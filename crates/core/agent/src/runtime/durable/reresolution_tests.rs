@@ -9,7 +9,8 @@ use plakous_model::Clock;
 use crate::ModelRouteBinding;
 
 use crate::runtime::{
-    ModelReresolutionError, ModelReresolutionOperation, ModelReresolver, ReresolvedModel,
+    ModelReresolutionError, ModelReresolutionOperation, ModelReresolutionRefusal, ModelReresolver,
+    ReresolvedModel,
 };
 
 const WINDOW_END: u64 = 20;
@@ -1067,5 +1068,68 @@ async fn a_restored_frame_refuses_a_foreign_model_account_plan_or_operation() ->
         "a non-provider operation restored the frame"
     );
     let _ = swapped.original.shutdown().await;
+    Ok(())
+}
+
+/// The live terminal result keeps the typed refusal the reresolver returned.
+/// Rebuilding that same terminal from its canonical record does not: the
+/// record has no refusal field.
+#[tokio::test]
+async fn a_published_refusal_keeps_its_live_reresolution_error() -> TestResult {
+    let durable = Durable::new()?;
+    let current = Arc::new(windowed_model(
+        1,
+        9,
+        WINDOW_END,
+        1,
+        b"artifact-account",
+        9_900,
+    )?);
+    let refusal = ModelReresolutionError::new(
+        "fresh resolution changed the selected login; explicit rebind required",
+    )
+    .with_refusal(ModelReresolutionRefusal::BindingChanged);
+    let reresolver = ScriptedReresolver::new([Err(refusal.clone())]);
+    let agent = durable
+        .sessions
+        .create(
+            "create:reresolve-live-refusal",
+            durable.builder(&current, Some(Arc::clone(&reresolver)))?,
+        )
+        .await?;
+    durable.clock.set(PAST_WINDOW);
+    let result = agent.prompt("continue").await?.result().await?;
+    let TurnResultOutcome::Failed(error) = result.outcome() else {
+        return Err(format!("the turn did not fail: {:?}", result.outcome()).into());
+    };
+    assert_eq!(
+        error.reresolution_error(),
+        Some(&refusal),
+        "publication reattaches the refusal in memory"
+    );
+    let checkpoint = agent.checkpoint();
+    let command_id = {
+        let commands = checkpoint.manifest().ledger().commands();
+        let command = commands
+            .into_iter()
+            .next_back()
+            .expect("the refused turn recorded its command");
+        CommandId::new(command.command_id().to_owned())?
+    };
+    let historical =
+        crate::runtime::terminal::checkpoint_root_terminal_result(&checkpoint, &command_id)?;
+    let historical = historical.expect("the refusal was published at this checkpoint");
+    let TurnResultOutcome::Failed(stored) = historical.outcome() else {
+        return Err(format!(
+            "historical outcome was not a failure: {:?}",
+            historical.outcome()
+        )
+        .into());
+    };
+    assert!(
+        stored.reresolution_error().is_none(),
+        "canonical rehydration does not invent a refusal"
+    );
+    agent.shutdown().await?;
     Ok(())
 }

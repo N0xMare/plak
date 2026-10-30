@@ -150,3 +150,23 @@ fn a_binding_change_is_named_and_never_reconstructed_from_canonical_parts() {
         None
     );
 }
+
+#[test]
+fn reresolution_source_is_omitted_when_its_text_repeats_the_message() {
+    use crate::runtime::ModelReresolutionError;
+    use std::error::Error;
+    let repeated = ModelReresolutionError::new("model re-resolution refused");
+    let distinct = ModelReresolutionError::new("fresh login changed");
+    let same = AgentError::new(
+        AgentErrorKind::ExternalBindingUnavailable,
+        repeated.to_string(),
+    )
+    .with_reresolution_error(Some(repeated));
+    assert!(same.source().is_none());
+    let extra = AgentError::new(
+        AgentErrorKind::ExternalBindingUnavailable,
+        format!("model re-resolution refused: {distinct}"),
+    )
+    .with_reresolution_error(Some(distinct));
+    assert!(extra.source().is_some());
+}

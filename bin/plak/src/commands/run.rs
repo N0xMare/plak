@@ -520,7 +520,12 @@ impl PlakousApplication {
                 &tree_id,
             )
         {
-            return Err(CliFailure::new(product_agent::RESTORED_PAUSED_RESUME_HINT));
+            return Err(CliFailure::new(crate::refusal_text::paused_tree_text(
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Run,
+                    session_id: Some(&session.id),
+                },
+            )));
         }
         let policy = admitted.session_policy();
         policy.install_request_budget();
@@ -592,6 +597,7 @@ impl PlakousApplication {
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),
             continuation: None,
+            event_renderer: None,
         };
         run_config(
             &self.executor,
@@ -657,10 +663,10 @@ pub(crate) fn run_config(
     limits: product_host::RunBounds,
 ) -> CliResult<ProcessOutcome> {
     use crate::surface_protocol::{HostEvent, UserAction};
-    let face = std::cell::RefCell::new(face::CliFace::new(
-        face::CliFace::verbose_from_environment(),
-        child_agents,
-    ));
+    let face = std::cell::RefCell::new(
+        face::CliFace::new(face::CliFace::verbose_from_environment(), child_agents)
+            .with_session_id(&config.session.id),
+    );
     if print_session_id {
         writeln!(stdout, "session_id={}", config.session.id)
             .map_err(|_| CliFailure::new("stdout failed"))?;

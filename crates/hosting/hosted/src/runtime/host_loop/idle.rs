@@ -150,10 +150,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                             Ok(_) => {}
                             Err(failure) => {
-                                let _ = self.events.notice(TranscriptRow::error(
-                                    NoticeScope::Session,
-                                    failure.message().to_owned(),
-                                ));
+                                let _ = self.events.notice(
+                                    TranscriptRow::error(
+                                        NoticeScope::Session,
+                                        failure.message().to_owned(),
+                                    )
+                                    .with_optional_remedy(failure.remedy()),
+                                );
                             }
                         }
                     } else {
@@ -484,13 +487,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             self.recovery_blocked = false;
                         }
                         Err(err) => {
-                            let _ = self.events.notice(TranscriptRow::info(
-                                NoticeScope::Session,
-                                format!(
-                                    "clear session failed; previous session remains active: {}",
-                                    err.message()
-                                ),
-                            ));
+                            let _ = self.events.notice(
+                                TranscriptRow::info(
+                                    NoticeScope::Session,
+                                    format!(
+                                        "clear session failed; previous session remains active: {}",
+                                        err.message()
+                                    ),
+                                )
+                                .with_optional_remedy(err.remedy()),
+                            );
                             let _ = self.events.send(ContentEvent::SetBusy(false));
                             let _ = self.events.send(ContentEvent::Status {
                                 phase: HostPhase::Idle,
@@ -520,7 +526,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                     "compact refused: current context authority is unavailable: {}",
                                     error.message()
                                 ),
-                            ));
+                            ).with_optional_remedy(error.remedy()));
                             return Ok(HostStep::Continue);
                         }
                     };
@@ -540,10 +546,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     );
                     observe_compact(&self.events, self.config.session.pending_queue.len(), false);
                     if let Err(error) = compacted {
-                        let _ = self.events.notice(TranscriptRow::error(
-                            NoticeScope::Compaction,
-                            format!("compact: {}", error.message()),
-                        ));
+                        let _ = self.events.notice(
+                            TranscriptRow::error(
+                                NoticeScope::Compaction,
+                                format!("compact: {}", error.message()),
+                            )
+                            .with_optional_remedy(error.remedy()),
+                        );
                         None
                     } else if compact_may_resume_queue(
                         capacity_recovery,
@@ -617,10 +626,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             None
                         }
                         Err(err) => {
-                            let _ = self.events.notice(TranscriptRow::error(
-                                NoticeScope::Session,
-                                format!("resume: {}", err.message()),
-                            ));
+                            let _ = self.events.notice(
+                                TranscriptRow::error(
+                                    NoticeScope::Session,
+                                    format!("resume: {}", err.message()),
+                                )
+                                .with_optional_remedy(err.remedy()),
+                            );
                             None
                         }
                     }
@@ -668,11 +680,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Compaction, format!(
                                         "compact refused: current context authority is unavailable: {}",
                                         error.message()
-                                    )));
+                                    )).with_optional_remedy(error.remedy()));
                                     let _ = self.events.notice(TranscriptRow::info(NoticeScope::Compaction,
-                                        "the forked session is active; /compact retries the reduction"
+                                        "the forked session is active; another explicit compaction retries the reduction"
                                             ,
-                                    ));
+                                    ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryCompaction {}));
                                     return Ok(HostStep::Continue);
                                 }
                             };
@@ -698,22 +710,28 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 false,
                             );
                             if let Err(error) = compacted {
-                                let _ = self.events.notice(TranscriptRow::error(
-                                    NoticeScope::Compaction,
-                                    format!("compact: {}", error.message()),
-                                ));
+                                let _ = self.events.notice(
+                                    TranscriptRow::error(
+                                        NoticeScope::Compaction,
+                                        format!("compact: {}", error.message()),
+                                    )
+                                    .with_optional_remedy(error.remedy()),
+                                );
                                 let _ = self.events.notice(TranscriptRow::info(
                                     NoticeScope::Compaction,
-                                    "the forked session is active; /compact retries the reduction",
-                                ));
+                                    "the forked session is active; another explicit compaction retries the reduction",
+                                ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryCompaction {}));
                             }
                         }
                         Ok(()) => {}
                         Err(err) => {
-                            let _ = self.events.notice(TranscriptRow::error(
-                                NoticeScope::Session,
-                                format!("fork: {}", err.message()),
-                            ));
+                            let _ = self.events.notice(
+                                TranscriptRow::error(
+                                    NoticeScope::Session,
+                                    format!("fork: {}", err.message()),
+                                )
+                                .with_optional_remedy(err.remedy()),
+                            );
                         }
                     }
                     None
@@ -733,10 +751,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             self.config.session.context_counters(),
                         ) {
                             emit_unavailable_context(&self.events);
-                            let _ = self.events.notice(TranscriptRow::error(
-                                NoticeScope::Session,
-                                error.message().to_owned(),
-                            ));
+                            let _ = self.events.notice(
+                                TranscriptRow::error(
+                                    NoticeScope::Session,
+                                    error.message().to_owned(),
+                                )
+                                .with_optional_remedy(error.remedy()),
+                            );
                         }
                         if !self.config.attached_one_shot {
                             if surface::fresh_usage(self.config.surface.as_deref(), &intent) {
@@ -809,7 +830,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             Ok(Rebound::Switched) => surface::ProfileForkOutcome::Forked,
                             Ok(Rebound::Unchanged) => surface::ProfileForkOutcome::AlreadyActive,
                             Err(error) => {
-                                surface::ProfileForkOutcome::Refused(error.message().to_owned())
+                                surface::ProfileForkOutcome::Refused(error.host_failure())
                             }
                         });
                     }
@@ -826,8 +847,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 Ok(UserAction::RetryAttach) => {
                     let _ = self.events.notice(TranscriptRow::info(
                         NoticeScope::Session,
-                        "already attached — /attach is for the not-ready shell",
-                    ));
+                        "already attached; attachment retry applies only to a detached session",
+                    ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::AttachOnlyWhenDetached {}));
                     None
                 }
                 Ok(

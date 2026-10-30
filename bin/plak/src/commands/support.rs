@@ -184,7 +184,15 @@ pub(crate) fn admit_account_model(account: &str, model: &str) -> Result<(), Stri
     if model == crate::test_hooks::SELECTOR && crate::test_hooks::selected().is_some() {
         return Ok(());
     }
-    plakous_hosted::binding::admit_account_model(account, model)
+    plakous_hosted::binding::admit_account_model(account, model).map_err(|failure| {
+        crate::refusal_text::failure_text(
+            &failure,
+            crate::notice_text::RemedyContext {
+                frontend: crate::notice_text::Frontend::Run,
+                session_id: None,
+            },
+        )
+    })
 }
 
 pub const fn cli_provider_name(provider: NativeProvider) -> &'static str {
@@ -534,37 +542,6 @@ fn credential_not_ready(provider: NativeProvider, status: CredentialState) -> Cl
     CliFailure::classified(CliFailureKind::Auth, message)
 }
 
-/// Why a model run cannot use this account's stored login, in the words the
-/// CLI refuses it with; `None` when the offline read says it can run.
-pub(crate) fn credential_refusal(
-    provider: NativeProvider,
-    status: CliResult<crate::presentation::CliStatus>,
-) -> Option<String> {
-    let failure = match status {
-        Err(failure) => failure,
-        Ok(status) if status.credential != CredentialState::Ready => {
-            credential_not_ready(provider, status.credential)
-        }
-        // The state home is read only for unsafe storage, which is not one
-        // of these.
-        Ok(status) => match status.compatibility {
-            CompatibilityState::Current => return None,
-            CompatibilityState::Required => native_subscription_failure(
-                NativeSubscriptionError::AcceptanceRequired,
-                Some(provider),
-                Path::new(""),
-            ),
-            CompatibilityState::Inactive => profile_inactive_failure(Some(provider)),
-            CompatibilityState::Unsupported => native_subscription_failure(
-                NativeSubscriptionError::UnsupportedPlatform,
-                Some(provider),
-                Path::new(""),
-            ),
-        },
-    };
-    Some(failure.message().to_owned())
-}
-
 /// `CredentialUnavailable` from a credential operation, named by the state
 /// `status` reads offline (signed out, quarantined, revoked) when it reads one
 /// that is not ready, and by the generic remedy otherwise.
@@ -795,7 +772,8 @@ pub fn resume_opened_continue_tree(
         return Ok(());
     }
     if product_agent::topology_tree_is_restored_paused(tree_id) {
-        return Err(CliFailure::new(product_agent::RESTORED_PAUSED_RESUME_HINT));
+        return Err(CliFailure::new(product_agent::RESTORED_PAUSED_REFUSAL)
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {}));
     }
     Ok(())
 }

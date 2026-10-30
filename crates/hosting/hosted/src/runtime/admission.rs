@@ -76,27 +76,10 @@ pub(super) fn emit_restored_paused_note<P: plakous_host_protocol::ProtocolExtens
     if !tree_paused && !queue_paused {
         return;
     }
-    let mut note = String::new();
-    if tree_paused {
-        note.push_str(
-            "the agent tree is paused after an interrupt: spawning a subagent will be \
-             refused until you resume it. Open /tree and press r to resume the tree, or \
-             relaunch with `plak run --resume-tree`",
-        );
-    }
-    if queue_paused {
-        if !note.is_empty() {
-            note.push_str(". ");
-        }
-        note.push_str(
-            "the queue is paused and will not auto-drain: press Tab to focus the queue, \
-             then r to resume delivery or Enter to send one item now; in plak agent, send a resume_queue command",
-        );
-    }
-    let _ = events.send(ContentEvent::Row(TranscriptRow::warning(
-        NoticeScope::Queue,
-        note,
-    )));
+    let _ = events.send(ContentEvent::RestoredPause(HostPause {
+        tree: tree_paused,
+        queue: queue_paused,
+    }));
 }
 
 pub(super) fn emit_prompt_history<P: plakous_host_protocol::ProtocolExtension>(
@@ -376,10 +359,10 @@ pub(super) fn refuse_recovery_blocked_action<P: plakous_host_protocol::ProtocolE
     action: &UserAction<P>,
     failure: &crate::CliFailure,
 ) {
-    let _ = events.notice(TranscriptRow::error(
-        NoticeScope::Queue,
-        failure.message().to_owned(),
-    ));
+    let _ = events.notice(
+        TranscriptRow::error(NoticeScope::Queue, failure.message().to_owned())
+            .with_optional_remedy(failure.remedy()),
+    );
     if matches!(
         action,
         UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)
@@ -393,10 +376,13 @@ pub(super) fn refuse_detached_recovery_action<P: plakous_host_protocol::Protocol
     events: &Sender<P>,
     action: &UserAction<P>,
 ) {
-    let _ = events.notice(TranscriptRow::error(
-        NoticeScope::Queue,
-        "this session is not attached; /attach reopens it, which recovers any interrupted turn",
-    ));
+    let _ = events.notice(
+        TranscriptRow::error(
+            NoticeScope::Queue,
+            "this session is not attached; reopening recovers any interrupted turn",
+        )
+        .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Attach {}),
+    );
     if matches!(
         action,
         UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)

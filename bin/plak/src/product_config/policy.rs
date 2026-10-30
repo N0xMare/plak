@@ -304,7 +304,18 @@ impl AgentTemplate {
                         .as_deref()
                         .and_then(crate::platform_catalog::api_effort),
                 )
-                .map_err(|error| format!("template {name}: {error}"))?;
+                .map_err(|error| {
+                    format!(
+                        "template {name}: {}",
+                        crate::refusal_text::failure_text(
+                            &plakous_hosted::CliFailure::from(error),
+                            crate::notice_text::RemedyContext {
+                                frontend: crate::notice_text::Frontend::Run,
+                                session_id: None
+                            }
+                        )
+                    )
+                })?;
         }
         match self.extra.as_deref() {
             None => {}

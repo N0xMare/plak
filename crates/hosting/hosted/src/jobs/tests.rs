@@ -845,8 +845,8 @@ fn transition_refusal_counts_only_running_jobs_and_does_not_stop_them() -> TestR
     assert_eq!(
         registry
             .transition_refusal(key.session_id, key.branch_id)
-            .as_deref(),
-        Some("1 background process is running; stop them first (/ps)"),
+            .map(|refusal| refusal.count),
+        Some(1),
     );
     assert_eq!(service.jobs()[0].status, JobStatus::Running);
     service.stop_jobs(JobStopReason::User, Duration::from_millis(200))?;

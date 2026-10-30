@@ -88,4 +88,11 @@ pub enum OpenRouterKeyUsageProbe {
     Ok(Box<OpenRouterKeyUsage>, String),
     /// A named failure carrying no secret material.
     Failed(String),
+    /// A rejected key, retaining the source that must be repaired.
+    Rejected {
+        /// Neutral redaction-safe failure facts.
+        reason: String,
+        /// The selected key source.
+        source: plakous_host_protocol::views::KeySource,
+    },
 }

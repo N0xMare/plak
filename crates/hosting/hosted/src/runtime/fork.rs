@@ -158,7 +158,8 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             let raw = format!("canonical fork failed: {error}");
             return Err(CliFailure::new(
                 crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
-            ));
+            )
+            .with_optional_remedy(crate::storage_pressure::sessions_remedy(&error).as_ref()));
         }
         // Possibly dispatched: the workflow stays unresolved for exact
         // reconciliation and is never replayed.
@@ -185,7 +186,9 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         _ => {
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
             discard_unstarted_fork(executor, watch, config, opened, events, &operation_id)?;
-            return Err(CliFailure::new(request.withdrawal_note()));
+            return Err(
+                CliFailure::new(request.withdrawal_note()).with_remedy(request.withdrawal_remedy())
+            );
         }
     };
     // The branch fact and request, not this runtime receipt, publish the
@@ -224,13 +227,13 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
             if watch.interrupted() {
                 return Err(CliFailure::new(format!(
-                    "fork stopped; saved as session {target_id}; this session stays attached; /resume {target_id} opens it"
-                )));
+                    "fork stopped; saved as session {target_id}; this session stays attached; the saved session can be opened explicitly"
+                )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeSavedSession { session_id: target_id.parse().map_err(|e| CliFailure::new(format!("invalid saved session identity: {e}")))? }));
             }
             return Err(CliFailure::new(format!(
-                "the fork was saved as session {target_id} but could not project ({}); this session stays attached, and /resume {target_id} opens the fork",
+                "the fork was saved as session {target_id} but could not project ({}); this session stays attached; the saved fork can be opened explicitly",
                 error.message(),
-            )));
+            )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeSavedSession { session_id: target_id.parse().map_err(|e| CliFailure::new(format!("invalid saved session identity: {e}")))? }));
         }
     };
     observe_boundary(
@@ -265,8 +268,8 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
                 target_locator,
             );
             return Err(CliFailure::new(format!(
-                "the fork was saved as session {target_id} but could not attach ({detail}); this session stays attached, and /resume {target_id} opens the fork"
-            )));
+                "the fork was saved as session {target_id} but could not attach ({detail}); this session stays attached; the saved fork can be opened explicitly"
+            )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeSavedSession { session_id: target_id.parse().map_err(|e| CliFailure::new(format!("invalid saved session identity: {e}")))? }));
         }
     };
     let previous = std::mem::replace(opened, replacement);

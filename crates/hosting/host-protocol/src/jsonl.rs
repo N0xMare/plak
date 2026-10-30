@@ -40,7 +40,7 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::ProviderSnapshot { .. } => "provider_snapshot",
         SessionObservation::Activity { .. } => "activity",
         SessionObservation::AgentAttached(_) => "attached",
-        SessionObservation::Row(_) => "row",
+        SessionObservation::Row(_) | SessionObservation::RestoredPause(_) => "row",
         SessionObservation::Status { .. } => "status",
         SessionObservation::QueueSnapshot { .. } => "queue",
         SessionObservation::ContextCapacityRecovery(_) => "context_capacity_recovery",
@@ -144,7 +144,7 @@ pub fn project_host_event<P: ProtocolExtension>(
                 fields.insert("stop_reason".into(), Value::from(reason.as_str()));
             }
         }
-        SessionObservation::Status { .. } => return None,
+        SessionObservation::Status { .. } | SessionObservation::RestoredPause(_) => return None,
         SessionObservation::SetBusy(busy) => {
             JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
             fields.insert("kind".to_owned(), Value::from("busy"));

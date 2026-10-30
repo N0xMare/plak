@@ -272,8 +272,8 @@ fn send_tool(driver: TreeDriver, deliverer: Option<Arc<dyn ChildController>>) ->
                     }]);
                     tree.project_feed(&request.agent_id, &session, &[record], &crate::tree::TreeFeedReads::default()).map_err(TopologyError::from)?;
                     Ok::<_, TopologyError>(())
-                }).map_err(|error| MailDeliveryFailure::RecoveryRequired(error.message))?.0
-                    .map_err(|error| MailDeliveryFailure::RecoveryRequired(error.message))?;
+                }).map_err(|error| MailDeliveryFailure::RecoveryRequired(error.message.into()))?.0
+                    .map_err(|error| MailDeliveryFailure::RecoveryRequired(error.message.into()))?;
                 Ok(ack)
             })
         }

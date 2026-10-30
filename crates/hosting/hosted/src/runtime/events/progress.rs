@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct Progress {
     pub(in crate::runtime) account: Option<String>,
+    pub(in crate::runtime) waiting_for_login: bool,
     started: BTreeSet<(AttemptId, CallId)>,
     pub(in crate::runtime) view: ChildProgress,
     pub(in crate::runtime) terminal: bool,
@@ -28,6 +29,8 @@ impl Progress {
             .and_then(|value| u64::try_from(value.as_millis()).ok());
         match kind {
             AgentEventKind::ModelDispatchStarted => {
+                self.waiting_for_login = false;
+                self.view.credential_wait = None;
                 self.base = [
                     self.view.input_tokens,
                     self.view.output_tokens,
@@ -41,6 +44,8 @@ impl Progress {
                 self.view.activity = Some(format!("waiting for a {slots} slot"));
             }
             AgentEventKind::ModelCredentialWait { waiting } => {
+                self.waiting_for_login = *waiting;
+                self.view.credential_wait = waiting.then(|| self.account.clone()).flatten();
                 self.view.activity = waiting.then(|| self.login_notice());
             }
             AgentEventKind::ToolStarted {
@@ -82,6 +87,8 @@ impl Progress {
                 self.base = [0; 5];
                 self.usage(usage.model());
                 self.view.activity = None;
+                self.view.credential_wait = None;
+                self.waiting_for_login = false;
                 self.terminal = true;
             }
             _ => {}
@@ -89,10 +96,7 @@ impl Progress {
     }
 
     pub(in crate::runtime) fn login_notice(&self) -> String {
-        self.account.as_ref().map_or_else(
-            || "waiting for login".to_owned(),
-            |account| format!("waiting for login: run `plak login {account}`"),
-        )
+        "waiting for login".to_owned()
     }
 
     fn usage(&mut self, usage: Usage) {

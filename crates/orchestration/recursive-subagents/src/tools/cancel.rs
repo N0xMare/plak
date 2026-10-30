@@ -447,8 +447,10 @@ impl TopologyTool {
     pub(super) fn fail_closed_session(
         &self,
         agent_id: &str,
-        message: String,
+        message: impl Into<plakous_host_protocol::status::HostFailure>,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
+        let failure = message.into();
+        let message = failure.diagnostic.as_str().to_owned();
         let (persist_error, pending) = {
             let Ok(mut tree) = self.driver.lock() else {
                 return ToolOutcome::failure_text(
@@ -486,21 +488,13 @@ impl TopologyTool {
         if let Err(error) = self.driver.settle(pending) {
             return Self::topology_failure(&error);
         }
-        match persist_error {
-            Ok(()) => ToolOutcome::failure_text(
-                json!({
-                    "code": TopologyErrorCode::OperationRecoveryRequired,
-                    "message": message,
-                })
-                .to_string(),
+        let error = match persist_error {
+            Ok(()) => TopologyError::new(TopologyErrorCode::OperationRecoveryRequired, message),
+            Err(error) => TopologyError::new(
+                error.code,
+                format!("{message}; persist failed: {}", error.message),
             ),
-            Err(error) => ToolOutcome::failure_text(
-                json!({
-                    "code": error.code,
-                    "message": format!("{message}; persist failed: {}", error.message),
-                })
-                .to_string(),
-            ),
-        }
+        };
+        Self::topology_failure(&error.with_failure(&failure))
     }
 }

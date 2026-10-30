@@ -334,14 +334,14 @@ impl ProductMailDeliverer {
         .await
         .map_err(|failure| match failure {
             ChildStartFailure::Refused(message) => {
-                crate::agent_tree_tools::MailDeliveryFailure::Refused(message)
+                crate::agent_tree_tools::MailDeliveryFailure::Refused(message.into())
             }
             ChildStartFailure::SlotOccupied(_) => {
                 crate::agent_tree_tools::MailDeliveryFailure::SlotBusy
             }
             ChildStartFailure::Failed(message)
             | ChildStartFailure::HoldEndedAfterAdmission(message) => {
-                crate::agent_tree_tools::MailDeliveryFailure::RecoveryRequired(message)
+                crate::agent_tree_tools::MailDeliveryFailure::RecoveryRequired(message.into())
             }
         })?;
         Ok(crate::agent_tree_tools::MailDeliveryAck {

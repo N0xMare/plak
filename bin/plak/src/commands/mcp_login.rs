@@ -256,7 +256,6 @@ fn oauth_spec(paths: &PlakPaths, config: &ProductConfig, id: &str) -> CliResult<
         &rendered,
         secrets::ProductNamedSecrets::shared(paths),
     )
-    .map_err(CliFailure::new)
 }
 
 fn logged_in(status: &McpOAuthStatus) -> String {

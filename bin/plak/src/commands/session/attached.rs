@@ -212,7 +212,7 @@ fn build_attached_host_config(
         None,
         &presentation.native_models,
     )
-    .map_err(|error| AttachedConfigError::Other(CliFailure::new(error)))
+    .map_err(AttachedConfigError::Other)
 }
 
 fn validate_catalog_for_attach(
@@ -280,6 +280,7 @@ fn run_attached_config(
     action: crate::surface_protocol::UserAction,
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
+    let session_id = config.session.id.clone();
     let (actions, events, worker) = product_host::spawn_host_worker(config)?;
     actions
         .send(action)
@@ -320,13 +321,31 @@ fn run_attached_config(
             crate::surface_protocol::HostEvent::Row(TranscriptRow::Notice(notice))
                 if notice.tone == NoticeTone::Error =>
             {
-                failure = Some(notice.text);
+                failure = Some(crate::notice_text::with_remedy(
+                    &notice.text,
+                    notice.remedy.as_ref(),
+                    crate::notice_text::RemedyContext {
+                        frontend: crate::notice_text::Frontend::Run,
+                        session_id: Some(&session_id),
+                    },
+                ));
             }
             crate::surface_protocol::HostEvent::Row(TranscriptRow::Notice(notice))
                 if notice.placement() != NoticePlacement::SessionLog =>
             {
-                writeln!(stdout, "{}", notice.text)
-                    .map_err(|_| CliFailure::new("stdout failed"))?;
+                writeln!(
+                    stdout,
+                    "{}",
+                    crate::notice_text::with_remedy(
+                        &notice.text,
+                        notice.remedy.as_ref(),
+                        crate::notice_text::RemedyContext {
+                            frontend: crate::notice_text::Frontend::Run,
+                            session_id: Some(&session_id)
+                        }
+                    )
+                )
+                .map_err(|_| CliFailure::new("stdout failed"))?;
             }
             crate::surface_protocol::HostEvent::Status {
                 phase: HostPhase::Error,

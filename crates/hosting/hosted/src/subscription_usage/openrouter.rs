@@ -20,6 +20,7 @@ pub(super) fn project(
             meters: openrouter_meters(usage),
         },
         balances: Vec::new(),
+        repair: None,
     }
 }
 /// Provider labels can contain masked key material. Only the product's safe

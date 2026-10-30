@@ -1,9 +1,7 @@
 //! CLI rendering over the one host-owned Usage projection.
 //!
-//! There is no second projection and no second renderer here: every `plak
-//! usage` surface goes through [`write_limits`], which is
-//! `plakous_hosted::subscription_usage::render_limits_text`, so the CLI and the TUI
-//! Usage surface can never disagree.
+//! The host owns usage facts. Plak decorates a display copy with typed repair
+//! guidance before passing it to the shared neutral Limits formatter.
 
 use std::io::{self, Write};
 
@@ -20,6 +18,20 @@ pub(crate) fn write_limits(
 ) -> io::Result<()> {
     let mut display = view.clone();
     let notes = annotate_limits(&mut display, paths, zone);
+    for vertical in &mut display.verticals {
+        let account = vertical.vertical.account();
+        match &mut vertical.state {
+            VerticalUsageState::NotConnected => {
+                vertical.state = VerticalUsageState::Unavailable {
+                    reason: crate::usage_remedy::not_connected(account),
+                }
+            }
+            VerticalUsageState::Unavailable { reason } => {
+                *reason = crate::usage_remedy::unavailable_reason(vertical.repair, account, reason);
+            }
+            VerticalUsageState::Ready { .. } => {}
+        }
+    }
     write!(output, "{}", host_usage::render_limits_text(&display))?;
     for note in notes {
         writeln!(output, "{note}")?;
@@ -47,13 +59,16 @@ pub(crate) fn annotate_limits(
         else {
             continue;
         };
-        match &mut vertical.state {
-            VerticalUsageState::Unavailable { reason }
-                if reason.starts_with("credential needs a token refresh;")
-                    || reason
-                        .starts_with("credential is quarantined after an ambiguous refresh;") =>
-            {
+        match (&mut vertical.state, vertical.repair) {
+            (
+                VerticalUsageState::Unavailable { reason },
+                Some(plakous_host_protocol::views::UsageRepair::Credential(
+                    plakous_host_protocol::views::UsageCredentialState::RefreshRequired
+                    | plakous_host_protocol::views::UsageCredentialState::Quarantined,
+                )),
+            ) => {
                 *reason = failure;
+                vertical.repair = None;
             }
             _ => notes.push(format!("{}: {failure}", vertical.vertical.provider_label())),
         }

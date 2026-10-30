@@ -1,5 +1,6 @@
 use super::{TranscriptItem, project_keyed_snapshot};
 use crate::runtime::test_kit::TestExtension;
+use plakous_host_protocol::status::HostStatusDetail;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type Sender = crate::runtime::Sender<TestExtension>;
 
@@ -116,6 +117,6 @@ fn lifecycle_milestones_name_cumulative_elapsed_time() {
     assert!(matches!(
         event,
         HostEvent::Status { detail: Some(detail), .. }
-            if matches!(detail, plakous_host_protocol::status::HostStatusDetail::TransitionStage { stage: HostLifecyclePhase::RebindResolveTarget, .. })
+            if matches!(detail, HostStatusDetail::TransitionStage { stage: HostLifecyclePhase::RebindResolveTarget, .. })
     ));
 }

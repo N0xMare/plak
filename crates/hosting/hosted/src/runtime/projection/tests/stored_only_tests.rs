@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, reason = "test assertions")]
 
+use plakous_host_protocol::status::HostStatusDetail;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -113,7 +114,7 @@ fn uncancelled_stored_only_root_batch_full_keeps_run_loop_alive_and_retries_once
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
     send_attached_action(&actions, UserAction::Steer("ready?".into()));
     loop {
-        if matches!(events.recv_timeout(Duration::from_secs(15)).unwrap(), HostEvent::Status { ref detail, .. } if matches!(detail, Some(plakous_host_protocol::status::HostStatusDetail::NoActiveTurn)))
+        if matches!(events.recv_timeout(Duration::from_secs(15)).unwrap(), HostEvent::Status { ref detail, .. } if matches!(detail, Some(HostStatusDetail::NoActiveTurn)))
         {
             break;
         }
@@ -144,7 +145,7 @@ fn uncancelled_stored_only_root_batch_full_keeps_run_loop_alive_and_retries_once
     assert_eq!(stored.pending_mail("root").len(), 1);
     send_attached_action(&actions, UserAction::Steer("still alive?".into()));
     loop {
-        if matches!(events.recv_timeout(Duration::from_secs(15)).unwrap(), HostEvent::Status { ref detail, .. } if matches!(detail, Some(plakous_host_protocol::status::HostStatusDetail::NoActiveTurn)))
+        if matches!(events.recv_timeout(Duration::from_secs(15)).unwrap(), HostEvent::Status { ref detail, .. } if matches!(detail, Some(HostStatusDetail::NoActiveTurn)))
         {
             break;
         }

@@ -236,7 +236,7 @@ pub enum ProfileForkOutcome {
     /// This session already runs that root with those cards.
     AlreadyActive,
     /// Nothing changed; the reason is operator-facing.
-    Refused(String),
+    Refused(plakous_host_protocol::status::HostFailure),
 }
 
 /// A profile the product wants the host to use now.
@@ -268,7 +268,7 @@ pub struct SurfaceProfileFork {
 
 impl SurfaceProfileFork {
     /// Ends the request without changing anything.
-    pub fn refuse(self, reason: impl Into<String>) {
+    pub fn refuse(self, reason: impl Into<plakous_host_protocol::status::HostFailure>) {
         (self.finish)(ProfileForkOutcome::Refused(reason.into()));
     }
 }

@@ -420,10 +420,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             config.session.context_counters(),
         ) {
             emit_unavailable_context(&events);
-            let _ = events.send(ContentEvent::Row(TranscriptRow::error(
-                NoticeScope::Recovery,
-                error.message().to_owned(),
-            )));
+            let _ = events.send(ContentEvent::Row(
+                TranscriptRow::error(NoticeScope::Recovery, error.message().to_owned())
+                    .with_optional_remedy(error.remedy()),
+            ));
         }
         emit_restored_paused_note(
             &events,

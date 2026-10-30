@@ -300,7 +300,7 @@ one notice explaining the fallback. A failed exec removes the private receipt.
 Importing an ordinary export file strips replay.
 The destination may compact an over-window conversation at first prompt.
 Children and live processes do not carry; queued prompts stay paused. Old
-version 7 documents are refused; version 8 imports with empty named state.
+version 9 and older are refused; version 10 imports.
 
 ## Slash commands
 

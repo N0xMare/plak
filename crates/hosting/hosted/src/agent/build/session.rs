@@ -93,6 +93,7 @@ impl From<AgentSessionsError> for CodingSessionOpenFailure {
         let binding_change = error.binding_change().cloned().map(Box::new);
         let failure = if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
             CliFailure::new(incompatible_session_message(&error))
+                .with_optional_advice(crate::error::incompatible_session_advice(&error))
         } else {
             CliFailure::from(error)
         };
@@ -307,6 +308,7 @@ impl AttachedCodingSession {
                 CliFailure::new(
                     crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
                 )
+                .with_optional_remedy(crate::storage_pressure::sessions_remedy(&error).as_ref())
             })? {
             CreateSessionOutcome::Created { session, .. } => {
                 let locator = session.locator();
@@ -1149,7 +1151,10 @@ async fn attach_runtime_source(
     }
     let reachability_probe = plakous::sessions::internal::reachability_probe(&runtime);
     let reopen_failure = |error: AgentSessionsError| CodingSessionOpenFailure {
-        failure: Box::new(CliFailure::new((wording.reopen_failed)(&error))),
+        failure: Box::new(
+            CliFailure::new((wording.reopen_failed)(&error))
+                .with_attach_failure(crate::error::sessions_attach_failure(&error)),
+        ),
         current_locator: error.current_locator(),
         binding_change: error.binding_change().cloned().map(Box::new),
     };

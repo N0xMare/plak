@@ -72,6 +72,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                     "an earlier command submission is still pending; resume that exact queued item"
                         .into(),
                 stop_drain: true,
+                remedy: None,
             },
         ));
     }
@@ -203,12 +204,17 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                                     control_source(&error),
                                 ),
                                 stop_drain: true,
+                                remedy: admission_rejection_remedy(
+                                    error.kind(),
+                                    control_source(&error),
+                                ),
                             },
                         ));
                     }
                     return Ok(DrivenTurn::continuing(
                         super::TurnHostOutcome::RecoveryRequired {
                             error: error.to_string(),
+                            remedy: None,
                         },
                     ));
                 }
@@ -260,6 +266,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                     control_source(error),
                 ),
                 session_wide: session_wide_refusal(error.kind()),
+                remedy: admission_rejection_remedy(error.kind(), control_source(error)),
             })
         });
         #[cfg(test)]
@@ -282,6 +289,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 return Ok(DrivenTurn::continuing(
                     super::TurnHostOutcome::RecoveryRequired {
                         error: rejection.message,
+                        remedy: rejection.remedy,
                     },
                 ));
             } else {
@@ -318,7 +326,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                         );
                         return Ok(DrivenTurn::continuing(super::TurnHostOutcome::RecoveryRequired {
                             error: "unrecorded refusal could not release its submission; recovery required".into(),
-                        }));
+                         remedy: None, }));
                     }
                     *session = candidate;
                 } else if rejection.session_wide {
@@ -328,6 +336,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                     super::TurnHostOutcome::AdmissionRejected {
                         error: rejection.admission_message,
                         stop_drain: unrecorded || rejection.session_wide,
+                        remedy: rejection.remedy,
                     },
                 ));
             }
@@ -593,6 +602,19 @@ fn admission_rejection_message(
     }
 }
 
+fn admission_rejection_remedy(
+    kind: plakous::agent::ControlErrorKind,
+    source: Option<&plakous::agent::AgentError>,
+) -> Option<plakous_host_protocol::notice_remedy::NoticeRemedy> {
+    source
+        .and_then(super::super::turn::agent_error_remedy)
+        .or_else(|| {
+            (kind == plakous::agent::ControlErrorKind::StoragePressure).then_some(
+                plakous_host_protocol::notice_remedy::NoticeRemedy::ReclaimRetainedHistory {},
+            )
+        })
+}
+
 fn session_wide_refusal(kind: plakous::agent::ControlErrorKind) -> bool {
     // Store integrity, physical exhaustion and precommit validation refusals
     // share AdmissionRejected; none justify draining more queued work.
@@ -644,6 +666,7 @@ struct StartRefusal {
     message: String,
     admission_message: String,
     session_wide: bool,
+    remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
 }
 
 #[cfg(test)]
@@ -675,6 +698,7 @@ pub(in crate::runtime) fn stub_start_refusal(
                     None,
                 ),
                 session_wide: session_wide_refusal(kind),
+                remedy: admission_rejection_remedy(kind, None),
             },
         );
     });

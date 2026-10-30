@@ -16,9 +16,12 @@ pub(super) fn commit_definite_failure_projection(
     session: &mut SessionRecord,
     error: &str,
     save: impl FnOnce(&mut SessionRecord) -> Result<(), crate::session_store::RecordStoreError>,
+    remedy: Option<&plakous_host_protocol::notice_remedy::NoticeRemedy>,
 ) -> Result<(), String> {
     let mut candidate = session.clone();
-    candidate.append_transcript(TranscriptRow::error(NoticeScope::Turn, error));
+    candidate.append_transcript(
+        TranscriptRow::error(NoticeScope::Turn, error).with_optional_remedy(remedy),
+    );
     candidate.touch();
     save(&mut candidate)?;
     *session = candidate;
@@ -29,13 +32,17 @@ pub(super) fn commit_exceptional_terminal_projection(
     session: &mut SessionRecord,
     projection: ExceptionalTerminalProjection<'_>,
     save: impl FnOnce(&mut SessionRecord) -> Result<(), crate::session_store::RecordStoreError>,
+    remedy: Option<&plakous_host_protocol::notice_remedy::NoticeRemedy>,
 ) -> Result<(), String> {
     let mut candidate = session.clone();
     match projection {
         ExceptionalTerminalProjection::RecoveryRequired(error)
         | ExceptionalTerminalProjection::UnresolvedError(error) => {
             candidate.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-            candidate.append_transcript(TranscriptRow::error(NoticeScope::Turn, error.to_string()));
+            candidate.append_transcript(
+                TranscriptRow::error(NoticeScope::Turn, error.to_string())
+                    .with_optional_remedy(remedy),
+            );
         }
         ExceptionalTerminalProjection::Interrupted(assistant) => {
             candidate.child_wake_suppressed = true;

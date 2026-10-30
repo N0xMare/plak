@@ -28,6 +28,56 @@ fn store_with_session(root: &Path) -> (ProductStore, String) {
 }
 
 #[test]
+fn every_notice_remedy_survives_store_reopen_and_disposable_view_rebuild() {
+    use crate::notice_text::{Frontend, RemedyContext, with_remedy};
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    let remedies = crate::notice_text::tests::all_remedies();
+    let mut record = store.load(&id).unwrap();
+    for remedy in &remedies {
+        record.record_notice(
+            TranscriptRow::info(NoticeScope::Host, "neutral facts").with_remedy(remedy.clone()),
+        );
+    }
+    store.commit(&mut record).unwrap();
+    let first = store.load_intents(&id).unwrap();
+    let expected = SessionViews::empty().transcript(&first);
+    assert_eq!(expected.len(), remedies.len());
+    store.delete_views(&id).unwrap();
+    drop(store);
+    let mut store = ProductStore::open(&PlakPaths::explicit(root.path().join("p"))).unwrap();
+    assert!(store.load_views(&id).unwrap().is_none());
+    let rebuilt = SessionViews::empty().transcript(&store.load_intents(&id).unwrap());
+    assert_eq!(rebuilt, expected);
+    for ((_, row), remedy) in rebuilt.iter().zip(&remedies) {
+        let TranscriptRow::Notice(notice) = row else {
+            panic!("notice lost")
+        };
+        assert_eq!(notice.remedy.as_ref(), Some(remedy));
+        for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+            assert_eq!(
+                with_remedy(
+                    &notice.text,
+                    notice.remedy.as_ref(),
+                    RemedyContext {
+                        frontend,
+                        session_id: Some(&id)
+                    }
+                ),
+                with_remedy(
+                    "neutral facts",
+                    Some(remedy),
+                    RemedyContext {
+                        frontend,
+                        session_id: Some(&id)
+                    }
+                )
+            );
+        }
+    }
+}
+
+#[test]
 fn queue_command_join_does_not_decode_transcript_rows() {
     let root = tempdir().unwrap();
     let (mut store, id) = store_with_session(root.path());
@@ -129,7 +179,7 @@ fn a_cross_connection_writer_moves_the_projection_cursor_without_store_failure()
 
 #[test]
 fn historical_clear_and_submissions_are_consumed_without_withdrawal_after_retention() {
-    assert_eq!(crate::store::SCHEMA_VERSION, 34);
+    assert_eq!(crate::store::SCHEMA_VERSION, 35);
     let root = tempdir().unwrap();
     let (mut store, id) = store_with_session(root.path());
     let mut source = store.load(&id).unwrap();
@@ -722,7 +772,7 @@ fn keyed_views_round_trip_change_only_touched_keys_and_rebuild_under_cas() {
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     let (mut store, session) = store_with_session(root.path());
-    assert_eq!(super::super::SCHEMA_VERSION, 34);
+    assert_eq!(super::super::SCHEMA_VERSION, 35);
     let empty = SessionViews::empty();
     let first = with_bookkeeping(views_at(1, &[]));
     store

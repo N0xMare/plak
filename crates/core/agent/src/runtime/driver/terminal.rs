@@ -304,6 +304,9 @@ impl Driver {
         if self.recovery_gated {
             return Err(recovery_gate_error());
         }
+        // The canonical record has no refusal field. Keep the one this
+        // publication is committing, and only on the result it returns.
+        let live_refusal = proposal_reresolution(&proposal);
         let persistence = match proposal {
             TerminalProposal::Cancelled(error) | TerminalProposal::Failed(error) => {
                 self.commit_turn_terminal(
@@ -330,7 +333,9 @@ impl Driver {
         match persistence {
             Ok(checkpoint) => {
                 let terminal = terminal_record_at_checkpoint(&checkpoint, &command.command_id)?;
-                self.rehydrate_terminal_result(&terminal).await
+                let mut result = self.rehydrate_terminal_result(&terminal).await?;
+                attach_published_reresolution(&mut result, live_refusal);
+                Ok(result)
             }
             Err(error) => Err(self.required_terminal_publication_failure(&error)),
         }
@@ -379,4 +384,32 @@ impl Driver {
         }
         terminal_turn_result(terminal, checkpoint)
     }
+}
+
+fn proposal_reresolution(
+    proposal: &TerminalProposal,
+) -> Option<crate::runtime::ModelReresolutionError> {
+    let error = match proposal {
+        TerminalProposal::Cancelled(error)
+        | TerminalProposal::Failed(error)
+        | TerminalProposal::RecoveryRequired(error) => error.as_ref(),
+        TerminalProposal::Completed(_) => return None,
+    };
+    error.reresolution_error().cloned()
+}
+
+fn attach_published_reresolution(
+    result: &mut TurnResult,
+    refusal: Option<crate::runtime::ModelReresolutionError>,
+) {
+    let Some(refusal) = refusal else {
+        return;
+    };
+    let error = match &mut result.outcome {
+        TurnResultOutcome::Failed(error)
+        | TurnResultOutcome::Cancelled(error)
+        | TurnResultOutcome::RecoveryRequired(error) => error,
+        TurnResultOutcome::Completed(_) => return,
+    };
+    error.attach_reresolution_error(Some(refusal));
 }

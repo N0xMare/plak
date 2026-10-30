@@ -14,6 +14,7 @@ mod resume;
 mod templates;
 mod tool_operation;
 mod tree;
+mod usage_repair;
 
 pub use call_detail::{
     CallDetail, CallDetailOutcome, CallDetailSource, MAX_SOURCE_LINKS, SourceLink,
@@ -32,3 +33,4 @@ pub use resume::ResumeSessionEntry;
 pub use templates::TemplateRow;
 pub use tool_operation::ToolOperation;
 pub use tree::{ChildProgress, NodeView, TreeView};
+pub use usage_repair::{KeySource, UsageCredentialState, UsageRepair};

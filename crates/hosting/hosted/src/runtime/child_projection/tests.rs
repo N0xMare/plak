@@ -74,8 +74,9 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
     );
     assert_eq!(
         snapshot.progress.activity.as_deref(),
-        Some("waiting for login: run `plak login claude`")
+        Some("waiting for login")
     );
+    assert_eq!(snapshot.progress.credential_wait.as_deref(), Some("claude"));
     assert!(!snapshot.terminal);
     {
         let state = observation.lock();

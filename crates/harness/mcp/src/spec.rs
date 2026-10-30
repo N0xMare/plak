@@ -294,9 +294,10 @@ impl StdioServer {
     ) -> Result<ServiceProcessRequest, McpError> {
         let secrets = match &self.secrets {
             Some(resolve) => resolve().map_err(|error| {
-                McpError::new(
+                McpError::from_resolver(
                     McpErrorKind::Definition,
                     format!("mcp server {server} secrets could not be resolved: {error}"),
+                    error,
                 )
             })?,
             None => Vec::new(),

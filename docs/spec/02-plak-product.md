@@ -241,10 +241,10 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r26.e34.p34.t9/             this build's state (§2.5)
+    r26.e34.p35.t9/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 26, epoch 34
-      product.sqlite3             Plak intents and feed-derived views, schema 34
+      product.sqlite3             Plak intents and feed-derived views, schema 35
       subagents.sqlite3           the agent tree, schema 9
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
@@ -782,7 +782,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r26.e34.p34.t9`. The key is derived from the stores'
+schema>`, for example `r26.e34.p35.t9`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -1022,13 +1022,21 @@ is a warning, not an export refusal.
 The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
-writes **version 10** and imports **10 and 9**, never older documents. Runtime
-canonical format epochs are not export versions: v10 carries a Plak-owned neutral
+writes **version 11** and imports **11 and 10**, never older documents. Runtime
+canonical format epochs are not export versions: v11 carries a Plak-owned neutral
 conversation encoding, not canonical segment bytes, digests, checkpoints, or
 runtime serde representations.
 
+Version 11 adds the optional semantic `remedy` on notice transcript rows. Its
+closed code and typed targets are part of the document: unknown codes, fields,
+accounts and invalid target UUIDs refuse the document before import. The
+version 10 reader accepts only its original notice fields and installs no
+remedy. Missing remedies retain their text verbatim; importing never infers an
+action from words or command fragments. This is a document bump, not an
+in-place database migration; the product store is schema 35.
+
 `plak session export <id> [--out <path>]` writes one JSON document with
-`"format": "plak-session-export", "version": 10` and prints its path. The
+`"format": "plak-session-export", "version": 11` and prints its path. The
 exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
 state key and producer build provenance (verified binary id, or explicitly
@@ -1040,9 +1048,9 @@ Otherwise the common lease-free projector first catches the views up to the
 feed tail; any required writes remain derived product-view writes, not attach.
 The binding carries `py-sdk` like every other explicit selection. `named_state`
 is a key-ordered JSON map of committed session-owned values (01 §9.8); import
-validates it and seeds it atomically with history. The v9 importer uses the
-same history decoder and preserves named state. Version 8 is refused with
-`this build imports versions 9 and 10`.
+validates it and seeds it atomically with history. The v10 importer uses the
+same history decoder and preserves named state. Version 9 and older are refused
+with `this build imports versions 10 and 11`.
 
 `history` contains `replay_account` (source account reference), `replay_model`
 (model identifier string), and ordered `groups`. Each group contains its
@@ -1202,7 +1210,7 @@ same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
 on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
 
-Versions 9 and 10 carry full conversation rather than a separate archive;
+Versions 10 and 11 carry full conversation rather than a separate archive;
 neither has a restart checkpoint or archive import arm. There is no
 `session reference` command or search/tail archive reader. Old retained
 reference files are never read or used as import authority;
@@ -1835,7 +1843,7 @@ genesis identity derived from the immutable create operation. The projector
 restores that creation join, so a committed clear remains settled even when
 its source request's anchor is still retained.
 Submissions and workflow requests carry the applied cursor at their first
-durable write (schema 34's immutable `anchor` columns). Once that anchor is
+durable write (schema 35's immutable `anchor` columns). Once that anchor is
 below `feed_retained_from`, their join settles them as consumed, both on an
 incremental pass and after view deletion. No withdrawal notice, command row
 or counter is derived, and a historical clear's successor is never treated as
@@ -2257,7 +2265,7 @@ marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
 `plak version --carry-probe <file>` is a hidden machine form: it validates a
-v10/v9 export and reports the destination route, optional total/admitted input
+v11/v10 export and reports the destination route, optional total/admitted input
 windows, estimated history tokens and message count. It performs no inference
 or session creation and emits no startup event.
 
@@ -3303,6 +3311,20 @@ When Python is omitted, `python_host` and `python_host_target` are absent.
 `hello`, `ready`, `tool`, `error`, `turn`, `turn_lifecycle`, `tree`, `bye`, `model_refusal`, and `recovered` MUST NOT be dropped
 on the sink: they are the lines a client's own state machine depends on.
 
+Three product renderings change the text of an otherwise stable v1 envelope.
+A `tool` event whose `detail` is a closed structured refusal (an MCP login or
+named-secret payload, or a topology error that carries advice or a remedy)
+replaces that `detail` with the JSONL sentence for the typed repair, including
+`plak secret set <name>` when the call's server matches. Any other detail is
+left as the host wrote it. A `tree` snapshot renders each node's `fault` and
+live progress in that same sentence before the neutral tree event is encoded;
+the fault stays a field of the snapshot and is not a separate event, so it
+does not reorder the snapshot against other lines. A restored-paused tree that
+was asked to resume, and whose hub does not register before the hello wait
+ends, writes one `error` diagnostic naming `resume_tree` (or
+`plak agent --session <id> --resume-tree`) and then shuts down. It does not
+send `hello`.
+
 `turn_lifecycle` is correlated observational evidence for one admitted turn:
 `admitted` opens the marker at durable admission, and a terminal phase is
 projected only from the canonical `TurnResult` — never inferred from `busy`,
@@ -3501,10 +3523,12 @@ automatically. No shell export/import round trip is required.
 
 An unattached exact reopen refusal names the account or the specific frozen
 binding input that differs (`resolved harness plan is bound to a different
-<change>`, chapter 01 §5.4) and its guidance names the one carry command:
-`fix: carry the full history into a new session with /rebind; restoring the
-original account and configuration reopens it exactly instead`. `plak --resume
-<id>` of such a session opens unattached with that reason and guidance. `/reload`
+<change>`, chapter 01 §5.4). Its repair notice carries the binding remedy
+(§5.4), which the TUI renders with the one carry command first: carry the full
+history into a new session with `/rebind`; restoring the original
+account/configuration with the named login command reopens it exactly instead.
+`plak --resume <id>` of such a session opens unattached with that reason and
+guidance. `/reload`
 from that refusal takes the same in-process carry path. A missing login or
 quarantined credential alone is not a binding mismatch and is repaired with the
 named login command.
@@ -4143,7 +4167,9 @@ single-turn one-shot commands never continue automatically. Unsafe hosted
 effects, unknown outcomes, recovery-required terminals, cancellation, permanent
 failures and context-capacity remedies never enter this path.
 
-**Typed rows.** Every transcript row is one typed `TranscriptRow`
+**Typed rows.** JSONL `tool.detail` and notice `message`/`detail` are the
+product sentences for a typed remedy (see §4.3.2). The stored and exported row
+keeps the remedy code; it does not store that sentence. Every transcript row is one typed `TranscriptRow`
 (`plakous-host-protocol` `views::transcript`): session header, user and steer
 (text and an optional send time `sent_at_ms`), assistant, sealed thinking, tool
 item (call id, canonical `name`, `exposed_name` when the model called the tool
@@ -4223,7 +4249,7 @@ row's own start-to-finish span; a failed wait keeps its timeout and actual
 wait. The live tool line carries the same wait facts as the persisted row. The
 projector writes rows into the product transcript
 (`transcript_rows.row`, one JSON payload per row with its ordering key,
-schema 34) by the provenance rules of §2.6; the export document carries them
+schema 35) by the provenance rules of §2.6; the export document carries them
 (§2.5.1), the host emits the same row live as one `Row` observation once the
 projector wrote it, and restore reads them as the rows of the presentation
 snapshot. Live and restored rows are the same values; the renderer maps a row
@@ -4246,6 +4272,46 @@ clipped) are items inside the group; `turn`, `queue`, `recovery`, `tree`,
 rows with an info, warning or error tone (an error tone is an error row);
 `diagnostic` (history projection) is never emitted live and goes to the
 session log only; it is never persisted, and no surface renders it.
+
+**Hint ownership.** Library diagnostics and stored notice `text` carry neutral
+facts, not terminal keys, slash commands, CLI flags or product sidecar repair
+instructions. A notice may carry one closed `NoticeRemedy` (including compound
+alternatives), with the original account/credential condition or exact saved
+session UUID when required. Every error composition and notice conversion
+preserves those facts. The product store, disposable-view rebuild, restore,
+export and import retain the code and targets; renderers never search the
+diagnostic for a remedy. Plak renders TUI, `run` and JSONL guidance separately.
+No new JSONL envelope fields, kinds or phases expose this internal metadata.
+
+The TUI retains the tree, queue, attach, profile, binding, recovery, compaction,
+process-stop, login, storage-reclamation and saved-fork actions. `run` names a
+complete `plak run --session <id> --resume-tree -- <prompt>` when tree resume is
+required, and opens `plak --resume <id>` for actions only the TUI supports;
+it does not invent compact/rebind/queue flags. JSONL notice prose deliberately
+uses `resume_tree`, `resume_queue`, `recover`, `compact`, `fork`, `clear` and
+`interrupt` where those commands exist; queue send-one and arbitrary profile
+rebind remain TUI actions. Ordinary typed host status phase/detail spellings,
+pause combinations, steering punctuation, transition labels, queue counts,
+correlation IDs and omitted-detail behavior remain stable. Notice-derived
+`note` details/messages change to the frontend-specific recipes. A row without
+a remedy is displayed verbatim, including previous-version imports.
+
+Transient refusals retain structured model/effort, child-credential,
+MCP-server/scope, missing-secret and incompatible-session facts until the
+product formats them. Usage projections retain credential state and inference
+key source, and child activity retains the waiting account. A restored open
+warning carries typed tree/queue pause facts; it remains live-only and does not
+write a second stored pause notice. Log-only retained compaction overflow is a
+typed presentation fact whose Plak log adapter preserves the `/clear` hint.
+
+A known structured tool refusal keeps its code and repair targets intact in
+the existing detail payload, rather than flattening them together with its
+argument preview. Plak renders those facts before terminal wrapping or CLI
+reason clipping; no surface prints that payload as opaque JSON. MCP's bounded
+authorization payload retains its original server and canonical scope string,
+so even the largest admitted scope list fits the existing tool-preview bound.
+The same decoder serves live previews and canonical expanded output. This does
+not add a field to stored `ToolItem` or a JSONL envelope.
 Output-bound rederivation is a `settings` warning,
 because it names an operator action; a child live-stream gap (the host's
 reattach marker and the observation channel's coalescing marker alike) is a

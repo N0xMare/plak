@@ -319,7 +319,7 @@ fn clear_intent_projection(admit: bool, fork_source: bool) {
             "withdrawal removes the empty reservation"
         );
         assert!(
-            matches!(&notices[0], TranscriptRow::Notice(row) if row.text == "clear did not start; run /clear again")
+            matches!(&notices[0], TranscriptRow::Notice(row) if row.text == "clear did not start; request a fresh conversation again explicitly" && row.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {}))
         );
         assert_eq!(
             config

@@ -5,10 +5,59 @@ fn document_versions() -> [CarryDocument; 2] {
     [
         sample_document(),
         serde_json::from_str(include_str!(
-            "../../../tests/fixtures/session-export-v9.json"
+            "../../../tests/fixtures/session-export-v10.json"
         ))
         .unwrap(),
     ]
+}
+
+#[test]
+fn v11_preserves_every_remedy_and_v10_never_infers_or_accepts_one() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("export.json");
+    let mut document = sample_document();
+    document.transcript = crate::notice_text::tests::all_remedies()
+        .into_iter()
+        .map(|remedy| {
+            TranscriptRow::info(plakous_hosted::sessions::NoticeScope::Host, "neutral facts")
+                .with_remedy(remedy)
+        })
+        .collect();
+    let encoded = serde_json::to_value(&document).unwrap();
+    fs::write(&path, encoded.to_string()).unwrap();
+    assert_eq!(
+        read_document(&path)
+            .unwrap()
+            .into_import()
+            .unwrap()
+            .record
+            .transcript
+            .to_vec(),
+        document.transcript
+    );
+    let mut previous = encoded.clone();
+    previous["version"] = 10.into();
+    fs::write(&path, previous.to_string()).unwrap();
+    assert!(read_document(&path).is_err(), "v10 accepted a v11 field");
+    previous["transcript"] = serde_json::json!([{"kind":"notice","scope":"host","tone":"info","text":"legacy /recover text"}]);
+    fs::write(&path, previous.to_string()).unwrap();
+    let imported = read_document(&path).unwrap().into_import().unwrap();
+    let TranscriptRow::Notice(notice) = &imported.record.transcript.to_vec()[0] else {
+        panic!("notice lost")
+    };
+    assert_eq!(notice.text, "legacy /recover text");
+    assert!(notice.remedy.is_none());
+    for invalid in [
+        serde_json::json!({"code":"future_code"}),
+        serde_json::json!({"code":"login","account":"not_an_account"}),
+        serde_json::json!({"code":"resume_saved_session","session_id":"invalid"}),
+        serde_json::json!({"code":"recover_session","extra":true}),
+    ] {
+        let mut bad = encoded.clone();
+        bad["transcript"][0]["remedy"] = invalid;
+        fs::write(&path, bad.to_string()).unwrap();
+        assert!(read_document(&path).is_err());
+    }
 }
 
 #[test]
@@ -90,7 +139,7 @@ fn v8_is_refused_before_import_regardless_of_named_state_or_selection() {
         assert_eq!(
             read_document(&path).unwrap_err().to_string(),
             format!(
-                "{} is a version 8 session export; this build imports versions 9 and 10",
+                "{} is a version 8 session export; this build imports versions 10 and 11",
                 path.display()
             )
         );
@@ -102,7 +151,7 @@ fn v8_is_refused_before_import_regardless_of_named_state_or_selection() {
     assert_eq!(
         read_document(&path).unwrap_err().to_string(),
         format!(
-            "{} is a version 8 session export; this build imports versions 9 and 10",
+            "{} is a version 8 session export; this build imports versions 10 and 11",
             path.display()
         )
     );
@@ -154,20 +203,20 @@ fn file_import_validates_named_state_keys_count_and_total_before_creation() {
 }
 
 #[test]
-fn v9_import_preserves_named_state_and_v8_is_refused() {
+fn v10_import_preserves_named_state_and_v9_is_refused() {
     let root = tempfile::tempdir().unwrap();
     let mut value = serde_json::to_value(sample_document()).unwrap();
-    value["version"] = serde_json::json!(9);
+    value["version"] = serde_json::json!(10);
     value["named_state"] = serde_json::json!({"answer":42});
-    let path = root.path().join("v9.json");
+    let path = root.path().join("v10.json");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let imported = read_document(&path).unwrap().into_import().unwrap();
     assert_eq!(imported.history.named_state().unwrap()["answer"], 42);
-    value["version"] = serde_json::json!(8);
+    value["version"] = serde_json::json!(9);
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let error = read_document(&path).unwrap_err().to_string();
     assert!(
-        error.contains("version 8 session export; this build imports versions 9 and 10"),
+        error.contains("version 9 session export; this build imports versions 10 and 11"),
         "{error}"
     );
 }

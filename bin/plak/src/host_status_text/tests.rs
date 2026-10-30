@@ -1,8 +1,55 @@
 use super::*;
+use plakous_host_protocol::status::{ControlFailure, DiagnosticText, HostPhase};
+
+#[test]
+fn native_failure_status_spelling_is_restored_from_binding_facts_not_diagnostic() {
+    use plakous_host_protocol::notice_remedy::AccountTarget;
+    let mut failure: HostFailure = "opaque neutral diagnosis".into();
+    failure.origin = Some(Box::new(HostFailureOrigin::NativeBinding {
+        label: "Native".into(),
+        account: AccountTarget::Grok,
+    }));
+    for (cause, expected) in [
+        (
+            AttachFailure::CredentialRejected,
+            "Native credential was rejected at refresh; run `plak login grok`",
+        ),
+        (
+            AttachFailure::CredentialUnavailable,
+            "Native credential is unavailable (signed out, quarantined, or a login made by an earlier build); run `plak login grok`",
+        ),
+        (
+            AttachFailure::LoginSelectionChanged,
+            "exact reopen refused: Native login selection changed; use /reload or /rebind to carry the history under the current login; Fork now is available only while attached",
+        ),
+        (
+            AttachFailure::AccountChanged,
+            "Native provider account changed; log in to the original account with `plak login grok` to reopen exactly, or use /rebind to carry the history into a new session under the newly logged-in account",
+        ),
+        (
+            AttachFailure::BindingChanged,
+            "exact reopen refused: Native is bound to a different account or model; restore the original account and configuration with `plak login grok`, or use /rebind to carry the history into a new session",
+        ),
+    ] {
+        failure.cause = cause;
+        assert_eq!(
+            status_detail(
+                &HostStatusDetail::Failure {
+                    failure: failure.clone()
+                },
+                Frontend::Jsonl
+            ),
+            expected
+        );
+        assert_eq!(
+            detached_reason(&DetachedReason::ResolveFailed(failure.clone())),
+            format!("resolve_failed: {expected}")
+        );
+    }
+}
 use crate::agent_jsonl::{JsonlCorrelation, project_host_event};
 use crate::notice_text::Frontend;
 use crate::surface_protocol::HostEvent;
-use plakous_host_protocol::status::{ControlFailure, DiagnosticText, HostPhase};
 
 fn wire(detail: HostStatusDetail, phase: HostPhase) -> serde_json::Value {
     let event = HostEvent::Status {
@@ -15,7 +62,7 @@ fn wire(detail: HostStatusDetail, phase: HostPhase) -> serde_json::Value {
             .is_none()
     );
     serde_json::from_str(
-        &project_host_event(&event, JsonlCorrelation::default()).expect("Plak status"),
+        &project_host_event(&event, JsonlCorrelation::default(), None).expect("Plak status"),
     )
     .expect("JSONL")
 }
@@ -42,7 +89,7 @@ fn all_host_phase_spellings_and_missing_detail_stay_stable() {
             detail: None,
         };
         let value: serde_json::Value = serde_json::from_str(
-            &project_host_event(&event, JsonlCorrelation::default()).expect("status"),
+            &project_host_event(&event, JsonlCorrelation::default(), None).expect("status"),
         )
         .expect("JSONL");
         assert_eq!(value["phase"], label);

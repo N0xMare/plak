@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;
+use plakous_host_protocol::status::AttachFailure;
 type HostConfig = crate::runtime::HostConfig<TestExtension>;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
@@ -280,42 +281,65 @@ fn exact_native_refresh_preserves_semantics_and_account_with_monotonic_generatio
 #[test]
 fn unavailable_native_authority_names_its_login_remedy() {
     let failure = native_authority_unavailable("Codex", "codex");
-    assert!(failure.message().contains("run `plak login codex`"));
     assert!(failure.message().contains("earlier build"));
+    assert_eq!(
+        failure.remedy(),
+        Some(&plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+            account: plakous_host_protocol::notice_remedy::AccountTarget::Codex
+        })
+    );
 }
 
 #[test]
 fn changed_native_account_names_both_exact_restore_and_history_carry() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
     let failure = native_account_changed("Claude", "claude");
+    assert!(failure.message().contains("original account"));
+    assert_eq!(failure.host_failure().cause, AttachFailure::AccountChanged);
     assert!(
-        failure
-            .message()
-            .contains("original account with `plak login claude`")
+        matches!(attach_repair_notice(&failure.host_failure(), "grok"), TranscriptRow::Notice(notice) if notice.remedy == Some(NoticeRemedy::RestoreAccountOrRebind { account: AccountTarget::Claude }))
     );
-    assert!(failure.message().contains("/rebind"));
-    let guidance = attach_repair_guidance(
-        "provider account changed; start a new session for the newly logged-in account",
+    let failure =
+        CliFailure::new("unrelated text").with_attach_failure(AttachFailure::LoginSelectionChanged);
+    assert!(
+        matches!(attach_repair_notice(&failure.host_failure(), "claude"), TranscriptRow::Notice(notice) if notice.remedy == Some(NoticeRemedy::CarryCurrentLogin {}))
     );
-    assert!(guidance.contains("original account"));
-    assert!(guidance.contains("/rebind"));
-    let guidance = attach_repair_guidance("login selection changed");
-    assert!(guidance.contains("login-selection fence"));
-    assert!(guidance.contains("cannot restore the old selection"));
 }
 
 #[test]
 fn claude_refresh_rejection_and_attach_guidance_name_distinct_repairs() {
+    use AttachFailure;
     let failure = native_credential_message("Claude", "claude", true);
     assert_eq!(
-        failure.message(),
-        "Claude credential was rejected at refresh; run `plak login claude`"
+        failure.host_failure().cause,
+        AttachFailure::CredentialRejected
     );
-    assert!(attach_repair_guidance(failure.message()).contains("same-account Claude"));
+    assert!(failure.remedy().is_some());
+    let unavailable = native_authority_unavailable("Claude", "claude");
+    assert_eq!(
+        unavailable.host_failure().cause,
+        AttachFailure::CredentialUnavailable
+    );
+    let misleading = CliFailure::new("login selection changed; Python host is unavailable");
     assert!(
-        attach_repair_guidance("resolved harness plan is bound to a different model capability binding (adapter revision, declared features or context contract)")
-            .contains("/rebind")
+        matches!(attach_repair_notice(&misleading.host_failure(), "claude"), TranscriptRow::Notice(notice) if notice.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RepairThenAttach {}))
     );
-    assert!(attach_repair_guidance("credential is unavailable").contains("no usable login"));
+}
+
+#[test]
+fn a_changed_frozen_binding_leads_the_attach_repair_with_the_carry() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+    let failure = CliFailure::new(
+        "resolved harness plan is bound to a different model capability binding (adapter revision, declared features or context contract)",
+    )
+    .with_attach_failure(AttachFailure::BindingChanged);
+    assert!(matches!(
+        attach_repair_notice(&failure.host_failure(), "claude"),
+        TranscriptRow::Notice(notice)
+            if notice.remedy == Some(NoticeRemedy::RestoreBindingOrCarry { account: AccountTarget::Claude })
+                && notice.text.starts_with("explicitly carry the full history into a new session")
+                && !notice.text.contains('/')
+    ));
 }
 
 #[test]
@@ -360,22 +384,20 @@ async fn delayed_transition_stage_times_out_without_detaching_source() {
 
 #[test]
 fn code_mode_attach_failure_names_js_sidecar() {
-    let guidance =
-        attach_repair_guidance("Codex Code Mode sidecar is unavailable: plakous-js-host not found");
-    assert!(guidance.contains("PLAK_JS_HOST"));
-    assert!(!guidance.contains("PLAK_CODE_MODE_HOST"));
-    assert!(!guidance.contains("0.149.0"));
+    let failure = CliFailure::new("arbitrary diagnostic")
+        .with_attach_failure(AttachFailure::JavaScriptHostUnavailable);
+    assert!(
+        matches!(attach_repair_notice(&failure.host_failure(), "codex"), TranscriptRow::Notice(notice) if notice.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RepairJavaScriptHost {}))
+    );
 }
 
 #[test]
 fn product_javascript_attach_failure_names_the_sidecar_repair() {
-    let guidance =
-        attach_repair_guidance("product JavaScript host is unavailable: plakous-js-host not found");
-
-    assert!(guidance.contains("PLAK_JS_HOST"));
-    assert!(guidance.contains("plakous-js-host"));
-    assert!(!guidance.contains("PLAK_CODE_MODE_HOST"));
-    assert!(!guidance.contains("/login"));
+    let failure = CliFailure::new("arbitrary diagnostic")
+        .with_attach_failure(AttachFailure::PythonHostUnavailable);
+    assert!(
+        matches!(attach_repair_notice(&failure.host_failure(), "claude"), TranscriptRow::Notice(notice) if notice.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RepairPythonHost {}))
+    );
 }
 
 #[test]
@@ -463,6 +485,7 @@ fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
         seed_history: None,
         source_releases: SourceReleases::default(),
         continuation: None,
+        event_renderer: None,
     };
     let shell_host = test_kit::doubles_shell_host();
     let (actions, events, worker) = spawn_deferred_host(move || HostLaunchPreparation {

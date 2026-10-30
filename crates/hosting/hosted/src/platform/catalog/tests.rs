@@ -40,7 +40,11 @@ fn unknown_id_is_refused_with_up_to_three_closest_listed_ids() {
         text.contains("does not list model `claude-haiku-5.5`"),
         "{text}"
     );
-    assert!(text.contains("plak models anthropic"), "{text}");
+    assert!(!text.contains("plak models"), "{text}");
+    let refusal = crate::CliFailure::from(error);
+    assert!(
+        matches!(refusal.advice(), Some(plakous_host_protocol::refusal::RefusalAdvice::UnknownModel {account, model, ..}) if account == "anthropic" && model == "claude-haiku-5.5")
+    );
     let none = anthropic()
         .admit("gpt-6-luna", Some(ReasoningEffort::Low))
         .unwrap_err();
@@ -167,14 +171,16 @@ fn reopen_keeps_the_stored_window_and_refuses_moved_facts_with_the_rebind_remedy
     );
     let refusal = moved_haiku.reopen_window(provider, &stored).unwrap_err();
     assert!(
-        refusal.contains("changed since this session was created"),
+        refusal
+            .message()
+            .contains("changed since this session was created"),
         "{refusal}"
     );
     assert!(
-        refusal.ends_with("rebind with Fork now in the Agents tab, or start a new session"),
+        refusal.remedy() == Some(&plakous_host_protocol::notice_remedy::NoticeRemedy::Rebind {}),
         "{refusal}"
     );
-    assert!(!refusal.contains("/model"), "{refusal}");
+    assert!(!refusal.message().contains("/model"), "{refusal}");
     assert!(haiku.reopen_window(provider, b"no binding at all").is_err());
 }
 
@@ -410,10 +416,12 @@ fn openai_reopen_refuses_when_the_stored_facts_no_longer_match() {
     }
     let refusal = luna.reopen_window(provider, &moved).unwrap_err();
     assert!(
-        refusal.contains("changed since this session was created"),
+        refusal
+            .message()
+            .contains("changed since this session was created"),
         "{refusal}"
     );
-    assert!(refusal.contains("rebind"), "{refusal}");
+    assert!(refusal.message().contains("rebind"), "{refusal}");
 }
 
 /// Byte offset of the digest inside [`PlatformModel::binding_evidence`].

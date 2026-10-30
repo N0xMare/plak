@@ -1,5 +1,6 @@
 //! Shared local-tool runtime construction for separately billed API routes.
 
+use plakous_host_protocol::status::AttachFailure;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -167,9 +168,11 @@ pub(crate) fn runtime_binding(
                 CliFailure::new(format!("JavaScript composition is invalid: {error}"))
             })?;
             let host_path = spec.sidecars.javascript_host().map_err(|error| {
-                CliFailure::new(format!(
-                    "JavaScript host is unavailable: {error}; set PLAK_JS_HOST or place plakous-js-host beside plak"
-                ))
+                CliFailure::new(format!("JavaScript host is unavailable: {error}"))
+                    .with_attach_failure(AttachFailure::JavaScriptHostUnavailable)
+                    .with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::RepairJavaScriptHost {},
+                    )
             })?;
             let attachment = product_javascript_candidate_attachment(
                 &descriptor,
@@ -193,9 +196,11 @@ pub(crate) fn runtime_binding(
             )
             .map_err(|error| CliFailure::new(format!("Python composition is invalid: {error}")))?;
             let host = spec.sidecars.python_host().map_err(|error| {
-                CliFailure::new(format!(
-                    "Python host is unavailable: {error}; set PLAK_PY_HOST or place plakous-py-host beside plak"
-                ))
+                CliFailure::new(format!("Python host is unavailable: {error}"))
+                    .with_attach_failure(AttachFailure::PythonHostUnavailable)
+                    .with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::RepairPythonHost {},
+                    )
             })?;
             let attachment =
                 product_python_attachment(&descriptor, &host, &configuration, presentation)?;
@@ -234,9 +239,11 @@ pub(crate) fn runtime_binding(
                 CliFailure::new(format!("Code Mode descriptor is invalid: {error}"))
             })?;
             let host_path = spec.sidecars.javascript_host().map_err(|error| {
-                CliFailure::new(format!(
-                    "Codex Code Mode sidecar is unavailable: {error}; set PLAK_JS_HOST or place plakous-js-host beside plak"
-                ))
+                CliFailure::new(format!("Codex Code Mode sidecar is unavailable: {error}"))
+                    .with_attach_failure(AttachFailure::JavaScriptHostUnavailable)
+                    .with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::RepairJavaScriptHost {},
+                    )
             })?;
             builder = attach_codex_minimal(builder, &descriptor, &host_path).map_err(|error| {
                 CliFailure::new(format!("Codex Code Mode could not attach: {error}"))

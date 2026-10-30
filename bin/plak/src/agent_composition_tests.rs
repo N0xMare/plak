@@ -613,7 +613,9 @@ async fn mail_start_composition_of_an_openrouter_child_never_takes_the_oauth_spe
     .err()
     .expect("the OAuth spec builder cannot bind an OpenRouter account");
     assert!(
-        oauth_spec.contains("not a supported native OAuth account"),
+        oauth_spec
+            .message()
+            .contains("not a supported native OAuth account"),
         "{oauth_spec}"
     );
 
@@ -632,7 +634,9 @@ async fn mail_start_composition_of_an_openrouter_child_never_takes_the_oauth_spe
     .err()
     .expect("the OAuth spec builder cannot bind an OpenRouter account");
     assert!(
-        live_shape.contains("not a supported native OAuth account"),
+        live_shape
+            .message()
+            .contains("not a supported native OAuth account"),
         "{live_shape}"
     );
 

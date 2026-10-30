@@ -1,7 +1,19 @@
 use super::{
     CompositionSelection, OpenRouterRoutingSelection, ProtocolSelection, ResolvedProtocol,
-    TargetSelection, WIRE_RESOLUTION_REVISION, WireBinding, admit_account_model,
+    TargetSelection, WIRE_RESOLUTION_REVISION, WireBinding, account_target, admit_account_model,
 };
+use plakous::subscriptions::NativeProvider;
+use plakous_host_protocol::notice_remedy::AccountTarget;
+
+#[test]
+fn a_native_provider_maps_to_its_account_without_the_string_table() {
+    assert_eq!(account_target(NativeProvider::Codex), AccountTarget::Codex);
+    assert_eq!(account_target(NativeProvider::Xai), AccountTarget::Grok);
+    assert_eq!(
+        account_target(NativeProvider::Claude),
+        AccountTarget::Claude
+    );
+}
 
 #[test]
 fn account_model_admission_reads_the_account_catalog() {
@@ -31,23 +43,30 @@ fn account_model_admission_reads_the_account_catalog() {
         ("xai-api", "claude-sonnet-5"),
     ] {
         let refusal = admit_account_model(account, model).unwrap_err();
-        assert!(refusal.contains(&format!("`{model}`")), "{refusal}");
         assert!(
-            refusal.contains(&format!("account `{account}`")),
+            refusal.message().contains(&format!("`{model}`")),
             "{refusal}"
         );
-        assert!(refusal.contains("catalog"), "{refusal}");
-        assert!(refusal.contains("run `plak models "), "{refusal}");
+        assert!(
+            refusal.message().contains(&format!("account `{account}`")),
+            "{refusal}"
+        );
+        assert!(refusal.message().contains("catalog"), "{refusal}");
+        assert!(
+            matches!(refusal.advice(), Some(plakous_host_protocol::refusal::RefusalAdvice::UnknownModel { account: original, .. }) if original == account)
+        );
     }
     assert_eq!(
-        admit_account_model("grok", "gpt-5.6-luna").unwrap_err(),
-        "model `gpt-5.6-luna` is not in the SuperGrok subscription catalog of account `grok`; \
-             run `plak models grok` to list the models it offers"
+        admit_account_model("grok", "gpt-5.6-luna")
+            .unwrap_err()
+            .message(),
+        "model `gpt-5.6-luna` is not in the SuperGrok subscription catalog of account `grok`; inspect the account's available models"
     );
     // An account with no catalog is refused, not guessed at.
     assert!(
         admit_account_model("mystery", "gpt-5.6-luna")
             .unwrap_err()
+            .message()
             .contains("account `mystery` requires")
     );
 }

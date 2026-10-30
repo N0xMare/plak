@@ -119,7 +119,7 @@ pub trait ChildController: Send + Sync {
         start: SpawnStart,
     ) -> Pin<Box<dyn Future<Output = Result<SpawnBound, SpawnBindError>> + Send + '_>> {
         let _ = start;
-        Box::pin(async { Err(SpawnBindError::Refused(UNPROVIDED.to_owned())) })
+        Box::pin(async { Err(SpawnBindError::Refused(UNPROVIDED.into())) })
     }
 
     /// Starts, follows up, or steers the bound child session for one mail
@@ -140,7 +140,7 @@ pub trait ChildController: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<MailDeliveryAck, MailDeliveryFailure>> + Send + '_>>
     {
         let _ = request;
-        Box::pin(async { Err(MailDeliveryFailure::Refused(UNPROVIDED.to_owned())) })
+        Box::pin(async { Err(MailDeliveryFailure::Refused(UNPROVIDED.into())) })
     }
 
     /// Withdraws only after a definitive Start refusal, holding startup and

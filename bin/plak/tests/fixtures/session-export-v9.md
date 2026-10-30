@@ -1,5 +1,5 @@
 # Version 9 export fixture
 
-`session-export-v9.json` is synthesized previous-version evidence with neutral
-text history, typed transcript rows and committed named state. Version 10
-imports it without dropping named state; version 8 is refused.
+`session-export-v9.json` is synthesized older-version refusal evidence with
+neutral text history, typed transcript rows and committed named state. This
+build imports only versions 10 and 11; version 9 is refused.

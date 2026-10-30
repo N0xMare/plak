@@ -132,10 +132,26 @@ impl WorkflowRequest {
     #[must_use]
     pub const fn withdrawal_note(&self) -> &'static str {
         match self.kind {
-            SessionWorkflowKind::Compact(_) => "compaction did not start; run /compact again",
-            SessionWorkflowKind::Fork => "fork did not start; run /fork again",
+            SessionWorkflowKind::Compact(_) => {
+                "compaction did not start; request compaction again explicitly"
+            }
+            SessionWorkflowKind::Fork => "fork did not start; request a fork again explicitly",
             SessionWorkflowKind::Rebind(_) => "model change did not start; choose the model again",
-            SessionWorkflowKind::Clear => "clear did not start; run /clear again",
+            SessionWorkflowKind::Clear => {
+                "clear did not start; request a fresh conversation again explicitly"
+            }
+        }
+    }
+
+    /// The semantic repair for a definitely unstarted workflow.
+    #[must_use]
+    pub const fn withdrawal_remedy(&self) -> plakous_host_protocol::notice_remedy::NoticeRemedy {
+        use plakous_host_protocol::notice_remedy::NoticeRemedy;
+        match self.kind {
+            SessionWorkflowKind::Compact(_) => NoticeRemedy::RetryCompaction {},
+            SessionWorkflowKind::Fork => NoticeRemedy::RetryFork {},
+            SessionWorkflowKind::Rebind(_) => NoticeRemedy::Rebind {},
+            SessionWorkflowKind::Clear => NoticeRemedy::StartFresh {},
         }
     }
 

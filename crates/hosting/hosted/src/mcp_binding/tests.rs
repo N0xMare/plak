@@ -108,8 +108,9 @@ fn a_frozen_table_rebuilds_its_definition_and_names_every_refusal() -> TestResul
     assert_eq!(
         server_spec(&fake()?, &table, &secrets(&[]))
             .err()
-            .as_deref(),
-        Some("mcp server fake: secret \"tok\" is not set; remedy: plak secret set tok")
+            .as_ref()
+            .map(crate::CliFailure::message),
+        Some("mcp server fake: secret \"tok\" is not set; supply the named secret")
     );
     let http = |url: &str| {
         format!(
@@ -129,8 +130,9 @@ fn a_frozen_table_rebuilds_its_definition_and_names_every_refusal() -> TestResul
     assert_eq!(
         server_spec(&fake()?, &http("https://mcp.example/mcp"), &secrets(&[]))
             .err()
-            .as_deref(),
-        Some("mcp server fake: secret \"tok\" is not set; remedy: plak secret set tok")
+            .as_ref()
+            .map(crate::CliFailure::message),
+        Some("mcp server fake: secret \"tok\" is not set; supply the named secret")
     );
     let plain = server_spec(
         &fake()?,
@@ -140,7 +142,9 @@ fn a_frozen_table_rebuilds_its_definition_and_names_every_refusal() -> TestResul
     .err()
     .ok_or("a plain-http non-loopback url bound")?;
     assert!(
-        plain.starts_with("mcp server fake: mcp server url must be https://"),
+        plain
+            .message()
+            .starts_with("mcp server fake: mcp server url must be https://"),
         "{plain}"
     );
     let invalid = Some("mcp server fake has an invalid frozen definition");
@@ -153,7 +157,8 @@ fn a_frozen_table_rebuilds_its_definition_and_names_every_refusal() -> TestResul
         assert_eq!(
             server_spec(&fake()?, &broken, &secrets(&[("tok", "v")]))
                 .err()
-                .as_deref(),
+                .as_ref()
+                .map(crate::CliFailure::message),
             invalid,
             "{broken}"
         );
@@ -173,7 +178,7 @@ fn an_unconfigured_server_refuses_with_its_remedy() -> TestResult {
     )
     .err();
     assert_eq!(
-        refused.as_deref(),
+        refused.as_ref().map(crate::CliFailure::message),
         Some(
             "mcp server github is not configured; remedy: add [mcp_servers.github] to \
              config.toml or remove mcp:github from the template's tools"
@@ -309,11 +314,19 @@ fn a_secret_reaches_the_server_environment_and_no_refusal_text() -> TestResult {
     )
     .err()
     .ok_or("a server that exited at startup bound")?;
-    assert!(refused.starts_with("mcp server fake"), "{refused}");
     assert!(
-        refused.ends_with("remedy: fix the server or remove mcp:fake from the template's tools")
+        refused.message().starts_with("mcp server fake"),
+        "{refused}"
     );
-    assert!(!refused.contains(SECRET_VALUE) && !refused.contains("a-different-value"));
+    assert!(
+        refused
+            .message()
+            .ends_with("remedy: fix the server or remove mcp:fake from the template's tools")
+    );
+    assert!(
+        !refused.message().contains(SECRET_VALUE)
+            && !refused.message().contains("a-different-value")
+    );
     Ok(())
 }
 
@@ -358,7 +371,7 @@ fn a_wildcard_omits_an_unlowerable_tool_with_a_notice_and_an_explicit_name_refus
     )
     .err()
     .ok_or("an unlowerable tool named explicitly bound")?;
-    assert!(refused.contains("tangled"), "{refused}");
+    assert!(refused.message().contains("tangled"), "{refused}");
     Ok(())
 }
 
@@ -423,8 +436,14 @@ fn an_http_server_binds_with_its_bearer_secret() -> TestResult {
     )
     .err()
     .ok_or("a wrong bearer bound")?;
-    assert!(refused.starts_with("mcp server fake"), "{refused}");
-    assert!(!refused.contains(SECRET_VALUE) && !refused.contains("a-different-value"));
+    assert!(
+        refused.message().starts_with("mcp server fake"),
+        "{refused}"
+    );
+    assert!(
+        !refused.message().contains(SECRET_VALUE)
+            && !refused.message().contains("a-different-value")
+    );
     Ok(())
 }
 
@@ -547,6 +566,7 @@ fn resources_add_the_read_resource_tool_or_refuse_without_the_capability() -> Te
     .ok_or("a server without resources bound read_resource")?;
     assert!(
         refused
+            .message()
             .ends_with("remedy: remove resources = true from [mcp_servers.fake] or fix the server"),
         "{refused}"
     );
@@ -581,8 +601,11 @@ fn an_oauth_table_without_a_login_refuses_before_connecting() -> TestResult {
     };
     let logins: Arc<dyn NamedSecrets> = Arc::new(LoginSecrets(home.path().to_path_buf()));
     assert_eq!(
-        server_spec(&fake()?, &table(""), &logins).err().as_deref(),
-        Some("mcp server fake is not logged in; remedy: plak mcp login fake")
+        server_spec(&fake()?, &table(""), &logins)
+            .err()
+            .as_ref()
+            .map(crate::CliFailure::message),
+        Some("mcp server fake is not logged in; authenticate this server")
     );
     assert_eq!(
         mcp_login_status("fake", &table(""), logins.as_ref())?,
@@ -596,15 +619,15 @@ fn an_oauth_table_without_a_login_refuses_before_connecting() -> TestResult {
     assert_eq!(
         server_spec(&fake()?, &table(client), &logins)
             .err()
-            .as_deref(),
-        Some(
-            "mcp server fake: secret \"fake-client\" is not set; remedy: plak secret set fake-client"
-        )
+            .as_ref()
+            .map(crate::CliFailure::message),
+        Some("mcp server fake: secret \"fake-client\" is not set; supply the named secret")
     );
     assert_eq!(
         server_spec(&fake()?, &table(""), &secrets(&[]))
             .err()
-            .as_deref(),
+            .as_ref()
+            .map(crate::CliFailure::message),
         Some("mcp server fake uses oauth, and this product stores no MCP logins")
     );
     let bearer = "[mcp_servers.fake]\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\n\
@@ -614,18 +637,43 @@ fn an_oauth_table_without_a_login_refuses_before_connecting() -> TestResult {
 }
 
 #[test]
-fn login_remedy_single_quotes_validated_scopes_and_supports_scope_less_fallback() -> TestResult {
-    let login = McpServerName::new("docs")?;
-    let scope = "mcp:tools offline_access";
-    assert!(plakous::auth::oauth_workflow::valid_scope_list(scope));
+fn oauth_refusals_preserve_server_and_secret_names_as_typed_facts() -> TestResult {
+    let server = fake()?;
+    let missing = server_spec(&server, "[mcp_servers.fake]\ntransport=\"stdio\"\ncommand=\"fake\"\nsecret_env={TOKEN=\"token\"}\nstartup_seconds=20\ncall_seconds=120\n", &secrets(&[])).err().ok_or("missing secret admitted")?;
     assert_eq!(
-        mcp_login_remedy(&login, Some(scope)),
-        "remedy: plak mcp login docs --scope 'mcp:tools offline_access'"
+        missing.advice(),
+        Some(
+            &plakous_host_protocol::refusal::RefusalAdvice::SecretMissing {
+                server: "fake".into(),
+                name: "token".into()
+            }
+        )
     );
-    assert_eq!(
-        mcp_login_remedy(&login, None),
-        "remedy: plak mcp login docs"
+    assert!(!missing.message().contains("plak secret"));
+    Ok(())
+}
+
+#[test]
+fn a_missing_secret_keeps_its_requirement_after_the_resolver_boxes_it() -> TestResult {
+    let server = fake()?;
+    let failure = read_secret(&server, "token", &secrets(&[]))
+        .err()
+        .ok_or("an unset secret was present")?;
+    assert!(!failure.message().contains(SECRET_VALUE));
+    let error = McpError::from_resolver(
+        McpErrorKind::Startup,
+        failure.to_string(),
+        boxed_secret_error(failure),
     );
+    let requirement = error.secret_requirement().ok_or("requirement dropped")?;
+    assert_eq!(requirement.server, "fake");
+    assert_eq!(requirement.name, "token");
+    let source = std::error::Error::source(&error).ok_or("resolver source dropped")?;
+    let missing = source
+        .downcast_ref::<plakous::mcp::McpNamedSecretMissing>()
+        .ok_or("resolver source was not the named secret")?;
+    assert_eq!(missing.requirement().name, "token");
+    assert!(!error.to_string().contains(SECRET_VALUE));
     Ok(())
 }
 

@@ -498,6 +498,7 @@ fn attached_oauth_ready_refresh_never_rebinds_canonical_agent() {
         seed_history: None,
         source_releases: SourceReleases::default(),
         continuation: None,
+        event_renderer: None,
     };
     let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(tx);

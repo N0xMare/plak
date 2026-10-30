@@ -7,6 +7,23 @@ fn at(seconds: u64) -> TestResult<Timestamp> {
     Ok(Timestamp::new(seconds, 0)?)
 }
 
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+#[test]
+fn compatibility_drift_is_not_a_login_remedy() {
+    let refusal = refusal(
+        NativeProvider::Codex,
+        NativeSubscriptionError::CompatibilityDrift {
+            provider: NativeProvider::Codex,
+            reason: plakous::subscriptions::CompatibilityDrift::GrantedScope,
+        },
+    );
+    assert!(refusal.refusal().is_none(), "{refusal}");
+    let agent =
+        plakous::agent::AgentError::new(plakous::agent::AgentErrorKind::Model, refusal.message())
+            .with_reresolution_error(Some(refusal));
+    assert!(crate::runtime::agent_error_remedy(&agent).is_none());
+}
+
 #[test]
 fn a_changed_binding_names_the_fork_now_remedy() {
     let refusal = refusal(
@@ -16,9 +33,13 @@ fn a_changed_binding_names_the_fork_now_remedy() {
     assert!(
         refusal
             .message()
-            .ends_with("rebind with Fork now in the Agents tab, or start a new session"),
+            .ends_with("explicitly rebind by forking, or start a new session"),
         "{refusal}"
     );
+    assert!(matches!(
+        refusal.refusal(),
+        Some(plakous::agent::ModelReresolutionRefusal::BindingChanged)
+    ));
     assert!(!refusal.message().contains("/model"), "{refusal}");
 }
 

@@ -25,7 +25,7 @@ impl ChildRuntimeFactory for ProductionChildRuntimeFactory {
 }
 
 pub(crate) type ChildRuntimeFuture<'a> =
-    std::pin::Pin<Box<dyn Future<Output = Result<SessionRuntimeBinding, String>> + Send + 'a>>;
+    std::pin::Pin<Box<dyn Future<Output = crate::CliResult<SessionRuntimeBinding>> + Send + 'a>>;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "deterministic scoped route fixtures")]
@@ -69,7 +69,7 @@ mod tests {
         )
         .await
         {
-            Err(error) => error,
+            Err(error) => error.message().to_owned(),
             Ok(_) => panic!("the fixture route must refuse before provider resolution"),
         }
     }

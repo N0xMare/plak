@@ -15,6 +15,7 @@
 )]
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
 
+use plakous_host_protocol::status::HostPhase;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -114,6 +115,7 @@ pub(crate) fn product_injected_attached_host(
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
         continuation: None,
+        event_renderer: None,
     };
     (config, injection, paths)
 }
@@ -392,7 +394,7 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
     assert!(
         during.iter().any(|event| matches!(
             event,
-            HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Compacting)
+            HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Compacting)
         )),
         "scheduled compact must paint compacting, during={during:?}"
     );
@@ -411,7 +413,7 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
     assert!(
         after.iter().any(|event| matches!(
             event,
-            HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle)
+            HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Idle)
         )),
         "a failed scheduled compact must return the HUD to idle, after={after:?}"
     );
@@ -896,6 +898,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
         continuation: None,
+        event_renderer: None,
     };
     let (event_tx, _event_rx) = surface_protocol::host_event_channel();
     let events = Sender::over(event_tx);

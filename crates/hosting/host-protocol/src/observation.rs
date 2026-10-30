@@ -77,6 +77,8 @@ define_observations! {
     /// Append one typed transcript row. The same row a restore reads back
     /// from the product transcript, so live and restored rows match.
     Row(TranscriptRow),
+    /// Live-only open warning; frontends own the tree/queue action grammar.
+    RestoredPause(crate::status::HostPause),
     /// Replace status strip fields.
     Status {
         /// Semantic latest-state phase, distinct from terminal turn authority.

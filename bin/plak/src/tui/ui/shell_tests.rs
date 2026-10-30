@@ -22,7 +22,7 @@ use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode, MouseButton, MouseEvent,
     MouseEventKind,
 };
-use plakous_host_protocol::status::HostPhase;
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
@@ -762,11 +762,9 @@ fn turn_status_spinner_advances_and_reduced_motion_is_static() {
     app.apply_host_event(HostEvent::Status {
         phase: HostPhase::Running,
         queue_len: 0,
-        detail: Some(
-            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
-                diagnostic: plakous_host_protocol::status::DiagnosticText::new("working"),
-            },
-        ),
+        detail: Some(HostStatusDetail::PlanDiagnostic {
+            diagnostic: DiagnosticText::new("working"),
+        }),
     });
     app.apply_host_event(HostEvent::SetBusy(true));
     let backend = TestBackend::new(80, 12);

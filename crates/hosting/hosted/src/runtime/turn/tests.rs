@@ -98,11 +98,13 @@ fn definite_failure_allows_continuation_but_recovery_required_blocks_it() {
             error: "redacted definite rejection".into(),
             transient: None,
             exchange: crate::agent::TerminalExchange::Closed,
+            remedy: None,
         }
     )));
     assert!(host_outcome_blocks_continuation(&Ok(
         TurnHostOutcome::RecoveryRequired {
             error: "redacted unresolved outcome".into(),
+            remedy: None,
         }
     )));
     assert!(!host_outcome_blocks_continuation(&Ok(
@@ -213,8 +215,8 @@ fn store_capacity_presentation_is_typed_and_branches_on_the_refused_class() {
     let raw = "agent turn failed: checkpoints 14/16";
     let ordinary = crate::storage_pressure::storage_pressure_message(None, raw);
     assert!(ordinary.contains("new work is refused"));
-    let gc = ordinary.find("`plak session gc --all`").unwrap();
-    assert!(gc < ordinary.find("`plak session delete <id>`").unwrap());
+    let gc = ordinary.find("reclaim superseded history").unwrap();
+    assert!(gc < ordinary.find("remove unneeded sessions").unwrap());
     assert!(ordinary.contains("do not reclaim it"));
     assert!(ordinary.ends_with(raw));
     // Text alone is not a capacity classification.
@@ -825,4 +827,56 @@ fn operator_facing_agent_error_keeps_protocol_category_over_a_429_request_id() {
     assert!(rendered.contains("request_id=req_429"), "{rendered}");
     assert!(!rendered.contains("rate-limit"), "{rendered}");
     assert!(!rendered.contains("quota is exhausted"), "{rendered}");
+}
+
+/// A live refusal the canonical record does not store still selects the notice
+/// remedy the product transcript keeps.
+#[test]
+fn a_live_reresolution_refusal_is_stored_on_the_failure_notice() {
+    use plakous::agent::{ModelReresolutionError, ModelReresolutionRefusal};
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+
+    let cases = [
+        (
+            ModelReresolutionRefusal::BindingChanged,
+            NoticeRemedy::Rebind {},
+        ),
+        (
+            ModelReresolutionRefusal::CredentialUnavailable {
+                account: "codex".into(),
+            },
+            NoticeRemedy::Login {
+                account: AccountTarget::Codex,
+            },
+        ),
+        (
+            ModelReresolutionRefusal::ResolutionFailed {
+                account: "grok".into(),
+            },
+            NoticeRemedy::RetryThenLogin {
+                account: AccountTarget::Grok,
+            },
+        ),
+    ];
+    for (refusal_kind, expected) in cases {
+        let refusal = ModelReresolutionError::new("fresh resolution refused the turn")
+            .with_refusal(refusal_kind);
+        let error = AgentError::new(AgentErrorKind::Model, "fresh resolution refused the turn")
+            .with_reresolution_error(Some(refusal));
+        let remedy = agent_error_remedy(&error);
+        assert_eq!(remedy.as_ref(), Some(&expected));
+        let root = tempfile::tempdir().unwrap();
+        let mut session = SessionRecord::new(root.path().to_path_buf());
+        reconcile::commit_definite_failure_projection(
+            &mut session,
+            "agent turn failed: fresh resolution refused the turn",
+            |_| Ok(()),
+            remedy.as_ref(),
+        )
+        .unwrap();
+        let Some(TranscriptRow::Notice(notice)) = session.transcript.last() else {
+            panic!("the failure notice was not stored");
+        };
+        assert_eq!(notice.remedy.as_ref(), Some(&expected));
+    }
 }

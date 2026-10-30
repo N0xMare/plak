@@ -28,7 +28,40 @@ mod result;
 #[path = "spec.rs"]
 mod spec;
 
-pub use error::{McpError, McpErrorKind};
+pub use error::{
+    McpError, McpErrorKind, McpLoginRequirement, McpNamedSecretMissing, McpSecretRequirement,
+};
+
+fn source_login_requirement(
+    source: &(dyn std::error::Error + 'static),
+) -> Option<McpLoginRequirement> {
+    match http::classify(source) {
+        Some(http::HttpRefusal::Authorization { text, .. }) => text.login,
+        _ => source
+            .downcast_ref::<McpError>()
+            .and_then(McpError::login_requirement)
+            .cloned(),
+    }
+}
+
+fn source_secret_requirement(
+    source: &(dyn std::error::Error + 'static),
+) -> Option<McpSecretRequirement> {
+    if let Some(missing) = source.downcast_ref::<McpNamedSecretMissing>() {
+        return Some(missing.requirement().clone());
+    }
+    source
+        .downcast_ref::<McpError>()
+        .and_then(McpError::secret_requirement)
+        .cloned()
+}
+
+impl McpError {
+    pub(crate) fn with_login(mut self, login: Option<McpLoginRequirement>) -> Self {
+        self.login = login;
+        self
+    }
+}
 pub use http::{MAX_SSE_EVENT_BYTES, McpHttpEndpoint, McpHttpSecret, McpHttpSecretResolver};
 pub use listing::{
     FrozenMcpListing, MAX_DESCRIPTION_BYTES, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, McpToolRecord,
@@ -37,9 +70,8 @@ pub use listing::{
 pub use lowering::{SchemaRefusal, lower_input_schema};
 pub use naming::{MAX_EXPOSED_NAME_BYTES, exposed_tool_name};
 pub use oauth::{
-    McpDeviceLogin, McpLocalLogin, McpLocalRetirement, McpLogin, McpLoginOptions, McpLoginRemedy,
-    McpLogoutOutcome, McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus, McpPasteLogin,
-    McpRemoteLogin,
+    McpDeviceLogin, McpLocalLogin, McpLocalRetirement, McpLogin, McpLoginOptions, McpLogoutOutcome,
+    McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus, McpPasteLogin, McpRemoteLogin,
 };
 pub use pack::McpToolPack;
 pub use plakous_http::{HeaderName, HeaderValue, SensitiveBytes};

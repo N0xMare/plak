@@ -82,9 +82,9 @@ pub struct MailDeliveryAck {
 pub enum MailDeliveryFailure {
     /// Delivery was definitely refused before a turn started; existing child
     /// authority remains reusable after the tree rolls back the new attempt.
-    Refused(String),
+    Refused(plakous_host_protocol::status::HostFailure),
     /// Delivery may have changed runtime authority and requires recovery.
-    RecoveryRequired(String),
+    RecoveryRequired(plakous_host_protocol::status::HostFailure),
     /// The mail reached the child after the turn it targeted ended, or (a
     /// Start) found the child's slot held by a turn another command admitted.
     /// Nothing was delivered: the send looks at the child again (spec 03
@@ -97,14 +97,14 @@ pub enum MailDeliveryFailure {
 }
 
 impl MailDeliveryFailure {
-    fn into_parts(self) -> (bool, String) {
+    fn into_parts(self) -> (bool, plakous_host_protocol::status::HostFailure) {
         match self {
             Self::Refused(message) => (true, message),
             Self::RecoveryRequired(message) => (false, message),
-            Self::TurnEnded => (true, "the child's turn ended before delivery".to_owned()),
+            Self::TurnEnded => (true, "the child's turn ended before delivery".into()),
             Self::SlotBusy => (
                 true,
-                "the child's live slot was still starting or retiring".to_owned(),
+                "the child's live slot was still starting or retiring".into(),
             ),
         }
     }
@@ -112,13 +112,13 @@ impl MailDeliveryFailure {
 
 impl From<String> for MailDeliveryFailure {
     fn from(message: String) -> Self {
-        Self::RecoveryRequired(message)
+        Self::RecoveryRequired(message.into())
     }
 }
 
 impl From<&str> for MailDeliveryFailure {
     fn from(message: &str) -> Self {
-        Self::RecoveryRequired(message.to_owned())
+        Self::RecoveryRequired(message.into())
     }
 }
 
@@ -426,7 +426,7 @@ impl TopologyTool {
         let Some(session_locator) = snapshot.session_locator.clone() else {
             return self.fail_closed_session(
                 &snapshot.agent_id,
-                "child session locator is missing; spawn bind did not complete".into(),
+                "child session locator is missing; spawn bind did not complete",
             );
         };
         let mut snapshot = snapshot;
@@ -585,7 +585,7 @@ impl TopologyTool {
                                     MailDeliveryFailure::RecoveryRequired(
                                         "the child's interrupted turn is still bound and no turn \
                                      waiter is left to release it"
-                                            .to_owned(),
+                                            .into(),
                                     ),
                                 )
                                 .await;
@@ -1025,19 +1025,15 @@ impl TopologyTool {
         if withdrawn.is_err() {
             return self.fail_closed_session(agent_id, message);
         }
-        ToolOutcome::failure_text(
-            json!({
-                "code": if definite_refusal {
-                    TopologyErrorCode::Capacity
-                } else {
-                    TopologyErrorCode::OperationRecoveryRequired
-                },
-                "message": format!(
+        Self::topology_failure(
+            &TopologyError::new(
+                TopologyErrorCode::Capacity,
+                format!(
                     "{message}; the followup attempt was rolled back and {agent_id} still \
                      carries the attempt it had"
                 ),
-            })
-            .to_string(),
+            )
+            .with_failure(&message),
         )
     }
 }

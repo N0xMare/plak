@@ -344,9 +344,11 @@ fn actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers() -> T
                     intents
                         .notices
                         .iter()
-                        .filter(|notice| {
-                            notice.row.text() == Some("fork did not start; run /fork again")
-                        })
+                        .filter(|notice| matches!(
+                            &notice.row,
+                            TranscriptRow::Notice(row)
+                                if row.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryFork {})
+                        ))
                         .count(),
                     1
                 );

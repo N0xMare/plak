@@ -156,11 +156,10 @@ async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedO
         OpenRouterChatDiscoveryError::AbsentModel => CliFailure::classified(
             CliFailureKind::Usage,
             format!(
-                "model `{}` is not in the OpenRouter catalog of account `openrouter`; \
-                 run `plak models openrouter` to list the models it offers",
+                "model `{}` is not in the OpenRouter catalog of account `openrouter`; inspect its available models",
                 spec.literal_model
             ),
-        ),
+        ).with_advice(plakous_host_protocol::refusal::RefusalAdvice::UnknownModel { model: spec.literal_model.clone(), account: "openrouter".into(), catalog: "OpenRouter".into() }),
         error => CliFailure::new(format!("OpenRouter exact discovery failed: {error}")),
     })?;
     let reasoning_disable_wire =
@@ -714,7 +713,25 @@ pub fn probe_openrouter_key_usage(
         };
         match client.key_usage().await {
             Ok(usage) => OpenRouterKeyUsageProbe::Ok(Box::new(usage), label),
-            Err(error) => OpenRouterKeyUsageProbe::Failed(key_usage_failure(&error, &label)),
+            Err(error) => {
+                let reason = key_usage_failure(&error, &label);
+                if matches!(
+                    error,
+                    plakous::openrouter::OpenRouterKeyUsageError::Unauthorized
+                        | plakous::openrouter::OpenRouterKeyUsageError::Forbidden
+                ) {
+                    OpenRouterKeyUsageProbe::Rejected {
+                        reason,
+                        source: if label == "OPENROUTER_API_KEY" {
+                            plakous_host_protocol::views::KeySource::Environment
+                        } else {
+                            plakous_host_protocol::views::KeySource::File
+                        },
+                    }
+                } else {
+                    OpenRouterKeyUsageProbe::Failed(reason)
+                }
+            }
         }
     })
 }
@@ -729,7 +746,7 @@ fn key_usage_failure(error: &plakous::openrouter::OpenRouterKeyUsageError, label
     let remedy = if label == "OPENROUTER_API_KEY" {
         "unset it to use the key file, or replace it"
     } else {
-        "run `plak key set openrouter` to replace it"
+        "replace the rejected API key from the key file"
     };
     format!("OpenRouter rejected the API key from {label} ({status}); {remedy}")
 }

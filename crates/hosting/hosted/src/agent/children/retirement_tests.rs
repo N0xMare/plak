@@ -2205,7 +2205,13 @@ async fn a_child_create_refused_under_storage_pressure_is_a_definite_spawn_refus
     let SpawnBindError::Refused(message) = child_create_failure(&error, false) else {
         panic!("a capacity-refused create was left for recovery");
     };
-    assert!(message.contains("session store is full"), "{message}");
+    assert!(
+        message
+            .diagnostic
+            .as_str()
+            .contains("session store is full"),
+        "{message}"
+    );
     assert_eq!(
         retained_sessions(&database),
         0,

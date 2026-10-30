@@ -428,10 +428,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                 compact_finished_note(*outcome, *summary, outcome_detail),
             ));
         } else if quiet {
-            let _ = events.notice(TranscriptRow::info(
-                NoticeScope::Compaction,
-                COMPACT_PROVIDER_QUIET_NOTE,
-            ));
+            let _ = events.notice(
+                TranscriptRow::info(NoticeScope::Compaction, COMPACT_PROVIDER_QUIET_NOTE)
+                    .with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::RetryCompaction {},
+                    ),
+            );
             let call_id = sessions::projector::compaction_call_id(workflow_id.as_bytes());
             publish_compact_activity(session, events, &call_id, "failed", None, Some(*elapsed_ms));
         } else {

@@ -387,6 +387,7 @@ pub(super) fn usage_fixture() -> App {
                     ],
                 },
                 balances: Vec::new(),
+                repair: None,
             },
             VerticalUsageView {
                 vertical: UsageVertical::new("grok", "SuperGrok"),
@@ -415,6 +416,7 @@ pub(super) fn usage_fixture() -> App {
                         value: "$3.55 used of $50.00 cap".into(),
                     },
                 ],
+                repair: None,
             },
             VerticalUsageView {
                 vertical: UsageVertical::new("claude", "Claude"),
@@ -423,6 +425,7 @@ pub(super) fn usage_fixture() -> App {
                 observed_at: None,
                 state: VerticalUsageState::NotConnected,
                 balances: Vec::new(),
+                repair: None,
             },
             VerticalUsageView {
                 vertical: UsageVertical::new("openrouter", "OpenRouter"),
@@ -468,6 +471,7 @@ pub(super) fn usage_fixture() -> App {
                     ],
                 },
                 balances: Vec::new(),
+                repair: None,
             },
         ],
         session: SessionLedgerView {
@@ -972,6 +976,7 @@ pub(super) fn tree_node(id: &str, parent: Option<&str>, depth: u8) -> NodeView {
         ended_at_unix: None,
         fault: None,
         waiting_on: None,
+        recovery_abandoned: false,
     }
 }
 

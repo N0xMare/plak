@@ -6,7 +6,55 @@
 use super::*;
 use crate::surface_protocol::HostEvent;
 use plakous_host_protocol::QueueDrainState;
-use plakous_host_protocol::status::HostPhase;
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
+
+#[test]
+fn remedies_and_live_pause_project_through_existing_jsonl_envelopes() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+    use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow};
+    let correlation = JsonlCorrelation {
+        prompt_id: Some("prompt"),
+        command_id: Some("command"),
+        ..Default::default()
+    };
+    let line = project_host_event(
+        &HostEvent::Row(
+            TranscriptRow::info(NoticeScope::Session, "opaque").with_remedy(NoticeRemedy::Login {
+                account: AccountTarget::Grok,
+            }),
+        ),
+        correlation,
+        Some("exact-root"),
+    )
+    .unwrap();
+    let value = object_from_line(&line);
+    assert_eq!(value["kind"], "status");
+    assert_eq!(value["phase"], "note");
+    assert_eq!(value["queue_len"], 0);
+    assert_eq!(value["id"], "command");
+    assert!(
+        value["detail"]
+            .as_str()
+            .unwrap()
+            .contains("plak login grok")
+    );
+    assert!(!value.contains_key("remedy"));
+    let line = project_host_event(
+        &HostEvent::RestoredPause(plakous_host_protocol::status::HostPause {
+            tree: true,
+            queue: true,
+        }),
+        correlation,
+        Some("exact-root"),
+    )
+    .unwrap();
+    let value = object_from_line(&line);
+    assert_eq!(value["id"], "command");
+    assert_eq!(value["queue_len"], 0);
+    let detail = value["detail"].as_str().unwrap();
+    assert!(detail.contains("resume_tree") && detail.contains("resume_queue"));
+    assert!(!detail.contains("Tab") && !detail.contains("/attach"));
+}
 
 /// The session binding changes only through templates and profiles, so
 /// the retired binding kinds are unknown kinds like any other.
@@ -362,7 +410,7 @@ fn correlation_turn_scoped_prefers_prompt_id() {
         command_id: Some("tree-1"),
         pending_tree_snapshot_id: None,
     };
-    let assistant = project_host_event(&HostEvent::AssistantDelta("hi".into()), correlation)
+    let assistant = project_host_event(&HostEvent::AssistantDelta("hi".into()), correlation, None)
         .expect("assistant");
     assert_eq!(object_from_line(&assistant)["id"], "prompt-1");
 
@@ -382,6 +430,7 @@ fn correlation_turn_scoped_prefers_prompt_id() {
             wait: None,
         },
         correlation,
+        None,
     )
     .expect("tool");
     assert_eq!(object_from_line(&tool)["id"], "prompt-1");
@@ -404,6 +453,7 @@ fn correlation_tree_snapshot_uses_pending_tree_id_only() {
             command_id: Some("tree-1"),
             pending_tree_snapshot_id: Some("tree-2"),
         },
+        None,
     )
     .expect("tree");
     assert!(!object_from_line(&unsolicited).contains_key("id"));
@@ -417,6 +467,7 @@ fn correlation_tree_snapshot_uses_pending_tree_id_only() {
             command_id: Some("tree-2"),
             pending_tree_snapshot_id: Some("tree-2"),
         },
+        None,
     )
     .expect("tree");
     assert_eq!(object_from_line(&explicit)["id"], "tree-2");
@@ -438,6 +489,7 @@ fn correlation_errors_use_command_id() {
             ),
         ),
         correlation,
+        None,
     )
     .expect("error");
     assert_eq!(object_from_line(&error)["id"], "tree-1");
@@ -467,6 +519,7 @@ fn idle_invoke_tool_events_echo_command_id() {
             wait: None,
         },
         correlation,
+        None,
     )
     .expect("tool");
     let tool = object_from_line(&tool);
@@ -481,6 +534,7 @@ fn idle_invoke_tool_events_echo_command_id() {
             ),
         ),
         correlation,
+        None,
     )
     .expect("error");
     assert_eq!(object_from_line(&error)["id"], "iv");
@@ -492,6 +546,7 @@ fn idle_invoke_tool_events_echo_command_id() {
             ),
         ),
         correlation,
+        None,
     )
     .expect("status");
     let idle = object_from_line(&idle);
@@ -519,7 +574,7 @@ fn a_terminal_tool_line_reaches_the_wire_with_its_duration() {
         wait: None,
     };
     for state in ["done", "failed", "cancelled", "rejected"] {
-        let line = project_host_event(&terminal(state), JsonlCorrelation::default())
+        let line = project_host_event(&terminal(state), JsonlCorrelation::default(), None)
             .unwrap_or_else(|| panic!("terminal `{state}` tool line has no v1 line"));
         let object = object_from_line(&line);
         assert_eq!(object["kind"], "tool");
@@ -545,6 +600,7 @@ fn a_terminal_tool_line_reaches_the_wire_with_its_duration() {
                 wait: None,
             },
             JsonlCorrelation::default(),
+            None,
         )
         .expect("running tool line"),
     );
@@ -577,6 +633,7 @@ fn tool_error_tree_are_required_stdout() {
             command_id: None,
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .unwrap();
     let object = object_from_line(&tool);
@@ -609,6 +666,7 @@ fn tool_error_tree_are_required_stdout() {
                 command_id: None,
                 pending_tree_snapshot_id: None,
             },
+            None,
         )
         .unwrap();
         let object = object_from_line(&line);
@@ -625,6 +683,7 @@ fn tool_error_tree_are_required_stdout() {
             ),
         ),
         JsonlCorrelation::default(),
+        None,
     )
     .unwrap();
     assert!(required_stdout_kind(&error));
@@ -666,9 +725,11 @@ fn tool_error_tree_are_required_stdout() {
                 ended_at_unix: None,
                 fault: None,
                 waiting_on: None,
+                recovery_abandoned: false,
             }],
         }),
         JsonlCorrelation::default(),
+        None,
     )
     .unwrap();
     assert!(required_stdout_kind(&tree));
@@ -715,6 +776,7 @@ fn tree_rows_carry_the_tier_attempt_and_candidate_or_omit_them() {
         ended_at_unix: None,
         fault: None,
         waiting_on: None,
+        recovery_abandoned: false,
     };
     let snapshot = |node: NodeView| {
         let line = project_host_event(
@@ -726,6 +788,7 @@ fn tree_rows_carry_the_tier_attempt_and_candidate_or_omit_them() {
                 nodes: vec![node],
             }),
             JsonlCorrelation::default(),
+            None,
         )
         .unwrap();
         object_from_line(&line)
@@ -906,11 +969,9 @@ fn optional_events_project_and_are_not_required_stdout() {
         &HostEvent::Status {
             phase: HostPhase::Running,
             queue_len: 2,
-            detail: Some(
-                plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
-                    diagnostic: plakous_host_protocol::status::DiagnosticText::new("tool"),
-                },
-            ),
+            detail: Some(HostStatusDetail::PlanDiagnostic {
+                diagnostic: DiagnosticText::new("tool"),
+            }),
         },
         JsonlCorrelation {
             prompt_id: Some("p1"),
@@ -918,6 +979,7 @@ fn optional_events_project_and_are_not_required_stdout() {
             command_id: None,
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .expect("status projects");
     let status_obj = object_from_line(&status);
@@ -940,6 +1002,7 @@ fn optional_events_project_and_are_not_required_stdout() {
             command_id: Some("c1"),
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .expect("system notes project as optional status");
     let note_obj = object_from_line(&note);
@@ -951,7 +1014,7 @@ fn optional_events_project_and_are_not_required_stdout() {
     );
     assert!(!required_stdout_kind(&note));
 
-    let busy = project_host_event(&HostEvent::SetBusy(true), JsonlCorrelation::default())
+    let busy = project_host_event(&HostEvent::SetBusy(true), JsonlCorrelation::default(), None)
         .expect("busy projects");
     let busy_obj = object_from_line(&busy);
     assert_eq!(busy_obj["kind"], "busy");
@@ -966,6 +1029,7 @@ fn optional_events_project_and_are_not_required_stdout() {
             command_id: None,
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .expect("assistant projects");
     let assistant_obj = object_from_line(&assistant);
@@ -985,6 +1049,7 @@ fn optional_events_project_and_are_not_required_stdout() {
             drain: QueueDrainState::RestoredPaused,
         },
         JsonlCorrelation::default(),
+        None,
     )
     .expect("queue projects");
     let queue_obj = object_from_line(&queue);
@@ -1029,6 +1094,7 @@ fn projections_are_additive_v1_lines() {
                 wait: None,
             },
             correlation,
+            None,
         )
         .unwrap(),
     );
@@ -1054,6 +1120,7 @@ fn projections_are_additive_v1_lines() {
                 wait: None,
             },
             correlation,
+            None,
         )
         .unwrap(),
     );
@@ -1068,6 +1135,7 @@ fn projections_are_additive_v1_lines() {
                 text: "weighing".into(),
             },
             correlation,
+            None,
         )
         .unwrap(),
     );
@@ -1085,6 +1153,7 @@ fn projections_are_additive_v1_lines() {
                 expires_at_ms: 42,
             },
             correlation,
+            None,
         )
         .unwrap(),
     );
@@ -1101,6 +1170,7 @@ fn projections_are_additive_v1_lines() {
                 resolution: "expired".into(),
             },
             correlation,
+            None,
         )
         .unwrap(),
     );
@@ -1114,6 +1184,7 @@ fn projections_are_additive_v1_lines() {
                 position: Some(2),
             },
             correlation,
+            None,
         )
         .unwrap(),
     );
@@ -1142,6 +1213,7 @@ fn live_usage_snapshot_is_not_a_turn_event() {
             command_id: None,
             pending_tree_snapshot_id: None,
         },
+        None,
     );
     assert!(
         line.is_none(),
@@ -1176,6 +1248,7 @@ fn the_terminal_turn_record_carries_the_context_growth_fields() {
             command_id: None,
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .expect("a terminal usage observation projects as `turn`");
     let record: Value = serde_json::from_str(&line).expect("the projection is one JSON object");
@@ -1207,6 +1280,7 @@ fn an_unknown_prepared_input_peak_is_omitted_not_zero() {
             command_id: None,
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .expect("a terminal usage observation projects as `turn`");
     let record: Value = serde_json::from_str(&line).expect("the projection is one JSON object");
@@ -1234,6 +1308,7 @@ fn turn_usage_projects_cached_input_as_observation() {
             command_id: None,
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .expect("turn usage projects");
     let object = object_from_line(&line);
@@ -1260,6 +1335,7 @@ fn navigator_unavailable_projects_as_required_error() {
             command_id: Some("t1"),
             pending_tree_snapshot_id: None,
         },
+        None,
     )
     .expect("unavailable projects");
     let object = object_from_line(&error);

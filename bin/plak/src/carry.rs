@@ -3,8 +3,8 @@
 //! A build never reads another build's stores as session authority. The one
 //! thing that crosses is a portable session reference: `plak session export` writes it
 //! from this build's state, `plak session import` creates a new linked session
-//! from the full neutral conversation and named state. Version 8 imports with
-//! empty named state; version 7 is no longer importable.
+//! from the full neutral conversation and named state. This build imports
+//! versions 11 and 10; v10 notice text stays verbatim without inferred remedies.
 
 mod document;
 #[cfg(any(test, feature = "tui"))]

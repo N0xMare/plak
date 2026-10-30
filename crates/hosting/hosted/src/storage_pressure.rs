@@ -4,6 +4,24 @@ use plakous::sessions::{
     AgentSessionsError, AgentSessionsErrorKind, SessionStoreAdmission, SessionStorePressure,
 };
 
+pub(crate) fn sessions_remedy(
+    error: &AgentSessionsError,
+) -> Option<plakous_host_protocol::notice_remedy::NoticeRemedy> {
+    use plakous_host_protocol::notice_remedy::NoticeRemedy as R;
+    match error.kind() {
+        AgentSessionsErrorKind::StorageFull => Some(R::FreeDiskSpace {}),
+        AgentSessionsErrorKind::StoragePressure => {
+            Some(match error.storage_pressure().map(|p| p.admission()) {
+                Some(SessionStoreAdmission::Settlement | SessionStoreAdmission::Recovery) => {
+                    R::ReclaimThenRecover {}
+                }
+                _ => R::ReclaimRetainedHistory {},
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Frames `raw` by the class of the refused write: new work refused at the
 /// ordinary threshold, or a running turn whose outcome could not be recorded
 /// inside the reserve and therefore needs recovery.
@@ -14,10 +32,10 @@ pub(crate) fn storage_pressure_message(
     let detail = pressure.map_or_else(|| "a retention bound".to_owned(), |p| p.to_string());
     match pressure.map(|pressure| pressure.admission()) {
         Some(SessionStoreAdmission::Settlement | SessionStoreAdmission::Recovery) => format!(
-            "session store reserve is exhausted ({detail}) - a running turn could not record its outcome and needs recovery; free retained state with `plak session gc --all`, then `plak session delete <id>` on sessions you no longer need, then run /recover\n{raw}"
+            "session store reserve is exhausted ({detail}) - a running turn could not record its outcome and needs recovery; reclaim superseded history, remove unneeded sessions, then explicitly recover\n{raw}"
         ),
         _ => format!(
-            "session store is full ({detail}) - new work is refused so the reserve can finish and recover running turns; reclaim superseded history with `plak session gc --all`, then free sessions you no longer need with `plak session delete <id>` (/clear, compaction and /recover do not reclaim it)\n{raw}"
+            "session store is full ({detail}) - new work is refused so the reserve can finish and recover running turns; reclaim superseded history, then remove unneeded sessions; a fresh conversation, compaction and recovery do not reclaim it\n{raw}"
         ),
     }
 }
@@ -33,7 +51,7 @@ pub(crate) fn sessions_storage_pressure(error: &AgentSessionsError, raw: &str) -
 
 pub(crate) fn storage_full_message(raw: &str) -> String {
     format!(
-        "session store disk is full - reclaim history with `plak session gc --all`, delete unused sessions with `plak session delete <id>`, or free disk space; the logical reserve does not reserve disk blocks\n{raw}"
+        "session store disk is full - reclaim history, remove unused sessions, or free disk space; the logical reserve does not reserve disk blocks\n{raw}"
     )
 }
 
@@ -52,8 +70,9 @@ mod tests {
                 .unwrap()
                 .starts_with("session store is full (")
         );
-        assert!(message.contains("plak session gc --all"));
-        assert!(message.contains("plak session delete <id>"));
+        assert!(message.contains("reclaim superseded history"));
+        assert!(message.contains("remove unneeded sessions"));
+        assert!(!message.contains("plak session"));
         assert!(message.contains("prompt was not admitted"));
         assert!(!message.contains("needs recovery"));
     }
@@ -61,8 +80,9 @@ mod tests {
     #[test]
     fn physical_storage_full_names_remedies_without_promising_reserved_blocks() {
         let message = super::storage_full_message("prompt was not admitted");
-        assert!(message.contains("plak session gc --all"));
-        assert!(message.contains("plak session delete <id>"));
+        assert!(message.contains("reclaim history"));
+        assert!(message.contains("remove unused sessions"));
+        assert!(!message.contains("plak session"));
         assert!(message.contains("free disk space"));
         assert!(message.contains("logical reserve does not reserve disk blocks"));
         assert!(message.contains("prompt was not admitted"));

@@ -101,8 +101,11 @@ pub(super) fn log_event(log: Option<&SessionLog>, session_id: &str, event: Sessi
 pub(super) fn log_ev<P: plakous_host_protocol::ProtocolExtension>(
     log: Option<&SessionLog>,
     config: &HostConfig<P>,
-    event: SessionEvent,
+    mut event: SessionEvent,
 ) {
+    if let Some(render) = config.event_renderer {
+        render(&mut event);
+    }
     log_event(log, &config.session.id, event);
 }
 
@@ -136,7 +139,7 @@ pub(super) fn log_compact_finished<P: plakous_host_protocol::ProtocolExtension>(
     started: Instant,
     outcome: &str,
 ) {
-    log_compact_finished_with_detail(log, config, started, outcome, None);
+    log_compact_finished_with_detail(log, config, started, outcome, None, false);
 }
 
 /// `detail` is the diagnosable compact reason. The transcript may show a
@@ -149,12 +152,17 @@ pub(super) fn log_compact_finished_with_detail<P: plakous_host_protocol::Protoco
     started: Instant,
     outcome: &str,
     detail: Option<&str>,
+    retained_overflow: bool,
 ) {
     let mut event = SessionEvent::new("compact.finished")
         .u64("elapsed_ms", elapsed_ms_since(started))
         .str("outcome", outcome);
     if let Some(detail) = detail {
         event = event.str("detail", detail);
+    }
+    if retained_overflow {
+        event.presentation =
+            Some(crate::session_log::SessionEventPresentation::CompactCommittedOverflow);
     }
     log_ev(log, config, event);
 }

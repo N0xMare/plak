@@ -132,27 +132,54 @@ impl NativeModelReresolver {
 }
 
 fn refusal(provider: NativeProvider, kind: NativeSubscriptionError) -> ModelReresolutionError {
-    let (label, account) = match provider {
-        NativeProvider::Codex => ("Codex", "codex"),
-        _ => ("xAI", "grok"),
+    // Drift is a pinned-contract mismatch, not a missing login. A login
+    // remedy would send the operator through `plak login` for a condition
+    // that login cannot repair. The variant exists only with a native route.
+    #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+    if let NativeSubscriptionError::CompatibilityDrift { .. } = &kind {
+        return ModelReresolutionError::new(kind.to_string());
+    }
+    let (label, account) = match crate::binding::account_target(provider) {
+        plakous_host_protocol::notice_remedy::AccountTarget::Codex => ("Codex", "codex"),
+        plakous_host_protocol::notice_remedy::AccountTarget::Grok => ("xAI", "grok"),
+        plakous_host_protocol::notice_remedy::AccountTarget::Claude => ("Claude", "claude"),
+        plakous_host_protocol::notice_remedy::AccountTarget::OpenRouter => {
+            ("OpenRouter", "openrouter")
+        }
+        plakous_host_protocol::notice_remedy::AccountTarget::Unspecified => {
+            ("subscription", "unspecified")
+        }
+    };
+    let reason = match &kind {
+        NativeSubscriptionError::ReresolutionBindingChanged => {
+            plakous::agent::ModelReresolutionRefusal::BindingChanged
+        }
+        NativeSubscriptionError::CredentialUnavailable
+        | NativeSubscriptionError::Authentication
+        | NativeSubscriptionError::AuthenticationBinding
+        | NativeSubscriptionError::AuthenticationAccountChanged => {
+            plakous::agent::ModelReresolutionRefusal::CredentialUnavailable {
+                account: account.to_owned(),
+            }
+        }
+        _ => plakous::agent::ModelReresolutionRefusal::ResolutionFailed {
+            account: account.to_owned(),
+        },
     };
     ModelReresolutionError::new(match kind {
-        #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
-        NativeSubscriptionError::CompatibilityDrift { .. } => kind.to_string(),
         NativeSubscriptionError::ReresolutionBindingChanged => format!(
-            "fresh {label} resolution changed the selected login, account or model semantics; \
-             rebind with Fork now in the Agents tab, or start a new session"
+            "fresh {label} resolution changed the selected login, account or model semantics; explicitly rebind by forking, or start a new session"
         ),
         NativeSubscriptionError::CredentialUnavailable
         | NativeSubscriptionError::Authentication
         | NativeSubscriptionError::AuthenticationBinding
         | NativeSubscriptionError::AuthenticationAccountChanged => format!(
-            "{label} credential is unavailable (signed out, quarantined, or a login made by an earlier build); run `plak login {account}`"
+            "{label} credential is unavailable (signed out, quarantined, or a login made by an earlier build); restore usable credentials"
         ),
         kind => format!(
-            "exact {label} resolution failed: {kind}; retry the prompt, or run `plak login {account}` if it persists"
+            "exact {label} resolution failed: {kind}; retry the prompt, then restore credentials if it persists"
         ),
-    })
+    }).with_refusal(reason)
 }
 
 impl ModelReresolver for NativeModelReresolver {

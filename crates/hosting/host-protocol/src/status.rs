@@ -92,6 +92,103 @@ pub struct HostFailure {
     pub diagnostic: DiagnosticText,
     /// Semantic repair selected at the failure source.
     pub remedy: Option<NoticeRemedy>,
+    /// Typed originating attach condition, never recovered from diagnostic prose.
+    pub cause: AttachFailure,
+    /// Additional typed action-refusal facts, when present.
+    pub advice: Option<Box<crate::refusal::RefusalAdvice>>,
+    /// Structured binding facts needed by an existing status presentation.
+    pub origin: Option<Box<HostFailureOrigin>>,
+}
+
+/// Exact source facts of binding refusals, independent of their diagnostic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HostFailureOrigin {
+    /// Native binding or credential revalidation.
+    NativeBinding {
+        /// Provider's public display label.
+        label: String,
+        /// Original account identity.
+        account: crate::notice_remedy::AccountTarget,
+    },
+    /// Bound model facts changed since creation.
+    ModelFacts {
+        /// Exact original account.
+        account: String,
+        /// Exact original model.
+        model: String,
+    },
+}
+
+impl From<String> for HostFailure {
+    fn from(value: String) -> Self {
+        Self {
+            diagnostic: DiagnosticText::new(value),
+            remedy: None,
+            cause: AttachFailure::Other,
+            advice: None,
+            origin: None,
+        }
+    }
+}
+impl From<&str> for HostFailure {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+impl std::fmt::Display for HostFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.diagnostic.as_str())
+    }
+}
+
+impl std::error::Error for HostFailure {}
+
+/// Typed attach repair distinctions that survive error wrapping.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AttachFailure {
+    /// The JavaScript runtime artifact is unavailable.
+    JavaScriptHostUnavailable,
+    /// The Python runtime artifact is unavailable.
+    PythonHostUnavailable,
+    /// The original login selection cannot be restored by another login.
+    LoginSelectionChanged,
+    /// The current login attests a different account.
+    AccountChanged,
+    /// The frozen binding differs from the current account/configuration.
+    BindingChanged,
+    /// Refresh rejected the credential or left an unknown rotating-token outcome.
+    CredentialRejected,
+    /// No usable native login is available.
+    CredentialUnavailable,
+    /// Another factual attach refusal, with no inferred cause.
+    #[default]
+    Other,
+}
+
+impl From<String> for DetachedReason {
+    fn from(value: String) -> Self {
+        Self::Other(DiagnosticText::new(value))
+    }
+}
+impl From<&str> for DetachedReason {
+    fn from(value: &str) -> Self {
+        Self::Other(DiagnosticText::new(value))
+    }
+}
+
+impl DetachedReason {
+    /// Content-free reason tag for operational logs.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::MissingDefaults => "missing_defaults",
+            Self::EffortRequired => "effort_required",
+            Self::ResolveFailed(_) => "resolve_failed",
+            Self::CredentialUnusable(_) => "credential_unusable",
+            Self::RecoveryRequired(_) => "recovery_required",
+            Self::Other(_) => "other",
+        }
+    }
 }
 
 /// Why no canonical agent is attached.

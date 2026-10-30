@@ -87,10 +87,15 @@ impl Applier<'_> {
                 self.push(TranscriptRow::warning(NoticeScope::Recovery, line));
             }
             FeedTurnOutcome::RecoveryRequired => {
-                self.push(TranscriptRow::error(
-                    NoticeScope::Recovery,
-                    crate::runtime::RECOVERY_PENDING_NOTE,
-                ));
+                self.push(
+                    TranscriptRow::error(
+                        NoticeScope::Recovery,
+                        crate::runtime::RECOVERY_PENDING_NOTE,
+                    )
+                    .with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {},
+                    ),
+                );
                 self.views.state.pause = Some(Anchored {
                     anchor,
                     value: Some(PauseCause::RecoveryRequired { turn_id: turn }),

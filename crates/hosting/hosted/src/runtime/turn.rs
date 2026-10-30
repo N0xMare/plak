@@ -148,11 +148,13 @@ pub(super) fn terminal_turn_outcome(result: &TurnResult) -> TurnHostOutcome {
                         }
                     }),
                     exchange: crate::agent::TerminalExchange::of(result),
+                    remedy: agent_error_remedy(error),
                 }
             }
         }
         TurnResultOutcome::RecoveryRequired(error) => TurnHostOutcome::RecoveryRequired {
             error: operator_facing_agent_error("agent turn requires recovery", error),
+            remedy: agent_error_remedy(error),
         },
     }
 }
@@ -274,6 +276,37 @@ pub(crate) fn operator_facing_agent_error(prefix: &str, error: &AgentError) -> S
         }
     });
     operator_facing_render(raw, error.model_kind(), retry_after)
+}
+
+pub(crate) fn agent_error_remedy(
+    error: &AgentError,
+) -> Option<plakous_host_protocol::notice_remedy::NoticeRemedy> {
+    use plakous::agent::ModelReresolutionRefusal as F;
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy as R};
+    if let Some(reason) = error
+        .reresolution_error()
+        .and_then(plakous::agent::ModelReresolutionError::refusal)
+    {
+        return Some(match reason {
+            F::BindingChanged => R::Rebind {},
+            F::CredentialUnavailable { account } => R::Login {
+                account: AccountTarget::from_account(account),
+            },
+            F::ResolutionFailed { account } => R::RetryThenLogin {
+                account: AccountTarget::from_account(account),
+            },
+        });
+    }
+    if error.is_storage_full() {
+        return Some(R::FreeDiskSpace {});
+    }
+    plakous::sessions::SessionStorePressure::from_agent_error(error).map(|pressure| match pressure
+        .admission()
+    {
+        plakous::sessions::SessionStoreAdmission::Settlement
+        | plakous::sessions::SessionStoreAdmission::Recovery => R::ReclaimThenRecover {},
+        _ => R::ReclaimRetainedHistory {},
+    })
 }
 
 /// The operator text for a failure: the typed model kind is the only

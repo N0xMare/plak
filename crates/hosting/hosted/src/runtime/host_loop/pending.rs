@@ -17,7 +17,7 @@ use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(super) const AUTO_CONTINUE_PAUSE_TEXT: &str = "auto-continue paused until the next prompt";
-pub(super) const TREE_PAUSE_TEXT: &str = "agents paused · /tree resume";
+pub(super) const TREE_PAUSE_TEXT: &str = "agents paused";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PauseKind {
@@ -31,7 +31,13 @@ impl PauseKind {
             Self::AutoContinue => AUTO_CONTINUE_PAUSE_TEXT,
             Self::Tree => TREE_PAUSE_TEXT,
         };
-        TranscriptRow::warning(NoticeScope::Tree, text)
+        let row = TranscriptRow::warning(NoticeScope::Tree, text);
+        match self {
+            Self::Tree => {
+                row.with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {})
+            }
+            Self::AutoContinue => row,
+        }
     }
 }
 

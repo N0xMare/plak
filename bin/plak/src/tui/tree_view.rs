@@ -120,7 +120,10 @@ impl From<&NodeView> for CanvasNode {
             blocked: node.blocked.clone(),
             usage: node.usage,
             active_turn: node.active_turn,
-            live_progress: node.live_progress.clone(),
+            live_progress: node
+                .live_progress
+                .clone()
+                .map(crate::refusal_text::child_progress),
             unread_mail: node.unread_mail,
             has_session: node.has_session,
             template: node.template.clone(),
@@ -131,7 +134,7 @@ impl From<&NodeView> for CanvasNode {
             started_at_unix: node.started_at_unix,
             ended_at_unix: node.ended_at_unix,
             finished: node.finished(),
-            fault: node.fault.clone(),
+            fault: crate::refusal_text::node_fault(node),
             waiting_on: node.waiting_on.clone(),
         }
     }

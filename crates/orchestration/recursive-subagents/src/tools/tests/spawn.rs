@@ -151,6 +151,52 @@ impl ChildController for NotReadyBinder {
     }
 }
 
+struct RefusingBinder;
+
+impl ChildController for RefusingBinder {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
+    fn bind(
+        &self,
+        _start: SpawnStart,
+    ) -> Pin<Box<dyn Future<Output = Result<SpawnBound, SpawnBindError>> + Send + '_>> {
+        Box::pin(async {
+            let mut failure =
+                plakous_host_protocol::status::HostFailure::from("bind refused".to_owned());
+            failure.advice = Some(Box::new(
+                plakous_host_protocol::refusal::RefusalAdvice::CheckStorage,
+            ));
+            failure.remedy = Some(plakous_host_protocol::notice_remedy::NoticeRemedy::Rebind {});
+            Err(SpawnBindError::Refused(failure))
+        })
+    }
+}
+
+/// A refused bind keeps the binder's typed advice and remedy on the tool error.
+#[tokio::test]
+async fn a_refused_bind_keeps_typed_advice_and_remedy() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, tree) = persist_fixture(&root);
+    let driver = driver_on(tree, Arc::clone(&store));
+    let tool = spawn_tool(
+        driver,
+        Some(Arc::new(RefusingBinder) as Arc<dyn ChildController>),
+    );
+    let outcome = tool
+        .spawn_with(
+            "op-spawn-refused-advice".into(),
+            &serde_json::to_value(spawn_request()).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    let body = outcome_json(&outcome);
+    assert_eq!(body["advice"]["kind"], "check_storage");
+    assert_eq!(body["remedy"]["code"], "rebind");
+}
+
 /// An account that is not Ready is refused before the tree admits a
 /// node: no node, attempt, or bind is spent, and the tree stays live.
 #[tokio::test]

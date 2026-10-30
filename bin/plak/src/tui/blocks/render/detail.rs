@@ -147,7 +147,7 @@ pub(super) fn push_item_detail(
             push(logical, Line::from(spans));
         }
     }
-    let output = operator_output(verb, text.output);
+    let output = operator_output(item.name, verb, text.output);
     let output = output.trim_end_matches('\n');
     if output.trim().is_empty() {
         return;
@@ -197,7 +197,19 @@ pub(super) fn push_item_detail(
     }
 }
 
-fn operator_output(verb: ToolVerb, output: &str) -> std::borrow::Cow<'_, str> {
+fn operator_output<'a>(name: &str, verb: ToolVerb, output: &'a str) -> std::borrow::Cow<'a, str> {
+    let output = crate::refusal_text::tool_error_text(
+        name,
+        output,
+        crate::notice_text::RemedyContext {
+            frontend: crate::notice_text::Frontend::Tui,
+            session_id: None,
+        },
+    )
+    .map_or_else(
+        || std::borrow::Cow::Borrowed(output),
+        std::borrow::Cow::Owned,
+    );
     if verb == ToolVerb::Plan {
         output
             .lines()
@@ -206,7 +218,7 @@ fn operator_output(verb: ToolVerb, output: &str) -> std::borrow::Cow<'_, str> {
             .join("\n")
             .into()
     } else {
-        output.into()
+        output
     }
 }
 

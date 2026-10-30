@@ -304,6 +304,8 @@ fn decode<T: DeserializeOwned>(value: &Value) -> Result<T, TopologyError> {
         TopologyError {
             code,
             message: error.to_string(),
+            advice: None,
+            remedy: None,
         }
     })
 }
@@ -561,13 +563,7 @@ impl TopologyTool {
         }
         match result {
             Ok(payload) => ToolOutcome::success_text(payload.to_string()),
-            Err(error) => ToolOutcome::failure_text(
-                json!({
-                    "code": error.code,
-                    "message": error.message,
-                })
-                .to_string(),
-            ),
+            Err(error) => ToolOutcome::failure_text(error.to_value().to_string()),
         }
     }
 
@@ -590,13 +586,7 @@ impl TopologyTool {
     }
 
     fn topology_failure(error: &TopologyError) -> Result<ToolOutcome, ToolRuntimeError> {
-        ToolOutcome::failure_text(
-            json!({
-                "code": error.code,
-                "message": error.message,
-            })
-            .to_string(),
-        )
+        ToolOutcome::failure_text(error.to_value().to_string())
     }
 
     /// Runs an effects batch with the mutex released. A batch carrying an

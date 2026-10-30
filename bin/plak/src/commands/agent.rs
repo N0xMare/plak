@@ -15,7 +15,6 @@ use super::support::cli_provider_name;
 use crate::presentation::tui_presentation_bundle;
 use crate::product_config;
 use crate::store::sessions as product_sessions;
-use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 use plakous_hosted::runtime as product_host;
 
@@ -252,7 +251,12 @@ fn run_agent_after_admission(
     let tree_id = crate::topology_product::durable_topology_tree_id(&state_roots, &record);
     let resume_tree = crate::topology_product::requested_tree_resume(paths, &tree_id, resume_tree)?;
     if !resume_tree && crate::topology_product::tree_requires_explicit_resume(paths, &tree_id) {
-        return Err(CliFailure::new(product_agent::RESTORED_PAUSED_RESUME_HINT));
+        return Err(CliFailure::new(crate::refusal_text::paused_tree_text(
+            crate::notice_text::RemedyContext {
+                frontend: crate::notice_text::Frontend::Jsonl,
+                session_id: Some(&record.id),
+            },
+        )));
     }
     let account = record.account.clone().ok_or_else(|| {
         CliFailure::classified(
@@ -313,7 +317,7 @@ fn run_agent_after_admission(
         None,
         &presentation.native_models,
     )
-    .map_err(|error| CliFailure::classified(CliFailureKind::Auth, error))?;
+    .map_err(|error| error.or_kind(CliFailureKind::Auth))?;
     config.ready_path = product_host::ReadyPathTiming {
         presentation_ms,
         resolve_ms: u64::try_from(resolve_started.elapsed().as_millis()).unwrap_or(u64::MAX),

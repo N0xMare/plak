@@ -79,6 +79,8 @@ pub struct NodeView {
     pub ended_at_unix: Option<u64>,
     /// Why the node cannot make progress, when the host knows.
     pub fault: Option<String>,
+    /// The current failure records an operator's session-deletion abandonment.
+    pub recovery_abandoned: bool,
     /// What a parked child waits on (`p3`, `c2`), present exactly while it
     /// is parked: an empty list is the parked marker for a child whose wait
     /// is not yet named (an arrival already woke it, or a reopen holds it).
@@ -92,6 +94,8 @@ pub struct ChildProgress {
     pub turn_id: String,
     /// Current activity verb, shared with the root HUD's classification.
     pub activity: Option<String>,
+    /// Original account while waiting for its login; absent outside that wait.
+    pub credential_wait: Option<String>,
     /// Tool calls dispatched during this turn.
     pub tool_calls: u64,
     /// Unix milliseconds of the most recent observed activity.

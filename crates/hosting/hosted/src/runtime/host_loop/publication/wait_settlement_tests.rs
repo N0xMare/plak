@@ -104,6 +104,7 @@ fn a_failure_without_a_committed_exchange_returns_wait_mail_to_unread() {
                 transient: None,
                 error: "contained panic".into(),
                 exchange: TerminalExchange::Unclosed,
+                remedy: None,
             }),
             Instant::now(),
             TerminalErrorPresentation::Events,

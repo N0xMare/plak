@@ -73,10 +73,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     detail: Some(HostStatusDetail::RecoveryIncomplete),
                 });
                 return Err(CliFailure::new(format!(
-                    "the session could not be reopened to recover the interrupted turn ({}); \
-                     nothing was lost, and the next prompt or /recover retries",
+                    "the session could not be reopened to recover the interrupted turn ({}); nothing was lost, and the next prompt or explicit recovery retries",
                     failure.message()
-                )));
+                )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
             }
         };
         self.recovery_blocked = false;
@@ -136,10 +135,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.session.context_counters(),
         ) {
             emit_unavailable_context(&self.events);
-            let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
-                NoticeScope::Recovery,
-                error.message().to_owned(),
-            )));
+            let _ = self.events.send(ContentEvent::Row(
+                TranscriptRow::error(NoticeScope::Recovery, error.message().to_owned())
+                    .with_optional_remedy(error.remedy()),
+            ));
         }
         let _ = self.events.send(ContentEvent::AgentAttached(true));
         self.spawn_tree_recovery();

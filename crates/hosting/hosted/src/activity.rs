@@ -142,6 +142,12 @@ const FILE_CONTENT_KEYS: [&str; 4] = ["content", "contents", "text", "file_text"
 /// Input that is not JSON is already human text and passes through unchanged.
 #[must_use]
 pub fn tool_detail_text(arguments: Option<&str>, result: Option<&str>) -> Option<String> {
+    if let Some(raw) = result
+        && plakous_host_protocol::refusal::ToolRefusal::decode(raw)
+            .is_some_and(|refusal| refusal.has_help())
+    {
+        return Some(raw.to_owned());
+    }
     let arguments = arguments.map(preview_text).filter(|text| !text.is_empty());
     let result = result.map(preview_text).filter(|text| !text.is_empty());
     match (arguments, result) {

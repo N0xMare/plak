@@ -213,6 +213,13 @@ pub enum VerticalObservation {
     OpenRouterKey(Box<OpenRouterKeyUsage>, String),
     /// A credential exists but no allowance can truthfully be reported.
     Unavailable(String),
+    /// The selected inference key was rejected, with its original source retained.
+    RejectedKey {
+        /// Neutral failure facts.
+        reason: String,
+        /// Selected key source.
+        source: plakous_host_protocol::views::KeySource,
+    },
 }
 
 /// Builds the one Usage projection every surface renders.
@@ -254,6 +261,7 @@ fn project_vertical(
             observed_at: None,
             state: VerticalUsageState::NotConnected,
             balances: Vec::new(),
+            repair: None,
         },
         VerticalObservation::Unavailable(reason) => VerticalUsageView {
             vertical,
@@ -264,6 +272,7 @@ fn project_vertical(
                 reason: reason.clone(),
             },
             balances: Vec::new(),
+            repair: None,
         },
         VerticalObservation::Native(SubscriptionUsageRead::Unavailable {
             observed_at,
@@ -275,6 +284,14 @@ fn project_vertical(
                     reason: unavailable_reason(*other, vertical.account()),
                 },
             };
+            let repair = match reason {
+                SubscriptionUsageUnavailable::CredentialState(state) => {
+                    Some(plakous_host_protocol::views::UsageRepair::Credential(
+                        usage_credential_state(*state),
+                    ))
+                }
+                _ => None,
+            };
             VerticalUsageView {
                 vertical,
                 account_email: None,
@@ -282,6 +299,7 @@ fn project_vertical(
                 observed_at: Some(format_unix_seconds(observed_at.seconds())),
                 state,
                 balances: Vec::new(),
+                repair,
             }
         }
         VerticalObservation::Native(SubscriptionUsageRead::Snapshot(snapshot)) => {
@@ -298,11 +316,38 @@ fn project_vertical(
                     .filter(|balance| report_balance(balance))
                     .map(balance_view)
                     .collect(),
+                repair: None,
             }
         }
+        VerticalObservation::RejectedKey { reason, source } => VerticalUsageView {
+            vertical,
+            account_email: None,
+            plan_label: None,
+            observed_at: None,
+            state: VerticalUsageState::Unavailable {
+                reason: reason.clone(),
+            },
+            balances: Vec::new(),
+            repair: Some(plakous_host_protocol::views::UsageRepair::RejectedKey(
+                *source,
+            )),
+        },
         VerticalObservation::OpenRouterKey(usage, label) => {
             openrouter_usage::project(vertical, usage, label)
         }
+    }
+}
+
+fn usage_credential_state(
+    state: SubscriptionUsageCredentialState,
+) -> plakous_host_protocol::views::UsageCredentialState {
+    use plakous_host_protocol::views::UsageCredentialState as S;
+    match state {
+        SubscriptionUsageCredentialState::RefreshRequired => S::RefreshRequired,
+        SubscriptionUsageCredentialState::Quarantined => S::Quarantined,
+        SubscriptionUsageCredentialState::Revoked => S::Revoked,
+        SubscriptionUsageCredentialState::LoginRequired => S::LoginRequired,
+        SubscriptionUsageCredentialState::WrittenByNewerBuild => S::WrittenByNewerBuild,
     }
 }
 
@@ -544,11 +589,7 @@ pub fn render_limits_text(view: &UsageLimitsView) -> String {
         }
         match &vertical.state {
             VerticalUsageState::NotConnected => {
-                let _ = writeln!(
-                    out,
-                    "  not connected · run `plak login {}`",
-                    vertical.vertical.account()
-                );
+                let _ = writeln!(out, "not connected");
             }
             VerticalUsageState::Unavailable { reason } => {
                 let _ = writeln!(out, "  {reason}");
@@ -847,27 +888,19 @@ pub fn unavailable_reason(reason: SubscriptionUsageUnavailable, account: &str) -
     match reason {
         SubscriptionUsageUnavailable::NotConnected => "credential is not ready".to_owned(),
         SubscriptionUsageUnavailable::CredentialState(state) => match state {
-            SubscriptionUsageCredentialState::RefreshRequired => format!(
-                "credential needs a token refresh; the next turn refreshes it, or run `plak refresh {account}`"
-            ),
+            SubscriptionUsageCredentialState::RefreshRequired => "credential needs a token refresh; the next turn refreshes it, or refresh explicitly".to_owned(),
             // Grok reclaims an ambiguous refresh on its next refresh, so a
             // re-login is the fallback rather than the first remedy there.
             SubscriptionUsageCredentialState::Quarantined if account == "grok" => {
-                "credential is quarantined after an ambiguous refresh; the next turn retries it, or run `plak refresh grok`; run `plak login grok` if that fails"
+                "credential is quarantined after an ambiguous refresh; the next turn retries it, or refresh explicitly; replace the login if that fails"
                     .to_owned()
             }
-            SubscriptionUsageCredentialState::Quarantined => format!(
-                "credential is quarantined after an ambiguous refresh; run `plak login {account}` to recover"
-            ),
+            SubscriptionUsageCredentialState::Quarantined => "credential is quarantined after an ambiguous refresh; replace the login to recover".to_owned(),
             SubscriptionUsageCredentialState::Revoked => {
-                format!("credential is revoked; run `plak login {account}`")
+                "credential is revoked; replace the login".to_owned()
             }
-            SubscriptionUsageCredentialState::LoginRequired => format!(
-                "the stored login was made by an earlier build and cannot be used; run `plak login {account}`"
-            ),
-            SubscriptionUsageCredentialState::WrittenByNewerBuild => format!(
-                "the stored login was written by a newer plak build; use that build, or replace it with `plak login {account}` (that build must then log in again)"
-            ),
+            SubscriptionUsageCredentialState::LoginRequired => "the stored login was made by an earlier build and cannot be used; replace the login".to_owned(),
+            SubscriptionUsageCredentialState::WrittenByNewerBuild => "the stored login was written by a newer build; use that build or replace the login; the writing build must then log in again".to_owned(),
         },
         SubscriptionUsageUnavailable::Busy => USAGE_BUSY_REASON.to_owned(),
         SubscriptionUsageUnavailable::LocalState => {

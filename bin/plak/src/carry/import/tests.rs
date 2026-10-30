@@ -52,7 +52,7 @@ use crate::home::paths::PlakPaths;
 use crate::store::sessions::QueueDrainState;
 
 #[test]
-fn v9_import_intents_survive_reopen_and_rebuild() {
+fn v10_import_intents_survive_reopen_and_rebuild() {
     assert_import_intents_rebuild();
 }
 

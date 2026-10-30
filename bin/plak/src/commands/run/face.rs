@@ -79,6 +79,7 @@ pub(crate) fn child_agents(
 
 /// The stateful part of the face: what has already been said this run.
 pub(crate) struct CliFace {
+    session_id: Option<String>,
     verbose: bool,
     child_agents: ChildAgents,
     announced_session: bool,
@@ -92,6 +93,7 @@ impl CliFace {
     /// A face for one run.
     pub(crate) const fn new(verbose: bool, child_agents: ChildAgents) -> Self {
         Self {
+            session_id: None,
             verbose,
             child_agents,
             announced_session: false,
@@ -100,6 +102,11 @@ impl CliFace {
             announced_approvals: std::collections::BTreeSet::new(),
             failed_tools: 0,
         }
+    }
+
+    pub(crate) fn with_session_id(mut self, session_id: &str) -> Self {
+        self.session_id = Some(session_id.to_owned());
+        self
     }
 
     /// Whether `PLAK_VERBOSE` asks for the per-tool progress lines.
@@ -114,6 +121,13 @@ impl CliFace {
     /// decision pure, so a test pins the text a user reads without a host.
     pub(crate) fn lines(&mut self, event: &HostEvent) -> Vec<String> {
         match event {
+            HostEvent::RestoredPause(pause) => vec![prefixed(&crate::notice_text::restored_pause(
+                *pause,
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Run,
+                    session_id: self.session_id.as_deref(),
+                },
+            ))],
             HostEvent::ApprovalRequired {
                 approval_id,
                 tool_name,
@@ -129,7 +143,14 @@ impl CliFace {
             HostEvent::Row(TranscriptRow::Notice(notice))
                 if notice.placement() != NoticePlacement::SessionLog =>
             {
-                vec![prefixed(&notice.text)]
+                vec![prefixed(&crate::notice_text::with_remedy(
+                    &notice.text,
+                    notice.remedy.as_ref(),
+                    crate::notice_text::RemedyContext {
+                        frontend: crate::notice_text::Frontend::Run,
+                        session_id: self.session_id.as_deref(),
+                    },
+                ))]
             }
             HostEvent::ModelRetry(retry) => vec![prefixed(&retry_line(retry))],
             HostEvent::SessionInfo(info) => self.session_line(info).into_iter().collect(),
@@ -178,6 +199,7 @@ impl CliFace {
         &mut self,
         info: &plakous_host_protocol::views::presentation::SessionInfoView,
     ) -> Option<String> {
+        self.session_id = Some(info.session_id.clone());
         if self.announced_session {
             return None;
         }
@@ -235,7 +257,17 @@ impl CliFace {
             return lines;
         }
         self.failed_tools += 1;
-        match failure_reason(detail) {
+        let typed_reason = detail.and_then(|raw| {
+            crate::refusal_text::tool_error_text(
+                name,
+                raw,
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Run,
+                    session_id: self.session_id.as_deref(),
+                },
+            )
+        });
+        match typed_reason.or_else(|| failure_reason(detail)) {
             Some(reason) => line.push_str(&format!(": {reason}")),
             None => line.push_str(": no reason was reported"),
         }

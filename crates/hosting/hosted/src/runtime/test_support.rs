@@ -163,6 +163,7 @@ pub(super) fn fresh_injected_attached_host_for<P: plakous_host_protocol::Protoco
             seed_history: None,
             source_releases: SourceReleases::default(),
             continuation: None,
+            event_renderer: None,
         },
         injection,
     )
@@ -271,6 +272,7 @@ pub(super) fn overflow_injected_attached_host(
             seed_history: None,
             source_releases: SourceReleases::default(),
             continuation: None,
+            event_renderer: None,
         },
         injection,
     )

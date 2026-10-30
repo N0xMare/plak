@@ -656,9 +656,9 @@ fn a_jsonl_face_keeps_the_open_note_and_writes_no_pause_rows() {
                 let events: Vec<_> = observed.try_iter().collect();
                 let notes = notes(&events);
                 assert!(
-                    notes
-                        .iter()
-                        .any(|note| note.starts_with("the agent tree is paused")),
+                    events.iter().any(
+                        |event| matches!(event, HostEvent::RestoredPause(pause) if pause.tree)
+                    ),
                     "the JSONL open note lost its tree remedy: {notes:?}"
                 );
                 assert!(

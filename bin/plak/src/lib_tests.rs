@@ -1470,16 +1470,17 @@ fn deferred_unknown_native_model_is_refused_even_with_explicit_effort() {
         true,
     );
     assert_eq!(eligibility, TuiAttachEligibility::Unavailable);
-    assert!(
-        deferred_attach_refusal_reason(eligibility, false, None).starts_with("resolve_failed:")
-    );
+    assert!(matches!(
+        deferred_attach_refusal_reason(eligibility, false, None),
+        plakous_host_protocol::status::DetachedReason::ResolveFailed(_)
+    ));
 }
 
-/// An unusable stored login is named in the CLI's words, not as a model
-/// missing from the catalog, and the shell reason drops CLI backticks.
+/// An unusable stored login retains its typed condition, not a missing-model
+/// diagnosis or an account inferred from display text.
 #[test]
 fn unusable_stored_login_names_the_credential_not_a_missing_model() {
-    let refusal = commands::support::credential_refusal(
+    let refusal = commands::host_config::credential_gate_refusal(
         NativeProvider::Xai,
         Ok(CliStatus {
             compatibility: CompatibilityState::Current,
@@ -1487,30 +1488,36 @@ fn unusable_stored_login_names_the_credential_not_a_missing_model() {
         }),
     );
     let reason = deferred_attach_refusal_reason(TuiAttachEligibility::Unavailable, false, refusal);
-    assert_eq!(
+    assert!(matches!(
         reason,
-        "credential_unusable: the stored grok login was written by an older build or another profile; run plak login grok, which replaces it"
-    );
-    for (credential, words) in [
+        plakous_host_protocol::status::DetachedReason::CredentialUnusable(_)
+    ));
+    for (credential, condition) in [
         (
             CredentialState::LoginRequired,
-            "made by an earlier plak build",
+            plakous_host_protocol::notice_remedy::CredentialCondition::OlderProfile,
         ),
-        (CredentialState::WrittenByNewerBuild, "newer plak build"),
-        (CredentialState::SignedOut, "signed out"),
+        (
+            CredentialState::WrittenByNewerBuild,
+            plakous_host_protocol::notice_remedy::CredentialCondition::NewerBuild,
+        ),
+        (
+            CredentialState::SignedOut,
+            plakous_host_protocol::notice_remedy::CredentialCondition::Unavailable,
+        ),
     ] {
-        let refusal = commands::support::credential_refusal(
+        let refusal = commands::host_config::credential_gate_refusal(
             NativeProvider::Claude,
             Ok(CliStatus {
                 compatibility: CompatibilityState::Current,
                 credential,
             }),
         )
-        .unwrap_or_default();
-        assert!(refusal.contains(words), "{refusal}");
+        .expect("unusable credential refused");
+        assert_eq!(refusal.remedy, Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RepairCredentialOrChooseProfile {account: plakous_host_protocol::notice_remedy::AccountTarget::Claude, condition}));
     }
     assert_eq!(
-        commands::support::credential_refusal(
+        commands::host_config::credential_gate_refusal(
             NativeProvider::Codex,
             Ok(CliStatus {
                 compatibility: CompatibilityState::Current,
@@ -1521,12 +1528,8 @@ fn unusable_stored_login_names_the_credential_not_a_missing_model() {
     );
     // Missing defaults still win: there is no selected account to name.
     assert_eq!(
-        deferred_attach_refusal_reason(
-            TuiAttachEligibility::Unavailable,
-            true,
-            Some("x".to_owned())
-        ),
-        "missing_defaults"
+        deferred_attach_refusal_reason(TuiAttachEligibility::Unavailable, true, Some("x".into())),
+        plakous_host_protocol::status::DetachedReason::MissingDefaults
     );
 }
 

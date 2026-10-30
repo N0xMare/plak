@@ -53,11 +53,11 @@ async fn awaiting_native_at_startup_resolves_to_named_login_and_quarantine_guida
     for (quarantined, expected) in [
         (
             false,
-            "Claude credential is unavailable (signed out, quarantined, or a login made by an earlier build); run `plak login claude`",
+            "Claude credential is unavailable (signed out, quarantined, or a login made by an earlier build); restore usable credentials",
         ),
         (
             true,
-            "Claude credential was rejected at refresh; run `plak login claude`",
+            "Claude credential was rejected at refresh; restore usable credentials",
         ),
     ] {
         let error = refresh_native_authority(
@@ -70,6 +70,12 @@ async fn awaiting_native_at_startup_resolves_to_named_login_and_quarantine_guida
         .await
         .unwrap_err();
         assert_eq!(error.message(), expected);
+        assert!(matches!(
+            error.remedy(),
+            Some(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+                account: plakous_host_protocol::notice_remedy::AccountTarget::Claude
+            })
+        ));
     }
 }
 
@@ -92,6 +98,9 @@ async fn awaiting_native_preserves_named_login_selection_refusal() {
     .await
     .unwrap_err();
     assert!(error.message().contains("login selection changed"));
-    assert!(error.message().contains("/reload or /rebind"));
+    assert_eq!(
+        error.remedy(),
+        Some(&plakous_host_protocol::notice_remedy::NoticeRemedy::CarryCurrentLogin {})
+    );
     assert!(!error.message().contains("cannot be refreshed"));
 }

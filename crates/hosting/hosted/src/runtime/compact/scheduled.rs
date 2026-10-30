@@ -130,10 +130,12 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
             return Ok(ScheduledPrompt::Parked);
         }
         if config.session.queue_drain_state != SessionQueueDrainState::LiveAutoDrain {
-            let _ = events.notice(TranscriptRow::error(
-                NoticeScope::Compaction,
-                SCHEDULED_COMPACT_PARKED_NOTE,
-            ));
+            let _ = events.notice(
+                TranscriptRow::error(NoticeScope::Compaction, SCHEDULED_COMPACT_PARKED_NOTE)
+                    .with_remedy(
+                    plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeQueueOrStartFresh {},
+                ),
+            );
             return Ok(ScheduledPrompt::Parked);
         }
         let after = project_pending(false)?;
@@ -276,7 +278,7 @@ fn with_mail_clause(note: &str, drop_mail: bool) -> String {
 
 /// Operator note when a scheduled pass parked its prompt without a compacted
 /// checkpoint.
-const SCHEDULED_COMPACT_PARKED_NOTE: &str = "scheduled compaction produced no compacted checkpoint for the queued prompt; the prompt remains queued and drain is paused. Review the preceding compaction result. After correcting the cause, resume the queue with Tab then r in the TUI or resume_queue in plak agent; retrying compaction is a new paid operation. You can also use /clear in the TUI or clear in plak agent to start a fresh conversation";
+const SCHEDULED_COMPACT_PARKED_NOTE: &str = "scheduled compaction produced no compacted checkpoint for the queued prompt; the prompt remains queued and drain is paused. Review the preceding compaction result and correct its cause before resuming delivery. Retrying compaction is a new paid operation. Starting a fresh conversation is an alternative";
 
 /// Product decision following the feed-owned failed fold outcome.
 const SCHEDULED_COMPACT_FAILED_FITS_NOTE: &str =

@@ -207,13 +207,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     "sub-agent auto-continue paused until the next prompt"
                 );
                 self.child_wake.retry = None;
-                let _ = self.events.notice(TranscriptRow::error(
-                    NoticeScope::Tree,
-                    format!(
-                        "Sub-agent auto-continue paused until the next prompt: {}",
-                        error.message()
-                    ),
-                ));
+                let _ = self.events.notice(
+                    TranscriptRow::error(
+                        NoticeScope::Tree,
+                        format!(
+                            "Sub-agent auto-continue paused until the next prompt: {}",
+                            error.message()
+                        ),
+                    )
+                    .with_optional_remedy(error.remedy()),
+                );
                 let _ = self.suppress_child_wake(Some(error.message().to_owned()));
                 self.child_wake.park();
                 Ok(HostStep::Continue)

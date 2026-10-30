@@ -22,7 +22,7 @@ use crate::tui::presentation::{ActivityKind, ActivityState};
 use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction, user_action_channel};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use plakous_host_protocol::status::HostPhase;
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -1834,11 +1834,9 @@ fn host_status_and_transcript_events() {
     app.apply_host_event(HostEvent::Status {
         phase: HostPhase::Running,
         queue_len: 2,
-        detail: Some(
-            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
-                diagnostic: plakous_host_protocol::status::DiagnosticText::new("tool:edit"),
-            },
-        ),
+        detail: Some(HostStatusDetail::PlanDiagnostic {
+            diagnostic: DiagnosticText::new("tool:edit"),
+        }),
     });
     app.apply_host_event(HostEvent::QueueSnapshot {
         items: vec![queue_item("q-1", 1, "one"), queue_item("q-2", 1, "two")],

@@ -705,6 +705,10 @@ async fn within_startup(
 /// A failed start. OAuth credentials refused without renewal are an
 /// authorization error, whose text already names the login remedy.
 fn handshake_failed(server: &McpServerName, error: ClientInitializeError) -> McpError {
+    let login = match http::classify(&error) {
+        Some(HttpRefusal::Authorization { text, .. }) => text.login,
+        _ => None,
+    };
     let (kind, message) = match http::classify(&error) {
         Some(HttpRefusal::Credentials(status)) => (
             McpErrorKind::Startup,
@@ -713,14 +717,14 @@ fn handshake_failed(server: &McpServerName, error: ClientInitializeError) -> Mcp
         Some(HttpRefusal::Authorization {
             text,
             renewed: false,
-        }) => (McpErrorKind::Authorization, text),
-        Some(HttpRefusal::Authorization { text, .. }) => (McpErrorKind::Startup, text),
+        }) => (McpErrorKind::Authorization, text.message),
+        Some(HttpRefusal::Authorization { text, .. }) => (McpErrorKind::Startup, text.message),
         _ => (
             McpErrorKind::Startup,
             format!("mcp server {server} handshake failed"),
         ),
     };
-    McpError::with_source(kind, message, error)
+    McpError::with_source(kind, message, error).with_login(login)
 }
 
 /// Pages through `tools/list` within [`MAX_LISTED_TOOLS`] and

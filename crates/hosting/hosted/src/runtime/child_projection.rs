@@ -314,8 +314,11 @@ impl ChildObservation {
             return;
         }
         projection.progress.account = Some(account.to_owned());
+        if projection.progress.waiting_for_login {
+            projection.progress.view.credential_wait = Some(account.to_owned());
+        }
         let label = projection.progress.login_notice();
-        if projection.progress.view.activity.as_deref() == Some("waiting for login") {
+        if projection.progress.waiting_for_login {
             projection.progress.view.activity = Some(label);
         }
         state.progress = projection.progress.view.clone();

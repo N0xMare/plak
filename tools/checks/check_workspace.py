@@ -621,6 +621,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/tui/highlight.rs"): {"thread_local"},
     ("plak", "src/tui/activity.rs"): {"thread_local"},
     ("plakous-host-protocol", "src/jsonl.rs"): {"json"},
+    ("plakous-host-protocol", "src/topology.rs"): {"json"},
     ("plakous-hosted", "src/session_log.rs"): {"thread_local"},
     # Explicit unreachable operation in the feature-gated hosted test fixture.
     ("plakous-hosted", "src/runtime/test_kit.rs"): {"panic"},
@@ -796,6 +797,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "LocalCompositionProfile",
         # The host's re-resolution hook for a model past its admitted window.
         "ModelReresolutionError",
+        "ModelReresolutionRefusal",
         "ModelReresolutionOperation",
         "ModelReresolver",
         # A Content view carries a response completion only as its kind; the
@@ -1384,7 +1386,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "HeaderName", "HeaderValue", "McpError", "McpErrorKind", "McpHttpEndpoint", "McpHttpSecret",
             "McpHttpSecretResolver", "McpLease", "McpOAuthSecretResolver", "McpOAuthSettings",
             "McpOAuthStatus", "McpPool", "McpPrompt", "McpPromptExpansion", "McpSecretResolver",
-            "McpServerSpec", "McpToolPack",
+            "McpNamedSecretMissing", "McpServerSpec", "McpToolPack",
             "McpToolRecord", "McpToolSelection", "SensitiveBytes", "ServiceSecretValue",
             "exposed_tool_name",
         },
@@ -1507,11 +1509,20 @@ PRODUCT_ACCOUNT_NAMES = {"claude", "codex", "grok", "supergrok"}
 PRODUCT_ACCOUNT_NAME_WAIVERS: set[str] = set()
 # Where a neutral package still names one of Plak's accounts. Each of these is
 # *identity*, not behaviour: a vocabulary a model is shown, a durable lowering
-# recorded in a persisted projection, or an enrolled-candidate table. None of
-# them can move above the core, because the core is what compares them.
+# recorded in a persisted projection, an enrolled-candidate table, or the
+# original target of an operator remedy. None decides provider behavior.
 PRODUCT_ACCOUNT_NAME_EXEMPTIONS: dict[SourceKey, set[str]] = {
     # Persisted notice remedies preserve the exact original account identity.
-    ("plakous-host-protocol", "src/notice_remedy.rs"): {"codex", "grok", "claude", "openrouter"},
+    ("plakous-host-protocol", "src/notice_remedy.rs"): {
+        "chatgpt",
+        "claude",
+        "codex",
+        "grok",
+        "openrouter",
+        "supergrok",
+        "xai",
+        "xai-oauth",
+    },
     # `CodingPresentation::{Codex, Grok, Claude}` is the model vocabulary --
     # which tool dialect a model is shown. It is irreducibly named after the
     # vendor whose dialect it reproduces.

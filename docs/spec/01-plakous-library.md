@@ -2868,8 +2868,8 @@ Sealed Messages artifacts add a distinct `native` block variant; the HTTP reques
 serializer unwraps it into native JSON. Existing variants, artifact revisions
 and sealed digests are unchanged. An older decoder refuses that unfamiliar
 persisted tag as an invalid artifact envelope, rather than treating native cited
-text as uncited text. Export v10 carries the new opaque replay vocabulary;
-v9 remains importable (chapter 02 §2.5.1).
+text as uncited text. Export v11 carries the new opaque replay vocabulary;
+v10 remains importable (chapter 02 §2.5.1).
 
 **On this wire reasoning has exactly two forms, and text is not one of them.** A
 thinking block is replayed with its signature or not at all, and a redacted block
@@ -2972,7 +2972,7 @@ model, family and dialect. The canonical replay scope and its digest include the
 full account-binding digest, including its version; an accountless envelope
 never acquires Responses replay authority. This check applies to historical
 prefixes as well as newly appended output and hosted-program lineage. Export
-v9 and v10 preserve the scope. Ordinary forks and validated imports cannot widen it.
+v10 and v11 preserve the scope. Ordinary forks and validated imports cannot widen it.
 The Responses limits of 4,096 replay items and 3 MiB replay payload apply to
 one newly appended response, not the accumulated canonical history. An exact
 active artifact remains reusable beyond either historical total, including
@@ -4707,6 +4707,13 @@ dispatch.
 Between turns the host may still re-resolve a root at a quiescent prompt
 boundary (below).
 
+`ModelReresolutionError` may retain a neutral typed refusal
+(`BindingChanged`, `CredentialUnavailable { account }`, or
+`ResolutionFailed { account }`). The live `AgentError` preserves that source
+through its re-resolution conversion, so a host can choose a semantic remedy
+without searching the diagnostic. These live error facts contain no provider
+vocabulary or product command grammar and do not change canonical encodings.
+
 The login selection epoch is a random, non-secret value stored inside the
 private credential payload: 32 random bytes, base64url without padding
 (43 characters), the one encoding every subscription vertical mints and
@@ -5432,7 +5439,7 @@ format 4 and host backend semantic revision 15 bind them, and exact reopen rejec
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
 the ceiling boolean, including when false. The runtime format epoch isolates
 these bindings from earlier state. CarryBinding does not embed an environment
-descriptor; export v10 retains the v9 importer.
+descriptor; export v11 retains the v10 importer.
 Unsupported descriptors have no compatibility path.
 The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
@@ -6145,8 +6152,8 @@ that closed is restarted under the crash policy at the next call.
 credential store (one `PrivateCredentialStore` record, chapter 04 §3.1), an
 optional issuer pin, an optional pre-registered client (its id, and an
 optional client secret resolved at each use, both requiring the issuer pin),
-an optional fixed loopback callback port, and the embedder's login remedy
-text (Plak: `plak mcp login <id>`). OAuth excludes a `Bearer` slot and an
+and an optional fixed loopback callback port. Login requirements are typed
+server/scope facts; Plak renders `plak mcp login <id>`. OAuth excludes a `Bearer` slot and an
 `Authorization` header. The definition digest covers the mode, the pin, the
 client id, the presence of a client secret and the port, never a token, a
 secret or the store location. The canonical server URI is the endpoint URL
@@ -6294,10 +6301,15 @@ including when the authorization server omits `expires_in`. A 403 whose challeng
 has `error="insufficient_scope"` is a definite failure
 naming the login remedy with the union of the stored requested scope and the
 challenged scope; any other 403 is a definite failure naming the login remedy.
-The remedy text is the embedder's (`McpOAuthSettings::with_login_remedy`,
-given the step-up scope), else "log in to it again". At start, where no effect has been requested, a 401 that
+Authorization failures carry an `McpLoginRequirement` with the exact server and
+validated union of scopes, not an embedder-supplied text callback.
+`McpError::login_requirement` preserves it on startup and request failures;
+tool failures retain it in their structured authorization payload. The message
+is neutral, and the frontend formats its own login command.
+`McpError::from_resolver` copies a named-secret requirement out of
+`McpNamedSecretMissing` without putting the secret value in the message. At start, where no effect has been requested, a 401 that
 renewed retries the start once; a start refused without renewal fails with
-`McpErrorKind::Authorization`, whose text already names the login remedy. Expired, revoked and under-scoped credentials
+`McpErrorKind::Authorization`, retaining the typed login requirement. Expired, revoked and under-scoped credentials
 therefore surface as tool failures that name the login; the agent never
 starts one.
 
@@ -7518,10 +7530,10 @@ lists saved keys and their sizes, plus running promoted job numbers. Values
 themselves are not included in that note. Compaction may drop a state-only note
 because the next boundary re-emits it.
 
-The Python SDK presentation issues these state operations. Export v10 carries
+The Python SDK presentation issues these state operations. Export v11 carries
 the committed named values as JSON and validates their keys, values and quotas
 before seeding the new session's genesis atomically with its history. Export
-v9 preserves named values; v8 is refused.
+v10 imports preserve named values; v9 and older are refused.
 
 ### 9.9 Typed Python SDK cells
 
@@ -8403,7 +8415,8 @@ contain no anchor, so import is unanchored. A nonempty root genesis seed
 (never a fork, rebind or clear successor) may use the destination's unanchored
 occupancy measure, once, for its first preflight fold; this is not paid admission
 authority.
-The export document is version 10; this build imports versions 10 and 9, refusing v8 (chapter 02 §2.5.1).
+The export document is version 11; this build imports versions 11 and 10,
+refusing v9 and older (chapter 02 §2.5.1).
 
 A paid fold's **own input must admit under a conservative bound, or on a
 `ReferenceClientEnvelope` contract its enrolled reference envelope (§6.8,
@@ -8829,7 +8842,7 @@ it, so the position survives compaction, reopen and fork unchanged. A
 compaction segment without the record leaves
 the position unknown and the indices are omitted, as native omits an unknown
 position. The record is an optional field of the canonical compaction block
-encoding; exports v9 and v10 carry the turn record in its independent neutral
+encoding; exports v10 and v11 carry the turn record in its independent neutral
 compaction fields, so conversation carry preserves the position (spec 02
 §2.5.1). Carrying a history to
 another binding turns a native compaction block into a plain compaction block

@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use fake_server::{FakeServer, Observed, Style, standard_tools, tool};
@@ -575,6 +576,59 @@ async fn secret_environment_reaches_the_spawn_by_name_only() -> TestResult {
     let calls = harness.backend.service_calls();
     assert_eq!(calls[0].secret_environment_names(), [token]);
     assert!(!format!("{calls:?}{lease:?}").contains("s3cret-value"));
+    pool.shutdown().await;
+    Ok(())
+}
+
+/// A secret that resolves for the admitting spawn and is missing when the
+/// crashed server restarts. The failure is the structured `mcp_secret`
+/// document `ToolRefusal::McpSecret` decodes, and it never carries the value.
+#[tokio::test]
+async fn a_missing_secret_on_restart_is_an_mcp_secret_refusal() -> TestResult {
+    let (harness, _) = harness(standard(Style::Initialize, 1))?;
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let resolve_attempts = Arc::clone(&attempts);
+    let spec = spec()?.with_secret_environment([EnvironmentVariableName::new("FAKE_TOKEN")?], {
+        Arc::new(move || {
+            if resolve_attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Ok(vec![(
+                    EnvironmentVariableName::new("FAKE_TOKEN")?,
+                    ServiceSecretValue::new(String::from("s3cret-value"))?,
+                )]);
+            }
+            Err(Box::new(crate::McpNamedSecretMissing::new(
+                "fake",
+                "token",
+                "secret token is not set",
+            )) as Box<dyn std::error::Error + Send + Sync>)
+        })
+    });
+    let pool = McpPool::new();
+    let lease = pool.lease(spec, Arc::clone(&harness.environment)).await?;
+    let frozen = lease.freeze(&McpToolSelection::All).await?;
+    let crashed = invoke_simple(&lease, &frozen, "exit", json!({})).await?;
+    assert_eq!(crashed.kind(), ToolOutcomeKind::OutcomeUnknown);
+    let failed = invoke_simple(&lease, &frozen, "echo", json!({"text": "x"})).await?;
+    assert_eq!(failed.kind(), ToolOutcomeKind::Failure);
+    let text = failed.joined_text();
+    assert!(!text.contains("s3cret-value"), "{text}");
+    let document: Value = serde_json::from_str(&text)
+        .map_err(|error| std::io::Error::other(format!("{error}: {text}")))?;
+    let root = document
+        .as_object()
+        .ok_or("mcp secret document is not an object")?;
+    assert_eq!(root.len(), 1, "{document}");
+    let secret = root
+        .get("mcp_secret")
+        .and_then(Value::as_object)
+        .ok_or("mcp_secret object missing")?;
+    assert_eq!(secret.len(), 3, "{document}");
+    assert_eq!(secret.get("server").and_then(Value::as_str), Some("fake"));
+    assert_eq!(secret.get("name").and_then(Value::as_str), Some("token"));
+    let message = secret.get("message").and_then(Value::as_str).unwrap_or("");
+    assert!(message.contains("the call was not sent"), "{document}");
+    assert!(!message.contains("s3cret-value"), "{document}");
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
     pool.shutdown().await;
     Ok(())
 }

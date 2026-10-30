@@ -1,5 +1,6 @@
 //! The interactive TUI: launch, the attach/handoff round loop, reload and teardown.
 
+use plakous_host_protocol::status::{DetachedReason, HostFailure};
 use std::env;
 use std::io::{self, IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -878,7 +879,7 @@ fn run_tui_rounds(
             .resume_pending
             .then(|| Arc::new(std::sync::atomic::AtomicBool::new(false)));
         let attach = if state.defer_startup {
-            Err("deferred startup".to_owned())
+            Err(HostFailure::from("deferred startup"))
         } else if can_attach {
             attacher.attach(
                 &paths,
@@ -893,13 +894,15 @@ fn run_tui_rounds(
                 resume_publication.clone(),
             )
         } else if model_needs_explicit_effort {
-            Err("effort_required".to_owned())
+            Err(HostFailure::from("explicit reasoning effort is required"))
         } else {
             Err(
-                commands::host_config::native_credential_refusal(account.as_deref()).map_or_else(
-                    || "selected model is absent from the discovered Ready catalog".to_owned(),
-                    |refusal| commands::host_config::credential_unusable_reason(&refusal),
-                ),
+                commands::host_config::native_credential_refusal(account.as_deref())
+                    .unwrap_or_else(|| {
+                        HostFailure::from(
+                            "selected model is absent from the discovered Ready catalog",
+                        )
+                    }),
             )
         };
 
@@ -1011,20 +1014,17 @@ fn run_tui_rounds(
                             store.as_ref(),
                             &state.record.id,
                             &cwd,
-                            &attach_err,
+                            attach_err.diagnostic.as_str(),
                         ));
                     }
                     let reason = if model_needs_explicit_effort && !effort_explicit {
-                        "effort_required".to_owned()
+                        DetachedReason::EffortRequired
                     } else if product_onboarding::needs_setup(&cfg) {
-                        "missing_defaults".to_owned()
-                    } else if attach_err == "effort_required" {
-                        "effort_required".to_owned()
-                    } else if attach_err.starts_with("credential_unusable: ") {
-                        attach_err.clone()
+                        DetachedReason::MissingDefaults
+                    } else if matches!(attach_err.remedy.as_ref(), Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RepairCredentialOrChooseProfile { .. })) {
+                        DetachedReason::CredentialUnusable(attach_err.clone())
                     } else {
-                        // Keep short reason tag for logs; detail is in attach_err for TUI.
-                        format!("resolve_failed: {attach_err}")
+                        DetachedReason::ResolveFailed(attach_err.clone())
                     };
                     product_session_log::emit(
                         &paths.session_home(),
@@ -1032,7 +1032,7 @@ fn run_tui_rounds(
                         product_session_log::SessionEvent::new("host.attach_failed")
                             .opt_str("account", account.as_deref())
                             .opt_str("model", model_id.as_deref())
-                            .str("reason", &reason),
+                            .str("reason", reason.kind()),
                     );
                     let (action_tx, event_rx, join) =
                         shell::host::spawn_shell_host_with_clear_publication(
@@ -1128,7 +1128,7 @@ fn prepare_deferred_tui_host(
             product_home: prep_paths.home().to_path_buf(),
             session: prep_record,
             cwd: prep_cwd,
-            reason: RESUME_PICKER_SHELL_REASON.to_owned(),
+            reason: RESUME_PICKER_SHELL_REASON.into(),
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
         });
         let catalog_refresh = shell::catalog_refresh::hook(prep_paths.clone(), &mode);
@@ -1199,7 +1199,7 @@ fn prepare_deferred_tui_host(
                 store: prep_state_roots.session_records(),
                 session: prep_record,
                 cwd: prep_cwd,
-                reason: format!("resolve_failed: {error}"),
+                reason: DetachedReason::ResolveFailed(error.host_failure()),
                 ready_catalog: sections.clone(),
             }),
         }

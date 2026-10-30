@@ -6,6 +6,7 @@
     reason = "In-process recovery scenarios abandon an owner fence and reopen the same session before checking terminal reconciliation."
 )]
 
+use plakous_host_protocol::status::HostPhase;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -437,7 +438,7 @@ fn the_explicit_recover_control_reports_the_child_it_settled() {
         &events,
         &mut seen,
         "the open",
-        |event| matches!(event, HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle)),
+        |event| matches!(event, HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Idle)),
     );
     // The child is stranded after the open, so only `/recover` can settle it.
     let tokio = tokio::runtime::Runtime::new().unwrap();
@@ -486,10 +487,12 @@ fn recovery_names_the_paused_queue_and_its_resume_delivers_it() {
     send_attached_action(&actions, UserAction::FollowUp("queued".into()));
     wait_for(&events, &mut seen, "the fenced terminal", recovery_required);
     send_attached_action(&actions, UserAction::Recover);
-    wait_for(&events, &mut seen, "the paused-queue note", |event| {
-        matches!(event, HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. }))
-            if note.contains("the queue is paused") && note.contains("resume_queue"))
-    });
+    wait_for(
+        &events,
+        &mut seen,
+        "the paused-queue note",
+        |event| matches!(event, HostEvent::RestoredPause(pause) if pause.queue),
+    );
     assert!(
         seen.iter().any(|event| matches!(event,
             HostEvent::QueueSnapshot { items, drain }
@@ -554,7 +557,7 @@ fn an_unadmitted_fork_is_withdrawn_at_open_and_the_source_answers() {
         .iter()
         .filter(|event| {
             matches!(event, HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. }))
-                if note == "fork did not start; run /fork again")
+                if note == "fork did not start; request a fork again explicitly")
         })
         .count();
     assert_eq!(notes, 1, "{seen:#?}");
@@ -567,7 +570,9 @@ fn an_unadmitted_fork_is_withdrawn_at_open_and_the_source_answers() {
         stored
             .transcript
             .iter()
-            .filter(|row| { row.text() == Some("fork did not start; run /fork again") })
+            .filter(|row| {
+                row.text() == Some("fork did not start; request a fork again explicitly")
+            })
             .count(),
         1,
     );

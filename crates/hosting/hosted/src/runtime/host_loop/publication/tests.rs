@@ -598,6 +598,7 @@ fn terminal_head_changes_only_after_the_projector_pass() {
                     transient: None,
                     error: "synthetic failure".into(),
                     exchange: TerminalExchange::Closed,
+                    remedy: None,
                 },
                 1 => TurnHostOutcome::Interrupted {
                     assistant: "synthetic partial".into(),
@@ -605,6 +606,7 @@ fn terminal_head_changes_only_after_the_projector_pass() {
                 },
                 _ => TurnHostOutcome::RecoveryRequired {
                     error: "synthetic recovery".into(),
+                    remedy: None,
                 },
             })
         };

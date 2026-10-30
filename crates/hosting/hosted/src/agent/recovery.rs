@@ -240,7 +240,11 @@ impl ChildSessionPort for ParentSessionPort {
                         "child session could not be created: {reason}"
                     )));
                 }
-                Err(reason) => return Err(session_refusal(&reason).into()),
+                Err(reason) => {
+                    return Err(session_refusal(reason.message())
+                        .with_failure(&reason.host_failure())
+                        .into());
+                }
             };
             Ok(replay_create_with(&sessions, operation_id, binding, accepted.is_none()).await?)
         })
@@ -327,10 +331,7 @@ impl ChildRecoveryReport {
         }
         if !self.refused.is_empty() {
             parts.push(format!(
-                "{} child agent(s) still need recovery ({}); recover_agent retries; \
-                 /recover only selects unresolved child sessions, not an already-settled \
-                 child's pending tree publication; close_agent ends a node whose list_agents \
-                 remedy is close_agent",
+                "{} child agent(s) still need recovery ({}); retry recovery for each obligation; root recovery only selects unresolved child sessions, not an already-settled child's pending tree publication; close a node only when its reported remedy is closure",
                 self.refused.len(),
                 self.refused
                     .iter()
@@ -341,8 +342,7 @@ impl ChildRecoveryReport {
         }
         if !self.not_attempted.is_empty() {
             parts.push(format!(
-                "{} child agent(s) not attempted before the recovery pass deadline ({}); \
-                 /recover (or recover_agent) retries",
+                "{} child agent(s) not attempted before the recovery pass deadline ({}); another explicit recovery pass retries them",
                 self.not_attempted.len(),
                 self.not_attempted.join(", ")
             ));
@@ -387,7 +387,10 @@ pub(super) fn reopen_refusal(error: ChildReopenError) -> TopologyError {
             TopologyErrorCode::RecoverySessionUnavailable
         }
     };
-    refusal(code, &error.message)
+    let mut result = refusal(code, &error.message);
+    result.advice = error.advice;
+    result.remedy = error.remedy;
+    result
 }
 
 /// [`wait_evidence`] read from the committed history of a turn's

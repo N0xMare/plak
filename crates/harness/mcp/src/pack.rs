@@ -578,7 +578,21 @@ async fn dispatch(
     };
     let connection = match entry.connection().await {
         Ok(connection) => connection,
-        Err(error) => return failure(format!("{error}; the call was not sent")),
+        Err(error) => {
+            if let Some(secret) = error.secret_requirement() {
+                return failure(
+                    serde_json::json!({
+                        "mcp_secret": {
+                            "message": format!("{error}; the call was not sent"),
+                            "server": secret.server,
+                            "name": secret.name,
+                        }
+                    })
+                    .to_string(),
+                );
+            }
+            return failure(format!("{error}; the call was not sent"));
+        }
     };
     if !current(&connection) {
         return failure(TOOL_CHANGED.to_owned());
@@ -651,8 +665,18 @@ async fn settle_transport_error(
             ));
         }
         Some(HttpRefusal::Authorization { text, renewed }) => {
+            if let Some(login) = text.login {
+                return failure(
+                    serde_json::json!({"mcp_authorization": {
+                    "message": format!("{}; the call did not run", plakous_model::SafeDiagnostic::new(text.message)),
+                    "server": login.server,
+                    "scope": login.scopes.join(" "),
+                    }})
+                    .to_string(),
+                );
+            }
             return failure(if renewed {
-                text
+                text.message
             } else {
                 format!("{text}; the call did not run")
             });

@@ -536,11 +536,12 @@ pub use plakous_host_protocol::jsonl::host_event_kind;
 
 /// Project Plak-owned status and notice prose before the neutral envelope adapter.
 #[must_use]
-pub fn project_host_event(
-    event: &crate::surface_protocol::HostEvent,
+pub fn project_host_event<P: plakous_host_protocol::ProtocolExtension>(
+    event: &plakous_host_protocol::SessionObservation<P>,
     correlation: JsonlCorrelation<'_>,
+    session_id: Option<&str>,
 ) -> Option<String> {
-    use crate::surface_protocol::HostEvent;
+    use plakous_host_protocol::SessionObservation as HostEvent;
     use plakous_host_protocol::views::transcript::{NoticePlacement, NoticeTone, TranscriptRow};
     let mut fields = Map::new();
     match event {
@@ -563,18 +564,77 @@ pub fn project_host_event(
                 );
             }
         }
+        HostEvent::RestoredPause(pause) => {
+            let text = crate::notice_text::restored_pause(
+                *pause,
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Jsonl,
+                    session_id,
+                },
+            );
+            return project_host_event(
+                &HostEvent::<P>::Row(TranscriptRow::warning(
+                    plakous_host_protocol::views::transcript::NoticeScope::Queue,
+                    text,
+                )),
+                correlation,
+                session_id,
+            );
+        }
+        HostEvent::TopologyNavigatorSnapshot(snapshot) => {
+            let mut snapshot = snapshot.clone();
+            for node in &mut snapshot.nodes {
+                node.fault = crate::refusal_text::node_fault(node);
+                node.live_progress = node
+                    .live_progress
+                    .take()
+                    .map(crate::refusal_text::child_progress);
+            }
+            return plakous_host_protocol::jsonl::project_host_event(
+                &HostEvent::<P>::TopologyNavigatorSnapshot(snapshot),
+                correlation,
+            );
+        }
+        HostEvent::ToolLine {
+            name,
+            detail: Some(raw),
+            ..
+        } => {
+            let Some(text) = crate::refusal_text::tool_error_text(
+                name,
+                raw,
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Jsonl,
+                    session_id,
+                },
+            ) else {
+                return plakous_host_protocol::jsonl::project_host_event(event, correlation);
+            };
+            let line = plakous_host_protocol::jsonl::project_host_event(event, correlation)?;
+            let mut fields: Map<String, Value> = serde_json::from_str(&line).ok()?;
+            fields.insert("detail".into(), Value::from(text));
+            return Some(encode_object(fields));
+        }
         HostEvent::Row(TranscriptRow::Notice(notice))
             if notice.placement() != NoticePlacement::SessionLog =>
         {
+            let text = crate::notice_text::with_remedy(
+                &notice.text,
+                notice.remedy.as_ref(),
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Jsonl,
+                    session_id,
+                },
+            );
             JsonlCorrelation::insert_id(&mut fields, correlation.command_scoped_id());
             if notice.tone == NoticeTone::Error {
                 fields.insert("kind".into(), Value::from("error"));
-                fields.insert("message".into(), Value::from(notice.text.as_str()));
+                fields.insert("message".into(), Value::from(text.as_str()));
             } else {
                 fields.insert("kind".into(), Value::from("status"));
                 fields.insert("phase".into(), Value::from("note"));
                 fields.insert("queue_len".into(), Value::from(0_u64));
-                fields.insert("detail".into(), Value::from(notice.text.as_str()));
+                fields.insert("detail".into(), Value::from(text.as_str()));
             }
         }
         _ => return plakous_host_protocol::jsonl::project_host_event(event, correlation),

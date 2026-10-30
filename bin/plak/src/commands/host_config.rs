@@ -2,6 +2,7 @@
 //! and the multi-turn host worker spawn the TUI and the attached one-shot
 //! commands share.
 
+use plakous_host_protocol::status::{DetachedReason, DiagnosticText, HostFailure};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -102,40 +103,106 @@ pub fn tui_attach_eligibility(
 pub fn deferred_attach_refusal_reason(
     eligibility: TuiAttachEligibility,
     product_needs_setup: bool,
-    credential_refusal: Option<String>,
-) -> String {
+    credential_refusal: Option<HostFailure>,
+) -> DetachedReason {
+    use DetachedReason;
     match eligibility {
-        TuiAttachEligibility::Ready => "canonical attach was not attempted".to_owned(),
-        TuiAttachEligibility::EffortRequired => "effort_required".to_owned(),
-        TuiAttachEligibility::Unavailable if product_needs_setup => "missing_defaults".to_owned(),
+        TuiAttachEligibility::Ready => {
+            DetachedReason::Other(DiagnosticText::new("canonical attach was not attempted"))
+        }
+        TuiAttachEligibility::EffortRequired => DetachedReason::EffortRequired,
+        TuiAttachEligibility::Unavailable if product_needs_setup => DetachedReason::MissingDefaults,
         TuiAttachEligibility::Unavailable => credential_refusal.map_or_else(
             || {
-                "resolve_failed: selected model is absent from the discovered Ready catalog"
-                    .to_owned()
+                DetachedReason::ResolveFailed(
+                    "selected model is absent from the discovered Ready catalog".into(),
+                )
             },
-            |refusal| credential_unusable_reason(&refusal),
+            DetachedReason::CredentialUnusable,
         ),
     }
 }
 
-/// Shell reason for a stored login a model run would refuse.
-pub fn credential_unusable_reason(refusal: &str) -> String {
-    format!("credential_unusable: {}", refusal.replace('`', ""))
-}
-
-/// The CLI's refusal for the selected native account's stored login, read
-/// offline; `None` for other accounts or a login that can run.
-pub fn native_credential_refusal(account: Option<&str>) -> Option<String> {
+/// The selected native account's offline refusal, with its original account and condition.
+pub fn native_credential_refusal(account: Option<&str>) -> Option<HostFailure> {
     let provider = plakous_hosted::binding::oauth_provider_for_account(account?)?;
     let state_home = crate::home::paths::application_state_home().ok()?;
     let mut accounts = PlakousApplication::for_accounts(state_home).ok()?;
-    let status = super::application::AccountOps::offline_status(&mut accounts, provider);
-    let refusal = super::support::credential_refusal(provider, status)?;
-    tracing::warn!(
-        account = provider.as_str(),
-        reason = %refusal,
-        "TUI attach refused: stored subscription login cannot run"
-    );
+    credential_gate_refusal(
+        provider,
+        super::application::AccountOps::offline_status(&mut accounts, provider),
+    )
+}
+
+pub(crate) fn credential_gate_refusal(
+    provider: plakous::subscriptions::NativeProvider,
+    status: plakous_hosted::CliResult<crate::presentation::CliStatus>,
+) -> Option<HostFailure> {
+    use crate::presentation::{CompatibilityState, CredentialState};
+    use plakous_host_protocol::notice_remedy::{CredentialCondition, NoticeRemedy};
+    use plakous_host_protocol::status::{AttachFailure, DiagnosticText, HostFailure};
+    let status = match status {
+        Ok(status) => status,
+        Err(failure) => return Some(failure.host_failure()),
+    };
+    if status.credential == CredentialState::Ready
+        && status.compatibility == CompatibilityState::Current
+    {
+        return None;
+    }
+    if status.credential == CredentialState::Ready {
+        use plakous::subscriptions::NativeSubscriptionError as E;
+        let failure = match status.compatibility {
+            CompatibilityState::Current => return None,
+            CompatibilityState::Inactive => {
+                super::support::profile_inactive_failure(Some(provider))
+            }
+            CompatibilityState::Required => super::support::native_subscription_failure(
+                E::AcceptanceRequired,
+                Some(provider),
+                Path::new(""),
+            ),
+            CompatibilityState::Unsupported => super::support::native_subscription_failure(
+                E::UnsupportedPlatform,
+                Some(provider),
+                Path::new(""),
+            ),
+        };
+        return Some(failure.host_failure());
+    }
+    let (condition, cause, text) = match status.credential {
+        CredentialState::WrittenByNewerBuild => (
+            CredentialCondition::NewerBuild,
+            AttachFailure::CredentialUnavailable,
+            "the stored login was written by a newer build; use that build or replace the login; the writing build must then log in again",
+        ),
+        CredentialState::ProfileChanged | CredentialState::LoginRequired => (
+            CredentialCondition::OlderProfile,
+            AttachFailure::CredentialUnavailable,
+            "the stored login was made by an older build or another profile and must be replaced",
+        ),
+        CredentialState::Quarantined | CredentialState::Revoked => (
+            CredentialCondition::Rejected,
+            AttachFailure::CredentialRejected,
+            "the credential is rejected or quarantined after an uncertain refresh",
+        ),
+        _ => (
+            CredentialCondition::Unavailable,
+            AttachFailure::CredentialUnavailable,
+            "no usable login is available for the selected account/profile",
+        ),
+    };
+    let refusal = HostFailure {
+        origin: None,
+        diagnostic: DiagnosticText::new(text),
+        cause,
+        advice: None,
+        remedy: Some(NoticeRemedy::RepairCredentialOrChooseProfile {
+            account: plakous_hosted::binding::account_target(provider),
+            condition,
+        }),
+    };
+    tracing::warn!(account = provider.as_str(), reason = %refusal, "TUI attach refused: stored subscription login cannot run");
     Some(refusal)
 }
 
@@ -174,7 +241,7 @@ pub trait TuiAttacher {
         cwd: &Path,
         ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
         resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Result<HostedAgentChannels, String>;
+    ) -> Result<HostedAgentChannels, HostFailure>;
 }
 
 pub struct NativeTuiAttacher;
@@ -196,7 +263,7 @@ impl TuiAttacher for NativeTuiAttacher {
         cwd: &Path,
         ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
         resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Result<HostedAgentChannels, String> {
+    ) -> Result<HostedAgentChannels, HostFailure> {
         try_spawn_hosted_agent(
             paths,
             state_roots,
@@ -227,9 +294,9 @@ pub fn try_spawn_hosted_agent(
     cwd: &Path,
     ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
     resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-) -> Result<HostedAgentChannels, String> {
+) -> Result<HostedAgentChannels, HostFailure> {
     let native_models = tui_presentation_bundle(paths)
-        .map_err(|error| error.message().to_owned())?
+        .map_err(|error| error.host_failure())?
         .native_models;
     let config = build_host_config(
         paths,
@@ -243,8 +310,9 @@ pub fn try_spawn_hosted_agent(
         ready_catalog,
         resume_publication,
         &native_models,
-    )?;
-    product_host::spawn_host_worker(config).map_err(|failure| failure.message().to_owned())
+    )
+    .map_err(|failure| failure.host_failure())?;
+    product_host::spawn_host_worker(config).map_err(|failure| failure.host_failure())
 }
 
 #[allow(
@@ -264,7 +332,7 @@ pub fn build_host_config(
     ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
     resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
     native_models: &[HostLaunchNativeModelFact],
-) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, String> {
+) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure> {
     let policy = product_config::SessionPolicy::load(paths)?;
     policy.install_request_budget();
     // The repository gate's offline model, when this build carries the hook and
@@ -274,17 +342,19 @@ pub fn build_host_config(
     // falling through to one.
     #[cfg(feature = "test-hooks")]
     if let Some(selection) = crate::test_hooks::selected() {
-        return selection?.host_config(
-            crate::test_hooks::OfflineFace::Attached,
-            paths,
-            state_roots,
-            session,
-            effort,
-            effort_explicit,
-            cwd,
-            ready_catalog,
-            resume_publication,
-        );
+        return selection?
+            .host_config(
+                crate::test_hooks::OfflineFace::Attached,
+                paths,
+                state_roots,
+                session,
+                effort,
+                effort_explicit,
+                cwd,
+                ready_catalog,
+                resume_publication,
+            )
+            .map_err(crate::CliFailure::new);
     }
     let account = account
         .filter(|s| !s.trim().is_empty())
@@ -373,6 +443,7 @@ pub fn build_host_config(
                 seed_history: None,
                 source_releases: product_host::SourceReleases::default(),
                 continuation: crate::environment::take_reload_continuation(),
+                event_renderer: Some(crate::log_text::render),
             });
         }
         plakous_hosted::binding::AttachRoute::NativeOauth { provider, .. } => provider,
@@ -417,9 +488,9 @@ pub fn build_host_config(
     if session.target_selection == product_config::ProductTargetSelection::NativePriority
         && !priority_admitted
     {
-        return Err(format!(
-            "Fast is absent from the authenticated `{model_id}` catalog row"
-        ));
+        return Err(
+            format!("Fast is absent from the authenticated `{model_id}` catalog row").into(),
+        );
     }
     let selected = product_agent::selected_coding_provider_configuration_with_processing_tier(
         provider,
@@ -489,5 +560,6 @@ pub fn build_host_config(
         seed_history: None,
         source_releases: product_host::SourceReleases::default(),
         continuation: crate::environment::take_reload_continuation(),
+        event_renderer: Some(crate::log_text::render),
     })
 }

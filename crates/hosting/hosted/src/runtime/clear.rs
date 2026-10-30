@@ -151,10 +151,10 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     ) {
         emit_unavailable_context(events);
         // An unreadable context is state every switch re-announces.
-        let _ = events.send(ContentEvent::Row(TranscriptRow::error(
-            NoticeScope::Session,
-            error.message().to_owned(),
-        )));
+        let _ = events.send(ContentEvent::Row(
+            TranscriptRow::error(NoticeScope::Session, error.message().to_owned())
+                .with_optional_remedy(error.remedy()),
+        ));
     }
     log_ev(
         log,
@@ -437,10 +437,10 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     ) {
         emit_unavailable_context(events);
         // An unreadable context is state every switch re-announces.
-        let _ = events.send(ContentEvent::Row(TranscriptRow::error(
-            NoticeScope::Session,
-            error.message().to_owned(),
-        )));
+        let _ = events.send(ContentEvent::Row(
+            TranscriptRow::error(NoticeScope::Session, error.message().to_owned())
+                .with_optional_remedy(error.remedy()),
+        ));
     }
     if !opened.has_recovered_turn() {
         let _ = events.send(ContentEvent::SetBusy(false));

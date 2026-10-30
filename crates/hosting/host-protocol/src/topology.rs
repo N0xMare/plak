@@ -522,6 +522,10 @@ pub struct TopologyError {
     pub code: TopologyErrorCode,
     /// Bounded prose for a person; never parse it.
     pub message: String,
+    /// Optional transient refusal data, independent of the human message.
+    pub advice: Option<Box<crate::refusal::RefusalAdvice>>,
+    /// Optional semantic repair retained through a composed runtime refusal.
+    pub remedy: Option<crate::notice_remedy::NoticeRemedy>,
 }
 
 impl TopologyError {
@@ -532,7 +536,40 @@ impl TopologyError {
         if message.len() > 512 {
             message.truncate(512);
         }
-        Self { code, message }
+        Self {
+            code,
+            message,
+            advice: None,
+            remedy: None,
+        }
+    }
+
+    /// Retain structured action-refusal facts without adding command grammar.
+    #[must_use]
+    pub fn with_advice(mut self, advice: crate::refusal::RefusalAdvice) -> Self {
+        self.advice = Some(Box::new(advice));
+        self
+    }
+
+    /// Preserve typed help when a runtime failure becomes a topology refusal.
+    #[must_use]
+    pub fn with_failure(mut self, failure: &crate::status::HostFailure) -> Self {
+        self.advice.clone_from(&failure.advice);
+        self.remedy.clone_from(&failure.remedy);
+        self
+    }
+
+    /// Serialize the error payload carried inside an ordinary tool result.
+    #[must_use]
+    pub fn to_value(&self) -> serde_json::Value {
+        let mut value = serde_json::json!({ "code": self.code, "message": self.message });
+        if let Some(advice) = &self.advice {
+            value["advice"] = serde_json::json!(advice);
+        }
+        if let Some(remedy) = &self.remedy {
+            value["remedy"] = serde_json::json!(remedy);
+        }
+        value
     }
 }
 

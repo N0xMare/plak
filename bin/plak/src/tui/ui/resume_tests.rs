@@ -16,6 +16,7 @@ use crate::tui::presentation::ActivityKind;
 use crate::tui::{HostEvent, ResumeMenu, ResumeSessionEntry, SettingsView, UserAction};
 use crate::tui::{ResumeRow as _, SurfaceObservation};
 use crossterm::event::{KeyCode, MouseEventKind};
+use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -819,9 +820,9 @@ fn every_control_center_tab_matches_reviewable_goldens_at_both_sizes() {
 /// exactly one recovery row, on the TUI and the JSONL face, and never stores it.
 #[test]
 fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
+    use crate::agent_jsonl::project_host_event;
     use crate::observation_parity_tests::{Fixture, Script};
     use plakous_host_protocol::envelope::JsonlCorrelation;
-    use plakous_host_protocol::jsonl::project_host_event;
     use plakous_hosted::runtime::spawn_host_worker;
     use plakous_hosted::sessions::QueueItem;
 
@@ -843,7 +844,7 @@ fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
                 started = true;
             }
             if started
-                && matches!(event, HostEvent::Status { ref phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle))
+                && matches!(event, HostEvent::Status { ref phase, .. } if matches!(phase, HostPhase::Idle))
             {
                 break;
             }
@@ -897,7 +898,7 @@ fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
             if matches!(&event, HostEvent::Row(row) if row.text().is_some_and(
                 |text| text.contains("recovered an interrupted turn")
             )) {
-                let line = project_host_event(&event, JsonlCorrelation::default()).unwrap();
+                let line = project_host_event(&event, JsonlCorrelation::default(), None).unwrap();
                 assert!(line.contains("recovered an interrupted turn"));
                 jsonl_rows += 1;
             }

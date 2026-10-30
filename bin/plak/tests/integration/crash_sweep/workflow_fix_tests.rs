@@ -59,7 +59,7 @@ fn unadmitted_compact_request_is_withdrawn_once_without_dispatch() {
                 .notices
                 .iter()
                 .filter(|notice| {
-                    notice.row.text() == Some("compaction did not start; run /compact again")
+                    matches!(&notice.row, plakous_host_protocol::views::transcript::TranscriptRow::Notice(row) if row.text == "compaction did not start; request compaction again explicitly" && row.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryCompaction {}))
                 })
                 .count(),
             1

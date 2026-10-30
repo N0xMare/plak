@@ -773,7 +773,7 @@ fn unknown_schema_is_refused() {
 fn current_schema_rejects_previous_product_store_without_modification() {
     // A product schema change moves the state directory; a store at
     // another version in this directory is refused with its rows intact.
-    assert_eq!(SCHEMA_VERSION, 34);
+    assert_eq!(SCHEMA_VERSION, 35);
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     paths.ensure_layout().unwrap();
@@ -783,7 +783,7 @@ fn current_schema_rejects_previous_product_store_without_modification() {
         store.commit(&mut session).unwrap();
     }
     let connection = Connection::open(paths.product_database()).unwrap();
-    connection.pragma_update(None, "user_version", 33).unwrap();
+    connection.pragma_update(None, "user_version", 34).unwrap();
     drop(connection);
 
     let error = ProductStore::open(&paths).unwrap_err();
@@ -792,7 +792,7 @@ fn current_schema_rejects_previous_product_store_without_modification() {
         ProductStoreOpenErrorKind::UnsupportedPersistence
     );
     assert!(
-        error.to_string().contains("product schema 33, expected 34"),
+        error.to_string().contains("product schema 34, expected 35"),
         "{error}"
     );
     assert!(

@@ -1113,6 +1113,9 @@ pub(super) fn project_usage_limits(
             crate::openrouter::OpenRouterKeyUsageProbe::Failed(reason) => {
                 VerticalObservation::Unavailable(reason)
             }
+            crate::openrouter::OpenRouterKeyUsageProbe::Rejected { reason, source } => {
+                VerticalObservation::RejectedKey { reason, source }
+            }
         },
     ));
     // The caller stamps the session ledger; collection here stays provider-only.

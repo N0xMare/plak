@@ -11,6 +11,7 @@
     reason = "private process-level test harness"
 )]
 
+use plakous_host_protocol::status::HostFailure;
 use std::error::Error;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -75,7 +76,7 @@ impl TuiAttacher for CompactionAttacher {
         cwd: &Path,
         ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
         resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Result<HostedAgentChannels, String> {
+    ) -> Result<HostedAgentChannels, HostFailure> {
         let controller =
             BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &self.evidence)
                 .map_err(|error| error.to_string())?;
@@ -159,8 +160,9 @@ impl TuiAttacher for CompactionAttacher {
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
             continuation: None,
+            event_renderer: None,
         })
-        .map_err(|failure| failure.message().to_owned())
+        .map_err(|failure| failure.host_failure())
     }
 }
 
@@ -188,7 +190,7 @@ fn compaction_terminal_e2e_child() -> TestResult {
     let resume = std::env::var("PLAK_COMPACT_PTY_RESUME").ok();
     let services = crate::shell::services::Services::from_env(None);
     let outcome = launch_tui_with_attacher(&services, resume, false, None, &attacher)
-        .map_err(|failure| failure.message().to_owned())?;
+        .map_err(|failure| failure.host_failure())?;
     if outcome != ProcessOutcome::Success {
         return Err("compaction PTY child did not exit successfully".into());
     }

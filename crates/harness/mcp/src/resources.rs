@@ -295,6 +295,10 @@ where
 }
 
 pub(crate) fn request_failed(server: &McpServerName, what: &str, error: &ServiceError) -> McpError {
+    let login = match http::classify(error) {
+        Some(HttpRefusal::Authorization { text, .. }) => text.login,
+        _ => None,
+    };
     let message = match error {
         ServiceError::McpError(error) => format!(
             "mcp server {server} refused {what}: {} ({})",
@@ -302,11 +306,11 @@ pub(crate) fn request_failed(server: &McpServerName, what: &str, error: &Service
         ),
         _ => match http::classify(error) {
             Some(HttpRefusal::Credentials(status)) => http::credentials_text(server, status),
-            Some(HttpRefusal::Authorization { text, .. }) => text,
+            Some(HttpRefusal::Authorization { text, .. }) => text.message,
             _ => format!("mcp server {server} {what} failed: {error}"),
         },
     };
-    McpError::new(McpErrorKind::Request, message)
+    McpError::new(McpErrorKind::Request, message).with_login(login)
 }
 
 pub(crate) fn timed_out(server: &McpServerName, what: &str, timeout: Duration) -> McpError {

@@ -38,6 +38,7 @@ fn node(status: NodeStatus, attempt: Option<AttemptStatus>) -> NodeView {
         ended_at_unix: Some(1_700_000_009),
         fault: None,
         waiting_on: None,
+        recovery_abandoned: false,
     }
 }
 

@@ -193,25 +193,12 @@ fn retained_approval_after_owner_loss(switch: bool) {
 }
 
 fn assert_one_jsonl_recovery_note(events: &[HostEvent<TestExtension>], with_submission: bool) {
-    let jsonl: Vec<serde_json::Value> = events
+    let notices = events
         .iter()
-        .filter_map(|event| {
-            plakous_host_protocol::jsonl::project_host_event(
-                event,
-                plakous_host_protocol::envelope::JsonlCorrelation::default(),
-            )
-        })
-        .map(|line| serde_json::from_str(&line).unwrap())
-        .collect();
+        .filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(row)) if row.text.contains("recovered an interrupted turn")))
+        .count();
     assert_eq!(
-        jsonl
-            .iter()
-            .filter(|record| record["kind"] == "status"
-                && record["detail"]
-                    .as_str()
-                    .is_some_and(|detail| detail.contains("recovered an interrupted turn")))
-            .count(),
-        1,
+        notices, 1,
         "JSONL recovery has one status note (with submission: {with_submission})"
     );
 }

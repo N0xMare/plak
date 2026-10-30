@@ -210,9 +210,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
                 recovery_save?;
                 return Err(CliFailure::new(
-                    "the session has an interrupted turn, so the model change was not started; the \
-                     next prompt (or /recover) recovers it, then the change can be retried",
-                ));
+                    "the session has an interrupted turn, so the model change was not started; the next prompt or explicit recovery recovers it, then retry the change",
+                ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
             }
             _ => {
                 restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
@@ -297,13 +296,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 }
                 if watch.interrupted() {
                     return Err(CliFailure::new(format!(
-                        "fork stopped; saved as session {target_id}; this session stays attached; /resume {target_id} opens it"
-                    )));
+                        "fork stopped; saved as session {target_id}; this session stays attached; the saved session can be opened explicitly"
+                    )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeSavedSession { session_id: target_id.parse().map_err(|e| CliFailure::new(format!("invalid saved session identity: {e}")))? }));
                 }
                 return Err(CliFailure::new(format!(
-                    "the fork was saved as session {target_id} but could not project ({}); this session stays attached, and /resume {target_id} opens the fork",
+                    "the fork was saved as session {target_id} but could not project ({}); this session stays attached; the saved fork can be opened explicitly",
                     error.message(),
-                )));
+                )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeSavedSession { session_id: target_id.parse().map_err(|e| CliFailure::new(format!("invalid saved session identity: {e}")))? }));
             }
         };
         observe_boundary(

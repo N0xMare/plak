@@ -912,12 +912,15 @@ fn prompt_id_preserved_when_tree_command_arrives_mid_turn() {
 
     let assistant_lines = handle_event(
         &HostEvent::AssistantDelta("partial".into()),
-        &mut busy,
-        &mut turn_busy,
-        &mut tree_state,
-        &mut prompt_id,
-        command_id.as_ref(),
-        &mut pending_tree_snapshot_id,
+        &mut JsonlSession {
+            busy: &mut busy,
+            turn_busy: &mut turn_busy,
+            tree_state: &mut tree_state,
+            prompt_id: &mut prompt_id,
+            command_id: command_id.as_ref(),
+            pending_tree_snapshot_id: &mut pending_tree_snapshot_id,
+            session_id: None,
+        },
     );
     assert_eq!(assistant_lines.len(), 1);
     assert!(assistant_lines[0].contains("\"id\":\"prompt-1\""));
@@ -938,12 +941,15 @@ fn prompt_id_preserved_when_tree_command_arrives_mid_turn() {
             finished_at_ms: None,
             wait: None,
         },
-        &mut busy,
-        &mut turn_busy,
-        &mut tree_state,
-        &mut prompt_id,
-        command_id.as_ref(),
-        &mut pending_tree_snapshot_id,
+        &mut JsonlSession {
+            busy: &mut busy,
+            turn_busy: &mut turn_busy,
+            tree_state: &mut tree_state,
+            prompt_id: &mut prompt_id,
+            command_id: command_id.as_ref(),
+            pending_tree_snapshot_id: &mut pending_tree_snapshot_id,
+            session_id: None,
+        },
     );
     assert_eq!(tool_lines.len(), 1);
     assert!(tool_lines[0].contains("\"id\":\"prompt-1\""));
@@ -998,14 +1004,18 @@ fn unsolicited_tree_snapshot_omits_id_while_prompt_in_flight() {
                 ended_at_unix: None,
                 fault: None,
                 waiting_on: None,
+                recovery_abandoned: false,
             }],
         }),
-        &mut busy,
-        &mut turn_busy,
-        &mut tree_state,
-        &mut prompt_id,
-        command_id.as_ref(),
-        &mut pending_tree_snapshot_id,
+        &mut JsonlSession {
+            busy: &mut busy,
+            turn_busy: &mut turn_busy,
+            tree_state: &mut tree_state,
+            prompt_id: &mut prompt_id,
+            command_id: command_id.as_ref(),
+            pending_tree_snapshot_id: &mut pending_tree_snapshot_id,
+            session_id: None,
+        },
     );
     assert_eq!(lines.len(), 1);
     assert!(!lines[0].contains("\"id\":"));
@@ -1060,14 +1070,18 @@ fn explicit_tree_command_snapshot_uses_tree_command_id() {
                 ended_at_unix: None,
                 fault: None,
                 waiting_on: None,
+                recovery_abandoned: false,
             }],
         }),
-        &mut busy,
-        &mut turn_busy,
-        &mut tree_state,
-        &mut prompt_id,
-        command_id.as_ref(),
-        &mut pending_tree_snapshot_id,
+        &mut JsonlSession {
+            busy: &mut busy,
+            turn_busy: &mut turn_busy,
+            tree_state: &mut tree_state,
+            prompt_id: &mut prompt_id,
+            command_id: command_id.as_ref(),
+            pending_tree_snapshot_id: &mut pending_tree_snapshot_id,
+            session_id: None,
+        },
     );
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("\"id\":\"tree-2\""));
@@ -1123,14 +1137,18 @@ fn unsolicited_snapshot_does_not_consume_pending_tree_id() {
                 ended_at_unix: None,
                 fault: None,
                 waiting_on: None,
+                recovery_abandoned: false,
             }],
         }),
-        &mut busy,
-        &mut turn_busy,
-        &mut tree_state,
-        &mut prompt_id,
-        command_id.as_ref(),
-        &mut pending_tree_snapshot_id,
+        &mut JsonlSession {
+            busy: &mut busy,
+            turn_busy: &mut turn_busy,
+            tree_state: &mut tree_state,
+            prompt_id: &mut prompt_id,
+            command_id: command_id.as_ref(),
+            pending_tree_snapshot_id: &mut pending_tree_snapshot_id,
+            session_id: None,
+        },
     );
     assert_eq!(lines.len(), 1);
     assert!(!lines[0].contains("\"id\":"));
@@ -1148,12 +1166,15 @@ fn set_busy_false_clears_prompt_id_without_synthetic_turn_idle() {
 
     let lines = handle_event(
         &HostEvent::SetBusy(false),
-        &mut busy,
-        &mut turn_busy,
-        &mut tree_state,
-        &mut prompt_id,
-        command_id.as_ref(),
-        &mut pending_tree_snapshot_id,
+        &mut JsonlSession {
+            busy: &mut busy,
+            turn_busy: &mut turn_busy,
+            tree_state: &mut tree_state,
+            prompt_id: &mut prompt_id,
+            command_id: command_id.as_ref(),
+            pending_tree_snapshot_id: &mut pending_tree_snapshot_id,
+            session_id: None,
+        },
     );
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("\"kind\":\"busy\""));
@@ -1314,12 +1335,15 @@ fn saturated_mailbox_cannot_attribute_unknown_refusal_to_previous_turn() {
         origins.observe(&event, &mut active);
         let lines = handle_event(
             &event,
-            &mut busy,
-            &mut turn_busy,
-            &mut tree,
-            &mut active,
-            command.as_ref(),
-            &mut None,
+            &mut JsonlSession {
+                busy: &mut busy,
+                turn_busy: &mut turn_busy,
+                tree_state: &mut tree,
+                prompt_id: &mut active,
+                command_id: command.as_ref(),
+                pending_tree_snapshot_id: &mut None,
+                session_id: None,
+            },
         );
         if matches!(event, HostEvent::ModelRefusal { .. }) {
             saw_refusal = true;
@@ -1334,12 +1358,15 @@ fn saturated_mailbox_cannot_attribute_unknown_refusal_to_previous_turn() {
                 "command refused",
             ),
         ),
-        &mut busy,
-        &mut turn_busy,
-        &mut tree,
-        &mut active,
-        command.as_ref(),
-        &mut None,
+        &mut JsonlSession {
+            busy: &mut busy,
+            turn_busy: &mut turn_busy,
+            tree_state: &mut tree,
+            prompt_id: &mut active,
+            command_id: command.as_ref(),
+            pending_tree_snapshot_id: &mut None,
+            session_id: None,
+        },
     );
     assert!(lines[0].contains("\"id\":\"p1\""));
 }

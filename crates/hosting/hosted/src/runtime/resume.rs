@@ -45,8 +45,8 @@ pub(super) fn emit_resume_choices<P: plakous_host_protocol::ProtocolExtension>(
     let _ = events.send(ContentEvent::ResumeSessions(choices));
     if total > MAX_RESUME_CHOICES {
         let _ = events.notice(TranscriptRow::info(NoticeScope::Session, format!(
-            "resume picker shows the {MAX_RESUME_CHOICES} most recent cwd sessions; `/resume <uuid>` accepts any exact id"
-        )));
+            "the session list contains the {MAX_RESUME_CHOICES} most recent sessions in this workspace; any exact session ID can be opened"
+        )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeExactSession {}));
     }
 }
 

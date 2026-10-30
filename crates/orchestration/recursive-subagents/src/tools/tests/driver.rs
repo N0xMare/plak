@@ -910,7 +910,7 @@ fn fail_closed_second_save_refusal_dispatches_nothing_until_retry() {
         let before_attempt = tree.attempt(&child).unwrap().clone();
         let driver = driver_on(tree, store);
         let tool = task_tool(driver.clone(), TopologyKind::Spawn);
-        tool.fail_closed_session(&child, "materialization failed".into())
+        tool.fail_closed_session(&child, "materialization failed")
             .unwrap();
         driver
             .read(|tree| {
@@ -920,7 +920,7 @@ fn fail_closed_second_save_refusal_dispatches_nothing_until_retry() {
             })
             .unwrap();
         assert!(vcs.calls_of(FakeOp::Seal).is_empty());
-        tool.fail_closed_session(&child, "materialization failed".into())
+        tool.fail_closed_session(&child, "materialization failed")
             .unwrap();
         assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
     }

@@ -1,7 +1,8 @@
 //! Plak-owned rendering of typed host lifecycle facts.
 
 use plakous_host_protocol::status::{
-    CancelUnsettled, DetachedReason, HostPause, HostStatusDetail, HostTransitionStage, SteerSource,
+    AttachFailure, CancelUnsettled, DetachedReason, HostFailure, HostFailureOrigin, HostPause,
+    HostStatusDetail, HostTransitionStage, SteerSource,
 };
 
 #[cfg(test)]
@@ -25,15 +26,46 @@ pub(crate) fn detached_reason(reason: &DetachedReason) -> String {
         DetachedReason::MissingDefaults => "missing_defaults".into(),
         DetachedReason::EffortRequired => "effort_required".into(),
         DetachedReason::ResolveFailed(failure) => {
-            format!("resolve_failed: {}", failure.diagnostic.as_str())
+            format!("resolve_failed: {}", legacy_failure(failure))
         }
         DetachedReason::CredentialUnusable(failure) => {
-            format!("credential_unusable: {}", failure.diagnostic.as_str())
+            format!("credential_unusable: {}", legacy_failure(failure))
         }
         DetachedReason::RecoveryRequired(failure) => {
-            format!("recovery_required: {}", failure.diagnostic.as_str())
+            format!("recovery_required: {}", legacy_failure(failure))
         }
         DetachedReason::Other(diagnostic) => diagnostic.as_str().into(),
+    }
+}
+
+fn legacy_failure(failure: &HostFailure) -> String {
+    use AttachFailure as F;
+    match failure.origin.as_deref() {
+        Some(HostFailureOrigin::NativeBinding { label, account }) => {
+            let account = crate::notice_text::account_label(*account);
+            match failure.cause {
+                F::AccountChanged => format!(
+                    "{label} provider account changed; log in to the original account with `plak login {account}` to reopen exactly, or use /rebind to carry the history into a new session under the newly logged-in account"
+                ),
+                F::CredentialRejected => format!(
+                    "{label} credential was rejected at refresh; run `plak login {account}`"
+                ),
+                F::CredentialUnavailable => format!(
+                    "{label} credential is unavailable (signed out, quarantined, or a login made by an earlier build); run `plak login {account}`"
+                ),
+                F::LoginSelectionChanged => format!(
+                    "exact reopen refused: {label} login selection changed; use /reload or /rebind to carry the history under the current login; Fork now is available only while attached"
+                ),
+                F::BindingChanged => format!(
+                    "exact reopen refused: {label} is bound to a different account or model; restore the original account and configuration with `plak login {account}`, or use /rebind to carry the history into a new session"
+                ),
+                _ => failure.diagnostic.as_str().into(),
+            }
+        }
+        Some(HostFailureOrigin::ModelFacts { account, model }) => format!(
+            "{account} model `{model}` changed since this session was created (its provider-published facts or this build's reviewed table moved); rebind with Fork now in the Agents tab, or start a new session"
+        ),
+        None => failure.diagnostic.as_str().into(),
     }
 }
 
@@ -101,9 +133,11 @@ pub(crate) fn status_detail(
             "{} · cumulative elapsed {cumulative_elapsed_ms}ms",
             transition_label(*stage)
         ),
-        D::Failure { failure } => crate::notice_text::with_remedy(
-            failure.diagnostic.as_str(),
-            failure.remedy.as_ref(),
+        D::Failure { failure } if frontend == crate::notice_text::Frontend::Jsonl => {
+            legacy_failure(failure)
+        }
+        D::Failure { failure } => crate::refusal_text::host_failure_text(
+            failure,
             crate::notice_text::RemedyContext {
                 frontend,
                 session_id: None,

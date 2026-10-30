@@ -99,6 +99,7 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
             .and_then(|attempt| attempt.ended_at)
             .map(|ended_at| ended_at / 1_000)
             .filter(|seconds| *seconds > 0),
+        recovery_abandoned: attempt.is_some_and(super::AttemptRecord::recovery_was_abandoned),
         fault: attempt
             .filter(|attempt| attempt.candidate_handoff().is_some())
             .and_then(super::AttemptRecord::presented_failure)

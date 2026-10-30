@@ -244,7 +244,7 @@ fn login_line(paths: &PlakPaths, config: &ProductConfig, id: &str) -> Option<Str
     let login = format!("run `plak mcp login {id}`");
     let text = match status {
         Ok(None) => return None,
-        Err(error) => format!("unreadable ({}); {login}", shown(&error)),
+        Err(error) => format!("unreadable ({}); {login}", shown(error.message())),
         Ok(Some(McpOAuthStatus::LoggedIn {
             expires_in,
             refreshable,
@@ -351,7 +351,18 @@ fn test(paths: &PlakPaths, id: &str) -> CliResult<String> {
         &workspace,
         secrets::ProductNamedSecrets::shared(paths),
     )
-    .map_err(|error| CliFailure::new(format!("mcp server {id} failed: {}", shown(&error))))?;
+    .map_err(|error| {
+        CliFailure::new(format!(
+            "mcp server {id} failed: {}",
+            shown(&crate::refusal_text::failure_text(
+                &error,
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Run,
+                    session_id: None
+                }
+            ))
+        ))
+    })?;
     let mut out = format!(
         "mcp server {id}: {} tool{} a session would bind as mcp:{id}\n",
         probe.tools.len(),
@@ -396,7 +407,18 @@ fn prompts(paths: &PlakPaths, id: &str) -> CliResult<String> {
         &workspace,
         secrets::ProductNamedSecrets::shared(paths),
     )
-    .map_err(|error| CliFailure::new(format!("mcp server {id} failed: {}", shown(&error))))?;
+    .map_err(|error| {
+        CliFailure::new(format!(
+            "mcp server {id} failed: {}",
+            shown(&crate::refusal_text::failure_text(
+                &error,
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Run,
+                    session_id: None
+                }
+            ))
+        ))
+    })?;
     let mut out = format!(
         "mcp server {id}: {} prompt{}\n",
         prompts.len(),
@@ -442,7 +464,18 @@ fn expand_prompt(
         prompt,
         arguments,
     )
-    .map_err(|error| CliFailure::new(format!("mcp server {id} failed: {}", shown(&error))))?;
+    .map_err(|error| {
+        CliFailure::new(format!(
+            "mcp server {id} failed: {}",
+            shown(&crate::refusal_text::failure_text(
+                &error,
+                crate::notice_text::RemedyContext {
+                    frontend: crate::notice_text::Frontend::Run,
+                    session_id: None
+                }
+            ))
+        ))
+    })?;
     let mut out = crate::cli_output::safe_terminal_block(expansion.text());
     out.push('\n');
     let images = expansion.images().len();

@@ -684,7 +684,7 @@ impl JobRegistry {
         &self,
         session: plakous::model::SessionId,
         branch: plakous::model::BranchId,
-    ) -> Option<String> {
+    ) -> Option<RunningProcesses> {
         let services = self
             .services
             .lock()
@@ -696,14 +696,27 @@ impl JobRegistry {
                 .filter(|job| job.status == plakous::tools::JobStatus::Running)
                 .count()
         });
-        (count != 0).then(|| {
-            let noun = if count == 1 {
-                "process is"
-            } else {
-                "processes are"
-            };
-            format!("{count} background {noun} running; stop them first (/ps)")
-        })
+        (count != 0).then_some(RunningProcesses { count })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RunningProcesses {
+    pub(crate) count: usize,
+}
+
+impl std::fmt::Display for RunningProcesses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let noun = if self.count == 1 {
+            "process is"
+        } else {
+            "processes are"
+        };
+        write!(
+            f,
+            "{} background {noun} running; stop them before changing the session",
+            self.count
+        )
     }
 }
 

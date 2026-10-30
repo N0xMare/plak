@@ -56,9 +56,38 @@ pub struct AgentError {
     tool_kind: Option<ToolRuntimeErrorKind>,
     store_error: Option<SessionStoreError>,
     binding_change: Option<Box<crate::BindingChange>>,
+    reresolution_error: Option<Box<crate::runtime::ModelReresolutionError>>,
 }
 
 impl AgentError {
+    /// Attaches a live re-resolution refusal. Canonical records do not store it;
+    /// a rebuild from those records leaves this field empty.
+    #[must_use]
+    pub fn with_reresolution_error(
+        mut self,
+        error: Option<crate::runtime::ModelReresolutionError>,
+    ) -> Self {
+        self.attach_reresolution_error(error);
+        self
+    }
+
+    /// Keeps a live re-resolution refusal on an error rebuilt from canonical
+    /// parts. Canonical records do not store the refusal.
+    pub(crate) fn attach_reresolution_error(
+        &mut self,
+        error: Option<crate::runtime::ModelReresolutionError>,
+    ) {
+        if self.reresolution_error.is_none() {
+            self.reresolution_error = error.map(Box::new);
+        }
+    }
+
+    /// The typed source of a live host re-resolution refusal, when available.
+    #[must_use]
+    pub fn reresolution_error(&self) -> Option<&crate::runtime::ModelReresolutionError> {
+        self.reresolution_error.as_deref()
+    }
+
     pub(crate) fn with_runtime_diagnostic(mut self, diagnostic: &str) -> Self {
         self.message = SafeDiagnostic::new(format!("{}; {diagnostic}", self.message()));
         self
@@ -74,6 +103,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            reresolution_error: None,
         }
     }
 
@@ -176,6 +206,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            reresolution_error: None,
         }
     }
 
@@ -193,6 +224,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            reresolution_error: None,
         }
     }
 
@@ -204,6 +236,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            reresolution_error: None,
         }
     }
 
@@ -220,6 +253,7 @@ impl AgentError {
             tool_kind: Some(error.kind()),
             store_error: None,
             binding_change: None,
+            reresolution_error: None,
         }
     }
 
@@ -235,6 +269,7 @@ impl AgentError {
             tool_kind: None,
             store_error: Some(error),
             binding_change: None,
+            reresolution_error: None,
         }
     }
 
@@ -248,6 +283,7 @@ impl AgentError {
             tool_kind: None,
             store_error: Some(error),
             binding_change: None,
+            reresolution_error: None,
         }
     }
 
@@ -265,6 +301,7 @@ impl AgentError {
             tool_kind,
             store_error,
             binding_change: None,
+            reresolution_error: None,
         }
     }
 }
@@ -280,6 +317,7 @@ impl fmt::Debug for AgentError {
             .field("tool_kind", &self.tool_kind)
             .field("store_error", &self.store_error)
             .field("binding_change", &self.binding_change)
+            .field("reresolution_error", &self.reresolution_error)
             .finish()
     }
 }
@@ -298,6 +336,12 @@ impl std::error::Error for AgentError {
             .or_else(|| {
                 self.store_error
                     .as_ref()
+                    .filter(|error| self.message() != error.to_string())
+                    .map(|error| error as &dyn std::error::Error)
+            })
+            .or_else(|| {
+                self.reresolution_error
+                    .as_deref()
                     .filter(|error| self.message() != error.to_string())
                     .map(|error| error as &dyn std::error::Error)
             })

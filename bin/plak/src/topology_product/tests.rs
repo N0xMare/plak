@@ -651,7 +651,7 @@ fn epoch_blocks_rebind_reads_store_when_hub_misses() {
     // Store load always restore_paused(); hub miss cannot see Live descendants.
     assert_eq!(
         plakous_hosted::runtime::epoch_rebind_refusal(&paths, &tree_id),
-        Some(ProductAgentTree::TREE_EPOCH_REBIND_PAUSED)
+        Some(EpochRebindRefusal::RestoredPaused)
     );
     let _ = spawned;
 }
@@ -674,7 +674,7 @@ fn epoch_blocks_rebind_when_restored_paused() {
     assert!(epoch_blocks_rebind(&paths, &tree_id));
     assert_eq!(
         plakous_hosted::runtime::epoch_rebind_refusal(&paths, &tree_id),
-        Some(ProductAgentTree::TREE_EPOCH_REBIND_PAUSED)
+        Some(EpochRebindRefusal::RestoredPaused)
     );
 }
 

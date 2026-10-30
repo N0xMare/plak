@@ -1062,9 +1062,10 @@ impl crate::agent::children::runtime_factory::ChildRuntimeFactory for ScriptedCh
         &'a self,
         request: crate::agent::children::runtime_factory::ChildRuntimeRequest<'a>,
     ) -> crate::agent::children::runtime_factory::ChildRuntimeFuture<'a> {
-        Box::pin(
-            async move { (self.0)(request.agent_id, request.path, request.parent.state_roots()) },
-        )
+        Box::pin(async move {
+            (self.0)(request.agent_id, request.path, request.parent.state_roots())
+                .map_err(CliFailure::from)
+        })
     }
 }
 
@@ -1143,9 +1144,10 @@ impl crate::agent::children::runtime_factory::ChildRuntimeFactory for Switchable
                 .last()
                 .map_or_else(|| state.base.clone(), |(_, binding)| binding.clone())
         };
-        Box::pin(
-            async move { binding(request.agent_id, request.path, request.parent.state_roots()) },
-        )
+        Box::pin(async move {
+            binding(request.agent_id, request.path, request.parent.state_roots())
+                .map_err(CliFailure::from)
+        })
     }
 }
 /// Removes its own override, not a stale snapshot of another registration.

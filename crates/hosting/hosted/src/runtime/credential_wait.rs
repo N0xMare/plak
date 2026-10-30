@@ -45,10 +45,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> CredentialNotices<P> {
                     if current != *waiting {
                         *waiting = current;
                         if current {
-                            let _ = sender.notice(TranscriptRow::info(
-                                NoticeScope::Settings,
-                                format!("waiting for login: run `plak login {account}`"),
-                            ));
+                            let _ = sender.notice(
+                                TranscriptRow::info(NoticeScope::Settings, "waiting for login")
+                                    .with_remedy(
+                                        plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+                                            account:
+                                                plakous_host_protocol::notice_remedy::AccountTarget::from_account(
+                                                    &account,
+                                                ),
+                                        },
+                                    ),
+                            );
                         }
                         let _ = sender.send(super::ContentEvent::CredentialWait {
                             account: current.then(|| account.clone()),
@@ -105,8 +112,16 @@ mod tests {
         );
         tokio::task::yield_now().await;
         let initial: Vec<_> = rx.try_iter().collect();
-        assert!(
-            matches!(&initial[0], super::super::HostEvent::Row(TranscriptRow::Notice(notice)) if notice.scope == NoticeScope::Settings && notice.text == "waiting for login: run `plak login claude`")
+        let super::super::HostEvent::Row(TranscriptRow::Notice(notice)) = &initial[0] else {
+            panic!("login wait did not open with a notice");
+        };
+        assert_eq!(notice.scope, NoticeScope::Settings);
+        assert_eq!(notice.text, "waiting for login");
+        assert_eq!(
+            notice.remedy,
+            Some(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+                account: plakous_host_protocol::notice_remedy::AccountTarget::Claude,
+            })
         );
         assert!(
             matches!(&initial[1], super::super::HostEvent::CredentialWait { account: Some(account) } if account == "claude")

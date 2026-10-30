@@ -47,7 +47,7 @@ pub struct SpawnBound {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SpawnBindError {
     /// No session or turn remains owned by the binder.
-    Refused(String),
+    Refused(plakous_host_protocol::status::HostFailure),
     /// Ownership remains with an independent worker; sealing is forbidden.
     RecoveryRequired {
         /// The last observed startup stage.
@@ -59,7 +59,7 @@ pub enum SpawnBindError {
 
 impl From<String> for SpawnBindError {
     fn from(message: String) -> Self {
-        Self::Refused(message)
+        Self::Refused(message.into())
     }
 }
 
@@ -705,7 +705,7 @@ impl TopologyTool {
                                 &request,
                                 Some(&operation_id),
                                 &output.agent_id,
-                                &message,
+                                message.diagnostic.as_str(),
                             );
                             let status = tree
                                 .node(&output.agent_id)
@@ -724,7 +724,9 @@ impl TopologyTool {
                         })?;
                     self.settle(effects).await?;
                     return match persisted {
-                        Ok(error) | Err(error) => Self::topology_failure(&error),
+                        Ok(error) | Err(error) => {
+                            Self::topology_failure(&error.with_failure(&message))
+                        }
                     };
                 }
                 Err(SpawnBindError::RecoveryRequired { stage, message }) => {

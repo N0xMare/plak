@@ -314,10 +314,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     .map(|job| format!("p{} ({})", job.number, job.command))
                     .chain(waiting_rows.iter().map(|(_, label)| label.clone()))
                     .collect::<Vec<_>>();
-                let _ = self.events.notice(TranscriptRow::info(
-                    NoticeScope::Tree,
-                    format!("plak: waiting for {}; Ctrl-C to stop", waiting.join(", ")),
-                ));
+                let _ = self.events.notice(
+                    TranscriptRow::info(
+                        NoticeScope::Tree,
+                        format!("waiting for {}", waiting.join(", ")),
+                    )
+                    .with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::InterruptWait {},
+                    ),
+                );
                 waiting_noted = true;
             }
             std::thread::sleep(Duration::from_millis(20));

@@ -70,28 +70,38 @@ impl ProductChildSessionBinder {
             else {
                 return Ok(());
             };
-            let refusal = |detail: &str| {
+            let refusal = |state: plakous_host_protocol::refusal::ChildCredentialState| {
+                let detail = match state {
+                    plakous_host_protocol::refusal::ChildCredentialState::Unavailable => {
+                        "is not signed in and Ready"
+                    }
+                    plakous_host_protocol::refusal::ChildCredentialState::CheckUnavailable => {
+                        "could not be checked"
+                    }
+                };
                 crate::agent_tree::TopologyError::new(
                     crate::agent_tree_protocol::TopologyErrorCode::ModelNotAdmitted,
                     format!(
-                        "template {template} binds account {}, which {detail}; no agent was \
-                         spawned. Choose another template, or ask the operator to run `plak \
-                         login {}`",
-                        binding.account, binding.account
+                        "template {template} binds account {}, which {detail}; no agent was spawned; choose another template or restore usable credentials",
+                        binding.account
                     ),
-                )
+                ).with_advice(plakous_host_protocol::refusal::RefusalAdvice::ChildCredential { template: template.to_string(), account: plakous_host_protocol::notice_remedy::AccountTarget::from_account(&binding.account), state })
             };
             let subscriptions = self
                 .parent
                 .state_roots()
                 .native_subscriptions()
-                .map_err(|_| refusal("could not be checked"))?;
+                .map_err(|_| {
+                    refusal(plakous_host_protocol::refusal::ChildCredentialState::CheckUnavailable)
+                })?;
             match subscriptions.admit_for_dispatch(provider).await {
                 Ok(_) => Ok(()),
-                Err(NativeSubscriptionError::CredentialUnavailable) => {
-                    Err(refusal("is not signed in and Ready"))
-                }
-                Err(_) => Err(refusal("could not be checked")),
+                Err(NativeSubscriptionError::CredentialUnavailable) => Err(refusal(
+                    plakous_host_protocol::refusal::ChildCredentialState::Unavailable,
+                )),
+                Err(_) => Err(refusal(
+                    plakous_host_protocol::refusal::ChildCredentialState::CheckUnavailable,
+                )),
             }
         })
     }
@@ -154,7 +164,9 @@ impl ProductChildSessionBinder {
                     start_spawned_child(&parent, start, created, &worker_startup, &worker_runtime)
                         .await
                         .map_err(|failure| match failure {
-                            ChildStartFailure::Refused(message) => SpawnBindError::Refused(message),
+                            ChildStartFailure::Refused(message) => {
+                                SpawnBindError::Refused(message.into())
+                            }
                             ChildStartFailure::Failed(message)
                             | ChildStartFailure::HoldEndedAfterAdmission(message)
                             | ChildStartFailure::SlotOccupied(message) => {
@@ -371,7 +383,8 @@ pub(in crate::agent) async fn create_spawned_child_session(
         None,
         Some(deadline),
     )
-    .await?;
+    .await
+    .map_err(|error| SpawnBindError::Refused(error.host_failure()))?;
     let sessions = parent
         .state_roots()
         .runtime_sessions()
@@ -436,14 +449,22 @@ pub(super) fn child_create_failure(
         error,
         &format!("child session could not be created: {error}"),
     ) {
-        return SpawnBindError::Refused(message);
+        return SpawnBindError::Refused(
+            crate::CliFailure::new(message)
+                .with_optional_remedy(crate::storage_pressure::sessions_remedy(error).as_ref())
+                .host_failure(),
+        );
     }
     let message = format!(
         "child session could not be created ({:?}): {error}",
         error.kind()
     );
     if nothing_created && ChildReopenErrorKind::of(error).settles_never_created() {
-        return SpawnBindError::Refused(message);
+        return SpawnBindError::Refused(
+            crate::CliFailure::new(message)
+                .with_optional_remedy(crate::storage_pressure::sessions_remedy(error).as_ref())
+                .host_failure(),
+        );
     }
     SpawnBindError::RecoveryRequired {
         stage: ChildStartupStage::Creating,
@@ -667,7 +688,7 @@ pub(in crate::agent) async fn child_session_runtime_binding(
     // admission gates compare the same identity.
     created_output_bound: Option<OutputBoundDisposition>,
     startup_deadline: Option<tokio::time::Instant>,
-) -> Result<SessionRuntimeBinding, String> {
+) -> crate::CliResult<SessionRuntimeBinding> {
     // A new child uses current construction inputs, never a parent's reopen pin.
     let mut scoped_parent = parent.clone();
     if !opening_durable_session {
@@ -701,7 +722,7 @@ pub(in crate::agent) async fn child_session_runtime_binding(
 
 pub(super) async fn production_child_runtime(
     request: super::runtime_factory::ChildRuntimeRequest<'_>,
-) -> Result<SessionRuntimeBinding, String> {
+) -> crate::CliResult<SessionRuntimeBinding> {
     let super::runtime_factory::ChildRuntimeRequest {
         parent,
         agent_id,
@@ -752,7 +773,6 @@ pub(super) async fn production_child_runtime(
         crate::topology_runtime::TopologyHubAttach::LookupOnly,
         &mut None,
     )
-    .map_err(|error| error.message().to_owned())
 }
 
 #[allow(
@@ -769,7 +789,7 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
     effort: Option<&str>,
     opening_durable_session: bool,
     fence: SessionToolFence,
-) -> Result<SessionRuntimeBinding, String> {
+) -> crate::CliResult<SessionRuntimeBinding> {
     let tree_id = spawn_parent_tree_id(parent);
     let account = account.ok_or_else(|| "API child account is missing".to_owned())?;
     let model = tuple_id
@@ -798,8 +818,7 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
         },
         &child_path,
     );
-    let selected_effort =
-        crate::runtime::effort_from_record(effort).map_err(|error| error.message().to_owned())?;
+    let selected_effort = crate::runtime::effort_from_record(effort)?;
     let child = ApiTopologyParent {
         created_output_bound,
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
@@ -834,7 +853,6 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
     ))
     .await
     .map(|prepared| prepared.runtime)
-    .map_err(|error| error.message().to_owned())
 }
 
 /// A child's optional tools: its own frozen card's list, never its
@@ -939,7 +957,7 @@ pub async fn spawned_child_spec(
     tuple_id: Option<&str>,
     effort: Option<&str>,
     startup_deadline: Option<tokio::time::Instant>,
-) -> Result<ProductAgentSpec, String> {
+) -> crate::CliResult<ProductAgentSpec> {
     let (tree_id, workspace_root_base, state_roots, parent_composition) = match parent {
         SpawnParent::Native(spec) => (
             spec.topology_tree_id
@@ -1027,8 +1045,7 @@ pub async fn spawned_child_spec(
         native_tool_mode,
         child_composition,
         processing_tier,
-    )
-    .map_err(|error| error.message().to_owned())?;
+    )?;
     let limits = product_subscription_request_limits()
         .map_err(|_| "spawn child subscription gate is invalid".to_string())?;
     let resolved = Arc::new(
@@ -1047,9 +1064,9 @@ pub async fn spawned_child_spec(
     if resolved.native_tool_mode() != native_tool_mode {
         let row_mode = child_tool_mode_label(resolved.native_tool_mode());
         let enrolled_mode = child_tool_mode_label(native_tool_mode);
-        return Err(format!(
+        return Err(crate::CliFailure::new(format!(
             "model {target_model}: authenticated row tool mode {row_mode} differs from its enrolled presentation {enrolled_mode}; choose another model",
-        ));
+        )));
     }
 
     Ok(ProductAgentSpec {

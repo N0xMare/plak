@@ -60,10 +60,6 @@ async fn setup(config: OAuthConfig) -> TestResult<Setup> {
 impl Setup {
     fn settings(&self) -> McpOAuthSettings {
         McpOAuthSettings::new(self.home.path().join("remote").join("credential.json"))
-            .with_login_remedy(Arc::new(|scope| match scope {
-                Some(scope) => format!("run login remote --scope '{scope}'"),
-                None => "run login remote".to_owned(),
-            }))
     }
 
     /// Token requests of the refresh grant.
@@ -959,11 +955,11 @@ async fn a_start_renews_a_rejected_token_and_retries_once() -> TestResult {
         .await
         .err()
         .ok_or("a revoked grant started")?;
-    // An authorization error: its text carries the one login remedy.
+    // Authorization preserves the exact repair target separately from text.
     assert_eq!(refused.kind(), McpErrorKind::Authorization);
     assert!(
         refused.message().contains("invalid_grant")
-            && refused.message().ends_with("; run login remote"),
+            && refused.message().ends_with("; authentication is required"),
         "{refused}"
     );
     assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
@@ -972,7 +968,10 @@ async fn a_start_renews_a_rejected_token_and_retries_once() -> TestResult {
         .await
         .err()
         .ok_or("retired login started")?;
-    assert_eq!(next.message().matches("run login remote").count(), 1);
+    assert_eq!(
+        next.login_requirement().map(|login| login.server.as_str()),
+        Some("remote")
+    );
     assert!(next.message().contains("not logged in"));
     Ok(())
 }
@@ -988,10 +987,15 @@ async fn insufficient_scope_names_the_step_up_login_and_nothing_runs() -> TestRe
     setup.gate.require_scope(Some("mcp:admin"));
     let refused = echo(&registry, &workspace).await?;
     assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
+    let payload: serde_json::Value = serde_json::from_str(&refused.joined_text())?;
+    assert_eq!(payload["mcp_authorization"]["server"], "remote");
     assert_eq!(
-        refused.joined_text(),
-        "mcp server remote needs scope \"mcp:tools offline_access mcp:admin\"; \
-         run login remote --scope 'mcp:tools offline_access mcp:admin'; the call did not run"
+        payload["mcp_authorization"]["scope"],
+        serde_json::json!("mcp:tools offline_access mcp:admin")
+    );
+    assert_eq!(
+        payload["mcp_authorization"]["message"],
+        "mcp server remote needs additional scope; authentication is required; the call did not run"
     );
     assert_eq!(setup.calls.calls(), Vec::<String>::new());
     assert!(setup.refreshes().is_empty(), "a step-up is not a refresh");
@@ -1049,7 +1053,7 @@ async fn a_start_refuses_without_a_login_for_this_server() -> TestResult {
     assert_eq!(refused.kind(), McpErrorKind::Authorization);
     assert_eq!(
         refused.message(),
-        "mcp server remote is not logged in; run login remote"
+        "mcp server remote is not logged in; authentication is required"
     );
     assert!(
         setup.fixture.observed().requests().is_empty(),
@@ -1111,7 +1115,9 @@ async fn hostile_scopes_never_reach_a_step_up_command() -> TestResult {
             refused.joined_text()
         );
         assert!(!refused.joined_text().contains("--scope"));
-        assert_eq!(refused.joined_text().matches("run login remote").count(), 1);
+        let payload: serde_json::Value = serde_json::from_str(&refused.joined_text())?;
+        assert_eq!(payload["mcp_authorization"]["server"], "remote");
+        assert_eq!(payload["mcp_authorization"]["scope"], serde_json::json!(""));
         assert_eq!(setup.calls.calls(), Vec::<String>::new());
         pool.shutdown().await;
     }
@@ -1310,12 +1316,16 @@ async fn invalid_grant_retires_the_login_and_each_call_has_one_remedy() -> TestR
     let refused = echo(&registry, &workspace).await?;
     assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
     assert!(refused.joined_text().contains("invalid_grant"));
-    assert_eq!(refused.joined_text().matches("run login remote").count(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&refused.joined_text())?;
+    assert_eq!(payload["mcp_authorization"]["server"], "remote");
+    assert_eq!(payload["mcp_authorization"]["scope"], serde_json::json!(""));
     assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
     let next = echo(&registry, &workspace).await?;
     assert_eq!(next.kind(), ToolOutcomeKind::Failure);
     assert!(next.joined_text().contains("not logged in"));
-    assert_eq!(next.joined_text().matches("run login remote").count(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&next.joined_text())?;
+    assert_eq!(payload["mcp_authorization"]["server"], "remote");
+    assert_eq!(payload["mcp_authorization"]["scope"], serde_json::json!(""));
     assert_eq!(setup.refreshes().len(), 1);
     assert_eq!(setup.calls.calls(), Vec::<String>::new());
     pool.shutdown().await;

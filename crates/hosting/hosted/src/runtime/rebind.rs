@@ -57,10 +57,10 @@ fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
         config.session.context_counters(),
     ) {
         emit_unavailable_context(events);
-        let _ = events.notice(TranscriptRow::error(
-            NoticeScope::Settings,
-            error.message().to_owned(),
-        ));
+        let _ = events.notice(
+            TranscriptRow::error(NoticeScope::Settings, error.message().to_owned())
+                .with_optional_remedy(error.remedy()),
+        );
     }
 }
 
@@ -290,8 +290,7 @@ fn frozen_tools_rebind_refusal<P: plakous_host_protocol::ProtocolExtension>(
     };
     let Some(route) = route else {
         return Some(format!(
-            "this session keeps its tools across a model change, and {account} serves none of \
-             them; remedy: /clear, or start a new session on that model"
+            "this session keeps its tools across a model change, and {account} serves none of them; start a fresh conversation on that model"
         ));
     };
     let options = match crate::frozen_tables::retrieval_options(&tools.tool_sections) {
@@ -342,7 +341,7 @@ pub(super) fn tree_epoch_blocks_rebind(rows: &dyn TopologyRows, session: &Sessio
 pub(super) fn tree_epoch_rebind_refusal(
     rows: &dyn TopologyRows,
     session: &SessionRecord,
-) -> Option<&'static str> {
+) -> Option<crate::agent_tree::EpochRebindRefusal> {
     topology_state::epoch_rebind_refusal(rows, &durable_tree_id(rows, session))
 }
 
@@ -475,7 +474,8 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         return Ok(Rebound::Unchanged);
     }
     if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {
-        return Err(CliFailure::new(refusal));
+        return Err(CliFailure::new(refusal)
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {}));
     }
     let (operation, target_product_id, own_tree, topology_tree_id) =
         stage_profile_fork(config, opened, &account, model, composition, roster)?;
@@ -563,7 +563,11 @@ fn refuse_unready_rebind<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
 ) -> CliResult<()> {
     if let Some(reason) = tree_epoch_rebind_refusal(&config.topology_rows(), &config.session) {
-        return Err(CliFailure::new(reason));
+        return Err(CliFailure::new(reason.message()).with_optional_remedy(
+            (reason == crate::agent_tree::EpochRebindRefusal::RestoredPaused)
+                .then_some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {})
+                .as_ref(),
+        ));
     }
     if !session_rebind_boundary_ready(&config.session) {
         return Err(CliFailure::new(

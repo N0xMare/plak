@@ -136,8 +136,7 @@ impl ProductAgentTree {
         }
         let message = bounded_text(
             &format!(
-                "operator abandoned {agent_id}/{} via session delete --abandon-children; \
-             recovery will not run{}",
+                "operator abandoned {agent_id}/{} for session deletion; recovery will not run{}",
                 attempt.attempt_id,
                 attempt
                     .failure

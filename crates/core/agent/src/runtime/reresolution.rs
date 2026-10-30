@@ -52,6 +52,24 @@ impl fmt::Debug for ReresolvedModel {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModelReresolutionError {
     message: String,
+    refusal: Option<ModelReresolutionRefusal>,
+}
+
+/// Provider-neutral cause retained through a live re-resolution refusal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ModelReresolutionRefusal {
+    /// Fresh authority changed the frozen binding.
+    BindingChanged,
+    /// The host's selected account has no usable credential.
+    CredentialUnavailable {
+        /// Host account identifier, not a provider implementation name.
+        account: String,
+    },
+    /// Fresh resolution failed for the same selected account.
+    ResolutionFailed {
+        /// Host account identifier.
+        account: String,
+    },
 }
 
 impl ModelReresolutionError {
@@ -60,6 +78,7 @@ impl ModelReresolutionError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            refusal: None,
         }
     }
 
@@ -67,6 +86,19 @@ impl ModelReresolutionError {
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Retain the host's typed cause independently of its diagnostic.
+    #[must_use]
+    pub fn with_refusal(mut self, refusal: ModelReresolutionRefusal) -> Self {
+        self.refusal = Some(refusal);
+        self
+    }
+
+    /// The host's typed refusal when one was supplied.
+    #[must_use]
+    pub fn refusal(&self) -> Option<&ModelReresolutionRefusal> {
+        self.refusal.as_ref()
     }
 }
 

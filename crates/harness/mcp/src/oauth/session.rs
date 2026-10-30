@@ -25,13 +25,13 @@ use plakous_http::{ExchangeControl, SensitiveBytes, sensitive_header_value};
 use plakous_tools::McpServerName;
 use zeroize::Zeroize as _;
 
-use super::McpOAuthSettings;
 use super::credential::{
     LoginExpectation, StoredLogin, TokenEndpointAuth, open_store, read_ready, status, store_failed,
     unix_now,
 };
 use super::exchange::{ClientAuth, EXCHANGE_TIMEOUT, OAuthHttp};
 use super::login::{authorization_server, client_secret};
+use super::{AuthorizationFailure, McpLoginRequirement, McpOAuthSettings};
 use crate::McpOAuthStatus;
 use crate::surface::error::{McpError, McpErrorKind};
 
@@ -76,7 +76,7 @@ impl OAuthSession {
     ///
     /// Returns operator text naming the login remedy when there is no usable
     /// login or it could not be renewed; nothing was sent.
-    pub(crate) async fn bearer(&self) -> Result<Bearer, String> {
+    pub(crate) async fn bearer(&self) -> Result<Bearer, AuthorizationFailure> {
         let store = self.store()?;
         let due = {
             let (_, stored) = self.ready(&store)?;
@@ -110,7 +110,7 @@ impl OAuthSession {
     pub(crate) async fn rejected(
         self: &Arc<Self>,
         generation: CredentialGeneration,
-    ) -> (String, bool) {
+    ) -> (AuthorizationFailure, bool) {
         let session = Arc::clone(self);
         let renewal = tokio::spawn(async move {
             let store = session.store()?;
@@ -129,10 +129,13 @@ impl OAuthSession {
         .await;
         match renewal {
             Ok(Ok(())) => (
-                format!(
-                    "mcp server {}: not executed: credentials were rejected and have been renewed; call again",
-                    self.server
-                ),
+                AuthorizationFailure {
+                    message: format!(
+                        "mcp server {}: not executed: credentials were rejected and have been renewed; call again",
+                        self.server
+                    ),
+                    login: None,
+                },
                 true,
             ),
             Ok(Err(text)) => (text, false),
@@ -148,7 +151,7 @@ impl OAuthSession {
 
     /// After a 403: with `insufficient_scope`, the step-up login with the
     /// union of the stored requested scope and the challenged one.
-    pub(crate) fn forbidden(&self, challenge: Option<&BearerChallenge>) -> String {
+    pub(crate) fn forbidden(&self, challenge: Option<&BearerChallenge>) -> AuthorizationFailure {
         let Some(challenge) =
             challenge.filter(|challenge| challenge.error.as_deref() == Some("insufficient_scope"))
         else {
@@ -169,16 +172,15 @@ impl OAuthSession {
         }
         let scope = union_scopes([stored.as_deref(), challenged])
             .filter(|scope| scope.len() <= super::login::MAX_SCOPE_BYTES);
-        let needed = scope.as_deref().map_or_else(
-            || "needs more scope".to_owned(),
-            |scope| format!("needs scope \"{scope}\""),
-        );
-        self.refusal(&needed, scope.as_deref())
+        self.refusal("needs additional scope", scope.as_deref())
     }
 
     /// A successful response proves this generation is usable. Clear its
     /// rejection marker once, fenced against concurrent refresh or logout.
-    pub(crate) async fn accepted(&self, generation: CredentialGeneration) -> Result<(), String> {
+    pub(crate) async fn accepted(
+        &self,
+        generation: CredentialGeneration,
+    ) -> Result<(), AuthorizationFailure> {
         let _flight = self.refresh.lock().await;
         let store = self.store()?;
         let (fence, mut stored) = self.ready(&store)?;
@@ -186,8 +188,12 @@ impl OAuthSession {
             return Ok(());
         }
         stored.renewed_after_rejection = false;
-        let next = generation.next().map_err(|error| error.to_string())?;
-        let record = stored.record(next).map_err(|error| error.to_string())?;
+        let next = generation
+            .next()
+            .map_err(|error| self.refusal(&error.to_string(), None))?;
+        let record = stored
+            .record(next)
+            .map_err(|error| self.refusal(&error.to_string(), None))?;
         match store.replace(generation, &record) {
             Ok(()) | Err(PrivateStoreError::StaleWriter) => Ok(()),
             Err(error) => {
@@ -196,7 +202,7 @@ impl OAuthSession {
         }
     }
 
-    fn store(&self) -> Result<PrivateCredentialStore, String> {
+    fn store(&self) -> Result<PrivateCredentialStore, AuthorizationFailure> {
         match open_store(self.settings.store()) {
             Ok(Some(store)) => Ok(store),
             Ok(None) => Err(self.refusal("is not logged in", None)),
@@ -209,7 +215,7 @@ impl OAuthSession {
     fn ready(
         &self,
         store: &PrivateCredentialStore,
-    ) -> Result<(CredentialFence, StoredLogin), String> {
+    ) -> Result<(CredentialFence, StoredLogin), AuthorizationFailure> {
         store
             .load()
             .ok()
@@ -224,7 +230,7 @@ impl OAuthSession {
             .ok_or_else(|| self.unusable())
     }
 
-    fn unusable(&self) -> String {
+    fn unusable(&self) -> AuthorizationFailure {
         let reason = match status(&self.settings, &self.resource) {
             Ok(McpOAuthStatus::NotLoggedIn) => "is not logged in",
             Ok(McpOAuthStatus::Refreshing) => "is renewing its login in another process",
@@ -236,12 +242,24 @@ impl OAuthSession {
         self.refusal(reason, None)
     }
 
-    fn refusal(&self, reason: &str, scope: Option<&str>) -> String {
-        format!(
-            "mcp server {} {reason}; {}",
-            self.server,
-            self.settings.login_remedy(scope)
-        )
+    fn refusal(&self, reason: &str, scope: Option<&str>) -> AuthorizationFailure {
+        let scopes = scope
+            .filter(|s| {
+                s.len() <= super::login::MAX_SCOPE_BYTES
+                    && plakous_auth::oauth_workflow::valid_scope_list(s)
+            })
+            .map(|s| s.split_ascii_whitespace().map(str::to_owned).collect())
+            .unwrap_or_default();
+        AuthorizationFailure {
+            message: format!(
+                "mcp server {} {reason}; authentication is required",
+                self.server
+            ),
+            login: Some(McpLoginRequirement {
+                server: self.server.to_string(),
+                scopes,
+            }),
+        }
     }
 
     fn expectation(&self) -> LoginExpectation<'_> {

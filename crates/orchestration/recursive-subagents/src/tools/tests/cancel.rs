@@ -484,7 +484,7 @@ async fn fail_closed_session_does_not_project_unsaved_materialization() {
         observer: Some(Arc::clone(&observer)),
         cell_budget: test_budget(),
     };
-    let _ = tool.fail_closed_session(&agent_id, "materialization failed".into());
+    let _ = tool.fail_closed_session(&agent_id, "materialization failed");
     driver
         .read(|tree| {
             assert_eq!(

@@ -194,8 +194,8 @@ impl ProductAgentTree {
     /// `ResumeTree` is the name of a request type and `restored_paused`
     /// is a wire value. The refusals state the condition and the operator's own
     /// way out of it instead.
-    pub const TREE_PAUSED_REFUSAL: &str = "the agent tree is paused after an interrupt; open /tree and press r to \
-         resume the tree, or relaunch with `plak run --resume-tree`";
+    pub const TREE_PAUSED_REFUSAL: &str =
+        "the agent tree is paused after an interrupt; explicitly resume the tree before dispatch";
 
     /// Refusal shown after stop-all until the next admitted root prompt.
     pub const TREE_STOPPED_REFUSAL: &str = "delegation is stopped for this turn; send a new prompt after all agents \
@@ -203,7 +203,7 @@ impl ProductAgentTree {
 
     /// Refusal shown when a roster apply arrives on a paused tree.
     pub const TREE_EPOCH_REBIND_PAUSED: &str =
-        "cannot apply a roster while the agent tree is paused · /tree then r resumes it";
+        "cannot apply a roster while the agent tree is paused; explicitly resume the tree first";
 
     /// Refusal shown when a rebind arrives while a spawn is mid-mint.
     pub const TREE_EPOCH_REBIND_PENDING_SPAWNS: &str =

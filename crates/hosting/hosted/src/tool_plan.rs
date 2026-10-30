@@ -1011,8 +1011,7 @@ impl ToolPlanRefusal {
             }
         };
         format!(
-            "this session keeps its tools across a model change, and {reason}; remedy: /clear, \
-             or start a new session on that model"
+            "this session keeps its tools across a model change, and {reason}; start a fresh conversation on that model"
         )
     }
 }

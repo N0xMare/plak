@@ -370,7 +370,7 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
         use plakous_hosted::agent_tree_tools::{MailDeliveryAck, MailDeliveryFailure};
         Box::pin(async move {
             let failure = |error: plakous_hosted::agent_tree_protocol::TopologyError| {
-                MailDeliveryFailure::RecoveryRequired(error.message)
+                MailDeliveryFailure::RecoveryRequired(error.message.into())
             };
             // Finish the scripted attempt before returning the root's send.
             // No child commit can then race the root's next provider step.
@@ -1139,6 +1139,7 @@ impl OfflineSelection {
             continuation: (face == OfflineFace::Attached)
                 .then(crate::environment::take_reload_continuation)
                 .flatten(),
+            event_renderer: None,
         })
     }
 }

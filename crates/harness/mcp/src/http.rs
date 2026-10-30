@@ -285,9 +285,10 @@ impl McpHttpEndpoint {
         }
         let resolved = match &self.secrets {
             Some(resolve) => resolve().map_err(|error| {
-                McpError::new(
+                McpError::from_resolver(
                     McpErrorKind::Definition,
                     format!("mcp server {server} secrets could not be resolved: {error}"),
+                    error,
                 )
             })?,
             None => Vec::new(),
@@ -421,7 +422,10 @@ pub(crate) enum McpHttpError {
     Encode,
     /// The OAuth credentials were missing or refused; the text names the
     /// remedy, and `renewed` says a 401 renewed them.
-    Authorization { text: String, renewed: bool },
+    Authorization {
+        text: crate::surface::oauth::AuthorizationFailure,
+        renewed: bool,
+    },
 }
 
 impl fmt::Display for McpHttpError {
@@ -432,7 +436,7 @@ impl fmt::Display for McpHttpError {
             Self::Status(status) => write!(formatter, "server answered HTTP {}", status.as_u16()),
             Self::Sse(error) => error.fmt(formatter),
             Self::Encode => formatter.write_str("the mcp message could not be encoded"),
-            Self::Authorization { text, .. } => formatter.write_str(text),
+            Self::Authorization { text, .. } => text.fmt(formatter),
         }
     }
 }
@@ -915,7 +919,10 @@ pub(crate) enum HttpRefusal {
     Credentials(StatusCode),
     /// OAuth credentials were missing or refused; nothing ran. `renewed`
     /// says a 401 renewed them, so the same request would now be admitted.
-    Authorization { text: String, renewed: bool },
+    Authorization {
+        text: crate::surface::oauth::AuthorizationFailure,
+        renewed: bool,
+    },
     /// The request never reached the server.
     NotSent,
     /// Any other HTTP failure: the call may have reached the server.

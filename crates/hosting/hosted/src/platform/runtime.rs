@@ -176,14 +176,12 @@ pub(crate) async fn construct_platform_runtime_with(
     .await;
     let row = catalog
         .admit(spec.literal_model, Some(effort))
-        .map_err(|error| CliFailure::new(error.to_string()))?
+        .map_err(CliFailure::from)?
         .clone();
     // An exact reopen keeps the window number the session was created with;
     // a new session takes the configured selection.
     let window = match &admission.created_evidence {
-        Some(stored) => row
-            .reopen_window(provider, stored)
-            .map_err(CliFailure::new)?,
+        Some(stored) => row.reopen_window(provider, stored)?,
         None => row.window(admission.window),
     };
     let behavior = platform_behavior(

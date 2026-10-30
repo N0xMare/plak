@@ -757,17 +757,17 @@ fn local_refusals_are_never_called_a_transport_failure() {
         (
             SubscriptionUsageCredentialState::RefreshRequired,
             "credential needs a token refresh",
-            "the next turn refreshes it, or run `plak refresh grok`",
+            "the next turn refreshes it, or refresh explicitly",
         ),
         (
             SubscriptionUsageCredentialState::Quarantined,
             "credential is quarantined",
-            "plak login grok",
+            "replace the login",
         ),
         (
             SubscriptionUsageCredentialState::Revoked,
             "credential is revoked",
-            "plak login grok",
+            "replace the login",
         ),
     ] {
         let text = unavailable_reason(SubscriptionUsageUnavailable::CredentialState(state), "grok");
@@ -782,7 +782,7 @@ fn local_refusals_are_never_called_a_transport_failure() {
         "grok",
     );
     assert!(
-        grok_quarantine.contains("plak refresh grok"),
+        grok_quarantine.contains("refresh explicitly"),
         "{grok_quarantine}"
     );
     let codex_quarantine = unavailable_reason(
@@ -792,7 +792,7 @@ fn local_refusals_are_never_called_a_transport_failure() {
         "codex",
     );
     assert!(
-        codex_quarantine.contains("run `plak login codex` to recover"),
+        codex_quarantine.contains("replace the login to recover"),
         "{codex_quarantine}"
     );
     assert!(

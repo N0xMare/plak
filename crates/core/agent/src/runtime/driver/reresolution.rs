@@ -33,6 +33,7 @@ impl Driver {
             fresh = operation => fresh,
         };
         let checked_at = self.clock.now();
+        let mut refusal = None;
         let admitted = match fresh {
             Ok(fresh) => self
                 .model_rebind
@@ -44,7 +45,11 @@ impl Driver {
                         "{reason}; the model's admitted evidence window closed and only an explicit rebind can continue"
                     )
                 }),
-            Err(error) => Err(error.message().to_owned()),
+            Err(error) => {
+                let message = error.message().to_owned();
+                refusal = Some(error);
+                Err(message)
+            },
         };
         self.emit_telemetry(
             self.telemetry_context.with_turn(command.turn_id),
@@ -57,6 +62,7 @@ impl Driver {
                 AgentErrorKind::ExternalBindingUnavailable,
                 format!("model re-resolution refused: {message}"),
             )
+            .with_reresolution_error(refusal)
         })?;
         if let Some(rebind) = self.model_rebind.as_ref() {
             rebind.reresolver.accepted(rebind.admitted_until);

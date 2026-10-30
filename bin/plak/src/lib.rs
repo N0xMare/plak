@@ -60,13 +60,16 @@ mod dispatch;
 #[cfg(feature = "tui")]
 mod environment;
 mod host_status_text;
+mod log_text;
 mod lookup_status;
 mod notice_text;
+mod refusal_text;
 mod review_expiry;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
 pub(crate) mod terminal_application;
 pub(crate) mod tui_preferences;
+mod usage_remedy;
 /// Plak's own storage home: where the XDG layout puts each file, and the
 /// credentials kept under it.
 #[doc(hidden)]
@@ -266,9 +269,8 @@ pub fn run_from_args(arguments: impl IntoIterator<Item = OsString>) -> ExitCode 
         Err(failure) => {
             eprintln!(
                 "plak: {}",
-                cli_output::safe_terminal_block(&notice_text::with_remedy(
-                    failure.message(),
-                    failure.remedy(),
+                cli_output::safe_terminal_block(&refusal_text::failure_text(
+                    &failure,
                     notice_text::RemedyContext {
                         frontend: notice_text::Frontend::Run,
                         session_id: None

@@ -50,6 +50,9 @@ pub struct CliFailure {
     source: Option<Box<LookupFailure>>,
     refusal: Option<StoreRefusal>,
     remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
+    attach_failure: AttachFailure,
+    advice: Option<Box<plakous_host_protocol::refusal::RefusalAdvice>>,
+    origin: Option<Box<plakous_host_protocol::status::HostFailureOrigin>>,
 }
 
 /// A semantic- or product-store refusal that the same call may clear when
@@ -158,6 +161,9 @@ impl From<crate::session_store::RecordStoreError> for CliFailure {
         let refusal = error.refusal();
         let mut cli = Self::new(String::from(error));
         cli.refusal = refusal;
+        if refusal == Some(StoreRefusal::StorageFull) {
+            cli.remedy = Some(plakous_host_protocol::notice_remedy::NoticeRemedy::FreeDiskSpace {});
+        }
         cli
     }
 }
@@ -183,9 +189,36 @@ impl std::fmt::Display for CliFailure {
 impl From<plakous::sessions::AgentSessionsError> for CliFailure {
     fn from(error: plakous::sessions::AgentSessionsError) -> Self {
         let mut failure = Self::new(collapse_repeated_causes(&error.to_string()));
+        failure.remedy = crate::storage_pressure::sessions_remedy(&error);
+        failure.advice = incompatible_session_advice(&error).map(Box::new);
+        failure.attach_failure = sessions_attach_failure(&error);
         failure.source = Some(Box::new(LookupFailure::Recovery(error)));
         failure
     }
+}
+
+/// An open refused for a reconstructed frozen binding input is a binding
+/// change; a missing login or any other refusal never is.
+pub(crate) fn sessions_attach_failure(
+    error: &plakous::sessions::AgentSessionsError,
+) -> AttachFailure {
+    if error.binding_change().is_some() {
+        AttachFailure::BindingChanged
+    } else {
+        AttachFailure::default()
+    }
+}
+
+pub(crate) fn incompatible_session_advice(
+    error: &plakous::sessions::AgentSessionsError,
+) -> Option<plakous_host_protocol::refusal::RefusalAdvice> {
+    error.incompatible_session().map(|id| {
+        plakous_host_protocol::refusal::RefusalAdvice::ExportSession {
+            session_id: plakous_host_protocol::notice_remedy::ProductSessionId::from_uuid(
+                id.as_uuid(),
+            ),
+        }
+    })
 }
 
 impl From<crate::capabilities::CapabilityUnavailable> for CliFailure {
@@ -243,6 +276,9 @@ impl CliFailure {
             source: None,
             refusal: None,
             remedy: None,
+            attach_failure: AttachFailure::default(),
+            advice: None,
+            origin: None,
         }
     }
 
@@ -305,6 +341,16 @@ impl CliFailure {
         &self.message
     }
 
+    /// Attach transient typed refusal facts without rendering frontend text.
+    #[must_use]
+    pub fn with_optional_advice(
+        mut self,
+        advice: Option<plakous_host_protocol::refusal::RefusalAdvice>,
+    ) -> Self {
+        self.advice = advice.map(Box::new);
+        self
+    }
+
     /// Preserve a semantic repair independently of diagnostic context.
     #[must_use]
     pub fn with_remedy(
@@ -321,13 +367,53 @@ impl CliFailure {
         self.remedy.as_ref()
     }
 
+    /// Preserve the structured action-refusal facts the product needs to render help.
+    #[must_use]
+    pub fn with_advice(mut self, advice: plakous_host_protocol::refusal::RefusalAdvice) -> Self {
+        self.advice = Some(Box::new(advice));
+        self
+    }
+
+    /// Structured action-refusal facts, independent of diagnostic prose.
+    #[must_use]
+    pub fn advice(&self) -> Option<&plakous_host_protocol::refusal::RefusalAdvice> {
+        self.advice.as_deref()
+    }
+
+    /// Retain an optional originating semantic remedy when composing a failure.
+    #[must_use]
+    pub fn with_optional_remedy(
+        mut self,
+        remedy: Option<&plakous_host_protocol::notice_remedy::NoticeRemedy>,
+    ) -> Self {
+        self.remedy = remedy.cloned();
+        self
+    }
+
     /// Bounded typed startup/status failure, without rendering frontend instructions.
     #[must_use]
     pub fn host_failure(&self) -> HostFailure {
         HostFailure {
             diagnostic: DiagnosticText::new(self.message.clone()),
             remedy: self.remedy.clone(),
+            cause: self.attach_failure,
+            advice: self.advice.clone(),
+            origin: self.origin.clone(),
         }
+    }
+
+    /// Retain the attach condition at its typed originating source.
+    #[must_use]
+    pub const fn with_attach_failure(mut self, cause: AttachFailure) -> Self {
+        self.attach_failure = cause;
+        self
+    }
+
+    /// Preserve binding source facts for frontend status projection.
+    #[must_use]
+    pub fn with_origin(mut self, origin: plakous_host_protocol::status::HostFailureOrigin) -> Self {
+        self.origin = Some(Box::new(origin));
+        self
     }
 
     /// Typed shutdown failures, including canonical release and cleanup.
@@ -450,4 +536,4 @@ pub(crate) mod read_faults {
 #[cfg(test)]
 mod tests;
 
-use plakous_host_protocol::status::{DiagnosticText, HostFailure};
+use plakous_host_protocol::status::{AttachFailure, DiagnosticText, HostFailure};

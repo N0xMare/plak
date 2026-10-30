@@ -325,6 +325,7 @@ fn root_transient_failure_announces_automatic_continue() {
             }),
             error: "connection temporarily unavailable".into(),
             exchange: crate::agent::TerminalExchange::Closed,
+            remedy: None,
         }),
         Instant::now(),
         publication::TerminalErrorPresentation::Events,

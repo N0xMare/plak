@@ -81,7 +81,7 @@ pub(super) use tools::{spawn_roster_composition, spawn_roster_processing_tier};
 #[cfg(test)]
 pub(crate) use topology::topology_extensions_if_enabled;
 pub use topology::{
-    ApiTopologyParent, ProductAgentSpec, RESTORED_PAUSED_RESUME_HINT, SpawnParent,
+    ApiTopologyParent, ProductAgentSpec, RESTORED_PAUSED_REFUSAL, SpawnParent,
     TopologyInvokeReceipt, api_topology_parent, invoke_topology_tool_on_hub,
     rejoin_inflight_after_resume, topology_tree_is_restored_paused,
 };

@@ -1880,9 +1880,12 @@ async fn recovery_pass_publication_refusal_names_explicit_retry() {
         TopologyErrorCode::RecoveryStorageUnavailable
     );
     let note = report.note().unwrap();
-    assert!(note.contains("recover_agent retries"), "{note}");
     assert!(
-        note.contains("/recover only selects unresolved child sessions"),
+        note.contains("retry recovery for each obligation"),
+        "{note}"
+    );
+    assert!(
+        note.contains("root recovery only selects unresolved child sessions"),
         "{note}"
     );
     assert!(
@@ -2537,7 +2540,10 @@ async fn a_create_refused_before_it_wrote_anything_is_a_definite_spawn_refusal()
         Ok(_) => panic!("a construction-refused binding created a session"),
     };
     assert!(
-        message.contains("child session could not be created (Revalidation)"),
+        message
+            .diagnostic
+            .as_str()
+            .contains("child session could not be created (Revalidation)"),
         "{message}"
     );
     assert_eq!(
@@ -3009,8 +3015,10 @@ async fn publication_cut_reconstructs_child_before_binding_and_new_children_use_
         .expect_err("missing recorded evaluator must refuse reopen");
     let refusal = crate::agent::CodingSessionOpenFailure::from(error);
     let message = refusal.failure.message();
-    assert!(message.contains(&format!("plak session export {}", created.session_id())));
-    assert!(message.contains("plak session import <file>"));
+    assert!(message.contains("export using the writing build"));
+    assert!(
+        matches!(refusal.failure.advice(), Some(plakous_host_protocol::refusal::RefusalAdvice::ExportSession {session_id}) if session_id.to_string() == created.session_id().to_string())
+    );
     assert!(!message.contains("<id>"));
     assert_eq!(fixture.dispatches(), 0);
 }
@@ -3105,6 +3113,8 @@ fn reopen_refusals_map_to_exact_codes() {
         ),
     ] {
         let error = reopen_refusal(ChildReopenError {
+            advice: None,
+            remedy: None,
             kind,
             message: "refused".into(),
         });

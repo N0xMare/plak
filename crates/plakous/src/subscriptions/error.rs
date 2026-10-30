@@ -159,10 +159,10 @@ impl NativeSubscriptionError {
             Self::NotCompiled(_) => "native subscription route is not included in this build",
             Self::UnsafeStorage => "native subscription storage is unsafe",
             Self::CredentialProfileChanged => {
-                "stored native login was written by an older build or another profile; run `plak login <account>`, which replaces it"
+                "stored native login was written by an older build or another profile; replace the login"
             }
             Self::CredentialWrittenByNewerBuild => {
-                "stored native login was written by a newer plak build; use that build, or replace it with `plak login <account>` (that build must then log in again)"
+                "stored native login was written by a newer build; use that build or replace the login; the writing build must then log in again"
             }
             Self::UnsupportedPlatform => "native subscription storage is unsupported",
             Self::AcceptanceRequired => "exact native compatibility acceptance is required",

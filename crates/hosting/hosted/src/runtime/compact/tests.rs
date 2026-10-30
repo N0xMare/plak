@@ -532,8 +532,8 @@ fn a_quiet_provider_does_not_dump_the_responses_deadline_into_the_transcript() {
         "Responses observation dump must not reach the transcript: {dumped}"
     );
     assert!(
-        dumped.contains("/compact"),
-        "the note must name the retry: {dumped}"
+        dumped.contains("Another explicit compaction may retry"),
+        "the neutral note retains the retry fact: {dumped}"
     );
     assert_eq!(
         compact_operator_note(COMPACT_FAILED_DETAIL, Some("model refused")),

@@ -32,6 +32,7 @@ use plakous::application::ApplicationExecutor;
 use plakous::sessions::{
     AgentSessionsErrorKind, CompactReason, CompactSessionOutcome, ContextQuery, SessionOperationId,
 };
+use plakous_host_protocol::notice_remedy::NoticeRemedy;
 use plakous_host_protocol::status::HostPhase;
 use std::time::Instant;
 
@@ -44,7 +45,9 @@ use views::{
     compact_committed_detail, compact_operator_note, emit_compact_meter,
     manual_compact_operator_text, publish_compact_row, refresh_compact_views, unanchored_occupancy,
 };
-pub(super) use views::{context_capacity_recovery_guidance, observe_compact};
+pub(super) use views::{
+    context_capacity_recovery_guidance, context_capacity_recovery_remedy, observe_compact,
+};
 
 /// What one host compaction pass did to the conversation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -83,6 +86,7 @@ struct CompactAnswer {
     outcome: &'static str,
     size_subject: Option<String>,
     unadmitted: bool,
+    remedy: Option<NoticeRemedy>,
 }
 
 /// One compact pass, for an operator `/compact`, a scheduled pass or a
@@ -191,7 +195,14 @@ fn compact_source<P: plakous_host_protocol::ProtocolExtension>(
         || config.session.queue_commands.has_pending()
     {
         let detail = "compact requires a safe boundary with no unresolved product work";
-        log_compact_finished_with_detail(log, config, compact_started_at, "failed", Some(detail));
+        log_compact_finished_with_detail(
+            log,
+            config,
+            compact_started_at,
+            "failed",
+            Some(detail),
+            false,
+        );
         return Err(CliFailure::new(detail));
     }
     if watch.observe_now() {
@@ -236,7 +247,14 @@ fn compact_source<P: plakous_host_protocol::ProtocolExtension>(
     let source = opened.locator();
     if config.session.plakous_locator != Some(source) {
         let detail = "compact source does not match the exact durable product binding";
-        log_compact_finished_with_detail(log, config, compact_started_at, "failed", Some(detail));
+        log_compact_finished_with_detail(
+            log,
+            config,
+            compact_started_at,
+            "failed",
+            Some(detail),
+            false,
+        );
         return Err(CliFailure::new(detail));
     }
     // refusing before the single dispatch is lawful and unpaid.
@@ -336,6 +354,7 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
                 compact_started_at,
                 "failed",
                 Some(&detail),
+                false,
             );
             publish_compact_row(
                 config,
@@ -359,6 +378,7 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
                 compact_started_at,
                 "failed",
                 Some(&detail),
+                false,
             );
             publish_compact_row(
                 config,
@@ -401,6 +421,7 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
         run.started_at,
     );
     let mut size_subject = None;
+    let mut remedy = None;
     let unadmitted = compact_answer_is_unadmitted(&outcome, source);
     let (pass, successor_fits, detail, compact_outcome) = match outcome {
         CompactSessionOutcome::Compacted {
@@ -468,6 +489,12 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
                 .bind_plakous_locator(target)
                 .map_err(CliFailure::new)?;
             let note = compact_operator_note(COMPACT_FAILED_DETAIL, diagnostic.as_deref());
+            if diagnostic
+                .as_deref()
+                .is_some_and(views::compact_diagnostic_is_provider_quiet)
+            {
+                remedy = Some(NoticeRemedy::RetryCompaction {});
+            }
             (
                 CompactPass::Failed { note: note.clone() },
                 false,
@@ -507,6 +534,7 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
                 if query_context(executor, opened, ContextQuery::Current).is_ok_and(|projection| {
                     projection.disposition() == ContextDisposition::ProtectedOverflow
                 }) {
+                    remedy = Some(NoticeRemedy::LargerModelOrStartFresh {});
                     CONTEXT_CAPACITY_PROTECTED_GUIDANCE.to_owned()
                 } else {
                     COMPACT_NO_ELIGIBLE_RANGE_DETAIL.to_owned()
@@ -537,6 +565,7 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
                 compact_started_at,
                 "recovery_required",
                 Some(&detail),
+                false,
             );
             return Err(CliFailure::new(detail));
         }
@@ -548,6 +577,7 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
                 compact_started_at,
                 "failed",
                 Some(detail),
+                false,
             );
             return Err(CliFailure::new(detail));
         }
@@ -559,6 +589,7 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
         outcome: compact_outcome,
         size_subject,
         unadmitted,
+        remedy,
     })
 }
 
@@ -590,6 +621,7 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
         outcome: compact_outcome,
         size_subject,
         unadmitted,
+        remedy,
     } = answer;
     let settled_row = refresh_compact_views(
         executor, opened, config, log, operation, call_id, unadmitted,
@@ -670,10 +702,13 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
             || detail.contains("provider went quiet"))
     {
         // Plain sentence for the operator. `detail` stays the session-log diagnostic.
-        let _ = events.send(ContentEvent::Row(TranscriptRow::info(
-            NoticeScope::Compaction,
-            manual_compact_operator_text(&detail),
-        )));
+        let _ = events.send(ContentEvent::Row(
+            TranscriptRow::info(
+                NoticeScope::Compaction,
+                manual_compact_operator_text(&detail),
+            )
+            .with_optional_remedy(remedy.as_ref()),
+        ));
     }
     if interrupted {
         let _ = events.notice(TranscriptRow::info(NoticeScope::Compaction,
@@ -687,6 +722,7 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
         compact_started_at,
         compact_outcome,
         Some(detail.as_str()),
+        compacted && !successor_fits,
     );
     if successor_fits || !compacted {
         let _ = events.send(ContentEvent::ContextCapacityRecovery(None));

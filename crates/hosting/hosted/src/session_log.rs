@@ -33,6 +33,15 @@ const LOG_LOCK_WAIT: Duration = Duration::from_secs(2);
 pub struct SessionEvent {
     pub kind: String,
     pub fields: Vec<(String, JsonVal)>,
+    /// Transient presentation fact; not a JSONL field or recovery authority.
+    pub presentation: Option<SessionEventPresentation>,
+}
+
+/// Closed facts whose operator command grammar belongs to the product.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionEventPresentation {
+    /// A paid compaction committed but its retained projection still overflows.
+    CompactCommittedOverflow,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +57,7 @@ impl SessionEvent {
         Self {
             kind: kind.into(),
             fields: Vec::new(),
+            presentation: None,
         }
     }
 

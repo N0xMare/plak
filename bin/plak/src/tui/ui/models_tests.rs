@@ -12,7 +12,7 @@ use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ContextUsage, SessionLedgerView};
 use crate::tui::{HostEvent, SurfaceObservation, UserAction, user_action_channel};
 use crossterm::event::KeyCode;
-use plakous_host_protocol::status::HostPhase;
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -140,13 +140,9 @@ fn retry_attach_uses_compact_model_transition_copy() {
     app.apply_host_event(HostEvent::Status {
         phase: HostPhase::Rebind,
         queue_len: 0,
-        detail: Some(
-            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
-                diagnostic: plakous_host_protocol::status::DiagnosticText::new(
-                    "resolving exact target codex/gpt-secret",
-                ),
-            },
-        ),
+        detail: Some(HostStatusDetail::PlanDiagnostic {
+            diagnostic: DiagnosticText::new("resolving exact target codex/gpt-secret"),
+        }),
     });
     app.apply_host_event(HostEvent::SetBusy(true));
     let backend = TestBackend::new(80, 12);
@@ -236,13 +232,9 @@ fn failed_clear_keeps_source_view_and_binding() {
     app.apply_host_event(HostEvent::Status {
         phase: HostPhase::Idle,
         queue_len: 0,
-        detail: Some(
-            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
-                diagnostic: plakous_host_protocol::status::DiagnosticText::new(
-                    "clear refused · source remains active",
-                ),
-            },
-        ),
+        detail: Some(HostStatusDetail::PlanDiagnostic {
+            diagnostic: DiagnosticText::new("clear refused · source remains active"),
+        }),
     });
 
     assert!(blocks_contain(&app, "source transcript"));

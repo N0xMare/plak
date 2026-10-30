@@ -323,21 +323,15 @@ fn a_paused_queue_is_named_in_the_status_row_and_in_an_attach_note() {
         "every attach re-announces the note, so it is never stored"
     );
     drop(events);
-    let note = rx
+    let pause = rx
         .try_iter()
         .find_map(|event| match event {
-            HostEvent::Row(TranscriptRow::Notice(
-                plakous_host_protocol::views::transcript::NoticeRow { text: note, .. },
-            )) => Some(note),
+            HostEvent::RestoredPause(pause) => Some(pause),
             _ => None,
         })
         .expect("attach names the paused state");
-    assert!(note.contains("queue is paused"), "{note}");
-    assert!(
-        note.contains("Tab"),
-        "the note names a remedy that works: {note}"
-    );
-    assert!(!note.contains("restored_paused"), "{note}");
+    assert!(pause.queue);
+    assert!(!pause.tree);
 }
 
 /// Every operator-facing string for the paused state is prose and
@@ -347,7 +341,7 @@ fn paused_tree_copy_is_prose_with_a_remedy() {
     for copy in [
         crate::agent_tree::ProductAgentTree::TREE_PAUSED_REFUSAL,
         crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_PAUSED,
-        crate::agent::RESTORED_PAUSED_RESUME_HINT,
+        crate::agent::RESTORED_PAUSED_REFUSAL,
     ] {
         assert!(
             !copy.contains("ResumeTree") && !copy.contains("restored_paused"),

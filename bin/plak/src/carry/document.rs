@@ -18,8 +18,8 @@ pub(super) const FORMAT: &str = "plak-session-export";
 /// and of the immediately previous one. Any change to the document, including
 /// the embedded canonical-history and binding encodings, bumps this; the
 /// previous version's importer is kept for one bump only.
-pub(crate) const VERSION: u32 = 10;
-const PREVIOUS_VERSION: u32 = 9;
+pub(crate) const VERSION: u32 = 11;
+const PREVIOUS_VERSION: u32 = 10;
 pub(crate) const IMPORTABLE_VERSIONS: [u32; 2] = [PREVIOUS_VERSION, VERSION];
 const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
@@ -45,7 +45,7 @@ pub(crate) struct CarryDocument {
     /// never queued here: export refuses while one is unresolved.
     pub(super) queue: Vec<String>,
     pub(super) prompt_history: Vec<String>,
-    /// Typed product transcript rows, oldest first, shared by versions 9 and 10.
+    /// Typed product transcript rows, oldest first; v11 adds semantic notice remedies.
     #[serde(deserialize_with = "bounded_transcript")]
     pub(super) transcript: Vec<TranscriptRow>,
     /// Non-live sub-agents the source tree held; their trees are not carried.
@@ -301,6 +301,13 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
     if let Some(history) = header.raw_history {
         validate_size("history", history.get().len(), 128 * 1024 * 1024)?;
     }
+    if header.version == PREVIOUS_VERSION {
+        validate_v10_transcript(
+            header
+                .raw_transcript
+                .ok_or_else(|| ImportError::from("export transcript is missing".to_owned()))?,
+        )?;
+    }
     let mut document = serde_json::from_slice::<CarryDocument>(&bytes).map_err(invalid)?;
     document
         .transcript
@@ -314,6 +321,8 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
 /// The fields every version keeps, read before the version-specific body.
 #[derive(Deserialize)]
 struct DocumentHeader<'a> {
+    #[serde(borrow, rename = "transcript")]
+    raw_transcript: Option<&'a serde_json::value::RawValue>,
     #[serde(
         borrow,
         default,
@@ -328,6 +337,61 @@ struct DocumentHeader<'a> {
     checkpoint_present: bool,
     #[serde(default, rename = "archive", deserialize_with = "field_present")]
     archive_present: bool,
+}
+
+/// V10 notice rows have no remedy field. Do not silently reinterpret a v11 row
+/// relabelled as v10; the previous encoding remains an independent admission check.
+fn validate_v10_transcript(raw: &serde_json::value::RawValue) -> Result<(), ImportError> {
+    #[derive(Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+    enum V10Notice {
+        Notice {
+            scope: plakous_host_protocol::views::transcript::NoticeScope,
+            tone: plakous_host_protocol::views::transcript::NoticeTone,
+            text: String,
+        },
+    }
+    struct Rows;
+    impl<'de> serde::de::Visitor<'de> for Rows {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("bounded version 10 transcript rows")
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut rows: A) -> Result<(), A::Error> {
+            use serde::de::Error as _;
+            #[derive(Deserialize)]
+            struct Kind<'a> {
+                #[serde(borrow)]
+                kind: &'a str,
+            }
+            let (mut count, mut bytes) = (0, 0_usize);
+            while let Some(raw) = rows.next_element::<&serde_json::value::RawValue>()? {
+                count += 1;
+                if count > MAX_TRANSCRIPT_LINES {
+                    return Err(A::Error::custom("version 10 transcript has too many rows"));
+                }
+                let kind: Kind<'_> = serde_json::from_str(raw.get()).map_err(A::Error::custom)?;
+                if kind.kind == "notice" {
+                    let V10Notice::Notice { scope, tone, text } =
+                        serde_json::from_str(raw.get()).map_err(A::Error::custom)?;
+                    let _ = (scope, tone, text);
+                }
+                let row: TranscriptRow =
+                    serde_json::from_str(raw.get()).map_err(A::Error::custom)?;
+                bytes = bytes.saturating_add(row_bytes(&row));
+                if bytes > MAX_TRANSCRIPT_BYTES {
+                    return Err(A::Error::custom(
+                        "version 10 transcript exceeds its byte bound",
+                    ));
+                }
+            }
+            Ok(())
+        }
+    }
+    serde::Deserializer::deserialize_seq(&mut serde_json::Deserializer::from_str(raw.get()), Rows)
+        .map_err(|e| ImportError::from(e.to_string()))
 }
 
 fn field_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {

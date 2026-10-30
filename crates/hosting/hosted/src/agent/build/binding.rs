@@ -2,6 +2,7 @@
 
 use crate::tools::ProductToolExtensions;
 use crate::{CliFailure, CliResult};
+use plakous_host_protocol::status::AttachFailure;
 
 use super::policy::{
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT, RESPONSE_OUTPUT_CEILING,
@@ -850,8 +851,12 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         )))?;
         let host_path = state_roots.sidecars().javascript_host().map_err(|error| {
             CliFailure::new(format!(
-                "product JavaScript host is unavailable: {error}; set PLAK_JS_HOST or place plakous-js-host beside plak; no inference was dispatched"
+                "product JavaScript host is unavailable: {error}; no inference was dispatched"
             ))
+            .with_attach_failure(AttachFailure::JavaScriptHostUnavailable)
+            .with_remedy(
+                plakous_host_protocol::notice_remedy::NoticeRemedy::RepairJavaScriptHost {},
+            )
         })?;
         let attachment = product_javascript_candidate_attachment(
             &descriptor,
@@ -888,8 +893,10 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         })?;
         let host_path = state_roots.sidecars().python_host().map_err(|error| {
             CliFailure::new(format!(
-                "product Python host is unavailable: {error}; set PLAK_PY_HOST or place plakous-py-host beside plak; no inference was dispatched"
+                "product Python host is unavailable: {error}; no inference was dispatched"
             ))
+            .with_attach_failure(AttachFailure::PythonHostUnavailable)
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RepairPythonHost {})
         })?;
         let attachment = product_python_attachment(
             &descriptor,
@@ -923,9 +930,11 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             ))
         })?;
         let host_path = state_roots.sidecars().javascript_host().map_err(|error| {
-            CliFailure::new(format!(
-                "Codex Code Mode sidecar is unavailable: {error}; set PLAK_JS_HOST or place plakous-js-host beside plak"
-            ))
+            CliFailure::new(format!("Codex Code Mode sidecar is unavailable: {error}"))
+                .with_attach_failure(AttachFailure::JavaScriptHostUnavailable)
+                .with_remedy(
+                    plakous_host_protocol::notice_remedy::NoticeRemedy::RepairJavaScriptHost {},
+                )
         })?;
         builder = attach_codex_minimal(builder, &descriptor, &host_path).map_err(|error| {
             CliFailure::new(format!(
@@ -1007,8 +1016,8 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             }
             if effort_explicit {
                 return Err(CliFailure::new(
-                    "requested --effort was downgraded by the harness plan; refuse to run",
-                ));
+                    "requested reasoning effort was downgraded by the harness plan; refusing to run",
+                ).with_advice(plakous_host_protocol::refusal::RefusalAdvice::EffortDowngraded));
             }
         }
         builder = builder.harness_plan(plan);

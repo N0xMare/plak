@@ -24,7 +24,7 @@ use sessions::{
     StoreBaseline, digest_parts,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 34;
+pub(crate) const SCHEMA_VERSION: i64 = 35;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;

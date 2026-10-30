@@ -64,7 +64,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 &admission,
             );
             if let crate::session_store::StorageAdmission::Refused(_) = admission {
-                let reason = "new turns refused: operator storage is below the admission floor; input remains queued; check `plak doctor`";
+                let reason = "new turns refused: operator storage is below the admission floor; input remains queued; inspect storage health";
                 if let Some(state) = one_shot {
                     state.result = Some(Err(CliFailure::from(
                         crate::session_store::RecordStoreError::refused(
@@ -112,20 +112,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 self.discard_undispatched_wake(intent, before_recovery, before_drain, stopped)
         {
             self.suppress_child_wake(None)?;
-            let _ = self.events.notice(TranscriptRow::error(
-                NoticeScope::Queue,
-                error.message().to_owned(),
-            ));
+            let _ = self.events.notice(
+                TranscriptRow::error(NoticeScope::Queue, error.message().to_owned())
+                    .with_optional_remedy(error.remedy()),
+            );
             return Ok(HostStep::Continue);
         }
         if wake.is_some()
             && let Err(error) = outcome
         {
             self.suppress_child_wake(None)?;
-            let _ = self.events.notice(TranscriptRow::error(
-                NoticeScope::Queue,
-                error.message().to_owned(),
-            ));
+            let _ = self.events.notice(
+                TranscriptRow::error(NoticeScope::Queue, error.message().to_owned())
+                    .with_optional_remedy(error.remedy()),
+            );
             return Ok(HostStep::Continue);
         }
         outcome.map(|outcome| match outcome {
@@ -353,7 +353,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     "fresh model authority: {}; the prompt remains queued and drain stays paused",
                     error.message()
                 ),
-            ));
+            ).with_optional_remedy(error.remedy()));
             return Ok(std::ops::ControlFlow::Break(preparation::End::Refused));
         }
         if let Some(stopped) = self.stop_preparation(one_shot)? {
@@ -441,13 +441,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             Ok(projection) => projection,
             Err(error) => {
                 if host_authored {
-                    let _ = self.events.notice(TranscriptRow::error(
-                        NoticeScope::Tree,
-                        format!(
-                            "child wake preflight: {}; mail remains unread",
-                            error.message()
-                        ),
-                    ));
+                    let _ = self.events.notice(
+                        TranscriptRow::error(
+                            NoticeScope::Tree,
+                            format!(
+                                "child wake preflight: {}; mail remains unread",
+                                error.message()
+                            ),
+                        )
+                        .with_optional_remedy(error.remedy()),
+                    );
                     return Ok(PromptOutcome::Refused);
                 }
                 if let Some(state) = one_shot.as_deref_mut() {
@@ -456,13 +459,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 self.pause_unrecorded(error.message().to_owned())?;
                 emit_unavailable_context(&self.events);
                 if one_shot.is_none() {
-                    let _ = self.events.notice(TranscriptRow::error(
-                        NoticeScope::Queue,
-                        format!(
-                            "context: {}; the prompt remains queued and drain stays paused",
-                            error.message()
-                        ),
-                    ));
+                    let _ = self.events.notice(
+                        TranscriptRow::error(
+                            NoticeScope::Queue,
+                            format!(
+                                "context: {}; the prompt remains queued and drain stays paused",
+                                error.message()
+                            ),
+                        )
+                        .with_optional_remedy(error.remedy()),
+                    );
                 } else {
                     let _ = self.events.notice(TranscriptRow::info(
                         NoticeScope::Queue,
@@ -560,10 +566,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             false,
                         );
                         if one_shot.is_none() {
-                            let _ = self.events.notice(TranscriptRow::error(
-                                NoticeScope::Compaction,
-                                format!("compact: {}", error.message()),
-                            ));
+                            let _ = self.events.notice(
+                                TranscriptRow::error(
+                                    NoticeScope::Compaction,
+                                    format!("compact: {}", error.message()),
+                                )
+                                .with_optional_remedy(error.remedy()),
+                            );
                         } else {
                             let _ = self.events.notice(TranscriptRow::info(NoticeScope::Compaction,
                                 "automatic compaction failed; the prompt remains queued and drain stays paused",
@@ -1017,12 +1026,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             state.result = Some(Err(CliFailure::classified(
                 crate::error::CliFailureKind::Agent,
                 note,
-            )));
+            )
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {})));
         }
         self.pause_unrecorded(note.to_owned())?;
-        let _ = self
-            .events
-            .notice(TranscriptRow::error(NoticeScope::Compaction, note));
+        let _ = self.events.notice(
+            TranscriptRow::error(NoticeScope::Compaction, note)
+                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {}),
+        );
         Ok(HostStep::Continue)
     }
 
@@ -1052,7 +1063,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 }
 
 /// Operator note when a replayed delivery's immutable batch does not fit.
-const REPLAYED_MAIL_OVER_WINDOW_NOTE: &str = "the queued prompt and the sub-agent mail bound to its delivery do not fit the context window; the prompt remains queued and drain is paused. Use /clear in the TUI or clear in plak agent to start a fresh conversation";
+const REPLAYED_MAIL_OVER_WINDOW_NOTE: &str = "the queued prompt and the sub-agent mail bound to its delivery do not fit the context window; the prompt remains queued and drain is paused; start a fresh conversation";
 
 /// What a scheduled pass's send leaves for the command's child mail.
 #[derive(Debug, Eq, PartialEq)]

@@ -465,19 +465,31 @@ impl ScrollBlock {
             // The host no longer writes auto-continue rows; one a session
             // stored earlier is not shown.
             TranscriptRow::AutoContinue(_) => return None,
-            TranscriptRow::Notice(notice) => match (notice.placement(), notice.tone) {
-                (NoticePlacement::SessionLog, _) => return None,
-                (_, NoticeTone::Error) => Self::Error(notice.text),
-                _ if notice.scope == NoticeScope::Tree && mail_parts(&notice.text).is_some() => {
-                    Self::Mail {
-                        text: notice.text,
-                        open: false,
-                        group_open: false,
+            TranscriptRow::Notice(mut notice) => {
+                notice.text = crate::notice_text::with_remedy(
+                    &notice.text,
+                    notice.remedy.as_ref(),
+                    crate::notice_text::RemedyContext {
+                        frontend: crate::notice_text::Frontend::Tui,
+                        session_id: None,
+                    },
+                );
+                match (notice.placement(), notice.tone) {
+                    (NoticePlacement::SessionLog, _) => return None,
+                    (_, NoticeTone::Error) => Self::Error(notice.text),
+                    _ if notice.scope == NoticeScope::Tree
+                        && mail_parts(&notice.text).is_some() =>
+                    {
+                        Self::Mail {
+                            text: notice.text,
+                            open: false,
+                            group_open: false,
+                        }
                     }
+                    (NoticePlacement::GroupItem, _) => Self::item(notice.text),
+                    (NoticePlacement::NoticeRow, _) => Self::System(notice.text),
                 }
-                (NoticePlacement::GroupItem, _) => Self::item(notice.text),
-                (NoticePlacement::NoticeRow, _) => Self::System(notice.text),
-            },
+            }
             TranscriptRow::Interrupted => Self::System(INTERRUPTED_MARKER.to_owned()),
             TranscriptRow::Truncated => Self::System(TRANSCRIPT_TRUNCATION_MARKER.to_owned()),
         })

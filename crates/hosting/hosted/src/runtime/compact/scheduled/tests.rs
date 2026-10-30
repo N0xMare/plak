@@ -308,7 +308,7 @@ fn a_scheduled_pass_with_nothing_eligible_sends_the_prompt() {
         assert!(
             !notes
                 .iter()
-                .any(|text| text.contains("retrying compaction is a new paid operation")),
+                .any(|text| text.contains("Retrying compaction is a new paid operation")),
             "{notes:?}"
         );
     }
@@ -389,7 +389,7 @@ fn a_definite_scheduled_failure_sends_a_fitting_prompt_and_parks_one_that_does_n
         assert_eq!(
             notes
                 .iter()
-                .any(|text| text.contains("retrying compaction is a new paid operation")),
+                .any(|text| text.contains(super::SCHEDULED_COMPACT_PARKED_NOTE)),
             parked,
             "{notes:?}"
         );

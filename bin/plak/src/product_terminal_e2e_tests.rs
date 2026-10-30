@@ -11,6 +11,7 @@
     reason = "private process-level test harness"
 )]
 
+use plakous_host_protocol::status::HostFailure;
 use std::collections::HashSet;
 use std::error::Error;
 use std::io::{Read as _, Write as _};
@@ -97,7 +98,7 @@ impl TuiAttacher for OfflineAttacher {
         cwd: &Path,
         ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
         resume_publication: Option<Arc<AtomicBool>>,
-    ) -> Result<HostedAgentChannels, String> {
+    ) -> Result<HostedAgentChannels, HostFailure> {
         if self
             .remaining_attach_refusals
             .try_update(Ordering::AcqRel, Ordering::Acquire, |left| {
@@ -105,7 +106,7 @@ impl TuiAttacher for OfflineAttacher {
             })
             .is_ok()
         {
-            return Err("injected attach refusal".to_owned());
+            return Err("injected attach refusal".into());
         }
         let controller = if let Some(release) = &self.long_work_release {
             BoundaryController::quiet_gated_from_evidence_path(
@@ -230,11 +231,12 @@ impl TuiAttacher for OfflineAttacher {
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
             continuation: None,
+            event_renderer: None,
         });
         if let Err(error) = &attached {
             let _ = std::fs::write(paths.home().join("pty-attach-error.txt"), error.message());
         }
-        attached.map_err(|failure| failure.message().to_owned())
+        attached.map_err(|failure| failure.host_failure())
     }
 }
 
@@ -280,7 +282,7 @@ fn terminal_e2e_child() -> Result<(), Box<dyn Error>> {
             remaining_attach_refusals: AtomicUsize::new(attach_refusals),
         },
     )
-    .map_err(|failure| failure.message().to_owned())?;
+    .map_err(|failure| failure.host_failure())?;
     if outcome != ProcessOutcome::Success {
         return Err("PTY child did not exit successfully".into());
     }
@@ -1698,6 +1700,7 @@ fn host_config(
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
         continuation: None,
+        event_renderer: None,
     }
 }
 

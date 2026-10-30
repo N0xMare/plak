@@ -119,7 +119,8 @@ mod reresolution;
 pub use request_slots::RequestSlots;
 mod round_classification;
 pub use reresolution::{
-    ModelReresolutionError, ModelReresolutionOperation, ModelReresolver, ReresolvedModel,
+    ModelReresolutionError, ModelReresolutionOperation, ModelReresolutionRefusal, ModelReresolver,
+    ReresolvedModel,
 };
 /// Default deadline for one session-store call made by the durable runtime, including the
 /// shutdown receipt a session release commits. Hosts size their release timeouts from it.

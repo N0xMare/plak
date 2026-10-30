@@ -158,13 +158,17 @@ impl PlatformModel {
     /// # Errors
     /// Returns an operator-facing refusal with the rebind remedy when the
     /// bound facts changed since the session was created.
-    pub fn reopen_window(&self, provider: PlatformProvider, stored: &[u8]) -> Result<u64, String> {
+    pub fn reopen_window(
+        &self,
+        provider: PlatformProvider,
+        stored: &[u8],
+    ) -> crate::CliResult<u64> {
         let changed = || {
-            format!(
-                "{} model `{}` changed since this session was created (its provider-published facts or this build's reviewed table moved); rebind with Fork now in the Agents tab, or start a new session",
+            crate::CliFailure::new(format!(
+                "{} model `{}` changed since this session was created (its provider-published facts or this build's reviewed table moved); explicitly fork/rebind, or start a new session",
                 provider.account(),
                 self.model
-            )
+            )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Rebind {}).with_attach_failure(plakous_host_protocol::status::AttachFailure::BindingChanged).with_origin(plakous_host_protocol::status::HostFailureOrigin::ModelFacts { account: provider.account().into(), model: self.model.clone() })
         };
         let (digest, window) = stored_binding(stored).ok_or_else(changed)?;
         if digest != self.binding_digest(provider) || window == 0 || window > self.full_window {
@@ -242,7 +246,7 @@ impl std::fmt::Display for ApiAdmissionError {
                 if !suggestions.is_empty() {
                     write!(f, "; closest: {}", suggestions.join(", "))?;
                 }
-                write!(f, "; see `plak models {}`", provider.account())
+                write!(f, "; inspect the account's available models")
             }
             Self::Refused {
                 provider,
@@ -261,11 +265,41 @@ impl std::fmt::Display for ApiAdmissionError {
                 offered,
             } => write!(
                 f,
-                "{} model `{model}` requires --effort {}",
+                "{} model `{model}` requires an explicit reasoning effort from {}",
                 provider.account(),
                 effort_names(offered).join("|")
             ),
         }
+    }
+}
+
+impl From<ApiAdmissionError> for crate::CliFailure {
+    fn from(error: ApiAdmissionError) -> Self {
+        use plakous_host_protocol::refusal::RefusalAdvice;
+        let advice = match &error {
+            ApiAdmissionError::Unknown {
+                provider, model, ..
+            } => Some(RefusalAdvice::UnknownModel {
+                account: provider.account().to_owned(),
+                model: model.clone(),
+                catalog: provider.account().to_owned(),
+            }),
+            ApiAdmissionError::Effort {
+                provider,
+                model,
+                offered,
+            } => Some(RefusalAdvice::ExplicitEffort {
+                account: provider.account().to_owned(),
+                model: model.clone(),
+                offered: effort_names(offered)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            }),
+            ApiAdmissionError::Refused { .. } => None,
+        };
+        let failure = Self::new(error.to_string());
+        advice.map_or(failure.clone(), |advice| failure.with_advice(advice))
     }
 }
 

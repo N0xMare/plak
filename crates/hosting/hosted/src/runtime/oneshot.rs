@@ -238,12 +238,16 @@ pub(super) fn terminal(drive: &Result<TurnHostOutcome, String>) -> CliResult<One
         Ok(TurnHostOutcome::Interrupted { assistant, .. }) => Ok(OneShotOutcome::Interrupted {
             assistant: assistant.clone(),
         }),
-        Ok(TurnHostOutcome::RecoveryRequired { error }) => Err(CliFailure::recovery_required(
-            format!("{error}; the session recovers automatically the next time it is used"),
-        )),
-        Ok(TurnHostOutcome::AdmissionRejected { error, .. })
-        | Ok(TurnHostOutcome::Failed { error, .. }) => {
-            Err(CliFailure::classified(CliFailureKind::Agent, error.clone()))
+        Ok(TurnHostOutcome::RecoveryRequired { error, remedy }) => {
+            Err(CliFailure::recovery_required(format!(
+                "{error}; the session recovers automatically the next time it is used"
+            ))
+            .with_optional_remedy(remedy.as_ref()))
+        }
+        Ok(TurnHostOutcome::AdmissionRejected { error, remedy, .. })
+        | Ok(TurnHostOutcome::Failed { error, remedy, .. }) => {
+            Err(CliFailure::classified(CliFailureKind::Agent, error.clone())
+                .with_optional_remedy(remedy.as_ref()))
         }
         Ok(TurnHostOutcome::ContextCapacity { error, .. }) | Err(error) => {
             Err(CliFailure::classified(CliFailureKind::Agent, error.clone()))
@@ -264,6 +268,7 @@ mod presentation_tests {
             TurnHostOutcome::AdmissionRejected {
                 stop_drain: false,
                 error: "prompt was not admitted: storage refusal".into(),
+                remedy: None,
             },
             TurnHostOutcome::ConsumedDelivery,
         ] {

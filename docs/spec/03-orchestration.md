@@ -318,6 +318,21 @@ re-resolution (a changed login, account, catalog row or model semantics, or an
 unusable credential) fails that attempt with the remedy before any inference;
 it never falls back to the caller's model or account.
 
+Refusal messages below the product boundary are neutral facts. Child-account
+admission preserves the exact template, original account and credential-gate
+state as typed advice; incompatible-session recovery preserves the exact source
+session UUID. Topology tool error payloads keep their code/message and may carry
+this closed structured advice and an optional semantic remedy inside the existing
+tool result. Child startup, reopen and mail delivery retain both when composing
+runtime failures; rollback or recovery must not flatten them into prose. Plak's TUI, run
+and JSONL tool-detail renderers restore the corresponding login, exact tree
+resume and export/import instructions; model-facing results stay neutral.
+Neither the error code alone when it is broader than the refusal, nor rendered
+message substrings, are a sufficient classifier. Tree pause/rebind refusals
+remain typed across the host boundary. Session-deletion abandonment retains its
+durable decision/failure kind; Plak adds the historical
+`session delete --abandon-children` provenance from that kind, not from prose.
+
 The caller's spawn menu is checked before any binder admission. A template
 that is not on that menu is `template_not_spawnable`, or `template_unknown`
 when the epoch does not carry it, and the binder does not run: no account
@@ -3070,7 +3085,7 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 
 ## 14. Persistence, reopen, and recovery
 
-Product state lives in `product.sqlite3` at **schema 34**: intents and
+Product state lives in `product.sqlite3` at **schema 35**: intents and
 feed-derived views (chapter 02 §2.6). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
 intent. The tree lives separately in `subagents.sqlite3` at **schema 9**, owned

@@ -18,7 +18,7 @@ pub(crate) const STEERING_NOT_APPLIED_CLAUSE: &str =
 
 use crate::CliResult;
 use crate::sessions::queue::{drop_last_mutable, edit_mutable, move_mutable, remove_mutable};
-use plakous_host_protocol::status::{HostPhase, HostTransitionStage};
+use plakous_host_protocol::status::{DetachedReason, HostPhase, HostTransitionStage};
 
 use crate::session_home::SessionHome;
 
@@ -32,7 +32,8 @@ fn jobs_transition_guard<P: plakous_host_protocol::ProtocolExtension>(
         .job_registry()
         .transition_refusal(locator.session_id(), locator.branch_id())
     {
-        return Err(crate::CliFailure::new(reason));
+        return Err(crate::CliFailure::new(reason.to_string())
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StopProcesses {}));
     }
     // Injected runtimes may use a private service rather than these roots.
     let count = opened.agent().map_or(0, |agent| {
@@ -44,8 +45,9 @@ fn jobs_transition_guard<P: plakous_host_protocol::ProtocolExtension>(
     });
     if count != 0 {
         return Err(crate::CliFailure::new(format!(
-            "{count} background processes are running; stop them first (/ps)"
-        )));
+            "{count} background processes are running; stop them before changing the session"
+        ))
+        .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StopProcesses {}));
     }
     Ok(())
 }
@@ -161,6 +163,8 @@ pub(crate) use transcript_rows::{Derived, item_rows, projected_tool_row, settle_
 mod tree;
 pub(crate) use tree::bounded_text as bounded_notice_text;
 mod turn;
+#[cfg(test)]
+pub(crate) use turn::agent_error_remedy;
 pub(crate) use turn::truncation_note;
 mod turn_drive;
 use turn_drive::{TurnHost, drive_one_turn};
@@ -611,6 +615,8 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     pub product_home: PathBuf,
     /// Where this session's event log lives.
     pub home: SessionHome,
+    /// Product-owned projection of typed log facts into existing text fields.
+    pub event_renderer: Option<fn(&mut crate::session_log::SessionEvent)>,
     /// The port this session's record is loaded, saved, prepared and published through.
     pub store: Arc<dyn SessionRecordStore>,
     pub state_roots: crate::agent::ProductStateRoots,
@@ -1031,8 +1037,8 @@ pub struct ShellHostConfig<
     pub store: Arc<dyn SessionRecordStore>,
     pub session: SessionRecord,
     pub cwd: PathBuf,
-    /// Attach failure reason for status / logs (`missing_defaults` | `effort_required` | `resolve_failed:…`).
-    pub reason: String,
+    /// Typed detached reason; frontends own its status and repair text.
+    pub reason: DetachedReason,
     /// Exact Ready catalog supplied by the product discovery boundary.
     pub ready_catalog: plakous_host_protocol::views::ReadyCatalog,
     /// The product surfaces the shell host publishes for; see [`Surface`].
@@ -1168,8 +1174,7 @@ pub(crate) const COMPACT_ABANDONED_BILLED_NOTE: &str = "plak: interrupted compac
      applied, may have been billed, and will not be dispatched again; the conversation history is \
      unchanged";
 
-const COMPACT_PROVIDER_QUIET_NOTE: &str =
-    "compact didn't finish (the provider went quiet). Context is unchanged. /compact to retry.";
+const COMPACT_PROVIDER_QUIET_NOTE: &str = "compact didn't finish (the provider went quiet). Context is unchanged. Another explicit compaction may retry";
 
 const COMPACT_RECOVERY_REQUIRED_DETAIL: &str =
     "canonical compact requires explicit recovery; prompts remain paused";
@@ -1178,15 +1183,15 @@ const COMPACTING_ACTIVITY_LABEL: &str = "compacting context";
 
 const COMPACT_COMMITTED_DETAIL: &str = "compact workflow committed";
 
-const COMPACT_COMMITTED_STILL_OVERFLOWS_DETAIL: &str = "compact workflow committed; retained projection still overflows; retry is a new paid operation or /clear";
+const COMPACT_COMMITTED_STILL_OVERFLOWS_DETAIL: &str = "compact workflow committed; retained projection still overflows; another attempt is a new paid operation, or start a fresh conversation";
 
-pub(crate) const CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE: &str = "tool-grown context reached the admitted ceiling; the failed root turn is terminal and will not be replayed. /compact may attempt whole-group compaction of this exact checkpoint; it does not guarantee the retained projection will fit";
+pub(crate) const CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE: &str = "tool-grown context reached the admitted ceiling; the failed root turn is terminal and will not be replayed. An explicit whole-group compaction may target this exact checkpoint; it does not guarantee the retained projection will fit";
 
-pub(crate) const CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE: &str = "tool-grown context reached the admitted ceiling; the failed root turn is terminal and will not be replayed. /compact may attempt native compaction of this exact checkpoint; it does not fold the latest user message and does not guarantee the retained projection will fit";
+pub(crate) const CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE: &str = "tool-grown context reached the admitted ceiling; the failed root turn is terminal and will not be replayed. An explicit native compaction may target this exact checkpoint; it does not fold the latest user message and does not guarantee the retained projection will fit";
 
-pub(crate) const CONTEXT_CAPACITY_SEGMENT_LIMIT_GUIDANCE: &str = "the session's history reached its segment limit, which counts history segments rather than tokens; the failed root turn is terminal and will not be replayed. /compact compacts this session's earlier history, /fork-then-compact compacts a fork and leaves this session unchanged, and /clear starts a new conversation";
+pub(crate) const CONTEXT_CAPACITY_SEGMENT_LIMIT_GUIDANCE: &str = "the session's history reached its segment limit, which counts history segments rather than tokens; the failed root turn is terminal and will not be replayed. Compact earlier history in this session, compact a fork while leaving this session unchanged, or start a new conversation";
 
-pub(crate) const CONTEXT_CAPACITY_PROTECTED_GUIDANCE: &str = "tool-grown context overflow cannot be compacted; choose a model with a larger admitted ceiling, fork, or start a new session with /clear";
+pub(crate) const CONTEXT_CAPACITY_PROTECTED_GUIDANCE: &str = "tool-grown context overflow cannot be compacted; choose a model with a larger admitted ceiling, fork, or start a fresh conversation";
 
 pub(crate) const CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE: &str = "context-capacity recovery is unavailable because its exact source could not be verified; choose a larger model or start a new session";
 struct ResolvedRebindTarget {
@@ -1264,16 +1269,19 @@ enum TurnHostOutcome {
     },
     AdmissionRejected {
         error: String,
+        remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
         stop_drain: bool,
     },
     Failed {
         error: String,
+        remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
         transient: Option<TransientFailure>,
         /// How the root's await receipts settle at publication.
         exchange: crate::agent::TerminalExchange,
     },
     RecoveryRequired {
         error: String,
+        remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
     },
     Interrupted {
         assistant: String,

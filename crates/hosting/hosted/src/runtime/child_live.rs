@@ -734,10 +734,19 @@ pub(super) fn transcript_ops(
         .observe(event.kind(), event.attempt_id().zip(event.call_id()));
     match event.kind() {
         AgentEventKind::ModelCredentialWait { waiting: true } => {
-            ops.push(HostEvent::Row(TranscriptRow::info(
-                NoticeScope::Settings,
-                projection.progress.login_notice(),
-            )));
+            ops.push(HostEvent::Row(
+                TranscriptRow::info(NoticeScope::Settings, projection.progress.login_notice())
+                    .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+                        account: projection
+                            .progress
+                            .account
+                            .as_deref()
+                            .map(plakous_host_protocol::notice_remedy::AccountTarget::from_account)
+                            .unwrap_or(
+                                plakous_host_protocol::notice_remedy::AccountTarget::Unspecified,
+                            ),
+                    }),
+            ));
         }
         AgentEventKind::Model {
             event: Some(model), ..

@@ -2056,7 +2056,7 @@ async fn openrouter_child_never_takes_its_parents_account_or_model() {
     else {
         panic!("a row without an account bound");
     };
-    assert_eq!(missing_account, "API child account is missing");
+    assert_eq!(missing_account.message(), "API child account is missing");
     let Err(missing_model) = openrouter_child_runtime_binding(
         None,
         &parent,
@@ -2072,7 +2072,7 @@ async fn openrouter_child_never_takes_its_parents_account_or_model() {
     else {
         panic!("a row without a model bound");
     };
-    assert_eq!(missing_model, "API child model is missing");
+    assert_eq!(missing_model.message(), "API child model is missing");
 }
 
 #[test]

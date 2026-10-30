@@ -186,6 +186,7 @@ pub fn run_actual_host(
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),
             continuation: None,
+            event_renderer: None,
         },
         internal,
         actions,

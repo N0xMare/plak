@@ -13,7 +13,6 @@ use crate::agent_jsonl::{
     parse_command_line, project_host_event, ready_line,
 };
 use crate::topology_product::durable_topology_tree_id;
-use plakous_hosted::agent::RESTORED_PAUSED_RESUME_HINT;
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use plakous_hosted::runtime::{HostConfig, effort_label, spawn_host_worker};
 use plakous_hosted::topology_runtime;
@@ -193,18 +192,22 @@ fn run_agent_stdio_stopping_on(
                                     prompt_id: Some(&id),
                                     ..JsonlCorrelation::default()
                                 },
+                                Some(&session_id),
                             )
                             .into_iter()
                             .collect()
                         } else {
                             handle_event(
                                 &event,
-                                &mut busy,
-                                &mut turn_busy,
-                                &mut tree_state,
-                                &mut prompt_id,
-                                command_id.as_ref(),
-                                &mut pending_tree_snapshot_id,
+                                &mut JsonlSession {
+                                    busy: &mut busy,
+                                    turn_busy: &mut turn_busy,
+                                    tree_state: &mut tree_state,
+                                    prompt_id: &mut prompt_id,
+                                    command_id: command_id.as_ref(),
+                                    pending_tree_snapshot_id: &mut pending_tree_snapshot_id,
+                                    session_id: Some(&session_id),
+                                },
                             )
                         };
                         if !lines.is_empty() {
@@ -289,11 +292,14 @@ fn run_agent_stdio_stopping_on(
                     match hello_gate(resume_tree, paused, attached_at.elapsed() >= RESUME_WAIT) {
                         HelloGate::Wait => {}
                         HelloGate::RefusePaused => {
-                            refuse = Some(RESTORED_PAUSED_RESUME_HINT.to_owned());
-                            write_line(
-                                &mut stdout,
-                                &diagnostic_line(None, RESTORED_PAUSED_RESUME_HINT),
-                            )?;
+                            let text = crate::refusal_text::paused_tree_text(
+                                crate::notice_text::RemedyContext {
+                                    frontend: crate::notice_text::Frontend::Jsonl,
+                                    session_id: Some(&session_id),
+                                },
+                            );
+                            refuse = Some(text.clone());
+                            write_line(&mut stdout, &diagnostic_line(None, &text))?;
                             shutting_down = true;
                             shutdown_started = Instant::now();
                             begin_shutdown(&actions, busy)?;
@@ -737,39 +743,41 @@ fn emit_lines(
     Ok(())
 }
 
-fn handle_event(
-    event: &HostEvent,
-    busy: &mut bool,
-    turn_busy: &mut bool,
-    tree_state: &mut String,
-    prompt_id: &mut Option<String>,
-    command_id: Option<&String>,
-    pending_tree_snapshot_id: &mut Option<String>,
-) -> Vec<String> {
+struct JsonlSession<'a> {
+    busy: &'a mut bool,
+    turn_busy: &'a mut bool,
+    tree_state: &'a mut String,
+    prompt_id: &'a mut Option<String>,
+    command_id: Option<&'a String>,
+    pending_tree_snapshot_id: &'a mut Option<String>,
+    session_id: Option<&'a str>,
+}
+
+fn handle_event(event: &HostEvent, session: &mut JsonlSession<'_>) -> Vec<String> {
     let mut lines = Vec::new();
     if let HostEvent::SetBusy(value) = event {
-        *turn_busy = *value;
-        *busy = *value;
+        *session.turn_busy = *value;
+        *session.busy = *value;
     }
     if let HostEvent::TopologyNavigatorSnapshot(snapshot) = event {
-        *tree_state = snapshot.state.as_str().to_owned();
+        *session.tree_state = snapshot.state.as_str().to_owned();
     }
     let correlation = JsonlCorrelation {
-        prompt_id: prompt_id.as_deref(),
+        prompt_id: session.prompt_id.as_deref(),
         omit_unknown_turn_id: true,
-        command_id: command_id.map(String::as_str),
-        pending_tree_snapshot_id: pending_tree_snapshot_id.as_deref(),
+        command_id: session.command_id.map(String::as_str),
+        pending_tree_snapshot_id: session.pending_tree_snapshot_id.as_deref(),
     };
-    if let Some(line) = project_host_event(event, correlation) {
+    if let Some(line) = project_host_event(event, correlation, session.session_id) {
         lines.push(line);
         if let HostEvent::TopologyNavigatorSnapshot(snapshot) = event
             && snapshot.solicited
         {
-            *pending_tree_snapshot_id = None;
+            *session.pending_tree_snapshot_id = None;
         }
     }
     if matches!(event, HostEvent::SetBusy(false)) {
-        *prompt_id = None;
+        *session.prompt_id = None;
     }
     lines
 }

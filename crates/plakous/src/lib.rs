@@ -263,6 +263,7 @@ pub mod agent {
         MAX_USER_MESSAGE_BYTES,
         ModelReresolutionError,
         ModelReresolutionOperation,
+        ModelReresolutionRefusal,
         ModelReresolver,
         NormalizedModelEventKind,
         PendingEffectDecisionView,

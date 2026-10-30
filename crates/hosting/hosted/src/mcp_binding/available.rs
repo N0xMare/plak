@@ -21,6 +21,36 @@ use serde::Deserialize;
 
 use crate::tool_plan::{SelectedTool, TemplateToolSelection};
 
+fn mcp_failure(error: McpError) -> crate::CliFailure {
+    let advice = if let Some(login) = error.login_requirement() {
+        Some(plakous_host_protocol::refusal::RefusalAdvice::McpLogin {
+            server: login.server.clone(),
+            scopes: login.scopes.clone(),
+        })
+    } else {
+        error.secret_requirement().map(|secret| {
+            plakous_host_protocol::refusal::RefusalAdvice::SecretMissing {
+                server: secret.server.clone(),
+                name: secret.name.clone(),
+            }
+        })
+    };
+    crate::CliFailure::new(error.to_string()).with_optional_advice(advice)
+}
+
+fn boxed_secret_error(failure: crate::CliFailure) -> Box<dyn std::error::Error + Send + Sync> {
+    if let Some(plakous_host_protocol::refusal::RefusalAdvice::SecretMissing { server, name }) =
+        failure.advice()
+    {
+        return Box::new(plakous::mcp::McpNamedSecretMissing::new(
+            server.clone(),
+            name.clone(),
+            failure.to_string(),
+        ));
+    }
+    Box::new(failure)
+}
+
 /// The MCP name of the resources tool a `resources = true` table adds.
 const READ_RESOURCE: &str = "read_resource";
 
@@ -41,9 +71,10 @@ pub(crate) struct BoundMcpTools {
 /// The process's MCP pool and the executor its servers run on. Sessions bind
 /// and call from executors that may end before a server should; the pool's
 /// own outlives them all.
-fn pool() -> Result<(&'static McpPool, &'static tokio::runtime::Runtime), String> {
-    static POOL: OnceLock<Result<(McpPool, tokio::runtime::Runtime), String>> = OnceLock::new();
-    crate::capabilities::require_feature("mcp").map_err(|error| error.to_string())?;
+fn pool() -> Result<(&'static McpPool, &'static tokio::runtime::Runtime), crate::CliFailure> {
+    static POOL: OnceLock<Result<(McpPool, tokio::runtime::Runtime), crate::CliFailure>> =
+        OnceLock::new();
+    crate::capabilities::require_feature("mcp").map_err(crate::CliFailure::from)?;
     let pool = POOL.get_or_init(|| {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -72,7 +103,7 @@ pub(crate) fn bind_mcp_tools(
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
     frozen: Option<&[McpToolRecord]>,
-) -> Result<BoundMcpTools, String> {
+) -> Result<BoundMcpTools, crate::CliFailure> {
     if selection.mcp_servers().next().is_none() {
         return Ok(BoundMcpTools::empty());
     }
@@ -108,7 +139,7 @@ async fn bind_on_pool(
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
     frozen: Option<&[McpToolRecord]>,
-) -> Result<BoundMcpTools, String> {
+) -> Result<BoundMcpTools, crate::CliFailure> {
     let mut bound = BoundMcpTools::empty();
     let servers = selection.mcp_servers().cloned().collect::<Vec<_>>();
     let environment = Arc::new(service_environment(workspace_root)?);
@@ -127,9 +158,11 @@ async fn bind_on_pool(
         // A refused login already names the more specific login remedy.
         let refused = |error: McpError, remedy: &str| {
             if error.kind() == McpErrorKind::Authorization {
-                error.to_string()
+                mcp_failure(error)
             } else {
-                format!("{error}; {remedy}")
+                let failure = mcp_failure(error);
+                crate::CliFailure::new(format!("{failure}; {remedy}"))
+                    .with_optional_advice(failure.advice().cloned())
             }
         };
         let lease = pool
@@ -190,8 +223,8 @@ impl BoundMcpTools {
         server: &McpServerName,
         pack: &McpToolPack,
         records: Vec<McpToolRecord>,
-        refused: &dyn Fn(McpError) -> String,
-    ) -> Result<(), String> {
+        refused: &dyn Fn(McpError) -> crate::CliFailure,
+    ) -> Result<(), crate::CliFailure> {
         self.names.extend(
             pack.exposed_names()
                 .map_err(refused)?
@@ -220,12 +253,12 @@ pub(crate) fn recorded_mcp_tools(
     tool_sections: &BTreeMap<String, String>,
     secrets: &Arc<dyn NamedSecrets>,
     frozen: Option<&[McpToolRecord]>,
-) -> Result<BoundMcpTools, String> {
+) -> Result<BoundMcpTools, crate::CliFailure> {
     let mut bound = BoundMcpTools::empty();
     if selection.mcp_servers().next().is_none() {
         return Ok(bound);
     }
-    crate::capabilities::require_feature("mcp").map_err(|error| error.to_string())?;
+    crate::capabilities::require_feature("mcp").map_err(crate::CliFailure::from)?;
     let frozen = frozen.ok_or_else(|| {
         "the session's mcp tools were never frozen, so a reopen would list its servers again"
             .to_owned()
@@ -245,7 +278,11 @@ pub(crate) fn recorded_mcp_tools(
             .filter(|record| record.server() == server)
             .cloned()
             .collect::<Vec<_>>();
-        let refused = |error: McpError| format!("mcp server {server}: {error}");
+        let refused = |error: McpError| {
+            let failure = mcp_failure(error);
+            crate::CliFailure::new(format!("mcp server {server}: {failure}"))
+                .with_optional_advice(failure.advice().cloned())
+        };
         let pack = McpToolPack::unbound(server.clone(), spec.resources(), records.clone())
             .map_err(refused)?;
         bound.add(server, &pack, records, &refused)?;
@@ -285,7 +322,7 @@ pub fn probe_mcp_server(
     rendered: &str,
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
-) -> Result<McpProbe, String> {
+) -> Result<McpProbe, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
     let spec = server_spec(&server, rendered, &secrets)?;
@@ -296,20 +333,11 @@ pub fn probe_mcp_server(
         let listing = lease
             .freeze(&McpToolSelection::All)
             .await
-            .map_err(|error| error.to_string())?;
-        let listed = lease
-            .listed_tool_names()
-            .await
-            .map_err(|error| error.to_string())?;
+            .map_err(mcp_failure)?;
+        let listed = lease.listed_tool_names().await.map_err(mcp_failure)?;
         let resources = if lease.spec().resources() {
-            let resources = lease
-                .list_resources()
-                .await
-                .map_err(|error| error.to_string())?;
-            let templates = lease
-                .list_resource_templates()
-                .await
-                .map_err(|error| error.to_string())?;
+            let resources = lease.list_resources().await.map_err(mcp_failure)?;
+            let templates = lease.list_resource_templates().await.map_err(mcp_failure)?;
             Some((resources.len(), templates.len()))
         } else {
             None
@@ -327,8 +355,7 @@ pub fn probe_mcp_server(
         })
         .collect::<Vec<_>>();
     if resources.is_some() {
-        let exposed =
-            exposed_tool_name(&server, READ_RESOURCE).map_err(|error| error.to_string())?;
+        let exposed = exposed_tool_name(&server, READ_RESOURCE).map_err(mcp_failure)?;
         tools.push((READ_RESOURCE.to_owned(), exposed.as_str().to_owned()));
     }
     let allows = |name: &str| {
@@ -366,15 +393,12 @@ pub fn list_mcp_prompts(
     rendered: &str,
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
-) -> Result<Vec<McpPrompt>, String> {
+) -> Result<Vec<McpPrompt>, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
     let spec = server_spec(&server, rendered, &secrets)?;
     on_probe_lease(spec, workspace_root, async |lease| {
-        lease
-            .list_prompts()
-            .await
-            .map_err(|error| error.to_string())
+        lease.list_prompts().await.map_err(mcp_failure)
     })
 }
 
@@ -392,7 +416,7 @@ pub fn get_mcp_prompt(
     secrets: Arc<dyn NamedSecrets>,
     prompt: &str,
     arguments: &BTreeMap<String, String>,
-) -> Result<McpPromptExpansion, String> {
+) -> Result<McpPromptExpansion, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
     let spec = server_spec(&server, rendered, &secrets)?;
@@ -400,7 +424,7 @@ pub fn get_mcp_prompt(
         lease
             .get_prompt(prompt, arguments)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(mcp_failure)
     })
 }
 
@@ -409,9 +433,9 @@ pub fn get_mcp_prompt(
 fn on_probe_lease<T>(
     spec: McpServerSpec,
     workspace_root: &std::path::Path,
-    work: impl AsyncFnOnce(&McpLease) -> Result<T, String>,
-) -> Result<T, String> {
-    crate::capabilities::require_feature("mcp").map_err(|error| error.to_string())?;
+    work: impl AsyncFnOnce(&McpLease) -> Result<T, crate::CliFailure>,
+) -> Result<T, crate::CliFailure> {
+    crate::capabilities::require_feature("mcp").map_err(crate::CliFailure::from)?;
     let environment = Arc::new(service_environment(workspace_root)?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -422,10 +446,7 @@ fn on_probe_lease<T>(
     let pool = McpPool::new().running_on(runtime.handle().clone());
     runtime.block_on(async {
         let outcome = async {
-            let lease = pool
-                .lease(spec, environment)
-                .await
-                .map_err(|error| error.to_string())?;
+            let lease = pool.lease(spec, environment).await.map_err(mcp_failure)?;
             work(&lease).await
         }
         .await;
@@ -445,7 +466,7 @@ pub fn mcp_login_status(
     server: &str,
     rendered: &str,
     secrets: &dyn NamedSecrets,
-) -> Result<Option<McpOAuthStatus>, String> {
+) -> Result<Option<McpOAuthStatus>, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
     let definition = rendered_server(&server, rendered)?;
@@ -461,7 +482,7 @@ pub fn mcp_login_status(
         .map_err(|error| format!("mcp server {server}: {error}"))?;
     McpServerSpec::http(server.clone(), endpoint)
         .oauth_status()
-        .map_err(|error| format!("mcp server {server}: {error}"))
+        .map_err(|error| crate::CliFailure::new(format!("mcp server {server}: {error}")))
 }
 
 /// The definition `plak mcp login` and `logout` run against: one table with
@@ -477,14 +498,14 @@ pub fn mcp_oauth_spec(
     server: &str,
     rendered: &str,
     secrets: Arc<dyn NamedSecrets>,
-) -> Result<McpServerSpec, String> {
+) -> Result<McpServerSpec, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
     let definition = rendered_server(&server, rendered)?;
     if definition.auth.as_deref() != Some("oauth") {
-        return Err(format!(
+        return Err(crate::CliFailure::new(format!(
             "mcp server {server} does not use oauth; add auth = \"oauth\" to [mcp_servers.{server}]"
-        ));
+        )));
     }
     http_spec(&server, &definition, &secrets)
         .map_err(|error| error.unwrap_or_else(|| invalid_definition(&server)))
@@ -509,7 +530,9 @@ fn server_selection(selection: &TemplateToolSelection, server: &McpServerName) -
 
 /// The environment a new pool entry for this workspace spawns in. A service
 /// outlives the bind that started it, so its scope is a run of its own.
-fn service_environment(workspace_root: &std::path::Path) -> Result<ExecutionEnvironment, String> {
+fn service_environment(
+    workspace_root: &std::path::Path,
+) -> Result<ExecutionEnvironment, crate::CliFailure> {
     let unavailable = "mcp server environment could not be prepared for this workspace";
     let workspace =
         WorkspacePolicy::host(workspace_root, ".").map_err(|_| unavailable.to_owned())?;
@@ -523,7 +546,7 @@ fn service_environment(workspace_root: &std::path::Path) -> Result<ExecutionEnvi
         ExecutionEnvironmentConfig::default(),
         options,
     )
-    .map_err(|_| unavailable.to_owned())
+    .map_err(|_| crate::CliFailure::new(unavailable))
 }
 
 /// One `[mcp_servers.<id>]` table as `ToolSections` renders it.
@@ -567,7 +590,7 @@ pub(crate) fn server_spec(
     server: &McpServerName,
     rendered: &str,
     secrets: &Arc<dyn NamedSecrets>,
-) -> Result<McpServerSpec, String> {
+) -> Result<McpServerSpec, crate::CliFailure> {
     let invalid = || invalid_definition(server);
     let definition = rendered_server(server, rendered)?;
     let spec = match definition.transport.as_str() {
@@ -618,8 +641,14 @@ pub(crate) fn server_spec(
                 .map_err(|error| format!("mcp server {server}: {error}"))?
                 && let Some(reason) = login_refusal(&status)
             {
-                return Err(format!(
-                    "mcp server {server} {reason}; remedy: plak mcp login {server}"
+                return Err(crate::CliFailure::new(format!(
+                    "mcp server {server} {reason}; authenticate this server"
+                ))
+                .with_advice(
+                    plakous_host_protocol::refusal::RefusalAdvice::McpLogin {
+                        server: server.to_string(),
+                        scopes: Vec::new(),
+                    },
                 ));
             }
             spec
@@ -636,13 +665,18 @@ pub(crate) fn server_spec(
     })
 }
 
-fn invalid_definition(server: &McpServerName) -> String {
-    format!("mcp server {server} has an invalid frozen definition")
+fn invalid_definition(server: &McpServerName) -> crate::CliFailure {
+    crate::CliFailure::new(format!(
+        "mcp server {server} has an invalid frozen definition"
+    ))
 }
 
 /// The one `[mcp_servers.<id>]` table of `rendered`, which carries nothing
 /// else.
-fn rendered_server(server: &McpServerName, rendered: &str) -> Result<RenderedServer, String> {
+fn rendered_server(
+    server: &McpServerName,
+    rendered: &str,
+) -> Result<RenderedServer, crate::CliFailure> {
     let mut tables = crate::frozen_tables::parse::<RenderedTables>(rendered)
         .ok_or_else(|| invalid_definition(server))?;
     tables
@@ -654,25 +688,23 @@ fn rendered_server(server: &McpServerName, rendered: &str) -> Result<RenderedSer
 
 /// The OAuth settings of a table with `auth = "oauth"`: its login file,
 /// issuer pin, pre-registered client (its secret resolved by `client_secret`
-/// at each use) and callback port. Failures name `plak mcp login`.
+/// at each use) and callback port. Failures retain typed server/scope facts.
 fn oauth_settings(
     server: &McpServerName,
     definition: &RenderedServer,
     secrets: &dyn NamedSecrets,
     client_secret: Option<McpOAuthSecretResolver>,
-) -> Result<Option<McpOAuthSettings>, String> {
+) -> Result<Option<McpOAuthSettings>, crate::CliFailure> {
     match definition.auth.as_deref() {
         None => return Ok(None),
         Some("oauth") => {}
         Some(_) => return Err(invalid_definition(server)),
     }
-    let refused = |error: McpError| format!("mcp server {server}: {error}");
+    let refused = |error: McpError| mcp_failure(error).with_context(format!("mcp server {server}"));
     let store = secrets.mcp_login_file(server.as_str()).ok_or_else(|| {
         format!("mcp server {server} uses oauth, and this product stores no MCP logins")
     })?;
-    let login = server.clone();
-    let mut settings = McpOAuthSettings::new(store)
-        .with_login_remedy(Arc::new(move |scope| mcp_login_remedy(&login, scope)));
+    let mut settings = McpOAuthSettings::new(store);
     if let Some(issuer) = &definition.oauth_issuer {
         settings = settings.with_issuer(issuer).map_err(refused)?;
     }
@@ -687,13 +719,6 @@ fn oauth_settings(
     Ok(Some(settings))
 }
 
-fn mcp_login_remedy(login: &McpServerName, scope: Option<&str>) -> String {
-    match scope {
-        Some(scope) => format!("remedy: plak mcp login {login} --scope '{scope}'"),
-        None => format!("remedy: plak mcp login {login}"),
-    }
-}
-
 /// An HTTP definition: its URL, literal headers, and the bearer and header
 /// secrets resolved by name at each start, or its OAuth login. `Err(None)`
 /// is an invalid table.
@@ -701,9 +726,10 @@ fn http_spec(
     server: &McpServerName,
     definition: &RenderedServer,
     secrets: &Arc<dyn NamedSecrets>,
-) -> Result<McpServerSpec, Option<String>> {
+) -> Result<McpServerSpec, Option<crate::CliFailure>> {
     let url = definition.url.as_deref().ok_or(None)?;
-    let refused = |error: McpError| Some(format!("mcp server {server}: {error}"));
+    let refused =
+        |error: McpError| Some(mcp_failure(error).with_context(format!("mcp server {server}")));
     let headers = definition
         .headers
         .iter()
@@ -713,7 +739,7 @@ fn http_spec(
                 HeaderValue::try_from(value.as_str()).map_err(|_| None)?,
             ))
         })
-        .collect::<Result<Vec<_>, Option<String>>>()?;
+        .collect::<Result<Vec<_>, Option<crate::CliFailure>>>()?;
     let mut slots = Vec::new();
     if let Some(secret) = &definition.bearer_secret {
         slots.push((McpHttpSecret::Bearer, secret.clone()));
@@ -778,7 +804,7 @@ fn header_resolver(
             .map(|(slot, secret)| {
                 read_secret(&server, secret, &secrets)
                     .map(|value| (slot.clone(), value.into_header()))
-                    .map_err(Into::into)
+                    .map_err(boxed_secret_error)
             })
             .collect()
     })
@@ -794,7 +820,7 @@ fn oauth_secret_resolver(
     Arc::new(move || {
         read_secret(&server, &secret, &secrets)
             .map(NamedSecretValue::into_header)
-            .map_err(Into::into)
+            .map_err(boxed_secret_error)
     })
 }
 
@@ -802,13 +828,21 @@ fn read_secret(
     server: &McpServerName,
     secret: &str,
     secrets: &Arc<dyn NamedSecrets>,
-) -> Result<NamedSecretValue, String> {
+) -> Result<NamedSecretValue, crate::CliFailure> {
     match secrets.read(secret) {
         Ok(Some(value)) => Ok(value),
-        Ok(None) => Err(format!(
-            "mcp server {server}: secret {secret:?} is not set; remedy: plak secret set {secret}"
+        Ok(None) => Err(crate::CliFailure::new(format!(
+            "mcp server {server}: secret {secret:?} is not set; supply the named secret"
+        ))
+        .with_advice(
+            plakous_host_protocol::refusal::RefusalAdvice::SecretMissing {
+                server: server.to_string(),
+                name: secret.to_owned(),
+            },
         )),
-        Err(reason) => Err(format!("mcp server {server}: {reason}")),
+        Err(reason) => Err(crate::CliFailure::new(format!(
+            "mcp server {server}: {reason}"
+        ))),
     }
 }
 
@@ -816,7 +850,7 @@ fn require_secret(
     server: &McpServerName,
     secret: &str,
     secrets: &Arc<dyn NamedSecrets>,
-) -> Result<(), String> {
+) -> Result<(), crate::CliFailure> {
     read_secret(server, secret, secrets).map(drop)
 }
 
@@ -834,11 +868,13 @@ fn secret_resolver(
                 read_secret(&server, secret, &secrets)
                     .and_then(|value| {
                         value.into_environment().map_err(|reason| {
-                            format!("mcp server {server}: secret {secret:?}: {reason}")
+                            crate::CliFailure::new(format!(
+                                "mcp server {server}: secret {secret:?}: {reason}"
+                            ))
                         })
                     })
                     .map(|value| (variable.clone(), value))
-                    .map_err(Into::into)
+                    .map_err(boxed_secret_error)
             })
             .collect()
     })

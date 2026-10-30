@@ -835,7 +835,14 @@ pub(crate) fn limits_layout(
                 )));
             }
             VerticalUsageState::Unavailable { reason } => {
-                lines.push(Line::from(Span::styled(reason.clone(), muted)));
+                lines.push(Line::from(Span::styled(
+                    crate::usage_remedy::unavailable_reason(
+                        vertical.repair,
+                        vertical.vertical.account(),
+                        reason,
+                    ),
+                    muted,
+                )));
             }
             VerticalUsageState::Ready { meters } if meters.is_empty() => {
                 lines.push(Line::from(Span::styled(

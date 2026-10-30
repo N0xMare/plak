@@ -86,7 +86,7 @@ pub use build::{
     NATIVE_RUN_MAX_MODEL_ROUNDS, NATIVE_RUN_MAX_MODEL_ROUNDS_CEILING, NATIVE_RUN_MAX_OUTPUT_TOKENS,
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT,
     NATIVE_RUN_TURN_INFERENCE_ALLOWANCE, NATIVE_RUN_TURN_INPUT_LIABILITY_BUDGET,
-    NATIVE_RUN_TURN_RETRY_RESERVE, ProductAgentSpec, RESTORED_PAUSED_RESUME_HINT, SpawnParent,
+    NATIVE_RUN_TURN_RETRY_RESERVE, ProductAgentSpec, RESTORED_PAUSED_REFUSAL, SpawnParent,
     api_topology_parent, build_api_root_coding_session, build_coding_session,
     build_runtime_session, coding_session_runtime_binding,
     coding_session_runtime_binding_attaching_root, coding_session_target_binding,

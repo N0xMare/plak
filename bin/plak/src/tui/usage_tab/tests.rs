@@ -627,6 +627,7 @@ fn limits_fixture() -> UsageLimitsView {
                     ],
                 },
                 balances: Vec::new(),
+                repair: None,
             },
             VerticalUsageView {
                 vertical: UsageVertical::new("grok", "SuperGrok"),
@@ -635,6 +636,7 @@ fn limits_fixture() -> UsageLimitsView {
                 observed_at: None,
                 state: VerticalUsageState::NotConnected,
                 balances: Vec::new(),
+                repair: None,
             },
             VerticalUsageView {
                 vertical: UsageVertical::new("claude", "Claude"),
@@ -643,6 +645,7 @@ fn limits_fixture() -> UsageLimitsView {
                 observed_at: None,
                 state: VerticalUsageState::NotConnected,
                 balances: Vec::new(),
+                repair: None,
             },
             VerticalUsageView {
                 vertical: UsageVertical::new("openrouter", "OpenRouter"),
@@ -669,6 +672,7 @@ fn limits_fixture() -> UsageLimitsView {
                     }],
                 },
                 balances: Vec::new(),
+                repair: None,
             },
         ],
         session: SessionLedgerView {

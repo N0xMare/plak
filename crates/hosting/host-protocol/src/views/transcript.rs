@@ -129,7 +129,29 @@ impl TranscriptRow {
             scope,
             tone,
             text: text.into(),
+            remedy: None,
         })
+    }
+
+    /// Attach one semantic operator remedy without embedding frontend instructions.
+    #[must_use]
+    pub fn with_remedy(mut self, remedy: crate::notice_remedy::NoticeRemedy) -> Self {
+        if let Self::Notice(notice) = &mut self {
+            notice.remedy = Some(remedy);
+        }
+        self
+    }
+
+    /// Retain an originating failure's optional remedy during notice composition.
+    #[must_use]
+    pub fn with_optional_remedy(
+        mut self,
+        remedy: Option<&crate::notice_remedy::NoticeRemedy>,
+    ) -> Self {
+        if let Self::Notice(notice) = &mut self {
+            notice.remedy = remedy.cloned();
+        }
+        self
     }
 
     /// Whether this row closes the current tool group (spec 02 §5.4). Tool,
@@ -447,6 +469,9 @@ pub struct NoticeRow {
     pub tone: NoticeTone,
     /// Operator-facing text.
     pub text: String,
+    /// One typed remedy selected by the producer; absent rows render verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remedy: Option<crate::notice_remedy::NoticeRemedy>,
 }
 
 impl NoticeRow {

@@ -1667,7 +1667,7 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
     );
     assert!(events.iter().any(|event| matches!(event, HostEvent::QueueSnapshot { items, .. } if items.len() == 2 && !items[0].rejected && !items[1].rejected)));
     assert!(events.iter().any(|event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if matches!(detail, HostStatusDetail::PromptNotAdmitted))));
-    assert!(events.iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.starts_with("session store is full (checkpoints ") && message.contains("plak session gc --all") && message.contains("plak session delete <id>") && message.contains("prompt was not admitted"))));
+    assert!(events.iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, remedy: Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ReclaimRetainedHistory {}), .. })) if message.starts_with("session store is full (checkpoints ") && message.contains("reclaim superseded history") && message.contains("remove unneeded sessions") && message.contains("prompt was not admitted"))));
     injector
         .execute(
             "UPDATE store_meta SET checkpoints=?1 WHERE id=1",

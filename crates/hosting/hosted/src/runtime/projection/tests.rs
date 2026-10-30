@@ -831,7 +831,13 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
             error.message().contains("fork stopped; saved as session"),
             "{error:?}"
         );
-        assert!(error.message().contains("/resume"), "{error:?}");
+        assert!(
+            matches!(
+                error.remedy(),
+                Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeSavedSession { .. })
+            ),
+            "{error:?}"
+        );
         assert_eq!(config.session.id, source_id);
         assert!(
             opened.agent().is_some(),

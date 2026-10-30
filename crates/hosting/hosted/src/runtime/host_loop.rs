@@ -506,7 +506,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     })
                     .inspect(|()| self.spawn_tree_recovery())
             } else if crate::agent::topology_tree_is_restored_paused(&tree_id) {
-                Err(CliFailure::new(crate::agent::RESTORED_PAUSED_RESUME_HINT))
+                Err(CliFailure::new(crate::agent::RESTORED_PAUSED_REFUSAL)
+                    .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {}))
             } else {
                 Ok(())
             };

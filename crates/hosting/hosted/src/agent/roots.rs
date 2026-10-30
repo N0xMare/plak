@@ -430,6 +430,7 @@ impl ProductStateRoots {
             CliFailure::new(
                 crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
             )
+            .with_optional_remedy(crate::storage_pressure::sessions_remedy(&error).as_ref())
         })?;
         let sessions = Arc::new(AgentSessions::new(backend).map_err(|_| {
             CliFailure::new("plak durable session runtime could not be initialized")

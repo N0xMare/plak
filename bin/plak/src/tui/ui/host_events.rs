@@ -720,6 +720,18 @@ impl App {
             HostEvent::TranscriptStream { .. } => {
                 unreachable!("scoped stream routed before root events")
             }
+            HostEvent::RestoredPause(pause) => self.apply_live_op(HostEvent::Row(
+                plakous_host_protocol::views::transcript::TranscriptRow::warning(
+                    plakous_host_protocol::views::transcript::NoticeScope::Queue,
+                    crate::notice_text::restored_pause(
+                        pause,
+                        crate::notice_text::RemedyContext {
+                            frontend: crate::notice_text::Frontend::Tui,
+                            session_id: None,
+                        },
+                    ),
+                ),
+            )),
             HostEvent::ModelRetry(retry) => {
                 if retry.output_discarded {
                     self.discard_streamed_assistant();

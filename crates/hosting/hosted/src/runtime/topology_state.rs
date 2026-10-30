@@ -107,17 +107,20 @@ pub(crate) fn observed_restored_paused(rows: &dyn TreeRows, tree_id: &str) -> bo
 /// Operator-facing reason when rebind is blocked.
 ///
 /// Store-open or load failure fails closed as live descendants, not quiescent.
-pub fn epoch_rebind_refusal(rows: &dyn TreeRows, tree_id: &str) -> Option<&'static str> {
+pub fn epoch_rebind_refusal(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+) -> Option<crate::agent_tree::EpochRebindRefusal> {
     if let Some(runtime) = lookup(tree_id) {
         return runtime
-            .read(ProductAgentTree::epoch_rebind_refusal)
+            .read(ProductAgentTree::epoch_rebind_refusal_kind)
             .ok()
             .flatten();
     }
     match rows.tree(tree_id) {
-        Ok(Some(tree)) => tree.epoch_rebind_refusal(),
+        Ok(Some(tree)) => tree.epoch_rebind_refusal_kind(),
         Ok(None) => None,
-        Err(_) => Some(ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS),
+        Err(_) => Some(crate::agent_tree::EpochRebindRefusal::LiveDescendants),
     }
 }
 

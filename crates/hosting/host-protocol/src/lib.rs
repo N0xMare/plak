@@ -87,6 +87,7 @@ pub mod jsonl;
 pub mod limits;
 pub mod notice_remedy;
 pub mod observation;
+pub mod refusal;
 pub mod selection;
 pub mod status;
 pub mod topology;

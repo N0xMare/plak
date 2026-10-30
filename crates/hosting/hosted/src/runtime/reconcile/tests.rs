@@ -17,14 +17,18 @@ fn definite_failure_projection_publishes_only_after_durable_save() {
     session.append_transcript(TranscriptRow::user("retained source"));
     let source = session.clone();
 
-    let result = commit_definite_failure_projection(&mut session, "definite rejection", |_| {
-        Err("injected store failure".into())
-    });
+    let result = commit_definite_failure_projection(
+        &mut session,
+        "definite rejection",
+        |_| Err("injected store failure".into()),
+        None,
+    );
     assert!(result.is_err());
     assert_eq!(session.transcript, source.transcript);
     assert_eq!(session.store_revision, source.store_revision);
 
-    commit_definite_failure_projection(&mut session, "definite rejection", |_| Ok(())).unwrap();
+    commit_definite_failure_projection(&mut session, "definite rejection", |_| Ok(()), None)
+        .unwrap();
     assert_eq!(
         session.transcript.last(),
         Some(&TranscriptRow::error(
@@ -46,13 +50,16 @@ fn exceptional_terminal_projections_publish_candidate_first() {
         session.append_transcript(TranscriptRow::user("retained source"));
         let source = session.clone();
 
-        let result = commit_exceptional_terminal_projection(&mut session, projection, |_| {
-            Err("injected store failure".into())
-        });
+        let result = commit_exceptional_terminal_projection(
+            &mut session,
+            projection,
+            |_| Err("injected store failure".into()),
+            None,
+        );
         assert!(result.is_err());
         assert_eq!(session, source);
 
-        commit_exceptional_terminal_projection(&mut session, projection, |_| Ok(())).unwrap();
+        commit_exceptional_terminal_projection(&mut session, projection, |_| Ok(()), None).unwrap();
         assert_ne!(session, source);
         match projection {
             ExceptionalTerminalProjection::Interrupted(_) => {
@@ -104,6 +111,6 @@ fn failed_exceptional_terminal_publication_never_emits_success_idle() {
     );
     assert!(!observed.iter().any(|event| matches!(
         event,
-        HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle)
+        HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Idle)
     )));
 }

@@ -171,6 +171,7 @@ pub fn unread_usage_limits() -> crate::tui::presentation::UsageLimitsView {
                 observed_at: None,
                 state: VerticalUsageState::NotConnected,
                 balances: Vec::new(),
+                repair: None,
             })
             .collect(),
         ..UsageLimitsView::default()

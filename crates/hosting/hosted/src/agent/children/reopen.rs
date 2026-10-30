@@ -649,6 +649,8 @@ impl ChildReopenErrorKind {
 pub(in crate::agent) struct ChildReopenError {
     pub(in crate::agent) kind: ChildReopenErrorKind,
     pub(in crate::agent) message: String,
+    pub(in crate::agent) advice: Option<Box<plakous_host_protocol::refusal::RefusalAdvice>>,
+    pub(in crate::agent) remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
 }
 
 impl ChildReopenError {
@@ -656,6 +658,8 @@ impl ChildReopenError {
         Self {
             kind: ChildReopenErrorKind::SessionUnavailable,
             message: message.into(),
+            advice: None,
+            remedy: None,
         }
     }
 
@@ -663,6 +667,8 @@ impl ChildReopenError {
         Self {
             kind: ChildReopenErrorKind::of(error),
             message: format_session_reopen_error(prefix, error),
+            advice: crate::error::incompatible_session_advice(error).map(Box::new),
+            remedy: crate::storage_pressure::sessions_remedy(error),
         }
     }
 }
@@ -681,7 +687,28 @@ impl From<ChildReopenError> for String {
 
 impl From<ChildReopenError> for crate::agent_tree_tools::MailDeliveryFailure {
     fn from(error: ChildReopenError) -> Self {
-        Self::RecoveryRequired(error.message)
+        let mut failure = plakous_host_protocol::status::HostFailure::from(error.message);
+        failure.advice = error.advice;
+        failure.remedy = error.remedy;
+        Self::RecoveryRequired(failure)
+    }
+}
+
+fn child_reopen_from_binding(failure: crate::CliFailure) -> ChildReopenError {
+    ChildReopenError {
+        kind: ChildReopenErrorKind::SessionUnavailable,
+        message: failure.message().to_owned(),
+        advice: failure.advice().cloned().map(Box::new),
+        remedy: failure.remedy().cloned(),
+    }
+}
+
+fn child_reopen_from_open(error: crate::agent::CodingSessionOpenFailure) -> ChildReopenError {
+    ChildReopenError {
+        kind: ChildReopenErrorKind::Incompatible,
+        message: error.failure.message().to_owned(),
+        advice: error.failure.advice().cloned().map(Box::new),
+        remedy: error.failure.remedy().cloned(),
     }
 }
 
@@ -708,9 +735,9 @@ pub(crate) fn incompatible_session_message(error: &AgentSessionsError) -> String
         .to_string()
         .replace("an incompatible build", "an incompatible plak build");
     match error.incompatible_session() {
-        Some(id) => format!(
-            "{message}; recover with that build's `plak session export {id}` then `plak session import <file>`"
-        ),
+        Some(_) => {
+            format!("{message}; export using the writing build, then import with this build")
+        }
         None => message,
     }
 }
@@ -877,7 +904,7 @@ async fn reopen_spawned_child_at_head(
             None,
         )
         .await
-        .map_err(ChildReopenError::unavailable)?;
+        .map_err(child_reopen_from_binding)?;
         let operation_id = SessionOperationId::new(format!(
             "plak:{operation_kind}:{agent_id}:{generation}:{}:{}",
             u8::from(retry.adoptions),
@@ -894,6 +921,8 @@ async fn reopen_spawned_child_at_head(
             }) => {
                 let Some(delay) = retry.lease_delay(CHILD_LEASE_POLL) else {
                     return Err(ChildReopenError {
+                        advice: None,
+                        remedy: None,
                         kind: ChildReopenErrorKind::LeaseHeld {
                             retry_after_seconds: Some(retry_after),
                         },
@@ -920,10 +949,7 @@ async fn reopen_spawned_child_at_head(
             }
         }
     };
-    let incompatible = |error: crate::agent::CodingSessionOpenFailure| ChildReopenError {
-        kind: ChildReopenErrorKind::Incompatible,
-        message: error.failure.message().to_owned(),
-    };
+    let incompatible = child_reopen_from_open;
     let recovered = classify_opened(&opened);
     let reopened = match opened {
         OpenSessionOutcome::Opened { session, .. }
@@ -1100,4 +1126,52 @@ pub(super) fn record_reopen_failure(
         tree.record_host_retirement_for_attempt(agent_id, expected, error.to_owned())
             .map(|_| ())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mail_delivery_keeps_reopen_advice_and_remedy() {
+        use plakous_host_protocol::notice_remedy::NoticeRemedy;
+        use plakous_host_protocol::refusal::RefusalAdvice;
+        let error = ChildReopenError {
+            kind: ChildReopenErrorKind::SessionUnavailable,
+            message: "child session could not be reopened".into(),
+            advice: Some(Box::new(RefusalAdvice::CheckStorage)),
+            remedy: Some(NoticeRemedy::Rebind {}),
+        };
+        let failure = crate::agent_tree_tools::MailDeliveryFailure::from(error);
+        let crate::agent_tree_tools::MailDeliveryFailure::RecoveryRequired(host) = failure else {
+            panic!("a reopen failure is recovery-required");
+        };
+        assert_eq!(host.advice.as_deref(), Some(&RefusalAdvice::CheckStorage));
+        assert_eq!(host.remedy, Some(NoticeRemedy::Rebind {}));
+        assert!(host.diagnostic.as_str().contains("could not be reopened"));
+    }
+
+    #[test]
+    fn binding_and_open_failures_keep_advice_and_remedy_on_mail_delivery() {
+        use plakous_host_protocol::notice_remedy::NoticeRemedy;
+        use plakous_host_protocol::refusal::RefusalAdvice;
+        let failure = crate::CliFailure::new("child recorded runtime is unavailable")
+            .with_advice(RefusalAdvice::CheckStorage)
+            .with_remedy(NoticeRemedy::FreeDiskSpace {});
+        let reopened = child_reopen_from_binding(failure);
+        let opened = child_reopen_from_open(crate::agent::CodingSessionOpenFailure::from(
+            crate::CliFailure::new("child session projection is incompatible")
+                .with_advice(RefusalAdvice::CheckStorage)
+                .with_remedy(NoticeRemedy::FreeDiskSpace {}),
+        ));
+        for error in [reopened, opened] {
+            let delivered = crate::agent_tree_tools::MailDeliveryFailure::from(error);
+            let crate::agent_tree_tools::MailDeliveryFailure::RecoveryRequired(host) = delivered
+            else {
+                panic!("a reopen failure is recovery-required");
+            };
+            assert_eq!(host.advice.as_deref(), Some(&RefusalAdvice::CheckStorage));
+            assert_eq!(host.remedy, Some(NoticeRemedy::FreeDiskSpace {}));
+        }
+    }
 }

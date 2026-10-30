@@ -49,6 +49,7 @@ fn view() -> TreeView {
                 ended_at_unix: None,
                 fault: None,
                 waiting_on: None,
+                recovery_abandoned: false,
             },
             NodeView {
                 agent_id: "c1".to_owned(),
@@ -92,6 +93,7 @@ fn view() -> TreeView {
                 ended_at_unix: Some(1_700_000_011),
                 fault: Some("bind failed".to_owned()),
                 waiting_on: None,
+                recovery_abandoned: false,
             },
         ],
     }
@@ -136,6 +138,7 @@ fn live_child_progress_is_additive_on_jsonl_tree_rows() {
         reasoning_tokens: 2,
         cached_input_tokens: 7,
         cache_write_tokens: 0,
+        credential_wait: None,
     });
     let wire: serde_json::Value = serde_json::from_str(&projected(tree)).unwrap();
     assert_eq!(wire["v"], 1);

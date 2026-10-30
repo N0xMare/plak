@@ -795,7 +795,8 @@ pub fn topology_tree_is_restored_paused(tree_id: &str) -> bool {
     crate::topology_runtime::is_restored_paused(tree_id)
 }
 
-pub const RESTORED_PAUSED_RESUME_HINT: &str = "the agent tree is paused after an interrupt; relaunch with `plak run --resume-tree`, or open the TUI and press r on /tree to resume the tree";
+pub const RESTORED_PAUSED_REFUSAL: &str =
+    "the agent tree is paused after an interrupt; explicitly resume it before dispatch";
 
 pub async fn rejoin_inflight_after_resume(tree_id: &str) {
     let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {

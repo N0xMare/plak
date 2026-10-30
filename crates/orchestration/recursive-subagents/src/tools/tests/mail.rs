@@ -2077,7 +2077,18 @@ async fn owner_fenced_followup_refusal_fails_closed_without_erasing_evidence() {
             None,
             &id,
             &opener,
-            MailDeliveryFailure::Refused("child is retiring".into()),
+            MailDeliveryFailure::Refused({
+                let mut failure =
+                    plakous_host_protocol::status::HostFailure::from("child is retiring");
+                failure.advice = Some(Box::new(
+                    plakous_host_protocol::refusal::RefusalAdvice::ExportSession {
+                        session_id: "00112233-4455-6677-8899-aabbccddeeff".parse().unwrap(),
+                    },
+                ));
+                failure.remedy =
+                    Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverChildren {});
+                failure
+            }),
         )
         .await
         .unwrap();
@@ -2086,6 +2097,11 @@ async fn owner_fenced_followup_refusal_fails_closed_without_erasing_evidence() {
         outcome_json(&outcome)["code"],
         "operation_recovery_required"
     );
+    assert_eq!(
+        outcome_json(&outcome)["advice"]["session_id"],
+        "00112233-4455-6677-8899-aabbccddeeff"
+    );
+    assert_eq!(outcome_json(&outcome)["remedy"]["code"], "recover_children");
     driver
         .read(|tree| {
             assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);

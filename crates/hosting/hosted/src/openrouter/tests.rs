@@ -33,7 +33,8 @@ fn key_usage_rejection_names_status_source_and_remedy_only() {
         let file = key_usage_failure(&error, "sha256:1234abcd");
         assert!(file.contains("from sha256:1234abcd"));
         assert!(file.contains(status));
-        assert!(file.contains("plak key set openrouter"));
+        assert!(file.contains("replace the rejected API key from the key file"));
+        assert!(!file.contains("plak key"));
     }
 }
 use crate::agent::enroll_product_instructions;

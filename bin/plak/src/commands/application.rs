@@ -583,6 +583,9 @@ impl AccountOps for PlakousApplication {
                 product_openrouter::OpenRouterKeyUsageProbe::Failed(reason) => {
                     product_usage::VerticalObservation::Unavailable(reason)
                 }
+                product_openrouter::OpenRouterKeyUsageProbe::Rejected { reason, source } => {
+                    product_usage::VerticalObservation::RejectedKey { reason, source }
+                }
             },
         )
     }

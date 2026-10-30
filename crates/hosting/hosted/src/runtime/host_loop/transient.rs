@@ -110,10 +110,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let _ = self.events.notice(TranscriptRow::info(
             NoticeScope::Turn,
             format!(
-                "{human}; will continue automatically {wait} ({}/{budget}) \u{b7} Esc cancels",
+                "{human}; will continue automatically {wait} ({}/{budget}); continuation may be cancelled",
                 self.transient_resumes_used,
             ),
-        ));
+        ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::CancelContinuation {}));
         true
     }
 

@@ -44,10 +44,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::agent_jsonl::project_host_event;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeProvider;
 use plakous_host_protocol::envelope::JsonlCorrelation;
-use plakous_host_protocol::jsonl::{host_event_kind, project_host_event};
+use plakous_host_protocol::jsonl::host_event_kind;
 use plakous_host_protocol::observation::{TurnLifecycle, TurnPhase};
 use plakous_offline_crash_harness::protocol::CrashBoundary;
 use plakous_offline_crash_harness::{
@@ -101,9 +102,20 @@ impl Record {
                 )
             });
         }
+        let payload = match &event {
+            HostEvent::Status {
+                phase,
+                queue_len,
+                detail,
+            } => format!(
+                "Status {{ phase: {:?}, queue_len: {queue_len}, detail: {detail:?} }}",
+                phase.as_str(),
+            ),
+            _ => format!("{event:?}"),
+        };
         Self {
             kind: host_event_kind(&event).to_owned(),
-            payload: scrub(&format!("{event:?}"), root),
+            payload: scrub(&payload, root),
         }
     }
 
@@ -992,6 +1004,7 @@ impl Fixture {
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
             continuation: None,
+            event_renderer: None,
         }
     }
 }
@@ -1614,7 +1627,7 @@ fn run_parity(scenario: &str, script: Script, one_shot: OneShot, steps: impl Fn(
 fn jsonl_projection_matches_production(events: &[HostEvent], root: &Path) {
     for event in events {
         let record = Record::from_event(event, root);
-        let projected = project_host_event(event, JsonlCorrelation::default()).is_some();
+        let projected = project_host_event(event, JsonlCorrelation::default(), None).is_some();
         assert_eq!(
             jsonl_carries(&record),
             projected,
@@ -1988,7 +2001,7 @@ fn jsonl_carries_the_terminal_tool_line() {
     let terminal: Vec<String> = events
         .iter()
         .filter(|event| matches!(event, HostEvent::ToolLine { state, .. } if state != "running"))
-        .filter_map(|event| project_host_event(event, JsonlCorrelation::default()))
+        .filter_map(|event| project_host_event(event, JsonlCorrelation::default(), None))
         .collect();
     assert_eq!(
         terminal.len(),
@@ -2187,7 +2200,7 @@ fn refusal_normal_host_and_jsonl_preserve_text_and_specific_note_once() {
         );
         let projected = events
             .iter()
-            .filter_map(|event| project_host_event(event, JsonlCorrelation::default()))
+            .filter_map(|event| project_host_event(event, JsonlCorrelation::default(), None))
             .collect::<Vec<_>>();
         assert_eq!(
             projected

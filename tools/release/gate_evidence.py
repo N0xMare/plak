@@ -72,7 +72,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({"docs/spec/*.md"}), "a tool-call argument fixture"),
     "crates/harness/compose/tests/integration/pack_registrations.rs": (
         frozenset({"README.md"}), "a tool-call argument fixture"),
-    "crates/hosting/hosted/src/mcp_binding/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
+    "bin/plak/src/refusal_text/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture; these refusal scenarios read no documentation"),
     "crates/hosting/hosted/src/runtime/tool_facts/tests.rs": (frozenset({"README.md"}), "a conflict path fixture"),
     "crates/orchestration/recursive-subagents/src/tools/tests/registrations.rs": (
         frozenset({'"docs"'}), "an MCP server id fixture"),

@@ -451,9 +451,12 @@ async fn openai_api_native_ptc_without_the_javascript_host_names_the_sidecar() {
     };
     let message = error.message();
     assert!(
-        message.contains("Codex Code Mode sidecar is unavailable")
-            && message.contains("PLAK_JS_HOST"),
+        message.contains("Codex Code Mode sidecar is unavailable"),
         "{message}"
+    );
+    assert_eq!(
+        error.remedy(),
+        Some(&plakous_host_protocol::notice_remedy::NoticeRemedy::RepairJavaScriptHost {})
     );
 }
 

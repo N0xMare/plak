@@ -13,6 +13,7 @@ use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::send_attached_action;
 use crate::sessions;
 use plakous::sessions::feed::{FeedCursor, FeedPage, FeedPageRequest};
+use plakous_host_protocol::status::{CancelUnsettled, HostPhase, HostStatusDetail};
 use std::sync::Arc;
 
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
@@ -274,7 +275,7 @@ fn a_quit_after_an_interrupt_records_exactly_one_cancel_command() {
         &events,
         &mut seen,
         "interrupting",
-        |event| matches!(event, HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Interrupting)),
+        |event| matches!(event, HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Interrupting)),
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
@@ -362,7 +363,7 @@ fn a_quit_after_a_refused_interrupt_requests_the_cancel() {
         &events,
         &mut seen,
         "refused cancel notice",
-        |event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if matches!(detail, plakous_host_protocol::status::HostStatusDetail::CancelUnsettled { cause: plakous_host_protocol::status::CancelUnsettled::RuntimeRefused { .. } })),
+        |event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if matches!(detail, HostStatusDetail::CancelUnsettled { cause: CancelUnsettled::RuntimeRefused { .. } })),
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();

@@ -20,7 +20,7 @@ pub(crate) fn bind_mcp_tools(
     _workspace_root: &Path,
     _secrets: Arc<dyn NamedSecrets>,
     _frozen: Option<&[McpToolRecord]>,
-) -> Result<BoundMcpTools, String> {
+) -> Result<BoundMcpTools, crate::CliFailure> {
     crate::capabilities::require_tools(selection).map_err(|error| error.to_string())?;
     Ok(BoundMcpTools {
         names: Vec::new(),
@@ -35,7 +35,7 @@ pub(crate) fn recorded_mcp_tools(
     _tool_sections: &BTreeMap<String, String>,
     _secrets: &Arc<dyn NamedSecrets>,
     _frozen: Option<&[McpToolRecord]>,
-) -> Result<BoundMcpTools, String> {
+) -> Result<BoundMcpTools, crate::CliFailure> {
     bind_mcp_tools(
         selection,
         &BTreeMap::new(),

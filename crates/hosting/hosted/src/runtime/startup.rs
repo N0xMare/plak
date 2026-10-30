@@ -1,6 +1,6 @@
 //! Host startup: worker spawn, lifecycle phases, and session opening.
 use crate::surface_protocol::ContentEvent;
-use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
+use plakous_host_protocol::status::{AttachFailure, DetachedReason, HostPhase, HostStatusDetail};
 use std::future::Future;
 #[cfg(test)]
 use std::thread;
@@ -93,10 +93,10 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
             let _ = startup_tx.send(Err(err.message().to_owned()));
             // A notice, not an error row: the failure itself is the worker's
             // result, which every surface reports once as its terminal error.
-            let _ = event_tx.notice(TranscriptRow::info(
-                NoticeScope::Host,
-                format!("host error: {}", err.message()),
-            ));
+            let _ = event_tx.notice(
+                TranscriptRow::info(NoticeScope::Host, format!("host error: {}", err.message()))
+                    .with_optional_remedy(err.remedy()),
+            );
             let _ = event_tx.send(ContentEvent::Status {
                 phase: HostPhase::Error,
                 queue_len: 0,
@@ -208,18 +208,18 @@ pub fn spawn_deferred_host_with_clear_publication<P: plakous_host_protocol::Prot
                         return Err(error);
                     }
                     fallback.reason = if error.is_recovery_required() {
-                        format!("recovery_required: {}", error.message())
+                        DetachedReason::RecoveryRequired(error.host_failure())
                     } else {
-                        format!("resolve_failed: {}", error.message())
+                        DetachedReason::ResolveFailed(error.host_failure())
                     };
                     if let Ok(authoritative) = fallback.store.load(&fallback.session.id) {
                         fallback.session = authoritative;
                     }
                     let _ = event_tx.send(ContentEvent::AgentAttached(false));
-                    let _ = event_tx.notice(TranscriptRow::error(
-                        NoticeScope::Host,
-                        error.message().to_owned(),
-                    ));
+                    let _ = event_tx.notice(
+                        TranscriptRow::error(NoticeScope::Host, error.message().to_owned())
+                            .with_optional_remedy(error.remedy()),
+                    );
                     return shell_host.run(
                         fallback,
                         action_rx,
@@ -359,7 +359,11 @@ fn record_replay_fallback(
         crate::session_log::SessionEvent::new("session.replay_stripped")
             .str("reason", error.message()),
     );
-    session.record_notice(TranscriptRow::warning(NoticeScope::Settings,"Provider replay was incompatible with this build and was stripped; the conversation was carried without it."));
+    session.record_notice(TranscriptRow::warning(
+        NoticeScope::Settings,
+        "Provider replay was incompatible with this build and was stripped; the conversation \
+         was carried without it.",
+    ));
 }
 
 pub(super) async fn build_session_from_config<P: plakous_host_protocol::ProtocolExtension>(
@@ -637,16 +641,38 @@ async fn native_credential_failure(
 }
 
 fn native_account_changed(label: &str, account: &str) -> CliFailure {
+    let account = plakous_host_protocol::notice_remedy::AccountTarget::from_account(account);
     CliFailure::new(format!(
-        "{label} provider account changed; log in to the original account with `plak login {account}` to reopen exactly, or use /rebind to carry the history into a new session under the newly logged-in account"
+        "{label} provider account changed; restore the original account for exact reopen, or \
+         explicitly carry history into a new session under the current account"
     ))
+    .with_remedy(
+        plakous_host_protocol::notice_remedy::NoticeRemedy::RestoreAccountOrRebind { account },
+    )
+    .with_attach_failure(AttachFailure::AccountChanged)
+    .with_origin(
+        plakous_host_protocol::status::HostFailureOrigin::NativeBinding {
+            label: label.to_owned(),
+            account,
+        },
+    )
 }
 
 fn native_credential_message(label: &str, account: &str, quarantined: bool) -> CliFailure {
     if quarantined {
         CliFailure::new(format!(
-            "{label} credential was rejected at refresh; run `plak login {account}`"
+            "{label} credential was rejected at refresh; restore usable credentials"
         ))
+        .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+            account: plakous_host_protocol::notice_remedy::AccountTarget::from_account(account),
+        })
+        .with_attach_failure(AttachFailure::CredentialRejected)
+        .with_origin(
+            plakous_host_protocol::status::HostFailureOrigin::NativeBinding {
+                label: label.to_owned(),
+                account: plakous_host_protocol::notice_remedy::AccountTarget::from_account(account),
+            },
+        )
     } else {
         native_authority_unavailable(label, account)
     }
@@ -655,9 +681,19 @@ fn native_credential_message(label: &str, account: &str, quarantined: bool) -> C
 /// A renewal that found no usable credential names the repair, as other
 /// credential failures do.
 pub(super) fn native_authority_unavailable(label: &str, account: &str) -> CliFailure {
+    let account = plakous_host_protocol::notice_remedy::AccountTarget::from_account(account);
     CliFailure::new(format!(
-        "{label} credential is unavailable (signed out, quarantined, or a login made by an earlier build); run `plak login {account}`"
+        "{label} credential is unavailable (signed out, quarantined, or a login made by an \
+         earlier build); restore usable credentials"
     ))
+    .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Login { account })
+    .with_attach_failure(AttachFailure::CredentialUnavailable)
+    .with_origin(
+        plakous_host_protocol::status::HostFailureOrigin::NativeBinding {
+            label: label.to_owned(),
+            account,
+        },
+    )
 }
 
 /// The exact semantic and account axes that may not change during freshness reopen.
@@ -679,13 +715,40 @@ impl FreshNativeBinding {
             && self.credential_authority == fresh.credential_authority
             && self.selection != fresh.selection
         {
+            let account =
+                plakous_host_protocol::notice_remedy::AccountTarget::from_account(account);
             CliFailure::new(format!(
-                "exact reopen refused: {label} login selection changed; use /reload or /rebind to carry the history under the current login; Fork now is available only while attached"
+                "exact reopen refused: {label} login selection changed; explicitly carry history \
+                 under the current login; an attached-session fork requires an attachment"
             ))
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::CarryCurrentLogin {})
+            .with_attach_failure(AttachFailure::LoginSelectionChanged)
+            .with_origin(
+                plakous_host_protocol::status::HostFailureOrigin::NativeBinding {
+                    label: label.to_owned(),
+                    account,
+                },
+            )
         } else {
+            let account =
+                plakous_host_protocol::notice_remedy::AccountTarget::from_account(account);
             CliFailure::new(format!(
-                "exact reopen refused: {label} is bound to a different account or model; restore the original account and configuration with `plak login {account}`, or use /rebind to carry the history into a new session"
+                "exact reopen refused: {label} is bound to a different account or model; restore \
+                 the original account and configuration, or explicitly carry history into a new \
+                 session"
             ))
+            .with_remedy(
+                plakous_host_protocol::notice_remedy::NoticeRemedy::RestoreBindingOrCarry {
+                    account,
+                },
+            )
+            .with_attach_failure(AttachFailure::BindingChanged)
+            .with_origin(
+                plakous_host_protocol::status::HostFailureOrigin::NativeBinding {
+                    label: label.to_owned(),
+                    account,
+                },
+            )
         }
     }
 
@@ -798,8 +861,7 @@ fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
             &config.session.workspace_root,
             config.state_roots.named_secrets(),
             None,
-        )
-        .map_err(CliFailure::new)?;
+        )?;
         for notice in bound.notices {
             config
                 .session

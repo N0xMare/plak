@@ -165,7 +165,7 @@ pub(super) fn manual_compact_operator_text(detail: &str) -> String {
     }
 }
 
-fn compact_diagnostic_is_provider_quiet(diagnostic: &str) -> bool {
+pub(super) fn compact_diagnostic_is_provider_quiet(diagnostic: &str) -> bool {
     diagnostic.contains("deadline elapsed") || diagnostic.contains("no authoritative completion")
 }
 
@@ -218,6 +218,23 @@ pub(in crate::runtime) const fn context_capacity_recovery_guidance(
             CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE
         }
         ContextCapacityRecovery::Compactable => CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE,
+    }
+}
+
+pub(in crate::runtime) const fn context_capacity_recovery_remedy(
+    recovery: plakous_host_protocol::ContextCapacityRecovery,
+    exact_source: bool,
+    native: bool,
+    segment_limit: bool,
+) -> Option<plakous_host_protocol::notice_remedy::NoticeRemedy> {
+    use plakous_host_protocol::{ContextCapacityRecovery as C, notice_remedy::NoticeRemedy as R};
+    match recovery {
+        C::ResendShorter => None,
+        C::Protected => Some(R::LargerModelOrStartFresh {}),
+        C::Compactable if !exact_source => None,
+        C::Compactable if segment_limit => Some(R::CompactSegmentHistory {}),
+        C::Compactable if native => Some(R::CompactNative {}),
+        C::Compactable => Some(R::CompactWholeGroups {}),
     }
 }
 

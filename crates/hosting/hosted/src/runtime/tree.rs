@@ -713,9 +713,23 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
         }
     };
     let started = crate::agent::start_tree_recovery_pass(tree_id, move |report| {
-        match report.and_then(|report| report.note()) {
-            Some(note) => {
-                let _ = report_row(TranscriptRow::info(NoticeScope::Tree, note));
+        match report.and_then(|report| {
+            report.note().map(|note| {
+                (
+                    note,
+                    !report.refused.is_empty() || !report.not_attempted.is_empty(),
+                )
+            })
+        }) {
+            Some((note, needs_recovery)) => {
+                let row = TranscriptRow::info(NoticeScope::Tree, note);
+                let _ = report_row(if needs_recovery {
+                    row.with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverChildren {},
+                    )
+                } else {
+                    row
+                });
             }
             None => {
                 if let Some(nothing) = nothing {
@@ -736,14 +750,22 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
                     .to_owned(),
             ),
             crate::agent::RecoveryPassStart::Paused => Some(
-                "plak: this agent tree is paused; resuming it (r on /tree, or --resume-tree) \
-                 recovers its children"
+                "this agent tree is paused; explicitly resuming it recovers its children"
                     .to_owned(),
             ),
             _ => None,
         };
         if let Some(note) = note {
-            let _ = events.notice(TranscriptRow::info(NoticeScope::Tree, note));
+            let row = TranscriptRow::info(NoticeScope::Tree, note);
+            let _ = events.notice(
+                if matches!(started, crate::agent::RecoveryPassStart::Paused) {
+                    row.with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {},
+                    )
+                } else {
+                    row
+                },
+            );
         }
     }
     started

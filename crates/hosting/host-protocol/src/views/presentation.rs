@@ -455,6 +455,8 @@ pub struct UsageLimitsView {
 /// One vertical's allowance block.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerticalUsageView {
+    /// Semantic repair selected at the read source, never inferred from its reason text.
+    pub repair: Option<super::UsageRepair>,
     /// Which vertical this block describes.
     pub vertical: UsageVertical,
     /// Authenticated account identity exactly as the endpoint reported it,

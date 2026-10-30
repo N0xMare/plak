@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+use plakous_host_protocol::status::HostStatusDetail;
 use std::sync::{
     Mutex,
     atomic::{AtomicBool, Ordering},
@@ -88,7 +89,7 @@ fn assert_interrupted_product_write(site: StoreCall) {
     loop {
         if matches!(
             events.recv_timeout(Duration::from_secs(10)).unwrap(),
-            HostEvent::Status { ref detail, .. } if matches!(detail, Some(plakous_host_protocol::status::HostStatusDetail::NoActiveTurn))
+            HostEvent::Status { ref detail, .. } if matches!(detail, Some(HostStatusDetail::NoActiveTurn))
         ) {
             break;
         }

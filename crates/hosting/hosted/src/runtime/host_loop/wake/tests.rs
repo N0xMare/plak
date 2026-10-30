@@ -430,7 +430,7 @@ fn run_waits_without_a_turn_and_timeout_interrupts_resumable_children() {
         assert_eq!(
             notes
                 .iter()
-                .filter(|note| *note == "plak: waiting for c1; Ctrl-C to stop")
+                .filter(|note| *note == "waiting for c1")
                 .count(),
             1
         );

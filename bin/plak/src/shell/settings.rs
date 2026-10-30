@@ -378,7 +378,7 @@ fn apply_profile(
                     ProfileForkOutcome::Bound => ProfileOutcome::Bound,
                     ProfileForkOutcome::AlreadyActive => ProfileOutcome::AlreadyActive,
                     ProfileForkOutcome::Refused(reason) => {
-                        refuse_profile(&prepared.id, reason, &events);
+                        refuse_profile_failure(&prepared.id, &reason, &events);
                         return;
                     }
                 };
@@ -394,6 +394,21 @@ fn apply_profile(
         }),
     };
     Some(fork)
+}
+
+fn refuse_profile_failure(
+    name: &str,
+    reason: &plakous_host_protocol::status::HostFailure,
+    events: &Sender<PlakExtension>,
+) {
+    let text = crate::refusal_text::host_failure_text(
+        reason,
+        crate::notice_text::RemedyContext {
+            frontend: crate::notice_text::Frontend::Tui,
+            session_id: None,
+        },
+    );
+    refuse_profile(name, text, events);
 }
 
 /// Publishes the template readiness projection to the TUI. Emitted

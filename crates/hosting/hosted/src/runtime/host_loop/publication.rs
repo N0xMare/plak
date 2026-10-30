@@ -82,8 +82,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             && finish_reason != plakous::model::FinishReason::Refusal
                         {
                             let _ = self.events.notice(TranscriptRow::warning(NoticeScope::Turn,
-                                "turn finished with no visible text (empty stream — try again, or choose another profile with /agents)",
-                            ));
+                                "turn finished with no visible text (empty stream); try again or choose another profile",
+                            ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryOrChooseProfile {}));
                         }
                         if assistant.is_empty() {
                             log_ev(
@@ -125,10 +125,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             self.config.session.context_counters(),
                         ) {
                             emit_unavailable_context(&self.events);
-                            let _ = self.events.notice(TranscriptRow::error(
-                                NoticeScope::Turn,
-                                error.message().to_owned(),
-                            ));
+                            let _ = self.events.notice(
+                                TranscriptRow::error(NoticeScope::Turn, error.message().to_owned())
+                                    .with_optional_remedy(error.remedy()),
+                            );
                         }
                     }
                     Ok(false) => unreachable!("completion update always changes the candidate"),
@@ -146,9 +146,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             },
                         );
                         let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                            "turn completed but its product transcript could not be committed; the next prompt (or /recover) reopens the session and continues"
+                            "turn completed but its product transcript could not be committed; the next prompt or explicit recovery reopens the session and continues"
                                 ,
-                        ));
+                        ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                     }
                 }
             }
@@ -231,10 +231,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 self.config.session.context_counters(),
                             ) {
                                 emit_unavailable_context(&self.events);
-                                let _ = self.events.notice(TranscriptRow::error(
-                                    NoticeScope::Turn,
-                                    error.message().to_owned(),
-                                ));
+                                let _ = self.events.notice(
+                                    TranscriptRow::error(
+                                        NoticeScope::Turn,
+                                        error.message().to_owned(),
+                                    )
+                                    .with_optional_remedy(error.remedy()),
+                                );
                             }
                         }
                         Err(compact_error) => {
@@ -250,13 +253,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                     error,
                                 )));
                             }
-                            let _ = self.events.notice(TranscriptRow::error(
-                                NoticeScope::Compaction,
-                                format!("compact: {}", compact_error.message()),
-                            ));
-                            let _ = self
-                                .events
-                                .notice(TranscriptRow::info(NoticeScope::Turn, guidance));
+                            let _ = self.events.notice(
+                                TranscriptRow::error(
+                                    NoticeScope::Compaction,
+                                    format!("compact: {}", compact_error.message()),
+                                )
+                                .with_optional_remedy(compact_error.remedy()),
+                            );
+                            let _ = self.events.notice(
+                                TranscriptRow::info(NoticeScope::Turn, guidance)
+                                    .with_optional_remedy(
+                                        super::super::compact::context_capacity_recovery_remedy(
+                                            recovery,
+                                            exact_source,
+                                            native,
+                                            segment_limit,
+                                        )
+                                        .as_ref(),
+                                    ),
+                            );
                             let _ = self
                                 .events
                                 .send(ContentEvent::ContextCapacityRecovery(Some(recovery)));
@@ -275,28 +290,41 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             error,
                         )));
                     }
-                    let _ = self
-                        .events
-                        .notice(TranscriptRow::info(NoticeScope::Turn, guidance));
+                    let _ = self.events.notice(
+                        TranscriptRow::info(NoticeScope::Turn, guidance).with_optional_remedy(
+                            super::super::compact::context_capacity_recovery_remedy(
+                                recovery,
+                                exact_source,
+                                native,
+                                segment_limit,
+                            )
+                            .as_ref(),
+                        ),
+                    );
                     let _ = self
                         .events
                         .send(ContentEvent::ContextCapacityRecovery(Some(recovery)));
                 }
             }
-            Ok(TurnHostOutcome::AdmissionRejected { error, .. }) => {
+            Ok(TurnHostOutcome::AdmissionRejected { error, remedy, .. }) => {
                 if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                    let _ = self
-                        .events
-                        .notice(TranscriptRow::error(NoticeScope::Turn, error));
+                    let _ = self.events.notice(
+                        TranscriptRow::error(NoticeScope::Turn, error)
+                            .with_optional_remedy(remedy.as_ref()),
+                    );
                 }
             }
             Ok(TurnHostOutcome::Failed {
-                error, transient, ..
+                error,
+                transient,
+                remedy,
+                ..
             }) => {
                 if let Ok(()) = commit_definite_failure_projection(
                     &mut self.config.session,
                     &error,
                     |candidate| self.config.store.save(candidate),
+                    remedy.as_ref(),
                 ) {
                     log_ev(
                         self.log.as_ref(),
@@ -307,10 +335,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
-                            NoticeScope::Turn,
-                            error.clone(),
-                        )));
+                        let _ = self.events.send(ContentEvent::Row(
+                            TranscriptRow::error(NoticeScope::Turn, error.clone())
+                                .with_optional_remedy(remedy.as_ref()),
+                        ));
                     }
                     if !transient
                         .is_some_and(|failure| self.schedule_transient_resume(failure, &error))
@@ -322,17 +350,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 } else {
                     self.recovery_blocked = true;
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "definite turn failure could not be saved; the next prompt (or /recover) reopens the session and continues"
+                        "definite turn failure could not be saved; the next prompt or explicit recovery reopens the session and continues"
                             ,
-                    ));
+                    ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
-            Ok(TurnHostOutcome::RecoveryRequired { error }) => {
+            Ok(TurnHostOutcome::RecoveryRequired { error, remedy }) => {
                 self.recovery_blocked = true;
                 let saved = commit_exceptional_terminal_projection(
                     &mut self.config.session,
                     ExceptionalTerminalProjection::RecoveryRequired(&error),
                     |candidate| self.config.store.save(candidate),
+                    remedy.as_ref(),
                 );
                 if saved.is_ok() {
                     log_ev(
@@ -344,20 +373,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
-                            NoticeScope::Turn,
-                            error,
-                        )));
+                        let _ = self.events.send(ContentEvent::Row(
+                            TranscriptRow::error(NoticeScope::Turn, error)
+                                .with_optional_remedy(remedy.as_ref()),
+                        ));
                     }
-                    let _ = self.events.notice(TranscriptRow::info(
-                        NoticeScope::Recovery,
-                        RECOVERY_PENDING_NOTE,
-                    ));
+                    let _ = self.events.notice(
+                        TranscriptRow::info(NoticeScope::Recovery, RECOVERY_PENDING_NOTE)
+                            .with_remedy(
+                            plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {},
+                        ),
+                    );
                 } else {
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "recovery-required terminal projection could not be committed; the next prompt (or /recover) reopens the session and continues"
+                        "recovery-required terminal projection could not be committed; the next prompt or explicit recovery reopens the session and continues"
                             ,
-                    ));
+                    ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
             Ok(TurnHostOutcome::Interrupted { assistant, .. }) => {
@@ -365,6 +396,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     &mut self.config.session,
                     ExceptionalTerminalProjection::Interrupted(&assistant),
                     |candidate| self.config.store.save(candidate),
+                    None,
                 );
                 if saved.is_ok() {
                     log_ev(
@@ -378,9 +410,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 } else {
                     self.recovery_blocked = true;
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "interrupted terminal projection could not be committed; the next prompt (or /recover) reopens the session and continues"
+                        "interrupted terminal projection could not be committed; the next prompt or explicit recovery reopens the session and continues"
                             ,
-                    ));
+                    ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
             Err(msg) => {
@@ -389,6 +421,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     &mut self.config.session,
                     ExceptionalTerminalProjection::UnresolvedError(&msg),
                     |candidate| self.config.store.save(candidate),
+                    None,
                 );
                 if saved.is_ok() {
                     // drive_one_turn already applies operator_facing_agent_error.
@@ -405,15 +438,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             msg,
                         )));
                     }
-                    let _ = self.events.notice(TranscriptRow::info(
-                        NoticeScope::Recovery,
-                        RECOVERY_PENDING_NOTE,
-                    ));
+                    let _ = self.events.notice(
+                        TranscriptRow::info(NoticeScope::Recovery, RECOVERY_PENDING_NOTE)
+                            .with_remedy(
+                            plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {},
+                        ),
+                    );
                 } else {
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "failed terminal projection could not be committed; the next prompt (or /recover) reopens the session and continues"
+                        "failed terminal projection could not be committed; the next prompt or explicit recovery reopens the session and continues"
                             ,
-                    ));
+                    ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
         }
@@ -446,8 +481,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 /// What the operator is told when a turn's outcome could not be observed. The
 /// session is not lost: the next action reopens it and records the uncertainty
 /// once, and nothing the turn started is retried.
-pub(crate) const RECOVERY_PENDING_NOTE: &str = "the turn's outcome is uncertain; the \
-     next prompt (or /recover) records that and continues";
+pub(crate) const RECOVERY_PENDING_NOTE: &str = "the turn's outcome is uncertain; the next prompt or explicit recovery records that and continues";
 
 #[cfg(test)]
 mod tests;

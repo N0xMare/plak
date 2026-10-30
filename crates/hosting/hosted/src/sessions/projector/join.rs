@@ -83,7 +83,8 @@ pub fn workflow_withdrawals(
                 row: crate::sessions::TranscriptRow::info(
                     crate::sessions::NoticeScope::Recovery,
                     request.withdrawal_note(),
-                ),
+                )
+                .with_remedy(request.withdrawal_remedy()),
             };
             ordinal = ordinal.saturating_add(1);
             Some((id, notice))

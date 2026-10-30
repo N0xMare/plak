@@ -601,11 +601,16 @@ fn workflow_withdrawal_is_atomic_once_and_preserves_admitted_requests() {
         assert_eq!(
             rows,
             vec![
-                TranscriptRow::info(NoticeScope::Recovery, "fork did not start; run /fork again"),
                 TranscriptRow::info(
                     NoticeScope::Recovery,
-                    "clear did not start; run /clear again"
-                ),
+                    "fork did not start; request a fork again explicitly"
+                )
+                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryFork {}),
+                TranscriptRow::info(
+                    NoticeScope::Recovery,
+                    "clear did not start; request a fresh conversation again explicitly"
+                )
+                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {}),
             ]
         );
         assert_eq!(

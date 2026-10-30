@@ -2,7 +2,9 @@
 
 use crate::sessions::queue::{drop_last_mutable, edit_mutable, move_mutable, remove_mutable};
 use crate::surface_protocol::ContentEvent;
-use plakous_host_protocol::status::{DetachedReason, DiagnosticText, HostPhase, HostStatusDetail};
+use plakous_host_protocol::status::{
+    AttachFailure, DetachedReason, HostFailure, HostPhase, HostStatusDetail,
+};
 
 use std::sync::mpsc::RecvTimeoutError;
 
@@ -36,12 +38,12 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
     let log = (config.session.store_revision != 0)
         .then(|| SessionLog::open(&config.home, &config.session.id).ok())
         .flatten();
-    let recovery_blocked = config.reason.starts_with("recovery_required:");
+    let recovery_blocked = matches!(config.reason, DetachedReason::RecoveryRequired(_));
     log_event(
         log.as_ref(),
         &config.session.id,
         SessionEvent::new("host.shell")
-            .str("reason", &config.reason)
+            .str("reason", config.reason.kind())
             .opt_str("account", config.session.account.as_deref())
             .opt_str("model", config.session.model.as_deref()),
     );
@@ -125,7 +127,7 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
         phase: HostPhase::NotReady,
         queue_len: config.session.pending_queue.len(),
         detail: Some(HostStatusDetail::Detached {
-            reason: DetachedReason::Other(DiagnosticText::new(config.reason.clone())),
+            reason: config.reason.clone(),
         }),
     });
     let _ = events.send(ContentEvent::SetBusy(false));
@@ -144,11 +146,13 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
 ) -> ShellStep {
     match action {
         UserAction::Recover => {
-            let _ = events.notice(TranscriptRow::error(
-                NoticeScope::Session,
-                "no session is attached; /attach reopens it, and reopening recovers any \
-                 interrupted turn",
-            ));
+            let _ = events.notice(
+                TranscriptRow::error(
+                    NoticeScope::Session,
+                    "no session is attached; reopening recovers any interrupted turn",
+                )
+                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Attach {}),
+            );
         }
         UserAction::Quit => return ShellStep::Quit,
         UserAction::Background => {}
@@ -502,7 +506,13 @@ fn handle_shell_extension<P: plakous_host_protocol::ProtocolExtension>(
     // Nothing to fork: an unattached session with no conversation
     // takes the profile's root, and the agent attaches on it.
     if !config.session.transcript.is_empty() {
-        fork.refuse("this session is not attached; /attach it before forking onto a profile");
+        fork.refuse(
+            crate::CliFailure::new(
+                "this session is not attached; attach it before forking onto a profile",
+            )
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Attach {})
+            .host_failure(),
+        );
         return ShellStep::Continue;
     }
     match handle_shell_set_model(
@@ -552,6 +562,7 @@ pub(super) fn emit_shell_empty_state<P: plakous_host_protocol::ProtocolExtension
     events: &Sender<P>,
     config: &ShellHostConfig<P>,
 ) {
+    use plakous_host_protocol::notice_remedy::NoticeRemedy;
     let account = config.session.account.as_deref().unwrap_or("-");
     let model = config.session.model.as_deref().unwrap_or("-");
     let effort = config.session.effort.as_deref().unwrap_or("-");
@@ -559,84 +570,91 @@ pub(super) fn emit_shell_empty_state<P: plakous_host_protocol::ProtocolExtension
         NoticeScope::Session,
         format!("agent not attached · account={account} model={model} effort={effort}"),
     ));
-    if config.reason.starts_with("resolve_failed") {
-        let detail = config
-            .reason
-            .strip_prefix("resolve_failed:")
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("OAuth model resolve failed");
-        let _ = events.notice(TranscriptRow::info(
-            NoticeScope::Session,
-            format!("attach failed: {detail}"),
-        ));
-        let _ = events.notice(TranscriptRow::info(
-            NoticeScope::Session,
-            attach_repair_guidance(detail),
-        ));
-    } else {
-        match config.reason.as_str() {
-            "missing_defaults" => {
-                let _ = events.notice(TranscriptRow::info(
+    match &config.reason {
+        DetachedReason::ResolveFailed(failure) | DetachedReason::RecoveryRequired(failure) => {
+            let _ = events.notice(
+                TranscriptRow::info(
                     NoticeScope::Session,
-                    "choose a profile with /agents; the agent attaches automatically",
-                ));
-            }
-            "effort_required" => {
-                let _ = events.notice(TranscriptRow::info(NoticeScope::Session, format!(
-                    "model={model} needs an explicit effort — choose a profile whose root names one (/agents)"
-                )));
-            }
-            other => {
-                let _ = events.notice(TranscriptRow::info(
+                    format!("attach failed: {}", failure.diagnostic.as_str()),
+                )
+                .with_optional_remedy(failure.remedy.as_ref()),
+            );
+            let _ = events.notice(attach_repair_notice(failure, account));
+        }
+        DetachedReason::MissingDefaults => {
+            let _ = events.notice(
+                TranscriptRow::info(
                     NoticeScope::Session,
-                    format!("reason: {other} — /agents · /attach"),
-                ));
-            }
+                    "choose a profile; the agent attaches automatically",
+                )
+                .with_remedy(NoticeRemedy::ChooseProfile {}),
+            );
+        }
+        DetachedReason::EffortRequired => {
+            let _ = events.notice(TranscriptRow::info(NoticeScope::Session,
+                format!("model={model} needs an explicit effort; choose a profile whose root supplies one")).with_remedy(NoticeRemedy::ChooseProfileEffort {}));
+        }
+        DetachedReason::CredentialUnusable(failure) => {
+            let _ = events.notice(
+                TranscriptRow::info(NoticeScope::Session, failure.diagnostic.as_str())
+                    .with_optional_remedy(failure.remedy.as_ref()),
+            );
+        }
+        DetachedReason::Other(diagnostic) => {
+            let _ = events.notice(
+                TranscriptRow::info(
+                    NoticeScope::Session,
+                    format!(
+                        "reason: {}; select a profile or retry attachment after repair",
+                        diagnostic.as_str()
+                    ),
+                )
+                .with_remedy(NoticeRemedy::ChooseProfileOrAttach {}),
+            );
         }
     }
 }
 
-pub(super) fn attach_repair_guidance(detail: &str) -> String {
-    let guidance = if detail.contains("product JavaScript host is unavailable")
-        || detail.contains("JavaScript host is unavailable")
-        || detail.contains("Code Mode sidecar is unavailable")
-    {
-        "fix: set PLAK_JS_HOST or place plakous-js-host beside plak, then /attach"
-    } else if detail.contains("product Python host is unavailable")
-        || detail.contains("Python host is unavailable")
-    {
-        "fix: set PLAK_PY_HOST or place plakous-py-host beside plak, then /attach"
-    } else if detail.contains("login selection changed") {
-        "fix: the live login-selection fence changed; use /reload or /rebind to carry this history under the current login; logging in to the same account cannot restore the old selection"
-    } else if detail.contains("provider account changed") || detail.contains("AccountChanged") {
-        "fix: log in to the original account to reopen exactly, or use /rebind to carry this history into a new session under the newly logged-in account"
-    } else if detail.contains("bound to a different")
-        || detail.contains("binding mismatch")
-        || detail.contains("explicit rebind required")
-    {
-        "fix: carry the full history into a new session with /rebind; restoring the original account and configuration reopens it exactly instead; choosing /agents cannot repair a frozen binding"
-    } else if detail.contains("quarantined") || detail.contains("rejected at refresh") {
-        "fix: the credential was rejected or its refresh outcome is unknown; run `plak login <account>` in a shell, then retry /attach; a same-account Claude login preserves the session"
-    } else if detail.contains("credential")
-        || detail.contains("login")
-        || detail.contains("not logged in")
-        || detail.contains("signed out")
-    {
-        "fix: no usable login is available; run `plak login <account>` in a shell, then retry /attach"
-    } else {
-        "fix: address the attach failure above, then retry /attach; use /agents only to select a different profile"
+pub(super) fn attach_repair_notice(failure: &HostFailure, original_account: &str) -> TranscriptRow {
+    use AttachFailure as A;
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy as R};
+    let account = AccountTarget::from_account(original_account);
+    let (text, remedy) = match failure.cause {
+        A::JavaScriptHostUnavailable => (
+            "the JavaScript runtime artifact is unavailable; supply the configured runtime artifact, then retry attachment",
+            R::RepairJavaScriptHost {},
+        ),
+        A::PythonHostUnavailable => (
+            "the Python runtime artifact is unavailable; supply the configured runtime artifact, then retry attachment",
+            R::RepairPythonHost {},
+        ),
+        A::LoginSelectionChanged => (
+            "the live login-selection fence changed; explicitly carry this history under the current login; logging in to the same account cannot restore the old selection",
+            R::CarryCurrentLogin {},
+        ),
+        A::AccountChanged => (
+            "restore the original account for exact reopen, or explicitly carry history into a new session under the newly logged-in account",
+            R::RestoreAccountOrRebind { account },
+        ),
+        A::BindingChanged => (
+            "explicitly carry the full history into a new session under the current login; restoring the original account and configuration reopens it exactly instead; profile selection cannot repair a frozen binding",
+            R::RestoreBindingOrCarry { account },
+        ),
+        A::CredentialRejected => (
+            "the credential was rejected or its refresh outcome is unknown; restore usable credentials, then retry attachment; same-account login preserves the session where the route attests it",
+            R::LoginThenAttach { account },
+        ),
+        A::CredentialUnavailable => (
+            "no usable login is available; restore credentials, then retry attachment",
+            R::LoginThenAttach { account },
+        ),
+        A::Other => (
+            "address the attach failure above, then retry attachment; profile selection only chooses a different profile",
+            R::RepairThenAttach {},
+        ),
     };
-    let account = if detail.contains("Claude") || detail.contains("claude") {
-        "claude"
-    } else if detail.contains("Codex") || detail.contains("codex") {
-        "codex"
-    } else if detail.contains("xAI") || detail.contains("Grok") || detail.contains("grok") {
-        "grok"
-    } else {
-        "<account>"
-    };
-    guidance.replace("<account>", account)
+    TranscriptRow::info(NoticeScope::Session, text)
+        .with_remedy(failure.remedy.clone().unwrap_or(remedy))
 }
 
 pub(super) fn send_shell_binding<P: plakous_host_protocol::ProtocolExtension>(
@@ -691,25 +709,47 @@ pub(super) fn refuse_not_ready<P: plakous_host_protocol::ProtocolExtension>(
     config: &ShellHostConfig<P>,
     log: Option<&SessionLog>,
 ) {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, CredentialCondition, NoticeRemedy};
+
     log_event(
         log,
         &config.session.id,
         SessionEvent::new("turn.refused").str("reason", "not_ready"),
     );
-    // A stored login the product refused names its own repair.
-    let notice = config.reason.strip_prefix("credential_unusable: ").map_or_else(
-        || {
-            "not ready — choose a profile with /agents and the agent attaches automatically. Or /attach."
-                .to_owned()
-        },
-        |refusal| format!("not ready — {refusal}; or choose another profile with /agents"),
-    );
-    let _ = events.notice(TranscriptRow::info(NoticeScope::Session, notice));
+    let row =
+        match &config.reason {
+            DetachedReason::CredentialUnusable(failure) => {
+                let remedy = failure.remedy.clone().unwrap_or(
+                    NoticeRemedy::RepairCredentialOrChooseProfile {
+                        account: config
+                            .session
+                            .account
+                            .as_deref()
+                            .map_or(AccountTarget::Unspecified, AccountTarget::from_account),
+                        condition: CredentialCondition::Unavailable,
+                    },
+                );
+                TranscriptRow::info(
+                    NoticeScope::Session,
+                    format!(
+                        "not ready — {}; restore usable credentials or choose another profile",
+                        failure.diagnostic.as_str()
+                    ),
+                )
+                .with_remedy(remedy)
+            }
+            _ => TranscriptRow::info(
+                NoticeScope::Session,
+                "not ready; choose a profile for automatic attachment, or retry attachment",
+            )
+            .with_remedy(NoticeRemedy::ChooseProfileOrAttach {}),
+        };
+    let _ = events.notice(row);
     let _ = events.send(ContentEvent::Status {
         phase: HostPhase::NotReady,
         queue_len: 0,
         detail: Some(HostStatusDetail::DetachedPromptRefused {
-            reason: DetachedReason::Other(DiagnosticText::new(config.reason.clone())),
+            reason: config.reason.clone(),
         }),
     });
 }

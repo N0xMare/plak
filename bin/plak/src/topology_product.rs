@@ -182,7 +182,9 @@ impl RosterApplyRefusal {
     #[must_use]
     pub fn message(&self) -> &str {
         match self {
-            Self::RestoredPaused => ProductAgentTree::TREE_EPOCH_REBIND_PAUSED,
+            Self::RestoredPaused => {
+                "cannot apply a roster while the agent tree is paused · /tree then r resumes it"
+            }
             Self::PendingSpawns => ProductAgentTree::TREE_EPOCH_REBIND_PENDING_SPAWNS,
             Self::LiveDescendants => ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS,
             Self::RootBusy => Self::ROOT_BUSY,

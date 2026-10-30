@@ -826,9 +826,11 @@ fn resolve_secret(
     resolve()
         .map(|secret: SensitiveBytes| Zeroizing::new(secret.into_bytes().to_vec()))
         .map_err(|error| {
-            authorization(&format!(
-                "mcp server {server} oauth client secret could not be resolved: {error}"
-            ))
+            McpError::from_resolver(
+                McpErrorKind::Authorization,
+                format!("mcp server {server} oauth client secret could not be resolved: {error}"),
+                error,
+            )
         })
 }
 
@@ -854,9 +856,11 @@ pub(crate) fn client_secret(
                     resolve()
                         .map(|secret| Zeroizing::new(secret.into_bytes().to_vec()))
                         .map_err(|error| {
-                            authorization(&format!(
-                                "oauth client secret could not be resolved: {error}"
-                            ))
+                            McpError::from_resolver(
+                                McpErrorKind::Authorization,
+                                format!("oauth client secret could not be resolved: {error}"),
+                                error,
+                            )
                         })
                 })
                 .transpose()

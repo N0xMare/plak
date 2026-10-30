@@ -490,7 +490,8 @@ fn reopening_with_an_unadmitted_rebind_withdraws_once_without_branching() {
         intents.workflow_requests,
         [] as [sessions::projector::WorkflowRequest; 0]
     );
-    let notice = TranscriptRow::info(NoticeScope::Recovery, request.withdrawal_note());
+    let notice = TranscriptRow::info(NoticeScope::Recovery, request.withdrawal_note())
+        .with_remedy(request.withdrawal_remedy());
     assert_eq!(
         intents
             .notices
@@ -1026,7 +1027,11 @@ fn a_rebind_to_a_route_without_a_frozen_tool_refuses_up_front() {
     assert_eq!(
         error.message(),
         "this session keeps its tools across a model change, and web_fetch is not available \
-             on codex; remedy: /clear, or start a new session on that model"
+             on codex; start a fresh conversation on that model"
+    );
+    assert_eq!(
+        error.remedy(),
+        Some(&plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {})
     );
     assert!(
         test_kit::scripted(&config)

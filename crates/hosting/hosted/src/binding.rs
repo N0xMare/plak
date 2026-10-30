@@ -303,6 +303,24 @@ impl RouteRefusal {
     }
 }
 
+/// The notice account for a compiled native provider.
+///
+/// String aliases stay on [`plakous_host_protocol::notice_remedy::AccountTarget::from_account`]
+/// for persisted and foreign identifiers. A value that is already a
+/// [`NativeProvider`] does not go through that table.
+#[must_use]
+pub const fn account_target(
+    provider: NativeProvider,
+) -> plakous_host_protocol::notice_remedy::AccountTarget {
+    use plakous_host_protocol::notice_remedy::AccountTarget;
+    match provider {
+        NativeProvider::Codex => AccountTarget::Codex,
+        NativeProvider::Xai => AccountTarget::Grok,
+        NativeProvider::Claude => AccountTarget::Claude,
+        _ => AccountTarget::Unspecified,
+    }
+}
+
 /// Map product account id to native OAuth provider (if any).
 ///
 /// The account vocabulary is wider than the provider set: `supergrok` and
@@ -325,7 +343,7 @@ pub const fn oauth_provider_for_account(account: &str) -> Option<NativeProvider>
 /// # Errors
 /// The refusal names the account and the catalog the model is absent from,
 /// with the command that lists the catalog.
-pub fn admit_account_model(account: &str, model: &str) -> Result<(), String> {
+pub fn admit_account_model(account: &str, model: &str) -> crate::CliResult<()> {
     let (catalog, listing) = if let Some(provider) = oauth_provider_for_account(account) {
         if provider.enrolls(model) {
             return Ok(());
@@ -342,12 +360,11 @@ pub fn admit_account_model(account: &str, model: &str) -> Result<(), String> {
     } else if account == "openrouter" {
         return Ok(());
     } else {
-        return Err(RouteRefusal::NotOauth.message(account));
+        return Err(RouteRefusal::NotOauth.message(account).into());
     };
-    Err(format!(
-        "model `{model}` is not in the {catalog} catalog of account `{account}`; \
-         run `plak models {listing}` to list the models it offers"
-    ))
+    Err(crate::CliFailure::new(format!(
+        "model `{model}` is not in the {catalog} catalog of account `{account}`; inspect the account's available models"
+    )).with_advice(plakous_host_protocol::refusal::RefusalAdvice::UnknownModel { model: model.to_owned(), account: listing.to_owned(), catalog: catalog.to_owned() }))
 }
 
 /// Refusal for an explicit `native-ptc` on a subscription row that enrolls no
