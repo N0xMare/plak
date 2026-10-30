@@ -1,10 +1,11 @@
 //! Repository-only inspection of exact decoded heads without runtime ownership.
 
 use super::{
-    AgentSessionsError, ExactSource, Path, SessionLocator, SessionRecoveryPhase,
-    SqliteSessionStore, checkpoint_job_config, store_error,
+    AgentSessionsError, ExactSource, SessionLocator, SessionRecoveryPhase, checkpoint_job_config,
+    store_error,
 };
 use plakous_agent::internal::CheckpointRecoveryVerdict;
+use {plakous_store::SqliteSessionStore, std::path::Path};
 
 /// What the pure resume predicates permit, before credentialed reconstruction.
 #[doc(hidden)]

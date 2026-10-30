@@ -27,8 +27,6 @@ use super::{
     AgentSessions, AgentSessionsError, AgentSessionsErrorKind, RuntimeCheckpoint, SessionLocator,
     SessionStore, runtime_error, store_error, transcript,
 };
-#[cfg(feature = "sessions-sqlite")]
-use super::{Path, SqliteSessionStore};
 use notify::FeedChanges;
 pub(super) use notify::{FeedNotifier, NotifyingStore};
 pub use plakous_agent::internal::{
@@ -37,6 +35,8 @@ pub use plakous_agent::internal::{
     FeedLocator, FeedOperationKind, FeedOperationState, FeedRecord, FeedSeq, FeedTurnOutcome,
     FeedWorkflowKind, FeedWorkflowOutcome, MAX_FEED_PAGE_BYTES, MAX_FEED_RECORDS_PER_SESSION,
 };
+#[cfg(feature = "sessions-sqlite")]
+use {plakous_store::SqliteSessionStore, std::path::Path};
 
 /// Most records one [`AgentSessions::feed_page`] read returns.
 pub const MAX_FEED_PAGE_RECORDS: usize = 256;
