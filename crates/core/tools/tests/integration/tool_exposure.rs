@@ -189,10 +189,6 @@ fn invocation_request(tool: &str) -> Result<RequestFixture, TestError> {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one portable contract test exercises the complete exposure identity path"
-)]
 fn exposure_lookup_is_order_independent_and_prepares_exact_canonical_identity()
 -> Result<(), Box<dyn std::error::Error>> {
     let specs = [

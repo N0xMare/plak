@@ -836,10 +836,6 @@ impl ToolRuntime {
     ///
     /// Returns cancellation, snapshot-integrity, or executor errors. A tool's
     /// model-visible failure remains an `Ok(ToolOutcome)`.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "keeping the complete authorization-to-dispatch sequence together makes the safety boundary auditable"
-    )]
     pub async fn execute(
         &self,
         authorized: AuthorizedToolInvocation,

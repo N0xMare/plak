@@ -784,10 +784,6 @@ impl App {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one renderer keeps the registry rows, sub-panes and hit map synchronized"
-    )]
     pub(super) fn draw_control_settings(&mut self, frame: &mut Frame<'_>, body: Rect) {
         let Some(menu) = self.settings_menu.clone() else {
             let message = self

@@ -19,7 +19,7 @@ class = "published-internal"
 neutral = true
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 10
+too-many-lines-ceiling = 9
 reason = "Existing item-local schema, row-write and durability-test debt; table-local read codecs need no line-count allowance and no crate-wide lint allowances remain."
 
 [dependencies]

@@ -204,10 +204,6 @@ impl Driver {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the model operation keeps cancellation, control, assembly, and cleanup ordering visible in one auditable state machine"
-    )]
     pub(super) async fn run_model(
         &mut self,
         command: &PromptCommand,

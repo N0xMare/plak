@@ -391,10 +391,6 @@ impl WorkspaceSnapshotCache {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "bounded workspace read, cache, and resume remain one visible semantic operation"
-)]
 pub(super) fn read_workspace_sync(
     workspace: &ExecutionWorkspace,
     request: &WorkspaceReadSliceRequest,

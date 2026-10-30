@@ -252,11 +252,6 @@ impl Driver {
         Ok(command.operation_id)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "the actor-owned exact-turn control transition table remains auditable in one place"
-    )]
     pub(super) async fn handle_control(
         &mut self,
         active: Option<&PromptCommand>,

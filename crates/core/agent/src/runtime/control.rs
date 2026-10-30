@@ -16,11 +16,6 @@ use plakous_tools::{
     EffectAuthorizationGrantSource, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentScope, WorkspacePolicy,
 };
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "durable recovery witness explicitly binds each independent policy input"
-)]
 pub(super) fn run_environment(
     workspace: &WorkspacePolicy,
     run_id: RunId,

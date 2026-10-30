@@ -500,11 +500,6 @@ impl Agent {
     /// Returns typed invalid-input, backpressure, stale-target, wrong-phase,
     /// queue-full, or shutdown errors. Rejected admission creates no turn
     /// terminal and retains no known-turn entry.
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "follow-up preparation keeps every pre-ack resource and rollback boundary visible in one admission path"
-    )]
     pub async fn follow_up(
         &self,
         active_turn_id: TurnId,

@@ -6543,10 +6543,6 @@ fn artifact_append_rejects_foreign_account_and_accountless_output() -> TestResul
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one fixture distinguishes append integrity, covered-window account validation and fresh lowering"
-)]
 fn foreign_account_or_accountless_covered_output_prepares_fresh() -> TestResult {
     let (base, _) = active_replay_fixture(ResponsesStorageMode::Stateless, None)?;
     let (protocol, family, model) = target_values()?;

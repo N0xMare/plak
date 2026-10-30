@@ -202,10 +202,6 @@ impl Error for TurnDriveError {
 ///
 /// Returns a typed presentation, signal, control, agent, or shutdown failure
 /// after requesting bounded cleanup.
-#[allow(
-    clippy::too_many_lines,
-    reason = "admission, exact-turn settlement, cancellation, and shutdown stay visible in one ownership path"
-)]
 pub async fn run_once_until_signal<F, S>(
     agent: Agent,
     prompt: impl Into<UserInput>,

@@ -206,10 +206,6 @@ fn compaction_provider_error(error: ModelError) -> AgentError {
 }
 
 impl Driver {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the one driver-owned compaction sequence keeps every paid and publication fence visible"
-    )]
     pub(super) async fn compact_session(
         &mut self,
         active: Option<&PromptCommand>,

@@ -698,7 +698,6 @@ impl SealedFamilyArtifactCandidate {
 
     #[allow(
         clippy::large_types_passed_by_value,
-        clippy::too_many_arguments,
         reason = "the arguments are the exact serialized candidate fields"
     )]
     fn from_recorded(

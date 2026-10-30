@@ -431,10 +431,6 @@ impl ProductBoundaryController {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one fixture dispatch keeps the three workflow setup paths comparable"
-)]
 pub(crate) async fn run_product_fixture(
     home: &Path,
     workspace: &Path,

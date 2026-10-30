@@ -6398,10 +6398,6 @@ async fn browser_login_redirect_and_host_follow_the_bound_test_port() -> TestRes
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one table-sized test covers independent profile, JOSE, RSA, and catalog rejection axes"
-)]
 fn acceptance_jose_jwk_and_catalog_negative_matrix_is_strict() -> TestResult {
     // Consent binds the contract revisions: an acceptance made before this
     // review stays current, a clock before the review or an acceptance from

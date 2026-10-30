@@ -539,10 +539,6 @@ impl CapacityCertificate {
     ///
     /// Returns an error unless the declaration is input-only, exactly bound,
     /// revisioned, and reconstructive.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the custom declaration binds every reconstructive evidence axis"
-    )]
     pub fn custom_envelope(
         evidence_id: impl Into<String>,
         revision: impl Into<String>,

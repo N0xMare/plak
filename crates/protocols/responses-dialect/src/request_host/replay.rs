@@ -300,10 +300,6 @@ impl ResponsesArtifactReplayBridge {
     /// invalid artifact bytes, target/storage drift, expiry, canonical-prefix
     /// mismatch, or replay-kind drift. Only this validated active artifact can
     /// authorize continuation.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "all arguments are independent closed replay authorities"
-    )]
     pub fn from_active_artifact(
         active: &ActiveFamilyArtifact,
         request: &ModelRequest,
@@ -336,10 +332,6 @@ impl ResponsesArtifactReplayBridge {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "all arguments are independent closed replay authorities"
-    )]
     #[allow(
         clippy::too_many_lines,
         reason = "one linear host step whose ordering is the invariant"

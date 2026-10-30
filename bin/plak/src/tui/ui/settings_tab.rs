@@ -125,10 +125,6 @@ impl App {
         self.mark_dirty();
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one owner routes browse, search, chooser, stepper and reset in the Settings tab"
-    )]
     pub(super) fn handle_settings_key(&mut self, key: KeyEvent) -> Option<UserAction> {
         let action = self.handle_settings_key_inner(key);
         self.sync_render_prefs();

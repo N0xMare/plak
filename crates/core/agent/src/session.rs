@@ -1074,10 +1074,6 @@ pub struct ForkReceipt {
 impl ForkReceipt {
     /// Creates a backend-returned fork receipt.
     #[doc(hidden)]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the receipt preserves exact old/new authority"
-    )]
     #[must_use]
     pub const fn from_store(
         operation: ForkOperation,

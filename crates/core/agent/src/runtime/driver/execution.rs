@@ -338,10 +338,6 @@ async fn execute_read_only_tool(
         .with_value(value))
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the arguments are the exact published progress correlation tuple"
-)]
 pub(super) fn publish_tool_progress(
     events: &EventPipeline,
     turn_id: TurnId,
@@ -363,10 +359,6 @@ pub(super) fn publish_tool_progress(
     );
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the arguments are the exact published progress correlation tuple"
-)]
 pub(super) async fn drain_tool_progress(
     receiver: &ProgressReceiver,
     events: &EventPipeline,

@@ -171,11 +171,6 @@ pub(crate) fn configured_compaction_model(
     clippy::needless_pass_by_value,
     reason = "the test helper mirrors the production descriptor-consuming configuration seam"
 )]
-#[allow(
-    clippy::too_many_lines,
-    clippy::too_many_arguments,
-    reason = "complete public test-model fixture construction"
-)]
 pub(crate) fn configured_model_for_operation(
     model: Arc<dyn LanguageModel>,
     descriptor: ResolvedModelDescriptor,

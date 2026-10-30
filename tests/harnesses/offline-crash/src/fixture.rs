@@ -2398,10 +2398,6 @@ pub fn placeholder_runtime_binding(
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the loopback binding's axes are all independent fixture dials"
-)]
 fn runtime_binding_inner_with_body(
     workspace: &Path,
     controller: BoundaryController,
@@ -2456,10 +2452,6 @@ pub fn construction_refused_runtime_binding(
     ))
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the loopback binding's axes are all independent fixture dials"
-)]
 fn loopback_builder(
     workspace: &Path,
     controller: BoundaryController,

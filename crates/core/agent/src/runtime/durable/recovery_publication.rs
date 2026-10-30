@@ -91,10 +91,6 @@ impl DurableSessionRuntime {
 }
 
 impl RecoveryPublicationOwner<'_> {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "recovery publication consumes the exact immutable checkpoint groups"
-    )]
     pub(super) async fn publish(
         &mut self,
         checkpoint_id: CheckpointId,

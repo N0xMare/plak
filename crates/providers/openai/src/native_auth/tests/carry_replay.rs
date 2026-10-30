@@ -1,10 +1,6 @@
 use super::*;
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one native fixture binds exact catalog, credentials, configuration and inert replay"
-)]
 async fn sanitized_codex_native_compaction_passes_carry_replay_validation() -> TestResult {
     use plakous_agent::{AgentBuilder, AgentRequestPolicy};
     use plakous_model::{

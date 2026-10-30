@@ -971,10 +971,6 @@ fn indexed_tree_store_commit_cut_matrix() {
     );
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one frozen two-save Finalize and cancellation scenario"
-)]
 fn two_phase_scenario(root: &Path) -> Vec<Frame> {
     let vcs = Arc::new(FakeVcs::new());
     let feeds = Arc::new(Mutex::new(vec![Feed::default(); 3]));

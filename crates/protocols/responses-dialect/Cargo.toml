@@ -18,8 +18,8 @@ layer = "protocol"
 class = "published-internal"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 27
-too-many-arguments-ceiling = 14
+too-many-lines-ceiling = 26
+too-many-arguments-ceiling = 10
 large-file-ceiling = 0
 reason = "Existing item-local debt plus the mixed-presentation and canonical-reasoning wire literals; replay matrices and scenario phases need no new line allowances."
 

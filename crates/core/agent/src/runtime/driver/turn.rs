@@ -251,10 +251,6 @@ impl Driver {
     }
 
     /// The decision commit of a round's provider attempt.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the decision commit binds the exact attempt, its usage, decision and baton"
-    )]
     async fn record_provider_decision(
         &mut self,
         turn_id: TurnId,
@@ -517,10 +513,6 @@ impl Driver {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "fenced refresh, ambiguous-commit recovery, and receipt hydration form one ordered recovery transaction"
-    )]
     async fn run_turn(&mut self, command: &PromptCommand) -> Result<TurnResult, AgentError> {
         self.admitted_round = None;
         self.noticed_job_terminals.clear();
@@ -528,10 +520,6 @@ impl Driver {
         self.run_in_memory_turn(command).await
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the in-memory loop keeps continuation admission and turn transitions auditable"
-    )]
     async fn run_in_memory_turn(
         &mut self,
         command: &PromptCommand,
@@ -752,10 +740,6 @@ impl Driver {
     ///
     /// A truncated call never runs, so nothing is replayed: the model is told
     /// what happened and asked again.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the retry commit binds the exact attempt, its usage, decision and baton"
-    )]
     async fn commit_output_limit_retry(
         &mut self,
         command: &PromptCommand,
@@ -1272,7 +1256,6 @@ impl Driver {
     /// first, then the round is retried or the turn fails.
     #[allow(
         clippy::too_many_arguments,
-        clippy::too_many_lines,
         reason = "the failed attempt's decision, retry commit and overflow fold stay in one ordered body"
     )]
     async fn settle_failed_attempt(
@@ -1917,10 +1900,6 @@ impl Driver {
             .await
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the restored batch carries the complete persisted pause tuple"
-    )]
     async fn resume_restored_batch(
         &mut self,
         command: &PromptCommand,

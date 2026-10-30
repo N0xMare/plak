@@ -116,10 +116,6 @@ pub fn compile_provider_configuration_with_implementation(
 /// Returns a field-specific policy mismatch or the typed neutral configuration error when the
 /// descriptor, implementation, authority, router, or selected behavior are inconsistent.
 #[allow(
-    clippy::too_many_arguments,
-    reason = "the compiler receives independent selected, resolved, implementation, authority, family, and router facts"
-)]
-#[allow(
     clippy::needless_pass_by_value,
     reason = "owned value matches the dialect hook and caller ownership"
 )]

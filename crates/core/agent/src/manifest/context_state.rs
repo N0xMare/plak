@@ -1042,10 +1042,6 @@ impl RuntimeContextState {
     /// The target history must contain exactly one leading compaction segment
     /// followed by the closed planner's retained source segments. Summary
     /// content stays only in that canonical segment.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the histories and summary are independently reconstructive publication inputs"
-    )]
     pub fn successful_semantic_compaction(
         &self,
         publication: &SemanticCompactionPublication,

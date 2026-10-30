@@ -64,10 +64,6 @@ impl ExecutionEnvironmentLimits {
     ///
     /// Returns an invalid-limit error when limits are contradictory or outside
     /// hard bounds.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the six independent authority limits are intentionally explicit"
-    )]
     pub fn new(
         max_stdout_bytes: u64,
         max_stderr_bytes: u64,

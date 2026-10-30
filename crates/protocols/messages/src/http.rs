@@ -913,7 +913,6 @@ async fn run_hook<H: MessagesHttpHooks>(
 
 #[allow(
     clippy::too_many_arguments,
-    clippy::too_many_lines,
     reason = "stream owner receives exact exchange state"
 )]
 async fn stream_response<H: MessagesHttpHooks>(

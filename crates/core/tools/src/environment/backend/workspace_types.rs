@@ -498,10 +498,6 @@ impl RepositoryQueryLimits {
     /// # Errors
     ///
     /// Rejects zero, inconsistent, or hard-limit-exceeding bounds.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "independent query bounds are explicit authority"
-    )]
     pub fn new(
         max_files: usize,
         max_tree_entries: usize,

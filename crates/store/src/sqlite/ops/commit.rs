@@ -7,10 +7,6 @@
 
 use super::super::*;
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the single SQLite transaction keeps validate-then-publish atomicity auditable"
-)]
 pub(in super::super) fn commit(
     backend: &mut Backend,
     request: &CommitCheckpoint,

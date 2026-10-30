@@ -401,10 +401,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one table asserts the whole closed slash catalog"
-    )]
     fn resolve_core_actions() {
         let ctx = SlashContext {
             phase: "idle".into(),

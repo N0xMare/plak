@@ -795,10 +795,6 @@ impl ProcessSessionTools {
         })
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the closed process observation axes remain explicit at the single call boundary"
-    )]
     #[cfg(test)]
     pub(crate) async fn observe_with_update(
         environment: &plakous_tools::ExecutionEnvironment,
@@ -834,7 +830,6 @@ impl ProcessSessionTools {
     /// then summarised per call instead of paged 40 KB at a time, which a
     /// model polling a long test run could never catch up with.
     #[allow(
-        clippy::too_many_arguments,
         clippy::too_many_lines,
         reason = "one observation coordinates output draining, quiet holds and wake attribution"
     )]

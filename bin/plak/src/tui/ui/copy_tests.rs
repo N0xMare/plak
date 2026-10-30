@@ -90,10 +90,6 @@ fn sample() -> String {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one selection covers the fence, the quote, the list and the table"
-)]
 fn copying_a_fenced_block_drops_rails_and_keeps_lists_quotes_and_tables() {
     const WIDTH: u16 = 100;
     const HEIGHT: u16 = 40;

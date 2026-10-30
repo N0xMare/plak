@@ -8,7 +8,6 @@
     missing_docs,
     clippy::expect_used,
     clippy::unwrap_used,
-    clippy::too_many_lines,
     reason = "integration test crate"
 )]
 

@@ -167,10 +167,6 @@ pub(in super::super) const SESSION_ROW_DELETES: [&str; 9] = [
     "DELETE FROM session_feed WHERE session_id=?1",
 ];
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the one semantic deletion transaction stays linear for authority review"
-)]
 pub(in super::super) fn delete(
     b: &mut Backend,
     r: DeleteSession,

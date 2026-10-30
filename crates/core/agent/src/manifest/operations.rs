@@ -12,10 +12,6 @@ use super::{
 
 impl DurableCommandRecord {
     /// Creates one exact command/idempotency record.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are one exact command receipt"
-    )]
     pub fn new(
         command_id: impl Into<String>,
         sequence: u64,

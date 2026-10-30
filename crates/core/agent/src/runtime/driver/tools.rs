@@ -1592,10 +1592,6 @@ impl Driver {
         clippy::too_many_lines,
         reason = "the actor-owned select must visibly join every indexed execution while retaining controls and lease renewal"
     )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the exact admitted read-only group and its caller lineage"
-    )]
     pub(super) async fn execute_read_only_group(
         &mut self,
         command: &PromptCommand,

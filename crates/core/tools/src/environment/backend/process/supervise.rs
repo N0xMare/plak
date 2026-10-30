@@ -286,7 +286,6 @@ pub(super) const fn joined_process_final_status(
 
 #[allow(
     clippy::too_many_lines,
-    clippy::too_many_arguments,
     reason = "process setup rollback and joined cleanup are kept in one auditable supervisor"
 )]
 pub(super) fn supervise_host_process(

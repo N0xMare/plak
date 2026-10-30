@@ -1576,10 +1576,6 @@ enum EvaluationFailure {
     ArithmeticOverflow,
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one closed match keeps all capacity algebras auditable together"
-)]
 fn evaluate_rule(
     rule: CapacityRule,
     input: CountBound,

@@ -1192,10 +1192,6 @@ impl ResponsesArtifact {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear pass enforces the closed replay, storage, and coverage relation"
-    )]
     fn validate_structure(&self) -> Result<(), ResponsesArtifactError> {
         if self.production.output_items == 0 && self.continuation.is_none() && self.cache.is_none()
         {

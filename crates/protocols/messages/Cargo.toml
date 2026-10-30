@@ -18,7 +18,7 @@ layer = "protocol"
 class = "published-internal"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 9
+too-many-lines-ceiling = 8
 too-many-arguments-ceiling = 5
 large-file-ceiling = 0
 reason = "Existing item-local debt plus the public request-policy signature awaiting the provider/hosted typed-parameter pass; no crate-wide lint allowances remain."

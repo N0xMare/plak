@@ -559,7 +559,6 @@ pub(super) fn serialize_frame(buffer: &Buffer) -> String {
     out
 }
 
-#[allow(clippy::too_many_lines, reason = "one shared reviewable fixture")]
 pub(super) fn visual_fixture(narrow: bool) -> App {
     let mut launch = launch_basic();
     launch.session_id = Some("018f2537-5ed2-7b11-a4b1-f009be85f101".into());

@@ -158,10 +158,6 @@ impl DurableRuntimeBootstrap {
     ///
     /// Returns a typed fail-closed error for topology, object-root,
     /// compatibility, revalidation, durability, or recovery-scope mismatch.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the exact store/open authority tuple"
-    )]
     pub(in crate::runtime) async fn open(
         store: Arc<dyn SessionStore>,
         lease: BranchLease,
@@ -193,10 +189,6 @@ impl DurableRuntimeBootstrap {
         }
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the private validator consumes the exact closed store/open authority tuple"
-    )]
     pub(in crate::runtime) async fn open_owned(
         store: Arc<dyn SessionStore>,
         lease: BranchLease,

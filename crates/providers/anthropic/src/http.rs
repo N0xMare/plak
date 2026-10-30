@@ -156,10 +156,6 @@ impl AnthropicLocalHttpServiceFactory {
     }
 
     /// Seals a deterministic loopback fixture with injected identities.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "all executable fixture authority is explicit"
-    )]
     #[doc(hidden)]
     pub fn with_runtime(
         client: Client,

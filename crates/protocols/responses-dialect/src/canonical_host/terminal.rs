@@ -388,10 +388,6 @@ pub(super) fn validate_router_metadata(
 }
 
 #[allow(
-    clippy::too_many_arguments,
-    reason = "terminal item projection binds exact item/replay/identity/config facts"
-)]
-#[allow(
     clippy::too_many_lines,
     reason = "one linear host step whose ordering is the invariant"
 )]

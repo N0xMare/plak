@@ -50,10 +50,6 @@ use protocol::{ChildReply, ControlCommand, PROTOCOL_VERSION};
 ///
 /// This is public only so the package's thin binary can share the tested child
 /// implementation; it is not a Plakous API.
-#[allow(
-    clippy::too_many_lines,
-    reason = "the versioned child protocol is one exhaustive command dispatch boundary"
-)]
 pub async fn child_main() -> i32 {
     match read_command().and_then(|command| {
         command.validate_version()?;

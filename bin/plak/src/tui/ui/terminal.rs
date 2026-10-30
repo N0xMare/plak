@@ -688,10 +688,6 @@ pub(super) fn run_app(
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "central action dispatch keeps external side effects explicit"
-)]
 pub(super) fn dispatch_action(
     app: &mut App,
     action: &UserAction,

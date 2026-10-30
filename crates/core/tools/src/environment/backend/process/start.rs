@@ -58,7 +58,6 @@ pub(in crate::environment::backend) fn validate_process_value(
 }
 
 #[allow(
-    clippy::too_many_lines,
     clippy::too_many_arguments,
     reason = "spawn setup and every rollback edge stay with the single joined cleanup owner"
 )]

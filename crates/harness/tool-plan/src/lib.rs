@@ -943,10 +943,6 @@ impl ToolPack for PlanToolPack {
         ])
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one reviewed menu table per presentation"
-    )]
     fn menu(&self, presentation: CodingPresentation) -> Result<Vec<MenuEntry>, ToolRuntimeError> {
         let update_plan = tool_name(
             UPDATE_PLAN_CAPABILITY_NAME,
