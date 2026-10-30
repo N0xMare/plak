@@ -268,6 +268,12 @@ pub struct ToolItem {
 }
 
 impl ToolItem {
+    /// Semantic operation, derived without adding a persisted discriminator.
+    #[must_use]
+    pub fn operation(&self) -> super::ToolOperation {
+        super::ToolOperation::classify(&self.name, self.kind)
+    }
+
     /// The name the row is labelled by: the exposed name when the model
     /// called the tool by another name, the canonical name otherwise.
     #[must_use]

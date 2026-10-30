@@ -7,6 +7,7 @@
 
 mod layout;
 mod model;
+mod plan;
 mod render;
 mod tool_rows;
 mod wrap;

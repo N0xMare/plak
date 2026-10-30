@@ -138,69 +138,42 @@ impl ToolVerb {
 /// the canonical tool name selects the remaining normative verbs.
 #[must_use]
 pub fn tool_verb(name: &str, kind: ActivityKind) -> ToolVerb {
-    // The three read/mail topology tools carry their own verb. Collapsing
-    // every `ActivityKind::Agent` row to `Agent` printed `▸ ✓ Agent · 6.3s`
-    // for a `wait_agent`, which says nothing about what is being waited on.
-    match name {
-        "spawn_agent" => return ToolVerb::SpawnAgent,
-        "wait_agent" => return ToolVerb::WaitAgent,
-        "list_agents" => return ToolVerb::ListAgents,
-        "send_agent_message" => return ToolVerb::MessageAgent,
-        // The tool is named `adopt_candidate`; without an arm here the call
-        // falls through to `ActivityKind::Agent` and the transcript says
-        // "Agent" for the one call that rewrites the human's checkout.
-        "adopt_candidate" => return ToolVerb::Adopt,
-        "close_agent" => return ToolVerb::CloseAgent,
-        "interrupt_agent" => return ToolVerb::InterruptAgent,
-        "recover_agent" => return ToolVerb::RecoverAgent,
-        "discard_workspace" => return ToolVerb::DiscardWorkspace,
-        "stop_all" => return ToolVerb::StopAll,
-        "submit_result" => return ToolVerb::SubmitResult,
-        _ => {}
-    }
-    match kind {
-        ActivityKind::Compose => return ToolVerb::Compose,
-        ActivityKind::Agent => return ToolVerb::Agent,
-        ActivityKind::Compact => return ToolVerb::Compact,
-        _ => {}
-    }
-    match name {
-        // "Shell" is the host's normalized process-start label.
-        "run_process"
-        | "exec_command"
-        | "run_terminal_cmd"
-        | "run_terminal_command"
-        | "Shell"
-        | "shell"
-        | "bash"
-        | "Bash"
-        | "process_session_start" => ToolVerb::Run,
-        "write_stdin"
-        | "BashOutput"
-        | "get_command_or_subagent_output"
-        | "process_session_poll" => ToolVerb::WaitProcess,
-        "process_session_write" => ToolVerb::InputProcess,
-        "process_session_terminate" | "KillShell" | "TaskStop" | "kill_command_or_subagent" => {
-            ToolVerb::StopProcess
-        }
-        "read_file" | "view_file" | "view_image" | "inspect_image" | "Read" => ToolVerb::Read,
-        "search_repository" | "grep" | "Grep" | "glob" | "Glob" | "codebase_search"
-        | "file_search" => ToolVerb::Search,
-        "apply_patch" | "search_replace" | "edit_file" | "Edit" => ToolVerb::Edit,
-        "write_file" | "create_file" | "Write" | "write" => ToolVerb::Write,
-        "web_fetch" | "WebFetch" | "fetch" | "fetch_url" | "web__run" | "open_url" => {
-            ToolVerb::Fetch
-        }
-        "web_search" | "WebSearch" => ToolVerb::WebSearch,
-        "x_search" => ToolVerb::XSearch,
-        "image_gen" => ToolVerb::GenerateImage,
-        "list_dir" | "list_directory" | "ls" => ToolVerb::List,
-        "update_plan" | "todo_write" | "merge_plan" => ToolVerb::Plan,
-        name if McpCall::parse(name).is_some() => ToolVerb::Mcp,
-        _ => ToolVerb::Generic,
+    use plakous_host_protocol::views::ToolOperation;
+    match ToolOperation::classify(name, kind) {
+        ToolOperation::Run => ToolVerb::Run,
+        ToolOperation::WaitProcess => ToolVerb::WaitProcess,
+        ToolOperation::ReadProcess => ToolVerb::ReadProcess,
+        ToolOperation::InputProcess => ToolVerb::InputProcess,
+        ToolOperation::InterruptProcess => ToolVerb::InterruptProcess,
+        ToolOperation::StopProcess => ToolVerb::StopProcess,
+        ToolOperation::Read => ToolVerb::Read,
+        ToolOperation::Search => ToolVerb::Search,
+        ToolOperation::Edit => ToolVerb::Edit,
+        ToolOperation::Write => ToolVerb::Write,
+        ToolOperation::Fetch => ToolVerb::Fetch,
+        ToolOperation::WebSearch => ToolVerb::WebSearch,
+        ToolOperation::XSearch => ToolVerb::XSearch,
+        ToolOperation::GenerateImage => ToolVerb::GenerateImage,
+        ToolOperation::Mcp => ToolVerb::Mcp,
+        ToolOperation::List => ToolVerb::List,
+        ToolOperation::Plan => ToolVerb::Plan,
+        ToolOperation::Compose => ToolVerb::Compose,
+        ToolOperation::Agent => ToolVerb::Agent,
+        ToolOperation::SpawnAgent => ToolVerb::SpawnAgent,
+        ToolOperation::WaitAgent => ToolVerb::WaitAgent,
+        ToolOperation::ListAgents => ToolVerb::ListAgents,
+        ToolOperation::MessageAgent => ToolVerb::MessageAgent,
+        ToolOperation::Adopt => ToolVerb::Adopt,
+        ToolOperation::CloseAgent => ToolVerb::CloseAgent,
+        ToolOperation::InterruptAgent => ToolVerb::InterruptAgent,
+        ToolOperation::RecoverAgent => ToolVerb::RecoverAgent,
+        ToolOperation::DiscardWorkspace => ToolVerb::DiscardWorkspace,
+        ToolOperation::StopAll => ToolVerb::StopAll,
+        ToolOperation::SubmitResult => ToolVerb::SubmitResult,
+        ToolOperation::Compact => ToolVerb::Compact,
+        ToolOperation::Generic => ToolVerb::Generic,
     }
 }
-
 /// Host-projected process operations disambiguate aliases such as `write_stdin`.
 pub(in crate::tui) fn subject_tool_verb(
     name: &str,

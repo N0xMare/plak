@@ -1,9 +1,10 @@
 use super::{CanvasNode, CanvasTree};
+use crate::tui::status_glyph::status_glyph;
 use plakous_host_protocol::topology::{
     AttemptStatus, CandidateId, NodeStatus, Tier, TreeAdmissionState, WorkspaceMode,
     WorkspaceStatus,
 };
-use plakous_host_protocol::views::{NodeView, PROJECTED_STATUS_LABELS, TreeView, status_glyph};
+use plakous_host_protocol::views::{NodeView, PROJECTED_STATUS_LABELS, TreeView};
 
 fn node(status: NodeStatus, attempt: Option<AttemptStatus>) -> NodeView {
     NodeView {
@@ -94,7 +95,7 @@ fn every_label_this_adapter_produces_has_a_glyph() {
         );
         assert_ne!(
             status_glyph(&row.status),
-            plakous_host_protocol::views::UNKNOWN_STATUS_GLYPH,
+            crate::tui::status_glyph::UNKNOWN_STATUS_GLYPH,
             "node status `{}` falls through to the unknown glyph",
             row.status
         );
@@ -119,7 +120,7 @@ fn every_label_this_adapter_produces_has_a_glyph() {
         );
         assert_ne!(
             status_glyph(&label),
-            plakous_host_protocol::views::UNKNOWN_STATUS_GLYPH,
+            crate::tui::status_glyph::UNKNOWN_STATUS_GLYPH,
             "attempt status `{label}` falls through to the unknown glyph"
         );
     }

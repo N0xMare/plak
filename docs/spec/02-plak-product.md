@@ -4081,6 +4081,13 @@ one leaves them for the next.
 
 ### 5.4 The transcript grammar
 
+Host-protocol derives `ToolOperation` from each tool's canonical name and
+host-populated activity kind. `ToolItem::operation()` uses that classifier;
+the operation is not a field in the persisted or exported row. Plak maps the
+semantic operation to terminal labels and keeps no separate canonical-name
+classification table. Plan detail carries neutral status labels; terminal
+plan bullets and Activity status glyphs belong to the TUI, not a host library.
+
 Delivered child mail remains one stored `tree` notice per message (chapter 03).
 In the TUI each recognized `<purpose> · #<agent> · <body>` notice is one
 collapsed row: purpose, sender and the body's first line, ellipsized to the

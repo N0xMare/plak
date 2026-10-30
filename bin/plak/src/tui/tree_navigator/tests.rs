@@ -1,7 +1,6 @@
 use super::*;
-use plakous_host_protocol::views::{
-    BlockedObservation, PROJECTED_STATUS_LABELS, UNKNOWN_STATUS_GLYPH,
-};
+use crate::tui::status_glyph::UNKNOWN_STATUS_GLYPH;
+use plakous_host_protocol::views::{BlockedObservation, PROJECTED_STATUS_LABELS};
 
 fn node(id: &str, parent: Option<&str>, depth: u8) -> CanvasNode {
     CanvasNode {

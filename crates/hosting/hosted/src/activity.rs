@@ -14,6 +14,15 @@
 
 use plakous_host_protocol::views::presentation::{ActivityItem, ActivityKind};
 
+/// Derive the semantic tool operation from canonical host facts.
+#[must_use]
+pub fn tool_operation(
+    name: &str,
+    kind: ActivityKind,
+) -> plakous_host_protocol::views::ToolOperation {
+    plakous_host_protocol::views::ToolOperation::classify(name, kind)
+}
+
 /// Canonical outer markers of a Plakous local-composition cell.
 ///
 /// `wait` and `wait_js` are deliberately absent: they are
@@ -321,16 +330,7 @@ fn plan_item_line(item: &serde_json::Value) -> String {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("")
         .trim();
-    format!("{} {text}", plan_status_glyph(status))
-}
-
-fn plan_status_glyph(status: &str) -> &'static str {
-    match status {
-        "completed" => "✓",
-        "in_progress" => "▶",
-        "cancelled" | "canceled" => "×",
-        _ => "○",
-    }
+    format!("- [{status}] {text}")
 }
 
 fn plan_snapshot_bullets(text: &str) -> Option<String> {
@@ -354,7 +354,7 @@ fn plan_snapshot_bullets(text: &str) -> Option<String> {
             return None;
         }
         saw_item = true;
-        rows.push(format!("{} {}", plan_status_glyph(status), content.trim()));
+        rows.push(format!("- [{status}] {}", content.trim()));
     }
     saw_item.then(|| rows.join("\n"))
 }
@@ -366,11 +366,7 @@ fn looks_like_plan_list(text: &str) -> bool {
         if trimmed.is_empty() {
             continue;
         }
-        if !(trimmed.starts_with("✓ ")
-            || trimmed.starts_with("▶ ")
-            || trimmed.starts_with("○ ")
-            || trimmed.starts_with("× "))
-        {
+        if !trimmed.starts_with("- [") {
             return false;
         }
         any = true;

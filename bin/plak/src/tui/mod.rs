@@ -108,11 +108,13 @@ pub(crate) use settings::{EnumChooser, IntStepper, SettingsMenu};
 use theme::Theme;
 pub use tree_navigator::{TopologyNavigatorKey, TopologyNavigatorOutcome, TreeNavigator};
 pub use tree_view::{CanvasNode, CanvasTree};
+mod status_glyph;
+pub(crate) use status_glyph::status_glyph;
 
 // The host protocol the TUI speaks; crate-internal names for the moved types.
 pub(crate) use plakous_host_protocol::views::presentation;
 pub(crate) use plakous_host_protocol::views::{
-    AuthKind, ProviderDef, ProviderState, ResumeSessionEntry, TemplateRow, status_glyph,
+    AuthKind, ProviderDef, ProviderState, ResumeSessionEntry, TemplateRow,
 };
 pub(crate) use plakous_host_protocol::{
     ApprovalChoice, CompositionSelection, ContextCapacityRecovery, ProtocolSelection,

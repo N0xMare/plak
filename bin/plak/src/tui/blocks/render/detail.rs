@@ -147,7 +147,8 @@ pub(super) fn push_item_detail(
             push(logical, Line::from(spans));
         }
     }
-    let output = text.output.trim_end_matches('\n');
+    let output = operator_output(verb, text.output);
+    let output = output.trim_end_matches('\n');
     if output.trim().is_empty() {
         return;
     }
@@ -196,6 +197,19 @@ pub(super) fn push_item_detail(
     }
 }
 
+fn operator_output(verb: ToolVerb, output: &str) -> std::borrow::Cow<'_, str> {
+    if verb == ToolVerb::Plan {
+        output
+            .lines()
+            .map(crate::tui::blocks::plan::plan_line)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into()
+    } else {
+        output.into()
+    }
+}
+
 /// The input part of an item's detail: the full command, a diff, a
 /// write's first lines, or `key: value` arguments, never raw JSON.
 fn input_lines(verb: ToolVerb, input: &str, theme: &Theme) -> Vec<Line<'static>> {
@@ -205,7 +219,16 @@ fn input_lines(verb: ToolVerb, input: &str, theme: &Theme) -> Vec<Line<'static>>
             ToolVerb::Run => command_lines(input, theme),
             _ => input
                 .lines()
-                .map(|line| Line::from(Span::styled(line.to_owned(), theme.tool)))
+                .map(|line| {
+                    Line::from(Span::styled(
+                        if verb == ToolVerb::Plan {
+                            crate::tui::blocks::plan::plan_line(line)
+                        } else {
+                            line.to_owned()
+                        },
+                        theme.tool,
+                    ))
+                })
                 .collect(),
         };
     };

@@ -12,6 +12,7 @@ mod navigator;
 mod processes;
 mod resume;
 mod templates;
+mod tool_operation;
 mod tree;
 
 pub use call_detail::{
@@ -21,10 +22,7 @@ pub use call_detail::{
 pub use catalog::{
     AuthKind, ExtraState, ModelEntry, ProviderDef, ProviderSection, ProviderState, ReadyCatalog,
 };
-pub use navigator::{
-    AttemptCompaction, AttemptUsage, BlockedObservation, PROJECTED_STATUS_LABELS,
-    UNKNOWN_STATUS_GLYPH, status_glyph,
-};
+pub use navigator::{AttemptCompaction, AttemptUsage, BlockedObservation, PROJECTED_STATUS_LABELS};
 pub use presentation::{
     ActivityKind, ContextUsage, PresentationSnapshot, SessionInfoView, SubscriptionUsageView,
     UsageLimitsView,
@@ -32,4 +30,5 @@ pub use presentation::{
 pub use processes::{ProcessStatus, ProcessView};
 pub use resume::ResumeSessionEntry;
 pub use templates::TemplateRow;
+pub use tool_operation::ToolOperation;
 pub use tree::{ChildProgress, NodeView, TreeView};

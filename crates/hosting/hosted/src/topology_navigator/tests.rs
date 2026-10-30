@@ -276,11 +276,6 @@ fn navigator_labels_are_exhaustive_over_node_status() {
             plakous_host_protocol::views::PROJECTED_STATUS_LABELS.contains(&label),
             "node status `{label}` is not in the TUI's projected set"
         );
-        assert_ne!(
-            plakous_host_protocol::views::status_glyph(label),
-            plakous_host_protocol::views::UNKNOWN_STATUS_GLYPH,
-            "node status `{label}` has no glyph"
-        );
     }
     for status in [
         WorkspaceStatus::Active,
@@ -294,11 +289,6 @@ fn navigator_labels_are_exhaustive_over_node_status() {
         assert!(
             plakous_host_protocol::views::PROJECTED_STATUS_LABELS.contains(&label),
             "workspace status `{label}` is not in the TUI's projected set"
-        );
-        assert_ne!(
-            plakous_host_protocol::views::status_glyph(label),
-            plakous_host_protocol::views::UNKNOWN_STATUS_GLYPH,
-            "workspace status `{label}` has no glyph"
         );
     }
     for status in [
@@ -317,11 +307,6 @@ fn navigator_labels_are_exhaustive_over_node_status() {
         assert!(
             plakous_host_protocol::views::PROJECTED_STATUS_LABELS.contains(&label),
             "attempt status `{label}` is not in the TUI's projected set"
-        );
-        assert_ne!(
-            plakous_host_protocol::views::status_glyph(label),
-            plakous_host_protocol::views::UNKNOWN_STATUS_GLYPH,
-            "attempt status `{label}` has no glyph"
         );
     }
     for mode in [

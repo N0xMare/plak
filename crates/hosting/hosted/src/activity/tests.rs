@@ -153,7 +153,10 @@ fn plan_payloads_render_as_bullets_not_json() {
     })
     .to_string();
     let detail = tool_detail_text(Some(&arguments), None).expect("plan projection");
-    assert_eq!(detail, "✓ wrap thoughts\n▶ rail groups\n○ fence json");
+    assert_eq!(
+        detail,
+        "- [completed] wrap thoughts\n- [in_progress] rail groups\n- [pending] fence json"
+    );
 
     let snapshot = "revision=3\n- [completed] wrap thoughts\n- [in_progress] rail groups\n- [pending] fence json\n";
     let combined = tool_detail_text(Some(&arguments), Some(snapshot)).expect("merged plan");
