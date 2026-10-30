@@ -70,7 +70,38 @@ one cross-build carrier (a build imports its own and the previous version).
   the root template, so children inherit the template's own composition.
   Changing the root template or applying a profile clears that override.
 
+- Contract drift is reported, not mistaken for a credential problem: the model
+  picker keeps a drifted row visible but disabled with its reason, `plak run`
+  and `plak models` show the reason, and a drifted model is refused before
+  effort checks with an install-newer-build remedy rather than a re-login hint.
+  Turn-time contract rejections render distinctly from refused credentials.
+- Under account load the Codex subscription backend can answer HTTP 401
+  "authentication failed (status=503): Too many concurrent requests". That
+  exact answer is retried as a temporary overload under the normal retry
+  budget, honoring Retry-After, with no credential refresh and no re-login
+  advice; an exhausted budget ends the turn as temporarily unavailable. Every
+  other 401, and every other route, is still a refused credential.
+
 ### Plakous
+
+- `plakous-responses-dialect` is folded into `plakous-responses` and retired;
+  its last published version stays 0.0.2 (not yanked). The workspace has 37
+  packages. Host, error and usage hooks become concrete family code and the
+  internal projection and parsing surfaces narrow; route policy, digest
+  domains and semantic revision pins are unchanged.
+- `ResponsesProjector::start_tool_block`, `ResponsesProjector::terminal_response`
+  and `MessagesRequestPolicy::new` take typed parameter structs instead of long
+  argument lists; validation order and request fields are unchanged.
+- Native subscription auth shares one set of primitives and loopback fixtures.
+  Codex catalog contract and minimum-client drift, login-time OIDC endpoint
+  drift, a Claude grant without the required inference scope, and the absence
+  of an RS256 signing key at login or refresh are refused with an
+  install-newer-build remedy. Grok grants are not gated on scopes; extra
+  Claude scopes and mixed signing algorithms are accepted. Only the proven
+  Grok 426 client-version and documented Claude 400 sent-beta rejection shapes
+  are classified as permanent build-contract failures, never as a refused
+  credential; served pins are never adopted and removed betas are never retried.
+  `plakous::xai::SUPERGROK_REFERENCE_CLIENT_VERSION` is public.
 
 - Messages accepts initial and streamed text citations, preserving source
   associations and exact native replay without duplicating answer text.
@@ -126,8 +157,7 @@ one cross-build carrier (a build imports its own and the previous version).
   in-process consumer requests them. The demand flag defaults off; model
   results, recorded evidence, and existing prompt pins are unchanged.
 - `plakous-code-mode` is folded into `plakous-compose`'s `cell::codex_exec`
-  implementation and removed from the published cohort; the workspace has
-  38 packages. Compose exposes the inert `HostApi`, `python_bootstrap`, its
+  implementation and removed from the published cohort. Compose exposes the inert `HostApi`, `python_bootstrap`, its
   interpreter-neutral `PythonBootstrap` data, and `codex_exec` at its crate
   root. Presentation building blocks and fixture constructors are private.
 
@@ -269,14 +299,13 @@ one cross-build carrier (a build imports its own and the previous version).
   days of their review-due date, or past either.
 - Publication dry runs and uploads require more than a third of every review
   window remaining (more than 30 days of 90) instead of more than 21 days.
-- Fresh review dated 2026-10-24 on all seven surfaces; no pinned contract
-  changed. Subscription expiries (Codex, Grok, Claude) and API review-due
-  dates (OpenRouter Chat, OpenAI, xAI, Anthropic) are all
-  2027-01-22T00:00:00Z. Codex was reviewed against stable `rust-v0.164.0`
-  (its `models.json` is unchanged) and keeps reference client 0.162.1. Grok
-  keeps `x-grok-client-version` 1.0.46 (latest Grok Build 1.0.67) and Claude
-  keeps the Claude Code 2.1.295 identity (latest 2.1.310) until native
-  captures of the newer clients are reviewed.
+- Fresh review dated 2026-10-30 on all seven surfaces. Subscription expiries
+  (Codex, Grok, Claude) and API review-due dates (OpenRouter Chat, OpenAI,
+  xAI, Anthropic) are all 2027-01-28T00:00:00Z. Native references are Codex
+  0.166.0, Grok Build 1.0.70 (`x-grok-client-version` 1.0.70) and Claude Code
+  2.1.314. Claude beta order, runtime costume and billing vectors are
+  refreshed with the existing cch algorithm; 14 Claude and 13 Grok render
+  hashes move accordingly. OAuth consent identities are unchanged.
 - Anthropic API model table `anthropic.api-models.2026-10-24.v1`: Claude
   Sonnet 4.5 (`claude-sonnet-4-5-20250929`) is deprecated and retires
   2026-11-30 (replacement `claude-sonnet-5-5`); the bundled table now records
