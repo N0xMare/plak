@@ -9,6 +9,31 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plak
 
+- Agent trees use schema 9 and state key `r26.e33.p34.t9`. Carry sessions by
+  `/reload` or export/import. Forks use short
+  `plak/<tree8>/<agent_id>` branches and `<tree8>-<agent_id>` copy directories,
+  with a full-digest prefix collision guard. Base, candidate and landing
+  provenance pins retain work independently of checkout removal. Submitted
+  output is stored in its intent, not duplicated in attempt rows or submit receipts.
+  Schema 9 also records textual Git conflict candidates, their target and
+  resolver lineage, and `adopted_via`. A conflict leaves the checkout untouched;
+  resolve it in a fork over the named conflict candidate or explicitly land
+  markers with `adopt_candidate {accept_conflicts:true}`. Non-textual conflicts
+  and JJ retain plain conflict refusals.
+  Resolver copies persist their source, target and marker paths independently
+  of conflict records. Live inputs protect those records and pins; late
+  resolutions are superseded at seal time and spent conflict inputs refuse
+  another resolver. Inconsistent resolver lineage fails closed rather than
+  becoming work; ordinary stacked copies and accepted resolver follow-ups
+  keep sealing after their input records are collected. Resolver copies retain
+  their mint-time conflict base independently of those records.
+  The same schema records reversal provenance: `adopt_candidate {revert:true}`
+  undoes one adopted delta while preserving later edits; conflicting reversals
+  change nothing. Reverted Git candidates remain re-adoptable after copy removal.
+  Follow-ups cleanly merge the parent's current state into live-fork copies;
+  `refresh:false` opts out, and candidate-minted copies keep their pinned bases.
+  Conflicts leave the old copy unchanged and report paths to both agents.
+
 - Session export v10 retains Messages native citation replay, including protected
   citation tokens. Versions 10 and 9 import; version 8 is refused before session
   creation. Runtime epoch, product/tree schemas and state key are unchanged.
@@ -279,31 +304,6 @@ one cross-build carrier (a build imports its own and the previous version).
 ## 0.0.2
 
 ### Plak
-
-- Agent trees use schema 9 and state key `r26.e33.p34.t9`. Carry sessions by
-  `/reload` or v9 export/import; v8 remains importable. Forks use short
-  `plak/<tree8>/<agent_id>` branches and `<tree8>-<agent_id>` copy directories,
-  with a full-digest prefix collision guard. Base, candidate and landing
-  provenance pins retain work independently of checkout removal. Submitted
-  output is stored in its intent, not duplicated in attempt rows or submit receipts.
-  Schema 9 also records textual Git conflict candidates, their target and
-  resolver lineage, and `adopted_via`. A conflict leaves the checkout untouched;
-  resolve it in a fork over the named conflict candidate or explicitly land
-  markers with `adopt_candidate {accept_conflicts:true}`. Non-textual conflicts
-  and JJ retain plain conflict refusals.
-  Resolver copies persist their source, target and marker paths independently
-  of conflict records. Live inputs protect those records and pins; late
-  resolutions are superseded at seal time and spent conflict inputs refuse
-  another resolver. Inconsistent resolver lineage fails closed rather than
-  becoming work; ordinary stacked copies and accepted resolver follow-ups
-  keep sealing after their input records are collected. Resolver copies retain
-  their mint-time conflict base independently of those records.
-  The same schema records reversal provenance: `adopt_candidate {revert:true}`
-  undoes one adopted delta while preserving later edits; conflicting reversals
-  change nothing. Reverted Git candidates remain re-adoptable after copy removal.
-  Follow-ups cleanly merge the parent's current state into live-fork copies;
-  `refresh:false` opts out, and candidate-minted copies keep their pinned bases.
-  Conflicts leave the old copy unchanged and report paths to both agents.
 
 - Conversations carry across builds and configuration changes: `/reload` and
   `session import` move the full neutral conversation through export
