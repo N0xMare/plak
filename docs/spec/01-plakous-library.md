@@ -3931,6 +3931,10 @@ and subject claim shapes (in the claimed-HTTP orchestrator module, not the
 facade's re-exported workflow helpers), and content-free JWT failure
 classification (the internal `jwt` feature). Callers supply byte bounds and
 deadline/error policy.
+The shared native-auth primitives own usage-credential refusal and semantic-evidence
+serialization. Provider adapters retain plain acceptance-field comparisons,
+refresh-detail copying and their exact semantic projections; the shared layer
+does not choose pins or failure reasons.
 The provider crates retain header multiplicity rules, request construction,
 signed-claim validation, account binding, token payload encodings, compatibility
 review checks and consent pins. Sharing scaffolding does not change their wire

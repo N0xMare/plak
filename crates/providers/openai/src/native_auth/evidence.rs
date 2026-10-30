@@ -185,21 +185,22 @@ impl CodexModelResolutionEvidence {
             responses_lite: bool,
             catalog_enum_fingerprint: Digest,
         }
-        let bytes = serde_json::to_vec(&SemanticCodexEvidence {
-            schema: "plakous-openai/codex-semantic-evidence-v6",
-            evidence_revision: self.evidence_revision,
-            adapter_revision: self.adapter_revision,
-            profile_revision: self.profile_revision,
-            reference_client_version: crate::OPENAI_CODEX_REFERENCE_CLIENT_VERSION,
-            catalog_source_revision: crate::config::OPENAI_CODEX_CATALOG_SOURCE_REVISION,
-            capacity_facts: self.capacity_facts,
-            reasoning_efforts: self.reasoning_efforts.identity_byte(),
-            tool_mode: self.tool_mode,
-            responses_lite: self.responses_lite,
-            catalog_enum_fingerprint: self.catalog_enum_fingerprint,
-        })
-        .map_err(|_| ProviderConfigurationError::Identity)?;
-        ProviderSemanticEvidence::new(6, bytes)
+        plakous_auth::native_auth::semantic_provider_evidence(
+            6,
+            &SemanticCodexEvidence {
+                schema: "plakous-openai/codex-semantic-evidence-v6",
+                evidence_revision: self.evidence_revision,
+                adapter_revision: self.adapter_revision,
+                profile_revision: self.profile_revision,
+                reference_client_version: crate::OPENAI_CODEX_REFERENCE_CLIENT_VERSION,
+                catalog_source_revision: crate::config::OPENAI_CODEX_CATALOG_SOURCE_REVISION,
+                capacity_facts: self.capacity_facts,
+                reasoning_efforts: self.reasoning_efforts.identity_byte(),
+                tool_mode: self.tool_mode,
+                responses_lite: self.responses_lite,
+                catalog_enum_fingerprint: self.catalog_enum_fingerprint,
+            },
+        )
     }
 
     /// Returns the protocol adapter revision that will prepare requests.

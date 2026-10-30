@@ -177,20 +177,21 @@ impl XaiModelResolutionEvidence {
             source_revision: &'a str,
             reported_context_length: u32,
         }
-        let bytes = serde_json::to_vec(&SemanticSuperGrokEvidence {
-            schema: "plakous-xai/supergrok-semantic-evidence-v2",
-            evidence_revision: self.evidence_revision,
-            adapter_revision: &self.adapter_revision,
-            profile_revision: &self.profile_revision,
-            feature_revision: crate::responses_dialect::SUPERGROK_FEATURE_REVISION,
-            dialect_revision: crate::responses_dialect::SUPERGROK_RESPONSES_DIALECT_REVISION,
-            source_revision: model_catalog_source_revision(
-                self.descriptor.requested_model().as_str(),
-            ),
-            reported_context_length: self.catalog_diagnostics.reported_context_length().get(),
-        })
-        .map_err(|_| ProviderConfigurationError::Identity)?;
-        ProviderSemanticEvidence::new(2, bytes)
+        plakous_auth::native_auth::semantic_provider_evidence(
+            2,
+            &SemanticSuperGrokEvidence {
+                schema: "plakous-xai/supergrok-semantic-evidence-v2",
+                evidence_revision: self.evidence_revision,
+                adapter_revision: &self.adapter_revision,
+                profile_revision: &self.profile_revision,
+                feature_revision: crate::responses_dialect::SUPERGROK_FEATURE_REVISION,
+                dialect_revision: crate::responses_dialect::SUPERGROK_RESPONSES_DIALECT_REVISION,
+                source_revision: model_catalog_source_revision(
+                    self.descriptor.requested_model().as_str(),
+                ),
+                reported_context_length: self.catalog_diagnostics.reported_context_length().get(),
+            },
+        )
     }
 }
 

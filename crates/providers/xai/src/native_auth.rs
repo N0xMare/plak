@@ -12,6 +12,8 @@ mod refresh;
 mod route_authority;
 mod verify;
 
+use plakous_auth::native_auth::usage_credential_refusal;
+
 use error::LoginHttpStage;
 pub use error::XaiNativeAuthError;
 pub use evidence::XaiModelResolutionEvidence;
@@ -822,29 +824,6 @@ fn retired_or_quarantined(error: XaiNativeAuthError) -> BuildRequestFailure<XaiN
 #[cfg(test)]
 fn ensure_compatibility(now: u64) -> Result<(), XaiNativeAuthError> {
     ensure_compatibility_state(now, COMPATIBILITY_KILLED)
-}
-
-/// Names the exact local refusal for a record that is not Ready; `None` means
-/// the record is Ready and the read may proceed to lease it. A lifecycle this
-/// build does not know is refused as local state rather than guessed.
-const fn usage_credential_refusal(
-    status: CredentialStatus,
-) -> Option<SubscriptionUsageUnavailable> {
-    match status {
-        CredentialStatus::Ready => None,
-        CredentialStatus::RefreshRequired => Some(SubscriptionUsageUnavailable::CredentialState(
-            SubscriptionUsageCredentialState::RefreshRequired,
-        )),
-        CredentialStatus::RefreshOutcomeUnknown => {
-            Some(SubscriptionUsageUnavailable::CredentialState(
-                SubscriptionUsageCredentialState::Quarantined,
-            ))
-        }
-        CredentialStatus::Revoked => Some(SubscriptionUsageUnavailable::CredentialState(
-            SubscriptionUsageCredentialState::Revoked,
-        )),
-        _ => Some(SubscriptionUsageUnavailable::LocalState),
-    }
 }
 
 #[cfg(test)]

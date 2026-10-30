@@ -53,6 +53,7 @@ tokio = { workspace = true, features = ["macros", "rt", "time"] }
 zeroize = { workspace = true, optional = true }
 
 [dev-dependencies]
+plakous-test-support = { path = "../../../tests/support/plakous-test-support" }
 futures-util = { workspace = true, features = ["std"] }
 plakous-agent.workspace = true
 plakous-store.workspace = true

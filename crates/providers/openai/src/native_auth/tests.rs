@@ -6,7 +6,6 @@ mod carry_replay;
 
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::io;
 use std::mem::size_of;
 use std::num::NonZeroU32;
 use std::pin::Pin;
@@ -32,11 +31,7 @@ use plakous_model::{
 use plakous_responses::{
     RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION, ResponsesArtifactCodec,
 };
-use rcgen::{CertifiedKey, generate_simple_self_signed};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use tempfile::TempDir;
-use tokio_rustls::TlsAcceptor;
 
 use super::*;
 
@@ -458,89 +453,23 @@ Qur+amqrwl9uDA6MsnnG6Q==
 )
 .as_bytes();
 
+use plakous_test_support::native_auth::{read_request, response};
+
 struct TestEndpoint {
     listener: TcpListener,
-    acceptor: TlsAcceptor,
+    acceptor: tokio_rustls::TlsAcceptor,
     client: Client,
     origin: EndpointOrigin,
 }
 
 async fn test_endpoint() -> TestResult<TestEndpoint> {
-    let CertifiedKey { cert, signing_key } =
-        generate_simple_self_signed(vec!["localhost".to_owned(), "127.0.0.1".to_owned()])?;
-    let certificate = cert.der().clone();
-    let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(signing_key.serialize_der()));
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut server_config = ServerConfig::builder_with_provider(Arc::clone(&provider))
-        .with_safe_default_protocol_versions()?
-        .with_no_client_auth()
-        .with_single_cert(vec![certificate.clone()], private_key)?;
-    server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
-    let mut roots = RootCertStore::empty();
-    roots.add(CertificateDer::from(certificate.to_vec()))?;
-    let client_config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let origin = EndpointOrigin::parse(&format!("https://{}/", listener.local_addr()?))?;
-    let tls_identity = plakous_http::TlsConfigIdentity::from_parts(
-        1,
-        &[certificate.as_ref(), b"openai-test-rustls-ring-http2"],
-    )?;
-    let client =
-        Client::with_tls_config_and_identity(Limits::default(), client_config, tls_identity)?;
+    let peer = plakous_test_support::native_auth::test_endpoint().await?;
     Ok(TestEndpoint {
-        listener,
-        acceptor: TlsAcceptor::from(Arc::new(server_config)),
-        client,
-        origin,
+        listener: peer.listener,
+        acceptor: peer.acceptor,
+        client: peer.client,
+        origin: EndpointOrigin::parse(&peer.origin)?,
     })
-}
-
-fn response(status: &str, content_type: &str, body: &[u8], extra: &str) -> Vec<u8> {
-    let mut response = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n",
-            body.len()
-        )
-        .into_bytes();
-    response.extend_from_slice(body);
-    response
-}
-
-async fn read_request(
-    stream: &mut tokio_rustls::server::TlsStream<TcpStream>,
-) -> TestResult<Vec<u8>> {
-    let mut request = Vec::new();
-    let mut buffer = [0_u8; 1024];
-    let head_end = loop {
-        let read = stream.read(&mut buffer).await?;
-        if read == 0 {
-            return Err(io::Error::other("request ended before head").into());
-        }
-        request.extend_from_slice(&buffer[..read]);
-        if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-            break index + 4;
-        }
-    };
-    let head = std::str::from_utf8(&request[..head_end])?;
-    let length = head
-        .lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse::<usize>().ok())
-                .flatten()
-        })
-        .unwrap_or(0);
-    while request.len() < head_end + length {
-        let read = stream.read(&mut buffer).await?;
-        if read == 0 {
-            return Err(io::Error::other("request ended before body").into());
-        }
-        request.extend_from_slice(&buffer[..read]);
-    }
-    Ok(request)
 }
 
 fn spawn_sequence(
@@ -642,21 +571,14 @@ fn private_slot() -> TestResult<(TempDir, PathBuf)> {
 }
 
 // Wall-clock-independent epoch; elapsed time remains real for refresh-lead tests.
-struct ReviewClock;
+use plakous_test_support::native_auth::ReviewClock;
 
 fn now_unix_secs() -> u64 {
-    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    PROFILE_REVIEWED_AT + 60 + START.get_or_init(Instant::now).elapsed().as_secs()
+    ReviewClock::<PROFILE_REVIEWED_AT>.now().seconds()
 }
 
 fn review_timestamp() -> Timestamp {
     Timestamp::new(now_unix_secs(), 0).expect("review time")
-}
-
-impl Clock for ReviewClock {
-    fn now(&self) -> Timestamp {
-        review_timestamp()
-    }
 }
 
 fn acceptance() -> Result<CodexCompatibilityAcceptance, NativeCodexAuthError> {
@@ -1008,7 +930,7 @@ fn manager_for_endpoint(
                 chatgpt_origin: endpoint.origin.clone(),
                 loopback_ports: TEST_LOOPBACK_PORTS,
             },
-            Arc::new(ReviewClock),
+            Arc::new(ReviewClock::<PROFILE_REVIEWED_AT>),
         )?,
     ))
 }
@@ -1028,7 +950,7 @@ fn manager_for_endpoint_with_gate(
                 chatgpt_origin: endpoint.origin.clone(),
                 loopback_ports: TEST_LOOPBACK_PORTS,
             },
-            Arc::new(ReviewClock),
+            Arc::new(ReviewClock::<PROFILE_REVIEWED_AT>),
         )?
         .with_subscription_request_gate(gate),
     ))

@@ -1,5 +1,4 @@
 use super::*;
-use plakous_http::{Limits, TlsConfigIdentity};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 const ACCOUNT: &str = "12345678-1234-4234-8234-123456789abc";
@@ -37,35 +36,17 @@ async fn fixture_with_response(
 ) {
     let temp = tempfile::tempdir().unwrap();
     let mut manager = tests::manager(tests::private_store(&temp));
-    let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
-    let cert = certified.cert.der().clone();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let key = rustls::pki_types::PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
-    let mut server = rustls::ServerConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert.clone()], key.into())
+    let endpoint = plakous_test_support::native_auth::test_endpoint()
+        .await
         .unwrap();
-    server.alpn_protocols = vec![b"http/1.1".to_vec()];
-    let identity =
-        TlsConfigIdentity::from_parts(1, &[cert.as_ref(), b"claude-identity-fixture"]).unwrap();
-    let mut roots = rustls::RootCertStore::empty();
-    roots.add(cert).unwrap();
-    let client = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("https://{}", listener.local_addr().unwrap());
+    let listener = endpoint.listener;
+    let origin = endpoint.origin.trim_end_matches('/').to_owned();
     let core = Arc::get_mut(&mut manager.core).unwrap();
-    core.client =
-        Client::with_tls_config_and_identity(Limits::default(), client, identity).unwrap();
+    core.client = endpoint.client;
     core.token_origin = origin.clone();
     core.control_origin = Some(origin);
     let peer = tokio::spawn(async move {
-        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
+        let acceptor = endpoint.acceptor;
         // Wait for both requests before replying, so both managers hold a
         // shared Ready lease when the first attempts its exclusive CAS.
         let mut exchanges = Vec::new();

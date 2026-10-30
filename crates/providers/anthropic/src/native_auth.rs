@@ -4,6 +4,8 @@
 //! loopback listener: local and remote product modes share this paste-complete
 //! handle. Token exchange is JSON against the pinned Platform token origin.
 
+use plakous_auth::native_auth::usage_credential_refusal;
+
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
@@ -409,26 +411,6 @@ fn acquire_refresh_permit(
     gate.map(|gate| gate.acquire(SubscriptionRequestClass::AuthRefresh))
         .transpose()
         .map_err(|_| ClaudeNativeAuthError::NotReady)
-}
-
-const fn usage_credential_refusal(
-    status: CredentialStatus,
-) -> Option<SubscriptionUsageUnavailable> {
-    match status {
-        CredentialStatus::Ready => None,
-        CredentialStatus::RefreshRequired => Some(SubscriptionUsageUnavailable::CredentialState(
-            SubscriptionUsageCredentialState::RefreshRequired,
-        )),
-        CredentialStatus::RefreshOutcomeUnknown => {
-            Some(SubscriptionUsageUnavailable::CredentialState(
-                SubscriptionUsageCredentialState::Quarantined,
-            ))
-        }
-        CredentialStatus::Revoked => Some(SubscriptionUsageUnavailable::CredentialState(
-            SubscriptionUsageCredentialState::Revoked,
-        )),
-        _ => Some(SubscriptionUsageUnavailable::LocalState),
-    }
 }
 
 fn map_pull_body_error(error: PullBodyError) -> ClaudeNativeAuthError {

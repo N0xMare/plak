@@ -21,6 +21,8 @@ pub(crate) use authorization::NativeCodexAuthorization;
 pub(crate) use catalog_source::CodexCatalogSource;
 pub use error::NativeCodexAuthError;
 pub use evidence::CodexModelResolutionEvidence;
+use plakous_auth::native_auth::usage_credential_refusal;
+
 #[cfg(test)]
 use http::HttpReply;
 use http::{
@@ -324,29 +326,6 @@ fn local_credential_status(
     Ok(OfflineCredentialLifecycle::classify(
         fence.as_ref().map(CredentialFence::status),
     ))
-}
-
-/// Names the exact local refusal for a record that is not Ready; `None` means
-/// the record is Ready and the read may proceed to lease it. A lifecycle this
-/// build does not know is refused as local state rather than guessed.
-const fn usage_credential_refusal(
-    status: CredentialStatus,
-) -> Option<SubscriptionUsageUnavailable> {
-    match status {
-        CredentialStatus::Ready => None,
-        CredentialStatus::RefreshRequired => Some(SubscriptionUsageUnavailable::CredentialState(
-            SubscriptionUsageCredentialState::RefreshRequired,
-        )),
-        CredentialStatus::RefreshOutcomeUnknown => {
-            Some(SubscriptionUsageUnavailable::CredentialState(
-                SubscriptionUsageCredentialState::Quarantined,
-            ))
-        }
-        CredentialStatus::Revoked => Some(SubscriptionUsageUnavailable::CredentialState(
-            SubscriptionUsageCredentialState::Revoked,
-        )),
-        _ => Some(SubscriptionUsageUnavailable::LocalState),
-    }
 }
 
 fn local_logout(

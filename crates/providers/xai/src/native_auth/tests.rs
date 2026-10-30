@@ -19,7 +19,6 @@ use plakous_auth::subscription_limit::{
     InMemorySubscriptionRequestGate, SubscriptionLimitError, SubscriptionLimitSnapshot,
     SubscriptionRequestLimits, SubscriptionRequestPermit, SystemSubscriptionGateClock,
 };
-use plakous_http::{Limits, TlsConfigIdentity};
 use plakous_model::{
     ActiveFamilyArtifact, Actor, AttemptId, CachePolicy, CanonicalHistory, CapabilityRequirement,
     ContentBlock, ContextEvidenceClass, ConversationItem, ConversationView, DataClassification,
@@ -35,15 +34,11 @@ use plakous_model::{
 };
 use plakous_responses::{RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION};
 use plakous_responses::{ResponsesRequestConfig, lower_responses_request};
-use rcgen::generate_simple_self_signed;
-use rustls::pki_types::PrivatePkcs8KeyDer;
-use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use serde_json::json;
 use tempfile::{TempDir, tempdir};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify, mpsc, oneshot};
-use tokio_rustls::TlsAcceptor;
 
 use super::*;
 use plakous_auth::oauth_workflow::parse_absolute_redirect_query;
@@ -185,28 +180,11 @@ impl MockPeer {
 }
 
 async fn mock_peer() -> TestResult<MockPeer> {
-    let certified = generate_simple_self_signed(vec!["127.0.0.1".to_owned()])?;
-    let certificate = certified.cert.der().clone();
-    let key = PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut server = ServerConfig::builder_with_provider(Arc::clone(&provider))
-        .with_safe_default_protocol_versions()?
-        .with_no_client_auth()
-        .with_single_cert(vec![certificate.clone()], key.into())?;
-    server.alpn_protocols = vec![b"http/1.1".to_vec()];
-    let tls_identity =
-        TlsConfigIdentity::from_parts(1, &[certificate.as_ref(), b"xai-test-rustls-ring-http2"])?;
-    let mut roots = RootCertStore::empty();
-    roots.add(certificate)?;
-    let client_config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    let client =
-        Client::with_tls_config_and_identity(Limits::default(), client_config, tls_identity)?;
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let origin = format!("https://127.0.0.1:{}", listener.local_addr()?.port());
-    let acceptor = TlsAcceptor::from(Arc::new(server));
+    let endpoint = plakous_test_support::native_auth::test_endpoint().await?;
+    let listener = endpoint.listener;
+    let origin = endpoint.origin.as_str().trim_end_matches('/').to_owned();
+    let acceptor = endpoint.acceptor;
+    let client = endpoint.client;
     let (send, mut receive) = mpsc::channel::<MockExchange>(32);
     let pending = Arc::new(Mutex::new(Vec::new()));
     let requests = Arc::new(Mutex::new(Vec::new()));

@@ -20,10 +20,15 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 futures-core.workspace = true
 futures-util = { workspace = true, features = ["std"] }
 plakous-model.workspace = true
+plakous-http.workspace = true
 plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["async-await", "executor", "std"] }
