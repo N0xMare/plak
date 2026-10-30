@@ -1385,7 +1385,12 @@ mod tests {
     /// no unbounded `control.cancel()` await left.
     #[test]
     fn child_cancels_are_bounded_by_the_host_settle_timeout() {
-        let source = include_str!("hub.rs");
+        let source = concat!(
+            include_str!("hub.rs"),
+            include_str!("hub/registry.rs"),
+            include_str!("hub/runtime.rs"),
+            include_str!("hub/shutdown.rs")
+        );
         assert!(
             source.contains("plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT"),
             "the child cancel must go through the shared settle window"
@@ -1497,7 +1502,7 @@ mod tests {
     /// happened before the lock cannot be the one the insert relies on.
     #[test]
     fn the_closed_flag_is_read_under_the_lock_the_insert_takes() {
-        let source = include_str!("hub.rs");
+        let source = include_str!("hub/runtime.rs");
         let admits = source
             .split("fn admits_live(")
             .nth(1)
@@ -2452,7 +2457,7 @@ mod tests {
 
     #[test]
     fn retirement_release_is_not_wrapped_in_timeout() {
-        let source = include_str!("hub.rs");
+        let source = include_str!("hub/registry.rs");
         let worker = source
             .split("let task = tokio::spawn(async move {")
             .nth(1)
