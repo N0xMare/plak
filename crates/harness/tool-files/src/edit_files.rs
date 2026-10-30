@@ -94,6 +94,29 @@ fn invalid(message: impl Into<String>) -> ToolRuntimeError {
     ToolRuntimeError::new(ToolRuntimeErrorKind::InvalidArguments, message.into())
 }
 
+enum EditOpFailure {
+    Guard(ToolRuntimeError),
+    Runtime(ToolRuntimeError),
+}
+
+impl From<ToolRuntimeError> for EditOpFailure {
+    fn from(error: ToolRuntimeError) -> Self {
+        Self::Runtime(error)
+    }
+}
+
+impl EditOpFailure {
+    fn outcome(self, index: usize) -> Result<ToolOutcome, ToolRuntimeError> {
+        match self {
+            Self::Guard(error) => ToolOutcome::failure_text(error.message().as_str()),
+            Self::Runtime(error) if error.kind() == ToolRuntimeErrorKind::Cancelled => Err(error),
+            Self::Runtime(error) => {
+                ToolOutcome::failure_text(format!("op {index}: {}", error.message().as_str()))
+            }
+        }
+    }
+}
+
 async fn load(
     context: &ToolContext,
     files: &mut Overlay,
@@ -247,13 +270,17 @@ async fn apply_op(
     files: &mut Overlay,
     op: EditOp,
     guards: &mut crate::mutation::WriteGuards,
-) -> Result<(), ToolRuntimeError> {
+) -> Result<(), EditOpFailure> {
     let (path, expect) = match &op {
         EditOp::Patch { patch, expect } => {
-            return apply_patch(context, files, patch, expect.as_deref()).await;
+            return apply_patch(context, files, patch, expect.as_deref())
+                .await
+                .map_err(Into::into);
         }
         EditOp::Move { path, to, expect } => {
-            return move_file(context, files, path, to, expect.as_deref()).await;
+            return move_file(context, files, path, to, expect.as_deref())
+                .await
+                .map_err(Into::into);
         }
         EditOp::Write { path, expect, .. }
         | EditOp::Replace { path, expect, .. }
@@ -267,14 +294,15 @@ async fn apply_op(
     match op {
         EditOp::Write { content, .. } => {
             if let WorkspaceExpectedFileState::Content(identity) = state.original {
-                crate::mutation::require_read(context, &path, identity)?;
+                crate::mutation::require_read(context, &path, identity)
+                    .map_err(EditOpFailure::Guard)?;
             }
             guards.insert(path.clone(), state.original);
             state.bytes = Some(content.into_bytes());
         }
         EditOp::Delete { .. } => {
             if state.bytes.take().is_none() {
-                return Err(invalid("edit_files delete target is absent"));
+                return Err(invalid("edit_files delete target is absent").into());
             }
         }
         EditOp::Replace { old, new, all, .. } => {
@@ -283,7 +311,8 @@ async fn apply_op(
             if old.is_empty() || count == 0 || (!all && count != 1) {
                 return Err(invalid(
                     "edit_files replacement must match uniquely unless all is true",
-                ));
+                )
+                .into());
             }
             let next_len = original
                 .len()
@@ -296,12 +325,12 @@ async fn apply_op(
             if next_len.is_none_or(|size| {
                 u64::try_from(size).unwrap_or(u64::MAX) > MAX_STANDARD_TEXT_BYTES
             }) {
-                return Err(invalid("edit_files replacement exceeds the text bound"));
+                return Err(invalid("edit_files replacement exceeds the text bound").into());
             }
             state.bytes = Some(original.replace(&old, &new).into_bytes());
         }
         EditOp::Patch { .. } | EditOp::Move { .. } => {
-            return Err(invalid("edit_files operation was not preflighted"));
+            return Err(invalid("edit_files operation was not preflighted").into());
         }
     }
     Ok(())
@@ -324,20 +353,10 @@ impl ToolExecutor for EditFilesTool {
                     .map_err(|error| invalid(format!("invalid operation: {error}")));
                 let result = match parsed {
                     Ok(op) => apply_op(&context, &mut files, op, &mut guards).await,
-                    Err(error) => Err(error),
+                    Err(error) => Err(error.into()),
                 };
                 if let Err(error) = result {
-                    if matches!(error.kind(), ToolRuntimeErrorKind::Cancelled) {
-                        return Err(error);
-                    }
-                    if error.kind() == ToolRuntimeErrorKind::WorkspacePolicy {
-                        return ToolOutcome::failure_text(error.message().as_str());
-                    }
-                    return ToolOutcome::failure_text(format!(
-                        "op {}: {}",
-                        index + 1,
-                        error.message().as_str()
-                    ));
+                    return error.outcome(index + 1);
                 }
                 if files.values().any(|state| {
                     state.bytes.as_ref().is_some_and(|bytes| {
@@ -350,21 +369,7 @@ impl ToolExecutor for EditFilesTool {
                     ));
                 }
             }
-            let changes = files
-                .into_iter()
-                .map(|(path, state)| {
-                    WorkspaceMutation::new(
-                        path,
-                        state.original,
-                        state
-                            .bytes
-                            .map_or(WorkspaceReplacement::Missing, WorkspaceReplacement::content),
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(backend_runtime_error)?;
-            let transaction =
-                WorkspaceMutationTransaction::new(changes).map_err(backend_runtime_error)?;
+            let transaction = build_transaction(files, &mut guards)?;
             if let Err(error) = crate::mutation::preflight_result(&transaction) {
                 return ToolOutcome::failure_text(error.message().as_str());
             }
@@ -378,27 +383,64 @@ impl ToolExecutor for EditFilesTool {
                 .await;
             match result {
                 Ok(result) => edit_outcome(&result, value_inputs),
-                Err(error) if crate::mutation::guarded_conflict(&error, &guards).is_some() => {
-                    ToolOutcome::failure_text(
-                        crate::mutation::guarded_conflict(&error, &guards).unwrap_or_default(),
-                    )
-                }
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        ExecutionBackendErrorKind::RecoveryRequired
-                            | ExecutionBackendErrorKind::Cancelled
-                            | ExecutionBackendErrorKind::CleanupUnresolved
-                            | ExecutionBackendErrorKind::TimedOut
-                    ) =>
-                {
-                    Err(backend_runtime_error(error))
-                }
-                Err(error) => ToolOutcome::failure_text(error.message().as_str()),
+                Err(error) => mutation_failure(error, &guards),
             }
         })
     }
 }
+
+fn build_transaction(
+    files: Overlay,
+    guards: &mut crate::mutation::WriteGuards,
+) -> Result<WorkspaceMutationTransaction, ToolRuntimeError> {
+    let mut normalized_guards = crate::mutation::WriteGuards::new();
+    let changes = files
+        .into_iter()
+        .map(|(path, state)| {
+            let guarded = guards.contains_key(&path);
+            let mutation = WorkspaceMutation::new(
+                path,
+                state.original,
+                state
+                    .bytes
+                    .map_or(WorkspaceReplacement::Missing, WorkspaceReplacement::content),
+            )?;
+            if guarded {
+                normalized_guards.insert(mutation.path().to_path_buf(), mutation.expected());
+            }
+            Ok(mutation)
+        })
+        .collect::<Result<Vec<_>, plakous_tools::ExecutionBackendError>>()
+        .map_err(backend_runtime_error)?;
+    *guards = normalized_guards;
+    WorkspaceMutationTransaction::new(changes).map_err(backend_runtime_error)
+}
+
+fn mutation_failure(
+    error: plakous_tools::ExecutionBackendError,
+    guards: &crate::mutation::WriteGuards,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    if let Some(message) = crate::mutation::guarded_conflict(&error, guards) {
+        return ToolOutcome::failure_text(message);
+    }
+    match error {
+        error
+            if matches!(
+                error.kind(),
+                ExecutionBackendErrorKind::RecoveryRequired
+                    | ExecutionBackendErrorKind::Cancelled
+                    | ExecutionBackendErrorKind::CleanupUnresolved
+                    | ExecutionBackendErrorKind::TimedOut
+            ) =>
+        {
+            Err(backend_runtime_error(error))
+        }
+        error => ToolOutcome::failure_text(error.message().as_str()),
+    }
+}
+
+#[cfg(test)]
+mod tests;
 
 fn edit_outcome(
     result: &plakous_tools::WorkspaceMutationTransactionResult,

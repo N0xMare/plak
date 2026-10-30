@@ -255,10 +255,13 @@ async fn each_workspace_path_refusal_names_its_own_cause() -> Result<(), TestErr
     assert!(directory.message().as_str().contains("a-directory"));
     assert!(directory.proven_no_effect());
 
-    // A parent that is not a directory cannot hold the child, and saying which
-    // is more useful than "not found" alone.
+    // A parent that is not a directory cannot hold the child, so the path is
+    // neither missing nor creatable, and the kind says which component.
     let through_file = read("data.txt/child").await?;
-    assert_eq!(through_file.kind(), ExecutionBackendErrorKind::NotFound);
+    assert_eq!(
+        through_file.kind(),
+        ExecutionBackendErrorKind::NotADirectory
+    );
     assert!(through_file.proven_no_effect());
 
     {
@@ -274,6 +277,17 @@ async fn each_workspace_path_refusal_names_its_own_cause() -> Result<(), TestErr
             "a symbolic link is the one case that stays a symlink escape"
         );
         assert!(escaped.proven_no_effect());
+        // A linked directory component is traversal on every platform, even
+        // where the kernel answers a no-follow directory open with ENOTDIR.
+        symlink(outside.path(), workspace.path().join("dir-link"))?;
+        let through_link = read("dir-link/secret").await?;
+        assert_eq!(
+            through_link.kind(),
+            ExecutionBackendErrorKind::SymlinkEscape,
+            "{:?}",
+            through_link.message()
+        );
+        assert!(through_link.proven_no_effect());
     }
 
     {

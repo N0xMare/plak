@@ -69,6 +69,7 @@ pub fn backend_runtime_error(error: ExecutionBackendError) -> ToolRuntimeError {
         | ExecutionBackendErrorKind::NotFound
         | ExecutionBackendErrorKind::IsADirectory
         | ExecutionBackendErrorKind::NotARegularFile
+        | ExecutionBackendErrorKind::NotADirectory
         | ExecutionBackendErrorKind::OutsideWorkspace
         | ExecutionBackendErrorKind::SymlinkEscape => ToolRuntimeErrorKind::WorkspacePolicy,
         ExecutionBackendErrorKind::ResourceLimit => ToolRuntimeErrorKind::ResourceLimit,

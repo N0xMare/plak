@@ -121,6 +121,9 @@ pub enum ExecutionBackendErrorKind {
     /// The path names something that is neither a file nor a directory: a
     /// socket, a device, a FIFO.
     NotARegularFile,
+    /// A component of the path exists and is not a directory, so the path
+    /// names nothing and nothing can be created beneath it.
+    NotADirectory,
     /// The path resolves outside the workspace root.
     ///
     /// Distinct from [`Self::SymlinkEscape`], which is reserved for an escape
@@ -175,6 +178,7 @@ impl ExecutionBackendErrorKind {
             | Self::NotFound
             | Self::IsADirectory
             | Self::NotARegularFile
+            | Self::NotADirectory
             | Self::OutsideWorkspace
             | Self::SymlinkEscape
             | Self::ResourceLimit

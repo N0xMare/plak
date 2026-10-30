@@ -5821,7 +5821,9 @@ failure, never an unknown outcome.** The disposition is a property of the raise
 site, not of the category: a bound checked before a spawn and a bound noticed
 after a child has already run are both `ResourceLimit`. **Each category supplies
 only a default, which any raise site overrides.** `IdentityMismatch`,
-`InvalidRequest`, `WorkspacePolicy`, `SymlinkEscape`, `ResourceLimit`,
+`InvalidRequest`, `WorkspacePolicy` and its path refusals (`NotFound`,
+`IsADirectory`, `NotARegularFile`, `NotADirectory`, `OutsideWorkspace`),
+`SymlinkEscape`, `ResourceLimit`,
 `Conflict`, `Denied` and `Unsupported` at the backend, and `Registration`,
 `InvalidDefinition`, `UnknownTool`, `InvalidArguments`, `Policy`,
 `UnsupportedCapability`, `WorkspacePolicy`, `ResourceLimit` and

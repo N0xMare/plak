@@ -302,6 +302,11 @@ async fn edit_files_refuses_escapes_symlinks_and_protected_paths_atomically() ->
             "{}",
             result.joined_text()
         );
+        assert!(
+            result.joined_text().starts_with("op 2: "),
+            "{}",
+            result.joined_text()
+        );
         assert!(!root.path().join("safe").exists());
         assert!(!outside.path().join("escape").exists());
     }

@@ -87,11 +87,12 @@ fn workspace_open_error(relative: &Path, errno: Errno) -> ExecutionBackendError 
             ExecutionBackendErrorKind::NotFound,
             format!("path does not exist: {path}"),
         ),
-        // A component of the path is not a directory, so the path cannot name
-        // anything. Saying which is more useful than saying "not found".
+        // A component of the path is not a directory, so the path can name
+        // nothing and nothing can be created beneath it: a write refuses here
+        // rather than reading it as a create.
         Errno::NOTDIR => backend_error(
-            ExecutionBackendErrorKind::NotFound,
-            format!("path does not exist; a parent component is not a directory: {path}"),
+            ExecutionBackendErrorKind::NotADirectory,
+            format!("a parent component is not a directory: {path}"),
         ),
         Errno::ISDIR => backend_error(
             ExecutionBackendErrorKind::IsADirectory,
@@ -139,6 +140,40 @@ fn workspace_path_components(
     Ok(names)
 }
 
+/// Both Linux and macOS answer an `O_NOFOLLOW | O_DIRECTORY` open of a
+/// symbolic link with `ENOTDIR`, the same answer as for a regular file. Every
+/// such open checks the entry with `fstatat(AT_SYMLINK_NOFOLLOW)` and reports a
+/// link as `ELOOP`, so a linked component is refused as symlink traversal on
+/// both platforms and a non-directory component stays `ENOTDIR`. The check only
+/// turns one refusal into another; it never opens anything.
+fn link_errno<P: rustix::path::Arg + Copy>(
+    parent: &fs::File,
+    name: P,
+    flags: OFlags,
+    errno: Errno,
+) -> Errno {
+    let link = errno == Errno::NOTDIR
+        && flags.contains(OFlags::DIRECTORY)
+        && rustix::fs::statat(parent, name, AtFlags::SYMLINK_NOFOLLOW).is_ok_and(|stat| {
+            rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::Symlink
+        });
+    if link { Errno::LOOP } else { errno }
+}
+
+/// Opens one path component relative to `parent`, classifying a link as
+/// [`link_errno`] does.
+fn openat_component<P: rustix::path::Arg + Copy>(
+    parent: &fs::File,
+    name: P,
+    flags: OFlags,
+    mode: Mode,
+) -> Result<rustix::fd::OwnedFd, Errno> {
+    openat(parent, name, flags, mode).map_err(|errno| link_errno(parent, name, flags, errno))
+}
+
+#[cfg(test)]
+mod component_tests;
+
 #[cfg(not(target_os = "linux"))]
 fn open_workspace_beneath_at(
     root: &fs::File,
@@ -165,7 +200,7 @@ fn open_workspace_beneath_at(
             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
         };
         let parent = owned.as_ref().map_or(root, |file| file);
-        match openat(parent, *name, open_flags, Mode::empty()) {
+        match openat_component(parent, *name, open_flags, Mode::empty()) {
             Ok(descriptor) => {
                 if is_last {
                     return Ok(fs::File::from(descriptor));
@@ -210,6 +245,7 @@ fn observe_open_workspace_file_at(
                 ExecutionBackendErrorKind::SymlinkEscape,
                 "workspace mutation refuses symbolic links",
             )),
+            Err(Errno::NOTDIR) => Err(workspace_open_error(relative, Errno::NOTDIR)),
             Err(_) => Err(io_error("workspace mutation target open failed")),
         };
     }
@@ -222,7 +258,7 @@ fn observe_open_workspace_file_at(
             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
         };
         let parent = owned.as_ref().map_or(root, |file| file);
-        match openat(parent, *name, open_flags, Mode::empty()) {
+        match openat_component(parent, *name, open_flags, Mode::empty()) {
             Ok(descriptor) => {
                 if is_last {
                     let file = fs::File::from(descriptor);
@@ -246,6 +282,7 @@ fn observe_open_workspace_file_at(
                     "workspace mutation refuses symbolic links",
                 ));
             }
+            Err(Errno::NOTDIR) => return Err(workspace_open_error(relative, Errno::NOTDIR)),
             Err(_) => return Err(io_error("workspace mutation target open failed")),
         }
     }
@@ -320,7 +357,7 @@ fn open_workspace_beneath(
             Mode::empty(),
             ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
         )
-        .map_err(|errno| workspace_open_error(relative, errno))?;
+        .map_err(|errno| workspace_open_error(relative, link_errno(&root, &path, flags, errno)))?;
         Ok(fs::File::from(descriptor))
     }
     #[cfg(not(target_os = "linux"))]
@@ -1184,6 +1221,7 @@ fn observe_workspace_file(
                 ExecutionBackendErrorKind::SymlinkEscape,
                 "workspace mutation refuses symbolic links",
             )),
+            Err(Errno::NOTDIR) => Err(workspace_open_error(relative, Errno::NOTDIR)),
             Err(_) => Err(io_error("workspace mutation target open failed")),
         }
     }
@@ -1252,7 +1290,7 @@ fn create_missing_parents(
             .map_err(|errno| workspace_open_error(parent, errno))?,
     );
     for name in names {
-        match openat(&current, name, directory_flags, Mode::empty()) {
+        match openat_component(&current, name, directory_flags, Mode::empty()) {
             Ok(descriptor) => current = fs::File::from(descriptor),
             Err(Errno::NOENT) => {
                 match mkdirat(&current, name, Mode::from_raw_mode(0o755)) {
@@ -1263,7 +1301,7 @@ fn create_missing_parents(
                     .sync_all()
                     .map_err(|_| io_error("workspace mutation parent sync failed"))?;
                 let next = fs::File::from(
-                    openat(&current, name, directory_flags, Mode::empty())
+                    openat_component(&current, name, directory_flags, Mode::empty())
                         .map_err(|errno| workspace_open_error(parent, errno))?,
                 );
                 created.created.push((current, PathBuf::from(name)));

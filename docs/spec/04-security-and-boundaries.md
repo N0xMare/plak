@@ -236,7 +236,15 @@ On Linux the execution backend does better than a check: it opens beneath the
 root descriptor with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`, and
 `RESOLVE_NO_MAGICLINKS` plus `O_NOFOLLOW`, so containment is kernel-enforced
 and free of a check-to-use race. Elsewhere it opens component by component with
-`O_NOFOLLOW`, refusing symlink and cross-device traversal.
+`O_NOFOLLOW`, refusing symlink and cross-device traversal. Linux and macOS both
+answer an `O_NOFOLLOW | O_DIRECTORY` open of a symbolic link with `ENOTDIR`, as
+for a regular file, so every per-component open and the Linux beneath-open with
+`O_DIRECTORY` check such an entry with `fstatat(AT_SYMLINK_NOFOLLOW)` and report
+a link as `ELOOP`: a linked component, including the parent of a write and a
+missing parent a create would make, is refused as a pre-effect `SymlinkEscape`
+on both platforms, never read as a missing path. A component that exists and is
+not a directory is refused as a pre-effect `NotADirectory`, so a write beneath a
+file is refused before any effect instead of being read as a create.
 
 The lexical layer alone does **not** claim race-free containment, and says so.
 Process-tool working directories get the additional per-component symlink check
