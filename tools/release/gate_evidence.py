@@ -53,7 +53,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     "bin/plak/src/carry/history/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/cli/tests.rs": (frozenset({'"docs"'}), "an MCP server id argument fixture"),
     "bin/plak/src/tui/surface_views/tests.rs": (frozenset({'"docs"'}), "an MCP server id in help text"),
-    "bin/plak/src/cli_output.rs": (frozenset({'"STATUS"'}), "a table header"),
+    "bin/plak/src/cli_output/tests.rs": (frozenset({'"STATUS"'}), "a table header"),
     "bin/plak/src/product_config/mcp_edit/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/product_config/tool_sections_tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/tui/markdown_tests.rs": (frozenset({"README.md"}), "rendered transcript text"),
