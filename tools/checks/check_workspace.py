@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import io
 import json
 import os
 import re
@@ -31,7 +32,8 @@ import stat
 import subprocess
 import sys
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -1539,7 +1541,7 @@ class RustToken(NamedTuple):
     value: str
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=None)
 def _blank_rust_non_code(source: str) -> str:
     """Blank comments and literals while preserving offsets and newlines."""
     masked = list(source)
@@ -1573,7 +1575,7 @@ def _blank_rust_non_code(source: str) -> str:
             index = end
             continue
 
-        raw = RAW_STRING_START.match(source, index)
+        raw = RAW_STRING_START.match(source, index) if source[index] in "br" else None
         if raw is not None:
             terminator = '"' + raw.group("hashes")
             end = source.find(terminator, raw.end())
@@ -1599,7 +1601,7 @@ def _blank_rust_non_code(source: str) -> str:
             index = end
             continue
 
-        character = RUST_CHARACTER.match(source, index)
+        character = RUST_CHARACTER.match(source, index) if source[index] in "b'" else None
         if character is not None:
             end = character.end()
             blank(index, end)
@@ -1653,6 +1655,7 @@ def _block_end(masked: str, opening: int) -> int:
     return len(masked)
 
 
+@lru_cache(maxsize=None)
 def production_rust_source(source: str) -> str:
     """Blank test-only items without truncating later production items."""
     masked = _blank_rust_non_code(source)
@@ -1728,11 +1731,11 @@ def _decode_rust_string(value: str) -> str:
 def rust_tokens(source: str) -> list[RustToken]:
     """Lex policy-significant Rust without treating comments/literals as code."""
     # Several policy passes inspect the same source; callers still get their
-    # own mutable list. Caches are bounded, process-local and exact-content keyed.
+    # own mutable list. Caches are process-local and exact-content keyed.
     return list(_cached_rust_tokens(source))
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=None)
 def _cached_rust_tokens(source: str) -> tuple[RustToken, ...]:
     source = production_rust_source(source)
     tokens: list[RustToken] = []
@@ -1759,7 +1762,7 @@ def _cached_rust_tokens(source: str) -> tuple[RustToken, ...]:
                     index += 1
             continue
 
-        raw = RAW_STRING_START.match(source, index)
+        raw = RAW_STRING_START.match(source, index) if source[index] in "br" else None
         if raw is not None:
             terminator = '"' + raw.group("hashes")
             content_start = raw.end()
@@ -1791,7 +1794,7 @@ def _cached_rust_tokens(source: str) -> tuple[RustToken, ...]:
             index = min(end + 1, len(source))
             continue
 
-        character = RUST_CHARACTER.match(source, index)
+        character = RUST_CHARACTER.match(source, index) if source[index] in "b'" else None
         if character is not None:
             index = character.end()
             continue
@@ -2416,7 +2419,71 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
     return errors
 
 
+class _SourceScan:
+    """Filesystem snapshots belong to one checker invocation, never a later run."""
+
+    def __init__(self) -> None:
+        self.bytes: dict[Path, bytes] = {}
+        self.text: dict[Path, str] = {}
+        self.discoveries: dict[
+            tuple[Path, tuple[tuple[Path, bool], ...]],
+            tuple[tuple[Path, ...], tuple[str, ...]],
+        ] = {}
+
+
+_source_scan: _SourceScan | None = None
+
+
+@contextmanager
+def source_scan() -> Iterator[None]:
+    global _source_scan
+    previous = _source_scan
+    _source_scan = _SourceScan()
+    try:
+        yield
+    finally:
+        _source_scan = previous
+        for cached in (
+            _blank_rust_non_code, production_rust_source, _cached_rust_tokens,
+            _cached_test_module_targets, _cached_test_module_files,
+        ):
+            cached.cache_clear()
+
+
+def _read_rust_bytes(path: Path) -> bytes:
+    path = Path(os.path.abspath(path))
+    if _source_scan is None:
+        return path.read_bytes()
+    if path not in _source_scan.bytes:
+        _source_scan.bytes[path] = path.read_bytes()
+    return _source_scan.bytes[path]
+
+
+def read_rust_source(path: Path) -> str:
+    path = Path(os.path.abspath(path))
+    if _source_scan is None:
+        return path.read_text(encoding="utf-8")
+    if path not in _source_scan.text:
+        with io.TextIOWrapper(io.BytesIO(_read_rust_bytes(path)), encoding="utf-8") as stream:
+            _source_scan.text[path] = stream.read()
+    return _source_scan.text[path]
+
+
 def discover_rust_files(
+    repository: Path,
+    targets: list[tuple[Path, bool]],
+) -> tuple[list[Path], list[str]]:
+    key = (Path(os.path.abspath(repository)), tuple(targets))
+    if _source_scan is None:
+        return _discover_rust_files(repository, targets)
+    if key not in _source_scan.discoveries:
+        files, errors = _discover_rust_files(repository, targets)
+        _source_scan.discoveries[key] = (tuple(files), tuple(errors))
+    files, errors = _source_scan.discoveries[key]
+    return list(files), list(errors)
+
+
+def _discover_rust_files(
     repository: Path,
     targets: list[tuple[Path, bool]],
 ) -> tuple[list[Path], list[str]]:
@@ -2530,7 +2597,7 @@ def discover_rust_files(
             continue
         inspected.add(source)
         try:
-            source_text = source.read_text(encoding="utf-8")
+            source_text = read_rust_source(source)
         except OSError as error:
             errors.append(f"cannot inspect production Rust source {relative(source)}: {error}")
             continue
@@ -2689,6 +2756,13 @@ def test_module_targets(
     Path attributes inside inline modules have different Rust resolution rules;
     leave those counted rather than guessing a target and hiding production.
     """
+    return list(_cached_test_module_targets(path, source, crate_root))
+
+
+@lru_cache(maxsize=None)
+def _cached_test_module_targets(
+    path: Path, source: str, crate_root: bool,
+) -> tuple[ModuleTarget, ...]:
     targets: list[ModuleTarget] = []
     masked = _blank_rust_non_code(source)
     base = path.parent
@@ -2733,7 +2807,7 @@ def test_module_targets(
             directory = base.joinpath(*(span[2] for span in ancestors), name)
             targets.extend((ModuleTarget(directory.with_suffix(".rs"), directory, gated, False),
                             ModuleTarget(directory / "mod.rs", directory, gated, False)))
-    return targets
+    return tuple(targets)
 
 
 def explicit_rust_source_targets(path: Path, source: str) -> set[Path]:
@@ -2754,7 +2828,15 @@ def explicit_rust_source_targets(path: Path, source: str) -> set[Path]:
 
 
 def _test_module_files(files: dict[Path, str], crate_roots: set[Path]) -> set[Path]:
+    return set(_cached_test_module_files(tuple(files.items()), frozenset(crate_roots)))
+
+
+@lru_cache(maxsize=None)
+def _cached_test_module_files(
+    entries: tuple[tuple[Path, str], ...], crate_roots: frozenset[Path],
+) -> frozenset[Path]:
     """Follow test module edges, then restore every production-reachable file."""
+    files = dict(entries)
     excluded: set[Path] = set()
     path_loaded = {
         target.path for path, source in files.items()
@@ -2763,6 +2845,11 @@ def _test_module_files(files: dict[Path, str], crate_roots: set[Path]) -> set[Pa
     }
     edges = {path: test_module_targets(path, source, path in crate_roots or path in path_loaded)
              for path, source in files.items()}
+    descendants: dict[Path, set[Path]] = {}
+    for path in files:
+        for parent in (path, *path.parents):
+            descendants.setdefault(parent, set()).add(path)
+    references = {path: explicit_rust_source_targets(path, source) for path, source in files.items()}
     while True:
         previous = excluded.copy()
         for path, targets in edges.items():
@@ -2773,7 +2860,7 @@ def _test_module_files(files: dict[Path, str], crate_roots: set[Path]) -> set[Pa
                     continue
                 excluded.add(target.path)
                 if target.directory is not None:
-                    excluded.update(other for other in files if other.is_relative_to(target.directory))
+                    excluded.update(descendants.get(target.directory, ()))
         if previous == excluded:
             break
 
@@ -2782,12 +2869,11 @@ def _test_module_files(files: dict[Path, str], crate_roots: set[Path]) -> set[Pa
     while True:
         restored: set[Path] = set()
         for path in files.keys() - excluded:
-            source = files[path]
-            restored.update(explicit_rust_source_targets(path, source))
+            restored.update(references[path])
             restored.update(target.path for target in edges[path] if not target.test_only)
         restored.intersection_update(excluded)
         if not restored:
-            return excluded
+            return frozenset(excluded)
         excluded.difference_update(restored)
 
 
@@ -2798,7 +2884,7 @@ def cfg_test_module_files(
     files: dict[Path, str] = {}
     for source in sources:
         try:
-            files[source] = source.read_text(encoding="utf-8")
+            files[source] = read_rust_source(source)
         except OSError:
             continue
     return _test_module_files(files, crate_roots)
@@ -3711,9 +3797,7 @@ def package_sources(package: Package, repository: Path = ROOT) -> tuple[dict[str
     sources, errors = production_rust_sources(package.metadata, repository)
     base = (repository / package.directory).resolve()
     by_path = {
-        Path(os.path.relpath(source.resolve(), base)).as_posix(): source.read_text(
-            encoding="utf-8"
-        )
+        Path(os.path.relpath(source.resolve(), base)).as_posix(): read_rust_source(source)
         for source in sources
     }
     return by_path, errors
@@ -4146,7 +4230,8 @@ def validate_tracked_hygiene(
         path = root / relative
         if path.is_symlink() or not path.is_file():
             continue
-        for finding in hygiene_findings(relative, path.read_bytes(), private_names):
+        data = _read_rust_bytes(path) if path.suffix == ".rs" else path.read_bytes()
+        for finding in hygiene_findings(relative, data, private_names):
             errors.append(f"{finding}: tracked files must not carry owner-specific content")
     return errors
 
@@ -4254,7 +4339,7 @@ def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[s
     for path in filter(None, listed):
         if any(path.startswith(f"{other}/") for other in nested):
             continue
-        files[os.path.relpath(path, package.directory)] = (root / path).read_text(encoding="utf-8")
+        files[os.path.relpath(path, package.directory)] = read_rust_source(root / path)
     return files
 
 
@@ -4291,6 +4376,11 @@ def validate_workspace_excludes(
 
 def main() -> int:
     """Run all workspace policy checks."""
+    with source_scan():
+        return _check_workspace()
+
+
+def _check_workspace() -> int:
     workspace = load_workspace(ROOT)
     packages = workspace.packages
     policy = workspace.policy

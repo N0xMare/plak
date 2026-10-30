@@ -386,6 +386,100 @@ class CommitTraceEdgeTests(unittest.TestCase):
 
 
 class RustLexCacheTests(unittest.TestCase):
+    def test_discovery_cache_distinguishes_target_lists_in_one_repository(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first, second = root / 'first.rs', root / 'second.rs'
+            first.write_text('fn first() {}')
+            second.write_text('fn second() {}')
+            with workspace_policy.source_scan():
+                self.assertEqual(workspace_policy.discover_rust_files(root, [(first, True)]),
+                                 ([first], []))
+                self.assertEqual(workspace_policy.discover_rust_files(root, [(second, True)]),
+                                 ([second], []))
+
+    def test_text_snapshot_distinguishes_same_basename_in_different_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first, second = root / 'first/lib.rs', root / 'second/lib.rs'
+            for source, text in ((first, 'fn first() {}'), (second, 'fn second() {}')):
+                source.parent.mkdir()
+                source.write_text(text)
+            with workspace_policy.source_scan():
+                self.assertEqual(workspace_policy.read_rust_source(first), 'fn first() {}')
+                self.assertEqual(workspace_policy.read_rust_source(second), 'fn second() {}')
+
+    def test_test_module_cache_distinguishes_crate_roots_for_the_same_files(self):
+        root, child = Path('src/lib.rs'), Path('src/tests.rs')
+        files = {root: '#[cfg(test)] mod tests;', child: 'fn test() {}'}
+        with workspace_policy.source_scan():
+            self.assertEqual(workspace_policy._test_module_files(files, {root}), {child})
+            self.assertEqual(workspace_policy._test_module_files(files, set()), set())
+
+    def test_scan_exit_clears_every_content_cache_even_after_failure(self):
+        caches = (
+            workspace_policy._blank_rust_non_code, workspace_policy.production_rust_source,
+            workspace_policy._cached_rust_tokens, workspace_policy._cached_test_module_targets,
+            workspace_policy._cached_test_module_files,
+        )
+        with self.assertRaisesRegex(RuntimeError, 'scan failed'):
+            with workspace_policy.source_scan():
+                root = Path('src/lib.rs')
+                source = '#[cfg(test)] mod tests;'
+                workspace_policy.rust_tokens(source)
+                workspace_policy._test_module_files({root: source}, {root})
+                self.assertTrue(all(cache.cache_info().currsize for cache in caches))
+                raise RuntimeError('scan failed')
+        self.assertTrue(all(cache.cache_info().currsize == 0 for cache in caches))
+
+    def test_hygiene_bytes_and_source_text_share_one_read_without_losing_newlines(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'lib.rs'
+            source.write_bytes(b'fn first() {}\r\nfn second() {}\r')
+            with workspace_policy.source_scan():
+                self.assertEqual(workspace_policy._read_rust_bytes(source), source.read_bytes())
+                with patch.object(Path, 'read_bytes', side_effect=AssertionError('reread')):
+                    self.assertEqual(workspace_policy.read_rust_source(source),
+                                     'fn first() {}\nfn second() {}\n')
+
+    def test_lexing_keeps_sources_across_a_workspace_sized_scan(self):
+        workspace_policy._blank_rust_non_code.cache_clear()
+        workspace_policy._cached_rust_tokens.cache_clear()
+        sources = [f'fn file_{index}() {{ let text = "literal"; }}' for index in range(300)]
+        for source in sources:
+            workspace_policy._blank_rust_non_code(source)
+            workspace_policy.rust_tokens(source)
+        with patch.object(workspace_policy, 'production_rust_source', side_effect=AssertionError('rescanned')):
+            for source in sources:
+                self.assertEqual(workspace_policy.rust_tokens(source)[1].value,
+                                 source.split('(')[0].split()[1])
+        before = workspace_policy._blank_rust_non_code.cache_info().misses
+        for source in sources:
+            workspace_policy._blank_rust_non_code(source)
+        self.assertEqual(workspace_policy._blank_rust_non_code.cache_info().misses, before)
+
+    def test_filesystem_scan_refreshes_between_invocations_and_returns_owned_lists(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'lib.rs'
+            source.write_text('mod first;')
+            (root / 'first.rs').write_text('fn first() {}')
+            targets = [(source, False)]
+            with workspace_policy.source_scan():
+                first, errors = workspace_policy.discover_rust_files(root, targets)
+                self.assertEqual(errors, [])
+                self.assertIn(root / 'first.rs', first)
+                first.clear()
+                with patch.object(Path, 'read_text', side_effect=AssertionError('reread')):
+                    self.assertEqual(workspace_policy.read_rust_source(source), 'mod first;')
+                    self.assertIn(source, workspace_policy.discover_rust_files(root, targets)[0])
+            source.write_text('mod second;')
+            (root / 'second.rs').write_text('fn second() {}')
+            with workspace_policy.source_scan():
+                self.assertEqual(workspace_policy.read_rust_source(source), 'mod second;')
+                self.assertIn(root / 'second.rs', workspace_policy.discover_rust_files(root, targets)[0])
+
     def test_cached_tokens_are_independent_and_keyed_by_exact_source(self):
         source = 'use plakous::Agent; // not code\n'
         workspace_policy._cached_rust_tokens.cache_clear()
