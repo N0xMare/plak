@@ -15,6 +15,8 @@ pub enum JobTerminalStatus {
     Exited,
     /// Explicit stop or construction-bound runtime cap.
     Stopped,
+    /// Explicitly relinquished process ownership, without claiming an exit.
+    Released,
 }
 
 /// Bounded exact process outcome carried across owner release and reopen.
@@ -37,6 +39,7 @@ impl JobTerminal {
         let (status, exit_code, stopper) = match view.status {
             JobStatus::Exited(code) => (JobTerminalStatus::Exited, code, None),
             JobStatus::Stopped(by) => (JobTerminalStatus::Stopped, None, Some(by)),
+            JobStatus::Released => (JobTerminalStatus::Released, None, None),
             JobStatus::Running | JobStatus::OutcomeUnknown => return None,
         };
         Some(Self {
@@ -54,6 +57,8 @@ impl JobTerminal {
             || (self.status == JobTerminalStatus::Exited && self.stopper.is_some())
             || (self.status == JobTerminalStatus::Stopped
                 && (self.stopper.is_none() || self.exit_code.is_some()))
+            || (self.status == JobTerminalStatus::Released
+                && (self.stopper.is_some() || self.exit_code.is_some()))
         {
             return Err(RuntimeManifestError::InvalidText {
                 field: "job terminal",
@@ -99,6 +104,7 @@ impl JobRow {
                 .map_or(JobStatus::OutcomeUnknown, |terminal| {
                     match terminal.status {
                         JobTerminalStatus::Exited => JobStatus::Exited(terminal.exit_code),
+                        JobTerminalStatus::Released => JobStatus::Released,
                         JobTerminalStatus::Stopped => terminal
                             .stopper
                             .map_or(JobStatus::OutcomeUnknown, JobStatus::Stopped),

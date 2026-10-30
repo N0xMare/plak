@@ -91,6 +91,8 @@ pub enum JobStatus {
     Exited(Option<i32>),
     /// Explicit stop with its attribution.
     Stopped(JobStopReason),
+    /// Ownership was explicitly relinquished; this does not prove process exit.
+    Released,
     /// No exact terminal outcome is available.
     OutcomeUnknown,
 }

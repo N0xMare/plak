@@ -337,6 +337,24 @@ mod placeholders {
     }
 
     #[test]
+    fn placeholder_notice_pins_reason_neutral_context_and_size_wording() {
+        let successor = placeholder_successor(
+            &fixture(),
+            &collect_placeholder_candidates(&fixture()),
+            1,
+            workflow(),
+        )
+        .expect("successor");
+        let ContentBlock::Compaction(block) = &successor.notice.items()[0].blocks()[0] else {
+            panic!("notice");
+        };
+        assert_eq!(
+            block.summary(),
+            "Tool result placeholders: tool result bodies and images in this conversation may have been replaced with bounded placeholders to fit this request's context and size limits. Every tool call and its result remain paired; ask for a new attachment or safely reissue the identified tool to see removed content again."
+        );
+    }
+
+    #[test]
     fn zero_result_placeholder_pass_requires_a_distinct_replay_projection() {
         let history = CanonicalHistory::new(vec![
             HistorySegment::new(

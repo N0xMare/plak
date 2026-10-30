@@ -18,6 +18,8 @@ use crate::SessionStoreError;
 pub enum AgentErrorKind {
     /// Agent construction or prompt input was invalid.
     InvalidInput,
+    /// Protected resident media cannot fit the aggregate request budget.
+    RequestBudget,
     /// The bounded prompt queue has no remaining capacity.
     Backpressure,
     /// The agent no longer accepts work.

@@ -1,9 +1,10 @@
 //! Turn compaction fences and the segment-limit refusal (spec 01 §10.3).
 
 use super::{
-    COMMITTED_PRESSURE_FOLD_CAP, CompactionDetail, FAILED_PAID_FOLD_CAP, PAID_FOLD_BACKOFF_ROUNDS,
-    TurnCompactionOutcome, compaction_endpoint_refusal, compaction_refusal_reason,
-    failed_paid_fold, has_zero_headroom, paid_fold_failed_since_last_round,
+    COMMITTED_PRESSURE_FOLD_CAP, CompactionDetail, FAILED_PAID_FOLD_CAP, MANUAL_COMPACTION_REMEDY,
+    PAID_FOLD_BACKOFF_ROUNDS, TurnCompactionOutcome, compaction_endpoint_refusal,
+    compaction_refusal_reason, failed_paid_fold, has_zero_headroom,
+    paid_fold_failed_since_last_round,
 };
 use crate::input::UserInput;
 use crate::runtime::compaction::fold::nested_observation_token_upper_bound;
@@ -187,7 +188,26 @@ impl Driver {
         Ok(())
     }
 
+    /// The ordinary scheduled ladder after a residency candidate deferred;
+    /// the caller re-runs residency itself once the ladder settles.
+    pub(in crate::runtime::driver) async fn compact_after_deferred_image_residency(
+        &mut self,
+        command: &PromptCommand,
+    ) -> Result<(), AgentError> {
+        self.scheduled_ladder_after_tool_group(command)
+            .await
+            .map(|_| ())
+    }
+
     async fn maybe_scheduled_compact_after_tool_group(
+        &mut self,
+        command: &PromptCommand,
+    ) -> Result<TurnCompactionOutcome, AgentError> {
+        self.maybe_image_residency(command, false).await?;
+        self.scheduled_ladder_after_tool_group(command).await
+    }
+
+    async fn scheduled_ladder_after_tool_group(
         &mut self,
         command: &PromptCommand,
     ) -> Result<TurnCompactionOutcome, AgentError> {
@@ -274,7 +294,7 @@ impl Driver {
         let remedy = if self.config.scheduled_compaction_enabled {
             "compact the session or fork from an earlier checkpoint"
         } else {
-            "compact the session, or enable scheduled compaction"
+            MANUAL_COMPACTION_REMEDY
         };
         Some(self.project_model_error(
             ModelError::new(
@@ -340,6 +360,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
     ) -> Result<(), AgentError> {
+        self.maybe_image_residency(command, true).await?;
         if !self.config.scheduled_compaction_enabled
             || self
                 .authority

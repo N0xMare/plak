@@ -995,7 +995,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 33.
+like every canonical block. This is runtime checkpoint format epoch 34.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -1617,7 +1617,7 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **25** and the checkpoint format epoch is **33**; the
+The runtime schema is **26** and the checkpoint format epoch is **34**; the
 feed record encoding (§5.11) is part of that epoch, which it shares with the
 decision-fact encodings of the same release. Only
 the current exact schema and format epoch are supported. Every other runtime
@@ -1970,7 +1970,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 33 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 34 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -3047,7 +3047,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 33.
+checkpoint format epoch 34.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
@@ -4830,7 +4830,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 33.
+runtime checkpoint format epoch 34.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -5451,7 +5451,8 @@ previous observation, summarised the same way, and advance the cursor to its
 end: a model polling a long test run sees the newest output each call instead of
 paging through the backlog. A raised process result
 carries `status` when the process did not run to its own exit (`timed_out`,
-`terminated`, `cancelled`, `output_limit`, `failed`, `cleanup_unresolved`), and
+`terminated`, `cancelled`, `output_limit`, `failed`, `released`,
+`cleanup_unresolved`), and
 the Grok and Claude text presentations end with `[exit N]` for a nonzero exit
 or a line naming the abnormal end. `write_stdin` writes and then returns the
 output that follows and `max_output_tokens`. Nonempty writes retain the
@@ -5737,7 +5738,9 @@ read end transfers to a separate unowned drain process (a thread would die with
 `plak run`), which appends a bounded prefix to the already-open job spool and
 then drains to `/dev/null`; missing/unavailable spools drain to `/dev/null`.
 The drain exits at EOF (or terminal revocation) and has no session/attempt/hard-cap
-ownership. No new pathname is opened for the spool. Released rows reopen as OutcomeUnknown: no stored PID is later signalled.
+ownership. No new pathname is opened for the spool. Explicitly recorded
+Released rows reopen as Released; a missing terminal record remains
+OutcomeUnknown. No stored PID is later signalled in either case.
 Leader exit is observed with waitid WNOWAIT; the unreaped leader pins the PGID
 until no live group members remain, or ownership is explicitly relinquished.
 Ordinary polls use killpg(0), treating EPERM as present; per-owner live-member
@@ -5875,12 +5878,23 @@ On open, an exact registry snapshot takes precedence over a durable terminal;
 without either, `Agent::jobs` reports `OutcomeUnknown`. A lease release is never
 used to infer an exit. Open performs no auto-wake, persists no PID and signals
 no process from checkpoint metadata.
+Explicitly relinquishing leftover ownership with `plak run --leave-jobs-running`
+records a distinct `Released` terminal under the current owner's authority.
+Reopen projects `JobStatus::Released`, never an inferred exit, stop or
+`OutcomeUnknown`. An unsuccessful handoff and an ordinary lease release do not
+prove this fact. Already recorded exact exit/stop evidence remains unchanged.
+The released process notice says ownership was explicitly released, does not
+prove exit, and the process may still be running. Poll answers and process
+output schemas use `released`, and the Grok and Claude text presentations end
+with `[released: ownership was relinquished; the process may still be running]`;
+write refusals say ownership was released and nothing was written, never that
+the process already exited. Reopen retains no signal or stdin authority.
 
 The manifest carries a separate `JobLedger { next_id, rows }`, not recovery
 obligations: jobs never keep an otherwise Quiescent head Working. At most 128
 unconsumed rows carry number, displayed command (1 KiB), start time, owner,
 session identity and owner generation. Each row has optional `JobTerminal`
-evidence: exited/stopped, exit code or stopper, elapsed time and a 4 KiB/40-line
+evidence: exited/stopped/released, exit code or stopper (neither for released), elapsed time and a 4 KiB/40-line
 tail. The producer computes the tail from the back of retained output and
 normalizes CRLF to LF, drops lone CR, and replaces all remaining control
 characters (including C1 and DEL) except newline and tab with U+FFFD before enforcing
@@ -6350,7 +6364,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 33.
+runtime checkpoint format epoch 34.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -6811,7 +6825,7 @@ from the host; it does not generate an independent catalog.
 Every cell descriptor uses `sha256(ToolDefinition, 3, [profile, revisions...,
 execute text, wait text, grammar, limits JSON, presentation semantics JSON,
 outer projection digest, nested projection digest, host API JSON])`.
-Runtime epoch 33 separates these identities from the former presentation-local
+Runtime epoch 34 separates these identities from the former presentation-local
 recipes. Model-visible text and projection digests are unchanged. The v3
 descriptor replaces Python's separate profile, presentation, result, catalog
 and limits component identities.
@@ -7570,7 +7584,14 @@ the protected tail, a completed tool-call-and-result group may have its
 **result body** replaced by a bounded placeholder without the group being
 split, reordered or dropped. User intent, assistant text, reasoning, encrypted
 replay, native compaction items and committed compaction outputs are never
-rewritten by a placeholder-only pass. The explicit portable replay-omission
+rewritten by a tool-result-body placeholder pass. Image residency is a separate
+revisioned exception: it can replace an image block in an older user intent or
+an image part in a consumed tool result, keeping the group, item identity,
+block/part position, call/result correlation and all other content unchanged.
+The latest committed intent and incoming prompt, every steering segment, the
+unanswered tool batch, reasoning, opaque/native items and compaction outputs
+remain protected. The two newest otherwise unprotected images also remain.
+The explicit portable replay-omission
 exception below omits unbound opaque and reasoning replay, never native
 compaction items.
 
@@ -7583,6 +7604,76 @@ provider-native compaction through an exact route-gated protocol facet
 placeholders inside the protected tail (`ToolResultPlaceholdersV1`), followed by
 offline omission of unbound replay (`ReplayOmissionV1`). **No provider, model, account, or
 subscription name implies the native facet.**
+
+Image residency (`ResidencyPlaceholdersV1`, strategy tag 5, policy revision 1)
+runs offline before the ordinary ladder at admission, after a whole tool
+batch promotes, and after a committed assistant continuation, always with no
+working history. Its aggregate budget check precedes
+the disabled-scheduled-compaction early return. The conservative core budget
+is 20 resident images and 16 MiB known encoded payload, including protected
+incoming attachments. Inline raw bytes count as `4 * ceil(n/3)`; data URLs
+count their exact encoded payload. External URIs count as images with unknown
+remote bytes, tracked separately from measured zero and never fetched.
+Token metering remains independent of these byte counts.
+
+When either full budget is exceeded (T1), select eligible images oldest first
+until both residual axes reach 75%. This is a batching target, not a validity
+bound. If protection or the newest exemption prevents reaching the targets,
+select the maximum legal batch and accept exactly when the residual fits both
+full (100%) budgets. Otherwise return typed `RequestBudget` before dispatch,
+without running the ordinary ladder: the residual then consists only of
+images residency never removes (the two newest exempt images, the latest user
+intent, steering and the current batch), so this protected-only overflow is
+refused rather than deferred. The feed's error-kind spelling is
+`request_budget`.
+Protection is never relaxed.
+Cold-cache T2 does not fire in the core-only
+implementation: retention and last-dispatch observation are unknown, including
+after reopen. No clock, budget or current route default is re-evaluated during
+recovery.
+
+Each removed image becomes unmistakable text at the same block/part index,
+with origin, bounded call arguments, declared media type, known raw-byte
+length/hash and sniffed dimensions, or explicit unknown metadata. Tool remedies
+require effect-aware safe reissue; user attachments require reattachment.
+The sole compaction notice names bodies and images; a superseding
+`[plak: older context retired]` note describes at most 20 removed images plus a
+remaining count, without demanding a retrospective memory dump. A native
+compaction segment and binding remain byte-exact instead of being merged.
+
+A residency candidate independently prepares its own fresh wire projection,
+must fit (Fits), strictly shrink against a comparable fresh source and satisfy the
+full image budgets; it need not reach the pressure rung's 50% context landing
+threshold. Failed preparation or a non-shrinking candidate never publishes.
+When the image plan fits both image budgets but the candidate's fresh token
+preparation is not Fits, residency defers without publication to the ordinary
+compaction ladder at the same fence: a non-Fits residency candidate never
+rejects a turn the ordinary ladder would admit. Before every model round
+dispatches, residency is re-evaluated on the committed head. If the images
+still exceed either budget, the ordinary ladder runs once more, residency is
+re-evaluated, and only images that still exceed a budget refuse the round with
+typed `RequestBudget`; with scheduled compaction disabled the round refuses
+at once and names manual compaction or enabling scheduled compaction as the
+remedy. Deferral adds no paid-fold budget: any fold it runs is admitted by the
+existing per-turn paid-fold caps and backoff. It never sends an over-budget
+request. A request-budget refusal at a round start or a tool-batch fence first
+finalizes any open hosted continuation (a server pause or provider-programmatic
+batch), so the turn ends with one terminal and a Quiescent head.
+One lease-fenced CAS publishes history, invalidated replay/anchors, provenance
+and a single already-Finalized offline Compaction operation, with no provider
+sibling or paid attempt. Before that CAS the source is authoritative; after it
+the successor is authoritative and is never republished during recovery.
+The reconstructive v3 request records sorted explicit image locations and
+kinds, call ids, known raw lengths/hashes, trigger, budgets and before/after
+counts/known bytes/unknown-byte counts. Provenance hashes the complete plan,
+not just its segment range. Receipt validation recomputes the exact oldest-first
+selection, including the maximum-legal-batch rule, and deterministic successor
+from the immutable source. Both direct workflow recovery and turn-fold closure
+recognize this unpaid publication; neither dispatches it or resends a refused
+prompt. The feed pass and observation/telemetry reason are `residency`.
+Original images survive only while their source checkpoints survive; ordinary
+carry text/image variants carry the resulting history, not an undo archive or
+runtime residency metadata.
 
 External compaction operation IDs must not end in `:placeholders`. That suffix
 is reserved for the driver's derived unpaid continuation. The facade refuses

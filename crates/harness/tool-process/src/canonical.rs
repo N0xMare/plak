@@ -379,6 +379,7 @@ pub(crate) fn raised_stop_result(canonical: &str) -> Result<String, ToolRuntimeE
                 | "output_limit"
                 | "failed"
                 | "outcome_unknown"
+                | "released"
                 | "cleanup_unresolved"
         )
         .then_some(status),

@@ -95,6 +95,7 @@ impl SessionHistoryCompactionPass {
             Self::Placeholder => "placeholder pass",
             Self::Native => "native compaction",
             Self::ReplayOmission => "replay omission",
+            Self::Residency => "image residency",
         }
     }
 }

@@ -427,6 +427,7 @@ impl Driver {
             if !self.apply_steering(command).await? && steering_pending {
                 return Err(turn_lifecycle_error());
             }
+            self.maybe_image_residency(command, false).await?;
             command.shared.continue_after_model()?;
             return Ok(SettledRound::Continue(None));
         }

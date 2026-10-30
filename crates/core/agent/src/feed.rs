@@ -376,6 +376,8 @@ pub enum FeedCompactPass {
     Placeholders,
     /// Offline replay omission.
     ReplayOmission,
+    /// Offline aggregate-image residency.
+    Residency,
 }
 
 /// The settled outcome of one workflow.

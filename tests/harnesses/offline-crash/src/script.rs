@@ -77,6 +77,9 @@ pub struct ScriptPlan {
     /// Body size of the loopback tool's success text, in bytes.
     #[serde(default)]
     pub tool_result_bytes: Option<usize>,
+    /// Synthetic image parts returned by the loopback tool (no file I/O).
+    #[serde(default)]
+    pub tool_result_images: u8,
     /// Make the loopback tool report a bounded execution failure.
     #[serde(default)]
     pub tool_fails: bool,
@@ -344,6 +347,8 @@ pub enum ScriptOutput {
     /// item carries (`image/png 1234 bytes`), so a test sees what reached the
     /// model.
     ImageReport,
+    /// Synthetic assistant image blocks, for aggregate residency fences.
+    Images(u8),
     /// Reports the text actually present in the next model request.
     HistoryReport,
 }
@@ -387,6 +392,8 @@ pub enum ScriptFinish {
     Stop,
     /// The round requested tools.
     ToolCalls,
+    /// Commit a whole model round and request another one.
+    AssistantContinuation,
     /// The output bound was exhausted.
     Length,
     /// The model refused.

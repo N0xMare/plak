@@ -10,6 +10,8 @@ use crate::{
 
 mod evidence;
 mod measurement;
+mod residency;
+pub use residency::{ResidentImageBudget, ResidentImageBudgetError};
 
 pub use evidence::{
     CapacityCertificate, CapacityRule, ContextContract, ContextEvidenceClass,

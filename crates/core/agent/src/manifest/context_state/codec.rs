@@ -311,6 +311,7 @@ pub(in crate::manifest) fn read_compaction_provenance(
         2 => RuntimeCompactionStrategy::NativeResponsesTriggerV1,
         3 => RuntimeCompactionStrategy::ToolResultPlaceholdersV1,
         4 => RuntimeCompactionStrategy::ReplayOmissionV1,
+        5 => RuntimeCompactionStrategy::ResidencyPlaceholdersV1,
         tag => {
             return Err(RuntimeManifestError::UnknownTag {
                 field: "runtime compaction strategy",

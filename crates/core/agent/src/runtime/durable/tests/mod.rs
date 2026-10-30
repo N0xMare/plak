@@ -54,6 +54,7 @@ mod process_notices;
 mod provider_outcome_tests;
 #[path = "../reresolution_tests.rs"]
 mod reresolution_tests;
+mod residency;
 mod round_limit;
 mod scheduling_diagnostics;
 mod storage_outage;

@@ -313,6 +313,10 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         if !successful || previous_stored.reference() != source_stored.reference() {
             return Err(AgentError::from_store(SessionStoreError::corrupt()));
         }
+        if checkpoint.manifest().ledger().operations().iter().any(|record| matches!(record.kind(), crate::DurableOperationKind::Compaction { workflow_id } if *workflow_id == identity.workflow_id)
+            && super::residency::record::ResidencyRequest::decode(record.request().bytes(), identity.workflow_id).is_some()) {
+            return super::residency::receipt::validate(checkpoint, source_checkpoint, identity);
+        }
         return super::placeholder_receipt::validate(checkpoint, source_checkpoint, identity);
     }
 

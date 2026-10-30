@@ -54,6 +54,7 @@ pub(crate) fn encode_bundle_metadata_value(
             writer.u8(match terminal.status {
                 JobTerminalStatus::Exited => 1,
                 JobTerminalStatus::Stopped => 2,
+                JobTerminalStatus::Released => 3,
             });
             writer.optional(terminal.exit_code.is_some());
             if let Some(code) = terminal.exit_code {
@@ -151,6 +152,7 @@ pub(crate) fn decode_bundle_metadata(
                     let status = match reader.u8()? {
                         1 => JobTerminalStatus::Exited,
                         2 => JobTerminalStatus::Stopped,
+                        3 => JobTerminalStatus::Released,
                         tag => {
                             return Err(RuntimeManifestError::UnknownTag {
                                 field: "job terminal status",

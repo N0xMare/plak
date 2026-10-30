@@ -6,6 +6,7 @@ use plak::store::session_records::SessionRecordStore as _;
 use plakous_recursive_subagents::protocol::CandidateId;
 use serde_json::{Value, json};
 pub(super) mod c1;
+mod residency;
 mod sw3a;
 
 #[test]
@@ -133,6 +134,36 @@ pub(super) enum ExpectedTerminal {
 }
 
 pub(super) const REGISTRY: &[Shape] = &[
+    Shape {
+        name: "image_residency_admission",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: residency::admission_script,
+        configure: residency::configure_admission,
+        setup: residency::setup,
+        lifecycle: residency::admission_lifecycle,
+        assert_live: residency::assert_admission,
+    },
+    Shape {
+        name: "image_residency_tool_batch",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: residency::tool_script,
+        configure: residency::configure_tool,
+        setup: residency::setup,
+        lifecycle: prompt_then_quit,
+        assert_live: residency::assert_tool,
+    },
+    Shape {
+        name: "image_residency_continue",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: residency::continue_script,
+        configure: residency::configure_continue,
+        setup: residency::setup,
+        lifecycle: prompt_then_quit,
+        assert_live: residency::assert_continue,
+    },
     Shape {
         name: "native_credential_wait_then_final",
         subset: false,

@@ -134,11 +134,11 @@ fn cell_descriptor_v3_identities_pin_every_presentation() -> Result<(), TestErro
         [
             (
                 "codex-native",
-                "8887770c58d20ddce51c61c16a073ec2ebab09d8146961054f3c0d61b92e213a".to_owned()
+                "d043b3c77a9570cd1d3f476a8170797fb5f9743a7707dd3ee898b01fa5b69505".to_owned()
             ),
             (
                 "codex-minimal",
-                "bbd080736e1dbb1e97a60471182dc2e10e7a1d06580d716e09ea71a0e52b9c31".to_owned()
+                "e52b5361666318e9ad38ad69b75ea9ef646e741a5df7c9f1eb85dae5464873f5".to_owned()
             ),
             (
                 "javascript",

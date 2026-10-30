@@ -136,6 +136,7 @@ mirror!(segment_kind, plakous_model::HistorySegmentKind, {
 
 mirror!(agent_error_kind, crate::AgentErrorKind, {
     InvalidInput => "invalid_input",
+    RequestBudget => "request_budget",
     Backpressure => "backpressure",
     Shutdown => "shutdown",
     Cancelled => "cancelled",

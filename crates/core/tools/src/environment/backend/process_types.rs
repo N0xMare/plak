@@ -476,6 +476,8 @@ pub enum JoinedProcessStatus {
     Exited(Option<i32>),
     /// Read-only durable row whose former owner left no exact terminal evidence.
     OutcomeUnknown,
+    /// Ownership was relinquished; the group may still be running.
+    Released,
     /// Explicit termination joined the owned resources.
     Terminated,
     /// Cancellation joined the owned resources.

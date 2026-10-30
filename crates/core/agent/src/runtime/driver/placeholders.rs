@@ -499,7 +499,7 @@ impl Driver {
         })
     }
 
-    async fn measure_placeholder_successor_with_wire_digest(
+    pub(super) async fn measure_placeholder_successor_with_wire_digest(
         &mut self,
         runtime: &ExactCompactionRuntime,
         identity: DurableCompactionIdentity,

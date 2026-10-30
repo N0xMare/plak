@@ -472,6 +472,7 @@ impl JoinedProcessSessions {
             }
             JoinedProcessStatus::Terminated => lock(&session.stopped_by)
                 .map_or(crate::JobStatus::OutcomeUnknown, crate::JobStatus::Stopped),
+            JoinedProcessStatus::Released => crate::JobStatus::Released,
             _ => crate::JobStatus::OutcomeUnknown,
         };
         let mut bytes = shared

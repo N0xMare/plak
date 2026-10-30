@@ -98,12 +98,19 @@ impl Driver {
         batch.extend(execution.items);
         let mut operations = execution.operations;
         operations.push(frame.provider_operation);
-        self.promote_tool_exchange_then_maybe_compact(
-            command,
-            frame.attempt_id,
-            batch,
-            operations,
-            provider_artifact_transition(&provider_plan, &frame.provider_response),
+        let promoted = self
+            .promote_tool_exchange_then_maybe_compact(
+                command,
+                frame.attempt_id,
+                batch,
+                operations,
+                provider_artifact_transition(&provider_plan, &frame.provider_response),
+            )
+            .await;
+        self.finalize_continuation_on_request_budget(
+            command.turn_id,
+            frame.hosted_continuation_operation,
+            promoted,
         )
         .await?;
         let _ = self.apply_steering(command).await?;
@@ -335,12 +342,19 @@ impl Driver {
                 .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
         );
         operations.push(frame.provider_operation);
-        self.promote_tool_exchange_then_maybe_compact(
-            command,
-            frame.attempt_id,
-            batch,
-            operations,
-            provider_artifact_transition(&plan, &frame.provider_response),
+        let promoted = self
+            .promote_tool_exchange_then_maybe_compact(
+                command,
+                frame.attempt_id,
+                batch,
+                operations,
+                provider_artifact_transition(&plan, &frame.provider_response),
+            )
+            .await;
+        self.finalize_continuation_on_request_budget(
+            command.turn_id,
+            Some(continuation_operation),
+            promoted,
         )
         .await?;
         let _ = self.apply_steering(command).await?;

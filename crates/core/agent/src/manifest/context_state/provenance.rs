@@ -222,6 +222,7 @@ impl RuntimeCompactionStrategy {
             Self::NativeResponsesTriggerV1 => 2,
             Self::ToolResultPlaceholdersV1 => 3,
             Self::ReplayOmissionV1 => 4,
+            Self::ResidencyPlaceholdersV1 => 5,
         }
     }
 }
@@ -359,8 +360,11 @@ impl CompactionProvenance {
                 self.strategy,
                 RuntimeCompactionStrategy::ToolResultPlaceholdersV1
                     | RuntimeCompactionStrategy::ReplayOmissionV1
+                    | RuntimeCompactionStrategy::ResidencyPlaceholdersV1
             ) && self.invalidation.source_affinity == self.invalidation.target_affinity)
             || self.selected_group_count == 0
+            || (self.strategy == RuntimeCompactionStrategy::ResidencyPlaceholdersV1
+                && self.strategy_revision != 1)
             || (self.strategy == RuntimeCompactionStrategy::ReplayOmissionV1
                 && self.selected_group_count != 1)
             || self.selected_segment_count == 0
@@ -399,7 +403,8 @@ impl CompactionProvenance {
             // already had, so its position is whatever the published prefix
             // says — provided there is exactly one.
             RuntimeCompactionStrategy::ToolResultPlaceholdersV1
-            | RuntimeCompactionStrategy::ReplayOmissionV1 => {
+            | RuntimeCompactionStrategy::ReplayOmissionV1
+            | RuntimeCompactionStrategy::ResidencyPlaceholdersV1 => {
                 let mut found = None;
                 for (index, segment) in segments.iter().take(target_len).enumerate() {
                     if segment.kind() != HistorySegmentKind::Compaction {

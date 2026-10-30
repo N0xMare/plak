@@ -66,7 +66,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
+  test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
+  | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
   | test(cell_startup::)
   | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
@@ -170,6 +171,8 @@ not (
   | test(host_capacity_refuses_the_129th_start_across_services_before_spawn)
   | test(resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner)
   | test(durability::)
+  | test(image_residency_crash_cuts_recover_without_redispatch)
+  | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
   | test(approval_resume::)
   | test(in_place_recovery_drives_a_retained_approval_after_owner_loss)
@@ -205,7 +208,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
+  test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
+  | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
   | test(cell_startup::)
   | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
@@ -316,7 +320,9 @@ default-filter = '''
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
+  test(image_residency_crash_cuts_recover_without_redispatch)
+  | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
+  | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
   | test(approval_resume::)
   | test(in_place_recovery_drives_a_retained_approval_after_owner_loss)
   | test(session_switch_drives_a_retained_approval_without_idle_or_ready)

@@ -27,6 +27,7 @@ fn project_job(
             plakous::tools::JobStatus::Running => ProcessStatus::Running,
             plakous::tools::JobStatus::Exited(code) => ProcessStatus::Exited(code),
             plakous::tools::JobStatus::Stopped(_) => ProcessStatus::Stopped,
+            plakous::tools::JobStatus::Released => ProcessStatus::Released,
             plakous::tools::JobStatus::OutcomeUnknown => ProcessStatus::OutcomeUnknown,
         },
         output: job.output,

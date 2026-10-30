@@ -297,7 +297,7 @@ impl CanonicalProcessResultWireV2 {
                 "leftover" => self.session_id.is_some(),
                 "exited" => self.session_id.is_none(),
                 "terminated" | "cancelled" | "timed_out" | "output_limit" | "failed"
-                | "outcome_unknown" | "cleanup_unresolved" => {
+                | "outcome_unknown" | "released" | "cleanup_unresolved" => {
                     self.session_id.is_none() && self.exit_code.is_none()
                 }
                 _ => false,
@@ -336,6 +336,7 @@ fn raised_process_status(status: &str) -> Option<&'static str> {
         "output_limit" => Some("output_limit"),
         "failed" => Some("failed"),
         "outcome_unknown" => Some("outcome_unknown"),
+        "released" => Some("released"),
         "cleanup_unresolved" => Some("cleanup_unresolved"),
         _ => None,
     }
@@ -357,7 +358,24 @@ fn process_status_trailer(status: &str, exit_code: Option<i32>) -> Option<String
         "outcome_unknown" => Some(String::from(
             "[outcome unknown: the previous process owner is unavailable]",
         )),
+        "released" => Some(String::from(
+            "[released: ownership was relinquished; the process may still be running]",
+        )),
         "cleanup_unresolved" => Some(String::from("[cleanup unresolved]")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn released_process_trailer_never_claims_exit() {
+        assert_eq!(raised_process_status("released"), Some("released"));
+        assert_eq!(
+            process_status_trailer("released", None).as_deref(),
+            Some("[released: ownership was relinquished; the process may still be running]")
+        );
     }
 }

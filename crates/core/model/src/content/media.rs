@@ -171,6 +171,20 @@ impl MediaSource {
         }
     }
 
+    /// Encoded image payload bytes on the wire, or unknown for a remote URI.
+    /// Inline bytes lower to padded base64. A data URL retains its exact
+    /// encoded payload, without fetching or decoding it.
+    #[must_use]
+    pub fn encoded_image_bytes(&self) -> Option<u64> {
+        match &self.kind {
+            MediaSourceKind::Bytes(bytes) => Some((bytes.len() as u64).div_ceil(3) * 4),
+            MediaSourceKind::DataUrl(url) => {
+                url.split_once(',').map(|(_, payload)| payload.len() as u64)
+            }
+            MediaSourceKind::Uri(_) => None,
+        }
+    }
+
     pub(super) fn retained_bytes(&self) -> usize {
         match &self.kind {
             MediaSourceKind::Uri(uri) => uri.len(),

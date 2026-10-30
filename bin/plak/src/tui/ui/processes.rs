@@ -363,6 +363,7 @@ impl App {
                 ProcessStatus::Exited(Some(code)) => format!("✗ {code}"),
                 ProcessStatus::Exited(None) => "exited".into(),
                 ProcessStatus::Stopped => "stopped".into(),
+                ProcessStatus::Released => "released".into(),
                 ProcessStatus::OutcomeUnknown => "outcome unknown".into(),
             };
             let elapsed_of =

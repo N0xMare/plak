@@ -195,6 +195,7 @@ const fn compaction_rung_label(rung: CompactionRung) -> &'static str {
         CompactionRung::SemanticFold => "semantic_fold",
         CompactionRung::ToolResultPlaceholders => "tool_result_placeholders",
         CompactionRung::ReplayOmission => "replay_omission",
+        CompactionRung::Residency => "residency",
     }
 }
 
@@ -203,8 +204,13 @@ const fn compaction_rung_label(rung: CompactionRung) -> &'static str {
 /// "compact workflow committed" tells a reader nothing about whether it bought
 /// anything. The figures do.
 pub(in crate::runtime) fn compaction_summary_clause(summary: CompactionSummary) -> String {
+    let unit = if summary.rung == CompactionRung::Residency {
+        "segment(s)"
+    } else {
+        "exchange(s)"
+    };
     format!(
-        "compaction {} {} exchange(s): {} -> {} prepared input tokens",
+        "compaction {} {} {unit}: {} -> {} prepared input tokens",
         summary.rung.verb(),
         summary.segments,
         summary.input_tokens_before,
@@ -354,6 +360,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         let reason_label = match reason {
             CompactionEventReason::Manual => "manual",
             CompactionEventReason::Scheduled => "scheduled",
+            CompactionEventReason::Residency => "residency",
         };
         log_event(
             log,

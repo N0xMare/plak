@@ -772,7 +772,7 @@ fn exact_process_projection_schemas_are_v2_bound_goldens() -> Result<(), ToolRun
         json!({
             "exit_code": {"type":"integer"},
             "session_id": {"type":"integer","minimum":1},
-            "status": {"type":"string","enum":["leftover","timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","cleanup_unresolved"]},
+            "status": {"type":"string","enum":["leftover","timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","released","cleanup_unresolved"]},
             "output": {"type":"string"}
         }),
         &["output"],
@@ -2226,6 +2226,7 @@ fn stop_job_raises_the_projected_stop_bytes() -> Result<(), Box<dyn Error>> {
         json!({"status":"exited","exit_code":0,"session_id":null,"cursor":0,"output":""}),
         json!({"status":"exited","exit_code":3,"session_id":null,"cursor":9,"output":""}),
         json!({"status":"outcome_unknown","exit_code":null,"session_id":null,"cursor":0,"output":""}),
+        json!({"status":"released","exit_code":null,"session_id":null,"cursor":0,"output":""}),
     ] {
         let projected = map.raise(&receipt, ToolOutcome::success_text(canonical.to_string())?)?;
         assert_eq!(

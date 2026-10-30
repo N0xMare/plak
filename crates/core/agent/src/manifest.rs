@@ -21,6 +21,7 @@ pub(crate) mod named_state;
 pub use named_state::NamedState;
 mod operations;
 mod state;
+pub(crate) use context_state::ResidencySelectionAudit;
 pub use context_state::{
     CompactionInvalidation, CompactionProvenance, ContextEvaluationAudit,
     RuntimeCompactionStrategy, RuntimeContextState, RuntimeContextTransition,

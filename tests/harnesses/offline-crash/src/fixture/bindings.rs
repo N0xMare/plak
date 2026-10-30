@@ -698,6 +698,7 @@ fn loopback_builder(
             controller,
             fail: fail_effect,
             body_bytes,
+            images: 0,
         }),
     ))?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
@@ -852,6 +853,7 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
             controller,
             fail: script.tool_fails,
             body_bytes: script.tool_result_bytes,
+            images: script.tool_result_images,
         }),
     ))?;
     for extension in extensions {

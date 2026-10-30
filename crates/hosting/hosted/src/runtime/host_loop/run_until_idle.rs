@@ -385,6 +385,7 @@ fn job_status(status: plakous::tools::JobStatus) -> String {
         plakous::tools::JobStatus::Exited(Some(code)) => format!("exited {code}"),
         plakous::tools::JobStatus::Exited(None) => "exited".into(),
         plakous::tools::JobStatus::Stopped(_) => "stopped".into(),
+        plakous::tools::JobStatus::Released => "released".into(),
         plakous::tools::JobStatus::OutcomeUnknown => "outcome_unknown".into(),
         plakous::tools::JobStatus::Running => "running".into(),
     }

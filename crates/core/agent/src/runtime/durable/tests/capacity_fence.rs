@@ -814,7 +814,7 @@ async fn preparable_native_placeholder_case(protected: bool, tiny_replay: bool) 
         96_000,
         100_000,
         if tiny_replay {
-            &[1_765, 35]
+            &[1_880, 35]
         } else {
             &[60_000; 4]
         },

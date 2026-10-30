@@ -160,6 +160,10 @@ fn spawn_cli_with_run_deadline(
     if let Some(path) = run_deadline {
         command.env("PLAK_TEST_RUN_DEADLINE", path);
     }
+    spawn_cli_command(command, arguments)
+}
+
+fn spawn_cli_command(mut command: Command, arguments: &[&str]) -> Child {
     let mut child = command
         .args(arguments)
         .stdin(Stdio::piped())
@@ -171,6 +175,86 @@ fn spawn_cli_with_run_deadline(
     let _ = stdin.write_all(b"y\n");
     let _ = stdin.flush();
     child
+}
+
+#[test]
+fn released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    struct FinishOnDrop(PathBuf);
+    impl Drop for FinishOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, "finish");
+        }
+    }
+    let run = |cut: Option<u64>| {
+        let shell = "trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; while [ ! -f finish-leftover ]; do sleep 0.02; done; printf released > released.txt";
+        let command = format!(
+            "sh -c '{}' >/dev/null 2>&1 & while [ ! -f owned.pid ]; do sleep 0.02; done; exit 0",
+            shell.replace('\'', "'\\''")
+        );
+        let mut script = promoted_run_script(&command);
+        script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(30_000);
+        let fixture = Fixture::new(&script);
+        let cleanup = FinishOnDrop(fixture.workspace().join("finish-leftover"));
+        let trace = fixture.root.join("release-trace.jsonl");
+        let mut command = fixture.command();
+        command.env(
+            plakous_offline_crash_harness::commit_trace::TRACE_ENV,
+            &trace,
+        );
+        if let Some(cut) = cut {
+            command.env(
+                plakous_offline_crash_harness::commit_trace::KILL_ENV,
+                format!("runtime:{cut}"),
+            );
+        }
+        let mut child = spawn_cli_command(
+            command,
+            &[
+                "run",
+                "--provider",
+                "codex",
+                "--model",
+                "offline-loopback-v1",
+                "--effort",
+                "medium",
+                "--leave-jobs-running",
+                "--",
+                "start a background job",
+            ],
+        );
+        let outcome = wait_with_output(&mut child);
+        let commits: Vec<Value> = std::fs::read_to_string(trace)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        (fixture, cleanup, outcome, commits)
+    };
+    let (_pilot, _cleanup, outcome, commits) = run(None);
+    assert!(outcome.status.success(), "{}", outcome.stderr);
+    let terminal = commits
+        .iter()
+        .rev()
+        .find(|row| row["store"] == "runtime" && row["label"] == "commit")
+        .unwrap()["store_ordinal"]
+        .as_u64()
+        .unwrap();
+    for (cut, expected) in [
+        (terminal - 1, plakous::tools::JobStatus::OutcomeUnknown),
+        (terminal, plakous::tools::JobStatus::Released),
+    ] {
+        let (fixture, _cleanup, outcome, _) = run(Some(cut));
+        assert_eq!(outcome.status.signal(), Some(9));
+        assert_leftover_terminal_reopen(&fixture, expected);
+        assert!(
+            !fixture.workspace().join("stopped.txt").exists(),
+            "reopen must never signal the former group"
+        );
+        std::fs::write(fixture.workspace().join("finish-leftover"), "finish").unwrap();
+        wait_for_fixture_file(&fixture.workspace().join("released.txt"));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3536,12 +3620,65 @@ fn leftover_jobs_run_exits_without_waiting_and_stops_by_default() {
         );
         if leave {
             assert!(!fixture.workspace().join("stopped.txt").exists());
+            assert_leftover_terminal_reopen(&fixture, plakous::tools::JobStatus::Released);
+            assert!(
+                !fixture.workspace().join("stopped.txt").exists(),
+                "reopened metadata must not signal a released group"
+            );
             cleanup.release();
             wait_for_fixture_file(&fixture.workspace().join("released.txt"));
         } else {
             assert_owned_process_stopped(&fixture.workspace());
+            assert_leftover_terminal_reopen(
+                &fixture,
+                plakous::tools::JobStatus::Stopped(plakous::tools::JobStopReason::SessionExit),
+            );
         }
     }
+}
+
+fn assert_leftover_terminal_reopen(fixture: &Fixture, expected: plakous::tools::JobStatus) {
+    use plakous::sessions::{
+        AgentSessions, OpenSessionOutcome, OpenSessionRequest, SessionBackend, SessionOperationId,
+    };
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let locator = only_runtime_locator(fixture).parse().unwrap();
+    let controller = plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+        plakous_offline_crash_harness::protocol::CrashBoundary::None,
+        fixture.root.join("leftover-reopen-evidence.jsonl"),
+    )
+    .unwrap();
+    let plan = Arc::new(
+        serde_json::from_value(process_tool_answer_script("reopen must not dispatch")).unwrap(),
+    );
+    let binding = plakous_offline_crash_harness::scripted_runtime_binding(
+        &fixture.workspace(),
+        controller,
+        plan,
+    )
+    .unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let sessions =
+        AgentSessions::new(SessionBackend::sqlite(paths.runtime_database()).unwrap()).unwrap();
+    executor
+        .block_on(async {
+            let OpenSessionOutcome::Opened { session, .. } = sessions
+                .open(OpenSessionRequest::new(
+                    SessionOperationId::new("leftover:exact-reopen").unwrap(),
+                    locator,
+                    binding,
+                ))
+                .await
+                .unwrap()
+            else {
+                panic!("exact leftover reopen required");
+            };
+            let jobs = session.agent().jobs();
+            assert_eq!(jobs.len(), 1, "one retained terminal row");
+            assert_eq!(jobs[0].status, expected);
+            session.release().await.unwrap();
+        })
+        .unwrap();
 }
 
 #[test]

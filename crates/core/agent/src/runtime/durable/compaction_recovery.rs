@@ -725,6 +725,24 @@ pub(in crate::runtime) fn decode_compaction_operations(
                 let Ok(request) = serde_json::from_slice::<DurableCompactionRequestRecord>(
                     record.request().bytes(),
                 ) else {
+                    if let Some(offline) =
+                        crate::runtime::compaction::residency::record::ResidencyRequest::decode(
+                            record.request().bytes(),
+                            identity.workflow_id,
+                        )
+                    {
+                        if offline.source_session != identity.source.session_id
+                            || offline.source_branch != identity.source.branch_id
+                            || offline.source_checkpoint != identity.source.checkpoint_id
+                            || DurableCompactionIdentity::new(&offline.operation_id, identity.source)?.workflow_id != identity.workflow_id
+                            || !crate::runtime::compaction::residency::record::is_publication(record, identity.workflow_id)
+                            || checkpoint.manifest().ledger().operations().iter().any(|other| matches!(other.kind(), DurableOperationKind::Provider { root: ModelOperationRoot::SessionWorkflow(workflow), .. } if *workflow == identity.workflow_id))
+                        { return Err(AgentError::new(AgentErrorKind::Session, "image residency publication records disagree")); }
+                        return Ok(DecodedCompactionWorkflow::OfflinePlaceholders {
+                            compaction: OperationId(record.operation_id()),
+                            resolved: true,
+                        });
+                    }
                     // The offline placeholder rung publishes a Compaction
                     // operation whose request is a placeholder pass plan and which is
                     // finalized in the same CAS, so it has no provider

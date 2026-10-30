@@ -260,6 +260,8 @@ pub enum SessionHistoryCompactionPass {
     Native,
     /// Unbound replay was omitted offline.
     ReplayOmission,
+    /// Offline image residency.
+    Residency,
 }
 
 /// How one committed compaction segment is shown.

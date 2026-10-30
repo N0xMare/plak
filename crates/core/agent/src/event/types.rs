@@ -601,6 +601,8 @@ mod tool_runtime_error_kind_wire {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionEventReason {
+    /// Unpaid image residency before ordinary compaction scheduling.
+    Residency,
     /// Manual `/compact` or host `CompactSession`.
     Manual,
     /// Scheduled compact (idle fence (a) or tool-group fence (b)).

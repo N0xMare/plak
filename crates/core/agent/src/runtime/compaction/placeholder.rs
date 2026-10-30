@@ -255,7 +255,7 @@ fn collect_from(
 /// short enough that replacing a body never costs more than it saves.
 const MAX_REPLACED_ARGUMENT_BYTES: usize = 512;
 
-fn bounded_arguments(arguments: &str) -> String {
+pub(super) fn bounded_arguments(arguments: &str) -> String {
     let trimmed = arguments.trim();
     if trimmed.len() <= MAX_REPLACED_ARGUMENT_BYTES {
         return trimmed.to_owned();
@@ -372,9 +372,9 @@ const PLACEHOLDER_NOTICE_PREFIX: &str = "Tool result placeholders:";
 
 fn placeholder_notice_line() -> String {
     format!(
-        "{PLACEHOLDER_NOTICE_PREFIX} tool result bodies in this conversation have been replaced \
-         with bounded placeholders so it fits this model's context window. Every tool call and \
-         its result remain paired; re-run a call to see its content again.",
+        "{PLACEHOLDER_NOTICE_PREFIX} tool result bodies and images in this conversation may have been replaced \
+         with bounded placeholders to fit this request's context and size limits. Every tool call and its result remain paired; \
+         ask for a new attachment or safely reissue the identified tool to see removed content again.",
     )
 }
 
@@ -409,7 +409,7 @@ fn merged_notice_text(previous: Option<&str>) -> String {
 /// (`HistoryPlanningError::NoncanonicalCompaction`), and a semantic cut refuses
 /// a retained tail that holds one. A placeholder pass therefore never adds a segment
 /// beside an existing summary: it merges into it, or creates the only one.
-fn placeholders_notice_segment(
+pub(super) fn placeholders_notice_segment(
     workflow_id: SessionWorkflowId,
     previous: Option<&str>,
     turns: Option<SummarizedTurns>,
@@ -475,8 +475,12 @@ pub(in crate::runtime) const PLACEHOLDER_HARNESS_NOTE_MARKER: &str =
     "[plak: oldest tool results replaced this round]";
 
 /// True when this segment is a previous pass's harness note.
-fn is_placeholder_harness_note(segment: &HistorySegment) -> bool {
+pub(super) fn is_placeholder_harness_note(segment: &HistorySegment) -> bool {
     segment.kind() == HistorySegmentKind::Steering
+        && segment
+            .items()
+            .iter()
+            .all(|item| item.provenance() == Provenance::Instruction)
         && segment
             .items()
             .iter()
@@ -484,6 +488,9 @@ fn is_placeholder_harness_note(segment: &HistorySegment) -> bool {
             .any(|block| match block {
                 ContentBlock::Text(text) => {
                     text.text().starts_with(PLACEHOLDER_HARNESS_NOTE_MARKER)
+                        || text
+                            .text()
+                            .starts_with(super::residency::rewrite::NOTE_MARKER)
                 }
                 _ => false,
             })

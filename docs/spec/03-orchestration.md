@@ -762,9 +762,10 @@ process service no longer lists (its notice consumed or its row reclaimed)
 does not fail the call: its `jobs[]` row has status `already_reported`. A named process that is terminal,
 including one already terminal at admission, wakes it as `process`; each named
 process returns a `jobs[]` row `{ id, status, exit_code?, output? }`
-(`running`, `exited`, `stopped`, `unknown` or `already_reported`) read from the process service as
+(`running`, `exited`, `stopped`, `released`, `unknown` or `already_reported`) read from the process service as
 a snapshot, which consumes no notice. `wait_agent` names no processes, so its
-receipt never carries `jobs`. Every presentation returns the same receipt and
+receipt never carries `jobs`. `released` records explicit ownership relinquishment,
+not an inferred exit or permission to signal the former process. Every presentation returns the same receipt and
 records it under one operation-ledger kind (stored as `wait_agent`), so
 retirement and abandonment recovery below apply to every await alike.
 

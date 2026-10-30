@@ -205,6 +205,29 @@ pub(crate) fn compaction_view(
                 offline.before_input_tokens,
                 offline.turn_fence,
             )
+        } else if let Ok(offline) =
+            serde_json::from_slice::<super::compaction::residency::record::ResidencyRequest>(bytes)
+        {
+            if super::compaction::residency::record::ResidencyRequest::decode(
+                bytes,
+                offline.workflow_id,
+            )
+            .is_none()
+            {
+                return Err(invalid());
+            }
+            let source = DurableSessionAddress::new(
+                offline.source_session,
+                offline.source_branch,
+                offline.source_checkpoint,
+            );
+            (
+                offline.operation_id,
+                source,
+                FeedCompactPass::Residency,
+                offline.before_input_tokens,
+                true,
+            )
         } else {
             let paid: DurableCompactionRequestRecord =
                 serde_json::from_slice(bytes).map_err(|_| invalid())?;
@@ -230,6 +253,13 @@ pub(crate) fn compaction_view(
                 identity.workflow_id,
             ) {
                 Some(offline.after_input_tokens)
+            } else if let Some(residency) =
+                super::compaction::residency::record::ResidencyEvidence::decode(
+                    evidence.bytes(),
+                    identity.workflow_id,
+                )
+            {
+                Some(residency.after_input_tokens)
             } else {
                 serde_json::from_slice::<DurableCompactionPublicationEvidence>(evidence.bytes())
                     .ok()

@@ -32,6 +32,7 @@ pub(crate) fn transition<P: plakous_host_protocol::ProtocolExtension>(
         JobStatus::Running => unreachable!(),
         JobStatus::Exited(code) => ("exited", code, None),
         JobStatus::OutcomeUnknown => ("outcome_unknown", None, None),
+        JobStatus::Released => ("released", None, None),
         JobStatus::Stopped(reason) => (
             "stopped",
             None,
@@ -64,7 +65,7 @@ fn process_row(job: &JobView) -> Option<crate::sessions::TranscriptRow> {
     let outcome = match job.status {
         JobStatus::Exited(code) => ProcessOutcome::Exited { code },
         JobStatus::Stopped(_) => ProcessOutcome::Stopped,
-        JobStatus::Running | JobStatus::OutcomeUnknown => return None,
+        JobStatus::Running | JobStatus::OutcomeUnknown | JobStatus::Released => return None,
     };
     Some(crate::sessions::TranscriptRow::Process(ProcessNotice {
         job_id: format!("p{}", job.number),

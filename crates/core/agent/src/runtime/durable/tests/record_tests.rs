@@ -897,7 +897,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
     })?;
     assert_eq!(
         named_identity.to_string(),
-        "eb90a47983b87fa7dc2d27da86f6a09d7fd5831f34bbe1d8fec557f8415709c7"
+        "4361ad0bb5ed298e835d8554147339c8e78ec5b31dee6252c160407860b0dfe7"
     );
     let actual = cases
         .iter()

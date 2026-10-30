@@ -413,7 +413,7 @@ async fn leftover_jobs_release_and_attempt_end_stop_but_explicit_disown_does_not
     rustix::process::kill_process(pid, rustix::process::Signal::KILL)?;
     assert_eq!(
         sessions.joined_terminal_status(result.session_id),
-        Some(JoinedProcessStatus::OutcomeUnknown)
+        Some(JoinedProcessStatus::Released)
     );
     Ok(())
 }

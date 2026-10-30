@@ -342,6 +342,13 @@ impl Driver {
                 return Err(refusal);
             }
             self.reresolve_expired_model(command).await?;
+            let residency = self.require_image_residency(command).await;
+            self.finalize_continuation_on_request_budget(
+                command.turn_id,
+                continuation_baton,
+                residency,
+            )
+            .await?;
             self.turn_budgets.model_rounds = self.turn_budgets.model_rounds.saturating_add(1);
             // The budget ends exploration, not the turn. One wrap-up round runs
             // with tool selection withdrawn so the user still gets an answer;
@@ -700,12 +707,19 @@ impl Driver {
             batch.extend(execution.items);
             let mut completed_operations = execution.operations;
             completed_operations.push(provider_operation);
-            self.promote_tool_exchange_then_maybe_compact(
-                command,
-                attempt_id,
-                batch,
-                completed_operations,
-                provider_artifact_transition(&provider_plan, &response),
+            let promoted = self
+                .promote_tool_exchange_then_maybe_compact(
+                    command,
+                    attempt_id,
+                    batch,
+                    completed_operations,
+                    provider_artifact_transition(&provider_plan, &response),
+                )
+                .await;
+            self.finalize_continuation_on_request_budget(
+                command.turn_id,
+                continuation_baton,
+                promoted,
             )
             .await?;
             let _ = self.apply_steering(command).await?;

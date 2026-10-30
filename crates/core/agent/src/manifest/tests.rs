@@ -2906,7 +2906,7 @@ fn effect_decision_pause_is_exact_pre_dispatch_and_closed() -> TestResult {
 
 #[test]
 fn lifecycle_codec_golden_matrix_is_closed_bounded_and_tamper_checked() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 33);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 34);
     assert_eq!(RUNTIME_LIFECYCLE_CODEC_REVISION, 3);
     let signature = RecoveryHandlerSignature::new;
     let command = RecoveryObligation::new(
@@ -3516,7 +3516,7 @@ fn job_row(number: u32) -> TestResult<JobRow> {
 
 #[test]
 fn quiescent_job_ledger_and_terminal_evidence_round_trip() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 33);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 34);
     let mut manifest = manifest(ProducerProvenance::new("plakous", "jobs", "offline")?, None)?;
     let mut row = job_row(3)?;
     row.terminal = Some(JobTerminal {
@@ -3563,6 +3563,63 @@ fn job_ledger_bounds_numbers_and_same_batch_consumption() -> TestResult {
         tail: "x".repeat(4097),
     });
     assert!(JobLedger::new(2, vec![bad]).is_err());
+    Ok(())
+}
+
+#[test]
+fn released_job_terminal_round_trips_without_inventing_exit_or_stopper() -> TestResult {
+    let mut manifest = manifest(
+        ProducerProvenance::new("plakous", "released", "offline")?,
+        None,
+    )?;
+    let mut row = job_row(1)?;
+    manifest.jobs = JobLedger::new(2, vec![row.clone()])?;
+    let before_release = RuntimeCheckpoint::new(manifest.clone())?;
+    let before_release = crate::RuntimeCheckpointCodec::materialize(
+        &crate::RuntimeCheckpointCodec::bundle(&before_release, None)?,
+    )?;
+    assert_eq!(
+        before_release.manifest().jobs().rows()[0].view().status,
+        plakous_tools::JobStatus::OutcomeUnknown
+    );
+    row.terminal = Some(JobTerminal {
+        status: JobTerminalStatus::Released,
+        exit_code: None,
+        stopper: None,
+        elapsed: std::time::Duration::from_secs(3),
+        tail: "retained tail".into(),
+    });
+    manifest.jobs = JobLedger::new(2, vec![row.clone()])?;
+    let checkpoint = RuntimeCheckpoint::new(manifest)?;
+    let decoded = crate::RuntimeCheckpointCodec::materialize(
+        &crate::RuntimeCheckpointCodec::bundle(&checkpoint, None)?,
+    )?;
+    assert_eq!(decoded.manifest().jobs(), checkpoint.manifest().jobs());
+    assert_eq!(
+        decoded.manifest().jobs().rows()[0].view().status,
+        plakous_tools::JobStatus::Released
+    );
+    let view = decoded.manifest().jobs().rows()[0].view();
+    assert_eq!(JobTerminal::from_view(&view), row.terminal);
+    let mut invalid = row.clone();
+    invalid.terminal.as_mut().ok_or("terminal")?.exit_code = Some(0);
+    assert!(JobLedger::new(2, vec![invalid]).is_err());
+    let mut invalid = row;
+    invalid.terminal.as_mut().ok_or("terminal")?.stopper =
+        Some(plakous_tools::JobStopReason::SessionExit);
+    assert!(JobLedger::new(2, vec![invalid]).is_err());
+    let exact = checkpoint
+        .manifest()
+        .jobs()
+        .with_terminals(&[plakous_tools::JobView {
+            status: plakous_tools::JobStatus::Exited(Some(0)),
+            ..view
+        }])?;
+    assert_eq!(
+        &exact,
+        checkpoint.manifest().jobs(),
+        "release is already durable and cannot be overwritten"
+    );
     Ok(())
 }
 

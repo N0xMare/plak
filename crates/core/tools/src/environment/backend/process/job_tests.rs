@@ -5,6 +5,64 @@ use std::str::FromStr;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn explicit_leftover_disown_is_released_and_reopen_is_read_only() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let service = sessions(directory.path())?;
+    let id = service.start(
+        request(
+            "while [ ! -f finish-leftover ]; do sleep 0.01; done &",
+            false,
+        )?,
+        ExecutionOperationControl::new(CancellationToken::new()),
+    )?;
+    service.promote(id)?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while service.leftover(id).is_none() && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    if service.leftover(id).is_none() {
+        fs::write(directory.path().join("finish-leftover"), b"finish")?;
+        service.join_all()?;
+        return Err("shell leader never yielded a leftover group".into());
+    }
+    let disowned = service.disown_leftovers();
+    // The deliberately relinquished process must still get its fixture-owned
+    // completion signal even if a handoff assertion fails.
+    fs::write(directory.path().join("finish-leftover"), b"finish")?;
+    disowned?;
+    let views = service.jobs();
+    assert_eq!(views[0].status, JobStatus::Released);
+    service.join_all()?;
+    assert_eq!(service.jobs()[0].status, JobStatus::Released);
+    let restored = sessions(directory.path())?;
+    restored.restore_job_terminals(&views);
+    assert_eq!(restored.jobs()[0].status, JobStatus::Released);
+    let restored_id = restored
+        .session_for_number(views[0].number)
+        .ok_or("snapshot")?;
+    assert_eq!(
+        restored
+            .poll_from(restored_id, JoinedProcessOutputCursor::new(0), 1024, 20)?
+            .status(),
+        JoinedProcessStatus::Released
+    );
+    assert!(
+        restored
+            .write_stdin(
+                restored_id,
+                b"no authority",
+                JoinedProcessInputDisposition::KeepOpen
+            )
+            .is_err()
+    );
+    restored.stop(restored_id, JobStopReason::Model)?;
+    assert_eq!(restored.jobs()[0].status, JobStatus::Released);
+    restored.consume_jobs(&[views[0].number]);
+    assert_eq!(restored.jobs(), [] as [crate::JobView; 0]);
+    Ok(())
+}
+
 fn sessions(root: &Path) -> TestResult<JoinedProcessSessions> {
     Ok(ExecutionEnvironment::host(
         ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000691")?),

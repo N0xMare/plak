@@ -267,6 +267,7 @@ impl JoinedSession {
                 Some(crate::JobStopReason::HardCap),
             ),
             crate::JobStatus::Stopped(by) => (JoinedProcessStatus::Terminated, Some(by)),
+            crate::JobStatus::Released => (JoinedProcessStatus::Released, None),
             crate::JobStatus::Running | crate::JobStatus::OutcomeUnknown => {
                 (JoinedProcessStatus::OutcomeUnknown, None)
             }
@@ -305,7 +306,7 @@ impl JoinedSession {
                 spool: None,
                 pending_spool: None,
                 leftover: None,
-                disowned: false,
+                disowned: view.status == crate::JobStatus::Released,
             })),
             consumer_cursor: Arc::new(Mutex::new(JoinedProcessOutputCursor::new(0))),
             consumer_pending_utf8: Arc::new(Mutex::new(Vec::new())),

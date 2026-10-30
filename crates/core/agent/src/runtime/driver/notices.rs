@@ -209,6 +209,7 @@ fn summary_status(status: JobStatus) -> String {
         JobStatus::Exited(Some(code)) => format!("exited {code}"),
         JobStatus::Exited(None) => "exited".to_owned(),
         JobStatus::Stopped(_) => "stopped".to_owned(),
+        JobStatus::Released => "released".to_owned(),
         JobStatus::OutcomeUnknown | JobStatus::Running => "outcome_unknown".to_owned(),
     }
 }
@@ -246,6 +247,9 @@ fn render_notice(
             };
             let _ = write!(text, " status=\"stopped\" by=\"{by}\"");
         }
+        JobStatus::Released => {
+            text.push_str(" status=\"released\"");
+        }
         JobStatus::OutcomeUnknown | JobStatus::Running => {
             text.push_str(" status=\"outcome_unknown\"");
         }
@@ -259,6 +263,9 @@ fn render_notice(
         escape(&plakous_tools::internal::sanitize_job_command(&job.command)),
         started,
     );
+    if job.status == JobStatus::Released {
+        text.push_str("Ownership was explicitly released; this does not prove process exit. The process may still be running.\n");
+    }
     if let Some(file) = file {
         let _ = writeln!(text, "full output: {}", escape(&file.path));
         if let Some(written) = file.write_failed_after {

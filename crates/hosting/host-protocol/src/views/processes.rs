@@ -30,6 +30,8 @@ pub enum ProcessStatus {
     Exited(Option<i32>),
     /// Explicitly stopped.
     Stopped,
+    /// Ownership explicitly relinquished without proof of process exit.
+    Released,
     /// Exact outcome unavailable.
     OutcomeUnknown,
 }

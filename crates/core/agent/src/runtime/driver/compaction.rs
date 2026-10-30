@@ -33,6 +33,9 @@ mod prepare;
 mod publish;
 mod settle;
 
+/// The remedy a refusal names when only manual compaction can make room.
+pub(in crate::runtime::driver) const MANUAL_COMPACTION_REMEDY: &str =
+    "compact the session, or enable scheduled compaction";
 const PAID_FOLD_BACKOFF_ROUNDS: usize = 2;
 const FAILED_PAID_FOLD_CAP: usize = 3;
 /// Committed pressure-forced paid folds one root turn may pay for. Recurring

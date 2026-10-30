@@ -285,7 +285,7 @@ keep the stop name process-allowlist gated without changing its effect tag.
 The job-ledger fixture carries a promoted row across later turns and their operation-only and
 terminal commits, copies terminal evidence in a history-unchanged Quiescent
 checkpoint, and proves repeated recording is a no-op. Manifest round trips pin
-the row/terminal bounds, same-batch consumption, clear counter and epoch 33.
+the row/terminal bounds, same-batch consumption, clear counter and epoch 34.
 Fresh-service reopen retains exit-code and output-tail answers until consumption;
 stop on an already terminal snapshot preserves its original outcome. Row-cap
 fixtures keep foreground retention separate from promoted, unconsumed jobs.
@@ -1850,6 +1850,31 @@ uses the quick `final_only,direct_tool_then_final` selection. An explicit
 `--shapes` selection applies in either mode. The wrapper overrides any inherited
 `PLAK_CRASH_SWEEP_SHAPES`, leaving it unset for the strict all-shapes default so
 the Rust registry supplies the complete inventory.
+The residency corpus includes `image_residency_admission`,
+`image_residency_tool_batch` and `image_residency_continue`. Each seeds protected
+image history, crosses a mandatory aggregate-image fence with optional scheduled
+compaction disabled, and cuts every indexed runtime/product commit before and
+after the offline one-CAS publication. Pilots require strategy
+`ResidencyPlaceholdersV1`, exactly one Finalized compaction and no paid compact
+dispatch. The durability lane repeats these three shapes through
+`image_residency_crash_cuts_recover_without_redispatch`; direct receipt tests
+independently materialize and validate v3 source/selection/successor evidence.
+Released job coverage distinguishes successful explicit disown, ordinary stop
+and missing-owner unknown outcomes, preserves read-only reopen and consumption,
+and rejects released terminals carrying an exit code or stopper.
+The durability fixture
+`released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority`
+SIGKILLs a real `plak run --leave-jobs-running` on each side of the terminal
+recording commit: reopen reports unknown before it and released after it,
+never signals the orphan, and the fixture independently releases the group.
+The enabled-ladder residency regression seeds a source over the token window
+with 22 images: the non-Fits image-only candidate defers without publication
+to one ordinary paid fold, and the admitted round dispatches within both
+aggregate image budgets. Halting the store after each accepted commit of a
+round-start fold reopens exactly with no dispatch, second paid fold or
+republished compaction. Image refusals after a server pause with steered
+images and at a provider-programmatic tool-batch fence finalize the open
+continuation and leave a Quiescent head.
 The entry point first prepares the whole workspace's all-features test build,
 including `plak`, `plakous-js-runtime`'s `plakous-js-host` and
 `plakous-py-worker`'s `plakous-py-host`, in the same Cargo
@@ -2944,7 +2969,7 @@ the session-level test also requires a joined worker.
 SDK stub/bootstrap hashes and generated-validator keyword coverage are pinned;
 the SDK descriptor identity is pinned beside the existing goldens. Existing
 text pins are unchanged; descriptors naming the revised cell protocol rotate
-in unreleased epoch 33.
+in unreleased epoch 34.
 
 Harbor's opt-in `plak-py-ptc`/`plak-py-sdk` A/B recipe declares composition
 per arm in a digest-bound campaign. Default arms do not admit overrides;

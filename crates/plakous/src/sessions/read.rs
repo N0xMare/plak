@@ -43,6 +43,9 @@ fn facts_from_provenance(provenance: &CompactionProvenance) -> CommittedCompacti
         }
         RuntimeCompactionStrategy::NativeResponsesTriggerV1 => SessionHistoryCompactionPass::Native,
         RuntimeCompactionStrategy::ReplayOmissionV1 => SessionHistoryCompactionPass::ReplayOmission,
+        RuntimeCompactionStrategy::ResidencyPlaceholdersV1 => {
+            SessionHistoryCompactionPass::Residency
+        }
     };
     CommittedCompactionFacts {
         summary_segment: provenance.summary_segment_identity(),

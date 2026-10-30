@@ -500,6 +500,7 @@ const fn compact_pass_label(pass: plakous::sessions::feed::FeedCompactPass) -> &
         plakous::sessions::feed::FeedCompactPass::Summary => "summary",
         plakous::sessions::feed::FeedCompactPass::Placeholders => "placeholders",
         plakous::sessions::feed::FeedCompactPass::ReplayOmission => "replay omission",
+        plakous::sessions::feed::FeedCompactPass::Residency => "residency",
         _ => "compaction",
     }
 }

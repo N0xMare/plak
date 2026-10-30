@@ -78,6 +78,20 @@ pub enum RuntimeCompactionStrategy {
     ToolResultPlaceholdersV1,
     /// Offline omission of unbound replay, retaining all portable tool results.
     ReplayOmissionV1,
+    /// Offline, source-bound image retirement under aggregate request budgets.
+    ResidencyPlaceholdersV1,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ResidencySelectionAudit {
+    pub source_history: Digest,
+    pub source_projection: Digest,
+    pub source_segments: u32,
+    pub start: u32,
+    pub end: u32,
+    pub images: u32,
+    pub segments: u32,
+    pub identity: Digest,
 }
 
 /// Native successors that may keep a protected current-round tail after

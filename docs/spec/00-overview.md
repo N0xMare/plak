@@ -187,7 +187,7 @@ of versions 9 and 10 only (§2.5.1 of chapter 02).
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **26** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **33** (the named-state manifest, checkpoint integrity and commit identity encodings, the unified v3 cell descriptor identities, the Python cell-worker engine, artifact and containment identities, cell-protocol engine contracts and the Code Mode descriptor identities that name the cell worker revision, inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **34** (including reconstructive image-residency v3 plans/evidence, strategy tag 5 and explicit Released job terminals; component revisions remain frozen) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **34** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **9** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **20**, disposable, never recovery authority |
@@ -216,7 +216,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r26.e33.p34.t9`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r26.e34.p34.t9`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

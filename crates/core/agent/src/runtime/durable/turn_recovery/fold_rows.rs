@@ -145,6 +145,10 @@ fn fold_state(records: &[&DurableOperationRecord], anchor: u64) -> Option<FoldSt
             *workflow_id,
         )
         .is_some()
+            || crate::runtime::compaction::residency::record::is_publication(
+                compaction,
+                *workflow_id,
+            )
     });
     committed.then_some(FoldState::Committed)
 }

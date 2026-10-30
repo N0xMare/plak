@@ -55,6 +55,7 @@ pub(super) use notices::is_process_notice_batch;
 mod observation;
 mod operations;
 mod placeholders;
+mod residency;
 mod spawn;
 mod terminal;
 mod tools;

@@ -176,6 +176,7 @@ struct LoopbackEffect {
     /// When set, the successful outcome carries a body of this many bytes, so
     /// a turn can grow its own context past a small admitted ceiling.
     body_bytes: Option<usize>,
+    images: u8,
 }
 
 /// The loopback protocol family every ordinary scripted binding speaks.

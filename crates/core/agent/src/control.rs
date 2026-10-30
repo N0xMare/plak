@@ -697,6 +697,8 @@ pub enum CompactionRung {
     ToolResultPlaceholders,
     /// Unbound opaque and reasoning replay omitted offline; tool results kept.
     ReplayOmission,
+    /// Bounded retirement of older resident images without a provider call.
+    Residency,
 }
 
 impl CompactionRung {
@@ -708,6 +710,7 @@ impl CompactionRung {
             Self::SemanticFold => "folded",
             Self::ToolResultPlaceholders => "replaced",
             Self::ReplayOmission => "omitted replay",
+            Self::Residency => "retired images in",
         }
     }
 }

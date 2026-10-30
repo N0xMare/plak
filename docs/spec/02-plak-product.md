@@ -241,9 +241,9 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r26.e33.p34.t9/             this build's state (§2.5)
+    r26.e34.p34.t9/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 26, epoch 33
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 26, epoch 34
       product.sqlite3             Plak intents and feed-derived views, schema 34
       subagents.sqlite3           the agent tree, schema 9
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
@@ -782,7 +782,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r26.e33.p34.t9`. The key is derived from the stores'
+schema>`, for example `r26.e34.p34.t9`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -2505,6 +2505,12 @@ default. `--leave-jobs-running` instead releases leftover groups alive and
 **unowned**: stop tools, session release, attempt end, and hard caps no longer
 apply, and the caller is responsible for cleanup. Redirect service output to a
 file or `/dev/null`, particularly for a PTY on macOS (chapter 01 §8.5).
+The owner publishes the explicit `Released` job terminal before releasing
+session authority. Reopen lists it as released, without claiming a process exit
+or treating deliberate relinquishment as an unknown outcome. Existing live
+`job_terminal` frames use status `released`, with no exit code or stopper;
+the in-process Processes view likewise displays released. This adds no carried
+process-row variant and no product-store field.
 Piped output is transferred to EOF-bound unowned drain processes, so an
 unredirected pipe writer does not die merely because `run` exits. Budget-promoted
 jobs still wait while their leaders live; when a leader exits with live group
@@ -3251,7 +3257,7 @@ closes. This does not change the v1 command or event encoding.
 | `busy` | `busy` |
 | `job_started` | `job_id` (`p<N>`), `owner`, `command` |
 | `job_promoted` | `job_id`, `owner` |
-| `job_terminal` | `job_id`, `owner`, `status` (`exited`, `stopped`, `outcome_unknown`), `elapsed_ms`, `output`; optional `exit_code`, `stop_reason` (`model`, `user`, `session_exit`, `attempt_ended`, `hard_cap`) |
+| `job_terminal` | `job_id`, `owner`, `status` (`exited`, `stopped`, `released`, `outcome_unknown`), `elapsed_ms`, `output`; optional `exit_code`, `stop_reason` (`model`, `user`, `session_exit`, `attempt_ended`, `hard_cap`) |
 | `assistant` | `text` — a streamed delta |
 | `assistant_done` | — |
 | `model_refusal` | `message`, optional bounded sanitized `detail`; published refusal terminal, with the originating turn id when known |

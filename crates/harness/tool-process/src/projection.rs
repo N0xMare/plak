@@ -454,7 +454,7 @@ impl ProjectedProcessTool {
             json!({
                 "exit_code": {"type":"integer"},
                 "session_id": {"type":"integer","minimum":1},
-                "status": {"type":"string","enum":["leftover","timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","cleanup_unresolved"]},
+                "status": {"type":"string","enum":["leftover","timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","released","cleanup_unresolved"]},
                 "output": {"type":"string"}
             }),
             &["output"],
@@ -477,7 +477,7 @@ impl ProjectedProcessTool {
                 json!({
                     "tasks": {"type":"array","items": {"type":"object","properties": {
                         "task_id":{"type":"string"},
-                        "status":{"type":"string","enum":["running","leftover","exited","terminated","cancelled","timed_out","output_limit","failed","outcome_unknown","cleanup_unresolved","already_reported","not_found"]},
+                        "status":{"type":"string","enum":["running","leftover","exited","terminated","cancelled","timed_out","output_limit","failed","outcome_unknown","released","cleanup_unresolved","already_reported","not_found"]},
                         "exit_code":{"type":"integer"},
                         "output":{"type":"string"}
                     }, "required":["task_id","status","output"],"additionalProperties":false}}

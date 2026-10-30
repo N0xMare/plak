@@ -567,6 +567,24 @@ impl ToolExecutor for LoopbackEffect {
             // answers, not a runtime failure that abandons the turn.
             let outcome = if self.fail {
                 ToolOutcome::failure_text("loopback effect refused")?
+            } else if self.images > 0 {
+                ToolOutcome::success(
+                    (0..self.images)
+                        .map(|_| {
+                            plakous::model::MediaSource::bytes(vec![1; 3_000])
+                                .and_then(|source| {
+                                    plakous::model::ImageBlock::new("image/png", source)
+                                })
+                                .map(plakous::model::ToolResultPart::Image)
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|error| {
+                            ToolRuntimeError::new(
+                                ToolRuntimeErrorKind::Execution,
+                                error.to_string(),
+                            )
+                        })?,
+                )?
             } else if let Some(bytes) = self.body_bytes {
                 ToolOutcome::success_text("x".repeat(bytes))?
             } else {

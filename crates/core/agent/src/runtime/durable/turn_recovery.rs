@@ -281,6 +281,22 @@ pub(in crate::runtime) fn root_turn_closure_for_test(
     newest_root_turn_closure(checkpoint)
 }
 
+#[cfg(test)]
+pub(in crate::runtime::durable) fn close_root_turn_for_test(
+    checkpoint: &RuntimeCheckpoint,
+) -> Result<(plakous_model::CanonicalHistory, RuntimeOperationLedger), AgentError> {
+    let Some(RootClosure::Abandon { fold, claim }) = newest_root_turn_closure(checkpoint)? else {
+        return Err(AgentError::new(
+            AgentErrorKind::Session,
+            "test cut is not an abandoned root",
+        ));
+    };
+    let target = CheckpointId::try_from(uuid::Uuid::from_u128(0xA2_FFFF))
+        .map_err(|error| AgentError::from_identity(&error))?;
+    let closed = abandonment_closure_state(checkpoint, fold, claim, target)?;
+    Ok((closed.history, closed.ledger))
+}
+
 /// Whether a newly opened owner closes this working head itself. Such a head
 /// is not recovery-only; opening it is how it recovers.
 pub(crate) fn reopen_closes_working_turn(checkpoint: &RuntimeCheckpoint) -> bool {

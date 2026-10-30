@@ -23,6 +23,7 @@ pub(in crate::runtime) mod fold;
 
 pub(in crate::runtime) mod placeholder;
 pub(super) mod placeholder_receipt;
+pub(in crate::runtime) mod residency;
 
 #[cfg(test)]
 mod tests;

@@ -22,8 +22,8 @@ pub(crate) use object::{component_object_digest, object_address};
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
 /// the per-component revision constants inside the graph are frozen.
-/// Epoch 33 includes unified cell identities and named-state addresses/integrity.
-pub const RUNTIME_FORMAT_EPOCH: u32 = 33;
+/// Epoch 34 includes image-residency publications and explicit Released job terminals.
+pub const RUNTIME_FORMAT_EPOCH: u32 = 34;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize =

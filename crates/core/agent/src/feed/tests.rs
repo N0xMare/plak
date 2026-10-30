@@ -12,6 +12,20 @@ use uuid::Uuid;
 
 use super::*;
 
+#[test]
+fn residency_request_budget_refusal_round_trips_through_the_feed_codec()
+-> Result<(), Box<dyn std::error::Error>> {
+    let outcome = FeedTurnOutcome::Failed {
+        kind: AgentErrorKind::RequestBudget,
+        model_kind: None,
+        context: None,
+    };
+    let encoded = serde_json::to_string(&outcome)?;
+    assert!(encoded.contains("request_budget"));
+    assert_eq!(serde_json::from_str::<FeedTurnOutcome>(&encoded)?, outcome);
+    Ok(())
+}
+
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 fn id<T: TryFrom<Uuid>>(value: u128) -> TestResult<T>

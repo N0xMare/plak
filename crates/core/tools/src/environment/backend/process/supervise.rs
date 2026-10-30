@@ -67,7 +67,7 @@ pub(super) fn supervise_joined_process(
         }
         if lock(shared).disowned {
             disowned = true;
-            break JoinedProcessStatus::OutcomeUnknown;
+            break JoinedProcessStatus::Released;
         }
         if cancel_foreground(promoted, control) {
             break JoinedProcessStatus::Cancelled;

@@ -157,6 +157,7 @@ pub(super) fn await_job_rows(
                 plakous::tools::JobStatus::Running => ("running", None),
                 plakous::tools::JobStatus::Exited(code) => ("exited", code),
                 plakous::tools::JobStatus::Stopped(_) => ("stopped", None),
+                plakous::tools::JobStatus::Released => ("released", None),
                 plakous::tools::JobStatus::OutcomeUnknown => ("unknown", None),
             };
             AwaitJobRow {

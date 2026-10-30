@@ -510,6 +510,14 @@ fn scripted_response(
                 TextBlock::new(text, Some(TextPhase::Final)).map_err(invalid_model_fixture)?,
             )]
         }
+        ScriptOutput::Images(count) => (0..*count)
+            .map(|_| {
+                plakous::model::MediaSource::bytes(vec![1; 3_000])
+                    .and_then(|source| plakous::model::ImageBlock::new("image/png", source))
+                    .map(ContentBlock::Image)
+                    .map_err(invalid_model_fixture)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
         ScriptOutput::ImageReport => {
             let images = plan
                 .request()
@@ -639,6 +647,7 @@ fn scripted_response(
             match step.finish {
                 ScriptFinish::Stop => FinishReason::Stop,
                 ScriptFinish::ToolCalls => FinishReason::ToolCalls,
+                ScriptFinish::AssistantContinuation => FinishReason::AssistantContinuation,
                 ScriptFinish::Length => FinishReason::Length,
                 ScriptFinish::Refusal => FinishReason::Refusal,
             },

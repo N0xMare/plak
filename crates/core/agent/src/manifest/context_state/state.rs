@@ -365,6 +365,46 @@ impl RuntimeContextState {
         Self::from_parts(affinity, None, Some(transition), Some(provenance))
     }
 
+    pub(crate) fn successful_image_residency(
+        &self,
+        publication: &SemanticCompactionPublication,
+        notice: &HistorySegment,
+        successor: &CanonicalHistory,
+        selection: ResidencySelectionAudit,
+    ) -> Result<Self, RuntimeManifestError> {
+        if selection.images == 0 {
+            return Err(RuntimeManifestError::InvalidCompactionProvenance);
+        }
+        validate_digest(selection.identity, DigestDomain::ContextPlan)?;
+        let mut context = self.successful_tool_result_placeholders(
+            publication,
+            notice,
+            successor,
+            selection.source_history,
+            selection.source_projection,
+            selection.start,
+            selection.end,
+            selection.images,
+            selection.source_segments,
+        )?;
+        let provenance = context
+            .compaction
+            .as_mut()
+            .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?;
+        provenance.strategy = RuntimeCompactionStrategy::ResidencyPlaceholdersV1;
+        provenance.selection_plan = selection.identity;
+        provenance.selected_identity = selection.identity;
+        provenance.selected_segment_count = selection.segments;
+        provenance.identity = compaction_provenance_identity(provenance)?;
+        provenance.validate()?;
+        Self::from_parts(
+            context.affinity,
+            None,
+            context.transition,
+            context.compaction,
+        )
+    }
+
     /// Atomically describes a successful semantic-summary publication.
     ///
     /// The target history must contain exactly one leading compaction segment

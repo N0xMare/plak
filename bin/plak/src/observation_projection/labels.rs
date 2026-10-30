@@ -72,6 +72,7 @@ pub(crate) fn compaction_reason_text(reason: CompactionEventReason) -> &'static 
     match reason {
         CompactionEventReason::Manual => "manual",
         CompactionEventReason::Scheduled => "scheduled",
+        CompactionEventReason::Residency => "residency",
     }
 }
 

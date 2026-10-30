@@ -1094,6 +1094,9 @@ pub(super) fn committed_compaction_summary(
         crate::manifest::RuntimeCompactionStrategy::ReplayOmissionV1 => {
             crate::control::CompactionRung::ReplayOmission
         }
+        crate::manifest::RuntimeCompactionStrategy::ResidencyPlaceholdersV1 => {
+            crate::control::CompactionRung::Residency
+        }
     };
     Some(crate::control::CompactionSummary {
         rung,

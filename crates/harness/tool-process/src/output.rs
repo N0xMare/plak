@@ -5,9 +5,10 @@ use super::{
     Mutex, ToolRuntimeError, ToolRuntimeErrorKind, output_omitted_marker, text,
 };
 
-/// Refuses an operation on a session that has already exited and been joined.
+/// Refuses a write to a joined or read-only terminal session.
 ///
-/// A joined terminal status is proof the group is gone and reaped, so this
+/// A released row proves only relinquished ownership, not process exit.
+/// An exact joined exit status proves the group is gone and reaped, so this
 /// write reached nothing and mutated nothing. That makes the outcome known,
 /// and the model is told exactly what it found rather than being handed an
 /// unreconcilable journal gap. A session that is terminating but not yet
@@ -16,6 +17,14 @@ pub(crate) fn exited_session_refusal(
     session_id: u64,
     status: JoinedProcessStatus,
 ) -> ToolRuntimeError {
+    if status == JoinedProcessStatus::Released {
+        return ToolRuntimeError::new(
+            ToolRuntimeErrorKind::InvalidArguments,
+            format!(
+                "process session {session_id} ownership was released; the process may still be running; nothing was written"
+            ),
+        );
+    }
     let disposition = match status {
         JoinedProcessStatus::Exited(Some(code)) => format!("status {code}"),
         JoinedProcessStatus::Exited(None) => String::from("no status"),
@@ -55,6 +64,7 @@ pub(crate) const fn process_status_label(status: JoinedProcessStatus) -> &'stati
         JoinedProcessStatus::TimedOut => "timed_out",
         JoinedProcessStatus::OutputLimit => "output_limit",
         JoinedProcessStatus::Failed => "failed",
+        JoinedProcessStatus::Released => "released",
         JoinedProcessStatus::CleanupUnresolved => "cleanup_unresolved",
         // `JoinedProcessStatus` is `#[non_exhaustive]` outside its crate; a
         // status this pack has not enrolled has no exact outcome evidence.
@@ -239,4 +249,21 @@ fn utf8_string_prefix_len(text: &str, maximum: usize) -> usize {
         retained = retained.saturating_sub(1);
     }
     retained
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn released_poll_label_and_write_refusal_never_claim_exit() {
+        assert_eq!(
+            process_status_label(JoinedProcessStatus::Released),
+            "released"
+        );
+        assert_eq!(
+            exited_session_refusal(7, JoinedProcessStatus::Released).to_string(),
+            "process session 7 ownership was released; the process may still be running; nothing was written"
+        );
+    }
 }
