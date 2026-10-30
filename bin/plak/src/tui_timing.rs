@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use std::{fs, io::Write as _};
 
 use plakous_hosted::product_observation::{
-    ProductObservation, TuiTimingPhase, session_id_from_text, wall_timestamp,
+    ProductObservation, StartupTimingPhase, session_id_from_text, wall_timestamp,
 };
 
 use crate::home::paths::PlakPaths;
@@ -106,10 +106,10 @@ fn exit_observations(values: Vec<ExitMeasurement>) -> Vec<ProductObservation> {
         .filter_map(|value| Some((session_id_from_text(&value.session)?, value)))
         .flat_map(|(session_id, value)| {
             [
-                (TuiTimingPhase::KeyToRestore, value.key_to_restore_ns),
-                (TuiTimingPhase::RestoreToExit, value.restore_to_exit_ns),
+                (StartupTimingPhase::KeyToRestore, value.key_to_restore_ns),
+                (StartupTimingPhase::RestoreToExit, value.restore_to_exit_ns),
             ]
-            .map(|(phase, elapsed)| ProductObservation::TuiTiming {
+            .map(|(phase, elapsed)| ProductObservation::StartupTiming {
                 at: wall_timestamp(),
                 session_id,
                 phase,
@@ -169,10 +169,10 @@ pub(crate) fn attach(paths: &PlakPaths, session: &str, resumed: bool) {
             exit_import_due: false,
         });
     }
-    record(TuiTimingPhase::ProcessStart, Duration::ZERO);
+    record(StartupTimingPhase::ProcessStart, Duration::ZERO);
 }
 
-fn record(phase: TuiTimingPhase, elapsed: Duration) {
+fn record(phase: StartupTimingPhase, elapsed: Duration) {
     let Ok(mut timing) = TIMING.lock() else {
         return;
     };
@@ -209,10 +209,10 @@ impl Timing {
     fn record(
         &mut self,
         writer: Option<&std::sync::Arc<crate::telemetry_sink::TelemetryWriter>>,
-        phase: TuiTimingPhase,
+        phase: StartupTimingPhase,
         elapsed: Duration,
     ) {
-        let observation = ProductObservation::TuiTiming {
+        let observation = ProductObservation::StartupTiming {
             at: wall_timestamp(),
             session_id: self.session_id,
             phase,
@@ -251,8 +251,8 @@ pub(crate) fn first_frame() {
     });
     if first {
         let elapsed = PROCESS_START.get_or_init(Instant::now).elapsed();
-        record(TuiTimingPhase::FirstFrameLocal, elapsed);
-        record(TuiTimingPhase::ReadyToTypeLocal, elapsed);
+        record(StartupTimingPhase::FirstFrameLocal, elapsed);
+        record(StartupTimingPhase::ReadyToTypeLocal, elapsed);
         if let Ok(mut timing) = TIMING.lock()
             && let Some(timing) = timing.as_mut()
         {
@@ -274,7 +274,7 @@ pub(crate) fn host_ready() {
     });
     if first {
         record(
-            TuiTimingPhase::HostReadyBackground,
+            StartupTimingPhase::HostReadyBackground,
             PROCESS_START.get_or_init(Instant::now).elapsed(),
         );
     }

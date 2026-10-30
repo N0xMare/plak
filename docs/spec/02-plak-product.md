@@ -3375,6 +3375,15 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ## 5. The terminal interface
 
+The hosted launch API is frontend-neutral: `HostLaunchPreparation`,
+`HostLaunchMode` and `HostLaunchNativeModelFact` carry launch facts;
+`spawn_deferred_host` starts the host independently of a terminal driver.
+`StartupTimingPhase` and `ProductObservation::StartupTiming` carry lifecycle
+measurements. Their telemetry kind spellings (`tui_process_start`,
+`tui_first_frame_local`, `tui_ready_to_type_local`,
+`tui_host_ready_background`, `tui_key_to_restore`, `tui_restore_to_exit`)
+remain unchanged.
+
 The TUI is a chat surface, not a dashboard: the transcript is the main activity
 area, with a composer beneath it and exactly one row of motion between them.
 Everything else — settings, models, providers, usage, context, session facts,

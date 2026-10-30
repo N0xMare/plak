@@ -6,7 +6,10 @@ fn late_writer_registration_flushes_launch_phases_without_another_phase()
     let directory = tempfile::tempdir()?;
     let paths = PlakPaths::from_home(directory.path().to_path_buf());
     attach(&paths, "00000000-0000-0000-0000-000000000001", false);
-    record(TuiTimingPhase::ReadyToTypeLocal, Duration::from_millis(20));
+    record(
+        StartupTimingPhase::ReadyToTypeLocal,
+        Duration::from_millis(20),
+    );
     let (writer, receiver) = crate::telemetry_sink::TelemetryWriter::detached(8);
     crate::telemetry_sink::register_telemetry_writer(paths.home(), &writer);
     assert_eq!(receiver.try_iter().count(), 2);
@@ -29,41 +32,49 @@ fn launch_phases_wait_for_the_background_telemetry_writer() {
         pending: Vec::new(),
         exit_import_due: false,
     };
-    timing.record(None, TuiTimingPhase::ProcessStart, Duration::ZERO);
+    timing.record(None, StartupTimingPhase::ProcessStart, Duration::ZERO);
     timing.record(
         None,
-        TuiTimingPhase::FirstFrameLocal,
+        StartupTimingPhase::FirstFrameLocal,
         Duration::from_millis(20),
     );
     timing.record(
         None,
-        TuiTimingPhase::ReadyToTypeLocal,
+        StartupTimingPhase::ReadyToTypeLocal,
         Duration::from_millis(20),
     );
     let (writer, receiver) = crate::telemetry_sink::TelemetryWriter::detached(8);
     timing.record(
         Some(&writer),
-        TuiTimingPhase::HostReadyBackground,
+        StartupTimingPhase::HostReadyBackground,
         Duration::from_secs(2),
     );
-    let phases: Vec<_> = receiver
-        .try_iter()
-        .filter_map(|item| match item {
-            crate::telemetry_store::TelemetryItem::Product(ProductObservation::TuiTiming {
-                phase,
-                elapsed,
-                ..
-            }) => Some((phase, elapsed)),
-            _ => None,
-        })
-        .collect();
+    let phases: Vec<_> =
+        receiver
+            .try_iter()
+            .filter_map(|item| match item {
+                crate::telemetry_store::TelemetryItem::Product(
+                    ProductObservation::StartupTiming { phase, elapsed, .. },
+                ) => Some((phase, elapsed)),
+                _ => None,
+            })
+            .collect();
     assert_eq!(
         phases,
         vec![
-            (TuiTimingPhase::ProcessStart, Duration::ZERO),
-            (TuiTimingPhase::FirstFrameLocal, Duration::from_millis(20)),
-            (TuiTimingPhase::ReadyToTypeLocal, Duration::from_millis(20)),
-            (TuiTimingPhase::HostReadyBackground, Duration::from_secs(2)),
+            (StartupTimingPhase::ProcessStart, Duration::ZERO),
+            (
+                StartupTimingPhase::FirstFrameLocal,
+                Duration::from_millis(20)
+            ),
+            (
+                StartupTimingPhase::ReadyToTypeLocal,
+                Duration::from_millis(20)
+            ),
+            (
+                StartupTimingPhase::HostReadyBackground,
+                Duration::from_secs(2)
+            ),
         ]
     );
     assert_eq!(timing.pending, [] as [ProductObservation; 0]);
@@ -93,22 +104,21 @@ fn an_exit_imported_before_writer_registration_is_emitted_on_registration() {
     timing.emit(None, observations);
     let (writer, receiver) = crate::telemetry_sink::TelemetryWriter::detached(8);
     timing.flush_pending(&writer);
-    let phases: Vec<_> = receiver
-        .try_iter()
-        .filter_map(|item| match item {
-            crate::telemetry_store::TelemetryItem::Product(ProductObservation::TuiTiming {
-                phase,
-                elapsed,
-                ..
-            }) => Some((phase, elapsed)),
-            _ => None,
-        })
-        .collect();
+    let phases: Vec<_> =
+        receiver
+            .try_iter()
+            .filter_map(|item| match item {
+                crate::telemetry_store::TelemetryItem::Product(
+                    ProductObservation::StartupTiming { phase, elapsed, .. },
+                ) => Some((phase, elapsed)),
+                _ => None,
+            })
+            .collect();
     assert_eq!(
         phases,
         vec![
-            (TuiTimingPhase::KeyToRestore, Duration::from_millis(4)),
-            (TuiTimingPhase::RestoreToExit, Duration::from_millis(12)),
+            (StartupTimingPhase::KeyToRestore, Duration::from_millis(4)),
+            (StartupTimingPhase::RestoreToExit, Duration::from_millis(12)),
         ]
     );
 }

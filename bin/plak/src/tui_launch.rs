@@ -916,7 +916,7 @@ fn run_tui_rounds(
             let deferred_resume_publication = resume_publication.clone();
             let prep_needs_setup = product_onboarding::needs_setup(&cfg);
             let (action_tx, event_rx, join) =
-                product_host::spawn_deferred_tui_host_with_clear_publication(
+                product_host::spawn_deferred_host_with_clear_publication(
                     move || {
                         prepare_deferred_tui_host(
                             prep_paths,
@@ -1113,10 +1113,10 @@ fn prepare_deferred_tui_host(
     prep_needs_setup: bool,
     effort: ReasoningEffort,
     effort_explicit: bool,
-) -> product_host::TuiHostPreparation<surface_protocol::PlakExtension> {
+) -> product_host::HostLaunchPreparation<surface_protocol::PlakExtension> {
     let shell_host = shell::host::ProductShellHost::boxed(&prep_paths);
     if prep_resume_picker {
-        let mode = product_host::TuiHostMode::Shell(product_host::ShellHostConfig {
+        let mode = product_host::HostLaunchMode::Shell(product_host::ShellHostConfig {
             surface: Some(shell::settings::ProductSurface::boxed(&prep_paths)),
             home: prep_paths.session_home(),
             binding: shell::binding_document::ProductRootBindingDocument::shared(&prep_paths),
@@ -1132,7 +1132,7 @@ fn prepare_deferred_tui_host(
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
         });
         let catalog_refresh = shell::catalog_refresh::hook(prep_paths.clone(), &mode);
-        return product_host::TuiHostPreparation {
+        return product_host::HostLaunchPreparation {
             providers: supported_provider_rows(),
             catalog_refresh: Some(catalog_refresh),
             shell_host,
@@ -1185,9 +1185,9 @@ fn prepare_deferred_tui_host(
                     resolve_ms: u64::try_from(resolve_started.elapsed().as_millis())
                         .unwrap_or(u64::MAX),
                 };
-                product_host::TuiHostMode::Attached(config)
+                product_host::HostLaunchMode::Attached(config)
             }
-            Err(error) => product_host::TuiHostMode::Shell(product_host::ShellHostConfig {
+            Err(error) => product_host::HostLaunchMode::Shell(product_host::ShellHostConfig {
                 surface: Some(shell::settings::ProductSurface::boxed(&prep_paths)),
                 product_home: prep_paths.home().to_path_buf(),
                 home: prep_paths.session_home(),
@@ -1204,7 +1204,7 @@ fn prepare_deferred_tui_host(
             }),
         }
     } else {
-        product_host::TuiHostMode::Shell(product_host::ShellHostConfig {
+        product_host::HostLaunchMode::Shell(product_host::ShellHostConfig {
             surface: Some(shell::settings::ProductSurface::boxed(&prep_paths)),
             home: prep_paths.session_home(),
             binding: shell::binding_document::ProductRootBindingDocument::shared(&prep_paths),
@@ -1229,7 +1229,7 @@ fn prepare_deferred_tui_host(
         })
     };
     let catalog_refresh = shell::catalog_refresh::hook(prep_paths.clone(), &mode);
-    product_host::TuiHostPreparation {
+    product_host::HostLaunchPreparation {
         providers,
         mode,
         catalog_refresh: Some(catalog_refresh),

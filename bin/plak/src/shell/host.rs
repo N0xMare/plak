@@ -91,7 +91,7 @@ impl ProductShellHost {
         Self { paths }
     }
 
-    /// A boxed handle for a [`plakous_hosted::runtime::TuiHostPreparation`].
+    /// A boxed handle for a [`plakous_hosted::runtime::HostLaunchPreparation`].
     #[must_use]
     pub fn boxed(paths: &PlakPaths) -> Box<dyn ShellHostRunner<PlakExtension>> {
         Box::new(Self::new(paths.clone()))

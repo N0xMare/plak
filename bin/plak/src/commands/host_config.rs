@@ -13,7 +13,7 @@ use super::support::{
     product_subscription_request_limits,
 };
 use crate::home::paths as product_paths;
-use crate::presentation::TuiNativeModelFact;
+use crate::presentation::HostLaunchNativeModelFact;
 use crate::presentation::tui_presentation_bundle;
 use crate::product_config;
 use crate::store::sessions as product_sessions;
@@ -263,7 +263,7 @@ pub fn build_host_config(
     cwd: &Path,
     ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
     resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-    native_models: &[TuiNativeModelFact],
+    native_models: &[HostLaunchNativeModelFact],
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, String> {
     let policy = product_config::SessionPolicy::load(paths)?;
     policy.install_request_budget();

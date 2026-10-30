@@ -188,7 +188,7 @@ impl NodeDetachStatus {
 
 /// Content-free terminal lifecycle measurement phase.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TuiTimingPhase {
+pub enum StartupTimingPhase {
     ProcessStart,
     FirstFrameLocal,
     ReadyToTypeLocal,
@@ -197,7 +197,7 @@ pub enum TuiTimingPhase {
     RestoreToExit,
 }
 
-impl TuiTimingPhase {
+impl StartupTimingPhase {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -243,10 +243,10 @@ pub enum ProductObservation {
         session_id: SessionId,
         bound: RunBound,
     },
-    TuiTiming {
+    StartupTiming {
         at: Timestamp,
         session_id: SessionId,
-        phase: TuiTimingPhase,
+        phase: StartupTimingPhase,
         resumed: bool,
         elapsed: Duration,
     },
@@ -334,7 +334,7 @@ impl ProductObservation {
         match self {
             Self::TurnUsage { at, .. }
             | Self::RunBoundExit { at, .. }
-            | Self::TuiTiming { at, .. }
+            | Self::StartupTiming { at, .. }
             | Self::ModelRetry { at, .. }
             | Self::TreeNodeSpawned { at, .. }
             | Self::TreeNodeAttached { at, .. }
@@ -353,7 +353,7 @@ impl ProductObservation {
         match self {
             Self::TurnUsage { session_id, .. }
             | Self::RunBoundExit { session_id, .. }
-            | Self::TuiTiming { session_id, .. }
+            | Self::StartupTiming { session_id, .. }
             | Self::ModelRetry { session_id, .. }
             | Self::TreeNodeSpawned { session_id, .. }
             | Self::TreeNodeAttached { session_id, .. }

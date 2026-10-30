@@ -2,7 +2,7 @@
 //! Ready native vertical other than the attached one re-fetches its catalog
 //! in the background and the refreshed provider snapshot is published to the
 //! surface. Product policy, composed into the host through
-//! `TuiHostPreparation::catalog_refresh`.
+//! `HostLaunchPreparation::catalog_refresh`.
 
 use std::thread;
 use std::time::Instant;
@@ -13,23 +13,23 @@ use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::{
     CompatibilityStatus, NativeAuthStatus, NativeProvider, NativeSubscriptions, SubscriptionPaths,
 };
-use plakous_hosted::runtime::{Sender, TuiHostMode, oauth_provider_for_account};
+use plakous_hosted::runtime::{HostLaunchMode, Sender, oauth_provider_for_account};
 use plakous_hosted::session_log::{SessionEvent, SessionLog};
 
 /// The refresh hook for one prepared host mode: only an attached mode
 /// excludes its selected provider. Logs under the record only once published.
 pub(crate) fn hook(
     paths: PlakPaths,
-    mode: &TuiHostMode<PlakExtension>,
+    mode: &HostLaunchMode<PlakExtension>,
 ) -> Box<dyn FnOnce(Sender<PlakExtension>) + Send> {
     let (session_id, account) = refresh_context(mode);
     Box::new(move |events| spawn(paths, session_id, account, events))
 }
 
-fn refresh_context(mode: &TuiHostMode<PlakExtension>) -> (Option<String>, Option<String>) {
+fn refresh_context(mode: &HostLaunchMode<PlakExtension>) -> (Option<String>, Option<String>) {
     let (record, attached_account) = match mode {
-        TuiHostMode::Attached(config) => (&config.session, config.session.account.clone()),
-        TuiHostMode::Shell(config) => (&config.session, None),
+        HostLaunchMode::Attached(config) => (&config.session, config.session.account.clone()),
+        HostLaunchMode::Shell(config) => (&config.session, None),
     };
     let session_id = (record.store_revision != 0).then(|| record.id.clone());
     (session_id, attached_account)
@@ -115,19 +115,19 @@ mod tests {
             config.session.account = Some(account.into());
             crate::store::sessions::save_session(&paths, &mut config.session).unwrap();
             let expected_id = config.session.id.clone();
-            let mode = TuiHostMode::Attached(config);
+            let mode = HostLaunchMode::Attached(config);
             let (session_id, account) = refresh_context(&mode);
             assert_eq!(session_id.as_deref(), Some(expected_id.as_str()));
             let providers = refresh_providers(account.as_deref()).collect::<Vec<_>>();
             assert_eq!(providers.len(), 2);
             assert!(!providers.contains(&provider));
 
-            let TuiHostMode::Attached(config) = mode else {
+            let HostLaunchMode::Attached(config) = mode else {
                 unreachable!();
             };
             // The same persisted selection falls back because its ReadyCatalog
             // is empty. Its account is a selection, not an attached provider.
-            let mode = TuiHostMode::Shell(ShellHostConfig {
+            let mode = HostLaunchMode::Shell(ShellHostConfig {
                 product_home: config.product_home,
                 binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
                 subscriptions: None,
@@ -161,7 +161,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (config, _, _) = product_injected_attached_host(dir.path());
         assert_eq!(config.session.store_revision, 0);
-        let (session_id, account) = refresh_context(&TuiHostMode::Attached(config));
+        let (session_id, account) = refresh_context(&HostLaunchMode::Attached(config));
         assert_eq!(session_id, None);
         assert_eq!(account.as_deref(), Some("codex"));
     }

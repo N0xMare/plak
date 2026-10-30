@@ -188,8 +188,8 @@ pub use resources::sample_process_resources;
 pub use source_release::SourceReleases;
 pub use startup::HostWorker;
 mod worker;
-pub use startup::spawn_deferred_tui_host;
-pub use startup::spawn_deferred_tui_host_with_clear_publication;
+pub use startup::spawn_deferred_host;
+pub use startup::spawn_deferred_host_with_clear_publication;
 pub use startup::spawn_host_worker;
 pub use startup::{
     SeededSessionCreation, create_seeded_session, create_seeded_session_with_preflight,
@@ -503,7 +503,7 @@ pub use crate::surface_protocol::{ContentEvent, HostEvent, UserAction};
 
 /// One Ready-catalog native model fact used to construct host target authority.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TuiNativeModelFact {
+pub struct HostLaunchNativeModelFact {
     /// Product account label (`codex`, `grok`, `claude`).
     pub account: String,
     /// Exact catalog model id.
@@ -523,7 +523,7 @@ pub enum HostTargetAuthority {
         provider: NativeProvider,
         resolved: Arc<ResolvedProvider>,
         subscriptions: NativeSubscriptions,
-        catalog_candidates: Arc<[TuiNativeModelFact]>,
+        catalog_candidates: Arc<[HostLaunchNativeModelFact]>,
     },
     Platform {
         provider: crate::binding::PlatformProvider,
@@ -1089,20 +1089,20 @@ pub struct ShellFallbackFacts<
 }
 
 /// Result of Plak-owned asynchronous discovery and attachment preparation.
-pub struct TuiHostPreparation<
+pub struct HostLaunchPreparation<
     P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core,
 > {
     pub providers: Vec<plakous_host_protocol::views::ProviderDef>,
-    pub mode: TuiHostMode<P>,
+    pub mode: HostLaunchMode<P>,
     /// Product-owned background work started once the host is up (the live
     /// catalog refresh); it receives the content-only Sender boundary, never
     /// the raw received-observation mailbox. `None` runs nothing.
     ///
     /// ```compile_fail,E0308
-    /// use plakous_hosted::runtime::TuiHostPreparation;
+    /// use plakous_hosted::runtime::HostLaunchPreparation;
     /// use plakous_host_protocol::{Core, SessionObservation};
     /// use plakous_host_protocol::views::PresentationSnapshot;
-    /// fn misroute(prepared: &mut TuiHostPreparation<Core>) {
+    /// fn misroute(prepared: &mut HostLaunchPreparation<Core>) {
     ///     prepared.catalog_refresh = Some(Box::new(|events| {
     ///         let _ = events.send(SessionObservation::PresentationSnapshot(PresentationSnapshot::default()));
     ///     }));
@@ -1118,7 +1118,7 @@ pub struct TuiHostPreparation<
     clippy::large_enum_variant,
     reason = "one value, moved once into the host thread; boxing buys nothing"
 )]
-pub enum TuiHostMode<P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core> {
+pub enum HostLaunchMode<P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core> {
     Attached(HostConfig<P>),
     Shell(ShellHostConfig<P>),
 }

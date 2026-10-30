@@ -1168,7 +1168,7 @@ fn write_product_observation(
             transaction.execute("INSERT INTO product_events (at, kind, session_id, status) VALUES (?1, 'run_bound_exit', ?2, ?3)",
                 params![at, session_id, bound.as_str()])?;
         }
-        ProductObservation::TuiTiming {
+        ProductObservation::StartupTiming {
             phase,
             resumed,
             elapsed,

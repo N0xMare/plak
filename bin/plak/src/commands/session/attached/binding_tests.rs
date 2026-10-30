@@ -39,7 +39,7 @@ fn picker_filters_are_not_evidence_that_the_catalog_removed_a_model() {
             entries: Vec::new(),
         },
     ]);
-    let facts = [crate::presentation::TuiNativeModelFact {
+    let facts = [crate::presentation::HostLaunchNativeModelFact {
         account: "codex".into(),
         exact_id: "filtered-model".into(),
         native_tool_mode: None,

@@ -9,7 +9,7 @@ use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::{
     NativeModelVisibility, NativeProvider, NativeSubscriptions, NativeToolMode, SubscriptionPaths,
 };
-pub use plakous_hosted::runtime::TuiNativeModelFact;
+pub use plakous_hosted::runtime::HostLaunchNativeModelFact;
 
 use crate::cli_output;
 use crate::commands::support::native_subscription_failure;
@@ -102,7 +102,7 @@ pub struct TuiPresentationBundle {
     /// The exact Ready catalog: one section per account for the hosted session.
     pub sections: plakous_host_protocol::views::ReadyCatalog,
     /// Authenticated native catalog facts before picker filters.
-    pub native_models: Vec<TuiNativeModelFact>,
+    pub native_models: Vec<HostLaunchNativeModelFact>,
 }
 
 /// Frozen product coding tuples. Catalogs may list other enrolled ids.
@@ -403,7 +403,7 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
         if admitted {
             match backend.models(provider) {
                 Ok(models) => {
-                    native_models.extend(models.iter().map(|model| TuiNativeModelFact {
+                    native_models.extend(models.iter().map(|model| HostLaunchNativeModelFact {
                         account: account.to_owned(),
                         exact_id: model.exact_id.clone(),
                         native_tool_mode: model.native_tool_mode,

@@ -30,8 +30,8 @@ use super::info::plan_state_authority;
 use super::models::effort_from_record;
 use super::rebind::durable_tree_id;
 use super::{
-    HostConfig, HostLifecyclePhase, HostTargetAuthority, OpenRouterHostEvidence, RuntimeRole,
-    Sender, ShellHostConfig, TuiHostMode, TuiHostPreparation,
+    HostConfig, HostLaunchMode, HostLaunchPreparation, HostLifecyclePhase, HostTargetAuthority,
+    OpenRouterHostEvidence, RuntimeRole, Sender, ShellHostConfig,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -172,20 +172,18 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
 /// The returned channels are immediately usable by the TUI. The controller
 /// publishes activity while discovery/attachment runs, then transfers the same
 /// action receiver to either the one canonical runtime host or the shell host.
-pub fn spawn_deferred_tui_host<P: plakous_host_protocol::ProtocolExtension>(
-    prepare: impl FnOnce() -> TuiHostPreparation<P> + Send + 'static,
+pub fn spawn_deferred_host<P: plakous_host_protocol::ProtocolExtension>(
+    prepare: impl FnOnce() -> HostLaunchPreparation<P> + Send + 'static,
 ) -> (
     crate::surface_protocol::UserActionSender<P>,
     crate::surface_protocol::HostEventReceiver<P>,
     HostWorkerHandle,
 ) {
-    spawn_deferred_tui_host_with_clear_publication(prepare, None)
+    spawn_deferred_host_with_clear_publication(prepare, None)
 }
 
-pub fn spawn_deferred_tui_host_with_clear_publication<
-    P: plakous_host_protocol::ProtocolExtension,
->(
-    prepare: impl FnOnce() -> TuiHostPreparation<P> + Send + 'static,
+pub fn spawn_deferred_host_with_clear_publication<P: plakous_host_protocol::ProtocolExtension>(
+    prepare: impl FnOnce() -> HostLaunchPreparation<P> + Send + 'static,
     clear_publication: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> (
     crate::surface_protocol::UserActionSender<P>,
@@ -211,7 +209,7 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
         }
         let shell_host = prepared.shell_host;
         match prepared.mode {
-            TuiHostMode::Attached(config) => {
+            HostLaunchMode::Attached(config) => {
                 let facts = shell_host.fallback_facts();
                 let mut fallback = ShellHostConfig {
                     surface: facts.surface,
@@ -255,7 +253,7 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
                 }
                 Ok(())
             }
-            TuiHostMode::Shell(config) => {
+            HostLaunchMode::Shell(config) => {
                 let _ = event_tx.send(ContentEvent::AgentAttached(false));
                 let _ = event_tx.send(ContentEvent::Activity {
                     label: "provider setup required".into(),

@@ -217,7 +217,7 @@ fn build_attached_host_config(
 fn validate_catalog_for_attach(
     target: &product_config::ProductTargetSelection,
     catalog: &plakous_host_protocol::views::ReadyCatalog,
-    native_models: &[crate::presentation::TuiNativeModelFact],
+    native_models: &[crate::presentation::HostLaunchNativeModelFact],
     account: &str,
     model: &str,
     effort_explicit: bool,
@@ -239,7 +239,7 @@ fn validate_catalog_for_attach(
 fn require_catalog_binding(
     target: &product_config::ProductTargetSelection,
     catalog: &plakous_host_protocol::views::ReadyCatalog,
-    native_models: &[crate::presentation::TuiNativeModelFact],
+    native_models: &[crate::presentation::HostLaunchNativeModelFact],
     account: &str,
     model: &str,
 ) -> Result<(), AttachedConfigError> {
