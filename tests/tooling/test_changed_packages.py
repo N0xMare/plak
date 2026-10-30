@@ -29,7 +29,7 @@ DIRS = {
 class TouchedPackagesTests(unittest.TestCase):
     def test_ignored_proptest_regressions_are_package_inputs(self):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(
-                os.environ, {"PATH": "/usr/bin:/bin"}):
+                os.environ, {"PATH": "/usr/bin:/bin"}, clear=True):
             root = Path(temporary)
             def git(*args):
                 return subprocess.check_output(["git", *args], cwd=root, text=True)
@@ -71,11 +71,15 @@ class TouchedPackagesTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.touched("bin/plak/src/lib.rs", path), ["--workspace"])
 
+    def test_vendored_patch_sources_select_the_whole_workspace(self):
+        self.assertEqual(self.touched("vendor/monty-typeshed/src/lib.rs"), ["--workspace"])
+
     def test_the_real_workspace_maps_every_manifest_to_its_package(self):
         dirs = CHANGED.package_dirs()
         self.assertEqual(dirs["bin/plak"], "plak")
         for directory, name in dirs.items():
-            self.assertEqual(self.touched_in(dirs, f"{directory}/Cargo.toml"), [name])
+            expected = ["--workspace"] if directory.startswith("vendor/") else [name]
+            self.assertEqual(self.touched_in(dirs, f"{directory}/Cargo.toml"), expected)
 
     @staticmethod
     def touched_in(dirs, path):

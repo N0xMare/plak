@@ -644,7 +644,9 @@ packages replace the diff. At a JJ root, shared root-checked listings use
 an ancestor repository or fall back to an empty set. A source export uses a
 walk excluding `.git`, `.jj` and `target`; changed-package discovery requires a
 repository or explicit packages. A root Cargo input (manifest, lockfile, toolchain,
-lint, format or nextest config, `.cargo/`) selects every package. Its parallel
+lint, format or nextest config, `.cargo/`), or any path under `vendor/`
+(vendored members and the patched `monty-typeshed` source), selects every
+package. Its parallel
 lane passes `-E 'rdeps(=<pkg>) | ...'`, which nextest intersects with the
 profile's own filter; an empty selection passes, and no touched package runs
 only static. Fast leaves the serial lanes to check and is not pre-commit

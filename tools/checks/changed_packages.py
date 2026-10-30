@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Map the working-tree diff against HEAD to the workspace packages it touches.
 
-`scripts/dev-check.sh --fast` lints and tests only these packages (and, for
-tests, their reverse dependencies). A file belongs to the package whose
+`scripts/dev-check.sh --fast` selects these packages and their reverse
+dependencies for its parallel test lane; static checks cover the workspace.
+A file belongs to the package whose
 directory is its longest prefix. A change to a workspace-wide Cargo input
 (the root manifest, the lockfile, toolchain, lint or nextest config) touches
-every package. Files outside any package, such as docs and Python tooling,
-touch none.
+every package, as does any path under vendor/. Files outside any package,
+such as docs and Python tooling, touch none.
 
 Usage:
   changed_packages.py            # one package name per line, or `--workspace`
@@ -36,7 +37,7 @@ WORKSPACE_INPUTS = {
     "rustfmt.toml",
     ".config/nextest.toml",
 }
-WORKSPACE_PREFIXES = (".cargo/",)
+WORKSPACE_PREFIXES = (".cargo/", "vendor/")
 
 
 def package_dirs(root: Path = REPO_ROOT) -> dict[str, str]:

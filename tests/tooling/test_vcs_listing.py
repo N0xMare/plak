@@ -91,7 +91,10 @@ class ListingTests(unittest.TestCase):
                     vcs.evidence_tree(root)
 
     def test_git_ignored_regressions_outside_crates_are_inputs(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
+            'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+            'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
+        }, clear=True):
             root = Path(temporary)
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
             subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-C', str(root), 'commit', '--allow-empty', '-qm', 'base'], check=True)
