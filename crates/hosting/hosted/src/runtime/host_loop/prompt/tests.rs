@@ -5,6 +5,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::surface_protocol::HostEvent;
+use plakous_host_protocol::status::{HostStatusDetail, SteerSource};
 
 #[cfg(test)]
 mod preparation_compaction_tests;
@@ -800,14 +801,19 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
         .unwrap();
     let response = next(&|event| match event {
         HostEvent::Row(TranscriptRow::Steer { .. }) => true,
-        HostEvent::Status { detail, .. } => detail.as_deref() == Some("steering..."),
+        HostEvent::Status { detail, .. } => matches!(
+            detail,
+            Some(HostStatusDetail::Steering {
+                source: SteerSource::QueuedDelivery
+            })
+        ),
         HostEvent::Row(TranscriptRow::Notice(notice)) => {
             notice.text == "queue changed; refreshed from host snapshot"
         }
         _ => false,
     });
     assert!(
-        matches!(response, HostEvent::Status { detail, .. } if detail.as_deref() == Some("steering...")),
+        matches!(response, HostEvent::Status { detail, .. } if matches!(detail, Some(HostStatusDetail::Steering { source: SteerSource::QueuedDelivery }))),
         "acceptance publishes chrome, not an unapplied transcript row"
     );
     gate.release();
@@ -1660,7 +1666,7 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
             .any(|event| matches!(event, HostEvent::DraftRejected(_)))
     );
     assert!(events.iter().any(|event| matches!(event, HostEvent::QueueSnapshot { items, .. } if items.len() == 2 && !items[0].rejected && !items[1].rejected)));
-    assert!(events.iter().any(|event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if detail == "prompt not admitted")));
+    assert!(events.iter().any(|event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if matches!(detail, HostStatusDetail::PromptNotAdmitted))));
     assert!(events.iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.starts_with("session store is full (checkpoints ") && message.contains("plak session gc --all") && message.contains("plak session delete <id>") && message.contains("prompt was not admitted"))));
     injector
         .execute(

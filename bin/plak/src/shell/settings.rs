@@ -6,6 +6,7 @@ use crate::surface_protocol::{
     AgentAcknowledgement, ContentEvent, PlakExtension, ProfileOutcome, SurfaceIntent,
     SurfaceObservation,
 };
+use plakous_host_protocol::status::HostPhase;
 use plakous_hosted::binding::ProtocolSelection;
 
 use crate::shell::host::{commit_root_template, settings_save_changes_root_binding};
@@ -1072,9 +1073,13 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                     format!("config: {path}"),
                 )));
                 let _ = events.send(ContentEvent::Status {
-                    phase: "idle".into(),
+                    phase: HostPhase::Idle,
                     queue_len: facts.queue_len,
-                    detail: Some(format!("config: {path}")),
+                    detail: Some(
+                        plakous_host_protocol::status::HostStatusDetail::ConfigurationPath {
+                            path: path.clone(),
+                        },
+                    ),
                 });
             }
             SurfaceIntent::OpenSettings => emit_settings(&self.paths, events),

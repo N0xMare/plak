@@ -274,7 +274,7 @@ fn a_quit_after_an_interrupt_records_exactly_one_cancel_command() {
         &events,
         &mut seen,
         "interrupting",
-        |event| matches!(event, HostEvent::Status { phase, .. } if phase == "interrupting"),
+        |event| matches!(event, HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Interrupting)),
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
@@ -362,7 +362,7 @@ fn a_quit_after_a_refused_interrupt_requests_the_cancel() {
         &events,
         &mut seen,
         "refused cancel notice",
-        |event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if detail.contains("cancel was refused by the runtime")),
+        |event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if matches!(detail, plakous_host_protocol::status::HostStatusDetail::CancelUnsettled { cause: plakous_host_protocol::status::CancelUnsettled::RuntimeRefused { .. } })),
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();

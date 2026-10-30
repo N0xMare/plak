@@ -392,7 +392,7 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
     assert!(
         during.iter().any(|event| matches!(
             event,
-            HostEvent::Status { phase, .. } if phase == "compacting"
+            HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Compacting)
         )),
         "scheduled compact must paint compacting, during={during:?}"
     );
@@ -411,7 +411,7 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
     assert!(
         after.iter().any(|event| matches!(
             event,
-            HostEvent::Status { phase, .. } if phase == "idle"
+            HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle)
         )),
         "a failed scheduled compact must return the HUD to idle, after={after:?}"
     );

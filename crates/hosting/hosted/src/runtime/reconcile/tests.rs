@@ -1,4 +1,5 @@
 use crate::runtime::test_kit::TestExtension;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type Sender = crate::runtime::Sender<TestExtension>;
 
@@ -96,13 +97,13 @@ fn failed_exceptional_terminal_publication_never_emits_success_idle() {
     assert_eq!(
         observed,
         [HostEvent::Status {
-            phase: "error".into(),
+            phase: HostPhase::Error,
             queue_len: 3,
-            detail: Some("needs recovery · next prompt recovers".into()),
+            detail: Some(HostStatusDetail::RecoveryPending),
         }]
     );
     assert!(!observed.iter().any(|event| matches!(
         event,
-        HostEvent::Status { phase, .. } if phase == "idle"
+        HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle)
     )));
 }

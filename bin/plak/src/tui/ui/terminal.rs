@@ -19,6 +19,7 @@ use crate::tui::ui::pilot_sidecar::PilotSidecar;
 use crossterm::ExecutableCommand;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::tty::IsTty;
+use plakous_host_protocol::status::HostPhase;
 
 // Keep printable input as terminal-composed text, not report-all key events.
 const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
@@ -943,7 +944,7 @@ pub(super) fn request_terminal_handoff(
 pub(super) fn commit_sent_action(app: &mut App, action: &UserAction) {
     if action == &UserAction::ClearSession {
         app.clear_pending = true;
-        "clear".clone_into(&mut app.phase);
+        app.phase = HostPhase::Clear;
         app.status_detail = Some("clear pending authoritative host acknowledgement".to_owned());
         return;
     }

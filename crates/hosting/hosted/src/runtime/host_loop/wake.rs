@@ -3,6 +3,7 @@
 use super::{CliFailure, CliResult, HostLoop, HostStep, Instant, SessionQueueItem};
 use crate::driver::wake::{WakeCoalescer, WakeDecision, WakeSources};
 use crate::sessions::{NoticeScope, TranscriptRow};
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::time::Duration;
 
 #[cfg(test)]
@@ -137,9 +138,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let _ = self
             .events
             .send(crate::surface_protocol::ContentEvent::Status {
-                phase: "idle".into(),
+                phase: HostPhase::Idle,
                 queue_len: self.config.session.pending_queue.len(),
-                detail: Some("prompt not admitted; queue paused".into()),
+                detail: Some(HostStatusDetail::PromptNotAdmittedQueuePaused),
             });
         Ok(())
     }

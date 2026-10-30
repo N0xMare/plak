@@ -32,6 +32,7 @@ use plakous::application::ApplicationExecutor;
 use plakous::sessions::{
     AgentSessionsErrorKind, CompactReason, CompactSessionOutcome, ContextQuery, SessionOperationId,
 };
+use plakous_host_protocol::status::HostPhase;
 use std::time::Instant;
 
 mod scheduled;
@@ -631,7 +632,7 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
         );
     }
     let _ = events.send(ContentEvent::Status {
-        phase: "idle".into(),
+        phase: HostPhase::Idle,
         queue_len: config.session.pending_queue.len(),
         detail: None,
     });

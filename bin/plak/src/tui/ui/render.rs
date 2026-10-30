@@ -7,6 +7,7 @@ use super::{
     bounded_panel_height, desired_block_height, modal_chrome, tool_is_running, user_phase,
     user_status_detail, visual_cursor_xy_from_rows,
 };
+use plakous_host_protocol::status::HostPhase;
 use unicode_segmentation::UnicodeSegmentation;
 
 impl App {
@@ -196,20 +197,20 @@ impl App {
         if self.pending_approval().is_some() {
             return Some("approval needed".to_owned());
         }
-        if matches!(self.phase.as_str(), "error" | "not_ready") {
+        if matches!(self.phase, HostPhase::Error | HostPhase::NotReady) {
             let reason = self
                 .status_detail
                 .as_deref()
-                .map_or_else(|| user_phase(&self.phase).to_owned(), user_status_detail);
+                .map_or_else(|| user_phase(self.phase).to_owned(), user_status_detail);
             return Some(format!("error: {reason}"));
         }
-        if self.phase == "interrupted" {
+        if self.phase == HostPhase::Interrupted {
             return Some("interrupted".to_owned());
         }
         if self.busy && self.cancel_pending {
             return Some("cancelling…".to_owned());
         }
-        if self.phase == "rebind" {
+        if self.phase == HostPhase::Rebind {
             return Some("switching model…".to_owned());
         }
         // Pending results, questions, process exits, and pauses are idle
@@ -229,13 +230,13 @@ impl App {
                 StorageLevel::Refused => Some("storage low · new turns refused".to_owned()),
             };
         }
-        if self.phase == "interrupting" {
+        if self.phase == HostPhase::Interrupting {
             return Some("cancelling…".to_owned());
         }
         if let Some(account) = &self.credential_wait {
             return Some(format!("waiting for login: run `plak login {account}`"));
         }
-        if self.phase == "compacting" {
+        if self.phase == HostPhase::Compacting {
             return Some("compacting".to_owned());
         }
         if let Some(account) = &self.request_slot_wait {

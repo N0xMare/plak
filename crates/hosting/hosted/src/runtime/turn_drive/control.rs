@@ -15,6 +15,9 @@ use crate::runtime::admission::{
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{
+    CancelUnsettled, ControlFailure, DiagnosticText, HostPhase, HostStatusDetail, SteerSource,
+};
 use std::time::Duration;
 
 const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
@@ -213,9 +216,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                                     .send(ContentEvent::PromptAdmitted(item.protocol(false)));
                             }
                             let _ = self.host.events.send(ContentEvent::Status {
-                                phase: "running".into(),
+                                phase: HostPhase::Running,
                                 queue_len: self.host.session.pending_queue.len(),
-                                detail: Some("queued follow-up".into()),
+                                detail: Some(HostStatusDetail::QueuedFollowUp),
                             });
                         }
                         Ok(false) => {
@@ -251,17 +254,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             Ok(_) => {
                                 accept_draft(self.host.events, action);
                                 let _ = self.host.events.send(ContentEvent::Status {
-                                    phase: "running".into(),
+                                    phase: HostPhase::Running,
                                     queue_len: self.host.session.pending_queue.len(),
-                                    detail: Some("steering…".into()),
+                                    detail: Some(HostStatusDetail::Steering {
+                                        source: SteerSource::Direct,
+                                    }),
                                 });
                             }
                             Err(err) => {
                                 reject_draft(self.host.events, action);
                                 let _ = self.host.events.send(ContentEvent::Status {
-                                    phase: "running".into(),
+                                    phase: HostPhase::Running,
                                     queue_len: self.host.session.pending_queue.len(),
-                                    detail: Some(format!("steer rejected: {err}")),
+                                    detail: Some(HostStatusDetail::SteerRejected {
+                                        cause: ControlFailure {
+                                            diagnostic: DiagnosticText::new(err.to_string()),
+                                        },
+                                    }),
                                 });
                             }
                         }
@@ -291,62 +300,68 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     let detail = self
                         .cancel_unsettled
                         .clone()
-                        .unwrap_or_else(|| "interrupt requested".into());
+                        .map_or(HostStatusDetail::InterruptRequested, |cause| {
+                            HostStatusDetail::CancelUnsettled { cause }
+                        });
                     let _ = self.host.events.send(ContentEvent::Status {
-                        phase: "interrupting".into(),
+                        phase: HostPhase::Interrupting,
                         queue_len: self.host.session.pending_queue.len(),
                         detail: Some(detail),
                     });
                 }
-                Ok(UserAction::Interrupt) => match self.request_cancel().await {
-                    Ok(CancellationStatus::AlreadyTerminal) => self.cancel_accepted = true,
-                    Ok(
-                        status @ (CancellationStatus::AlreadyRequested
-                        | CancellationStatus::Requested),
-                    ) => {
-                        self.cancel_accepted = true;
-                        self.cancel_pending = true;
-                        self.projection.cancel_requested = true;
-                        if matches!(status, CancellationStatus::Requested)
-                            || self.cancel_settle_deadline.is_none()
-                        {
-                            self.cancel_settle_deadline =
-                                Some(Instant::now() + HOST_CANCEL_SETTLE_TIMEOUT);
+                Ok(UserAction::Interrupt) => {
+                    match self.request_cancel().await {
+                        Ok(CancellationStatus::AlreadyTerminal) => self.cancel_accepted = true,
+                        Ok(
+                            status @ (CancellationStatus::AlreadyRequested
+                            | CancellationStatus::Requested),
+                        ) => {
+                            self.cancel_accepted = true;
+                            self.cancel_pending = true;
+                            self.projection.cancel_requested = true;
+                            if matches!(status, CancellationStatus::Requested)
+                                || self.cancel_settle_deadline.is_none()
+                            {
+                                self.cancel_settle_deadline =
+                                    Some(Instant::now() + HOST_CANCEL_SETTLE_TIMEOUT);
+                            }
+                            let _ = self.host.events.send(ContentEvent::Status {
+                                phase: HostPhase::Interrupting,
+                                queue_len: self.host.session.pending_queue.len(),
+                                detail: Some(HostStatusDetail::InterruptRequested),
+                            });
                         }
-                        let _ = self.host.events.send(ContentEvent::Status {
-                            phase: "interrupting".into(),
-                            queue_len: self.host.session.pending_queue.len(),
-                            detail: Some("interrupt requested".into()),
-                        });
+                        Ok(_) => {}
+                        // A refusal that names the turn as gone is an observation
+                        // that it ended, not evidence it is still running: the
+                        // runtime drops a turn from its admitted set only after
+                        // publishing that turn's terminal. The host waits for that
+                        // terminal instead of latching an unsettled cancel.
+                        Err(error) if error.turn_is_no_longer_admitted() => {
+                            self.cancel_accepted = true;
+                        }
+                        Err(error) => {
+                            let detail = CancelUnsettled::RuntimeRefused {
+                                cause: ControlFailure {
+                                    diagnostic: DiagnosticText::new(error.to_string()),
+                                },
+                            };
+                            self.cancel_unsettled = Some(detail.clone());
+                            self.cancel_pending = true;
+                            self.projection.cancel_requested = true;
+                            apply_cancel_settlement(
+                                self.host.rows,
+                                self.host.store,
+                                self.host.home,
+                                self.host.session,
+                                self.host.events,
+                                &CancelSettlement::Unsettled(detail),
+                                None,
+                            )
+                            .await;
+                        }
                     }
-                    Ok(_) => {}
-                    // A refusal that names the turn as gone is an observation
-                    // that it ended, not evidence it is still running: the
-                    // runtime drops a turn from its admitted set only after
-                    // publishing that turn's terminal. The host waits for that
-                    // terminal instead of latching an unsettled cancel.
-                    Err(error) if error.turn_is_no_longer_admitted() => {
-                        self.cancel_accepted = true;
-                    }
-                    Err(error) => {
-                        let detail = format!(
-                            "cancel was refused by the runtime ({error}); the turn is still running"
-                        );
-                        self.cancel_unsettled = Some(detail.clone());
-                        self.cancel_pending = true;
-                        self.projection.cancel_requested = true;
-                        apply_cancel_settlement(
-                            self.host.rows,
-                            self.host.store,
-                            self.host.home,
-                            self.host.session,
-                            self.host.events,
-                            &CancelSettlement::Unsettled(detail),
-                            None,
-                        )
-                        .await;
-                    }
-                },
+                }
                 Ok(UserAction::DropQueued) => {
                     match commit_session_update(
                         self.host.store,

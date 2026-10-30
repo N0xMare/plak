@@ -12,6 +12,7 @@ use crate::tui::presentation::{ContextUsage, PreparedInputUsage};
 use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction, user_action_channel};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use plakous_host_protocol::topology::AttemptStatus;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -520,9 +521,11 @@ fn injected_event_loop_control_plane_sequence() {
     ev_tx.send(HostEvent::SetBusy(true)).unwrap();
     ev_tx
         .send(HostEvent::Status {
-            phase: "running".into(),
+            phase: HostPhase::Running,
             queue_len: 0,
-            detail: Some("turn started".into()),
+            detail: Some(HostStatusDetail::PlanDiagnostic {
+                diagnostic: DiagnosticText::new("turn started"),
+            }),
         })
         .unwrap();
     ev_tx
@@ -533,7 +536,7 @@ fn injected_event_loop_control_plane_sequence() {
         .unwrap();
     drain(&mut app);
     assert!(app.busy);
-    assert_eq!(app.phase, "running");
+    assert_eq!(app.phase, HostPhase::Running);
 
     for ch in "second".chars() {
         assert!(app.handle_key(key(KeyCode::Char(ch))).is_none());
@@ -544,9 +547,9 @@ fn injected_event_loop_control_plane_sequence() {
 
     ev_tx
         .send(HostEvent::Status {
-            phase: "running".into(),
+            phase: HostPhase::Running,
             queue_len: 1,
-            detail: Some("queued follow-up".into()),
+            detail: Some(HostStatusDetail::QueuedFollowUp),
         })
         .unwrap();
     drain(&mut app);
@@ -628,7 +631,7 @@ fn clear_slash_produces_clear_session_action() {
     assert!(blocks_contain(&app, "preserve me"));
     assert_eq!(app.session_id.as_deref(), Some("source-session"));
     assert!(app.clear_pending);
-    assert_eq!(app.phase, "clear");
+    assert_eq!(app.phase, HostPhase::Clear);
     assert!(
         app.status_detail
             .as_deref()

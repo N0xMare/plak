@@ -3224,6 +3224,20 @@ connection.
 
 #### 4.3.2 Events
 
+Internal `SessionObservation::Status` carries typed `HostPhase` and optional
+`HostStatusDetail`, never frontend prose. The twelve host phases are `idle`,
+`running`, `preparing`, `interrupting`, `interrupted`, `error`, `not_ready`,
+`compacting`, `clear`, `resume`, `fork` and `rebind`. Tree and queue pauses,
+transition stages with cumulative integer milliseconds, direct versus queued
+steering, and cancellation refusal versus settlement timeout remain typed
+facts. Phase-dependent TUI and hosted terminal-boundary decisions match those
+enums. Bounded external diagnostics are data, not remedy-selection authority.
+Plak renders Status and visible Notice observations before the neutral JSONL
+envelope projection; host-protocol does not format these product-owned cases.
+JSONL v1 keeps its phase/detail spellings, queue length, correlation and absent
+detail behavior. In particular direct `steering…` and queued `steering...`
+remain distinct; `note` is a notice projection, not a thirteenth host phase.
+
 `background` is an edge-triggered action, not a persistent mode. It neither
 steers nor cancels: only top-level promotable commands already running when the
 driver receives it are affected. Idle requests do nothing. Schema version stays

@@ -10,6 +10,7 @@ use crate::tui::TreeNavigator;
 use crate::tui::tree_navigator::RESTORED_PAUSED_NAVIGATOR_HINT;
 use crate::tui::{HostEvent, UserAction, user_action_channel};
 use crossterm::event::KeyCode;
+use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::topology::{
     AttemptStatus, CandidateId, NodeStatus, Tier, TreeAdmissionState, WorkspaceMode,
     WorkspaceStatus,
@@ -723,7 +724,7 @@ fn canvas_root_box_follows_the_header_phase() {
             tree_node("kid", Some("root"), 1),
         ]),
     );
-    "idle".clone_into(&mut app.phase);
+    app.phase = HostPhase::Idle;
     app.sync_root_turn_projection();
     let nav = app.tree_navigator.as_mut().expect("the canvas is open");
     assert_eq!(nav.selected_node().unwrap().status, "idle");
@@ -735,7 +736,7 @@ fn canvas_root_box_follows_the_header_phase() {
     );
     let _ = nav.handle_key(crate::tui::tree_navigator::TopologyNavigatorKey::Up);
     app.apply_host_event(HostEvent::Status {
-        phase: "running".into(),
+        phase: HostPhase::Running,
         queue_len: 0,
         detail: None,
     });

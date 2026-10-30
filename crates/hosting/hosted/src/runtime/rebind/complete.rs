@@ -354,7 +354,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             resume_locator,
             stderr_buf,
         )) {
-            Ok(result) => result.map_err(|error| error.failure),
+            Ok(result) => result.map_err(|error| *error.failure),
             Err(_) => Err(CliFailure::new("application execution failed")),
         };
         let replacement = match replacement_result {

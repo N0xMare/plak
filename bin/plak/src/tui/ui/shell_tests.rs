@@ -22,6 +22,7 @@ use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode, MouseButton, MouseEvent,
     MouseEventKind,
 };
+use plakous_host_protocol::status::HostPhase;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
@@ -117,11 +118,11 @@ fn the_scrim_darkens_the_backdrop_cells_themselves_not_only_the_modifier() {
 
 #[test]
 fn user_status_mapping_hides_runtime_jargon() {
-    assert_eq!(user_phase("idle"), "ready");
-    assert_eq!(user_phase("preparing"), "starting…");
-    assert_eq!(user_phase("not_ready"), "setup needed");
-    assert_eq!(user_phase("interrupted"), "interrupted");
-    assert_eq!(user_phase("error"), "needs attention");
+    assert_eq!(user_phase(HostPhase::Idle), "ready");
+    assert_eq!(user_phase(HostPhase::Preparing), "starting…");
+    assert_eq!(user_phase(HostPhase::NotReady), "setup needed");
+    assert_eq!(user_phase(HostPhase::Interrupted), "interrupted");
+    assert_eq!(user_phase(HostPhase::Error), "needs attention");
     let detail = user_status_detail("canonical Plakous locator recovery-required");
     assert!(!detail.contains("canonical"));
     assert!(!detail.contains("Plakous"));
@@ -759,9 +760,13 @@ fn protected_capacity_recovery_refuses_compaction() {
 fn turn_status_spinner_advances_and_reduced_motion_is_static() {
     let mut app = App::new(launch_basic(), true);
     app.apply_host_event(HostEvent::Status {
-        phase: "running".into(),
+        phase: HostPhase::Running,
         queue_len: 0,
-        detail: Some("working".into()),
+        detail: Some(
+            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
+                diagnostic: plakous_host_protocol::status::DiagnosticText::new("working"),
+            },
+        ),
     });
     app.apply_host_event(HostEvent::SetBusy(true));
     let backend = TestBackend::new(80, 12);
@@ -1310,9 +1315,9 @@ fn credential_wait_names_the_login_on_the_hud_and_cancellation_still_wins() {
     let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
     assert!(screen_text(&terminal).contains("waiting for login"));
-    app.phase = "interrupting".to_owned();
+    app.phase = HostPhase::Interrupting;
     assert_eq!(app.turn_status_label().as_deref(), Some("cancelling…"));
-    app.phase.clear();
+    app.phase = HostPhase::Idle;
     app.apply_host_event(HostEvent::CredentialWait { account: None });
     assert_ne!(
         app.turn_status_label().as_deref(),

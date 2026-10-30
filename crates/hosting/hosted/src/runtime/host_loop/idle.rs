@@ -19,6 +19,7 @@ use crate::runtime::admission::{
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     #[allow(
@@ -268,9 +269,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 }
                 Ok(action @ UserAction::Steer(_)) => {
                     let _ = self.events.send(ContentEvent::Status {
-                        phase: "idle".into(),
+                        phase: HostPhase::Idle,
                         queue_len: self.config.session.pending_queue.len(),
-                        detail: Some("no active turn".into()),
+                        detail: Some(HostStatusDetail::NoActiveTurn),
                     });
                     reject_draft(&self.events, action);
                     None
@@ -411,11 +412,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     if self.config.session.queue_projection_debt {
                         emit_queue_snapshot(&self.events, &self.config.session);
                         let _ = self.events.send(ContentEvent::Status {
-                            phase: "idle".into(),
+                            phase: HostPhase::Idle,
                             queue_len: self.config.session.pending_queue.len(),
-                            detail: Some(
-                                "queue projection is catching up; prompt remains queued".into(),
-                            ),
+                            detail: Some(HostStatusDetail::QueueProjectionCatchingUp),
                         });
                         return Ok(HostStep::Continue);
                     }
@@ -469,11 +468,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     self.last_tree_revision.child_live.close_agent_view();
                     let _ = self.events.send(ContentEvent::SetBusy(true));
                     let _ = self.events.send(ContentEvent::Status {
-                        phase: "clear".into(),
+                        phase: HostPhase::Clear,
                         queue_len: self.config.session.pending_queue.len(),
-                        detail: Some(
-                            "creating a fresh conversation on the current exact binding".into(),
-                        ),
+                        detail: Some(HostStatusDetail::CreatingFreshConversation),
                     });
                     match clear_session_rebuild(
                         &self.executor,
@@ -496,12 +493,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             ));
                             let _ = self.events.send(ContentEvent::SetBusy(false));
                             let _ = self.events.send(ContentEvent::Status {
-                                phase: "idle".into(),
+                                phase: HostPhase::Idle,
                                 queue_len: self.config.session.pending_queue.len(),
-                                detail: Some(format!(
-                                    "clear refused · {} remains active",
-                                    self.config.model_id
-                                )),
+                                detail: Some(HostStatusDetail::ClearRefused {
+                                    model_id: self.config.model_id.clone(),
+                                }),
                             });
                         }
                     }
@@ -640,9 +636,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     self.last_tree_revision.child_live.close_agent_view();
                     let _ = self.events.send(ContentEvent::SetBusy(true));
                     let _ = self.events.send(ContentEvent::Status {
-                        phase: "fork".into(),
+                        phase: HostPhase::Fork,
                         queue_len: self.config.session.pending_queue.len(),
-                        detail: Some("forking session".into()),
+                        detail: Some(HostStatusDetail::ForkingSession),
                     });
                     let forked = handle_fork(
                         &self.executor,
@@ -655,7 +651,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     );
                     let _ = self.events.send(ContentEvent::SetBusy(false));
                     let _ = self.events.send(ContentEvent::Status {
-                        phase: "idle".into(),
+                        phase: HostPhase::Idle,
                         queue_len: self.config.session.pending_queue.len(),
                         detail: None,
                     });
@@ -779,9 +775,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         self.last_tree_revision.child_live.close_agent_view();
                         let _ = self.events.send(ContentEvent::SetBusy(true));
                         let _ = self.events.send(ContentEvent::Status {
-                            phase: "rebind".into(),
+                            phase: HostPhase::Rebind,
                             queue_len: self.config.session.pending_queue.len(),
-                            detail: Some(format!("forking onto profile root `{}`", fork.model)),
+                            detail: Some(HostStatusDetail::ForkingProfileRoot {
+                                model: fork.model.clone(),
+                            }),
                         });
                         let result = handle_rebind(
                             &self.executor,
@@ -800,9 +798,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         );
                         let _ = self.events.send(ContentEvent::SetBusy(false));
                         let _ = self.events.send(ContentEvent::Status {
-                            phase: "idle".into(),
+                            phase: HostPhase::Idle,
                             queue_len: self.config.session.pending_queue.len(),
-                            detail: Some(format!("ready · {}", self.config.model_id)),
+                            detail: Some(HostStatusDetail::Ready {
+                                model_id: self.config.model_id.clone(),
+                                pause: plakous_host_protocol::status::HostPause::default(),
+                            }),
                         });
                         (fork.finish)(match result {
                             Ok(Rebound::Switched) => surface::ProfileForkOutcome::Forked,

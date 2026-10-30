@@ -1,5 +1,6 @@
 use super::*;
 use crate::surface_protocol::UserAction;
+use plakous_host_protocol::status::HostPhase;
 
 fn next_non_idle_step(host: &mut HostLoop<'_, TestExtension>) -> HostStep {
     loop {
@@ -162,10 +163,10 @@ pub(super) fn stopped_preparation(
             .iter()
             .rev()
             .find_map(|event| match event {
-                HostEvent::Status { phase, .. } => Some(phase.as_str()),
+                HostEvent::Status { phase, .. } => Some(phase),
                 _ => None,
             })
-            .is_some_and(|phase| phase == "idle")
+            .is_some_and(|phase| matches!(phase, HostPhase::Idle))
     );
     assert_eq!(
         observed.iter().rev().find_map(|event| match event {

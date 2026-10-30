@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;
+use plakous_host_protocol::status::HostPhase;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 use crate::runtime::test_kit::ProbeIntent;
@@ -244,7 +245,7 @@ fn a_manual_compact_names_itself_on_the_turn_status_row_and_clears_after() {
         during.iter().any(|event| matches!(
             event,
             HostEvent::Status { phase, queue_len, .. }
-                if phase == "compacting" && *queue_len == 2
+                if matches!(phase, HostPhase::Compacting) && *queue_len == 2
         )),
         "the activity label names the compaction: {during:?}"
     );
@@ -255,7 +256,7 @@ fn a_manual_compact_names_itself_on_the_turn_status_row_and_clears_after() {
     assert!(
         after.iter().any(|event| matches!(
             event,
-            HostEvent::Status { phase, .. } if phase == "idle"
+            HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Idle)
         )),
         "the activity clears on every exit arm: {after:?}"
     );

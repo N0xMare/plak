@@ -478,9 +478,11 @@ fn observation_mailbox_coalesces_deltas_and_preserves_final_state() {
     sender.send(SessionObservation::SetBusy(false)).unwrap();
     sender
         .send(SessionObservation::Status {
-            phase: "idle".into(),
+            phase: crate::status::HostPhase::Idle,
             queue_len: 3,
-            detail: Some("done".into()),
+            detail: Some(crate::status::HostStatusDetail::PlanDiagnostic {
+                diagnostic: crate::status::DiagnosticText::new("done"),
+            }),
         })
         .unwrap();
     let events = receiver.try_iter().collect::<Vec<_>>();
@@ -488,7 +490,7 @@ fn observation_mailbox_coalesces_deltas_and_preserves_final_state() {
     assert!(events.contains(&SessionObservation::SetBusy(false)));
     assert!(events.iter().any(|event| matches!(
         event,
-        SessionObservation::Status { phase, queue_len: 3, .. } if phase == "idle"
+        SessionObservation::Status { phase, queue_len: 3, .. } if matches!(phase, crate::status::HostPhase::Idle)
     )));
 }
 
@@ -602,9 +604,11 @@ fn final_state_displaces_saturated_diagnostics() {
     sender.send(SessionObservation::SetBusy(false)).unwrap();
     sender
         .send(SessionObservation::Status {
-            phase: "idle".into(),
+            phase: crate::status::HostPhase::Idle,
             queue_len: 1,
-            detail: Some("final".into()),
+            detail: Some(crate::status::HostStatusDetail::PlanDiagnostic {
+                diagnostic: crate::status::DiagnosticText::new("final"),
+            }),
         })
         .unwrap();
     let events = receiver.try_iter().collect::<Vec<_>>();
@@ -617,7 +621,7 @@ fn final_state_displaces_saturated_diagnostics() {
     assert!(events.iter().any(|event| matches!(
         event,
         SessionObservation::Status { phase, queue_len: 1, detail: Some(detail) }
-            if phase == "idle" && detail == "final"
+            if matches!(phase, crate::status::HostPhase::Idle) && matches!(detail, crate::status::HostStatusDetail::PlanDiagnostic { diagnostic } if diagnostic.as_str() == "final")
     )));
 }
 
@@ -626,9 +630,11 @@ fn admission_saturation_preserves_final_latest_state() {
     let (tx, rx) = observation_channel::<Core>();
     tx.send(SessionObservation::SetBusy(false)).unwrap();
     let status = SessionObservation::Status {
-        phase: "idle".into(),
+        phase: crate::status::HostPhase::Idle,
         queue_len: 0,
-        detail: Some("final".into()),
+        detail: Some(crate::status::HostStatusDetail::PlanDiagnostic {
+            diagnostic: crate::status::DiagnosticText::new("final"),
+        }),
     };
     tx.send(status.clone()).unwrap();
     for _ in 2..OBSERVATION_QUEUE_CAPACITY {
@@ -672,9 +678,11 @@ fn terminal_error_survives_saturation_and_final_recovery_state() {
     sender.send(SessionObservation::SetBusy(false)).unwrap();
     sender
         .send(SessionObservation::Status {
-            phase: "error".into(),
+            phase: crate::status::HostPhase::Error,
             queue_len: 1,
-            detail: Some("recovery required".into()),
+            detail: Some(crate::status::HostStatusDetail::PlanDiagnostic {
+                diagnostic: crate::status::DiagnosticText::new("recovery required"),
+            }),
         })
         .unwrap();
 
@@ -691,7 +699,7 @@ fn terminal_error_survives_saturation_and_final_recovery_state() {
     assert!(events.iter().any(|event| matches!(
         event,
         SessionObservation::Status { phase, detail: Some(detail), .. }
-            if phase == "error" && detail == "recovery required"
+            if matches!(phase, crate::status::HostPhase::Error) && matches!(detail, crate::status::HostStatusDetail::PlanDiagnostic { diagnostic } if diagnostic.as_str() == "recovery required")
     )));
 }
 
@@ -727,7 +735,7 @@ fn model_refusal_survives_saturation_and_final_idle_state() {
     sender.send(SessionObservation::SetBusy(false)).unwrap();
     sender
         .send(SessionObservation::Status {
-            phase: "idle".into(),
+            phase: crate::status::HostPhase::Idle,
             queue_len: 0,
             detail: None,
         })
@@ -775,7 +783,7 @@ fn turn_lifecycle_survives_replaceable_saturation() {
     sender.send(SessionObservation::SetBusy(false)).unwrap();
     sender
         .send(SessionObservation::Status {
-            phase: "idle".into(),
+            phase: crate::status::HostPhase::Idle,
             queue_len: 0,
             detail: None,
         })

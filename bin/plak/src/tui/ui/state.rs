@@ -512,7 +512,7 @@ impl App {
             account: self.account.clone(),
             model: self.model.clone(),
             effort: self.effort.clone(),
-            phase: user_phase(&self.phase).to_owned(),
+            phase: user_phase(self.phase).to_owned(),
             queue_len: self.queue_len,
             busy: self.busy,
         }

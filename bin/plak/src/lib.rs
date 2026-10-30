@@ -59,7 +59,9 @@ mod diagnostics;
 mod dispatch;
 #[cfg(feature = "tui")]
 mod environment;
+mod host_status_text;
 mod lookup_status;
+mod notice_text;
 mod review_expiry;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
@@ -264,7 +266,14 @@ pub fn run_from_args(arguments: impl IntoIterator<Item = OsString>) -> ExitCode 
         Err(failure) => {
             eprintln!(
                 "plak: {}",
-                cli_output::safe_terminal_block(failure.message())
+                cli_output::safe_terminal_block(&notice_text::with_remedy(
+                    failure.message(),
+                    failure.remedy(),
+                    notice_text::RemedyContext {
+                        frontend: notice_text::Frontend::Run,
+                        session_id: None
+                    }
+                ))
             );
             ExitCode::from(failure.exit_code())
         }

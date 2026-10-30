@@ -156,7 +156,9 @@ fn turn_phase_labels_match_the_serde_form() {
 fn required_kinds_project_for_the_core_protocol() {
     let error: SessionObservation<Core> =
         SessionObservation::Row(TranscriptRow::error(NoticeScope::Host, "boom"));
-    let line = project_host_event(&error, JsonlCorrelation::default()).unwrap();
-    assert!(line.contains(r#""kind":"error""#), "{line}");
+    assert!(
+        project_host_event(&error, JsonlCorrelation::default()).is_none(),
+        "product-formatted notices do not bypass Plak"
+    );
     assert_eq!(host_event_kind(&error), "row");
 }

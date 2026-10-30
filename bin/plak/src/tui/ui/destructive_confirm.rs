@@ -15,6 +15,7 @@ use super::{
 use crate::tui::blocks::humanize_tool;
 use crate::tui::tree_navigator::short_id;
 use crate::tui::{ApprovalChoice, agent_list};
+use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::views::ProcessStatus;
 
 const CANCEL: &str = "[ Cancel ]";
@@ -339,7 +340,7 @@ impl App {
     /// The root's busy `Esc` (spec 02 §5.3): stop the turn, or the turn and
     /// every background process.
     pub(super) fn confirm_turn_stop(&mut self) {
-        if matches!(self.phase.as_str(), "fork" | "rebind") {
+        if matches!(self.phase, HostPhase::Fork | HostPhase::Rebind) {
             self.open_confirm(
                 "Stop this operation?".to_owned(),
                 vec![

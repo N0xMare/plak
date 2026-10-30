@@ -9,6 +9,7 @@
 use crate::surface_protocol::ContentEvent;
 use plakous::agent::AbandonedTurnReport;
 use plakous::sessions::feed::FeedSeq;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 use super::{
     CliFailure, CliResult, ContextQuery, HostLoop, HostStep, SessionEvent,
@@ -46,9 +47,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     pub(super) fn recover_session(&mut self, trigger: RecoveryTrigger) -> CliResult<HostStep> {
         let _ = self.events.send(ContentEvent::SetBusy(true));
         let _ = self.events.send(ContentEvent::Status {
-            phase: "running".into(),
+            phase: HostPhase::Running,
             queue_len: self.config.session.pending_queue.len(),
-            detail: Some("recovering the interrupted turn".into()),
+            detail: Some(HostStatusDetail::RecoveringInterruptedTurn),
         });
         let recovered = self.reopen_in_place();
         let restored_working = recovered.is_ok() && self.opened.has_recovered_turn();
@@ -67,9 +68,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     SessionEvent::new("session.recover_failed").str("msg", failure.message()),
                 );
                 let _ = self.events.send(ContentEvent::Status {
-                    phase: "error".into(),
+                    phase: HostPhase::Error,
                     queue_len: self.config.session.pending_queue.len(),
-                    detail: Some("recovery did not complete; the next prompt retries it".into()),
+                    detail: Some(HostStatusDetail::RecoveryIncomplete),
                 });
                 return Err(CliFailure::new(format!(
                     "the session could not be reopened to recover the interrupted turn ({}); \
@@ -156,16 +157,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if restored_working {
             return self.drive_restored_turn();
         }
-        let ready = format!("ready · {}", self.config.model_id);
         let _ = self.events.send(ContentEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: self.config.session.pending_queue.len(),
-            detail: Some(
-                match restored_paused_status_suffix(&rows, &self.config.session) {
-                    Some(suffix) => format!("{ready} · {suffix}"),
-                    None => ready,
-                },
-            ),
+            detail: Some(HostStatusDetail::Ready {
+                model_id: self.config.model_id.clone(),
+                pause: restored_paused_status_suffix(&rows, &self.config.session),
+            }),
         });
         Ok(HostStep::Continue)
     }

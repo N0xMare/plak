@@ -8,6 +8,7 @@ use crate::runtime::recover_tests::{script, scripted_host_with};
 use crate::runtime::test_kit::TestExtension;
 use crate::sessions;
 use crate::surface_protocol::HostEvent;
+use plakous_host_protocol::status::HostPhase;
 
 #[test]
 fn in_place_recovery_drives_a_retained_approval_after_owner_loss() {
@@ -138,7 +139,7 @@ fn retained_approval_after_owner_loss(switch: bool) {
         !published[..offer]
             .iter()
             .any(|event| matches!(event, ContentEvent::SetBusy(false))
-                || matches!(event, ContentEvent::Status { phase, .. } if phase == "idle")),
+                || matches!(event, ContentEvent::Status { phase, .. } if matches!(phase, HostPhase::Idle))),
         "restored decision publication was announced idle: {:?}",
         &published[..offer]
     );
@@ -147,7 +148,7 @@ fn retained_approval_after_owner_loss(switch: bool) {
         !before_offer
             .iter()
             .any(|event| matches!(event, HostEvent::SetBusy(false))
-                || matches!(event, HostEvent::Status { phase, .. } if phase == "idle")),
+                || matches!(event, HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Idle))),
         "restored decision was announced idle: {before_offer:?}"
     );
     let tail = observed.try_iter().collect::<Vec<_>>();

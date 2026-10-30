@@ -6,6 +6,7 @@ use super::{
     tool_is_running, unix_now, unknown_context_usage,
 };
 use crate::tui::SurfaceObservation;
+use plakous_host_protocol::status::HostPhase;
 
 impl App {
     /// Retire observations and handles owned by the source session, not terminal preferences.
@@ -23,7 +24,7 @@ impl App {
         self.credential_wait = None;
         self.cancel_pending = false;
         self.busy = false;
-        self.phase = "idle".into();
+        self.phase = HostPhase::Idle;
         self.status_detail = None;
         self.clear_pending = false;
         self.quit_arm = None;
@@ -949,14 +950,19 @@ impl App {
                 queue_len: _,
                 detail,
             } => {
-                if self.clear_pending && phase != "clear" {
+                if self.clear_pending && phase != HostPhase::Clear {
                     self.clear_pending = false;
                 }
                 if self.phase != phase {
                     self.phase_started = Some(self.now());
                 }
                 self.phase = phase;
-                self.status_detail = detail;
+                self.status_detail = detail.as_ref().map(|detail| {
+                    crate::host_status_text::status_detail(
+                        detail,
+                        crate::notice_text::Frontend::Tui,
+                    )
+                });
                 self.sync_root_turn_projection();
                 self.mark_dirty();
             }
@@ -1180,10 +1186,10 @@ impl App {
                     self.cancel_pending = false;
                     self.quit_arm = None;
                 }
-                if busy && self.phase == "idle" {
-                    "running".clone_into(&mut self.phase);
-                } else if !busy && self.phase == "running" {
-                    "idle".clone_into(&mut self.phase);
+                if busy && self.phase == HostPhase::Idle {
+                    self.phase = HostPhase::Running;
+                } else if !busy && self.phase == HostPhase::Running {
+                    self.phase = HostPhase::Idle;
                 }
                 self.sync_root_turn_projection();
                 self.mark_dirty();

@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub struct CodingSessionOpenFailure {
-    pub failure: CliFailure,
+    pub failure: Box<CliFailure>,
     pub current_locator: Option<SessionLocator>,
     /// The frozen binding input this build reconstructs differently, when the
     /// open (or its verification) refused for that reason.
@@ -36,7 +36,7 @@ pub struct CodingSessionOpenFailure {
 impl From<CliFailure> for CodingSessionOpenFailure {
     fn from(failure: CliFailure) -> Self {
         Self {
-            failure,
+            failure: Box::new(failure),
             current_locator: None,
             binding_change: None,
         }
@@ -97,7 +97,7 @@ impl From<AgentSessionsError> for CodingSessionOpenFailure {
             CliFailure::from(error)
         };
         Self {
-            failure,
+            failure: Box::new(failure),
             current_locator,
             binding_change,
         }
@@ -712,7 +712,7 @@ pub(crate) async fn build_coding_session_seed(
         operation_id,
     ))
     .await
-    .map_err(|error| error.failure)
+    .map_err(|error| *error.failure)
 }
 
 /// Reopens one exact product-bound Plakous session without substituting current
@@ -758,7 +758,7 @@ pub async fn build_runtime_session(
         operation_id,
     ))
     .await
-    .map_err(|error| error.failure)
+    .map_err(|error| *error.failure)
 }
 
 /// Answers whether [`open_coding_session`] of `locator` would attach,
@@ -890,7 +890,7 @@ async fn attach_native_source(
     if result.is_err() {
         if let Err(cleanup) = crate::topology_runtime::release_root_lease(&tree_id).await {
             return result.map_err(|error| CodingSessionOpenFailure {
-                failure: error.failure.with_cleanup_failure(cleanup),
+                failure: Box::new(error.failure.with_cleanup_failure(cleanup)),
                 current_locator: error.current_locator,
                 binding_change: error.binding_change,
             });
@@ -956,7 +956,7 @@ pub(crate) async fn build_api_coding_session_seed(
         operation_id,
     ))
     .await
-    .map_err(|error| error.failure)
+    .map_err(|error| *error.failure)
 }
 
 pub async fn open_api_root_coding_session(
@@ -1103,7 +1103,7 @@ async fn attach_api_source(
         if let Some(acquired) = acquired_owner {
             if let Err(cleanup) = crate::topology_runtime::release_root_lease(&acquired).await {
                 return result.map_err(|error| CodingSessionOpenFailure {
-                    failure: error.failure.with_cleanup_failure(cleanup),
+                    failure: Box::new(error.failure.with_cleanup_failure(cleanup)),
                     current_locator: error.current_locator,
                     binding_change: error.binding_change,
                 });
@@ -1149,7 +1149,7 @@ async fn attach_runtime_source(
     }
     let reachability_probe = plakous::sessions::internal::reachability_probe(&runtime);
     let reopen_failure = |error: AgentSessionsError| CodingSessionOpenFailure {
-        failure: CliFailure::new((wording.reopen_failed)(&error)),
+        failure: Box::new(CliFailure::new((wording.reopen_failed)(&error))),
         current_locator: error.current_locator(),
         binding_change: error.binding_change().cloned().map(Box::new),
     };

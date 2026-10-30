@@ -18,7 +18,7 @@ layer = "bin"
 class = "supported"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 116
+too-many-lines-ceiling = 117
 too-many-arguments-ceiling = 21
 large-file-ceiling = 0
 reason = "Explicit CLI/TUI dispatch and scenario allowances after removing crate-wide suppression; production files remain below 1500 lines."

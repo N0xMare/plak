@@ -55,9 +55,9 @@ async fn cancel_that_never_settles_is_reported_unsettled() {
     let CancelSettlement::Unsettled(detail) = settlement else {
         panic!("a cancel that never settles must not be reported as settled");
     };
-    assert!(detail.contains("did not settle"), "{detail}");
-    assert!(detail.contains("still running"), "{detail}");
-    assert!(detail.contains("30ms"), "{detail}");
+    assert!(detail.to_string().contains("did not settle"), "{detail}");
+    assert!(detail.to_string().contains("still running"), "{detail}");
+    assert!(detail.to_string().contains("30ms"), "{detail}");
 }
 
 #[tokio::test]

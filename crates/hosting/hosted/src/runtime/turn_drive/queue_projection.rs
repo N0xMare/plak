@@ -2,6 +2,7 @@
 
 use super::{Duration, Instant, TurnDrive, emit_queue_snapshot, sessions};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 pub(super) struct QueueRefresh {
     expected: sessions::QueueCommands,
@@ -209,9 +210,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         if !self.queue_wait_noted {
             self.queue_wait_noted = true;
             let _ = self.host.events.send(ContentEvent::Status {
-                phase: "running".into(),
+                phase: HostPhase::Running,
                 queue_len: self.host.session.pending_queue.len(),
-                detail: Some("queue projection is catching up; prompt remains queued".into()),
+                detail: Some(HostStatusDetail::QueueProjectionCatchingUp),
             });
             let _ = self.host.events.notice(sessions::TranscriptRow::info(
                 sessions::NoticeScope::Queue,

@@ -39,6 +39,7 @@
     reason = "parity oracle test module"
 )]
 
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1023,7 +1024,9 @@ fn after_turn() -> impl Fn(&HostEvent) -> bool + Send {
             busy.set(true);
             false
         }
-        HostEvent::Status { phase, .. } => busy.get() && (phase == "idle" || phase == "error"),
+        HostEvent::Status { phase, .. } => {
+            busy.get() && (matches!(phase, HostPhase::Idle) || matches!(phase, HostPhase::Error))
+        }
         // A turn refused before admission never raises the busy edge; the
         // typed refusal note is its terminal observation.
         HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(
@@ -1046,7 +1049,7 @@ fn turn_wait_uses_start_receipt_when_busy_edges_coalesce() {
     sender.send(HostEvent::SetBusy(false)).unwrap();
     sender
         .send(HostEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: 0,
             detail: None,
         })
@@ -1066,7 +1069,7 @@ fn workflow_wait_uses_its_receipt_when_busy_edges_coalesce() {
         .unwrap();
     sender
         .send(HostEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: 0,
             detail: None,
         })
@@ -1080,7 +1083,7 @@ fn workflow_wait_uses_its_receipt_when_busy_edges_coalesce() {
     sender.send(HostEvent::SetBusy(false)).unwrap();
     sender
         .send(HostEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: 0,
             detail: None,
         })
@@ -1459,7 +1462,7 @@ fn presentation_parity_compares_folded_rows_not_snapshot_or_patch_encoding() {
         HostEvent::AssistantDone,
         HostEvent::SetBusy(false),
         HostEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: 0,
             detail: None,
         },
@@ -1698,11 +1701,9 @@ fn disabled_topology_jsonl_prompt_completes_without_navigator_error() {
             .iter()
             .any(|event| matches!(event, HostEvent::SetBusy(true)))
     );
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, HostEvent::Status { phase, .. } if phase == "idle"))
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Idle))
+    ));
     assert!(
         !events.iter().any(|event| matches!(
             event,
@@ -1769,7 +1770,9 @@ fn parity_clear_then_turn() {
                             cleared.set(true);
                             false
                         }
-                        HostEvent::Status { phase, .. } => cleared.get() && phase == "idle",
+                        HostEvent::Status { phase, .. } => {
+                            cleared.get() && matches!(phase, HostPhase::Idle)
+                        }
                         _ => false,
                     }
                 }),
@@ -1865,7 +1868,10 @@ fn after_cancel() -> impl Fn(&HostEvent) -> bool + Send {
     let interrupted = std::cell::Cell::new(false);
     let cancelled = std::cell::Cell::new(false);
     move |event: &HostEvent| match event {
-        HostEvent::Status { phase, .. } if phase == "error" => {
+        HostEvent::Status {
+            phase: HostPhase::Error,
+            ..
+        } => {
             panic!("gated cancellation reported an unexpected error: {event:?}")
         }
         HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(
@@ -1877,7 +1883,10 @@ fn after_cancel() -> impl Fn(&HostEvent) -> bool + Send {
         | HostEvent::ModelRefusal { .. } => {
             panic!("gated cancellation reported an unexpected failure: {event:?}")
         }
-        HostEvent::Status { phase, .. } if phase == "interrupted" => {
+        HostEvent::Status {
+            phase: HostPhase::Interrupted,
+            ..
+        } => {
             interrupted.set(true);
             false
         }
@@ -1903,12 +1912,12 @@ fn cancelled_turn() -> HostEvent {
 fn cancel_wait_requires_terminal_then_final_busy_false() {
     let settled = after_cancel();
     assert!(!settled(&HostEvent::Status {
-        phase: "idle".into(),
+        phase: HostPhase::Idle,
         queue_len: 0,
         detail: None,
     }));
     assert!(!settled(&HostEvent::Status {
-        phase: "interrupted".into(),
+        phase: HostPhase::Interrupted,
         queue_len: 0,
         detail: None,
     }));
@@ -1921,7 +1930,7 @@ fn cancel_wait_ignores_busy_false_before_terminal() {
     let settled = after_cancel();
     assert!(!settled(&HostEvent::SetBusy(false)));
     assert!(!settled(&HostEvent::Status {
-        phase: "interrupted".into(),
+        phase: HostPhase::Interrupted,
         queue_len: 0,
         detail: None,
     }));
@@ -1941,9 +1950,11 @@ fn cancel_wait_rejects_busy_false_without_interrupted_status() {
 #[should_panic(expected = "gated cancellation reported an unexpected error")]
 fn cancel_wait_rejects_error_status() {
     after_cancel()(&HostEvent::Status {
-        phase: "error".into(),
+        phase: HostPhase::Error,
         queue_len: 0,
-        detail: Some("unexpected fixture failure".into()),
+        detail: Some(HostStatusDetail::PlanDiagnostic {
+            diagnostic: DiagnosticText::new("unexpected fixture failure"),
+        }),
     });
 }
 
@@ -1954,7 +1965,9 @@ fn after_workflow() -> impl Fn(&HostEvent) -> bool + Send {
             started.set(true);
             false
         }
-        HostEvent::Status { phase, .. } => started.get() && (phase == "idle" || phase == "error"),
+        HostEvent::Status { phase, .. } => {
+            started.get() && (matches!(phase, HostPhase::Idle) || matches!(phase, HostPhase::Error))
+        }
         _ => false,
     }
 }
@@ -2032,7 +2045,10 @@ fn a_cancelled_tool_terminalises_once_before_the_interrupted_status() {
                     );
                     cancelled_at.get_or_insert(index);
                 }
-                HostEvent::Status { phase, .. } if phase == "interrupted" => {
+                HostEvent::Status {
+                    phase: HostPhase::Interrupted,
+                    ..
+                } => {
                     interrupted_at.get_or_insert(index);
                 }
                 _ => {}

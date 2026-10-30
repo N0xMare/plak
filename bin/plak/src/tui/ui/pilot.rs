@@ -214,7 +214,7 @@ impl App {
             ),
             schema: SNAPSHOT_SCHEMA,
             owner: self.semantic_owner(),
-            phase: self.phase.clone(),
+            phase: self.phase.as_str().to_owned(),
             busy: self.busy,
             binding: BindingSnapshot {
                 attached: self.agent_enabled,

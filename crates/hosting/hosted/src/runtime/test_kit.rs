@@ -873,7 +873,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
                 opened.clear_job_counter(self.binding(config, RuntimeRole::Primary)?)?,
             ))
             .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(|error| error.failure)?;
+            .map_err(|error| *error.failure)?;
         super::startup::observe_phase(
             events,
             super::HostLifecyclePhase::ClearResolveAuthority,
@@ -952,7 +952,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
                 runtime,
             )
             .await
-            .map_err(|error| error.failure)
+            .map_err(|error| *error.failure)
         })
     }
     fn open<'a>(

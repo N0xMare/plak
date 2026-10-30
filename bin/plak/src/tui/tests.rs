@@ -1,4 +1,5 @@
 use super::{HostEvent, QueueDrainState, QueueItem, TuiError, TuiLaunch, UserAction, control};
+use plakous_host_protocol::status::HostPhase;
 use plakous_hosted::sessions::{NoticeScope, TranscriptRow};
 use std::path::PathBuf;
 
@@ -53,7 +54,7 @@ fn host_event_variants_are_constructible() {
         active: true,
     };
     let _ = HostEvent::Status {
-        phase: "idle".into(),
+        phase: HostPhase::Idle,
         queue_len: 0,
         detail: None,
     };

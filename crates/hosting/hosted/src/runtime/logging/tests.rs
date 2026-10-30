@@ -116,6 +116,6 @@ fn lifecycle_milestones_name_cumulative_elapsed_time() {
     assert!(matches!(
         event,
         HostEvent::Status { detail: Some(detail), .. }
-            if detail.contains("cumulative elapsed")
+            if matches!(detail, plakous_host_protocol::status::HostStatusDetail::TransitionStage { stage: HostLifecyclePhase::RebindResolveTarget, .. })
     ));
 }

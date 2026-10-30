@@ -532,7 +532,55 @@ fn string_field(value: &Map<String, Value>, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-pub use plakous_host_protocol::jsonl::{host_event_kind, project_host_event};
+pub use plakous_host_protocol::jsonl::host_event_kind;
+
+/// Project Plak-owned status and notice prose before the neutral envelope adapter.
+#[must_use]
+pub fn project_host_event(
+    event: &crate::surface_protocol::HostEvent,
+    correlation: JsonlCorrelation<'_>,
+) -> Option<String> {
+    use crate::surface_protocol::HostEvent;
+    use plakous_host_protocol::views::transcript::{NoticePlacement, NoticeTone, TranscriptRow};
+    let mut fields = Map::new();
+    match event {
+        HostEvent::Status {
+            phase,
+            queue_len,
+            detail,
+        } => {
+            JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
+            fields.insert("kind".into(), Value::from("status"));
+            fields.insert("phase".into(), Value::from(phase.as_str()));
+            fields.insert("queue_len".into(), Value::from(*queue_len as u64));
+            if let Some(detail) = detail {
+                fields.insert(
+                    "detail".into(),
+                    Value::from(crate::host_status_text::status_detail(
+                        detail,
+                        crate::notice_text::Frontend::Jsonl,
+                    )),
+                );
+            }
+        }
+        HostEvent::Row(TranscriptRow::Notice(notice))
+            if notice.placement() != NoticePlacement::SessionLog =>
+        {
+            JsonlCorrelation::insert_id(&mut fields, correlation.command_scoped_id());
+            if notice.tone == NoticeTone::Error {
+                fields.insert("kind".into(), Value::from("error"));
+                fields.insert("message".into(), Value::from(notice.text.as_str()));
+            } else {
+                fields.insert("kind".into(), Value::from("status"));
+                fields.insert("phase".into(), Value::from("note"));
+                fields.insert("queue_len".into(), Value::from(0_u64));
+                fields.insert("detail".into(), Value::from(notice.text.as_str()));
+            }
+        }
+        _ => return plakous_host_protocol::jsonl::project_host_event(event, correlation),
+    }
+    Some(encode_object(fields))
+}
 
 /// Decode golden fixtures in tests without depending on field order.
 #[cfg(test)]

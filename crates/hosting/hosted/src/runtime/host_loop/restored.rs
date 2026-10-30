@@ -6,6 +6,7 @@ use super::{
     emit_terminal_status, host_outcome_blocks_continuation, query_context,
 };
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     #[allow(
@@ -17,18 +18,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             return Ok(HostStep::Continue);
         };
         let _ = self.events.send(ContentEvent::SetBusy(true));
-        let detail = "restoring the original admitted turn";
-        let suffix = super::restored_paused_status_suffix(
+        let pause = super::restored_paused_status_suffix(
             &self.config.topology_rows(),
             &self.config.session,
         );
         let _ = self.events.send(ContentEvent::Status {
-            phase: "running".into(),
+            phase: HostPhase::Running,
             queue_len: self.config.session.pending_queue.len(),
-            detail: Some(suffix.map_or_else(
-                || detail.to_owned(),
-                |suffix| format!("{detail} · {suffix}"),
-            )),
+            detail: Some(HostStatusDetail::RestoringAdmittedTurn { pause }),
         });
         let _ = self.events.send(ContentEvent::Activity {
             label: "agent restoring".into(),

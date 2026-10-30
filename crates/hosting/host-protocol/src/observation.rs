@@ -79,14 +79,12 @@ define_observations! {
     Row(TranscriptRow),
     /// Replace status strip fields.
     Status {
-        /// Phase label: `"idle"` | `"running"` | `"interrupting"` |
-        /// `"interrupted"` | `"error"`. `"interrupting"` means a cancel was
-        /// requested and has not been observed to settle.
-        phase: String,
+        /// Semantic latest-state phase, distinct from terminal turn authority.
+        phase: crate::status::HostPhase,
         /// Number of product-visible queued follow-ups.
         queue_len: usize,
-        /// Optional short status detail (tool name, error snippet, etc.).
-        detail: Option<String>,
+        /// Optional semantic detail, formatted by the consuming product.
+        detail: Option<crate::status::HostStatusDetail>,
     },
     /// Replace the complete product queue view and its delivery authority.
     QueueSnapshot {

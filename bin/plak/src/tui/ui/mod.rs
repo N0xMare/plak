@@ -1,5 +1,6 @@
 //! Interactive A3 hybrid shell: chrome, structured scrollback, slash palette, queue chips.
 
+use plakous_host_protocol::status::HostPhase;
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::io::stdout;
@@ -358,16 +359,16 @@ fn char_range_bytes(text: &str, range: std::ops::Range<usize>) -> usize {
     end.saturating_sub(start)
 }
 
-fn user_phase(phase: &str) -> &'static str {
+fn user_phase(phase: HostPhase) -> &'static str {
     match phase {
-        "idle" => "ready",
-        "running" => "thinking…",
-        "rebind" => "switching model…",
-        "preparing" => "starting…",
-        "interrupting" => "stopping…",
-        "interrupted" => "interrupted",
-        "error" => "needs attention",
-        "not_ready" => "setup needed",
+        HostPhase::Idle => "ready",
+        HostPhase::Running => "thinking…",
+        HostPhase::Rebind => "switching model…",
+        HostPhase::Preparing => "starting…",
+        HostPhase::Interrupting => "stopping…",
+        HostPhase::Interrupted => "interrupted",
+        HostPhase::Error => "needs attention",
+        HostPhase::NotReady => "setup needed",
         _ => "working",
     }
 }
@@ -476,7 +477,7 @@ pub(crate) struct App {
     /// the launcher hands the terminal back and exits the process.
     pub(crate) quitting: bool,
     pub(crate) busy: bool,
-    pub(crate) phase: String,
+    pub(crate) phase: HostPhase,
     pub(crate) queue_len: usize,
     pub(crate) status_detail: Option<String>,
     /// A clear request crossed the UI mailbox but has not reached the host's
@@ -828,9 +829,9 @@ impl App {
             .collect();
         let workspace_chrome = launch.workspace_chrome;
         let initial_phase = if hosted && !launch.agent_enabled {
-            "preparing"
+            HostPhase::Preparing
         } else {
-            "idle"
+            HostPhase::Idle
         };
         let mut pane = pane::TranscriptPane::new(blocks);
         pane.presentation_session.clone_from(&launch.session_id);
@@ -871,7 +872,7 @@ impl App {
             should_quit: false,
             quitting: false,
             busy: false,
-            phase: initial_phase.to_owned(),
+            phase: initial_phase,
             queue_len: 0,
             status_detail: None,
             clear_pending: false,

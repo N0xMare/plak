@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;
+use plakous_host_protocol::status::HostPause;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type Sender = crate::runtime::Sender<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
@@ -286,7 +287,10 @@ fn a_paused_queue_is_named_in_the_status_row_and_in_an_attach_note() {
     let paths = MemoryRows::new();
     let mut session = SessionRecord::new(root.path().to_path_buf());
 
-    assert_eq!(restored_paused_status_suffix(&paths, &session), None);
+    assert_eq!(
+        restored_paused_status_suffix(&paths, &session),
+        HostPause::default()
+    );
     // A note claims only what the host observed: a tree the host cannot
     // read is not reported paused (a contended hub lock would otherwise make
     // every fresh attach announce a paused tree).
@@ -298,18 +302,17 @@ fn a_paused_queue_is_named_in_the_status_row_and_in_an_attach_note() {
     // A restored drain state with nothing queued is not a paused
     // queue; a childless reopen says nothing about draining.
     session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-    assert_eq!(restored_paused_status_suffix(&paths, &session), None);
-    session.pending_queue.push(SessionQueueItem::new("later"));
-    let suffix = restored_paused_status_suffix(&paths, &session)
-        .expect("a paused queue is stated in the HUD");
-    assert!(suffix.contains("queue paused"), "{suffix}");
-    assert!(
-        suffix.contains('r'),
-        "the suffix names the resume key: {suffix}"
+    assert_eq!(
+        restored_paused_status_suffix(&paths, &session),
+        HostPause::default()
     );
-    assert!(
-        !suffix.contains("restored_paused") && !suffix.contains("ResumeTree"),
-        "operator copy carries no raw enum variants: {suffix}"
+    session.pending_queue.push(SessionQueueItem::new("later"));
+    assert_eq!(
+        restored_paused_status_suffix(&paths, &session),
+        HostPause {
+            tree: false,
+            queue: true
+        }
     );
 
     let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();

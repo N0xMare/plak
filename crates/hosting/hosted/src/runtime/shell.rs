@@ -2,6 +2,7 @@
 
 use crate::sessions::queue::{drop_last_mutable, edit_mutable, move_mutable, remove_mutable};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{DetachedReason, DiagnosticText, HostPhase, HostStatusDetail};
 
 use std::sync::mpsc::RecvTimeoutError;
 
@@ -121,9 +122,11 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
     emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
     let _ = events.send(ContentEvent::Status {
-        phase: "not_ready".into(),
+        phase: HostPhase::NotReady,
         queue_len: config.session.pending_queue.len(),
-        detail: Some(format!("not ready · {}", config.reason)),
+        detail: Some(HostStatusDetail::Detached {
+            reason: DetachedReason::Other(DiagnosticText::new(config.reason.clone())),
+        }),
     });
     let _ = events.send(ContentEvent::SetBusy(false));
 }
@@ -187,16 +190,16 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         }
         UserAction::Interrupt | UserAction::StopProcesses { .. } => {
             let _ = events.send(ContentEvent::Status {
-                phase: "not_ready".into(),
+                phase: HostPhase::NotReady,
                 queue_len: config.session.pending_queue.len(),
-                detail: Some("nothing to interrupt; no agent turn is attached".into()),
+                detail: Some(HostStatusDetail::NoAttachedTurnToInterrupt),
             });
         }
         UserAction::SendQueuedNow { .. } | UserAction::ResumeQueueDrain => {
             let _ = events.send(ContentEvent::Status {
-                phase: "not_ready".into(),
+                phase: HostPhase::NotReady,
                 queue_len: config.session.pending_queue.len(),
-                detail: Some("queue delivery requires an attached canonical agent".into()),
+                detail: Some(HostStatusDetail::QueueDeliveryNeedsAttachment),
             });
         }
         UserAction::ClearSession => {
@@ -703,9 +706,11 @@ pub(super) fn refuse_not_ready<P: plakous_host_protocol::ProtocolExtension>(
     );
     let _ = events.notice(TranscriptRow::info(NoticeScope::Session, notice));
     let _ = events.send(ContentEvent::Status {
-        phase: "not_ready".into(),
+        phase: HostPhase::NotReady,
         queue_len: 0,
-        detail: Some(format!("prompt refused · {}", config.reason)),
+        detail: Some(HostStatusDetail::DetachedPromptRefused {
+            reason: DetachedReason::Other(DiagnosticText::new(config.reason.clone())),
+        }),
     });
 }
 
@@ -1117,16 +1122,16 @@ pub(super) fn maybe_note_ready_hint<P: plakous_host_protocol::ProtocolExtension>
                 format!("binding ready (account={a} model={m} effort={effort}) — attaching agent…"),
             ));
             let _ = events.send(ContentEvent::Status {
-                phase: "not_ready".into(),
+                phase: HostPhase::NotReady,
                 queue_len: 0,
-                detail: Some("reattach pending".into()),
+                detail: Some(HostStatusDetail::ReattachPending),
             });
         }
         _ => {
             let _ = events.send(ContentEvent::Status {
-                phase: "not_ready".into(),
+                phase: HostPhase::NotReady,
                 queue_len: 0,
-                detail: Some("choose a profile with /agents".into()),
+                detail: Some(HostStatusDetail::ChooseProfile),
             });
         }
     }

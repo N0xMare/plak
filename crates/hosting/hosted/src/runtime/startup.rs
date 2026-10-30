@@ -1,5 +1,6 @@
 //! Host startup: worker spawn, lifecycle phases, and session opening.
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::future::Future;
 #[cfg(test)]
 use std::thread;
@@ -35,38 +36,6 @@ use super::{
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
-impl HostLifecyclePhase {
-    pub(super) const fn status(self) -> &'static str {
-        match self {
-            Self::ClearResolveAuthority
-            | Self::ClearBuildCandidate
-            | Self::ClearPublishCandidate
-            | Self::ClearActivate => "clear",
-            Self::RebindResolveTarget
-            | Self::RebindPrepareRuntime
-            | Self::RebindPublishIntent
-            | Self::RebindCanonicalTransition
-            | Self::RebindOpenTarget
-            | Self::RebindActivate => "rebind",
-        }
-    }
-
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::ClearResolveAuthority => "fresh authority resolved",
-            Self::ClearBuildCandidate => "candidate runtime built",
-            Self::ClearPublishCandidate => "candidate product record published",
-            Self::ClearActivate => "candidate activated",
-            Self::RebindResolveTarget => "exact target resolved",
-            Self::RebindPrepareRuntime => "immutable runtime prepared",
-            Self::RebindPublishIntent => "durable transition prepared",
-            Self::RebindCanonicalTransition => "canonical transition completed",
-            Self::RebindOpenTarget => "target runtime opened",
-            Self::RebindActivate => "target activated",
-        }
-    }
-}
-
 pub(super) fn observe_phase<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     phase: HostLifecyclePhase,
@@ -74,13 +43,18 @@ pub(super) fn observe_phase<P: plakous_host_protocol::ProtocolExtension>(
     queue_len: usize,
 ) {
     let _ = events.send(ContentEvent::Status {
-        phase: phase.status().into(),
+        phase: match phase {
+            HostLifecyclePhase::ClearResolveAuthority
+            | HostLifecyclePhase::ClearBuildCandidate
+            | HostLifecyclePhase::ClearPublishCandidate
+            | HostLifecyclePhase::ClearActivate => HostPhase::Clear,
+            _ => HostPhase::Rebind,
+        },
         queue_len,
-        detail: Some(format!(
-            "{} · cumulative elapsed {}ms",
-            phase.label(),
-            started.elapsed().as_millis()
-        )),
+        detail: Some(HostStatusDetail::TransitionStage {
+            stage: phase,
+            cumulative_elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        }),
     });
 }
 
@@ -124,9 +98,11 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
                 format!("host error: {}", err.message()),
             ));
             let _ = event_tx.send(ContentEvent::Status {
-                phase: "error".into(),
+                phase: HostPhase::Error,
                 queue_len: 0,
-                detail: Some(err.message().to_owned()),
+                detail: Some(HostStatusDetail::Failure {
+                    failure: err.host_failure(),
+                }),
             });
         }
         result
@@ -432,7 +408,7 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
                     )));
                 }
             }
-            Err(error) => return Err(error.failure),
+            Err(error) => return Err(*error.failure),
         }
     }
 }

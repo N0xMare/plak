@@ -12,6 +12,7 @@ use crate::tui::{
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::topology::{NodeStatus, TreeAdmissionState, WorkspaceMode};
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptRow};
 use plakous_host_protocol::views::{NodeView, TreeView};
@@ -287,7 +288,7 @@ pub(super) fn usage_fixture() -> App {
     app.model = Some("grok-4.6".into());
     app.account = Some("grok".into());
     app.effort = Some("medium".into());
-    app.phase = "idle".into();
+    app.phase = HostPhase::Idle;
     app.tree_epoch_state = Some("live".into());
     app.context_usage = ContextUsage {
         breakdown: Some(ContextBreakdownView {
@@ -635,11 +636,11 @@ pub(super) fn visual_fixture(narrow: bool) -> App {
             }
             app.mark_transcript_replaced();
         }
-        app.phase = "idle".into();
+        app.phase = HostPhase::Idle;
         app.pane.scroll_from_bottom = 2;
     } else {
         app.busy = true;
-        app.phase = "running".into();
+        app.phase = HostPhase::Running;
         app.replace_queue_snapshot(
             vec![queue_item("q-1", 3, "Run the narrow terminal review")],
             QueueDrainState::RestoredPaused,

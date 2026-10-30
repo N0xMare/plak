@@ -17,6 +17,7 @@ use crate::sessions::TranscriptRow;
 use crate::surface_protocol::ContentEvent;
 use plakous::application::ApplicationExecutor;
 use plakous::sessions::ContextQuery;
+use plakous_host_protocol::status::HostPhase;
 
 /// Publishes the §5.4 activity for a compaction, and clears it.
 ///
@@ -35,13 +36,13 @@ pub(in crate::runtime) fn observe_compact<P: plakous_host_protocol::ProtocolExte
     if running {
         let _ = events.send(ContentEvent::SetBusy(true));
         let _ = events.send(ContentEvent::Status {
-            phase: "compacting".into(),
+            phase: HostPhase::Compacting,
             queue_len,
             detail: None,
         });
     } else {
         let _ = events.send(ContentEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len,
             detail: None,
         });

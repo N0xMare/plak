@@ -1,5 +1,6 @@
 use super::*;
 use crate::surface_protocol::UserAction;
+use plakous_host_protocol::status::HostPhase;
 use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
 use plakous_offline_crash_harness::script::{SCRIPT_VERSION, ScriptPlan};
 use std::time::Duration;
@@ -127,7 +128,7 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
         HostEvent::PromptAdmitted(_) | HostEvent::TurnLifecycle(_)
     )));
     assert!(
-        matches!(observed.iter().rev().find(|event| matches!(event, HostEvent::Status {..})), Some(HostEvent::Status {phase, detail: Some(detail), ..}) if phase == "idle" && detail.contains("preparation stopped"))
+        matches!(observed.iter().rev().find(|event| matches!(event, HostEvent::Status {..})), Some(HostEvent::Status {phase, detail: Some(detail), ..}) if matches!(phase, HostPhase::Idle) && matches!(detail, HostStatusDetail::PromptPreparationStopped))
     );
     assert_eq!(
         observed

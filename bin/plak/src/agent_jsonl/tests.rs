@@ -6,6 +6,7 @@
 use super::*;
 use crate::surface_protocol::HostEvent;
 use plakous_host_protocol::QueueDrainState;
+use plakous_host_protocol::status::HostPhase;
 
 /// The session binding changes only through templates and profiles, so
 /// the retired binding kinds are unknown kinds like any other.
@@ -903,9 +904,13 @@ fn optional_events_project_and_are_not_required_stdout() {
 
     let status = project_host_event(
         &HostEvent::Status {
-            phase: "running".into(),
+            phase: HostPhase::Running,
             queue_len: 2,
-            detail: Some("tool".into()),
+            detail: Some(
+                plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
+                    diagnostic: plakous_host_protocol::status::DiagnosticText::new("tool"),
+                },
+            ),
         },
         JsonlCorrelation {
             prompt_id: Some("p1"),

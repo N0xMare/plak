@@ -23,6 +23,7 @@ use super::{
 };
 use super::{HostBoundary, HostWorkflow, RuntimeFactory, TurnObserver, observe_boundary};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::CancelUnsettled;
 
 pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) job_agent: &'a Agent,
@@ -95,7 +96,7 @@ struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
     quit_after_terminal: bool,
     /// After Quit, wait this long for a cancelled terminal, then abandon.
     quit_join_deadline: Option<Instant>,
-    cancel_unsettled: Option<String>,
+    cancel_unsettled: Option<CancelUnsettled>,
     cancel_pending: bool,
     /// The runtime accepted a cancel for this turn, or reported the turn
     /// already ended; a refused request leaves this unset.

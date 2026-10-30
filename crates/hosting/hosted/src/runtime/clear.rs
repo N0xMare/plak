@@ -1,6 +1,7 @@
 //! `/clear` rebuild, publication, and resume session switching.
 
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::time::Instant;
 
 use plakous::application::ApplicationExecutor;
@@ -167,9 +168,12 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     ));
     let _ = events.send(ContentEvent::SetBusy(false));
     let _ = events.send(ContentEvent::Status {
-        phase: "idle".into(),
+        phase: HostPhase::Idle,
         queue_len: 0,
-        detail: Some(format!("ready · {}", config.model_id)),
+        detail: Some(HostStatusDetail::Ready {
+            model_id: config.model_id.clone(),
+            pause: plakous_host_protocol::status::HostPause::default(),
+        }),
     });
     Ok(())
 }
@@ -215,7 +219,7 @@ pub(super) fn production_build_clear_candidate<P: plakous_host_protocol::Protoco
         let session = executor
             .block_on(opened.create_with_runtime(operation, opened.clear_job_counter(runtime)?))
             .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(|error| error.failure)?;
+            .map_err(|error| *error.failure)?;
         return Ok((session, None));
     }
 
@@ -267,7 +271,7 @@ pub(super) fn production_build_clear_candidate<P: plakous_host_protocol::Protoco
     let session = executor
         .block_on(opened.create_with_runtime(operation, opened.clear_job_counter(runtime)?))
         .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| error.failure)?;
+        .map_err(|error| *error.failure)?;
     Ok((session, None))
 }
 
@@ -316,9 +320,12 @@ pub(super) fn resume_session_switch<P: plakous_host_protocol::ProtocolExtension>
     if switched.is_err() && waited {
         let _ = events.send(ContentEvent::SetBusy(false));
         let _ = events.send(ContentEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: config.session.pending_queue.len(),
-            detail: Some(format!("ready · {}", config.model_id)),
+            detail: Some(HostStatusDetail::Ready {
+                model_id: config.model_id.clone(),
+                pause: plakous_host_protocol::status::HostPause::default(),
+            }),
         });
     }
     switched
@@ -337,9 +344,9 @@ fn load_settled_source<P: plakous_host_protocol::ProtocolExtension>(
         *waited = true;
         let _ = events.send(ContentEvent::SetBusy(true));
         let _ = events.send(ContentEvent::Status {
-            phase: "resume".into(),
+            phase: HostPhase::Resume,
             queue_len,
-            detail: Some("releasing the previous session attachment".into()),
+            detail: Some(HostStatusDetail::ReleasingPreviousAttachment),
         });
     }) == Settlement::StillRunning
     {
@@ -399,7 +406,7 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
             RuntimeRole::Primary,
         ))
         .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| error.failure)?;
+        .map_err(|error| *error.failure)?;
     let source = config.session.clone();
     let previous = std::mem::replace(opened, replacement);
     config.session = next;
@@ -438,9 +445,12 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     if !opened.has_recovered_turn() {
         let _ = events.send(ContentEvent::SetBusy(false));
         let _ = events.send(ContentEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: config.session.pending_queue.len(),
-            detail: Some(format!("ready · {}", config.model_id)),
+            detail: Some(HostStatusDetail::Ready {
+                model_id: config.model_id.clone(),
+                pause: plakous_host_protocol::status::HostPause::default(),
+            }),
         });
     }
     Ok(())

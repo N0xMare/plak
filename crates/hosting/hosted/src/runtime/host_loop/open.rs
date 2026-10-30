@@ -13,6 +13,7 @@ use super::{
 use crate::sessions::projector::{ProductTreeJoin as _, SubmissionKind, pending_command_ids};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
     #[allow(
@@ -430,22 +431,21 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             &config.session,
             config.interactive,
         );
-        let paused_suffix = restored_paused_status_suffix(&config.topology_rows(), &config.session);
-        let with_pause = |detail: String| match &paused_suffix {
-            Some(suffix) => format!("{detail} · {suffix}"),
-            None => detail,
-        };
+        let pause = restored_paused_status_suffix(&config.topology_rows(), &config.session);
         if restored_working {
             let _ = events.send(ContentEvent::Status {
-                phase: "running".into(),
+                phase: HostPhase::Running,
                 queue_len: config.session.pending_queue.len(),
-                detail: Some(with_pause("restoring the original admitted turn".into())),
+                detail: Some(HostStatusDetail::RestoringAdmittedTurn { pause }),
             });
         } else {
             let _ = events.send(ContentEvent::Status {
-                phase: "idle".into(),
+                phase: HostPhase::Idle,
                 queue_len: config.session.pending_queue.len(),
-                detail: Some(with_pause(format!("ready · {}", config.model_id))),
+                detail: Some(HostStatusDetail::Ready {
+                    model_id: config.model_id.clone(),
+                    pause,
+                }),
             });
         }
         let _ = events.send(ContentEvent::SetBusy(restored_working));

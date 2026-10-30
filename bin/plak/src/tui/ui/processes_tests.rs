@@ -7,6 +7,7 @@ use super::test_support::{
 };
 use super::{App, HostEvent, KeyCode, UserAction, theme_for};
 use crate::tui::{SettingsTheme, slash::SlashEffect};
+use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::views::{ProcessStatus, ProcessView};
 use ratatui::{Terminal, backend::TestBackend};
 use std::sync::Arc;
@@ -443,7 +444,7 @@ fn unattached_binding_refusal_can_carry_via_reload_or_rebind() {
     let mut app = fixture();
     app.apply_process_snapshot(Arc::new(Vec::new()));
     app.agent_enabled = false;
-    app.phase = "not_ready".into();
+    app.phase = HostPhase::NotReady;
     app.status_detail = Some(
         "resolve_failed: resolved harness plan is bound to a different model capability binding (adapter revision, declared features or context contract)".into(),
     );

@@ -6,6 +6,7 @@ use super::{
     UserAction, char_range_bytes, cursor_from_visual_click, modal_chrome, sanitize_composer_text,
     sanitize_single_line, truncate_utf8_bytes, utf8_prefix, visual_cursor_xy, visual_line_count,
 };
+use plakous_host_protocol::status::HostPhase;
 
 impl App {
     /// Record the pre-edit draft so the next mutation is undoable.
@@ -241,7 +242,7 @@ impl App {
     /// the TUI would close for nothing, so all three refuse. The loop performs
     /// the handoff, because it owns the host mailbox the explicit quit uses.
     fn request_reload(&mut self) -> Option<UserAction> {
-        if self.phase == "not_ready"
+        if self.phase == HostPhase::NotReady
             && let Some(cause) = self.status_detail.clone().filter(|detail| {
                 detail.contains("bound to a different")
                     || detail.contains("login selection changed")

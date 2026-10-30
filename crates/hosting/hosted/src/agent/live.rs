@@ -484,7 +484,7 @@ impl LiveChildHandle for ProductLiveChild {
             .await
             {
                 crate::interrupt::CancelSettlement::Settled => None,
-                crate::interrupt::CancelSettlement::Unsettled(detail) => Some(detail),
+                crate::interrupt::CancelSettlement::Unsettled(detail) => Some(detail.to_string()),
             };
             let sessions = Arc::clone(&self.attached.sessions);
             match self.attached.release_opened_for_transfer().await {

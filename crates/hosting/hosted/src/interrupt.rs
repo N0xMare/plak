@@ -31,6 +31,7 @@
 //! a whole turn — a `Quit` in particular — is still observed in the order it
 //! arrived.
 
+use plakous_host_protocol::status::{CancelUnsettled, ControlFailure, DiagnosticText};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
@@ -187,7 +188,7 @@ pub(crate) enum CancelSettlement {
     /// The runtime joined the cancel; `interrupted` may be asserted.
     Settled,
     /// The cancel timed out or was refused; the turn may still be running.
-    Unsettled(String),
+    Unsettled(CancelUnsettled),
 }
 
 impl CancelSettlement {
@@ -229,13 +230,14 @@ where
     match tokio::time::timeout(timeout, cancel).await {
         Ok(Ok(_)) => CancelSettlement::Settled,
         Ok(Err(error)) if error.turn_is_no_longer_admitted() => CancelSettlement::Settled,
-        Ok(Err(error)) => CancelSettlement::Unsettled(format!(
-            "cancel was refused by the runtime ({error}); the turn is still running"
-        )),
-        Err(_) => CancelSettlement::Unsettled(format!(
-            "cancel did not settle within {}ms; the turn is still running",
-            timeout.as_millis()
-        )),
+        Ok(Err(error)) => CancelSettlement::Unsettled(CancelUnsettled::RuntimeRefused {
+            cause: ControlFailure {
+                diagnostic: DiagnosticText::new(error.to_string()),
+            },
+        }),
+        Err(_) => CancelSettlement::Unsettled(CancelUnsettled::Deadline {
+            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+        }),
     }
 }
 

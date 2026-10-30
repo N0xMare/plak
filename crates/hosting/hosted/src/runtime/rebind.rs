@@ -81,7 +81,7 @@ pub(super) fn restore_detached_source<P: plakous_host_protocol::ProtocolExtensio
             RuntimeRole::Primary,
         ))
         .map_err(|_| CliFailure::new("application execution failed while restoring source"))?
-        .map_err(|error| error.failure)?;
+        .map_err(|error| *error.failure)?;
     let previous = std::mem::replace(opened, replacement);
     executor
         .block_on(previous.release())

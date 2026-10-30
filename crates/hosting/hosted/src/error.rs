@@ -49,6 +49,7 @@ pub struct CliFailure {
     shutdown: Option<Box<ShutdownFailures>>,
     source: Option<Box<LookupFailure>>,
     refusal: Option<StoreRefusal>,
+    remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
 }
 
 /// A semantic- or product-store refusal that the same call may clear when
@@ -241,6 +242,7 @@ impl CliFailure {
             shutdown: None,
             source: None,
             refusal: None,
+            remedy: None,
         }
     }
 
@@ -301,6 +303,31 @@ impl CliFailure {
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Preserve a semantic repair independently of diagnostic context.
+    #[must_use]
+    pub fn with_remedy(
+        mut self,
+        remedy: plakous_host_protocol::notice_remedy::NoticeRemedy,
+    ) -> Self {
+        self.remedy = Some(remedy);
+        self
+    }
+
+    /// The semantic remedy retained at the originating failure site.
+    #[must_use]
+    pub fn remedy(&self) -> Option<&plakous_host_protocol::notice_remedy::NoticeRemedy> {
+        self.remedy.as_ref()
+    }
+
+    /// Bounded typed startup/status failure, without rendering frontend instructions.
+    #[must_use]
+    pub fn host_failure(&self) -> HostFailure {
+        HostFailure {
+            diagnostic: DiagnosticText::new(self.message.clone()),
+            remedy: self.remedy.clone(),
+        }
     }
 
     /// Typed shutdown failures, including canonical release and cleanup.
@@ -422,3 +449,5 @@ pub(crate) mod read_faults {
 
 #[cfg(test)]
 mod tests;
+
+use plakous_host_protocol::status::{DiagnosticText, HostFailure};

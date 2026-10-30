@@ -85,8 +85,10 @@ pub mod envelope;
 pub mod intent;
 pub mod jsonl;
 pub mod limits;
+pub mod notice_remedy;
 pub mod observation;
 pub mod selection;
+pub mod status;
 pub mod topology;
 pub mod views;
 

@@ -4,6 +4,7 @@
 )]
 
 use crate::surface_protocol::HostEvent;
+use plakous_host_protocol::status::HostPhase;
 
 #[test]
 fn settings_cannot_clear_an_existing_root_with_an_incomplete_binding() {
@@ -528,7 +529,7 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
                 SurfaceIntent::OpenConfigFile => {
                     assert!(observed.iter().any(|event| matches!(event,
                     HostEvent::Status { phase, queue_len: 7, detail: Some(detail) }
-                    if phase == "idle" && detail.starts_with("config: "))));
+                    if matches!(phase, HostPhase::Idle) && matches!(detail, plakous_host_protocol::status::HostStatusDetail::ConfigurationPath { .. }))));
                 }
                 SurfaceIntent::OpenSettings => assert!(matches!(
                     observed.as_slice(),
@@ -656,7 +657,7 @@ fn usage_never_waits_on_a_held_compatibility_lock_on_the_action_loop() {
     }
     let answered = receive_until(&rx, std::time::Duration::from_secs(5), |event| {
         matches!(event, HostEvent::Status { detail: Some(detail), .. }
-            if detail.starts_with("config: "))
+            if matches!(detail, plakous_host_protocol::status::HostStatusDetail::ConfigurationPath { .. }))
     });
     assert!(
         !answered.iter().any(|event| matches!(

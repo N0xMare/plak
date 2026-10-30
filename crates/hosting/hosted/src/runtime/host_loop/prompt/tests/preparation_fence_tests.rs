@@ -1,5 +1,6 @@
 use super::*;
 use crate::surface_protocol::UserAction;
+use plakous_host_protocol::status::HostPhase;
 
 #[test]
 fn post_context_stop_does_not_admit_a_turn() {
@@ -26,7 +27,7 @@ fn every_stop_stage_has_identical_tui_and_jsonl_terminal_records() {
             .into_iter()
             .filter(|event| {
                 matches!(event,
-            HostEvent::Status { phase, .. } if phase != "preparing")
+            HostEvent::Status { phase, .. } if !matches!(phase, HostPhase::Preparing))
                     || matches!(event, HostEvent::SetBusy(false))
             })
             .collect();
@@ -36,7 +37,7 @@ fn every_stop_stage_has_identical_tui_and_jsonl_terminal_records() {
             "one resting status and one busy-false: {terminal:?}"
         );
         assert!(
-            matches!(&terminal[0], HostEvent::Status {phase, detail: Some(detail), ..} if phase == "idle" && detail == "prompt preparation stopped; prompt remains queued")
+            matches!(&terminal[0], HostEvent::Status {phase, detail: Some(detail), ..} if matches!(phase, HostPhase::Idle) && matches!(detail, HostStatusDetail::PromptPreparationStopped))
         );
         let jsonl: Vec<_> = terminal
             .iter()
@@ -168,7 +169,7 @@ fn mail_selection_and_missing_wake_context_failures_leave_a_terminal_status() {
             "{observed:?}"
         );
         assert!(
-            matches!(observed.iter().rev().find(|event| matches!(event, HostEvent::Status {..})), Some(HostEvent::Status {phase, ..}) if phase == "idle"),
+            matches!(observed.iter().rev().find(|event| matches!(event, HostEvent::Status {..})), Some(HostEvent::Status {phase, ..}) if matches!(phase, HostPhase::Idle)),
             "{observed:?}"
         );
         assert_eq!(

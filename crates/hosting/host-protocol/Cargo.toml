@@ -26,6 +26,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "time"] }

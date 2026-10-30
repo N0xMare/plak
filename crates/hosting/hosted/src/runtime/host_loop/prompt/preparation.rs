@@ -4,6 +4,7 @@
 use super::{CliResult, ContentEvent, HostLoop, InterruptWatch};
 use crate::interrupt::run_watched;
 use plakous::application::{ApplicationExecutor, ApplicationExecutorError};
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::future::Future;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,9 +72,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             }));
         }
         let _ = self.events.send(ContentEvent::Status {
-            phase: "idle".into(),
+            phase: HostPhase::Idle,
             queue_len: self.config.session.pending_queue.len(),
-            detail: Some("prompt preparation stopped; prompt remains queued".into()),
+            detail: Some(HostStatusDetail::PromptPreparationStopped),
         });
         paused?;
         Ok(Some(Stopped))

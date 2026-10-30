@@ -13,6 +13,7 @@ use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::runtime::admission::{QueuePersistAction, log_queue_persist_failed};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::HostPhase;
 
 pub(super) mod preparation;
 
@@ -249,7 +250,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
         watch.begin();
         let _ = self.events.send(ContentEvent::Status {
-            phase: "preparing".into(),
+            phase: HostPhase::Preparing,
             queue_len: self.config.session.pending_queue.len(),
             detail: None,
         });
@@ -661,7 +662,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         } = mail;
         let _ = self.events.send(ContentEvent::SetBusy(true));
         let _ = self.events.send(ContentEvent::Status {
-            phase: "running".into(),
+            phase: HostPhase::Running,
             queue_len: self.config.session.pending_queue.len(),
             detail: None,
         });

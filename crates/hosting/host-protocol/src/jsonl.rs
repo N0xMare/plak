@@ -14,7 +14,6 @@ use crate::intent::{ObservationExtension, ProtocolExtension};
 use crate::observation::{QueueDrainState, SessionObservation};
 use crate::topology::CandidateId;
 use crate::views::ActivityKind;
-use crate::views::transcript::{NoticePlacement, NoticeTone, TranscriptRow};
 
 /// Stable JSONL label for one host-populated activity kind.
 const fn activity_kind_label(kind: ActivityKind) -> &'static str {
@@ -145,19 +144,7 @@ pub fn project_host_event<P: ProtocolExtension>(
                 fields.insert("stop_reason".into(), Value::from(reason.as_str()));
             }
         }
-        SessionObservation::Status {
-            phase,
-            queue_len,
-            detail,
-        } => {
-            JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
-            fields.insert("kind".to_owned(), Value::from("status"));
-            fields.insert("phase".to_owned(), Value::from(phase.as_str()));
-            fields.insert("queue_len".to_owned(), Value::from(*queue_len as u64));
-            if let Some(detail) = detail {
-                fields.insert("detail".to_owned(), Value::from(detail.as_str()));
-            }
-        }
+        SessionObservation::Status { .. } => return None,
         SessionObservation::SetBusy(busy) => {
             JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
             fields.insert("kind".to_owned(), Value::from("busy"));
@@ -263,20 +250,6 @@ pub fn project_host_event<P: ProtocolExtension>(
                 "output_discarded".to_owned(),
                 Value::from(retry.output_discarded),
             );
-        }
-        SessionObservation::Row(TranscriptRow::Notice(notice))
-            if notice.placement() != NoticePlacement::SessionLog =>
-        {
-            JsonlCorrelation::insert_id(&mut fields, correlation.command_scoped_id());
-            if notice.tone == NoticeTone::Error {
-                fields.insert("kind".to_owned(), Value::from("error"));
-                fields.insert("message".to_owned(), Value::from(notice.text.as_str()));
-            } else {
-                fields.insert("kind".to_owned(), Value::from("status"));
-                fields.insert("phase".to_owned(), Value::from("note"));
-                fields.insert("queue_len".to_owned(), Value::from(0_u64));
-                fields.insert("detail".to_owned(), Value::from(notice.text.as_str()));
-            }
         }
         SessionObservation::QueueSnapshot { items, drain } => {
             JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());

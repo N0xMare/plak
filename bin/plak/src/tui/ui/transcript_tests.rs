@@ -22,6 +22,7 @@ use crate::tui::presentation::{ActivityKind, ActivityState};
 use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction, user_action_channel};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -1831,15 +1832,19 @@ fn model_refusal_restores_published_view_without_discarded_preview() {
 fn host_status_and_transcript_events() {
     let mut app = App::new(launch_basic(), true);
     app.apply_host_event(HostEvent::Status {
-        phase: "running".into(),
+        phase: HostPhase::Running,
         queue_len: 2,
-        detail: Some("tool:edit".into()),
+        detail: Some(
+            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
+                diagnostic: plakous_host_protocol::status::DiagnosticText::new("tool:edit"),
+            },
+        ),
     });
     app.apply_host_event(HostEvent::QueueSnapshot {
         items: vec![queue_item("q-1", 1, "one"), queue_item("q-2", 1, "two")],
         drain: QueueDrainState::LiveAutoDrain,
     });
-    assert_eq!(app.phase, "running");
+    assert_eq!(app.phase, HostPhase::Running);
     assert_eq!(app.queue_len, 2);
     assert_eq!(app.status_detail.as_deref(), Some("tool:edit"));
 

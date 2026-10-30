@@ -1510,6 +1510,8 @@ PRODUCT_ACCOUNT_NAME_WAIVERS: set[str] = set()
 # recorded in a persisted projection, or an enrolled-candidate table. None of
 # them can move above the core, because the core is what compares them.
 PRODUCT_ACCOUNT_NAME_EXEMPTIONS: dict[SourceKey, set[str]] = {
+    # Persisted notice remedies preserve the exact original account identity.
+    ("plakous-host-protocol", "src/notice_remedy.rs"): {"codex", "grok", "claude", "openrouter"},
     # `CodingPresentation::{Codex, Grok, Claude}` is the model vocabulary --
     # which tool dialect a model is shown. It is irreducibly named after the
     # vendor whose dialect it reproduces.

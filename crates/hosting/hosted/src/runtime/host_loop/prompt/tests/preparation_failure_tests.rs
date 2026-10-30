@@ -1,6 +1,7 @@
 use super::*;
 use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
 use crate::surface_protocol::UserAction;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 struct PauseWriteFailure;
 
@@ -55,14 +56,14 @@ fn stopped_preparation_publishes_stop_status_even_when_the_pause_write_fails() {
     assert_eq!(
         statuses.last(),
         Some(&(
-            "idle".into(),
-            Some("prompt preparation stopped; prompt remains queued".into())
+            HostPhase::Idle,
+            Some(HostStatusDetail::PromptPreparationStopped)
         ))
     );
     assert!(
         !statuses
             .iter()
-            .any(|(_, detail)| detail.as_deref() == Some("prompt not admitted"))
+            .any(|(_, detail)| matches!(detail, Some(HostStatusDetail::PromptNotAdmitted)))
     );
     host.release().unwrap();
 }

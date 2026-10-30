@@ -3,6 +3,7 @@
 use crate::surface_protocol::ContentEvent;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeProvider;
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 
 use crate::binding::RootTemplateFact;
 use crate::binding::{OpenRouterRoutingSelection, ProtocolSelection, TargetSelection};
@@ -31,17 +32,17 @@ pub(super) fn emit_terminal_status<P: plakous_host_protocol::ProtocolExtension>(
     queue_len: usize,
 ) {
     let (phase, detail) = match phase {
-        TerminalPhase::RecoveryPending => ("error", "needs recovery · next prompt recovers"),
-        TerminalPhase::Idle => ("idle", "turn complete"),
-        TerminalPhase::AdmissionRejected => ("idle", "prompt not admitted"),
+        TerminalPhase::RecoveryPending => (HostPhase::Error, HostStatusDetail::RecoveryPending),
+        TerminalPhase::Idle => (HostPhase::Idle, HostStatusDetail::TurnComplete),
+        TerminalPhase::AdmissionRejected => (HostPhase::Idle, HostStatusDetail::PromptNotAdmitted),
         // Status is a latest-state observation: publishing `idle` here would
         // replace the `interrupted` phase before any consumer could read it.
         TerminalPhase::Interrupted => return,
     };
     let _ = events.send(ContentEvent::Status {
-        phase: phase.into(),
+        phase,
         queue_len,
-        detail: Some(detail.into()),
+        detail: Some(detail),
     });
 }
 
@@ -538,9 +539,11 @@ pub(super) fn emit_agent_plan_notes<P: plakous_host_protocol::ProtocolExtension>
     let text = String::from_utf8_lossy(stderr_buf);
     for line in text.lines() {
         let _ = events.send(ContentEvent::Status {
-            phase: "preparing".into(),
+            phase: HostPhase::Preparing,
             queue_len: config.session.pending_queue.len(),
-            detail: Some(line.to_owned()),
+            detail: Some(HostStatusDetail::PlanDiagnostic {
+                diagnostic: DiagnosticText::new(line.to_owned()),
+            }),
         });
     }
 }

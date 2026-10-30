@@ -18,6 +18,7 @@ pub(crate) const STEERING_NOT_APPLIED_CLAUSE: &str =
 
 use crate::CliResult;
 use crate::sessions::queue::{drop_last_mutable, edit_mutable, move_mutable, remove_mutable};
+use plakous_host_protocol::status::{HostPhase, HostTransitionStage};
 
 use crate::session_home::SessionHome;
 
@@ -355,8 +356,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 }
             }
             HostEvent::Status { phase, .. } => {
-                presentations.root_terminal_status =
-                    matches!(phase.as_str(), "idle" | "interrupted" | "error");
+                presentations.root_terminal_status = matches!(
+                    phase,
+                    HostPhase::Idle | HostPhase::Interrupted | HostPhase::Error
+                );
             }
             _ => {}
         }
@@ -871,19 +874,7 @@ pub enum RuntimeRole {
     Rebind,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum HostLifecyclePhase {
-    ClearResolveAuthority,
-    ClearBuildCandidate,
-    ClearPublishCandidate,
-    ClearActivate,
-    RebindResolveTarget,
-    RebindPrepareRuntime,
-    RebindPublishIntent,
-    RebindCanonicalTransition,
-    RebindOpenTarget,
-    RebindActivate,
-}
+use HostTransitionStage as HostLifecyclePhase;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostWorkflow {

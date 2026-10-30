@@ -8,6 +8,7 @@ use crate::commands::support::{HOST_WORKER_JOIN_TIMEOUT, join_host_worker_bounde
 use crate::presentation::tui_presentation_bundle;
 use crate::product_config;
 use crate::store::sessions as product_sessions;
+use plakous_host_protocol::status::HostPhase;
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::runtime as product_host;
 use plakous_hosted::sessions::{NoticePlacement, NoticeTone, TranscriptRow};
@@ -327,10 +328,20 @@ fn run_attached_config(
                 writeln!(stdout, "{}", notice.text)
                     .map_err(|_| CliFailure::new("stdout failed"))?;
             }
-            crate::surface_protocol::HostEvent::Status { phase, detail, .. }
-                if phase == "error" =>
-            {
-                failure = detail.or_else(|| Some("attached session command failed".into()));
+            crate::surface_protocol::HostEvent::Status {
+                phase: HostPhase::Error,
+                detail,
+                ..
+            } => {
+                failure = Some(detail.as_ref().map_or_else(
+                    || "attached session command failed".into(),
+                    |detail| {
+                        crate::host_status_text::status_detail(
+                            detail,
+                            crate::notice_text::Frontend::Run,
+                        )
+                    },
+                ));
             }
             _ => {}
         }

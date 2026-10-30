@@ -4,6 +4,7 @@ use crate::session_home::SessionHome;
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::session_store::SessionRecordStore;
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{CancelUnsettled, HostPhase, HostStatusDetail};
 use std::time::{Duration, Instant};
 
 use plakous::agent::{AgentError, TurnControl, TurnResult, TurnResultOutcome};
@@ -326,7 +327,7 @@ pub(super) async fn observe_pending_cancel_settlement<
 >(
     control: &TurnControl,
     cancel_pending: bool,
-    cancel_unsettled: &mut Option<String>,
+    cancel_unsettled: &mut Option<CancelUnsettled>,
     cancel_settle_deadline: &mut Option<Instant>,
     rows: &dyn TopologyRows,
     store: &dyn SessionRecordStore,
@@ -373,18 +374,17 @@ pub(super) async fn observe_pending_cancel_settlement<
     cancel_pending
 }
 
-pub(super) fn cancel_settle_deadline_elapsed(deadline: Option<Instant>) -> Option<String> {
+pub(super) fn cancel_settle_deadline_elapsed(deadline: Option<Instant>) -> Option<CancelUnsettled> {
     deadline
         .filter(|deadline| Instant::now() >= *deadline)
         .map(|_| cancel_settle_timeout_detail())
 }
 
-pub(super) fn cancel_settle_timeout_detail() -> String {
+pub(super) fn cancel_settle_timeout_detail() -> CancelUnsettled {
     let timeout = HOST_CANCEL_SETTLE_TIMEOUT;
-    format!(
-        "cancel did not settle within {}ms; the turn is still running",
-        timeout.as_millis()
-    )
+    CancelUnsettled::Deadline {
+        timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+    }
 }
 
 /// Applies the settled-cancel bookkeeping when a cancel the host requested but
@@ -401,7 +401,7 @@ pub(super) async fn settle_late_cancel<P: plakous_host_protocol::ProtocolExtensi
     home: &SessionHome,
     session: &mut SessionRecord,
     events: &Sender<P>,
-    cancel_unsettled: Option<&str>,
+    cancel_unsettled: Option<&CancelUnsettled>,
 ) {
     if cancel_unsettled.is_none() {
         return;
@@ -492,11 +492,13 @@ pub(super) async fn apply_cancel_settlement<P: plakous_host_protocol::ProtocolEx
         }
         CancelSettlement::Unsettled(detail) => {
             let _ = events.send(ContentEvent::Status {
-                phase: "interrupting".into(),
+                phase: HostPhase::Interrupting,
                 queue_len: session.pending_queue.len(),
-                detail: Some(detail.clone()),
+                detail: Some(HostStatusDetail::CancelUnsettled {
+                    cause: detail.clone(),
+                }),
             });
-            let _ = events.notice(TranscriptRow::error(NoticeScope::Turn, detail.clone()));
+            let _ = events.notice(TranscriptRow::error(NoticeScope::Turn, detail.to_string()));
         }
     }
     CancelStatusPublication::Published
@@ -526,9 +528,9 @@ pub(super) fn publish_interrupted_status<P: plakous_host_protocol::ProtocolExten
     session: &SessionRecord,
 ) {
     let _ = events.send(ContentEvent::Status {
-        phase: "interrupted".into(),
+        phase: HostPhase::Interrupted,
         queue_len: session.pending_queue.len(),
-        detail: Some("interrupt requested".into()),
+        detail: Some(HostStatusDetail::InterruptRequested),
     });
 }
 

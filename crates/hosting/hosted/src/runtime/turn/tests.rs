@@ -12,6 +12,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
 }
 use crate::runtime::test_kit::TestExtension;
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{CancelUnsettled, DiagnosticText, HostPhase, HostStatusDetail};
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type Sender = crate::runtime::Sender<TestExtension>;
 
@@ -162,9 +163,11 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
     assert!(events.publish_transcript(canonical));
     assert!(events.send(ContentEvent::SetBusy(false)));
     assert!(events.send(ContentEvent::Status {
-        phase: "idle".into(),
+        phase: HostPhase::Idle,
         queue_len: 0,
-        detail: Some("terminal".into()),
+        detail: Some(HostStatusDetail::PlanDiagnostic {
+            diagnostic: DiagnosticText::new("terminal")
+        }),
     }));
     let drained = rx.try_iter().collect::<Vec<_>>();
     let expected = logging::project_session_snapshot(&session);
@@ -173,7 +176,7 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
     assert!(drained.iter().any(|event| matches!(
         event,
         HostEvent::Status { phase, detail: Some(detail), .. }
-            if phase == "idle" && detail == "terminal"
+            if matches!(phase, HostPhase::Idle) && matches!(detail, HostStatusDetail::PlanDiagnostic { diagnostic } if diagnostic.as_str() == "terminal")
     )));
 }
 
@@ -248,9 +251,7 @@ fn unsettled_cancel_paints_interrupting_and_never_asserts_interrupted() {
         &config.home,
         &mut config.session,
         &events,
-        &CancelSettlement::Unsettled(
-            "cancel did not settle within 5000ms; the turn is still running".into(),
-        ),
+        &CancelSettlement::Unsettled(CancelUnsettled::Deadline { timeout_ms: 5000 }),
         None,
     ));
 
@@ -341,7 +342,7 @@ fn a_settled_cancel_defers_interrupted_behind_an_open_tool_row() {
     assert!(
         !observed.iter().any(|event| matches!(
             event,
-            HostEvent::Status { phase, .. } if phase == "interrupted"
+            HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Interrupted)
         )),
         "the status must wait for the open tool row: {observed:?}"
     );
@@ -376,7 +377,7 @@ fn a_settled_cancel_defers_interrupted_behind_an_open_tool_row() {
             .iter()
             .filter(|event| matches!(
                 event,
-                HostEvent::Status { phase, .. } if phase == "interrupted"
+                HostEvent::Status { phase, .. } if matches!(phase, HostPhase::Interrupted)
             ))
             .count(),
         1,
@@ -414,7 +415,7 @@ fn a_late_cancelled_terminal_applies_the_settled_bookkeeping() {
         &config.home,
         &mut config.session,
         &events,
-        Some("cancel did not settle within 5000ms; the turn is still running"),
+        Some(&CancelUnsettled::Deadline { timeout_ms: 5000 }),
     ));
     let observed: Vec<HostEvent> = rx.try_iter().collect();
     assert!(
@@ -431,11 +432,13 @@ fn a_late_cancelled_terminal_applies_the_settled_bookkeeping() {
 fn cancel_settle_timeout_detail_uses_the_host_timeout() {
     let detail = cancel_settle_timeout_detail();
     assert!(
-        detail.contains("still running"),
+        detail.to_string().contains("still running"),
         "unsettled detail must stay truthful: {detail}"
     );
     assert!(
-        detail.contains(&format!("{}ms", HOST_CANCEL_SETTLE_TIMEOUT.as_millis())),
+        detail
+            .to_string()
+            .contains(&format!("{}ms", HOST_CANCEL_SETTLE_TIMEOUT.as_millis())),
         "{detail}"
     );
 }

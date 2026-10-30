@@ -437,7 +437,7 @@ fn the_explicit_recover_control_reports_the_child_it_settled() {
         &events,
         &mut seen,
         "the open",
-        |event| matches!(event, HostEvent::Status { phase, .. } if phase == "idle"),
+        |event| matches!(event, HostEvent::Status { phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle)),
     );
     // The child is stranded after the open, so only `/recover` can settle it.
     let tokio = tokio::runtime::Runtime::new().unwrap();

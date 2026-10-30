@@ -95,7 +95,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             self.host.home,
                             self.host.session,
                             self.host.events,
-                            self.cancel_unsettled.as_deref(),
+                            self.cancel_unsettled.as_ref(),
                         )
                         .await;
                         Ok(TurnHostOutcome::Interrupted {
@@ -142,7 +142,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         self.host.home,
                         self.host.session,
                         self.host.events,
-                        self.cancel_unsettled.as_deref(),
+                        self.cancel_unsettled.as_ref(),
                     )
                     .await;
                     emit_turn_lifecycle(

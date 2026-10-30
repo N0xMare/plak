@@ -10,6 +10,7 @@ use crate::tui::SettingsTheme;
 use crate::tui::SurfaceObservation;
 use crate::tui::presentation::ActivityKind;
 use crossterm::event::{KeyEvent, KeyModifiers, MouseEventKind};
+use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use ratatui::{Terminal, backend::TestBackend};
 use std::time::{Duration, Instant};
 
@@ -525,7 +526,7 @@ fn hud_priority_and_verbs_never_expose_the_tool_subject() {
         let label = app.turn_status_label().unwrap();
         assert!(label.starts_with("retrying ") && label.ends_with("(2/4)"));
         assert!(!label.contains("cause"));
-        app.phase = "compacting".into();
+        app.phase = HostPhase::Compacting;
         assert_eq!(app.turn_status_label().as_deref(), Some("compacting"));
         assert_hud_width_classes(&mut app);
         app.cancel_pending = true;
@@ -591,14 +592,16 @@ fn nested_activity_wins_over_a_computing_cell_and_problem_labels_replace_work() 
     ));
     assert_eq!(app.turn_status_label().as_deref(), Some("working"));
     for (phase, label) in [
-        ("error", "error: disk full"),
-        ("interrupted", "interrupted"),
-        ("rebind", "switching model…"),
+        (HostPhase::Error, "error: disk full"),
+        (HostPhase::Interrupted, "interrupted"),
+        (HostPhase::Rebind, "switching model…"),
     ] {
         app.apply_host_event(HostEvent::Status {
-            phase: phase.into(),
+            phase,
             queue_len: 0,
-            detail: Some("disk full".into()),
+            detail: Some(HostStatusDetail::PlanDiagnostic {
+                diagnostic: DiagnosticText::new("disk full"),
+            }),
         });
         assert_eq!(app.turn_status_label().as_deref(), Some(label));
     }
@@ -1175,10 +1178,10 @@ fn hud_labels_web_and_mcp_calls() {
 
 #[test]
 fn workflow_escape_offers_operation_stop_not_turn_loss() {
-    for phase in ["fork", "rebind"] {
+    for phase in [HostPhase::Fork, HostPhase::Rebind] {
         let mut app = App::new(launch_basic(), true);
         app.busy = true;
-        app.phase = phase.into();
+        app.phase = phase;
         assert!(app.handle_key(key(KeyCode::Esc)).is_none());
         let text = render_to_string(&mut app, 120, 24);
         assert!(text.contains("Stop this operation?"), "{text}");

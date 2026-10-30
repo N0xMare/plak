@@ -12,6 +12,7 @@ use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ContextUsage, SessionLedgerView};
 use crate::tui::{HostEvent, SurfaceObservation, UserAction, user_action_channel};
 use crossterm::event::KeyCode;
+use plakous_host_protocol::status::HostPhase;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -134,12 +135,18 @@ fn retry_attach_uses_compact_model_transition_copy() {
     let mut app = App::new(launch_basic(), true);
     dispatch_action(&mut app, &UserAction::RetryAttach, None);
     assert_eq!(app.status_detail.as_deref(), Some("switching model…"));
-    assert_eq!(user_phase("rebind"), "switching model…");
+    assert_eq!(user_phase(HostPhase::Rebind), "switching model…");
 
     app.apply_host_event(HostEvent::Status {
-        phase: "rebind".into(),
+        phase: HostPhase::Rebind,
         queue_len: 0,
-        detail: Some("resolving exact target codex/gpt-secret".into()),
+        detail: Some(
+            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
+                diagnostic: plakous_host_protocol::status::DiagnosticText::new(
+                    "resolving exact target codex/gpt-secret",
+                ),
+            },
+        ),
     });
     app.apply_host_event(HostEvent::SetBusy(true));
     let backend = TestBackend::new(80, 12);
@@ -227,9 +234,15 @@ fn failed_clear_keeps_source_view_and_binding() {
         ),
     ));
     app.apply_host_event(HostEvent::Status {
-        phase: "idle".into(),
+        phase: HostPhase::Idle,
         queue_len: 0,
-        detail: Some("clear refused · source remains active".into()),
+        detail: Some(
+            plakous_host_protocol::status::HostStatusDetail::PlanDiagnostic {
+                diagnostic: plakous_host_protocol::status::DiagnosticText::new(
+                    "clear refused · source remains active",
+                ),
+            },
+        ),
     });
 
     assert!(blocks_contain(&app, "source transcript"));

@@ -842,7 +842,9 @@ fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
             if matches!(event, HostEvent::PromptStarted(_)) {
                 started = true;
             }
-            if started && matches!(event, HostEvent::Status { ref phase, .. } if phase == "idle") {
+            if started
+                && matches!(event, HostEvent::Status { ref phase, .. } if matches!(phase, plakous_host_protocol::status::HostPhase::Idle))
+            {
                 break;
             }
         }

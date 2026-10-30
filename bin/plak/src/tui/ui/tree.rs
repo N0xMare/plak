@@ -6,6 +6,7 @@ use super::{
     TopologyNavigatorKey, TopologyNavigatorOutcome, UserAction, event, route_submit,
     tree_navigator_key,
 };
+use plakous_host_protocol::status::HostPhase;
 
 /// The product's acknowledged occurrences for the tree the TUI last saw.
 #[derive(Debug, Default)]
@@ -111,8 +112,8 @@ impl App {
     /// `running` on an idle session).
     pub(super) fn sync_root_turn_projection(&mut self) {
         let active = matches!(
-            self.phase.as_str(),
-            "running" | "interrupting" | "compacting"
+            self.phase,
+            HostPhase::Running | HostPhase::Interrupting | HostPhase::Compacting
         );
         if let Some(nav) = self.tree_navigator.as_mut()
             && nav.project_root_turn(active)

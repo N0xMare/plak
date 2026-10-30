@@ -10,6 +10,7 @@ use crate::runtime::ledger::RootLedger;
 use crate::sessions::projector::{Submission, SubmissionKind};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::{HostPhase, HostStatusDetail, SteerSource};
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
     #[allow(
@@ -260,9 +261,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 "send-now was rejected; the exact queue item was retained and automatic drain paused"));
         } else {
             let _ = self.host.events.send(ContentEvent::Status {
-                phase: "running".into(),
+                phase: HostPhase::Running,
                 queue_len: self.host.session.pending_queue.len(),
-                detail: Some("steering...".into()),
+                detail: Some(HostStatusDetail::Steering {
+                    source: SteerSource::QueuedDelivery,
+                }),
             });
         }
         observe_boundary(

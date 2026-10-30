@@ -7,6 +7,7 @@ use crate::sessions::{
     QueueDrainState as SessionQueueDrainState, QueueItem as SessionQueueItem, SessionRecord,
 };
 use crate::surface_protocol::ContentEvent;
+use plakous_host_protocol::status::HostPause;
 
 use super::rebind::durable_tree_id;
 use super::{
@@ -42,15 +43,10 @@ pub(super) fn emit_queue_snapshot<P: plakous_host_protocol::ProtocolExtension>(
 pub(super) fn restored_paused_status_suffix(
     rows: &dyn TopologyRows,
     session: &SessionRecord,
-) -> Option<String> {
-    let tree_paused =
-        topology_state::observed_restored_paused(rows, &durable_tree_id(rows, session));
-    let queue_paused = queue_drain_is_paused(session);
-    match (tree_paused, queue_paused) {
-        (false, false) => None,
-        (true, true) => Some("agent tree paused · queue not draining · /tree then r".to_owned()),
-        (true, false) => Some("agent tree paused · /tree then r".to_owned()),
-        (false, true) => Some("queue paused, not draining · Tab then r".to_owned()),
+) -> HostPause {
+    HostPause {
+        tree: topology_state::observed_restored_paused(rows, &durable_tree_id(rows, session)),
+        queue: queue_drain_is_paused(session),
     }
 }
 
