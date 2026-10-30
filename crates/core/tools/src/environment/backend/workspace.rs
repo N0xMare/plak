@@ -946,7 +946,8 @@ pub(super) fn mutate_workspace_sync(
             .map(fs::File::metadata)
             .transpose()
             .map_err(|_| io_error("workspace mutation metadata failed"))?;
-        verify_expected_file_state(observed.as_mut(), item.expected(), control)?;
+        verify_expected_file_state(observed.as_mut(), item.expected(), control)
+            .map_err(|error| error.at_workspace_path(item.path()))?;
         let disposition =
             mutation_disposition(item.expected(), item.replacement(), observed.is_some())?;
         let created_parents = if disposition == WorkspaceMutationDisposition::Created {
@@ -983,7 +984,8 @@ pub(super) fn mutate_workspace_sync(
     for (item, _prepared) in transaction.mutations().iter().zip(&preflight) {
         control.check_cancelled()?;
         let mut observed = observe_workspace_file(workspace, item.path())?;
-        verify_expected_file_state(observed.as_mut(), item.expected(), control)?;
+        verify_expected_file_state(observed.as_mut(), item.expected(), control)
+            .map_err(|error| error.at_workspace_path(item.path()))?;
     }
 
     // This is deliberately the last cancellation point. Returning Cancelled

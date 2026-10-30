@@ -24,7 +24,7 @@ impl EditFilesTool {
         Ok((
             standard_definition(
                 "edit_files",
-                "Validate ordered file operations together, then publish one workspace transaction with content/absence checks. Validation failure changes no target; publication is per-file, without rollback, and failure requires recovery. expect is a content revision or absent. Move copies bounded bytes to an absent destination, then deletes the source. It does not preserve the source inode or permissions: newly created destinations are 0600; replacements retain the original destination's permissions.",
+                crate::text::PLAKOUS_TOOL_EDIT_FILES_DESCRIPTION,
                 object_schema(
                     json!({"ops": {
                             "type":"array", "minItems":1, "maxItems":MAX_STANDARD_PATCH_CHANGES,
@@ -246,6 +246,7 @@ async fn apply_op(
     context: &ToolContext,
     files: &mut Overlay,
     op: EditOp,
+    guards: &mut crate::mutation::WriteGuards,
 ) -> Result<(), ToolRuntimeError> {
     let (path, expect) = match &op {
         EditOp::Patch { patch, expect } => {
@@ -264,7 +265,13 @@ async fn apply_op(
         .ok_or_else(|| invalid("missing edit target"))?;
     check_expect(state, expect.as_deref())?;
     match op {
-        EditOp::Write { content, .. } => state.bytes = Some(content.into_bytes()),
+        EditOp::Write { content, .. } => {
+            if let WorkspaceExpectedFileState::Content(identity) = state.original {
+                crate::mutation::require_read(context, &path, identity)?;
+            }
+            guards.insert(path.clone(), state.original);
+            state.bytes = Some(content.into_bytes());
+        }
         EditOp::Delete { .. } => {
             if state.bytes.take().is_none() {
                 return Err(invalid("edit_files delete target is absent"));
@@ -311,16 +318,20 @@ impl ToolExecutor for EditFilesTool {
                 );
             }
             let mut files = Overlay::new();
+            let mut guards = crate::mutation::WriteGuards::new();
             for (index, op) in args.ops.into_iter().enumerate() {
                 let parsed = serde_json::from_value(op)
                     .map_err(|error| invalid(format!("invalid operation: {error}")));
                 let result = match parsed {
-                    Ok(op) => apply_op(&context, &mut files, op).await,
+                    Ok(op) => apply_op(&context, &mut files, op, &mut guards).await,
                     Err(error) => Err(error),
                 };
                 if let Err(error) = result {
                     if matches!(error.kind(), ToolRuntimeErrorKind::Cancelled) {
                         return Err(error);
+                    }
+                    if error.kind() == ToolRuntimeErrorKind::WorkspacePolicy {
+                        return ToolOutcome::failure_text(error.message().as_str());
                     }
                     return ToolOutcome::failure_text(format!(
                         "op {}: {}",
@@ -354,6 +365,9 @@ impl ToolExecutor for EditFilesTool {
                 .map_err(backend_runtime_error)?;
             let transaction =
                 WorkspaceMutationTransaction::new(changes).map_err(backend_runtime_error)?;
+            if let Err(error) = crate::mutation::preflight_result(&transaction) {
+                return ToolOutcome::failure_text(error.message().as_str());
+            }
             let value_inputs = invocation
                 .want_value()
                 .then(|| crate::patch::file_change_inputs(&transaction))
@@ -364,6 +378,11 @@ impl ToolExecutor for EditFilesTool {
                 .await;
             match result {
                 Ok(result) => edit_outcome(&result, value_inputs),
+                Err(error) if crate::mutation::guarded_conflict(&error, &guards).is_some() => {
+                    ToolOutcome::failure_text(
+                        crate::mutation::guarded_conflict(&error, &guards).unwrap_or_default(),
+                    )
+                }
                 Err(error)
                     if matches!(
                         error.kind(),
@@ -386,12 +405,7 @@ fn edit_outcome(
     inputs: Option<Vec<(String, Option<WorkspaceContentIdentity>)>>,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     use plakous_tools::WorkspaceMutationDisposition as D;
-    let count = result
-        .items()
-        .iter()
-        .filter(|item| item.disposition() != D::Unchanged)
-        .count();
-    let outcome = ToolOutcome::success_text(format!("changed_files={count}"))?;
+    let outcome = ToolOutcome::success_text(crate::mutation::result_text(result))?;
     let Some(inputs) = inputs else {
         return Ok(outcome);
     };

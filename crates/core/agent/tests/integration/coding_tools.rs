@@ -289,7 +289,7 @@ async fn typed_mutations_report_committed_revisions_without_changing_text() -> T
             want_value,
         )
         .await?;
-        assert_eq!(patch.joined_text(), "changed_files=1");
+        assert_eq!(patch.joined_text(), "changed_files=1\nM \"old.txt\"");
         match patch.take_value() {
             Some(ExecutionValue::FileChanges(value)) if want_value => {
                 assert_eq!(value.changes.len(), 1);

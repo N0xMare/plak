@@ -307,6 +307,18 @@ impl ToolExecutor for ApplyPatchTool {
                     return ToolOutcome::failure_text(error.message().as_str());
                 }
             };
+            if let Err(error) = crate::mutation::preflight_result(&transaction) {
+                return ToolOutcome::failure_text(error.message().as_str());
+            }
+            let mut guards = crate::mutation::WriteGuards::new();
+            if args.old_string.as_deref().unwrap_or("").is_empty()
+                && args.replace_all.unwrap_or(false)
+                && args.edits.is_none()
+                && let Some(mutation) = transaction.mutations().first()
+                && args.file_path.is_some()
+            {
+                guards.insert(mutation.path().to_path_buf(), mutation.expected());
+            }
             let value_inputs = if invocation.want_value() {
                 file_change_inputs(&transaction)?
             } else {
@@ -318,15 +330,7 @@ impl ToolExecutor for ApplyPatchTool {
                 .await;
             match result {
                 Ok(result) => {
-                    let changed_files = result
-                        .items()
-                        .iter()
-                        .filter(|item| {
-                            item.disposition() != WorkspaceMutationDisposition::Unchanged
-                        })
-                        .count();
-                    let outcome =
-                        ToolOutcome::success_text(format!("changed_files={changed_files}"))?;
+                    let outcome = ToolOutcome::success_text(crate::mutation::result_text(&result))?;
                     Ok(if invocation.want_value() {
                         let mut changes = Vec::with_capacity(result.items().len());
                         changes.extend(result.items().iter().zip(value_inputs).filter_map(
@@ -358,7 +362,11 @@ impl ToolExecutor for ApplyPatchTool {
                     })
                 }
                 Err(error) if error.kind() == ExecutionBackendErrorKind::Conflict => {
-                    ToolOutcome::failure_text(PLAKOUS_TOOL_PATCH_WORKSPACE_CONFLICT)
+                    ToolOutcome::failure_text(
+                        crate::mutation::guarded_conflict(&error, &guards)
+                            .as_deref()
+                            .unwrap_or(PLAKOUS_TOOL_PATCH_WORKSPACE_CONFLICT),
+                    )
                 }
                 Err(error)
                     if matches!(
@@ -414,7 +422,7 @@ async fn search_replace_mutation(
     let path = relative_workspace_path(context, path)?;
     if old_string.is_empty() {
         let expected = if replace_all {
-            WorkspaceExpectedFileState::Any
+            crate::mutation::blind_write_expected(context, &path).await?
         } else {
             WorkspaceExpectedFileState::Missing
         };

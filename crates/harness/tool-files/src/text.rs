@@ -3,6 +3,18 @@
 //! A tool's description and its refusals travel with the tool (spec 02 §6.3):
 //! they change together and they are pinned together.
 
+/// Blind whole-file overwrite without an explicit text-read observation.
+pub const PLAKOUS_TOOL_WRITE_UNREAD: &str = "Write refused: {path} already exists and has not been read in this session attachment. Read the file with the file-reading tool, then retry. After resume or reload, read it again.";
+
+/// Blind whole-file overwrite after the observed content changed.
+pub const PLAKOUS_TOOL_WRITE_STALE: &str = "Write refused: {path} changed on disk since its last read. Read the file again with the file-reading tool, then retry; no files were changed.";
+
+/// Successful mutation text contract; paths are JSON string literals.
+pub const PLAKOUS_TOOL_FILE_CHANGES_FORMAT: &str = "changed_files={count}\n{action} {path}: every changed workspace-relative path in lexical order; A=create, M=update, D=delete; moves name D source and A destination; unchanged paths are omitted; zero changes is exactly changed_files=0";
+
+/// Explicitly enrolled SDK file transaction description.
+pub const PLAKOUS_TOOL_EDIT_FILES_DESCRIPTION: &str = "Validate ordered file operations together, then publish one workspace transaction with content/absence checks. Validation failure changes no target; publication is per-file, without rollback, and failure requires recovery. expect is a content revision or absent. Move copies bounded bytes to an absent destination, then deletes the source. It does not preserve the source inode or permissions: newly created destinations are 0600; replacements retain the original destination's permissions.";
+
 /// Standard read_file tool description.
 pub const PLAKOUS_TOOL_READ_FILE_DESCRIPTION: &str = "Read one workspace text file. path is workspace-relative, or exactly a path a process result or completion notice named on its `full output:` line. A `full output:` path issued by an earlier process (before a restart or reload) or another agent is refused. offset is a 1-indexed start line (default 1). limit is a maximum line count (default 200, max 2000). Returns a JSON string with content (the file text, preserving LF/CRLF and final newline), offset (1-indexed), lines, eof, and next_offset (null at EOF), plus optional workspace_generation. A page holds at most 256 KiB; continue from next_offset. A line over 2000 characters is clipped with a marker and counted in clipped_lines; invalid UTF-8 is replaced and marked lossy=true; binary files are refused. In JavaScript use JSON.parse(await tools.read_file({...})).content; in Python use json.loads(await read_file({...}))[\"content\"]. Metadata is not file content. Check eof before treating the result as the entire file.";
 

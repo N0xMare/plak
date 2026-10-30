@@ -32,6 +32,8 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 #[path = "sdk_tools.rs"]
 mod sdk_tools;
 
+mod write_guard;
+
 #[derive(Clone, Copy)]
 struct Ids {
     run: RunId,
@@ -2073,6 +2075,7 @@ async fn nested_read_then_write_preserves_exact_file_bytes() -> TestResult {
         "λ\r\n尾",
     ] {
         fs::write(workspace.path().join("seed.txt"), content)?;
+        read_existing_copy(&registry, environment.clone()).await?;
         let call = ids(0x94)?;
         let make_request = |name: &str, arguments: String| -> TestResult<_> {
             Ok(ToolInvocationRequest::new(
@@ -2120,6 +2123,23 @@ async fn nested_read_then_write_preserves_exact_file_bytes() -> TestResult {
             fs::read(workspace.path().join("copy.txt"))?,
             content.as_bytes()
         );
+    }
+    Ok(())
+}
+
+async fn read_existing_copy(
+    registry: &plakous_tools::FrozenToolRegistry,
+    environment: Arc<ExecutionEnvironment>,
+) -> TestResult {
+    if environment.root().join("copy.txt").exists() {
+        execute(
+            registry,
+            environment,
+            ids(0x95)?,
+            "read_file",
+            r#"{"path":"copy.txt"}"#,
+        )
+        .await?;
     }
     Ok(())
 }

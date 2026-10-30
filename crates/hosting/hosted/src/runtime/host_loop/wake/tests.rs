@@ -3267,6 +3267,7 @@ fn thirty_consecutive_wakes_admit_fresh_completions_without_a_user_prompt() {
 
 #[test]
 fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
+    assert_eq!(QUIET_WINDOW, Duration::from_secs(2));
     for coalesce in [false, true] {
         let jobs = Arc::new(WakeJobFixture::default());
         with_configured_fixture(

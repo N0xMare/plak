@@ -19,7 +19,7 @@ use plakous_tool_files::{
     PLAKOUS_TOOL_PATCH_TARGET_TOO_LARGE, PLAKOUS_TOOL_PATCH_WORKSPACE_CONFLICT,
     PLAKOUS_TOOL_READ_FILE_DESCRIPTION, PLAKOUS_TOOL_READ_OFFSET_PAST_EOF,
     PLAKOUS_TOOL_SEARCH_REPLACE_AMBIGUOUS, PLAKOUS_TOOL_SEARCH_REPLACE_NOT_FOUND,
-    PLAKOUS_TOOL_SEARCH_REPLACE_NOT_UTF8,
+    PLAKOUS_TOOL_SEARCH_REPLACE_NOT_UTF8, PLAKOUS_TOOL_WRITE_STALE, PLAKOUS_TOOL_WRITE_UNREAD,
 };
 use plakous_tool_plan::{
     PLAKOUS_CODEX_UPDATE_PLAN_DESCRIPTION, PLAKOUS_GROK_TODO_DESCRIPTION,
@@ -129,7 +129,7 @@ fn grok_prompts_digest_is_stable() {
 
 /// The concatenated digest of every string this module owns.
 const ERROR_PROMPTS_DIGEST: &str =
-    "58ed92e9cad4985d000f02b472c213add7949c866f1cb2c5ef7dc26ddfcc2499";
+    "7dcd5e82fa7959201291189f267b6fd1be5da74033bab7977d244bfd363fca6a";
 #[test]
 fn error_prompts_digest_is_stable() {
     let combined = [
@@ -152,6 +152,8 @@ fn error_prompts_digest_is_stable() {
         PLAKOUS_TOOL_SEARCH_REPLACE_NOT_UTF8,
         PLAKOUS_TOOL_SEARCH_REPLACE_NOT_FOUND,
         PLAKOUS_TOOL_SEARCH_REPLACE_AMBIGUOUS,
+        PLAKOUS_TOOL_WRITE_UNREAD,
+        PLAKOUS_TOOL_WRITE_STALE,
     ]
     .concat();
     assert_eq!(

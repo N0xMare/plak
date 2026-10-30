@@ -664,6 +664,7 @@ pub struct ExecutionEnvironment {
     pub(super) operation_backend: Arc<dyn ExecutionBackend>,
     pub(super) joined_process_sessions: Arc<JoinedProcessServiceCache>,
     pub(super) host_process: Option<Arc<HostProcessContext>>,
+    pub(super) read_observations: Arc<super::read_observations::ReadObservations>,
 }
 
 impl ExecutionEnvironment {
@@ -830,6 +831,7 @@ impl ExecutionEnvironment {
             operation_backend,
             joined_process_sessions: Arc::new(JoinedProcessServiceCache::default()),
             host_process: None,
+            read_observations: Arc::default(),
         })
     }
 

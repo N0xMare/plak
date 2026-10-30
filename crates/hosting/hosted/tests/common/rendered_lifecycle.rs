@@ -99,7 +99,7 @@ mod suite {
     const READ_SUCCESS: &str =
         r#"{"content":"hello\n","offset":1,"lines":1,"eof":true,"next_offset":null}"#;
     const SEARCH_HITS: &str = "matches=2 files_considered=1 files_scanned=1 bytes_scanned=24 skipped_binary=0 skipped_oversize=0 incomplete=false\nsrc/lib.rs:1:4:fn hello() {}\nsrc/lib.rs:2:4:fn world() {}";
-    const PATCH_SUCCESS: &str = "changed_files=1";
+    const PATCH_SUCCESS: &str = "changed_files=1\nM \"src/lib.rs\"";
     const PROCESS_OUTPUT: &str = "hello\n";
 
     fn lifecycle_dir() -> PathBuf {
@@ -416,7 +416,7 @@ mod suite {
         md.push_str("| what | Exact model-visible tool result text after `ToolProjectionMap::raise` then `ToolOutcome::to_model_result` |\n");
         md.push_str("| why | First-turn goldens show schemas; this file shows what comes back |\n");
         md.push_str("| production fns | `plakous_tools::exposure::ToolProjectionMap::raise`, `plakous_tools::outcome::ToolOutcome::to_model_result`, `coding.rs` result shapes, `prepare_in_environment` for absolute `workdir` |\n");
-        md.push_str("| faithful vs synthetic | Raised envelopes are faithful. Canonical `ToolOutcome` bodies are synthetic copies of `coding.rs` formats (`read_file` stamp, process `into_outcome` JSON, search hit list, `changed_files=N`). Error bodies cite `crates/harness/tool-files/src/text.rs` and `crates/harness/tool-process/src/text.rs`. Observation-budget *runtime* replacement texts cite `crates/core/agent/src/runtime/prompts.rs` (private `clip_tool_result` is not called). |\n\n");
+        md.push_str("| faithful vs synthetic | Raised envelopes are faithful. Canonical `ToolOutcome` bodies are synthetic copies of file/process/search executor formats (paged read metadata, process JSON, search hit list, file change counts and named paths). Error bodies cite `crates/harness/tool-files/src/text.rs` and `crates/harness/tool-process/src/text.rs`. Observation-budget *runtime* replacement texts cite `crates/core/agent/src/runtime/prompts.rs` (private `clip_tool_result` is not called). |\n\n");
 
         md.push_str("Known/deferred: Code Mode `exec` bytes are upstream-pinned; nested `inspect_image` in PTC cells.\n\n");
 
@@ -806,7 +806,7 @@ mod suite {
         ));
 
         md.push_str("## `apply_patch` success\n\n");
-        md.push_str("Canonical success from `coding.rs`: `changed_files=N`.\n\n");
+        md.push_str("Canonical success from `tool-files`: count plus every changed path, JSON-quoted and lexically ordered, with A/M/D actions.\n\n");
         md.push_str(&surface(
             "Codex Direct `apply_patch`",
             "Raising `TextResultObjectV1`.",
@@ -880,6 +880,23 @@ mod suite {
                 0x65,
             ),
         ));
+
+        md.push_str("## Guarded Write refusals\n\n");
+        let file_pins = plakous::tools::ToolPack::pins(&plakous::tools::FilesToolPack);
+        for (label, pin, call) in [
+            ("Unread existing file", "files.write_unread", 0x6a),
+            ("Stale content after Read", "files.write_stale", 0x6b),
+        ] {
+            let template = file_pins
+                .iter()
+                .find(|entry| entry.id() == pin)
+                .expect("file refusal pin")
+                .text();
+            md.push_str(&surface(label, "Definite failure, no files changed; the same refusal applies to Direct and nested writes.", "text", &raise_text(
+                &claude, "Write", r#"{"file_path":"src/lib.rs","content":"replacement"}"#,
+                ToolOutcome::failure_text(template.replace("{path}", "\"src/lib.rs\"")).expect("write refusal"), call,
+            )));
+        }
 
         md.push_str("## Patch-conflict failure (recovery text)\n\n");
         md.push_str("Failures skip `TextResultObjectV1` wrapping (`raise_text_result_object` returns the outcome as-is when not `Success`).\n\n");
@@ -1922,7 +1939,7 @@ mod suite {
     const LIFECYCLE_RENDER_PINS: &[(&str, &str)] = &[
         (
             "tool-results",
-            "ab71dc81f35663c8f9f590b5a353c81650919c343568a1c87a752a297b1b75e0",
+            "cc61ae7a6299346a10ba74e706ffdbd9782a4690d4566452ea28a6a7688a4187",
         ),
         (
             "compaction",

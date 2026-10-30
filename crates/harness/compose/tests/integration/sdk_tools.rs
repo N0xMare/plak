@@ -10,6 +10,9 @@ use serde_json::{Value, json};
 
 fn sdk_registry() -> TestResult<FrozenToolRegistry> {
     let mut builder = ToolRegistryBuilder::default();
+    for registration in <FilesToolPack as plakous_tools::ToolPack>::registrations(&FilesToolPack)? {
+        builder.register(registration)?;
+    }
     builder.register(FilesToolPack::edit_files_registration()?)?;
     builder.register(SearchToolPack::list_entries_registration()?)?;
     let process = Arc::new(ProcessSessionTools::posix_sh()?);
@@ -243,6 +246,14 @@ async fn edit_files_revisions_and_move_destinations_are_preconditions() -> TestR
     let revision = WorkspaceContentIdentity::from_bytes(b"now")?
         .digest()
         .to_string();
+    execute(
+        &registry,
+        environment.clone(),
+        ids(6)?,
+        "read_file",
+        r#"{"path":"a"}"#,
+    )
+    .await?;
     let result = execute(
         &registry,
         environment,

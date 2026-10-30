@@ -6138,6 +6138,40 @@ choice and answer discipline both degraded. The cost is bounded by §6.7.
 
 ### 6.3 The coding packs and how they lower
 
+Successful file changes in every vocabulary (Codex `apply_patch`, Claude
+`Edit`/`Write`, Grok `search_replace`/`write`, pi `edit`/`write`, neutral
+`apply_patch` and explicitly enrolled SDK `edit_files`) return `changed_files=N`
+followed by every changed workspace-relative path in lexical order, one per
+line, as A/M/D plus a space and a JSON-quoted path. Unchanged files are omitted;
+moves name D source and A destination, and zero changes is exactly
+`changed_files=0`. The result is preflighted before mutation rather than
+silently cutting paths. Typed `FileChanges` and result raising are preserved.
+
+Whole-file writes to existing files require an explicit successful text read
+in this session attachment and unchanged whole-file content, including when
+only a page was read. This is not an mtime check. Missing files can be created
+without a read; context-checked patch edits need no prior Read. SDK `expect`
+does not bypass this guard; writes to files created in the same SDK transaction
+need no prior read. Successful mutations consume the touched read observations,
+including both sides of a move and no-ops. Resume/reload, fork/import and another
+agent start without observations; reread existing files after resume/reload.
+Shell reads, search, images, process outputs and implicit patch reads do not
+authorize Write. Direct and nested calls have the same guard.
+
+Unread and stale writes are definite unsuccessful tool results with no target
+changes. Their exact texts follow (`{path}` is a JSON-quoted workspace-relative
+path), including create races and content conflicts caught at commit:
+
+```text
+Write refused: {path} already exists and has not been read in this session attachment. Read the file with the file-reading tool, then retry. After resume or reload, read it again.
+Write refused: {path} changed on disk since its last read. Read the file again with the file-reading tool, then retry; no files were changed.
+```
+
+Containment and I/O failures retain their truthful errors; a publication
+failure remains recovery-required, never a fabricated successful path listing.
+This accidental-clobber guard adds no sandbox against intentional patches or
+shell writes and no isolation from external writers or per-file publication.
+
 Each vertical presents the tool names its model was trained on, over one
 canonical Plakous tool set. The pack is the model-visible surface; the lowering
 is which canonical tool each name binds to.

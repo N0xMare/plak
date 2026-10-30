@@ -71,14 +71,7 @@ impl ToolExecutor for ReadFileTool {
                 .limit
                 .map_or(Ok(200), |value| exact_u64(value, "read limit is invalid"))?
                 .clamp(1, 2_000);
-            let page_bytes = if invocation
-                .exposure()
-                .is_some_and(|binding| binding.exposed_name().as_str() == "read")
-            {
-                50 * 1024
-            } else {
-                READ_RESPONSE_BYTES
-            };
+            let page_bytes = read_response_bytes(&invocation);
             let leading = read_leading_lines(&context, &args, start_line, limit).await?;
             let (mut bytes, complete) = (leading.bytes, leading.complete);
             if bytes.iter().take(8_192).any(|byte| *byte == 0) {
@@ -138,7 +131,7 @@ impl ToolExecutor for ReadFileTool {
                 clipped_lines,
                 workspace_generation: context.workspace().generation_stamp(),
             };
-            read_outcome(
+            let outcome = read_outcome(
                 path_display,
                 &result,
                 leading.revision,
@@ -148,8 +141,25 @@ impl ToolExecutor for ReadFileTool {
                     .min(take)
                     .saturating_sub(selected) as u64,
                 value_text,
-            )
+            )?;
+            if let Some(revision) = leading.revision {
+                context
+                    .environment()
+                    .record_text_read(context.run_id(), &args.path, revision);
+            }
+            Ok(outcome)
         })
+    }
+}
+
+fn read_response_bytes(invocation: &ToolInvocation) -> usize {
+    if invocation
+        .exposure()
+        .is_some_and(|binding| binding.exposed_name().as_str() == "read")
+    {
+        50 * 1024
+    } else {
+        READ_RESPONSE_BYTES
     }
 }
 

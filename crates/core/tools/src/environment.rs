@@ -22,6 +22,7 @@ mod config;
 mod identity;
 mod limits;
 mod process_options;
+mod read_observations;
 
 pub use config::{
     CredentialDelegation, CredentialSlotId, DelegatedAuthorityId, DelegationSourceAuthorityId,

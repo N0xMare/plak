@@ -105,8 +105,8 @@ fn claude_read_and_edit_raise_real_text_and_reject_non_text_success()
             "00000000-0000-0000-0000-000000000105",
             "Edit",
             r#"{"file_path":"src/lib.rs","old_string":"a","new_string":"b"}"#,
-            "changed_files=1",
-            "changed_files=1",
+            "changed_files=1\nM \"src/lib.rs\"",
+            "changed_files=1\nM \"src/lib.rs\"",
         ),
     ] {
         let prepared = projection.prepare(request(call, tool, arguments)?)?;

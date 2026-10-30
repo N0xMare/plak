@@ -5143,6 +5143,41 @@ mismatch, without disclosing provider evidence or changing exact-reopen admissio
 
 ### 8.5 Execution environment and process sessions
 
+File mutations report `changed_files=N`, then every committed changed
+workspace-relative path in lexical order as `A`, `M` or `D`, a space and a JSON
+string literal. Moves report both destination creation and source deletion;
+unchanged targets are omitted, and zero changes is exactly `changed_files=0`.
+The complete worst-case result is budgeted before effects; oversized listings
+are refused, never truncated successes. Transaction failures have no success
+listing; partial publication remains recovery-required.
+
+Blind whole-file replacement of an existing file requires an explicit
+successful text-read observation in the current session attachment. This covers
+empty-old-string `apply_patch` with `replace_all`, every presented Write/write,
+and SDK `edit_files` write operations. SDK `expect` is an additional check, not
+a bypass; ordered writes to files created within the same transaction need no
+prior read. Missing files use expected state `Missing`; existing files use
+`Content(last_read_identity)`, revalidated by the backend's mutation preflight
+before publication, never an unconditional write after a separate check.
+Content freshness is not mtime freshness: identical bytes remain fresh.
+Create-only empty-old-string calls and context-checked exact edits and patches
+keep their existing preconditions and need no prior read. The guard prevents
+accidental clobbers, not deliberate shell writes or intentional patches, and
+does not add isolation from external writers or cross-file atomic publication.
+
+The `ExecutionEnvironment` owns at most 1024 in-memory read observations, shared
+by clones, keyed by owning run and canonical contained workspace path. Only the
+file-reading executor records a token after constructing a successful text
+result; bounded/page reads identify the whole file. Failed or binary reads,
+images, search, shell reads, other agents, process-output files and implicit
+mutation preflight reads grant none. Absolute/relative/contained symlink aliases
+share the key without relaxing backend containment or symlink refusals. Touched
+keys (both sides of a move, including no-ops) are invalidated for mutation;
+eviction or loss requires rereading. Tokens survive turns, cells and compaction
+on the same attached environment, not environment reconstruction, resume/reload,
+fork/import or another agent. They are neither persisted nor reconstructed from
+transcript text. Exact unread/stale refusals are specified in chapter 02 §6.3.
+
 Filesystem, process, environment, and network effects require an explicit
 `ExecutionEnvironment` and `ToolPolicy`. Paths are workspace-relative and
 validated against traversal and symlink escape. Process-cwd resolution happens
@@ -5253,7 +5288,7 @@ entry points, not default pack registrations or presentation menus:
 `ProcessSessionTools::exec_registration`, and
 `SearchToolPack::list_entries_registration`. They are nested-eligible when a
 host enrolls them. No existing Direct, Code Mode, js-ptc or py-ptc catalog
-includes them; their frozen registries, descriptions and pins are unchanged.
+includes them.
 
 `edit_files` takes a nonempty bounded `ops` array. Each operation has an `op`
 tag: `patch` takes a Codex `patch` envelope; `replace` takes `path`, `old`,
@@ -5289,7 +5324,8 @@ per file, with no rollback once publication starts. A publication failure is
 `RecoveryRequired`; some targets may already have changed. Cancellation before
 publication changes no target. This claims neither isolation from other
 filesystem readers nor atomicity across host loss. The result reports
-`changed_files`.
+`changed_files` and the named path/action listing above. Unread or stale blind
+writes return the exact refusal without an operation-index prefix.
 
 `process_session_exec` takes nonempty `argv`, `workdir`, `yield_time_ms` and
 `max_output_bytes`, with optional `stdin` and `tty` (both false). It never
@@ -6641,6 +6677,10 @@ wait, or inherit composition qualification.
 
 ### 9.2 Nested eligibility and catalogs
 
+Nested file operations use the same explicit-read guard and named mutation
+results as Direct calls (§8.5); entering a cell grants no blind-write bypass.
+Clones within the attachment share observations across cells and compaction.
+
 Each registered tool declares closed direct-only or nested-eligible status.
 Only the exact profile compiler may place an eligible registered tool in its
 ordered reconstruction-complete nested catalog, and eligibility alone grants
@@ -7473,6 +7513,10 @@ before seeding the new session's genesis atomically with its history. Export
 v9 preserves named values; v8 is refused.
 
 ### 9.9 Typed Python SDK cells
+
+SDK `fs.apply` preserves typed `FileChanges` values while returning the same
+named mutation text and blind-write refusals as other file presentations (§8.5).
+An explicit SDK `expect` does not replace the attachment's text-read observation.
 
 `PythonHarnessSdkV1::compile` uses the same cell compiler and v3 identity
 recipe as the other presentations. Its exhaustive `CellDescriptor` variant

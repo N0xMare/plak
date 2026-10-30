@@ -196,6 +196,7 @@ pub struct ExecutionBackendError {
     kind: ExecutionBackendErrorKind,
     message: SafeDiagnostic,
     proven_no_effect: bool,
+    workspace_conflict_path: Option<PathBuf>,
 }
 
 impl ExecutionBackendError {
@@ -204,6 +205,7 @@ impl ExecutionBackendError {
             kind,
             message: SafeDiagnostic::new(message),
             proven_no_effect: kind.proven_no_effect(),
+            workspace_conflict_path: None,
         }
     }
 
@@ -235,6 +237,19 @@ impl ExecutionBackendError {
     pub const fn message(&self) -> &SafeDiagnostic {
         &self.message
     }
+
+    /// Returns the mutation target whose expected state conflicted, when known.
+    #[must_use]
+    pub fn workspace_conflict_path(&self) -> Option<&Path> {
+        self.workspace_conflict_path.as_deref()
+    }
+
+    fn at_workspace_path(mut self, path: &Path) -> Self {
+        if self.kind == ExecutionBackendErrorKind::Conflict {
+            self.workspace_conflict_path = Some(path.to_path_buf());
+        }
+        self
+    }
 }
 
 impl fmt::Debug for ExecutionBackendError {
@@ -244,6 +259,10 @@ impl fmt::Debug for ExecutionBackendError {
             .field("kind", &self.kind)
             .field("message", &self.message)
             .field("proven_no_effect", &self.proven_no_effect)
+            .field(
+                "workspace_conflict_path",
+                &self.workspace_conflict_path.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }
@@ -683,11 +702,30 @@ impl ExecutionEnvironment {
         if let Err(error) = transaction.enforce_limit(self.config().limits().max_artifact_bytes()) {
             return ready_error(error);
         }
-        self.operation_backend.mutate_workspace(
-            ExecutionWorkspace::from_environment(self),
-            transaction,
-            control,
-        )
+        let environment = self.clone();
+        Box::pin(async move {
+            let run = environment.descriptor().scope().run_id();
+            // Resolve aliases before deletes, and conservatively lose permission
+            // on an attempted mutation even if publication later fails.
+            for mutation in transaction.mutations() {
+                environment.invalidate_text_read(run, mutation.path());
+            }
+            let result = environment
+                .operation_backend
+                .mutate_workspace(
+                    ExecutionWorkspace::from_environment(&environment),
+                    transaction,
+                    control,
+                )
+                .await;
+            if let Ok(result) = &result {
+                // Also consume observations recorded concurrently during staging.
+                for item in result.items() {
+                    environment.invalidate_text_read(run, item.path());
+                }
+            }
+            result
+        })
     }
 
     /// Executes one literal process request through the exact live backend.
