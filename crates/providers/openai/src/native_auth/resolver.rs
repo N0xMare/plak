@@ -226,6 +226,10 @@ impl CodexModelResolver {
         Ok((model, evidence, retrieval, images))
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Resolve the exact Codex catalog row and bind its capability, context and credential evidence to one target."
+    )]
     fn resolve_exact(
         &self,
         model_id: &str,

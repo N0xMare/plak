@@ -75,6 +75,10 @@ pub(crate) async fn codex_side_request_rejected(target: &OpenAiTarget) -> bool {
         .is_ok()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Revalidate the Codex catalog and credential fence and select the one authorized refresh outcome before dispatch."
+)]
 pub(crate) fn codex_responses_preflight<'a>(
     dialect: &'a CodexResponsesDialect,
     request: ResponsesPreflightRequest<'a>,

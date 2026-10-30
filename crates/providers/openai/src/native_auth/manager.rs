@@ -232,6 +232,10 @@ impl CodexSubscriptionCredentialManager {
     /// timeout) would leave a durable Unknown fence that only a new login
     /// clears. An expired access token is reported as `RefreshRequired`
     /// without network I/O; the next turn refreshes it.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Resolve the selected Codex receipt and retain its diagnostics while classifying the bounded usage response."
+    )]
     pub async fn subscription_usage(&self) -> SubscriptionUsageRead {
         let deadline = Instant::now() + AUTH_REQUEST_CAP;
         let unavailable = |reason| SubscriptionUsageRead::Unavailable {

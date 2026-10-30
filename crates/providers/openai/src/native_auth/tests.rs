@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Exercise exact Codex login, catalog, credential rotation and inference through complete controlled-peer scenarios."
+)]
 mod carry_replay;
 
 use std::collections::BTreeSet;
@@ -2979,10 +2983,6 @@ async fn resolved_model_rejects_external_generation_rotation_before_dispatch() -
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one continuation fixture keeps the resolved fence, first round, rotation, and rejected later round together"
-)]
 async fn resolved_model_rejects_external_rotation_before_later_round() -> TestResult {
     let endpoint = test_endpoint().await?;
     let client = endpoint.client.clone();
@@ -4393,10 +4393,6 @@ async fn resolver_preserves_caller_client_observer_without_inference_override() 
     assert_inference_observation(true).await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one local TLS sequence proves observer inheritance, auth isolation and identical inference preparation"
-)]
 async fn assert_inference_observation(inherited: bool) -> TestResult {
     let endpoint = test_endpoint().await?;
     let client = endpoint.client.clone();
@@ -4576,10 +4572,6 @@ async fn assert_inference_observation(inherited: bool) -> TestResult {
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one end-to-end fixture proves exact device, identity, catalog, and two-round wire ordering"
-)]
 async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResult {
     let endpoint = test_endpoint().await?;
     let client = endpoint.client.clone();
@@ -5457,10 +5449,6 @@ async fn malformed_browser_callback_gets_explicit_rejection_without_network() ->
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one lifecycle fixture proves browser binding, refresh commit/quarantine, and local cleanup"
-)]
 async fn browser_callback_is_exact_state_bound_and_one_use() -> TestResult {
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;

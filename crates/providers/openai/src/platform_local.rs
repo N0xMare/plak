@@ -139,6 +139,10 @@ impl OpenAiPlatformModel {
     }
 
     /// Binds exact authority to the shared HTTP executor.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Bind one Platform key generation to its reviewed target, configuration authority and transport before publishing the model."
+    )]
     fn assemble(
         authority: OpenAiPlatformConfigurationAuthority,
         selected: SelectedProviderConfiguration,
@@ -406,6 +410,10 @@ impl LanguageModel for OpenAiPlatformModel {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Validate exact Platform authority and seal the complete Responses wire and context projection without dispatch."
+    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,

@@ -39,6 +39,10 @@ pub(super) fn credential_selection_epoch(
     .map_err(|_| NativeCodexAuthError::Catalog)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Hash each independent Codex route, account, capacity, effort, catalog and wire-mode fact into the resolution identity."
+)]
 pub(super) fn resolution_route_fingerprint(
     route: &OpenAiRoute,
     descriptor: &ResolvedModelDescriptor,
