@@ -21,8 +21,8 @@ neutral = true
 [package.metadata.plakous-lint]
 too-many-lines-ceiling = 14
 too-many-arguments-ceiling = 14
-large-file-ceiling = 1
-reason = "Existing lint debt, and one large file (the joined-process registry) after the environment split; ratchet down as further splits land."
+large-file-ceiling = 0
+reason = "Existing item-level lint debt after the joined-process registry split; ratchet down as further splits land."
 
 [features]
 default = []
