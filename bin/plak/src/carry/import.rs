@@ -47,8 +47,7 @@ impl CarryDocument {
             self.prompt_history,
             self.transcript,
             self.queue,
-            &self.source.session_id,
-            &self.source.state_key,
+            &self.source,
         );
         Ok(CarriedImport {
             record,
@@ -70,8 +69,7 @@ fn apply_record_fields(
     prompt_history: Vec<String>,
     transcript: Vec<TranscriptRow>,
     queue: Vec<String>,
-    source_session_id: &str,
-    source_state_key: &str,
+    source: &CarrySource,
 ) {
     record.account = binding.account;
     record.model = binding.model;
@@ -85,7 +83,7 @@ fn apply_record_fields(
     if !record.pending_queue.is_empty() {
         record.queue_drain_state = QueueDrainState::RestoredPaused;
     }
-    record.link_carried_forward(source_session_id, source_state_key);
+    record.link_carried_forward(&source.session_id, &source.state_key);
 }
 
 fn import_note(

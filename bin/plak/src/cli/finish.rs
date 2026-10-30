@@ -212,46 +212,7 @@ pub(super) fn finish_agent(
             if protocol.is_some() {
                 return Err("--protocol is available only with --account openrouter".into());
             }
-            let effort = effort
-                .as_deref()
-                .map(|value| {
-                    RunEffort::parse(value)
-                        .map(RunEffort::as_reasoning_effort)
-                        .ok_or_else(crate::command::run_effort_usage)
-                })
-                .transpose()?;
-            let composition = composition
-                .as_deref()
-                .map(crate::product_config::ProductCompositionSelection::parse)
-                .transpose()?;
-            if plakous_hosted::capabilities::require(account).is_ok() {
-                if model
-                    .as_deref()
-                    .is_some_and(|model| !crate::platform_catalog::enrolled(platform, model))
-                {
-                    return Err("API model is not enrolled for the selected account".into());
-                }
-                if let (Some(model), Some(composition)) = (model.as_deref(), composition) {
-                    plakous_hosted::platform::api_composition(platform, model, composition)
-                        .map_err(str::to_owned)?;
-                }
-                if let (Some(model), Some(effort)) = (model.as_deref(), effort) {
-                    plakous_hosted::platform::bundled_catalog(platform, "offline")
-                        .admit(model, Some(effort))
-                        .map_err(|error| error.to_string())?;
-                }
-            }
-            return Ok(Command::Agent {
-                session_id: None,
-                provider: None,
-                platform: Some(platform),
-                wire: None,
-                model,
-                effort,
-                effort_explicit: effort.is_some(),
-                composition,
-                resume_tree: false,
-            });
+            return finish_platform_agent(account, platform, model, effort, composition);
         }
         if account == "openrouter" {
             let effort = effort
@@ -314,6 +275,55 @@ pub(super) fn finish_agent(
         model,
         effort,
         effort_explicit,
+        composition,
+        resume_tree: false,
+    })
+}
+
+fn finish_platform_agent(
+    account: &str,
+    platform: plakous_hosted::binding::PlatformProvider,
+    model: Option<String>,
+    effort: Option<String>,
+    composition: Option<String>,
+) -> Result<Command, String> {
+    let effort = effort
+        .as_deref()
+        .map(|value| {
+            RunEffort::parse(value)
+                .map(RunEffort::as_reasoning_effort)
+                .ok_or_else(crate::command::run_effort_usage)
+        })
+        .transpose()?;
+    let composition = composition
+        .as_deref()
+        .map(crate::product_config::ProductCompositionSelection::parse)
+        .transpose()?;
+    if plakous_hosted::capabilities::require(account).is_ok() {
+        if model
+            .as_deref()
+            .is_some_and(|model| !crate::platform_catalog::enrolled(platform, model))
+        {
+            return Err("API model is not enrolled for the selected account".into());
+        }
+        if let (Some(model), Some(composition)) = (model.as_deref(), composition) {
+            plakous_hosted::platform::api_composition(platform, model, composition)
+                .map_err(str::to_owned)?;
+        }
+        if let (Some(model), Some(effort)) = (model.as_deref(), effort) {
+            plakous_hosted::platform::bundled_catalog(platform, "offline")
+                .admit(model, Some(effort))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(Command::Agent {
+        session_id: None,
+        provider: None,
+        platform: Some(platform),
+        wire: None,
+        model,
+        effort,
+        effort_explicit: effort.is_some(),
         composition,
         resume_tree: false,
     })

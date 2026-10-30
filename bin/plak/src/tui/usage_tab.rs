@@ -293,8 +293,6 @@ pub(crate) fn context_lines(
         breakdown,
         total,
         theme,
-        muted,
-        text,
     );
 
     lines.push(Line::from(""));
@@ -312,7 +310,7 @@ pub(crate) fn context_lines(
     }
 
     lines.extend(context_footer_lines(
-        usage, breakdown, chrome, used, total, fence, width, theme, muted,
+        usage, breakdown, chrome, total, fence, width, theme,
     ));
     lines
 }
@@ -382,9 +380,9 @@ fn context_legend_lines(
     breakdown: &ContextBreakdownView,
     total: u64,
     theme: &Theme,
-    muted: Style,
-    text: Style,
 ) -> Vec<Line<'static>> {
+    let muted = theme.slash_item_help;
+    let text = theme.slash_item;
     let palette = category_palette(theme);
     let mut rows: Vec<LegendRow> = categories
         .iter()
@@ -463,13 +461,13 @@ fn context_footer_lines(
     usage: &ContextUsage,
     breakdown: &ContextBreakdownView,
     chrome: &ContextChrome<'_>,
-    used: u64,
     total: u64,
     fence: Option<u64>,
     width: u16,
     theme: &Theme,
-    muted: Style,
 ) -> Vec<Line<'static>> {
+    let used = breakdown.used_tokens;
+    let muted = theme.slash_item_help;
     let mut lines = vec![Line::from("")];
     let pct = floor_percent(used, total);
     match fence {

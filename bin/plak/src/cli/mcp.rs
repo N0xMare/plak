@@ -94,6 +94,42 @@ pub(super) struct McpOAuthFlags {
     oauth_callback_port: Option<u16>,
 }
 
+impl McpOAuthFlags {
+    fn into_config(self) -> Result<Option<crate::product_config::McpOAuthConfig>, String> {
+        let McpOAuthFlags {
+            oauth,
+            oauth_issuer,
+            oauth_client_id,
+            oauth_client_secret,
+            oauth_callback_port,
+        } = self;
+        let oauth_given = oauth_issuer.is_some()
+            || oauth_client_id.is_some()
+            || oauth_client_secret.is_some()
+            || oauth_callback_port.is_some();
+        if oauth_given && !oauth {
+            return Err("the --oauth-* flags require --oauth".to_owned());
+        }
+        // The load parser checks the rest (issuer, client and port
+        // rules) before anything is written.
+        let oauth = oauth.then(|| crate::product_config::McpOAuthConfig {
+            issuer: oauth_issuer,
+            client: oauth_client_id.map(|id| crate::product_config::McpOAuthClient {
+                id,
+                secret: oauth_client_secret.clone(),
+            }),
+            callback_port: oauth_callback_port,
+        });
+        if oauth
+            .as_ref()
+            .is_some_and(|oauth| oauth.client.is_none() && oauth_client_secret.is_some())
+        {
+            return Err("--oauth-client-secret requires --oauth-client-id".to_owned());
+        }
+        Ok(oauth)
+    }
+}
+
 fn write_scope(
     scope: Option<&str>,
 ) -> Result<Option<crate::product_config::ConfigWriteScope>, String> {
@@ -200,36 +236,7 @@ impl McpAction {
                 replace,
                 command,
             } => {
-                let McpOAuthFlags {
-                    oauth,
-                    oauth_issuer,
-                    oauth_client_id,
-                    oauth_client_secret,
-                    oauth_callback_port,
-                } = *oauth;
-                let oauth_given = oauth_issuer.is_some()
-                    || oauth_client_id.is_some()
-                    || oauth_client_secret.is_some()
-                    || oauth_callback_port.is_some();
-                if oauth_given && !oauth {
-                    return Err("the --oauth-* flags require --oauth".to_owned());
-                }
-                // The load parser checks the rest (issuer, client and port
-                // rules) before anything is written.
-                let oauth = oauth.then(|| crate::product_config::McpOAuthConfig {
-                    issuer: oauth_issuer,
-                    client: oauth_client_id.map(|id| crate::product_config::McpOAuthClient {
-                        id,
-                        secret: oauth_client_secret.clone(),
-                    }),
-                    callback_port: oauth_callback_port,
-                });
-                if oauth
-                    .as_ref()
-                    .is_some_and(|oauth| oauth.client.is_none() && oauth_client_secret.is_some())
-                {
-                    return Err("--oauth-client-secret requires --oauth-client-id".to_owned());
-                }
+                let oauth = oauth.into_config()?;
                 let transport = match (url, command.split_first()) {
                     (Some(_), Some(_)) => {
                         return Err(
