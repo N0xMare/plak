@@ -1,5 +1,10 @@
 //! Resume picker tests.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Resume painting scenarios compare every row family live and restored at the same terminal widths."
+)]
+
 use super::terminal::dispatch_action;
 use super::test_support::{
     FIXED_NOW, key, launch_basic, left_click, left_mouse, provider_rows, restore_snapshot,

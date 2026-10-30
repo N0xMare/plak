@@ -1,5 +1,9 @@
 //! Process-level SIGKILL evidence over Plak's real host loop and startup reconcilers.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Actual-host crash matrices retain each kill boundary, relaunch, recovery, and single-terminal assertion in its scenario."
+)]
 #![cfg(unix)]
 #![forbid(unsafe_code)]
 

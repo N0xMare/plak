@@ -797,6 +797,10 @@ fn telemetry_check(kind: CheckKind, path: &Path, health: TelemetryHealth) -> Doc
     clippy::vec_init_then_push,
     reason = "ordered diagnostic construction stays readable beside conditional extension"
 )]
+#[allow(
+    clippy::too_many_lines,
+    reason = "Diagnosis derives every account and installation repair row from the same immutable DoctorInputs snapshot."
+)]
 pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     let mut checks = Vec::new();
     checks.push(DoctorCheck::new(

@@ -530,6 +530,10 @@ impl App {
         frame.render_widget(Paragraph::new(lines), inner);
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Queue painting computes chips, clipping, selection, and hit rectangles together from the same visible queue."
+    )]
     pub(super) fn draw_queue_panel(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let paused = self.queue_drain == QueueDrainState::RestoredPaused;
         let provisional = self.provisional_queue_rows().count();

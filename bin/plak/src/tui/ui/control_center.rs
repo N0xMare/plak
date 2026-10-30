@@ -59,6 +59,10 @@ impl App {
         true
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Control-center key handling dispatches each tab action while preserving focus and modal ownership."
+    )]
     pub(super) fn handle_control_key(&mut self, key: KeyEvent) -> Option<UserAction> {
         let code = key.code;
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);

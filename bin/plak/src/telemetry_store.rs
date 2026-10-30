@@ -1114,6 +1114,10 @@ fn delete_session_rows(connection: &Connection, session_id: &str) -> Result<(), 
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Product observation writing matches every row shape to its SQL bindings inside the current telemetry transaction."
+)]
 fn write_product_observation(
     transaction: &rusqlite::Transaction<'_>,
     observation: &ProductObservation,

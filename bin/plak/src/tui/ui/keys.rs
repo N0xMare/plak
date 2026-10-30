@@ -404,6 +404,10 @@ impl App {
     }
 
     /// Ctrl combos that are not composer editing.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Control-key handling maps the supported chords with their shift and composer-state conditions in one dispatcher."
+    )]
     pub(super) fn handle_ctrl_key(&mut self, code: KeyCode, shift: bool) -> CtrlKey {
         match code {
             KeyCode::Char('b' | 'B') => {

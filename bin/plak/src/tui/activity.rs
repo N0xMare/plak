@@ -385,6 +385,10 @@ impl Counts {
 
 /// Summarize the top-level calls of `blocks` that `counted` admits (indices
 /// into `blocks`). A cell's nested calls count through their cell.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Activity summary folds every transcript block kind while maintaining the same counted and uncounted aggregates."
+)]
 fn summary(blocks: &[ScrollBlock], counted: &dyn Fn(usize) -> bool) -> Summary {
     let cells: std::collections::HashMap<&str, usize> = blocks
         .iter()
@@ -688,6 +692,10 @@ pub(super) fn plan(blocks: &[ScrollBlock], prefs: RenderPrefs) -> Vec<RowPlan> {
 /// One group `start..end`: summary plus tip while a call runs, one summary
 /// line (or the single call's own item line) once none does, every item when
 /// opened or when grouping is off.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Plan grouping preserves active, completed, failed, and folded step presentation as one contiguous activity group."
+)]
 fn plan_group(
     blocks: &[ScrollBlock],
     plans: &mut [RowPlan],
@@ -1025,6 +1033,10 @@ fn agent_verb(block: &ScrollBlock) -> Option<ToolVerb> {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Agent activity merging reconciles tool results, child lifecycle, and visible summaries before emitting ordered rows."
+)]
 fn merge_agents(
     blocks: &[ScrollBlock],
     plans: &mut [RowPlan],

@@ -827,6 +827,10 @@ impl TranscriptRenderCache {
         true
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Tail splicing updates cached rows, block indexes, and scroll geometry together so partial redraws stay coherent."
+    )]
     fn splice_tail(
         &mut self,
         blocks: &[ScrollBlock],

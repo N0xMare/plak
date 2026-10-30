@@ -495,6 +495,10 @@ pub(super) fn draw_frame(terminal: &mut DefaultTerminal, app: &mut App) -> Resul
     result.map(|_| crate::tui_timing::first_frame())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The terminal event loop orders host drains, input, redraw, resize, and quit settlement around one terminal owner."
+)]
 pub(super) fn run_app(
     terminal: &mut DefaultTerminal,
     mut app: App,

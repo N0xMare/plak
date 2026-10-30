@@ -58,6 +58,10 @@ pub(super) fn finish_continue_session(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Run finishing receives the independent clap binding fields, prompt, output choice, and existing RunBounds without inventing a second binding type."
+)]
 pub(super) fn finish_run(
     account: String,
     model: String,
@@ -215,38 +219,7 @@ pub(super) fn finish_agent(
             return finish_platform_agent(account, platform, model, effort, composition);
         }
         if account == "openrouter" {
-            let effort = effort
-                .map(|value| {
-                    RunEffort::parse(&value)
-                        .map(RunEffort::as_reasoning_effort)
-                        .ok_or_else(crate::command::run_effort_usage)
-                })
-                .transpose()?;
-            let effort_explicit = effort.is_some();
-            let composition = composition
-                .map(|value| crate::product_config::ProductCompositionSelection::parse(&value))
-                .transpose()?
-                .unwrap_or(crate::product_config::ProductCompositionSelection::FollowCatalog);
-            if composition == crate::product_config::ProductCompositionSelection::NativePtc {
-                return Err(plakous_hosted::binding::OPENROUTER_NATIVE_PTC_REFUSAL.to_owned());
-            }
-            let selection = protocol
-                .as_deref()
-                .map(crate::product_config::ProductProtocolSelection::parse)
-                .transpose()?
-                .unwrap_or_default();
-            let wire = crate::product_config::ProductWireBinding::resolve(selection);
-            return Ok(Command::Agent {
-                session_id: None,
-                provider: None,
-                platform: None,
-                wire: Some(wire),
-                model,
-                effort,
-                effort_explicit,
-                composition: Some(composition),
-                resume_tree: false,
-            });
+            return finish_openrouter_agent(model, effort, composition, protocol);
         }
         if protocol.is_some() {
             return Err("--protocol is available only with --account openrouter".to_owned());
@@ -276,6 +249,46 @@ pub(super) fn finish_agent(
         effort,
         effort_explicit,
         composition,
+        resume_tree: false,
+    })
+}
+
+fn finish_openrouter_agent(
+    model: Option<String>,
+    effort: Option<String>,
+    composition: Option<String>,
+    protocol: Option<String>,
+) -> Result<Command, String> {
+    let effort = effort
+        .map(|value| {
+            RunEffort::parse(&value)
+                .map(RunEffort::as_reasoning_effort)
+                .ok_or_else(crate::command::run_effort_usage)
+        })
+        .transpose()?;
+    let effort_explicit = effort.is_some();
+    let composition = composition
+        .map(|value| crate::product_config::ProductCompositionSelection::parse(&value))
+        .transpose()?
+        .unwrap_or(crate::product_config::ProductCompositionSelection::FollowCatalog);
+    if composition == crate::product_config::ProductCompositionSelection::NativePtc {
+        return Err(plakous_hosted::binding::OPENROUTER_NATIVE_PTC_REFUSAL.to_owned());
+    }
+    let selection = protocol
+        .as_deref()
+        .map(crate::product_config::ProductProtocolSelection::parse)
+        .transpose()?
+        .unwrap_or_default();
+    let wire = crate::product_config::ProductWireBinding::resolve(selection);
+    Ok(Command::Agent {
+        session_id: None,
+        provider: None,
+        platform: None,
+        wire: Some(wire),
+        model,
+        effort,
+        effort_explicit,
+        composition: Some(composition),
         resume_tree: false,
     })
 }

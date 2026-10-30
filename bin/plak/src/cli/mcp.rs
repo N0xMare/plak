@@ -202,6 +202,10 @@ fn secret_references_are_names(
 }
 
 impl McpAction {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "MCP dispatch keeps each subcommand beside its required-argument refusals and transport-specific add validation."
+    )]
     pub(super) fn into_command(self) -> Result<Command, String> {
         use crate::commands::mcp::McpCommand;
         let help = || {

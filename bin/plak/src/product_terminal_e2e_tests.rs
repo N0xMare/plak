@@ -1,6 +1,10 @@
 //! Real-PTY offline qualification of Plak's private product composition.
 
 #![allow(
+    clippy::too_many_lines,
+    reason = "Real PTY product scenarios keep input, visible frames, handoffs, durable state, and resumed behavior together."
+)]
+#![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     missing_docs,

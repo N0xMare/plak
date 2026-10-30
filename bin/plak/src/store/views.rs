@@ -525,6 +525,10 @@ impl ProductStore {
     /// Commits one projector run: CAS-advances the cursor from the value the
     /// run read and writes the changed rows and the view state in the same
     /// transaction, under `synchronous=NORMAL`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Projection publication atomically checks revision and delivery identity before installing the session, transcript, queue, and workflow views."
+    )]
     pub fn commit_projection_views(
         &mut self,
         session_id: &str,
@@ -699,6 +703,10 @@ impl ProductStore {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "View commit keeps session revision CAS, transcript replacement, queue publication, and transaction completion together."
+)]
 fn commit_views(
     tx: &Connection,
     session_id: &str,

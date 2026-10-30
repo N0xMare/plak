@@ -498,6 +498,10 @@ pub(super) fn parse(
     Ok(sections)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "MCP server parsing validates mutually exclusive transports and their OAuth, secret, timeout, and tool fields with located diagnostics."
+)]
 fn parse_mcp_server(
     text: &str,
     id: &str,

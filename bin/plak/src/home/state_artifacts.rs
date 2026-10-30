@@ -470,6 +470,10 @@ pub(super) fn sessions(
         .collect())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The tree artifact inventory collects all workspace, child, mailbox, and runtime references from the same read-only database snapshot."
+)]
 fn tree_artifacts(database: &rusqlite::Connection) -> Result<Vec<(String, Artifacts)>, String> {
     let version = database
         .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
@@ -624,6 +628,10 @@ fn tree_artifacts(database: &rusqlite::Connection) -> Result<Vec<(String, Artifa
 
 /// All databases and holder proofs have already been locked by prune-legacy.
 /// Only the physical names in maintenance columns are read from foreign trees.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Artifact inventory combines runtime, product, and tree ownership with filesystem evidence before classifying every retained path."
+)]
 pub(super) fn inventory(
     paths: &PlakPaths,
     databases: &[(PathBuf, rusqlite::Connection)],

@@ -98,6 +98,10 @@ pub(super) fn execute_config_set(
     Ok(ProcessOutcome::Success)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The all-account status command collects OAuth and API credential facts before rendering one consistently ordered table."
+)]
 pub(super) fn execute_status_all(
     services: &Services,
     backend: &mut impl AccountOps,

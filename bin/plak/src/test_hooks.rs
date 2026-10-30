@@ -414,6 +414,10 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Offline binding selects each scripted crash shape and its recovery evidence before constructing the test runtime."
+    )]
     fn bind(
         &self,
         start: plakous_hosted::agent_tree_tools::SpawnStart,
@@ -912,6 +916,11 @@ impl OfflineSelection {
     /// Every field outside the injected target is read from the same product
     /// sources the real path reads, so what the gate exercises is the product's
     /// own composition with one substituted model.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "The offline host fixture mirrors production session, catalog, effort, workspace, and resume-publication inputs across its scripted routes."
+    )]
     pub(crate) fn host_config(
         &self,
         face: OfflineFace,

@@ -19,6 +19,10 @@ use super::McpCommand;
 
 const NEW_SESSIONS: &str = "new sessions pick this up; existing sessions keep the tools they froze";
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "MCP availability checks report tools, resources, templates, and prompts from one admitted connection and preserve per-surface failures."
+)]
 pub(crate) fn run(
     paths: &PlakPaths,
     command: McpCommand,

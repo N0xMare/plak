@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "CLI grammar matrices keep accepted commands and exact located refusals beside their complete argv inputs."
+)]
+
 #[test]
 fn run_image_flags_attach_sniffed_files_and_name_the_refused_file() {
     let dir = tempfile::tempdir().unwrap();

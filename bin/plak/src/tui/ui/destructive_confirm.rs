@@ -173,6 +173,10 @@ fn button_rows(widths: &[u16], width: u16) -> Vec<Vec<usize>> {
 impl App {
     /// Opens the pop-up for `action`, focused on its primary button. Any other
     /// intent is not destructive and is returned to be sent as is.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Destructive confirmation derives each action-specific target and refusal before staging the confirmation owner."
+    )]
     pub(super) fn confirm_destructive(&mut self, action: UserAction) -> Option<UserAction> {
         let (title, lines, button) = match &action {
             UserAction::InterruptTopologyNode { agent_id } => (
@@ -728,6 +732,10 @@ impl App {
             .flatten()
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Confirmation drawing keeps action-specific consequences, target detail, and buttons together in the modal layout."
+    )]
     pub(super) fn draw_destructive_confirm(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let Some(confirm) = self.destructive_confirm.as_ref() else {
             return;

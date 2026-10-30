@@ -61,6 +61,10 @@ pub(crate) fn estimate_rows_for_test(
 /// Agrees with [`block_lines`] on the only thing geometry correctness
 /// depends on — whether the block draws any rows at all — and is
 /// deliberately approximate about how many.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Row estimation mirrors every ScrollBlock variant without rendering text or diverging from transcript geometry."
+)]
 pub(in crate::tui::blocks) fn estimate_block_rows(
     block: &ScrollBlock,
     plan: &RowPlan,

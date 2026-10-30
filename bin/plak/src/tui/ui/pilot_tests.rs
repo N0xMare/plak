@@ -1,5 +1,10 @@
 //! Semantic TUI pilot projection and driver contracts.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Pilot stories exercise each modal owner, legal action set, persisted settings, and restored composer state end to end."
+)]
+
 use std::collections::HashSet;
 
 use serde_json::json;

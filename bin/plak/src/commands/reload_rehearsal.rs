@@ -208,6 +208,10 @@ fn report_head(
 
 /// Reads the retained feed once for lineage and terminal identity validation,
 /// then applies only records beyond the stored cursor with the live projector.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Reload rehearsal stages the offline runtime, tree, projector, and before/after fingerprints together to prove read-only behavior."
+)]
 fn dry_run(
     paths: &PlakPaths,
     followed: SessionLocator,

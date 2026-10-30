@@ -99,6 +99,10 @@ fn split_meta(meta: Option<&str>) -> Vec<String> {
 }
 
 /// The one-line rows a block starts with, in order (spec 02 §5.4).
+#[allow(
+    clippy::too_many_lines,
+    reason = "Lead-row rendering exhaustively maps block variants to the matching measured RowPlan and themed heading."
+)]
 pub(crate) fn lead_rows(block: &ScrollBlock, plan: &RowPlan, theme: &Theme) -> Vec<LeadRow> {
     if plan.hidden {
         return Vec::new();
@@ -330,6 +334,10 @@ fn summary_row(plan: &RowPlan, theme: &Theme) -> Option<LeadRow> {
     })
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Cell footers render completion, failure, and progress metadata under the same row budget and folding rules."
+)]
 pub(super) fn cell_footer_rows(
     tail: &CellTail,
     blocks: &[ScrollBlock],

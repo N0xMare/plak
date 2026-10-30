@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Telemetry fixtures construct every observation kind so schema and binding coverage stays exhaustive."
+)]
+
 use super::*;
 use std::sync::Arc;
 use std::time::Duration;

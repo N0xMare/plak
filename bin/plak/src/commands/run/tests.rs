@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Run finalization scenarios keep interruption, durable terminal recovery, sibling state, and reopened views in one lifecycle."
+)]
+
 use super::*;
 use crate::observation_parity_tests::{Fixture, Script};
 use plakous_hosted::runtime::{HostBoundary, HostWorkflow, ScriptedRuntimeFactory};

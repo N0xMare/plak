@@ -256,6 +256,10 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
 
 /// One template file. The file stem is the template's name; the body carries
 /// no `name` key.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Template parsing validates the complete TOML vocabulary while retaining located errors for each field family."
+)]
 pub(super) fn parse_template(text: &str, name: &str) -> Result<AgentTemplate, String> {
     let file: TemplateFile =
         toml::from_str(text).map_err(|error| template_translate(text, name, &error))?;

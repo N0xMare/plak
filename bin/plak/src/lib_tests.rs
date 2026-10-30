@@ -1,4 +1,8 @@
 #![allow(
+    clippy::too_many_lines,
+    reason = "Product command scenarios preserve complete route, credential, usage-refresh, and dispatch assertions."
+)]
+#![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     reason = "unit tests may assert with expect/unwrap"

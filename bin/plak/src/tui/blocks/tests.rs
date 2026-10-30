@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Transcript mapping scenarios enumerate every row kind and assert the complete rendered block shape."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use std::borrow::Cow;

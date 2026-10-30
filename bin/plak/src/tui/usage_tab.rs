@@ -187,6 +187,10 @@ pub(crate) struct ContextChrome<'a> {
 }
 
 /// Renders the Context section (spec 02 §5.6).
+#[allow(
+    clippy::too_many_lines,
+    reason = "The context board coordinates measured usage, compaction fence, category grid, legend, and footer under one width decision."
+)]
 pub(crate) fn context_lines(
     usage: &ContextUsage,
     chrome: &ContextChrome<'_>,

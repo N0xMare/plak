@@ -689,6 +689,10 @@ impl ProductStore {
             .map(|(sessions, _)| sessions)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Session listing batches summaries, workflow state, and retained branches while counting the exact queries used for one workspace view."
+    )]
     fn list_for_workspace_with_query_count(
         &mut self,
         workspace: &Path,

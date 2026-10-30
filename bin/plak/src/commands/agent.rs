@@ -31,6 +31,10 @@ use plakous_hosted::runtime as product_host;
 /// unchanged, and nothing here invents a `hello` for a session that never
 /// opened.
 #[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The agent entry receives the independent clap binding overrides and resume controls before it can admit a hosted session."
+)]
 pub(crate) fn run_agent(
     services: &crate::shell::services::Services,
     session_id: Option<String>,
@@ -182,6 +186,11 @@ pub(crate) fn new_agent_record(
 }
 
 #[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "Agent admission carries the explicit binding overrides through capability checks, session selection, and host configuration."
+)]
 fn run_agent_after_admission(
     services: &crate::shell::services::Services,
     session_id: Option<String>,

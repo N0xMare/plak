@@ -79,6 +79,10 @@ fn run_agent_stdio_with_input(
 /// process that is ending and wrong for a test that shares one. Reading it at
 /// the single entry point above and handing the answer in keeps the drive a
 /// function of its arguments.
+#[allow(
+    clippy::too_many_lines,
+    reason = "The stdio drive keeps input, host events, interrupts, and its single terminal emission in one ordered select loop."
+)]
 fn run_agent_stdio_stopping_on(
     mut config: HostConfig<crate::surface_protocol::PlakExtension>,
     resume_tree: bool,

@@ -1,5 +1,10 @@
 //! Transcript, tool block, and selection tests.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Transcript stories compare host-event transitions and live/restored geometry across the full width matrix."
+)]
+
 use super::terminal::osc52_sequence;
 use super::test_support::{
     PINNED_UNIX_MS, assert_visible_transcript_rows_match_projection, blocks_contain,

@@ -582,6 +582,10 @@ mod enabled {
             self.required
         }
 
+        #[allow(
+            clippy::too_many_lines,
+            reason = "Exchange capture initializes request metadata and both private journal streams before returning an observation handle."
+        )]
         fn start(&self, request_body: &[u8]) -> Option<Box<dyn ExchangeObservation>> {
             let Ok(mut next) = self.next.lock() else {
                 self.diagnose("sequence unavailable");

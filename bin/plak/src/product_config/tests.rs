@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Product configuration scenarios cover full template validation matrices and complete shipped preset homes."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::policy::template;

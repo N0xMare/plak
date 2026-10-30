@@ -1,6 +1,10 @@
 //! Real-PTY qualification of the exact Plak compaction journey.
 
 #![allow(
+    clippy::too_many_lines,
+    reason = "Real terminal compaction scenarios drive overflow, recovery, reopen, and continued input as one interaction."
+)]
+#![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     missing_docs,

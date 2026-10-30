@@ -321,6 +321,10 @@ impl<'a> Renderer<'a> {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The markdown tag dispatcher updates nesting and style state for each supported parser tag before text is emitted."
+    )]
     fn start(&mut self, tag: Tag<'_>) {
         match tag {
             Tag::Heading { level, .. } => {

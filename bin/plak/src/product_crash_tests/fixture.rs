@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Crash fixture setup constructs the complete offline host, durable stores, and boundary controller before dispatch."
+)]
+
 use std::error::Error;
 use std::future;
 use std::io::BufReader;

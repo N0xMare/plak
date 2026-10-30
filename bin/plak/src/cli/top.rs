@@ -4,6 +4,10 @@ use super::{
 };
 
 impl TopCommand {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The exhaustive top-level grammar maps each clap variant once, with run help and session-binding refusals in their original precedence."
+    )]
     pub(super) fn into_command(self) -> Result<Command, String> {
         match self {
             Self::Login { account: None, .. } => Ok(Command::CommandHelp {

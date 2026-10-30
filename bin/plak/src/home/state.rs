@@ -440,6 +440,10 @@ pub(crate) fn prune_confirmed_with_report(
     prune_legacy_checked(paths, Some(expected), stderr)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Legacy pruning keeps ownership inventories, live-lock checks, and destructive eligibility decisions in one ordered filesystem traversal."
+)]
 fn prune_legacy_checked(
     paths: &PlakPaths,
     expected: Option<&PruneInventory>,
@@ -703,6 +707,10 @@ fn probe_legacy_locks(
 /// Probes legacy state (`current_job_outputs: None`) or the current state
 /// directory, whose live job output files are neither locked nor removed and
 /// may vanish under a retention sweep, so their root is not walked.
+#[allow(
+    clippy::too_many_lines,
+    reason = "State-lock probing checks each runtime, product, tree, and reference owner without treating unavailable lock evidence as authority to delete."
+)]
 fn probe_state_locks(
     path: &Path,
     holders: &mut Vec<fs::File>,

@@ -113,6 +113,10 @@ pub(crate) enum Output {
     Span,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The exhaustive telemetry vocabulary maps each observation kind to its product row without adding an alternate projection path."
+)]
 pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Projection {
     let context = observation.context();
     let timestamp = row_timestamp_ns(observation.timestamp());

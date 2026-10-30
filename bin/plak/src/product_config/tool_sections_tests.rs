@@ -1,6 +1,10 @@
 //! `access`, template `tools`, `[tools.*]`, `[mcp_servers.*]`, the reference
 //! checks.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Tool-section validation matrices pair every located load failure with its source TOML."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::*;

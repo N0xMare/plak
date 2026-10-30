@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Import scenarios assert rebuilt intents, paused queues, transcript rows, and source links together."
+)]
+
 use super::*;
 use crate::CliFailure;
 use crate::carry::document::private_dir;

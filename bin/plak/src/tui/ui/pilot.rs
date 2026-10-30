@@ -192,6 +192,10 @@ impl PilotAction {
 }
 
 impl App {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The semantic pilot snapshot captures all active surface owners and their visible state from one App read."
+    )]
     pub(super) fn semantic_snapshot(&self) -> TuiSnapshot {
         TuiSnapshot {
             background_processes: self.background_processes,
@@ -483,6 +487,10 @@ impl App {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Pilot action enumeration mirrors every focus and modal owner so only currently executable actions are exposed."
+    )]
     pub(super) fn legal_pilot_actions(&self) -> Vec<LegalAction> {
         let owner = self.semantic_owner();
         if owner == "shutdown" {

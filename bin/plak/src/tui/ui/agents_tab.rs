@@ -245,6 +245,10 @@ impl App {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Profile drawing keeps list selection, detail rows, and hit rectangles synchronized across narrow and wide layouts."
+    )]
     pub(super) fn draw_agent_profiles(&mut self, frame: &mut Frame<'_>, body: Rect) {
         self.profiles.hits.clear();
         let visible = self.profiles.visible();

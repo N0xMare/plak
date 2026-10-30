@@ -38,6 +38,10 @@ use crate::{
 /// joins under the product deadline and reports the worker's outcome.
 /// Re-attach and hand-off rounds keep the terminal, since the next round
 /// paints into the same alternate screen.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Round settlement joins the host and records unresolved input against the exact session, store, workspace, and terminal owner."
+)]
 fn settle_tui_round(
     ui: Result<tui::TuiOutcome, tui::TuiError>,
     persistent_tui: &mut Option<tui::PersistentTerminal>,
@@ -283,6 +287,10 @@ fn adopt_attached_session(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Handoff application mutates separately borrowed record, resume flags, rollback attachment, and note while preserving caller ownership."
+)]
 pub(crate) fn apply_tui_handoff(
     services: &Services,
     paths: &product_paths::PlakPaths,
@@ -312,6 +320,10 @@ pub(crate) fn apply_tui_handoff(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Post-host handoff restores a pending attachment before forwarding the separately borrowed session, resume flags, and note."
+)]
 pub(crate) fn apply_tui_handoff_after_host(
     services: &Services,
     paths: &product_paths::PlakPaths,
@@ -499,6 +511,10 @@ fn refuse_without_terminal(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "TUI launch preparation validates terminal-facing selection, product state, catalog authority, and the initial round before starting the host."
+)]
 fn prepare_tui_launch(
     services: &Services,
     session_id: Option<String>,
@@ -654,6 +670,10 @@ fn prepare_tui_launch(
     ))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The TUI round loop owns deferred preparation, host attachment, terminal reuse, resume rollback, and handoff settlement in order."
+)]
 fn run_tui_rounds(
     services: &Services,
     launch: TuiLaunchContext,
@@ -1073,6 +1093,11 @@ fn run_tui_rounds(
 }
 
 /// The host preparation a deferred-startup round runs off the UI thread.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "Deferred preparation owns its moved paths, state roots, session, binding hints, picker choice, publication fence, and effort on the worker thread."
+)]
 fn prepare_deferred_tui_host(
     prep_paths: product_paths::PlakPaths,
     prep_state_roots: product_agent::ProductStateRoots,
@@ -1210,6 +1235,10 @@ fn prepare_deferred_tui_host(
 }
 
 /// Settles one round: re-attach, apply a handoff, or end the launch.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Round finishing combines services, storage, mutable round state, UI outcome, binding labels, and publication cleanup after the host has joined."
+)]
 fn finish_tui_round(
     services: &Services,
     paths: &product_paths::PlakPaths,

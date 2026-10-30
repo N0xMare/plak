@@ -5,8 +5,6 @@
 #![allow(
     clippy::doc_markdown,
     clippy::missing_errors_doc,
-    clippy::too_many_lines,
-    clippy::too_many_arguments,
     clippy::needless_pass_by_value,
     clippy::match_same_arms,
     clippy::if_same_then_else,
@@ -314,6 +312,10 @@ fn log_command_start(command: &Command) {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The composition root orders read-only shortcuts, signal installation, service construction, product-state admission, and face dispatch."
+)]
 fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
     let command = cli::parse(arguments)?;
     build_features::admit_command(&command)?;
@@ -625,6 +627,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Read-only session display gathers recorded binding, runtime history, workflows, and child status before rendering the requested view."
+)]
 fn show_session_read_only(
     paths: &product_paths::PlakPaths,
     id: &str,
@@ -772,6 +778,10 @@ fn show_session_read_only(
     Ok(ProcessOutcome::Success)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Application command routing preserves one explicit handler for each account, catalog, usage, and one-shot run verb."
+)]
 fn execute_application_command(
     command: Command,
     services: &Services,
@@ -891,6 +901,10 @@ fn execute_application_command(
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The product dispatcher exhaustively routes the remaining admitted commands without a second interpretation of their arguments."
+)]
 fn execute_command(
     command: Command,
     services: &Services,

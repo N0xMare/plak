@@ -15,6 +15,10 @@ pub(super) const MIN_SUBJECT_CELLS: usize = 12;
 /// meta parts drop from the right first so the label keeps `label_floor`
 /// cells (usually [`MIN_SUBJECT_CELLS`]), except the first `kept_meta`,
 /// which stay while the label is cut further; the caret always stays.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "An item row budgets its prefix, label, suffix, metadata, caret, theme, and width independently before clipping."
+)]
 pub(super) fn item_row(
     prefix: Vec<Span<'static>>,
     label: Vec<Span<'static>>,

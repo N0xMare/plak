@@ -30,6 +30,10 @@ impl rusqlite::ToSql for Cell {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The SQL statement table keeps one explicit insert statement for every telemetry RowKind."
+)]
 fn statement(kind: RowKind) -> &'static str {
     match kind {
         RowKind::Job => "INSERT INTO job_events (at, session_id, branch_id, run_id, agent_id, turn_id, call_id, kind, tool, nested, hint_source, hint_ms, delivery_point, count)

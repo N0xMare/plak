@@ -88,6 +88,10 @@ impl StreamedMarkdown<'_> {
 /// rows settle too; only new lines and the unfinished last line are highlighted.
 /// `settled` followed by `rest` equals
 /// `render_markdown(markdown, width, theme)`.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Streaming markdown tracks open fences, provisional trailing blocks, and completed output in one parser pass."
+)]
 pub fn render_markdown_streaming<'m>(
     markdown: &str,
     width: u16,

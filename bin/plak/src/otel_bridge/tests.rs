@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "OTLP export scenarios retain complete projected histories and verify inherited usage is never exported twice."
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 

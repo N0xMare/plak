@@ -1,5 +1,9 @@
 //! Unpublished process-test access to Plak's real product journal.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "The actual-host process fixture assembles the real product journal, scripted runtime, and crash boundary before driving it."
+)]
 #![allow(missing_docs, reason = "private cfg(test)-only process-test seam")]
 
 use std::path::PathBuf;

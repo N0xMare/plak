@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Reload rehearsal scenarios compare complete root and child projections with before/after read-only evidence."
+)]
+
 use super::*;
 
 #[test]

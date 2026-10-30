@@ -119,7 +119,21 @@ pub(super) fn parse_with_image_capability(
             None => message.replace("plak <command> --help", "plak help"),
         }
     }).map_err(usage)?;
-    let account = match cli.command.as_ref() {
+    let account = command_account(cli.command.as_ref());
+    if account == Some("xai") {
+        return Err(usage(
+            "`xai` is ambiguous: use `grok` (SuperGrok subscription) or `xai-api` (API key)"
+                .to_owned(),
+        ));
+    }
+    if let Some(TopCommand::Run { image, .. }) = &cli.command {
+        crate::build_features::admit_image_arguments(image, images_available)?;
+    }
+    cli.into_command().map_err(usage)
+}
+
+fn command_account(command: Option<&TopCommand>) -> Option<&str> {
+    match command {
         Some(
             TopCommand::Login { account, .. }
             | TopCommand::Logout { account, .. }
@@ -145,17 +159,7 @@ pub(super) fn parse_with_image_capability(
                 ),
         }) => account.as_deref(),
         _ => None,
-    };
-    if account == Some("xai") {
-        return Err(usage(
-            "`xai` is ambiguous: use `grok` (SuperGrok subscription) or `xai-api` (API key)"
-                .to_owned(),
-        ));
     }
-    if let Some(TopCommand::Run { image, .. }) = &cli.command {
-        crate::build_features::admit_image_arguments(image, images_available)?;
-    }
-    cli.into_command().map_err(usage)
 }
 
 #[cfg(test)]

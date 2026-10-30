@@ -278,6 +278,10 @@ pub fn tui_presentation_values_with_backend_and_composition(
 }
 
 /// Build TUI picker rows and full-catalog native model facts using an injected backend.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Presentation joins native and API model facts, credentials, compatibility, and composition choices into one ordered picker bundle."
+)]
 pub fn tui_presentation_bundle_with_backend_and_composition(
     paths: &PlakPaths,
     backend: &mut impl PresentationBackend,

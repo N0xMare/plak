@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Projected usage scenarios retain the full history, retention rebuild, and duplicate-terminal accounting assertions."
+)]
+
 use super::tests::{TestResult, all_observations, fixture_context, fixture_timestamp};
 use super::*;
 use plakous::agent::{TelemetryObservationKind, TurnUsage};

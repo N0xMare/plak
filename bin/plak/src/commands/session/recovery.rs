@@ -144,6 +144,10 @@ pub(crate) fn show_child_recovery_status(
     })
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child recovery reporting traverses root status, bounded descendants, and recoverable obligations into one consistent status view."
+)]
 fn show_child_recovery_status_with(
     paths: &crate::home::paths::PlakPaths,
     record: &product_sessions::SessionRecord,

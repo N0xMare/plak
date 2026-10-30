@@ -593,6 +593,10 @@ impl TreeNavigator {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The agent inspector renders lifecycle, binding, workspace, and recovery facts from the same selected node."
+    )]
     fn inspector_lines(&self, id: &str, projection: &AgentProjection, width: u16) -> Vec<String> {
         let Some(node) = self.node(id) else {
             return Vec::new();
