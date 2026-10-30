@@ -153,6 +153,9 @@ fn promoted_job(environment: &ExecutionEnvironment) -> TestResult<(u32, String)>
         assert!(std::time::Instant::now() < deadline, "job did not finish");
         std::thread::sleep(Duration::from_millis(5));
     }
+    // A terminal status precedes owner retirement. Join before consumption so
+    // retirement cannot queue a second release after the test ages the file.
+    sessions.join(id)?;
     let path = sessions
         .job_output_file(number)
         .ok_or("promoted job has no issued output file")?
