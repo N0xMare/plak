@@ -4439,6 +4439,17 @@ the name of the environment variable that won, and there is no revocation call.
 
 ### 7.3 Refresh, generations, and quarantine
 
+Refresh and remote revoke share one claimed HTTP ladder. A request-build
+failure either restores a definitely unstarted claim or, when the payload or
+binding is already corrupt (`LeaveQuarantined`), drops the claim and leaves
+the durable `RefreshOutcomeUnknown` quarantine. A dispatch-admission failure
+restores only a definitely unstarted claim. Post-start validation, including
+a revoke response the dialect refuses, and a profile recheck quarantine the
+claim. The terminal commits either the replacement Ready record or the revoke
+tombstone, never both. Observations name the durable disposition, including
+after reopening. The refresh-only retryable-failure policy below does not
+apply to revoke.
+
 Refresh is serialized by an in-process single-flight plus a per-slot
 cross-process lock with monotonic generations. Before any refresh network call
 the credential slot records `RefreshOutcomeUnknown`; an ambiguous refresh

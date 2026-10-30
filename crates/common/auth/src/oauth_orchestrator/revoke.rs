@@ -5,12 +5,11 @@ use std::time::Instant;
 use plakous_http::Client as HttpClient;
 
 use super::hooks::ClaimedRevokeHooks;
-use super::{
-    CredentialRefreshFailureClass, CredentialRefreshPhase, RefreshAttempt,
-    emit_claimed_http_failure, emit_refresh, handle_build_failure, http_status_class,
-    quarantine_or_map, restore_or_map,
+use super::{BuildRequestFailure, CredentialRefreshObserver};
+use crate::{
+    ClaimedHttpError, ClaimedHttpResponse, PrivateCredentialStore, PrivateStoreError, RefreshClaim,
 };
-use crate::PrivateCredentialStore;
+use std::future::Future;
 
 /// Run the shared claimed-revoke ladder for one dialect.
 ///
@@ -21,10 +20,6 @@ use crate::PrivateCredentialStore;
 ///
 /// Propagates dialect-mapped failures. Post-start failures leave the durable
 /// generation quarantined Unknown unless revoke succeeds.
-#[allow(
-    clippy::too_many_lines,
-    reason = "linear claimed-revoke exits stay in one function so telemetry cannot miss a branch"
-)]
 pub async fn run_claimed_revoke<H>(
     store: &PrivateCredentialStore,
     client: &HttpClient,
@@ -39,146 +34,47 @@ where
     let claim = store
         .begin_refresh(&fence)
         .map_err(|error| hooks.map_store_error(error))?;
-    let attempt = RefreshAttempt::new(claim.fence().generation().get(), started);
-    emit_refresh(
-        hooks.observer(),
-        &attempt,
-        CredentialRefreshPhase::Began,
-        None,
-        None,
-        None,
-    );
-    let request = match hooks.build_revoke_request(&claim) {
-        Ok(request) => request,
-        Err(failure) => {
-            let (error, phase, failure_class) =
-                handle_build_failure(store, claim, failure, attempt.deadline, |error| {
-                    hooks.map_store_error(error)
-                })
-                .await;
-            emit_refresh(hooks.observer(), &attempt, phase, failure_class, None, None);
-            return Err(error);
-        }
-    };
+    super::operation::run(store, client, claim, &mut Revoke(hooks), started).await
+}
 
-    if let Err(error) = hooks.authorize_dispatch().await {
-        let (error, restored) = restore_or_map(store, claim, error, attempt.deadline, |e| {
-            hooks.map_store_error(e)
-        })
-        .await;
-        emit_refresh(
-            hooks.observer(),
-            &attempt,
-            if restored {
-                CredentialRefreshPhase::Restored
-            } else {
-                CredentialRefreshPhase::OutcomeUnknown
-            },
-            Some(if restored {
-                CredentialRefreshFailureClass::NotReady
-            } else {
-                CredentialRefreshFailureClass::Store
-            }),
-            None,
-            None,
-        );
-        return Err(error);
-    }
+struct Revoke<'a, H>(&'a mut H);
 
-    let control = hooks.exchange_control();
-    let exchange_deadline = control.deadline();
-    let mut response = match hooks
-        .execute_claimed(store, client, claim, request, control)
-        .await
-    {
-        Ok(response) => response,
-        Err(mut error) => {
-            emit_claimed_http_failure(
-                store,
-                hooks.observer(),
-                &attempt,
-                &mut error,
-                exchange_deadline,
-            )
-            .await;
-            return Err(hooks.map_claimed_http_error(store, error).await);
-        }
-    };
+impl<H: ClaimedRevokeHooks> super::operation::Operation for Revoke<'_, H> {
+    type Error = H::Error;
+    type Prepared = ();
+    type Validated = ();
+    type Receipt = crate::CredentialGeneration;
+    type Output = H::Output;
 
-    let http_status = Some(response.status().as_u16());
-    if let Err(error) = hooks.accept_revoke_response(&mut response).await {
-        let transport_failure = response.transport_failure();
-        let failure_class = if let Some(class) = super::transport_failure_class(transport_failure) {
-            class
-        } else if response.status().is_success() {
-            CredentialRefreshFailureClass::Validation
-        } else {
-            http_status_class(response.status())
-        };
-        let (error, quarantined) =
-            quarantine_or_map(store, response, error, |e| hooks.map_store_error(e));
-        emit_refresh(
-            hooks.observer(),
-            &attempt,
-            if quarantined {
-                CredentialRefreshPhase::Quarantined
-            } else {
-                CredentialRefreshPhase::OutcomeUnknown
-            },
-            Some(if quarantined {
-                failure_class
-            } else {
-                CredentialRefreshFailureClass::Store
-            }),
-            http_status,
-            transport_failure.map(plakous_http::Failure::phase),
-        );
-        return Err(error);
+    super::operation::delegate_operation!();
+
+    fn build(
+        &mut self,
+        claim: &RefreshClaim,
+    ) -> Result<((), plakous_http::Request), BuildRequestFailure<Self::Error>> {
+        self.0
+            .build_revoke_request(claim)
+            .map(|request| ((), request))
     }
-    if let Err(error) = hooks.recheck_profile_before_complete().await {
-        let (error, quarantined) =
-            quarantine_or_map(store, response, error, |e| hooks.map_store_error(e));
-        emit_refresh(
-            hooks.observer(),
-            &attempt,
-            if quarantined {
-                CredentialRefreshPhase::Quarantined
-            } else {
-                CredentialRefreshPhase::OutcomeUnknown
-            },
-            Some(if quarantined {
-                CredentialRefreshFailureClass::Validation
-            } else {
-                CredentialRefreshFailureClass::Store
-            }),
-            http_status,
-            None,
-        );
-        return Err(error);
+    fn validate(
+        &mut self,
+        (): (),
+        response: &mut ClaimedHttpResponse,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.0.accept_revoke_response(response)
     }
-    match store.revoke_claimed_http(response) {
-        Ok(generation) => {
-            emit_refresh(
-                hooks.observer(),
-                &attempt,
-                CredentialRefreshPhase::Completed,
-                None,
-                http_status,
-                None,
-            );
-            hooks.output_from_revoked(generation)
-        }
-        Err(store_error) => {
-            emit_refresh(
-                hooks.observer(),
-                &attempt,
-                CredentialRefreshPhase::OutcomeUnknown,
-                Some(CredentialRefreshFailureClass::Store),
-                http_status,
-                None,
-            );
-            Err(hooks.map_store_error(store_error))
-        }
+    fn commit(
+        store: &PrivateCredentialStore,
+        response: ClaimedHttpResponse,
+        (): (),
+    ) -> Result<Self::Receipt, PrivateStoreError> {
+        store.revoke_claimed_http(response)
+    }
+    fn output(&mut self, generation: Self::Receipt) -> Result<Self::Output, Self::Error> {
+        self.0.output_from_revoked(generation)
+    }
+    fn observer(&self) -> Option<&dyn CredentialRefreshObserver> {
+        self.0.observer()
     }
 }
 

@@ -222,10 +222,7 @@ async fn no_refresh_needed_emits_nothing() -> Result<(), Box<dyn std::error::Err
         control: Duration::from_millis(50),
     };
     run_claimed_refresh(&store, &client()?, &mut hooks).await?;
-    assert_eq!(
-        observer.phases(),
-        [] as [crate::oauth_orchestrator::hooks::CredentialRefreshPhase; 0]
-    );
+    assert_eq!(observer.phases(), [] as [CredentialRefreshPhase; 0]);
     Ok(())
 }
 

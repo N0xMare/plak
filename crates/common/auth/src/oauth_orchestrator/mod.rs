@@ -38,6 +38,7 @@ mod claims;
 mod diagnostic;
 mod hooks;
 mod jwks;
+mod operation;
 mod refresh;
 mod revoke;
 
