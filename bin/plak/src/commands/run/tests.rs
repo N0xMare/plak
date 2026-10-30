@@ -1230,7 +1230,9 @@ fn inprocess_finalization_recovery(explicit: bool) {
     actions
         .send(UserAction::Prompt("first turn".into()))
         .unwrap();
-    read_until(|event| matches!(event, HostEvent::SetBusy(true)));
+    // Busy is latest-state and may already have coalesced to false. The
+    // retained start receipt still precedes the terminal idle observation.
+    read_until(|event| matches!(event, HostEvent::PromptStarted(_)));
     read_until(|event| matches!(event, HostEvent::SetBusy(false)));
     let mid = store.load(&id).unwrap();
     assert_eq!(
@@ -1265,9 +1267,9 @@ fn inprocess_finalization_recovery(explicit: bool) {
         UserAction::Prompt("second turn".into())
     };
     actions.send(control).unwrap();
-    let notes = read_until(
-        |event| matches!(event, HostEvent::Status { phase, detail: Some(detail), .. } if phase == "idle" && detail.starts_with("ready")),
-    );
+    // A queued prompt may replace recovery's ready status before the test
+    // reads it. Recovered is the retained receipt for that same boundary.
+    let notes = read_until(|event| matches!(event, HostEvent::Recovered { .. }));
     assert!(
         !notes
             .iter()
