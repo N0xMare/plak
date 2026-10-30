@@ -144,7 +144,11 @@ impl ToolExecutor for TerminalProbeTool {
                     ToolRuntimeErrorKind::Execution,
                     "scripted executor failure",
                 )),
-                TerminalAction::Panic => panic!("scripted executor panic"),
+                // Exercise unwinding and containment, not the process-global
+                // panic hook's potentially expensive backtrace symbolization.
+                TerminalAction::Panic => {
+                    std::panic::resume_unwind(Box::new("scripted executor panic"));
+                }
                 TerminalAction::Succeed => ToolOutcome::success_text("later work"),
             }
         })
