@@ -32,7 +32,8 @@ const MAX_CONTEXT_LABEL_BYTES: usize = 128;
 const MAX_MEASUREMENT_CERTIFICATES: usize = 16;
 
 /// One overrun on a specific capacity axis.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(try_from = "LimitOverflowWire")]
 pub struct LimitOverflow {
     required: u64,
     available: u64,
@@ -45,16 +46,12 @@ struct LimitOverflowWire {
     available: u64,
 }
 
-impl<'de> Deserialize<'de> for LimitOverflow {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = LimitOverflowWire::deserialize(deserializer)?;
+impl TryFrom<LimitOverflowWire> for LimitOverflow {
+    type Error = &'static str;
+
+    fn try_from(wire: LimitOverflowWire) -> Result<Self, Self::Error> {
         if wire.required <= wire.available {
-            return Err(serde::de::Error::custom(
-                "context overflow must exceed available capacity",
-            ));
+            return Err("context overflow must exceed available capacity");
         }
         Ok(Self {
             required: wire.required,
@@ -78,7 +75,8 @@ impl LimitOverflow {
 }
 
 /// Typed context overflow across shared, input, and/or output axes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(try_from = "ContextOverflowWire")]
 pub struct ContextOverflow {
     shared: Option<LimitOverflow>,
     input: Option<LimitOverflow>,
@@ -93,16 +91,12 @@ struct ContextOverflowWire {
     output: Option<LimitOverflow>,
 }
 
-impl<'de> Deserialize<'de> for ContextOverflow {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = ContextOverflowWire::deserialize(deserializer)?;
+impl TryFrom<ContextOverflowWire> for ContextOverflow {
+    type Error = &'static str;
+
+    fn try_from(wire: ContextOverflowWire) -> Result<Self, Self::Error> {
         if wire.shared.is_none() && wire.input.is_none() && wire.output.is_none() {
-            return Err(serde::de::Error::custom(
-                "context overflow must name at least one capacity axis",
-            ));
+            return Err("context overflow must name at least one capacity axis");
         }
         Ok(Self {
             shared: wire.shared,
@@ -1109,6 +1103,9 @@ fn semantic_digest(
 
 #[cfg(test)]
 mod occupancy_anchor_tests;
+
+#[cfg(test)]
+mod overflow_tests;
 
 #[cfg(test)]
 #[allow(
