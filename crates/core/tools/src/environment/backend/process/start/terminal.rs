@@ -58,6 +58,8 @@ pub(in crate::environment::backend::process) struct JoinedProcessResources {
     io_stop: Arc<AtomicBool>,
     cleanup_duration: Duration,
     armed: bool,
+    #[cfg(test)]
+    before_rollback: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl JoinedSpawn<'_> {
@@ -78,6 +80,8 @@ impl JoinedSpawn<'_> {
                 io_stop: Arc::new(AtomicBool::new(false)),
                 cleanup_duration: self.limits.cleanup_duration(),
                 armed: true,
+                #[cfg(test)]
+                before_rollback: None,
             },
             io,
         ))
@@ -426,6 +430,10 @@ impl JoinedProcessResources {
 
     fn rollback(&mut self, error: ExecutionBackendError) -> ExecutionBackendError {
         self.io_stop.store(true, Ordering::Release);
+        #[cfg(test)]
+        if let Some(probe) = self.before_rollback.take() {
+            probe();
+        }
         let deadline = Instant::now() + self.cleanup_duration;
         let (cleanup, error) = if let JoinedChild::Pty(child, _) = &mut self.child {
             (

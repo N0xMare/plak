@@ -6,11 +6,25 @@ use crate::environment::backend::process::{JoinedSessionOutput, process_group_ex
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+fn assert_stdin_still_open(mut input: std::io::PipeReader) {
+    let mut bytes = [0; 4096];
+    loop {
+        match input.read(&mut bytes) {
+            Ok(0) => panic!("stdin EOF preceded rollback group termination"),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("stdin probe failed: {error}"),
+        }
+    }
+}
+
 #[test]
 fn pipes_initial_stdin_rollback_terminates_group_before_join() -> TestResult {
+    let (input_reader, input_writer) = std::io::pipe()?;
+    set_nonblocking(&input_reader)?;
     let child = Command::new("/bin/sh")
         .args(["-c", "trap '' TERM; printf r; exec sleep 30"])
-        .stdin(Stdio::piped())
+        .stdin(Stdio::from(input_reader.try_clone()?))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0)
@@ -26,11 +40,12 @@ fn pipes_initial_stdin_rollback_terminates_group_before_join() -> TestResult {
         io_stop: Arc::new(AtomicBool::new(false)),
         cleanup_duration: Duration::from_secs(4),
         armed: true,
+        before_rollback: Some(Box::new(move || assert_stdin_still_open(input_reader))),
     };
     let JoinedChild::Pipes(child, _) = &mut resources.child else {
         return Err("expected pipes".into());
     };
-    let stdin = child.stdin.take().ok_or("stdin")?;
+    let stdin = std::process::ChildStdin::from(std::os::fd::OwnedFd::from(input_writer));
     set_nonblocking(&stdin)?;
     let mut stdout = child.stdout.take().ok_or("stdout")?;
     let stderr = child.stderr.take().ok_or("stderr")?;
