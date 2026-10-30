@@ -1424,6 +1424,8 @@ def generate_mitm_certs(directory: Path) -> tuple[Path, Path, Path]:
             str(ca_pem),
             "-CAkey",
             str(ca_key),
+            "-CAserial",
+            str(directory / "ca.srl"),
             "-CAcreateserial",
             "-out",
             str(leaf_pem),
@@ -2301,25 +2303,9 @@ async def run_claude_tui_owned(
         process = owned_processes.PtyProcess(pid)
         owned = owned_processes.Owned(process)
         set_pty_window(fd)
-        startup_deadline = time.monotonic() + timeout
-        while time.monotonic() < startup_deadline:
-            await drain_pty(fd, collected, 0.25)
-            folded = folded_pty_text(bytes(collected))
-            # Do not drive the dialog. A keypress can confirm "No, exit".
-            # Trust was pre-accepted in the synthetic config; if the dialog
-            # is still on screen the fixture key did not match.
-            if "noexit" in folded and "itrustthisfolder" in folded:
-                return (
-                    "claude: workspace trust dialog is open; the synthetic "
-                    f"config did not pre-accept {fixture} (log {log_path})"
-                )
-            if "bypasspermissionson" in folded:
-                break
-        if process.returncode is not None:
-            return (
-                "claude: TUI exited before the first user turn "
-                f"(exit {process.returncode}; log {log_path})"
-            )
+        error = await wait_claude_ready(fd, collected, process, timeout)
+        if error:
+            return f"{error} (log {log_path})"
         if not pty_write(fd, (PROMPT + "\r").encode("utf-8")):
             return f"claude: PTY closed before sending {PROMPT!r} (log {log_path})"
         # Drain the PTY while observing requests: a full terminal buffer can
@@ -2398,11 +2384,20 @@ async def wait_claude_ready(
     fd: int, collected: bytearray, process: Any, timeout: int,
 ) -> str | None:
     deadline = time.monotonic() + timeout
+    accepted_bypass = False
     while time.monotonic() < deadline:
         await drain_pty(fd, collected, 0.25)
         folded = folded_pty_text(bytes(collected))
         if "noexit" in folded and "itrustthisfolder" in folded:
             return "claude: workspace trust dialog is open"
+        # Newer interactive clients ask separately even when workspace trust
+        # and the old bypass acceptance flag are seeded. This is the isolated
+        # capture home, behind the destination-denying recorder, not a user TUI.
+        if (not accepted_bypass and "claudecoderunninginbypasspermissionsmode" in folded
+                and "noexit" in folded and "yesiaccept" in folded):
+            if not pty_write(fd, b"\x1b[B\r"):
+                return "claude: PTY closed while accepting synthetic bypass mode"
+            accepted_bypass = True
         if "bypasspermissionson" in folded:
             return None
         if process.returncode is not None:

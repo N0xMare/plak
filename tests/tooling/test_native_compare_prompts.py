@@ -26,6 +26,25 @@ sys.modules[SPEC.name] = NCP
 SPEC.loader.exec_module(NCP)
 
 
+class CertificateTests(unittest.TestCase):
+    def test_serial_stays_inside_dotted_certificate_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "capture.with.dots" / "certs"
+            directory.mkdir(parents=True)
+            # Run in an isolated cwd so an escaped serial is observable and harmless.
+            subprocess.run(
+                [sys.executable, "-c",
+                 "import runpy, pathlib, sys; "
+                 "runpy.run_path(sys.argv[1])['generate_mitm_certs'](pathlib.Path(sys.argv[2]))",
+                 str(ROOT / "scripts/native_compare_prompts.py"), str(directory)],
+                cwd=root, check=True, capture_output=True,
+            )
+            self.assertTrue((directory / "ca.srl").is_file())
+            self.assertTrue(all(path.is_relative_to(directory)
+                                for path in root.rglob("*") if path.is_file()))
+
+
 class RedactionTests(unittest.TestCase):
     def test_headers_redact_secrets_and_keep_dialect_pins(self):
         rows = NCP.redact_headers(
@@ -500,6 +519,33 @@ class ClaudeIngestTests(unittest.TestCase):
         error = NCP.run_claude_ingest(NCP.SPECS["claude"], Path("/tmp"), None)
         self.assertIsNotNone(error)
         self.assertIn("never -p", error)
+
+    def test_bypass_confirmation_precedes_first_turn_and_is_accepted_only_once(self):
+        dialog = b"Claude Code running in Bypass Permissions mode No, exit Yes, I accept"
+        collected = bytearray()
+        frames = iter([dialog, dialog, b"bypass permissions on"])
+
+        async def drain(_fd, output, _timeout):
+            output.extend(next(frames))
+
+        class Process:
+            returncode = None
+
+        with patch.object(NCP, "drain_pty", drain), patch.object(NCP, "pty_write", return_value=True) as write:
+            self.assertIsNone(asyncio.run(NCP.wait_claude_ready(7, collected, Process(), 1)))
+        write.assert_called_once_with(7, b"\x1b[B\r")
+
+    def test_workspace_trust_dialog_is_not_confirmed_as_bypass_mode(self):
+        class Process:
+            returncode = None
+
+        async def drain(_fd, output, _timeout):
+            output.extend(b"No, exit Yes, I trust this folder")
+
+        with patch.object(NCP, "drain_pty", drain), patch.object(NCP, "pty_write") as write:
+            error = asyncio.run(NCP.wait_claude_ready(7, bytearray(), Process(), 1))
+        self.assertIn("workspace trust dialog", error)
+        write.assert_not_called()
 
 
 class CaptureIsolationTests(unittest.TestCase):
