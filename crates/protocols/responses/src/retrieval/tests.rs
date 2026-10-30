@@ -4,9 +4,12 @@
     reason = "fixture builders take owned JSON for readability"
 )]
 
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Wake, Waker};
 
 use plakous_http::{Bytes, HeaderMap, HeaderValue, Limits, Method, Origin};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -399,6 +402,21 @@ async fn read_body(stream: &mut tokio::net::TcpStream) -> std::io::Result<Vec<u8
 }
 
 async fn peer(responses: Vec<Vec<u8>>) -> TestResult<Peer> {
+    listening_peer(responses, None).await
+}
+
+/// Like [`peer`], and signals after the first response bytes are written.
+async fn peer_signaling_first_write(
+    responses: Vec<Vec<u8>>,
+) -> TestResult<(Peer, tokio::sync::oneshot::Receiver<()>)> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    Ok((listening_peer(responses, Some(sender)).await?, receiver))
+}
+
+async fn listening_peer(
+    responses: Vec<Vec<u8>>,
+    first_write: Option<tokio::sync::oneshot::Sender<()>>,
+) -> TestResult<Peer> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let origin = Origin::loopback_http(
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -407,6 +425,7 @@ async fn peer(responses: Vec<Vec<u8>>) -> TestResult<Peer> {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&requests);
     tokio::spawn(async move {
+        let mut first_write = first_write;
         for response in responses {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
@@ -417,6 +436,10 @@ async fn peer(responses: Vec<Vec<u8>>) -> TestResult<Peer> {
                 requests.push(body);
             }
             let _ = stream.write_all(&response).await;
+            if let Some(signal) = first_write.take() {
+                let _ = stream.flush().await;
+                let _ = signal.send(());
+            }
             let _ = stream.shutdown().await;
         }
     });
@@ -688,5 +711,369 @@ async fn a_json_side_request_outside_the_allowlist_or_over_its_bound_fails() -> 
     .ok_or("an oversized document was accepted")?;
     assert_eq!(bounded.kind(), ResponsesRetrievalErrorKind::InvalidResponse);
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+/// The exact body the Codex subscription backend sends with HTTP 401 when its
+/// upstream authentication service refuses with a transient 503.
+const WRAPPED_OVERLOAD_BODY: &str = r#"{"error":{"message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}","type":"authentication_error","param":null,"code":null}}"#;
+
+fn wrapped_overload() -> Vec<u8> {
+    http_response(401, "retry-after: 0\r\n", WRAPPED_OVERLOAD_BODY)
+}
+
+struct OptIn {
+    inner: Fixed,
+    opted_in: bool,
+    renew: bool,
+    refreshes: AtomicUsize,
+}
+
+impl ResponsesRetrievalTransport for OptIn {
+    fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a> {
+        self.inner.authorize(body)
+    }
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        self.refreshes.fetch_add(1, Ordering::SeqCst);
+        Box::pin(std::future::ready(self.renew))
+    }
+    fn retry_wrapped_overload(&self) -> bool {
+        self.opted_in
+    }
+}
+
+fn opt_in(origin: Origin, opted_in: bool, renew: bool) -> OptIn {
+    OptIn {
+        inner: fixed(vec![origin]),
+        opted_in,
+        renew,
+        refreshes: AtomicUsize::new(0),
+    }
+}
+
+async fn run_json(transport: &OptIn, body: &[u8]) -> Result<Vec<u8>, ResponsesRetrievalError> {
+    let client = Client::new_http1(Limits::default())
+        .map_err(|_| ResponsesRetrievalError::invalid_request("fixture client"))?;
+    run_responses_json_side_request(
+        &client,
+        transport,
+        body,
+        cost_only,
+        &CancellationToken::new(),
+        limits(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_wrapped_overload_401_retries_as_its_503_without_a_refresh() -> TestResult {
+    let document = r#"{"output":"Rust 1.99 shipped."}"#;
+    let peer = peer(vec![
+        wrapped_overload(),
+        http_response(200, "content-type: application/json\r\n", document),
+    ])
+    .await?;
+    let transport = opt_in(peer.origin.clone(), true, true);
+    let returned = run_json(&transport, b"{\"q\":\"rust\"}").await?;
+    assert_eq!(returned, document.as_bytes());
+    assert_eq!(transport.inner.authorized.load(Ordering::SeqCst), 2);
+    assert_eq!(transport.refreshes.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+struct Marked {
+    inner: OptIn,
+    marks: Arc<Mutex<Vec<tokio::time::Instant>>>,
+}
+
+impl ResponsesRetrievalTransport for Marked {
+    fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a> {
+        if let Ok(mut marks) = self.marks.lock() {
+            marks.push(tokio::time::Instant::now());
+        }
+        self.inner.authorize(body)
+    }
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        self.inner.credential_rejected()
+    }
+    fn retry_wrapped_overload(&self) -> bool {
+        self.inner.retry_wrapped_overload()
+    }
+}
+
+/// Wakes from the side-request task. `woke` is the idle probe; `notify` resumes
+/// the test when the retry timer, or later socket IO, becomes ready.
+struct RunWake {
+    woke: AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+impl Wake for RunWake {
+    fn wake(self: Arc<Self>) {
+        self.woke.store(true, Ordering::SeqCst);
+        self.notify.notify_one();
+    }
+}
+
+/// Polls `run` until the peer has written the 401 and a further poll stays
+/// pending without waking. That quiet poll is the retry sleep.
+async fn drive_until_retry_sleep<F: Future>(
+    run: &mut Pin<Box<F>>,
+    wrote: &mut tokio::sync::oneshot::Receiver<()>,
+    wake: &Arc<RunWake>,
+    waker: &Waker,
+) -> TestResult {
+    let mut wrote_401 = false;
+    loop {
+        wake.woke.store(false, Ordering::SeqCst);
+        if run
+            .as_mut()
+            .poll(&mut Context::from_waker(waker))
+            .is_ready()
+        {
+            return Err("side request finished before its retry sleep".into());
+        }
+        if !wrote_401 {
+            match Pin::new(&mut *wrote).poll(&mut Context::from_waker(waker)) {
+                Poll::Ready(Ok(())) => wrote_401 = true,
+                Poll::Ready(Err(_)) => {
+                    return Err("peer dropped before writing the 401".into());
+                }
+                Poll::Pending => {}
+            }
+        }
+        tokio::task::yield_now().await;
+        if !wrote_401 || wake.woke.load(Ordering::SeqCst) {
+            continue;
+        }
+        wake.woke.store(false, Ordering::SeqCst);
+        if run
+            .as_mut()
+            .poll(&mut Context::from_waker(waker))
+            .is_ready()
+        {
+            return Err("side request finished before its retry sleep".into());
+        }
+        if !wake.woke.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+    }
+}
+
+/// Drives socket progress after a wake until `run` parks again.
+async fn poll_until_parked<F: Future>(
+    run: &mut Pin<Box<F>>,
+    wake: &Arc<RunWake>,
+    waker: &Waker,
+) -> TestResult<Option<F::Output>> {
+    loop {
+        wake.woke.store(false, Ordering::SeqCst);
+        if let Poll::Ready(value) = run.as_mut().poll(&mut Context::from_waker(waker)) {
+            return Ok(Some(value));
+        }
+        tokio::task::yield_now().await;
+        if !wake.woke.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+    }
+}
+
+/// After the clock hold drops, fails if `run` finishes before the 4.999 s mark.
+/// A five-second `Retry-After` completes on the following millisecond.
+async fn watch_five_second_retry<F: Future>(
+    run: &mut Pin<Box<F>>,
+    wake: &Arc<RunWake>,
+    waker: &Waker,
+    marks: &Mutex<Vec<tokio::time::Instant>>,
+    mut early: tokio::task::JoinHandle<()>,
+) -> TestResult<F::Output> {
+    let mut saw_early = false;
+    let mut tail = std::pin::pin!(tokio::time::sleep(Duration::from_millis(1)));
+    let mut tail_done = false;
+    loop {
+        tokio::select! {
+            biased;
+            () = wake.notify.notified() => {
+                if let Some(value) = poll_until_parked(run, wake, waker).await? {
+                    if !saw_early {
+                        return Err("the overload retried before Retry-After elapsed".into());
+                    }
+                    return Ok(value);
+                }
+            }
+            result = &mut early, if !saw_early => {
+                result.map_err(|_| "observation sleep cancelled")?;
+                saw_early = true;
+                assert_eq!(
+                    marks.lock().map_err(|_| "marks lock")?.len(),
+                    1,
+                    "the overload retried before Retry-After elapsed"
+                );
+            }
+            () = &mut tail, if saw_early && !tail_done => {
+                tail_done = true;
+            }
+        }
+    }
+}
+
+/// A nonzero `Retry-After` on the wrapped overload is the wait. Dropping the
+/// advice falls back to the jittered one-second backoff, which is not five
+/// seconds even at the longest sample.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_wrapped_overload_waits_out_a_nonzero_retry_after() -> TestResult {
+    // A blocking task freezes auto-advance while the 401 is still real IO.
+    let (keep_clock, clock_held) = std::sync::mpsc::channel::<()>();
+    let _clock = tokio::task::spawn_blocking(move || {
+        let _ = clock_held.recv();
+    });
+    let document = r#"{"output":"Rust 1.99 shipped."}"#;
+    let (peer, mut wrote) = peer_signaling_first_write(vec![
+        http_response(401, "retry-after: 5\r\n", WRAPPED_OVERLOAD_BODY),
+        http_response(200, "content-type: application/json\r\n", document),
+    ])
+    .await?;
+    let marks = Arc::new(Mutex::new(Vec::new()));
+    let transport = Marked {
+        inner: opt_in(peer.origin.clone(), true, true),
+        marks: Arc::clone(&marks),
+    };
+    let client = Client::new_http1(Limits::default())?;
+    let cancellation = CancellationToken::new();
+    let wake = Arc::new(RunWake {
+        woke: AtomicBool::new(false),
+        notify: tokio::sync::Notify::new(),
+    });
+    let waker = Waker::from(Arc::clone(&wake));
+    let mut run = Box::pin(run_responses_json_side_request(
+        &client,
+        &transport,
+        b"{\"q\":\"rust\"}",
+        cost_only,
+        &cancellation,
+        ResponsesRetrievalLimits {
+            exchange_timeout: Duration::from_secs(30),
+            jitter: Some(Jitter::LONGEST),
+        },
+    ));
+    // The peer signals after the 401 is written. Yield until `run` stays
+    // pending across a quiet poll: that is the retry sleep, not a fixed wait.
+    drive_until_retry_sleep(&mut run, &mut wrote, &wake, &waker).await?;
+    assert_eq!(
+        marks.lock().map_err(|_| "marks lock")?.len(),
+        1,
+        "the overload retried before any logical wait"
+    );
+    let parked = tokio::time::Instant::now();
+    // Register the observation sleep before releasing the freeze, so auto-advance
+    // fires it before a five-second Retry-After and after a one-second backoff.
+    let early = tokio::spawn(async {
+        tokio::time::sleep(Duration::from_secs(5) - Duration::from_millis(1)).await;
+    });
+    tokio::task::yield_now().await;
+    drop(keep_clock);
+    let returned = watch_five_second_retry(&mut run, &wake, &waker, &marks, early).await??;
+    assert_eq!(returned, document.as_bytes());
+    let marks = marks.lock().map_err(|_| "marks lock")?;
+    assert_eq!(marks.len(), 2);
+    assert_eq!(marks[1].duration_since(parked), Duration::from_secs(5));
+    Ok(())
+}
+
+#[tokio::test]
+async fn exhausted_wrapped_overloads_end_unavailable_without_a_refresh() -> TestResult {
+    let peer = peer(vec![wrapped_overload(); 4]).await?;
+    let transport = opt_in(peer.origin.clone(), true, true);
+    let error = run_json(&transport, b"{}")
+        .await
+        .err()
+        .ok_or("overload succeeded")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unavailable);
+    assert_eq!(error.status(), Some(401));
+    assert_eq!(error.physical_requests(), 4);
+    assert!(
+        error
+            .message()
+            .contains("HTTP 401 wrapping upstream HTTP 503"),
+        "{}",
+        error.message()
+    );
+    assert_eq!(transport.inner.authorized.load(Ordering::SeqCst), 4);
+    assert_eq!(transport.refreshes.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn other_401s_and_routes_without_the_opt_in_stay_credential_rejections() -> TestResult {
+    let cases: [(&str, bool, &str); 7] = [
+        (
+            "exact body without the opt-in",
+            false,
+            WRAPPED_OVERLOAD_BODY,
+        ),
+        ("no body", true, ""),
+        (
+            "unparseable body",
+            true,
+            "authentication failed (status=503)",
+        ),
+        (
+            "plain authentication_error",
+            true,
+            r#"{"error":{"message":"token expired","type":"authentication_error"}}"#,
+        ),
+        (
+            "other wrapped status",
+            true,
+            r#"{"error":{"message":"authentication failed (status=401): {\"error\":\"Too many concurrent requests\"}","type":"authentication_error"}}"#,
+        ),
+        (
+            "other upstream 503 reason",
+            true,
+            r#"{"error":{"message":"authentication failed (status=503): {\"error\":\"upstream unavailable\"}","type":"authentication_error"}}"#,
+        ),
+        (
+            "other error type",
+            true,
+            r#"{"error":{"message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}","type":"invalid_request_error"}}"#,
+        ),
+    ];
+    for (label, opted_in, body) in cases {
+        let unauthorized = http_response(401, "retry-after: 0\r\n", body);
+        let refused = peer(vec![unauthorized.clone()]).await?;
+        let transport = opt_in(refused.origin.clone(), opted_in, false);
+        let error = run_json(&transport, b"{}")
+            .await
+            .err()
+            .ok_or_else(|| format!("{label}: a 401 without renewal succeeded"))?;
+        assert_eq!(
+            error.kind(),
+            ResponsesRetrievalErrorKind::Unauthorized,
+            "{label}"
+        );
+        assert_eq!(error.status(), Some(401), "{label}");
+        assert_eq!(error.physical_requests(), 1, "{label}");
+        assert_eq!(
+            transport.inner.authorized.load(Ordering::SeqCst),
+            1,
+            "{label}"
+        );
+        assert_eq!(transport.refreshes.load(Ordering::SeqCst), 1, "{label}");
+
+        let renewed = peer(vec![
+            unauthorized,
+            http_response(200, "content-type: application/json\r\n", r#"{"ok":true}"#),
+        ])
+        .await?;
+        let transport = opt_in(renewed.origin.clone(), opted_in, true);
+        let returned = run_json(&transport, b"{}").await?;
+        assert_eq!(returned, br#"{"ok":true}"#, "{label}");
+        assert_eq!(transport.refreshes.load(Ordering::SeqCst), 1, "{label}");
+        assert_eq!(
+            transport.inner.authorized.load(Ordering::SeqCst),
+            2,
+            "{label}"
+        );
+    }
     Ok(())
 }

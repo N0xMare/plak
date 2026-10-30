@@ -366,7 +366,7 @@ pub async fn run_responses_retrieval(
         client,
         transport,
         &body,
-        ResponsesReader(Reply::Sse),
+        ResponsesReader::new(Reply::Sse, transport.retry_wrapped_overload()),
         cancellation,
         limits,
     )
@@ -404,7 +404,7 @@ pub async fn run_responses_json_side_request(
         client,
         transport,
         body,
-        ResponsesReader(Reply::Json),
+        ResponsesReader::new(Reply::Json, transport.retry_wrapped_overload()),
         cancellation,
         limits,
     )
@@ -434,6 +434,21 @@ enum Received {
 /// OpenAI shape `error.{type|code}: error.message` or the xAI shape
 /// `code: error`.
 pub(crate) fn status_error(status: u16, body: &[u8]) -> ResponsesRetrievalError {
+    classified_status_error(status, status, body)
+}
+
+/// The Codex wrapped-503 401: unavailable, as the upstream 503, while the
+/// recorded status stays the provider's HTTP 401.
+pub(crate) fn wrapped_overload_status_error(body: &[u8]) -> ResponsesRetrievalError {
+    classified_status_error(401, 503, body).with_status(401)
+}
+
+/// Whether an opted-in reader should retry this 401 as that upstream 503.
+pub(crate) fn retried_wrapped_overload(opted_in: bool, status: u16, body: &[u8]) -> bool {
+    opted_in && status == 401 && crate::attempt_host::body_wraps_upstream_overload(body)
+}
+
+fn classified_status_error(wire: u16, classified: u16, body: &[u8]) -> ResponsesRetrievalError {
     let detail = serde_json::from_slice::<Value>(body)
         .ok()
         .and_then(|value| match value.get("error")? {
@@ -452,19 +467,40 @@ pub(crate) fn status_error(status: u16, body: &[u8]) -> ResponsesRetrievalError 
             }
             _ => None,
         });
-    let kind = match status {
+    let kind = match classified {
         401 | 403 => ResponsesRetrievalErrorKind::Unauthorized,
         429 | 500..=599 => ResponsesRetrievalErrorKind::Unavailable,
         _ => ResponsesRetrievalErrorKind::Rejected,
     };
+    let status_label = if wire == classified {
+        format!("HTTP {wire}")
+    } else {
+        format!("HTTP {wire} wrapping upstream HTTP {classified}")
+    };
     let message = match detail {
-        Some(detail) => format!("the provider refused the side request (HTTP {status}, {detail})"),
-        None => format!("the provider refused the side request (HTTP {status})"),
+        Some(detail) => format!("the provider refused the side request ({status_label}, {detail})"),
+        None => format!("the provider refused the side request ({status_label})"),
     };
     ResponsesRetrievalError::new(kind, message)
 }
 
-struct ResponsesReader(Reply);
+struct ResponsesReader {
+    reply: Reply,
+    wrapped_overload: bool,
+}
+
+impl ResponsesReader {
+    fn new(reply: Reply, wrapped_overload: bool) -> Self {
+        Self {
+            reply,
+            wrapped_overload,
+        }
+    }
+
+    fn wrapped(&self, status: u16, body: &[u8]) -> bool {
+        retried_wrapped_overload(self.wrapped_overload, status, body)
+    }
+}
 enum ResponsesBody {
     Stream(Box<Collector>),
     Document(Document),
@@ -472,7 +508,7 @@ enum ResponsesBody {
 impl ResponseReader for ResponsesReader {
     type Collector = ResponsesBody;
     fn start(&self, _: &plakous_http::Response) -> ResponsesBody {
-        match self.0 {
+        match self.reply {
             Reply::Sse => ResponsesBody::Stream(Box::default()),
             Reply::Json => ResponsesBody::Document(Document::new(
                 MAX_DOCUMENT_BYTES,
@@ -481,7 +517,14 @@ impl ResponseReader for ResponsesReader {
         }
     }
     fn status_error(&self, status: u16, body: &[u8]) -> ResponsesRetrievalError {
-        status_error(status, body)
+        if self.wrapped(status, body) {
+            wrapped_overload_status_error(body)
+        } else {
+            status_error(status, body)
+        }
+    }
+    fn retried_as(&self, status: u16, body: &[u8]) -> Option<u16> {
+        self.wrapped(status, body).then_some(503)
     }
 }
 impl BodyCollector for ResponsesBody {

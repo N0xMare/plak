@@ -20,6 +20,7 @@ pub use authority::{
     ResponsesHeaderBinding,
 };
 use authority::{header_name_requires_secret, validate_auth_slots, validate_header_authority};
+pub(crate) use dispatch::body_wraps_upstream_overload;
 #[cfg(test)]
 use dispatch::{
     CollectorFailure, ObservationDelivery, RawTerminal, StreamCollector, classify_status,

@@ -354,6 +354,10 @@ impl ResponsesRetrievalTransport for CodexSideRequest<'_> {
     fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
         Box::pin(self.retrieval.model.codex_side_request_rejected())
     }
+
+    fn retry_wrapped_overload(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(feature = "native-auth")]

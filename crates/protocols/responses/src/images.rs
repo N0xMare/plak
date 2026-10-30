@@ -4,8 +4,9 @@
 //! `images/generations` and `images/edits` endpoints. One `image_gen` tool
 //! call is one logical request with a JSON body; its response carries the
 //! image as base64. Retries happen only where no image can have been made:
-//! before the request was transmitted, and on a rate-limit refusal. A
-//! request that may have reached the provider is never sent again, so a
+//! before the request was transmitted, on a rate-limit refusal, and, when
+//! the transport opts in, on the Codex wrapped-503 401.
+//! A request the provider may have accepted is never sent again, so a
 //! generation is never paid twice.
 
 use std::future::Future;
@@ -21,7 +22,8 @@ use serde_json::{Map, Value, json};
 
 use crate::retrieval::{
     ResponsesCredentialRefresh, ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch,
-    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, status_error,
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
+    retried_wrapped_overload, status_error, wrapped_overload_status_error,
 };
 
 /// Largest response body read, in bytes: a base64 image inside JSON.
@@ -217,6 +219,11 @@ pub trait ResponsesImageTransport: Send + Sync {
     fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
         Box::pin(std::future::ready(false))
     }
+
+    /// See [`crate::ResponsesRetrievalTransport::retry_wrapped_overload`].
+    fn retry_wrapped_overload(&self) -> bool {
+        false
+    }
 }
 
 /// The image bytes of a successful images response.
@@ -272,8 +279,9 @@ fn decode_base64(encoded: &str) -> Result<Vec<u8>, ResponsesRetrievalError> {
 ///
 /// # Errors
 ///
-/// Returns the request's failure; only an untransmitted request and a
-/// rate-limit refusal are retried, under [`plakous_attempt::RetryPolicy::TURN`].
+/// Returns the request's failure; only an untransmitted request, a
+/// rate-limit refusal, and an opted-in wrapped-503 401 are retried, under
+/// [`plakous_attempt::RetryPolicy::TURN`].
 pub async fn run_responses_image(
     client: &Client,
     transport: &dyn ResponsesImageTransport,
@@ -287,19 +295,16 @@ pub async fn run_responses_image(
     } else {
         ResponsesImageEndpoint::Generations
     };
+    let reader = ImageReader {
+        wrapped_overload: transport.retry_wrapped_overload(),
+    };
     let transport = ImageTransport {
         inner: transport,
         endpoint,
     };
-    let response = side_request::exchange_with_retry(
-        client,
-        &transport,
-        &body,
-        ImageReader,
-        cancellation,
-        limits,
-    )
-    .await?;
+    let response =
+        side_request::exchange_with_retry(client, &transport, &body, reader, cancellation, limits)
+            .await?;
     decode_responses_image(&response)
 }
 
@@ -314,8 +319,13 @@ impl side_request::RetrievalTransport for ImageTransport<'_> {
     fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
         self.inner.credential_rejected()
     }
+    fn retry_wrapped_overload(&self) -> bool {
+        self.inner.retry_wrapped_overload()
+    }
 }
-struct ImageReader;
+struct ImageReader {
+    wrapped_overload: bool,
+}
 struct ImageBody(Document);
 impl ResponseReader for ImageReader {
     type Collector = ImageBody;
@@ -326,7 +336,14 @@ impl ResponseReader for ImageReader {
         ))
     }
     fn status_error(&self, status: u16, body: &[u8]) -> ResponsesRetrievalError {
-        status_error(status, body)
+        if retried_wrapped_overload(self.wrapped_overload, status, body) {
+            wrapped_overload_status_error(body)
+        } else {
+            status_error(status, body)
+        }
+    }
+    fn retried_as(&self, status: u16, body: &[u8]) -> Option<u16> {
+        retried_wrapped_overload(self.wrapped_overload, status, body).then_some(503)
     }
     fn policy(&self) -> side_request::SideRequestPolicy {
         side_request::SideRequestPolicy::Image

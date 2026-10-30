@@ -190,6 +190,14 @@ pub trait RetrievalTransport: Send + Sync {
     fn credential_rejected(&self) -> CredentialRefresh<'_> {
         Box::pin(std::future::ready(false))
     }
+
+    /// Opts this route into retrying one proven overload that arrives wearing
+    /// another status. The family's reader decides which body that is and
+    /// which status it is retried as. Default: a 401 stays a credential
+    /// rejection.
+    fn retry_wrapped_overload(&self) -> bool {
+        false
+    }
 }
 
 /// Bounded transport and backoff policy for one side request.
@@ -256,6 +264,15 @@ pub trait ResponseReader: Sync {
     fn start(&self, response: &Response) -> Self::Collector;
     /// Preserves the family's existing safe refusal text.
     fn status_error(&self, status: u16, body: &[u8]) -> RetrievalError;
+    /// Status this refusal is retried as, when that is not its wire status.
+    ///
+    /// `Some` is a turn-policy retry even for an image request, honoring
+    /// `Retry-After`, and is never a credential rejection. `None` keeps the
+    /// wire status.
+    fn retried_as(&self, status: u16, body: &[u8]) -> Option<u16> {
+        let _ = (status, body);
+        None
+    }
     /// Replay semantics; images deliberately differ from retrieval.
     fn policy(&self) -> SideRequestPolicy {
         SideRequestPolicy::Retrieval
@@ -428,6 +445,18 @@ async fn exchange_once<R: ResponseReader>(
             return Err(cancelled());
         }
         let error = reader.status_error(status, &body);
+        // A proven overload wearing another status is retried as the status
+        // the reader names, including an image request that retries no other
+        // server error. It is not a credential rejection.
+        if let Some(retried) = reader.retried_as(status, &body)
+            && let Some(point) = RetryPolicy::status_failure_point(retried)
+        {
+            return Ok(Attempted::Retry {
+                point,
+                retry_after,
+                error,
+            });
+        }
         if (reader.policy() == SideRequestPolicy::Retrieval || status == 429)
             && let Some(point) = RetryPolicy::status_failure_point(status)
         {

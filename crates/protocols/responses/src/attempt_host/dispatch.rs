@@ -1097,6 +1097,24 @@ fn wraps_upstream_overload(error: &ResponsesProviderError) -> bool {
         })
 }
 
+/// Whether a raw error body is that proven wrapped overload.
+///
+/// Side requests share the attempt host's message check rather than a second
+/// copy. Parsing uses the OpenAI-compatible policy: a body that does not
+/// parse, or any other 401, is not this overload.
+#[must_use]
+pub(crate) fn body_wraps_upstream_overload(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    parse_provider_error_with_policy(
+        provider_error_object(&value),
+        ResponsesResponseLimits::default(),
+        ResponsesProviderErrorPolicy::OpenAiCompatible,
+    )
+    .is_ok_and(|error| wraps_upstream_overload(&error))
+}
+
 /// The status a refusal is retried and recorded as: a wrapped overload is the
 /// upstream `503` it names.
 pub(super) fn refusal_status(status: StatusCode, class: ResponsesHttpStatusClass) -> StatusCode {

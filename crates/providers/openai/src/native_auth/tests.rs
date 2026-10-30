@@ -7047,10 +7047,20 @@ async fn a_401_forced_refresh_never_replays_and_the_next_operation_renews_once()
     Ok(())
 }
 
+fn refresh_was_attempted(requests: &[Vec<u8>], unexpected: bool) -> bool {
+    unexpected
+        || request_kinds(requests)
+            .iter()
+            .any(|kind| !matches!(*kind, "catalog" | "inference"))
+}
+
 #[tokio::test]
 async fn a_wrapped_overload_401_is_retried_without_a_refresh() -> TestResult {
     // The exact body the subscription backend sends under account load when
-    // its upstream authentication service answers 503.
+    // its upstream authentication service answers 503. Removing the route
+    // gate must fail here in about ten seconds. A token-endpoint request is
+    // "refresh attempted"; the deadline itself is "no completion within 10 s",
+    // not that refresh.
     let overloaded = response(
         "401 Unauthorized",
         "application/json",
@@ -7066,26 +7076,71 @@ async fn a_wrapped_overload_401_is_retried_without_a_refresh() -> TestResult {
     )
     .await?;
     let generation = fixture.manager.load_fence().await?.generation();
-    let response = run_text(
+    let run = run_text(
         &fixture.model,
         &fixture.descriptor,
         "00000000-0000-7000-8000-000000000508",
-    )
-    .await?;
-    assert_ne!(response.output(), []);
-    let (requests, unexpected) = server.await??;
-    assert_eq!(
-        request_kinds(&requests),
-        ["catalog", "inference", "inference"]
     );
-    assert!(!unexpected);
-    assert_eq!(fixture.manager.load_fence().await?.generation(), generation);
-    assert_eq!(fixture.manager.status()?, CodexCredentialStatus::Ready);
-    assert_eq!(
-        dispatched(&fixture.gate, SubscriptionRequestClass::Inference)?,
-        2
-    );
-    Ok(())
+    tokio::pin!(run);
+    let mut server = server;
+    let mut recorded = None;
+    let deadline = tokio::time::sleep(Duration::from_secs(10));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            result = &mut run => {
+                let response = match result {
+                    Ok(response) => response,
+                    Err(error) => {
+                        let observed = match recorded.take() {
+                            Some(done) => Some(done),
+                            None => {
+                                match tokio::time::timeout(Duration::from_secs(2), &mut server)
+                                    .await
+                                {
+                                    Ok(joined) => Some(joined??),
+                                    Err(_) => None,
+                                }
+                            }
+                        };
+                        if observed.as_ref().is_none_or(|(requests, unexpected)| {
+                            refresh_was_attempted(requests, *unexpected)
+                        }) {
+                            return Err("refresh attempted".into());
+                        }
+                        return Err(error.into());
+                    }
+                };
+                assert_ne!(response.output(), []);
+                let (requests, unexpected) = match recorded.take() {
+                    Some(done) => done,
+                    None => server.await??,
+                };
+                if refresh_was_attempted(&requests, unexpected) {
+                    return Err("refresh attempted".into());
+                }
+                assert_eq!(
+                    request_kinds(&requests),
+                    ["catalog", "inference", "inference"]
+                );
+                assert_eq!(fixture.manager.load_fence().await?.generation(), generation);
+                assert_eq!(fixture.manager.status()?, CodexCredentialStatus::Ready);
+                assert_eq!(
+                    dispatched(&fixture.gate, SubscriptionRequestClass::Inference)?,
+                    2
+                );
+                return Ok(());
+            }
+            joined = &mut server, if recorded.is_none() => {
+                let (requests, unexpected) = joined??;
+                if refresh_was_attempted(&requests, unexpected) {
+                    return Err("refresh attempted".into());
+                }
+                recorded = Some((requests, unexpected));
+            }
+            () = &mut deadline => return Err("no completion within 10 s".into()),
+        }
+    }
 }
 
 #[tokio::test]

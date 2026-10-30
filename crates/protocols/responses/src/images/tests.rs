@@ -247,7 +247,7 @@ fn fixed(origins: Vec<Origin>) -> Fixed {
 }
 
 async fn run(
-    transport: &Fixed,
+    transport: &impl ResponsesImageTransport,
     request: &ResponsesImageRequest,
 ) -> Result<Vec<u8>, ResponsesRetrievalError> {
     let client =
@@ -369,5 +369,170 @@ async fn a_possible_paid_image_is_never_reissued_after_the_peer_reads_its_body()
     assert_eq!(error.physical_requests(), 1);
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 1);
     assert_eq!(peer.requests.lock().map_err(|_| "requests lock")?.len(), 1);
+    Ok(())
+}
+
+const WRAPPED_OVERLOAD_BODY: &str = r#"{"error":{"message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}","type":"authentication_error","param":null,"code":null}}"#;
+
+fn wrapped_overload() -> Vec<u8> {
+    http_response(401, "retry-after: 0\r\n", WRAPPED_OVERLOAD_BODY)
+}
+
+struct OptIn {
+    inner: Fixed,
+    opted_in: bool,
+    renew: bool,
+    refreshes: AtomicUsize,
+}
+
+impl ResponsesImageTransport for OptIn {
+    fn authorize<'a>(
+        &'a self,
+        endpoint: ResponsesImageEndpoint,
+        body: &'a [u8],
+    ) -> ResponsesImageAuthorization<'a> {
+        self.inner.authorize(endpoint, body)
+    }
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        self.refreshes.fetch_add(1, Ordering::SeqCst);
+        Box::pin(std::future::ready(self.renew))
+    }
+    fn retry_wrapped_overload(&self) -> bool {
+        self.opted_in
+    }
+}
+
+fn opt_in(origin: Origin, opted_in: bool, renew: bool) -> OptIn {
+    OptIn {
+        inner: fixed(vec![origin]),
+        opted_in,
+        renew,
+        refreshes: AtomicUsize::new(0),
+    }
+}
+
+#[tokio::test]
+async fn a_wrapped_overload_401_retries_as_its_503_without_a_refresh() -> TestResult {
+    let peer = peer(vec![wrapped_overload(), image_response()]).await?;
+    let transport = opt_in(peer.origin.clone(), true, true);
+    assert_eq!(
+        run(&transport, &generation(ResponsesImageFlavor::Codex)).await?,
+        PNG
+    );
+    assert_eq!(transport.inner.authorized.load(Ordering::SeqCst), 2);
+    assert_eq!(transport.refreshes.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn exhausted_wrapped_overloads_end_unavailable_without_a_refresh() -> TestResult {
+    let peer = peer(vec![wrapped_overload(); 4]).await?;
+    let transport = opt_in(peer.origin.clone(), true, true);
+    let error = run(&transport, &generation(ResponsesImageFlavor::Codex))
+        .await
+        .err()
+        .ok_or("overload succeeded")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unavailable);
+    assert_eq!(error.status(), Some(401));
+    assert_eq!(error.physical_requests(), 4);
+    assert!(
+        error
+            .message()
+            .contains("HTTP 401 wrapping upstream HTTP 503"),
+        "{}",
+        error.message()
+    );
+    assert_eq!(transport.inner.authorized.load(Ordering::SeqCst), 4);
+    assert_eq!(transport.refreshes.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_opted_in_image_still_does_not_retry_a_plain_503() -> TestResult {
+    let peer = peer(vec![
+        http_response(503, "retry-after: 0\r\n", "{}"),
+        image_response(),
+    ])
+    .await?;
+    let transport = opt_in(peer.origin.clone(), true, true);
+    let error = run(&transport, &generation(ResponsesImageFlavor::Codex))
+        .await
+        .err()
+        .ok_or("503 was retried")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unavailable);
+    assert_eq!(error.physical_requests(), 1);
+    assert_eq!(transport.inner.authorized.load(Ordering::SeqCst), 1);
+    assert_eq!(transport.refreshes.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn other_401s_and_routes_without_the_opt_in_stay_credential_rejections() -> TestResult {
+    let cases: [(&str, bool, &str); 7] = [
+        (
+            "exact body without the opt-in",
+            false,
+            WRAPPED_OVERLOAD_BODY,
+        ),
+        ("no body", true, ""),
+        (
+            "unparseable body",
+            true,
+            "authentication failed (status=503)",
+        ),
+        (
+            "plain authentication_error",
+            true,
+            r#"{"error":{"message":"token expired","type":"authentication_error"}}"#,
+        ),
+        (
+            "other wrapped status",
+            true,
+            r#"{"error":{"message":"authentication failed (status=401): {\"error\":\"Too many concurrent requests\"}","type":"authentication_error"}}"#,
+        ),
+        (
+            "other upstream 503 reason",
+            true,
+            r#"{"error":{"message":"authentication failed (status=503): {\"error\":\"upstream unavailable\"}","type":"authentication_error"}}"#,
+        ),
+        (
+            "other error type",
+            true,
+            r#"{"error":{"message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}","type":"invalid_request_error"}}"#,
+        ),
+    ];
+    let request = generation(ResponsesImageFlavor::Codex);
+    for (label, opted_in, body) in cases {
+        let unauthorized = http_response(401, "retry-after: 0\r\n", body);
+        let refused = peer(vec![unauthorized.clone()]).await?;
+        let transport = opt_in(refused.origin.clone(), opted_in, false);
+        let error = run(&transport, &request)
+            .await
+            .err()
+            .ok_or_else(|| format!("{label}: a 401 without renewal succeeded"))?;
+        assert_eq!(
+            error.kind(),
+            ResponsesRetrievalErrorKind::Unauthorized,
+            "{label}"
+        );
+        assert_eq!(error.status(), Some(401), "{label}");
+        assert_eq!(error.physical_requests(), 1, "{label}");
+        assert_eq!(transport.refreshes.load(Ordering::SeqCst), 1, "{label}");
+        assert_eq!(
+            transport.inner.authorized.load(Ordering::SeqCst),
+            1,
+            "{label}"
+        );
+
+        let renewed = peer(vec![unauthorized, image_response()]).await?;
+        let transport = opt_in(renewed.origin.clone(), opted_in, true);
+        assert_eq!(run(&transport, &request).await?, PNG, "{label}");
+        assert_eq!(transport.refreshes.load(Ordering::SeqCst), 1, "{label}");
+        assert_eq!(
+            transport.inner.authorized.load(Ordering::SeqCst),
+            2,
+            "{label}"
+        );
+    }
     Ok(())
 }

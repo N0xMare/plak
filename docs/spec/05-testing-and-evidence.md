@@ -2986,6 +2986,11 @@ anything else not), and the same loopback retries; the OpenAI and xAI API
 executors pin their side request's path, key, project and model over loopback
 TLS, and a revoked xAI key refuses before the socket. The Codex
 `alpha/search` body, allowlist and `results[]` mapping are pinned offline. The
+Responses side-request tests pin that a transport opting in retries the Codex
+wrapped-503 401 as a 503 without a claimed refresh, on both the JSON retrieval
+and image policies, and that every other 401 body and a transport without the
+opt-in still take the claimed-refresh path; an ordinary image 503 is still not
+retried. The
 SuperGrok and Codex executors pin over loopback TLS their path, OAuth headers,
 body and one authorized inference permit (acquired before its dispatch
 authorization), and that a logged-out or changed login refuses before the

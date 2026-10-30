@@ -4026,8 +4026,15 @@ is refused before acceptance and is retried under the turn policy
 refresh, gives a re-login remedy, or quarantines the credential. Its retry
 records `HttpStatus { status: 503 }` with the detail
 `HTTP 401 wrapping upstream HTTP 503`. An exhausted budget ends the turn
-`Unavailable`, retaining the provider's HTTP 401 status in its context. Every
-other 401 body, a missing or unparseable body, and every other route (the
+`Unavailable`, retaining the provider's HTTP 401 status in its context. Codex
+hosted web-search and image side requests opt in on their transport and
+classify that body with the same matcher. A match is retried under the
+side-request turn budget as that 503, honoring `Retry-After`, and does not
+call the side request's claimed refresh; an exhausted budget is unavailable
+and still records HTTP 401. Image side requests retry this refusal even
+though they retry no other HTTP 503, because the peer refused before
+acceptance. Every other side-request 401 keeps the single claimed refresh.
+Every other 401 body, a missing or unparseable body, and every other route (the
 OpenAI API-key route, xAI and OpenRouter) keep the credential-rejection path.
 
 `plakous-auth` owns provider-neutral authentication scaffolding: bounded,
@@ -5178,7 +5185,9 @@ image extension does: each physical request revalidates admission, runs the
 credential preflight and takes an inference permit exactly like the Codex
 `alpha/search` side request, and holds both until the response head. A 401 on
 the Codex or SuperGrok images request gets the same single claimed refresh and
-one more request as a retrieval side request; a 401 head made no image.
+one more request as a retrieval side request, except the Codex wrapped-503
+overload (§7.2), which is retried as that 503 and never refreshes. A 401 head
+made no image.
 `plakous-hosted` binds `image_gen` only where the route's release-owned row is
 `Supported` and the route has a port, on a deferred port the executor connects
 once. The Codex, OpenAI API, xAI API and SuperGrok rows are `Supported` on
@@ -6343,13 +6352,15 @@ physical request, lease or permit retention through the response head, bounded
 body reads, and the turn retry budget. A 401 is not a transport retry. The
 transport may report one claimed refresh of the rejected login; when it does
 not, the refusal ends the side request and no further physical request is
-sent. Each family still owns its request builder, typed replay allowlist,
-provider status interpretation and result collector. Retrieval normalizes to
-one outcome (text, ordered sources, usage and the successful exchange count)
-at the facade, without changing model-visible retrieval text. Images keep
-their own result and a stricter policy: only a proven-unsent request and HTTP
-429 may retry, never a request the peer may have accepted. These types add no
-persisted or wire encoding.
+sent. A transport may opt into the Codex wrapped-503 401 (§7.2). That refusal
+is retried as the upstream 503, honoring `Retry-After`, and the claimed
+refresh is not run. Each family still owns its request builder, typed replay
+allowlist, provider status interpretation and result collector. Retrieval
+normalizes to one outcome (text, ordered sources, usage and the successful
+exchange count) at the facade, without changing model-visible retrieval text.
+Images keep their own result and a stricter policy: only a proven-unsent
+request, HTTP 429, and an opted-in wrapped-503 401 may retry, never a request
+the peer may have accepted. These types add no persisted or wire encoding.
 
 Every compaction is a separate `SessionWorkflow` operation: harness summaries,
 Codex native, and future OpenAI/Anthropic server compaction. Inline compaction
@@ -6375,7 +6386,9 @@ route, account, credential and model, with admission revalidated before every
 physical request as before a model round, the kernel's `RetryPolicy::TURN`
 inside each exchange, on a subscription route (Codex, SuperGrok) the model
 round's answer to an HTTP 401 — one claimed refresh of the session's login,
-then one more physical request under the renewed grant — and at most three `pause_turn` continuations that send
+then one more physical request under the renewed grant, except the Codex
+wrapped-503 overload (§7.2), which is retried as that 503 and never refreshes —
+and at most three `pause_turn` continuations that send
 the paused assistant content back unchanged inside the same side request. The
 side request emits no model event, never streams into the transcript and
 never enters canonical history; only the wrapper's tool result does, and a
