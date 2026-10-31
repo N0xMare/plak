@@ -147,6 +147,87 @@ pub(crate) fn prepare(config: &ProductConfig, home: &Path, name: &str) -> Result
     })
 }
 
+/// The profile one session runs: the root template and working set its tree
+/// froze at genesis. Profile choice is per session; the home's `[root] agent`
+/// and `[roster] working_set` are only the default for brand-new sessions.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SessionSelection {
+    /// The root template, when the session runs its tuple.
+    pub(crate) root: Option<String>,
+    /// The templates the root may spawn.
+    pub(crate) working_set: Vec<String>,
+}
+
+impl SessionSelection {
+    /// The selection a frozen tree epoch records.
+    pub(crate) fn from_snapshot(
+        snapshot: &plakous_hosted::orchestration::OrchestrationSnapshot,
+    ) -> Self {
+        Self {
+            root: snapshot.root_template.clone(),
+            working_set: snapshot
+                .working_set
+                .iter()
+                .map(|name| name.as_str().to_owned())
+                .collect(),
+        }
+    }
+}
+
+/// The profile `record`'s own tree froze, or `None` for a session without a
+/// readable tree (no topology, or not yet opened).
+pub(crate) fn session_selection(
+    paths: &crate::home::paths::PlakPaths,
+    record: &crate::store::sessions::SessionRecord,
+) -> Option<SessionSelection> {
+    let (_, observed) = crate::topology_product::inspect_session_tree(paths, record).ok()?;
+    match observed {
+        plakous_recursive_subagents_store::TreeInspection::Tree(tree) => {
+            Some(SessionSelection::from_snapshot(&tree.rows().snapshot))
+        }
+        _ => None,
+    }
+}
+
+/// The home configuration with `selection` as its root and working set,
+/// resolved against the current template files (and, for a built-in
+/// profile's `{id}-{role}` names the home never saved, the built-in bodies).
+/// The result is in memory only.
+///
+/// # Errors
+/// A named template that no longer loads, or a working set the product would
+/// refuse (a missing description, too many members).
+pub(crate) fn selection_config(
+    config: &ProductConfig,
+    selection: &SessionSelection,
+) -> Result<ProductConfig, String> {
+    let mut selected = config.clone();
+    for name in selection.root.iter().chain(&selection.working_set) {
+        if selected.templates.contains_key(name) {
+            continue;
+        }
+        let template = builtin_template(name)
+            .ok_or_else(|| format!("template `{name}` no longer exists"))??;
+        selected.templates.insert(name.clone(), template);
+    }
+    selected.root_composition = None;
+    selected.root_agent.clone_from(&selection.root);
+    selected.working_set =
+        plakous_hosted::agent_tree_protocol::WorkingSet::parse(selection.working_set.clone())?;
+    selected.validate()?;
+    Ok(selected)
+}
+
+/// A built-in profile's own body for `{id}-{role}`.
+fn builtin_template(name: &str) -> Option<Result<AgentTemplate, String>> {
+    builtins().find_map(|builtin| {
+        let role = name.strip_prefix(builtin.id)?.strip_prefix('-')?;
+        let file = builtin.files.iter().find(|file| file.role == role)?;
+        Some(parse_template(file.body, name))
+    })
+}
+
 /// The profile `name` selects: an exact id first, then a built-in alias no
 /// user profile owns. The Agents list and `/agents <name>` both use this.
 fn resolve(config: &ProductConfig, home: &Path, name: &str) -> Result<Resolved, String> {

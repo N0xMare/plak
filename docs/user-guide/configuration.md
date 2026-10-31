@@ -458,11 +458,13 @@ the root and reviewer on Claude (`claude-opus-5-5`, high), the worker on Codex
 (`gpt-6.1-sol`, medium, fast mode) and the researcher on Grok
 (`grok-4.7-build-fast`, medium). It loads with only the Claude login; spawning
 the worker or researcher without its login is refused with the `plak login`
-to run, and `plak doctor` names each such role. Choosing a profile writes
+to run, and `plak doctor` names each such role. **Set as default** writes
 `{name}-root`, `{name}-worker`, `{name}-reviewer`, and `{name}-researcher`
 under `~/.plak/agents/` (a file you already have under one of those names is
-kept as it is) and points the root and the working set at those files. With **Next session** that happens
-right away; with **Fork now** it happens once the fork attaches. A refusal
+kept as it is) and points `[root] agent` and `[roster] working_set` at those
+files, which is how new sessions pick a profile; **Fork now** changes only the
+session it runs in and leaves the default alone, and **Use now** sets the
+default only when the home has none yet. A refusal
 before dispatch changes nothing. A stop after publication can leave a saved,
 resumable successor without attaching it or applying the profile files; the
 notice names that session and its `/resume` command. Fork now branches the current session onto that profile,

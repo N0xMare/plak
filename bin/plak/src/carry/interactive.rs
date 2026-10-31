@@ -608,6 +608,22 @@ impl super::ReloadHandoff {
         Ok(path)
     }
 
+    /// Fills what a carrying reload hands its destination: the source's own
+    /// profile and, for a binding carry, why it carried.
+    pub(crate) fn carrying(
+        &mut self,
+        paths: &PlakPaths,
+        record: &SessionRecord,
+        binding_change: Option<&str>,
+        finished_subagents: usize,
+    ) {
+        self.cause = binding_change.map(|change| binding_carry_cause(change, finished_subagents));
+        self.profile = crate::profiles::session_selection(
+            &PlakPaths::for_workspace(paths.home().to_path_buf(), &record.workspace_root),
+            record,
+        );
+    }
+
     /// Writes a non-empty handoff and names it on `command`; returns the
     /// sidecar's path, which the caller removes if the exec fails.
     pub(crate) fn pass(
@@ -616,7 +632,7 @@ impl super::ReloadHandoff {
         session_id: &str,
         command: &mut std::process::Command,
     ) -> Result<Option<PathBuf>, String> {
-        if self.cause.is_none() {
+        if self.cause.is_none() && self.profile.is_none() {
             return Ok(None);
         }
         let path = self.write(paths, session_id)?;

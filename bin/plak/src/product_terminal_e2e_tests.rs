@@ -3257,7 +3257,7 @@ fn profile_outcome(
 /// its own, saves the profile only after the branch lands, and leaves the
 /// source on its own tree so it still reopens under the strict tool check.
 #[test]
-fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
+fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
 -> Result<(), Box<dyn Error + Send + Sync>> {
     const A: &[u8] = b"profile-source-account";
     const B: &[u8] = b"profile-target-account";
@@ -3335,9 +3335,8 @@ fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
         Some(projected.head.checkpoint_id())
     );
 
-    let saved = crate::product_config::ProductConfig::load(&paths)?;
-    assert_ne!(std::fs::read_to_string(paths.config_file())?, config_before);
-    assert_eq!(saved.root_agent.as_deref(), Some("pb-root"));
+    // Profile choice is per session: the home's default is untouched.
+    assert_eq!(std::fs::read_to_string(paths.config_file())?, config_before);
     let target = product_sessions::list_sessions_for_cwd(&paths, &workspace)?
         .into_iter()
         .find(|row| row.id != source_id)
@@ -3353,6 +3352,11 @@ fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
             .roster
             .keys()
             .any(|name| name.as_str() == "pb-worker")
+    );
+    // The fork's own profile persists with its tree.
+    assert_eq!(
+        target_tree.snapshot.root_template.as_deref(),
+        Some("pb-root")
     );
     // The source's tree, if it has one, never received the profile's cards.
     if let Some(source_tree) = plakous_hosted::runtime::TreeRows::tree(&paths, &source_id)? {

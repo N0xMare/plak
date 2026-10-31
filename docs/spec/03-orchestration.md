@@ -144,7 +144,11 @@ nothing outside the digest widens it. Changed epoch-scoped orchestration or
 roster configuration is applied by `/reload` on an idle root with no live
 children or background processes: it carries the full history into a new
 session whose tree freezes the current settings at genesis and recompiles the
-root's tool descriptions. The transcript says `orchestration settings changed;
+root's tool descriptions. The roster compared and frozen is the session's own
+profile — the root template and working set its tree froze — re-resolved
+against the template files as they are now, never the home's default
+`[root] agent` / `[roster] working_set`; a source whose templates no longer
+load falls back to the home default with a notice (chapter 02 §5.5). The transcript says `orchestration settings changed;
 carried into a new session to apply them` and links `carried forward from <id>`.
 Only roster and bounds are refrozen: the source account, model, effort,
 composition and target selection stay selected, revalidated under the current
@@ -176,7 +180,9 @@ The source keeps its tree, epoch, and cards, so its checkpoint reopens with
 exactly the tools it sealed and the strict reopen check (spec 01 §2.3) holds,
 while the new session is briefed as the profile. Neither session can spawn
 from the other's cards. Children already running under the source stay in the
-source's tree; Fork now is refused while any are live.
+source's tree; Fork now is refused while any are live. Fork now changes only the new
+session; the home's default profile is written only by its explicit Set as
+default action.
 
 All `[orchestration]` bounds are carried in the digest, including the fixed
 per-cell agent budget: a ceiling that decides whether a spawn is admitted is

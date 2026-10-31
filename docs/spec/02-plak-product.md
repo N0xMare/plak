@@ -3542,7 +3542,7 @@ There is no `/skills`, `/sandbox`, `/workflows`, `/login`,
 There is no `/model`, `/account` or `/effort` either: the session's binding
 (account, model, effort, Fast, composition, protocol) changes only through
 templates and profiles — the Agents tab's **Fork now**, **Use now** on an
-unattached session with no conversation, **Next session**, or a new session
+unattached session with no conversation, **Set as default** for new sessions, or a new session
 (including `/rebind` carrying history under the current root configuration).
 Each of those names is an unknown command with the ordinary unknown-command
 note.
@@ -3554,7 +3554,7 @@ What the argument-taking ones do:
 | Command | Arguments |
 | --- | --- |
 | `/resume` | bare opens the cwd-scoped picker; a uuid resumes exactly |
-| `/agents` | bare opens the Agents tab; `<profile>` resolves the name against the product's list (an exact id, then an alias the list shows) and asks whether to use that profile now or save it for the next new `plak` |
+| `/agents` | bare opens the Agents tab; `<profile>` resolves the name against the product's list (an exact id, then an alias the list shows) and asks whether to use that profile in this session now or set it as the default for new sessions |
 | `/fork` | takes no argument. Forks on the current binding with the source's history, recompiling the session's current configuration for the same target: the `AGENTS.md` files as they are now, harness settings and tool presentation (chapter 01 §5.6). A fork whose tool authority changed since the session started is refused with `cannot fork: this session's tools changed; start a new session`. When any `AGENTS.md` differs from the source's, the transcript note names each by scope as changed, added, or removed, also when the fork is saved without attaching. Recovery of an interrupted fork first reads its receipt before anything opens: a recorded fork becomes current; otherwise the source opens and the fork recompiles the same way, with the same note. A recovered fork that is refused outright (another target, changed tool authority, an operation published with other semantics, storage pressure) is abandoned: the session opens unchanged with the abandoned-fork note and the refusal, and does not retry it. A different profile is `/agents <profile>`. If the canonical fork lands but its session cannot attach, the fork is saved as its own resumable session, the workflow resolves, and this session stays attached and promptable; the note names the saved session. A stop before canonical dispatch leaves the exact source unchanged; a stop during successor projection says `fork stopped; saved as session X` and offers `/resume X` with the source still attached |
 | `/fork-then-compact` | takes no argument. Forks on the current binding, then compacts only the new session. If compaction fails, the fork stands and `/compact` retries it |
 | `/stop-all` | the whole-tree verb (chapter 03), sent only from the destructive confirmation pop-up (§5.7) |
@@ -4699,14 +4699,16 @@ action or button highlight. The product publishes `SessionProfile` separately
 from the config's `Profiles` list. It identifies a saved profile only when the
 root binding (including normalized default effort and fast lane) and the
 session's frozen roster match. The popup always uses the session's own frozen
-cards, including after resume; config edits and next-session saves cannot invent
-roles. When no saved profile matches, the product reports `custom` with the
-known root and frozen cards (no cards if the session has no frozen roster),
-and typed differences from the nearest saved profile (fewest differing fields
-and cards; profile-list order breaks ties). The chip names at most two
-differences, such as `custom: root model` or `custom: worker card`, with a
-count for any others. Card names are cell-bounded; no template body, model
-value or credential enters these labels.
+cards, including after resume; config edits and default saves cannot invent
+roles. When no saved profile matches exactly, the product names the nearest
+profile (fewest differing fields and cards; profile-list order breaks ties)
+with the known root and frozen cards (no cards if the session has no frozen
+roster) and typed differences that carry the session's and the profile's own
+values for the root account, model, effort and Fast. The chip names the nearest
+profile and at most two differences, such as `claude-default · root effort
+xhigh (profile: high)` or `claude-default · worker card differs`, with a count
+for any others. Values and card names are cell-bounded; no template body or
+credential enters these labels.
 The inert TUI performs no profile matching.
 
 The queue panel is absent when the durable queue, admitted, unapplied steers
@@ -5017,7 +5019,8 @@ built-in, an unknown key, a template that does not exist). The tab paints that
 view; it reads no file and resolves no name itself. The list has a Profiles
 heading and a filter line (`type to filter`; every printable key filters,
 `/` included, and Esc clears the filter). `❯` marks the highlighted row and
-`current` marks the row the product reports. The wheel scrolls, the pointer
+`default` marks the row the product reports: the profile brand-new sessions
+bind (`[root] agent` and `[roster] working_set`). The wheel scrolls, the pointer
 moves `❯`, and a double-click or Enter opens the apply dialog; Enter does nothing while
 the filter hides every row. The box under the list names the highlighted
 profile in its border, then the root account, model, and effort, then each
@@ -5037,14 +5040,23 @@ that fixes it, and `plak doctor` lists each such role under
 The dialog is the destructive confirmation pop-up (§5.7), titled `Apply
 profile <name>?`: `[ Cancel ]`, then `[ Fork now ]` (`[ Use now ]` when the
 session has no model yet) when the root is idle with no running child, then
-`[ Next session ]`. Focus starts on the first action (`[ Fork now ]`, `[ Use
-now ]`, or `[ Next session ]` when that is the only one). `Enter` applies the
+`[ Set as default ]`. Focus starts on the first action (`[ Fork now ]`, `[ Use
+now ]`, or `[ Set as default ]` when that is the only one). `Enter` applies the
 focused button at once; `←`/`→` and `Tab` move between the buttons; `Esc`
 writes nothing. Without the first action a line says it waits until the root
-is idle and no child is running. Next session saves the pointers for
-the next time `plak` starts. Fork now needs an idle root with no running child;
-it closes the Agents tab and returns to the transcript, and the product saves
-the pointers only after the host reports that the profile landed:
+is idle and no child is running.
+
+Profile choice is per session. A session's profile is the root template and
+working set its tree froze at genesis, and it persists with that tree. Fork now
+changes only that session: it never writes `[root] agent` or `[roster]
+working_set`. Set as default is the explicit action that writes them (the
+documented config path, chapter 07 §3): it saves the pointers that brand-new
+sessions bind, and never changes an existing session. Use now is offered only
+while a session has no model; it saves its profile as the default only when the
+home has no loadable default root template, so the next `plak` on a fresh home
+is bound and an existing default is never replaced. Fork
+now needs an idle root with no running child; it closes the Agents tab and
+returns to the transcript:
 
 - On an attached session it branches onto the profile's root. The new session
   opens a tree of its own, frozen at genesis on the profile's roster, so it is
@@ -5079,9 +5091,30 @@ the pointers only after the host reports that the profile landed:
   the same prepared rebind row as a subscription fork, and recovery after a
   crash completes it onto the target's own tree.
 
-What landed comes back as a typed `ProfileApplied` (saved, forked, bound, or
-already active) or `ProfileRefused` with its reason; the transcript line and
-the `current` mark follow that answer, never the key press. `/clear`, `/fork`,
+What landed comes back as a typed `ProfileApplied` (saved as the default,
+forked, bound, or already active) or `ProfileRefused` with its reason; the
+transcript line and the `default` mark follow that answer, never the key press.
+Saved reads `profile <name> is the default for new sessions; existing sessions
+keep their own`.
+
+/reload, resume, the reload and orchestration carries and binding-repair
+`/rebind` keep the session's own profile: the carried successor's genesis
+freezes the source's root template and working set re-resolved against the
+template files as they are now (a built-in profile's `{id}-{role}` templates
+that the home never saved resolve to the built-in bodies), and its root tools
+follow that root template. An edit to one of those files therefore applies to
+that session at its next `/reload`, through the epoch-scoped carry of §5.1 when
+it changes an effective value; a change of the home default never does. Only
+when the source's templates no longer load does the successor fall back to the
+home default, with the notice `this session's profile could not be loaded
+(<reason>); the home default profile applies`. A session without an agent tree
+(sub-agents off, including one Fork now branched while they were off) records
+no profile, since no existing record holds one without a format change; its
+successor binds the home default with the notice `this session has no agent
+tree, so it records no profile of its own; the home default profile applies`.
+A reload handoff passes the profile to the destination in its private sidecar
+(§2.5.1); an import of a same-store source reads the source's tree; any other
+import binds the home default with that same no-profile notice. `/clear`, `/fork`,
 and `/fork-then-compact` keep the binding they already have. Applying a
 built-in publishes its templates as `{name}-root`, `{name}-worker`,
 `{name}-reviewer`, and `{name}-researcher` together with the pointers; every

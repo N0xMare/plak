@@ -137,9 +137,10 @@ pub struct ProfileRole {
 /// One selectable profile.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProfileRow {
-    /// Built-in id or `~/.plak/profiles` file stem.
+    /// Built-in id or `~/.plak/profiles` file stem; for a session's own row,
+    /// the nearest profile.
     pub id: String,
-    /// Bounded differences from the nearest saved profile; empty for an exact match.
+    /// Bounded differences from that profile; empty for an exact match.
     pub differences: Vec<ProfileDifference>,
     /// Other names `/agents <name>` accepts for this row.
     pub aliases: Vec<String>,
@@ -149,13 +150,15 @@ pub struct ProfileRow {
     pub cards: Vec<ProfileRole>,
 }
 
-/// Identity-only custom-profile detail; never contains card bodies or credentials.
+/// How a session differs from its nearest profile: the root's own values
+/// beside the profile's, and card or roster names. Never card bodies or
+/// credentials.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProfileDifference {
-    RootAccount,
-    RootModel,
-    RootEffort,
-    RootFast,
+    RootAccount { session: String, profile: String },
+    RootModel { session: String, profile: String },
+    RootEffort { session: String, profile: String },
+    RootFast { session: bool },
     WorkingSet,
     Card(String),
     Roster,
@@ -175,11 +178,12 @@ pub struct ProfilesView {
 /// How an applied profile landed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProfileOutcome {
-    /// Saved; the next new `plak` session uses it.
+    /// Saved as the default profile brand-new sessions bind.
     Saved,
-    /// This session branched onto it, and it is saved for the next session.
+    /// This session branched onto it; the home default is unchanged.
     Forked,
-    /// An unattached, empty session took its root, and it is saved.
+    /// An unattached, empty session took its root; a home without a default
+    /// also saves it as the default.
     Bound,
     /// This session already runs that root with those cards.
     AlreadyActive,
@@ -241,8 +245,8 @@ pub enum SurfaceIntent {
     /// Select a named agent profile (built-in or `~/.plak/profiles`).
     ///
     /// `fork_now` branches the attached session onto that profile (or binds
-    /// an unattached, empty one) and saves it once that lands. Otherwise the
-    /// pointers are saved and the next new `plak` session uses them.
+    /// an unattached, empty one); it changes only that session. Otherwise the
+    /// pointers are saved as the default profile for brand-new sessions.
     ApplyProfile {
         /// Profile id or alias.
         name: String,

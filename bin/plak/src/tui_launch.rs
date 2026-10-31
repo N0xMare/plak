@@ -1487,9 +1487,12 @@ fn reload_installed_plak(
             };
             let _ = writeln!(io::stdout(), "carrying {}", carried.summary);
             let _ = io::stdout().flush();
-            handoff.cause = binding_change
-                .as_deref()
-                .map(|change| carry::binding_carry_cause(change, carried.finished_subagents));
+            handoff.carrying(
+                paths,
+                record,
+                binding_change.as_deref(),
+                carried.finished_subagents,
+            );
             command.arg("--import-resume").arg(&path);
             carry_file = Some(path);
         }
@@ -1497,7 +1500,8 @@ fn reload_installed_plak(
     let handoff_file = match handoff.pass(paths, &record.id, &mut command) {
         Ok(handoff_file) => handoff_file,
         Err(reason) => {
-            remove_failed_handoff(carry_file.as_deref(), None);
+            remove_failed_handoff_receipt(carry_file.as_deref());
+            let _ = carry_file.map(std::fs::remove_file);
             return Ok(format!("reload kept this session open: {reason}"));
         }
     };
@@ -1509,7 +1513,7 @@ fn reload_installed_plak(
         "exec installed plak"
     );
     let error = std::os::unix::process::CommandExt::exec(&mut command);
-    remove_failed_handoff(None, handoff_file.as_deref());
+    let _ = handoff_file.map(std::fs::remove_file);
     remove_failed_handoff_receipt(carry_file.as_deref());
     if resumable {
         let _ = writeln!(
@@ -1548,15 +1552,6 @@ fn reload_command(
 fn remove_failed_handoff_receipt(path: Option<&Path>) {
     if let Some(path) = path {
         let _ = std::fs::remove_file(path.with_extension("handoff"));
-    }
-}
-
-/// Removes what a reload that will not exec wrote for its destination: the
-/// carry file with its receipt, and the handoff sidecar.
-fn remove_failed_handoff(carry_file: Option<&Path>, sidecar: Option<&Path>) {
-    remove_failed_handoff_receipt(carry_file);
-    for path in carry_file.into_iter().chain(sidecar) {
-        let _ = std::fs::remove_file(path);
     }
 }
 

@@ -17,11 +17,16 @@ pub(crate) fn rebind_session(
     ensure_carry_quiescence(services.paths()?, record)?;
     let document = export_session(services.paths()?, record)
         .map_err(|error| CliFailure::new(format!("cannot carry this session: {error}")))?;
+    let paths = crate::home::paths::PlakPaths::for_workspace(
+        services.paths()?.home().to_path_buf(),
+        &record.workspace_root,
+    );
     crate::commands::session::rebind::rebind_document(
         services,
         document,
         cause,
         ReboundMode::Rebind,
+        crate::profiles::session_selection(&paths, record),
     )
 }
 

@@ -35,24 +35,31 @@ fn profile_differences(
 ) -> Vec<crate::surface_protocol::ProfileDifference> {
     use crate::surface_protocol::ProfileDifference as Difference;
     let mut differences = Vec::new();
-    for (differs, field) in [
-        (
-            session.account.as_deref() != Some(row.root.account.as_str()),
-            Difference::RootAccount,
-        ),
-        (
-            session.model.as_deref() != Some(row.root.model.as_str()),
-            Difference::RootModel,
-        ),
-        (
-            session.effort.as_deref().unwrap_or("default") != row.root.effort,
-            Difference::RootEffort,
-        ),
-        (session.fast != row.root.fast, Difference::RootFast),
-    ] {
-        if differs {
-            differences.push(field);
-        }
+    let account = session.account.clone().unwrap_or_default();
+    if account != row.root.account {
+        differences.push(Difference::RootAccount {
+            session: account,
+            profile: row.root.account.clone(),
+        });
+    }
+    let model = session.model.clone().unwrap_or_default();
+    if model != row.root.model {
+        differences.push(Difference::RootModel {
+            session: model,
+            profile: row.root.model.clone(),
+        });
+    }
+    let effort = session.effort.as_deref().unwrap_or("default");
+    if effort != row.root.effort {
+        differences.push(Difference::RootEffort {
+            session: effort.to_owned(),
+            profile: row.root.effort.clone(),
+        });
+    }
+    if session.fast != row.root.fast {
+        differences.push(Difference::RootFast {
+            session: session.fast,
+        });
     }
     let roster = crate::roster_input::roster_input_from_config(
         config,
@@ -91,12 +98,11 @@ fn session_profile(
     use crate::surface_protocol::{ProfileRole, ProfileRow};
     let effort = session.effort.as_deref().unwrap_or("default");
     let mut matched_order = None;
-    let mut nearest = None;
-    let id = crate::profiles::list(config, home)
+    let mut nearest: Option<(String, Vec<crate::surface_protocol::ProfileDifference>)> = None;
+    let matched = crate::profiles::list(config, home)
         .rows
         .into_iter()
         .find_map(|row| {
-            use crate::surface_protocol::ProfileDifference as Difference;
             let Ok(prepared) = crate::profiles::prepare(config, home, &row.id) else {
                 return None;
             };
@@ -107,17 +113,22 @@ fn session_profile(
             }
             if nearest
                 .as_ref()
-                .is_none_or(|previous: &Vec<Difference>| differences.len() < previous.len())
+                .is_none_or(|(_, previous)| differences.len() < previous.len())
             {
-                nearest = Some(differences);
+                nearest = Some((row.id, differences));
             }
             None
-        })
-        .unwrap_or_else(|| "custom".to_owned());
-    let differences = if id == "custom" {
-        nearest.unwrap_or_else(|| vec![crate::surface_protocol::ProfileDifference::Roster])
-    } else {
-        Vec::new()
+        });
+    // An exact match names its profile; otherwise the nearest profile names
+    // the session, with the values that differ from it.
+    let (id, differences) = match matched {
+        Some(id) => (id, Vec::new()),
+        None => nearest.unwrap_or_else(|| {
+            (
+                "custom".to_owned(),
+                vec![crate::surface_protocol::ProfileDifference::Roster],
+            )
+        }),
     };
     let cards = session.roster.as_ref().map_or_else(Vec::new, |snapshot| {
         let working_set = ordered_working_set(config, snapshot, matched_order.as_deref());
@@ -236,15 +247,26 @@ fn refuse_profile(name: &str, reason: String, events: &Sender<PlakExtension>) {
     ));
 }
 
-/// Saves the profile's pointers once it has landed, and reports it.
+/// Reports how a profile landed. Profile choice is per session: only the
+/// explicit default action writes the home's pointers, and Use now (offered
+/// only while no model is bound) when the home has no loadable default, so a
+/// fresh home's next `plak` has one. A fork never writes them.
 fn commit_profile(
     paths: &PlakPaths,
     id: String,
     config: &ProductConfig,
     outcome: ProfileOutcome,
+    home_has_default: bool,
     events: &Sender<PlakExtension>,
 ) {
-    if let Err(error) = config.save_scoped(paths, crate::product_config::ConfigWriteScope::User) {
+    let saves = match outcome {
+        ProfileOutcome::Saved => true,
+        ProfileOutcome::Bound => !home_has_default,
+        ProfileOutcome::Forked | ProfileOutcome::AlreadyActive => false,
+    };
+    if saves
+        && let Err(error) = config.save_scoped(paths, crate::product_config::ConfigWriteScope::User)
+    {
         let reason = error.into_message();
         if outcome == ProfileOutcome::Saved {
             refuse_profile(&id, reason, events);
@@ -290,6 +312,7 @@ fn apply_profile(
         );
         return None;
     }
+    let home_has_default = loaded.root_template().is_some();
     let prepared = match crate::profiles::prepare(&loaded, paths.home(), name) {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -316,6 +339,7 @@ fn apply_profile(
             prepared.id,
             &prepared.config,
             ProfileOutcome::Saved,
+            home_has_default,
             events,
         );
         return None;
@@ -357,7 +381,14 @@ fn apply_profile(
                         return;
                     }
                 };
-                commit_profile(&paths, prepared.id, &prepared.config, outcome, &events);
+                commit_profile(
+                    &paths,
+                    prepared.id,
+                    &prepared.config,
+                    outcome,
+                    home_has_default,
+                    &events,
+                );
             }
         }),
     };

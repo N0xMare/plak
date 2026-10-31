@@ -1004,6 +1004,9 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
     } else {
         effort
     };
+    // A home that already loads a default root keeps it: Use now binds this
+    // session alone, and only a home without one gets the profile's root.
+    let keeps_default = binding.current().is_some();
     let mut root = binding.current().unwrap_or_default();
     root.account = account;
     root.model = model.clone();
@@ -1016,7 +1019,11 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
         _ => None,
     };
     let outcome = commit_shell_binding_candidate(config, events, "model", candidate, move || {
-        binding.commit(root)
+        if keeps_default {
+            Ok(())
+        } else {
+            binding.commit(root)
+        }
     });
     if outcome != ShellBindingOutcome::Committed {
         return outcome;
@@ -1035,7 +1042,14 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
         .unwrap_or_default();
     let _ = events.notice(TranscriptRow::info(
         NoticeScope::Settings,
-        format!("model → `{model}`{effort_note} (session + config)"),
+        format!(
+            "model → `{model}`{effort_note} ({})",
+            if keeps_default {
+                "session"
+            } else {
+                "session + config"
+            }
+        ),
     ));
     maybe_note_ready_hint(config, events);
     ShellBindingOutcome::Committed

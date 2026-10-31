@@ -1,10 +1,11 @@
 //! The private sidecar a reloading build leaves for the build it starts.
 //!
-//! It carries what the export document does not: why a reload carried. The
-//! old build writes it 0600 under the home's private carry directory and names
-//! it with the hidden `--reload-handoff <path>` argument (the writer is the
-//! interactive reload's); the destination reads it once and deletes it. It is never part of the export document, and
-//! a process started without that argument reads none.
+//! It carries what the export document does not: why a reload carried and
+//! the profile the session ran. The old build writes it 0600 under the home's
+//! private carry directory and names it with the hidden `--reload-handoff
+//! <path>` argument (the writer is the interactive reload's); the destination
+//! reads it once and deletes it. It is never part of the export document, and a
+//! process started without that argument reads none.
 
 use super::document::privately_owned;
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,10 @@ pub(crate) struct ReloadHandoff {
     /// Why the reload carried, as the one notice the successor records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) cause: Option<String>,
+    /// The profile the source session ran, which a carried successor
+    /// freezes instead of the home default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) profile: Option<crate::profiles::SessionSelection>,
 }
 
 impl Default for ReloadHandoff {
@@ -30,6 +35,7 @@ impl Default for ReloadHandoff {
         Self {
             version: VERSION,
             cause: None,
+            profile: None,
         }
     }
 }

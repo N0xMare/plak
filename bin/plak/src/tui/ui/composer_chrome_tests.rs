@@ -14,15 +14,23 @@ use ratatui::{Terminal, backend::TestBackend};
 use std::time::{Duration, Instant};
 
 #[test]
-fn custom_profile_chip_names_changed_fields_and_bounds_card_names() {
+fn profile_chip_names_the_nearest_profile_and_the_values_that_differ() {
     use crate::tui::ProfileDifference;
     let mut app = App::new(launch_basic(), true);
     pin_clock(&mut app);
     let mut profile = builtin_profiles_view().rows.remove(0);
-    profile.id = "custom".into();
-    profile.differences = vec![ProfileDifference::RootModel];
+    profile.id = "claude-default".into();
+    profile.differences = vec![ProfileDifference::RootEffort {
+        session: "xhigh".into(),
+        profile: "high".into(),
+    }];
     app.composer_chrome.profile = Some(profile.clone());
-    assert!(render_to_string(&mut app, 120, 12).contains("custom: root model"));
+    let text = render_to_string(&mut app, 120, 12);
+    assert!(
+        text.contains("claude-default · root effort xhigh (profile: high)"),
+        "{text}"
+    );
+    assert!(!text.contains("custom"), "{text}");
     profile.differences = vec![ProfileDifference::Card("worker".into())];
     app.composer_chrome.profile = Some(profile.clone());
     let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
@@ -37,15 +45,15 @@ fn custom_profile_chip_names_changed_fields_and_bounds_card_names() {
             std::fs::read_to_string(path).expect("custom profile golden")
         );
     }
-    assert!(render_to_string(&mut app, 120, 12).contains("custom: worker card"));
+    assert!(render_to_string(&mut app, 120, 12).contains("claude-default · worker card differs"));
     profile.differences = vec![
         ProfileDifference::Card("long-card-name-".repeat(20)),
-        ProfileDifference::RootFast,
+        ProfileDifference::RootFast { session: true },
         ProfileDifference::WorkingSet,
     ];
     app.composer_chrome.profile = Some(profile);
     let text = render_to_string(&mut app, 180, 12);
-    assert!(text.contains("root fast +1"), "{text}");
+    assert!(text.contains("root fast on (profile: off) +1"), "{text}");
     assert!(!text.contains(&"long-card-name-".repeat(3)));
 }
 

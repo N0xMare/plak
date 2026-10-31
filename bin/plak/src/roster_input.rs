@@ -316,11 +316,28 @@ pub fn genesis_orchestration_config(paths: Option<&PlakPaths>) -> CliResult<Prod
 /// nothing configured, and the topology gate is closed.
 pub(crate) struct ProductRosterSource {
     paths: Option<PlakPaths>,
+    selection: Option<crate::profiles::SessionSelection>,
 }
 
 impl ProductRosterSource {
     pub(crate) const fn new(paths: Option<PlakPaths>) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            selection: None,
+        }
+    }
+
+    /// A genesis for one carried session freezes that session's own profile,
+    /// resolved against the current template files; the home's
+    /// `[orchestration]` controls still apply.
+    pub(crate) const fn for_selection(
+        paths: PlakPaths,
+        selection: crate::profiles::SessionSelection,
+    ) -> Self {
+        Self {
+            paths: Some(paths),
+            selection: Some(selection),
+        }
     }
 }
 
@@ -331,7 +348,11 @@ impl plakous_hosted::agent::RosterSource for ProductRosterSource {
         root_tuple: &str,
         root_effort: Option<&str>,
     ) -> CliResult<RosterInput> {
-        let config = genesis_orchestration_config(self.paths.as_ref())?;
+        let mut config = genesis_orchestration_config(self.paths.as_ref())?;
+        if let Some(selection) = &self.selection {
+            config =
+                crate::profiles::selection_config(&config, selection).map_err(CliFailure::new)?;
+        }
         Ok(roster_input_from_config(
             &config,
             root_account,

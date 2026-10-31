@@ -224,6 +224,7 @@ pub(crate) fn import_and_resume(
         document,
         local_handoff,
         handoff.cause.as_deref(),
+        handoff.profile,
     );
     let (record, note) = imported.map_err(|failure| {
         CliFailure::new(format!(

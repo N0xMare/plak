@@ -30,6 +30,7 @@ pub(crate) fn apply_on_reload(
             document,
             ORCHESTRATION_CARRY_CAUSE,
             super::rebind::ReboundMode::Orchestration,
+            crate::profiles::session_selection(&paths, record),
         )
         .map(Some)
     };
@@ -56,7 +57,16 @@ pub(super) fn orchestration_changed(
         return Ok(false);
     };
     let frozen = &tree.rows().snapshot;
-    let config = crate::product_config::ProductConfig::load(paths)?;
+    // The session's own profile, re-resolved against the template files as
+    // they are now: an edit to one of its files applies to this session, a
+    // change of the home default never does. A profile that no longer loads
+    // carries onto the home default, and the carry says so.
+    let home = crate::product_config::ProductConfig::load(paths)?;
+    let config = crate::profiles::selection_config(
+        &home,
+        &crate::profiles::SessionSelection::from_snapshot(frozen),
+    )
+    .unwrap_or(home);
     let desired = crate::roster_input::roster_input_from_config(
         &config,
         &frozen.root_account,

@@ -1,4 +1,4 @@
-use super::{ROLES, list, prepare};
+use super::{ROLES, SessionSelection, list, prepare, selection_config};
 use crate::home::paths::PlakPaths;
 use crate::product_config::ProductConfig;
 use std::fs;
@@ -280,5 +280,43 @@ fn prepare_writes_nothing_and_keeps_a_template_the_user_edited() {
     assert_eq!(
         list(&reloaded, paths.home()).current.as_deref(),
         Some("codex-default")
+    );
+}
+
+/// A session's own profile resolves against the current files, and against a
+/// built-in's own bodies for the `{id}-{role}` names a home never saved.
+#[test]
+fn a_session_selection_resolves_built_in_bodies_and_refuses_a_missing_template() {
+    let config = ProductConfig::default_product();
+    let selection = SessionSelection {
+        root: Some("claude-default-root".to_owned()),
+        working_set: vec![
+            "claude-default-worker".to_owned(),
+            "claude-default-reviewer".to_owned(),
+        ],
+    };
+    let selected = selection_config(&config, &selection).unwrap();
+    assert_eq!(selected.root_agent.as_deref(), Some("claude-default-root"));
+    assert_eq!(
+        selected
+            .working_set
+            .names()
+            .iter()
+            .map(plakous_hosted::agent_tree_protocol::TemplateName::as_str)
+            .collect::<Vec<_>>(),
+        ["claude-default-worker", "claude-default-reviewer"]
+    );
+    assert!(selected.templates.contains_key("claude-default-worker"));
+    assert!(
+        config.templates.is_empty(),
+        "resolution never writes the home"
+    );
+    let missing = SessionSelection {
+        root: None,
+        working_set: vec!["gone".to_owned()],
+    };
+    assert_eq!(
+        selection_config(&config, &missing).unwrap_err(),
+        "template `gone` no longer exists"
     );
 }

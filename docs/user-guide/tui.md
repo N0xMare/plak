@@ -236,7 +236,8 @@ is renewing or about to need renewal, the installed build gives no answer and
 `/reload` resumes as it would without one. When the installed build cannot read this build's
 state, `/reload` likewise carries the session forward into a linked session
 with the full conversation and typed transcript. The handoff reports
-`N messages, ~T tokens; the first request rebuilds the prompt cache`.
+`N messages, ~T tokens; the first request rebuilds the prompt cache`. Every
+carry keeps the session's own profile (its root template and sub-agent cards).
 
 `/rebind` carries the full history into a new session under the current login,
 keeping the source account, model, effort, composition and target selection
@@ -351,12 +352,12 @@ Notes worth knowing:
 - There is no `/model`, `/account` or `/effort`. The session's account, model,
   effort, Fast mode, composition and protocol change only through profiles:
   the Agents tab's **Fork now**, **Use now** on a fresh session with no
-  conversation, or **Next session**. On a fresh home, pick a profile and
+  conversation, or **Set as default** for new sessions. On a fresh home, pick a profile and
   **Use now**; the agent attaches in the same session. Both accept a profile
   whose root is an OpenRouter or direct API account (`openai`, `anthropic`,
   `xai-api`).
-- `/agents <profile>` asks whether to use that profile now or save it for the
-  next time you start `plak`. The name can be a profile id or one of the short
+- `/agents <profile>` asks whether to use that profile in this session now or
+  set it as the default for new sessions. The name can be a profile id or one of the short
   names the list shows (`codex`, `claude`, `grok`, ...).
 - `/fork` keeps the current binding and the conversation, and recompiles this session's current configuration: your `AGENTS.md` files as they are now, harness settings and tool presentation. If an `AGENTS.md` changed since this session started, the transcript names it. If this session's tools changed (for example a tool added or removed in configuration), `/fork` says `cannot fork: this session's tools changed; start a new session`. `/fork-then-compact` does that and then compacts only the new session.
   During fork or Fork now, Esc offers **Stop operation**. Projection stops between committed pages; the source stays attached and the notice names any saved fork you can open with `/resume`.
@@ -598,12 +599,24 @@ confirmation pop-up: focus starts on Fork now, so `Enter` forks at once and
 - **Use now** appears instead when the session has no model yet (a fresh home):
   the session takes the profile's root and the agent attaches, including an
   OpenRouter or direct API-account root.
-- **Next session** saves the profile for the next time you start `plak`.
+- **Set as default** makes it the profile brand-new sessions start with
+  (`[root] agent` and `[roster] working_set` in `config.toml`); existing
+  sessions keep their own.
 
-The profile becomes the default for new sessions only once it has landed: a
-refused Fork now (an account that is not logged in, a running turn, an effort
-the model does not offer) changes nothing, and the transcript says why. The
-`current` mark moves only when the product confirms the change.
+A profile is per session: Fork now changes only that session and never the
+default (Use now also makes its profile the default when the home has none).
+The session keeps its profile through `/reload`, resume, a carry and
+`/rebind`; if you edit one of its template files, its next `/reload` applies
+the edit to it. A session without sub-agents has no agent tree and records no
+profile, so its carried successor starts on the default profile and the
+transcript says so. A refused Fork now (an account that is not logged in,
+a running turn, an effort the model does not offer) changes nothing, and the
+transcript says why. The `default` mark moves only when the product confirms
+Set as default.
+
+The profile chip in the composer border names the session's profile, or the
+nearest one and what differs, for example `claude-default · root effort
+xhigh (profile: high)`.
 
 ### Settings
 

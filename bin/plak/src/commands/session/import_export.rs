@@ -50,6 +50,10 @@ pub(crate) struct PreparedImport {
     pub(super) carried: crate::carry::CarriedImport,
     pub(super) estimated_tokens: u64,
     pub(super) messages: usize,
+    /// The source session's own profile, when the caller knows it; otherwise
+    /// a same-store source's tree answers, and failing that the home default
+    /// applies.
+    pub(super) profile: Option<crate::profiles::SessionSelection>,
 }
 
 impl PreparedImport {
@@ -67,6 +71,7 @@ impl PreparedImport {
             carried,
             estimated_tokens,
             messages,
+            profile: None,
         })
     }
 }
@@ -79,13 +84,14 @@ pub(crate) fn import_document(
     import_prepared(services, PreparedImport::new(document, local_handoff)?)
 }
 
-/// The `--import-resume` half of a reload handoff: when it carries a changed
-/// binding, the source names why.
+/// The `--import-resume` half of a reload handoff: the source names the
+/// session's own profile and, when it carries a changed binding, why.
 pub(crate) fn import_reload_handoff(
     services: &crate::shell::services::Services,
     document: crate::carry::CarryDocument,
     local_handoff: bool,
     cause: Option<&str>,
+    profile: Option<crate::profiles::SessionSelection>,
 ) -> CliResult<(product_sessions::SessionRecord, String)> {
     let estimated_tokens = document.estimated_tokens();
     let messages = document.message_count();
@@ -102,6 +108,7 @@ pub(crate) fn import_reload_handoff(
             carried,
             estimated_tokens,
             messages,
+            profile,
         },
     )
 }
@@ -122,6 +129,7 @@ pub(super) fn import_prepared_with_fallback(
         carried,
         estimated_tokens,
         messages,
+        profile,
     } = prepared;
     let crate::carry::CarriedImport {
         record,
@@ -151,7 +159,9 @@ pub(super) fn import_prepared_with_fallback(
         )));
     }
     record.validate_for_store().map_err(CliFailure::new)?;
+    let profile = profile.or_else(|| same_store_source_profile(services, &source_id, &source_key));
     let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
+    keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
     config.seed_history = Some(history);
     let created = product_host::create_seeded_session_with_preflight(config, move |window| {
         let capacity =
@@ -206,6 +216,88 @@ pub(super) fn import_prepared_with_fallback(
     Ok((record, note))
 }
 
+/// A source this store still holds names its own profile in its tree.
+fn same_store_source_profile(
+    services: &crate::shell::services::Services,
+    source_id: &str,
+    source_key: &str,
+) -> Option<crate::profiles::SessionSelection> {
+    if source_key != crate::home::state::state_key() {
+        return None;
+    }
+    let source = services.session_records().ok()?.load(source_id).ok()?;
+    let paths = crate::home::paths::PlakPaths::for_workspace(
+        services.paths().ok()?.home().to_path_buf(),
+        &source.workspace_root,
+    );
+    crate::profiles::session_selection(&paths, &source)
+}
+
+/// The successor's genesis freezes its source's own profile, resolved against
+/// the current template files, and its root tools follow that profile's root
+/// template. A source that records no profile, or whose templates no longer
+/// load, binds the home default with one notice.
+fn keep_source_profile(
+    paths: &crate::home::paths::PlakPaths,
+    config: &mut product_host::HostConfig<crate::surface_protocol::PlakExtension>,
+    profile: Option<&crate::profiles::SessionSelection>,
+    note: &mut String,
+) {
+    match successor_profile(paths, profile) {
+        Ok((selected, profile)) => {
+            config.root_template = selected.root_template_fact();
+            config.state_roots =
+                config
+                    .state_roots
+                    .clone()
+                    .with_roster_source(std::sync::Arc::new(
+                        crate::roster_input::ProductRosterSource::for_selection(
+                            paths.clone(),
+                            profile.clone(),
+                        ),
+                    ));
+        }
+        Err(notice) => {
+            config
+                .session
+                .record_notice(plakous_hosted::sessions::TranscriptRow::info(
+                    product_sessions::NoticeScope::Session,
+                    &notice,
+                ));
+            note.push_str(&format!("; {notice}"));
+        }
+    }
+}
+
+/// The configuration a successor freezes for its source's `profile`, or the
+/// notice saying why the home default applies instead.
+fn successor_profile<'a>(
+    paths: &crate::home::paths::PlakPaths,
+    profile: Option<&'a crate::profiles::SessionSelection>,
+) -> Result<
+    (
+        product_config::ProductConfig,
+        &'a crate::profiles::SessionSelection,
+    ),
+    String,
+> {
+    let Some(profile) = profile else {
+        return Err(
+            "this session has no agent tree, so it records no profile of its own; the home default profile applies"
+                .to_owned(),
+        );
+    };
+    product_config::ProductConfig::load(paths)
+        .and_then(|home| crate::profiles::selection_config(&home, profile))
+        .map(|selected| (selected, profile))
+        .map_err(|error| {
+            format!(
+                "this session's profile could not be loaded ({}); the home default profile applies",
+                plakous::model::SafeDiagnostic::new(error)
+            )
+        })
+}
+
 fn import_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
@@ -255,6 +347,29 @@ fn import_host_config(
 #[cfg(test)]
 mod rebind_tests {
     use super::*;
+
+    #[test]
+    fn a_successor_without_its_sources_profile_says_the_home_default_applies() {
+        let root = tempfile::tempdir().unwrap();
+        let paths =
+            crate::home::paths::PlakPaths::for_workspace(root.path().join("home"), root.path());
+        paths.ensure_layout().unwrap();
+        let none = successor_profile(&paths, None).err().unwrap();
+        assert_eq!(
+            none,
+            "this session has no agent tree, so it records no profile of its own; the home default profile applies"
+        );
+        let missing = crate::profiles::SessionSelection {
+            root: Some("gone-root".to_owned()),
+            working_set: Vec::new(),
+        };
+        let unloadable = successor_profile(&paths, Some(&missing)).err().unwrap();
+        assert!(
+            unloadable.starts_with("this session's profile could not be loaded (")
+                && unloadable.contains("gone-root"),
+            "{unloadable}"
+        );
+    }
 
     #[test]
     fn rebind_root_fallback_is_limited_to_an_unresolvable_source_selection() {

@@ -2,8 +2,9 @@
 //!
 //! The product owns the list: the tab asks for it with `ListProfiles`, paints
 //! the [`ProfilesView`] it gets back, and sends the chosen row's id. What
-//! landed comes back as `ProfileApplied` or `ProfileRefused`; the `current`
-//! mark is only ever the product's answer.
+//! landed comes back as `ProfileApplied` or `ProfileRefused`; the `default`
+//! mark (the profile brand-new sessions bind) is only ever the product's
+//! answer.
 
 use super::super::text_input::is_accepted_single_line_char;
 use super::{App, KeyCode, KeyEvent, KeyModifiers, Rect, ScrollBlock, UserAction};
@@ -110,7 +111,9 @@ impl App {
     pub(super) fn apply_profile_applied(&mut self, name: &str, outcome: ProfileOutcome) {
         let note = match outcome {
             ProfileOutcome::Saved => {
-                format!("profile {name} saved; the next new plak session uses it")
+                format!(
+                    "profile {name} is the default for new sessions; existing sessions keep their own"
+                )
             }
             ProfileOutcome::Forked => {
                 format!(
@@ -122,7 +125,11 @@ impl App {
                 format!("this session already runs profile {name}'s root and cards")
             }
         };
-        if let Some(view) = self.profiles.view.as_mut() {
+        // Only the default action moves the default; a fork or a bind changes
+        // that one session (a first bind's default arrives with the list).
+        if outcome == ProfileOutcome::Saved
+            && let Some(view) = self.profiles.view.as_mut()
+        {
             view.current = Some(name.to_owned());
         }
         self.push_block(ScrollBlock::System(note));
@@ -135,7 +142,7 @@ impl App {
     /// Asks how to apply the highlighted profile, in the destructive
     /// confirmation pop-up (spec 02 §5.5): Cancel, then Fork now (Use
     /// now on a session with no model) when the root is idle with no running
-    /// child, then Next session.
+    /// child, then Set as default.
     pub(super) fn arm_profile_confirm(&mut self) {
         let Some(row) = self.profiles.selected() else {
             return;
@@ -160,12 +167,15 @@ impl App {
         } else {
             "Fork now branches this session onto it; this one stays resumable.".to_owned()
         }];
-        lines.push("Next session saves it for the next time you start plak.".to_owned());
+        lines.push(
+            "Set as default makes it the profile new sessions start with; existing sessions keep their own."
+                .to_owned(),
+        );
         let mut actions = Vec::new();
         if fork_available {
             actions.push((now_button, apply(true)));
         }
-        actions.push(("[ Next session ]", apply(false)));
+        actions.push(("[ Set as default ]", apply(false)));
         self.open_confirm(format!("Apply profile {id}?"), lines, actions);
     }
 
@@ -333,7 +343,7 @@ impl App {
             let selected = index == self.profiles.cursor;
             let mark = if selected { "❯" } else { " " };
             let suffix = if current.as_deref() == Some(profile.id.as_str()) {
-                "  current"
+                "  default"
             } else {
                 ""
             };

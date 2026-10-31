@@ -187,7 +187,7 @@ fn agents_name_resolves_like_the_list() {
 }
 
 #[test]
-fn the_current_mark_follows_only_the_products_outcome() {
+fn the_default_mark_follows_only_the_products_default_outcome() {
     let mut app = agents_app();
     app.handle_key(key(KeyCode::Up));
     app.handle_key(key(KeyCode::Enter));
@@ -206,6 +206,18 @@ fn the_current_mark_follows_only_the_products_outcome() {
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::ProfileRefused {
         name: "claude-default".to_owned(),
         reason: "claude is not ready".to_owned(),
+    }));
+    assert_eq!(
+        app.profiles
+            .view
+            .as_ref()
+            .and_then(|view| view.current.as_deref()),
+        Some("grok-default")
+    );
+    // A fork changes only that session: the default mark stays.
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::ProfileApplied {
+        name: "claude-default".to_owned(),
+        outcome: ProfileOutcome::Forked,
     }));
     assert_eq!(
         app.profiles

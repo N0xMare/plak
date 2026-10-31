@@ -222,3 +222,52 @@ fn epoch_inspection_failures_skip_apply_and_keep_normal_reload() {
         assert_eq!(record.id, id);
     }
 }
+
+/// Profile choice is per session: a changed home default never moves an
+/// existing session, while an edit to one of its own profile's template files
+/// applies to it at its next reload.
+#[test]
+fn a_session_keeps_its_own_profile_and_takes_only_its_own_template_edits() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::for_workspace(root.path().join("home"), root.path());
+    paths.ensure_layout().unwrap();
+    let template = |name: &str, description: &str| {
+        std::fs::write(
+            paths.user_agents_dir().join(format!("{name}.toml")),
+            format!("account = \"grok\"\nmodel = \"grok-4.20\"\ndescription = \"{description}\"\n"),
+        )
+        .unwrap();
+    };
+    for name in ["mine-root", "mine-worker", "other-root", "other-worker"] {
+        template(name, name);
+    }
+    let point = |root_template: &str, worker: &str| {
+        let mut config = crate::product_config::ProductConfig::load(&paths).unwrap();
+        config.set_key("root.agent", root_template).unwrap();
+        config.set_key("roster.working_set", worker).unwrap();
+        config.save(&paths).unwrap();
+        config
+    };
+    let config = point("mine-root", "mine-worker");
+    let mut record = SessionRecord::new(root.path().to_path_buf());
+    let snapshot = crate::roster_input::snapshot_from_config(&config, "grok", "grok-4.20", None);
+    assert_eq!(snapshot.root_template.as_deref(), Some("mine-root"));
+    let mut tree = bootstrap(&record.id, root.path().to_path_buf());
+    tree.install_snapshot(snapshot);
+    crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+    assert!(!orchestration_changed(&paths, &record).unwrap());
+
+    // Another profile becomes the home default: this session is unaffected.
+    point("other-root", "other-worker");
+    assert!(!orchestration_changed(&paths, &record).unwrap());
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    let id = record.id.clone();
+    assert!(apply_on_reload(&services, &mut record).is_none());
+    assert_eq!(record.id, id);
+
+    // An edit to the session's own worker template applies to it.
+    template("mine-worker", "an edited worker card");
+    assert!(orchestration_changed(&paths, &record).unwrap());
+    template("mine-worker", "mine-worker");
+    assert!(!orchestration_changed(&paths, &record).unwrap());
+}

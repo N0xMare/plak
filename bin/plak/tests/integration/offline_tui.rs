@@ -1902,7 +1902,7 @@ fn the_agents_tab_lists_filters_and_applies_profiles_through_the_product() {
     std::thread::sleep(Duration::from_millis(200));
     let frame = terminal.screen();
     assert!(
-        !frame.contains("Next session"),
+        !frame.contains("Set as default"),
         "Enter on a hidden row offered it:\n{frame}"
     );
     terminal.send(b"\x1b");
@@ -1913,10 +1913,10 @@ fn the_agents_tab_lists_filters_and_applies_profiles_through_the_product() {
     terminal.wait_ready();
     terminal.send(b"/agents grok\r");
     terminal.wait_where("the grok-default dialog", |frame| {
-        frame.contains("Next session") && frame.contains("Apply profile grok-default?")
+        frame.contains("Set as default") && frame.contains("Apply profile grok-default?")
     });
-    // Next session keeps the tab open; the answer lands in the transcript.
-    // Focus starts on Fork now, so one → reaches Next session.
+    // Set as default keeps the tab open; the answer lands in the transcript.
+    // Focus starts on Fork now, so one → reaches Set as default.
     terminal.send(b"\x1b[C");
     terminal.send(b"\r");
     std::thread::sleep(Duration::from_millis(200));

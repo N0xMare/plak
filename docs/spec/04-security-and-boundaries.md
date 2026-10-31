@@ -1277,7 +1277,9 @@ destination reads it once and deletes it, and treats one that is not a regular
 file this user owns, is group- or world-accessible, lies elsewhere, exceeds
 64 KiB or names another version as absent. Its fields are bounded and
 validated before use, and none grants authority the destination would not
-otherwise have: it can only name why a carry happened. A same-user process
+otherwise have: it can only name why a carry happened and which of the
+operator's own templates the successor freezes, which the destination resolves
+against the home's files as it would any profile. A same-user process
 could write such a file, but only a reload's own argument makes a build read
 it.
 

@@ -98,7 +98,14 @@ name, every entry a string); any other key, a wrong type, a missing template,
 or a stem that is a built-in's name (`codex-default`, `claude-default`,
 `grok-default`, `multi-default`) leaves that file out of the list with a line saying why.
 Nothing in a session changes the live root's binding except a profile's Fork
-now or Use now; no slash command rebinds it.
+now or Use now; no slash command rebinds it. A profile is per session: `[root]
+agent` and `[roster] working_set` are only the default profile brand-new
+sessions bind, written by the Agents tab's Set as default (or by `plak config
+set` and the file); Fork now never writes them, and Use now, offered only
+while a session has no model, also records its profile as the default. Changing the
+default never changes an existing session, which keeps the root template and
+working set its tree froze, re-resolved against the template files at its next
+`/reload` (chapter 02 §5.5).
 
 ## 2. Grammar
 

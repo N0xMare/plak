@@ -34,8 +34,8 @@ pub(crate) use reload::{
 pub(crate) use {
     epoch::apply_on_reload,
     interactive::{
-        ReloadPlan, ReloadTarget, binding_carry_cause, carry_foreign_session, carry_out,
-        reload_plan, reload_target_for_session,
+        ReloadPlan, ReloadTarget, carry_foreign_session, carry_out, reload_plan,
+        reload_target_for_session,
     },
 };
 

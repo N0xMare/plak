@@ -89,9 +89,16 @@ fn nearest_profile_ties_keep_the_first_profile_list_row() {
             Some("high".into()),
         )),
     };
+    // Every listed profile with one differing field ties; the built-in that
+    // comes first in the list names the session.
+    let nearest = session_profile(&config, paths.home(), &session);
+    assert_eq!(nearest.id, "claude-default");
     assert_eq!(
-        session_profile(&config, paths.home(), &session).differences,
-        [ProfileDifference::RootModel]
+        nearest.differences,
+        [ProfileDifference::RootModel {
+            session: "claude-other".into(),
+            profile: prepared.root.model.clone(),
+        }]
     );
 }
 #[test]
@@ -177,7 +184,7 @@ fn composer_refresh_uses_the_launch_workspace() {
     );
     assert!(
         matches!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
-        HostEvent::Extension(SurfaceObservation::SessionProfile(row)) if row.id == "custom")
+        HostEvent::Extension(SurfaceObservation::SessionProfile(row)) if !row.differences.is_empty())
     );
     assert_eq!(
         rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
@@ -214,9 +221,13 @@ fn session_identity_uses_frozen_cards_not_current_config() {
     );
     session.model = Some("another-root-model".into());
     let custom_root = session_profile(&prepared.config, dir.path(), &session);
+    assert_eq!(custom_root.id, "claude-default");
     assert_eq!(
         custom_root.differences,
-        [crate::surface_protocol::ProfileDifference::RootModel]
+        [crate::surface_protocol::ProfileDifference::RootModel {
+            session: "another-root-model".into(),
+            profile: root.model.clone(),
+        }]
     );
     session.model = Some(root.model.clone());
     let working_set = |row: &crate::surface_protocol::ProfileRow| {
@@ -229,7 +240,7 @@ fn session_identity_uses_frozen_cards_not_current_config() {
     card.tuple_id = "frozen-session-model".into();
     frozen.templates_digest = "different-frozen-roster".into();
     let custom = session_profile(&prepared.config, dir.path(), &session);
-    assert_eq!(custom.id, "custom");
+    assert_eq!(custom.id, "claude-default");
     assert_eq!(
         custom.differences,
         [crate::surface_protocol::ProfileDifference::Card(
@@ -245,7 +256,7 @@ fn session_identity_uses_frozen_cards_not_current_config() {
     );
     session.roster = None;
     let without_tree = session_profile(&prepared.config, dir.path(), &session);
-    assert_eq!(without_tree.id, "custom");
+    assert_eq!(without_tree.id, "claude-default");
     assert_eq!(
         without_tree.cards,
         [] as [crate::surface_protocol::ProfileRole; 0]
@@ -1149,7 +1160,28 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
         fork.composition,
         Some(plakous_host_protocol::CompositionSelection::PySdk.into())
     );
+    let before = std::fs::read(paths.config_file()).unwrap();
     (fork.finish)(ProfileForkOutcome::Forked);
+    // A fork changes only its session: the home default and its saved SDK
+    // selection stay exactly as they were.
+    assert_eq!(std::fs::read(paths.config_file()).unwrap(), before);
+    // Setting the profile as the default discards the saved SDK selection.
+    let effect = ProductSurface::new(paths.clone()).dispatch(
+        SurfaceIntent::ApplyProfile {
+            name: "claude-default".into(),
+            fork_now: false,
+        },
+        SurfaceFacts {
+            session: None,
+            phase: SurfacePhase::Idle,
+            attached_one_shot: false,
+            catalog: &catalog,
+            queue_len: 0,
+            usage_reads: UsageReads::default(),
+        },
+        &events,
+    );
+    assert!(effect.profile_fork.is_none());
     let saved = ProductConfig::load(&paths).unwrap();
     assert_eq!(saved.root_agent.as_deref(), Some("claude-default-root"));
     assert_eq!(saved.root_composition, None);
@@ -1160,7 +1192,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
 }
 
 #[test]
-fn fork_now_saves_only_once_the_host_reports_it_landed() {
+fn fork_now_changes_only_its_session_and_never_the_home_default() {
     let dir = tempfile::tempdir().unwrap();
     let paths = profile_paths(dir.path());
     let before = std::fs::read(paths.config_file()).ok();
@@ -1197,8 +1229,9 @@ fn fork_now_saves_only_once_the_host_reports_it_landed() {
     let fork = effect.profile_fork.expect("a fork request");
     (fork.finish)(ProfileForkOutcome::Forked);
     assert_eq!(
-        ProductConfig::load(&paths).unwrap().root_agent.as_deref(),
-        Some("mine-root")
+        std::fs::read(paths.config_file()).ok(),
+        before,
+        "a landed fork changes only its session, never the home default"
     );
 }
 
@@ -1265,6 +1298,58 @@ fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
         ProductConfig::load(&paths).unwrap().root_agent.as_deref(),
         Some("mine-root")
     );
+}
+
+/// Use now binds an unattached session but never replaces a default the home
+/// already loads; only a home without one gets the profile as its default.
+#[test]
+fn use_now_keeps_a_loadable_home_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = profile_paths(dir.path());
+    std::fs::write(
+        dir.path().join("agents/kept-root.toml"),
+        "account = \"codex\"\nmodel = \"gpt-exact\"\neffort = \"medium\"\ndescription = \"kept\"\n",
+    )
+    .unwrap();
+    std::fs::write(paths.config_file(), "[root]\nagent = \"kept-root\"\n").unwrap();
+    let session = SessionRecord::new(dir.path().to_path_buf());
+    let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
+        surface: Some(ProductSurface::boxed(&paths)),
+        binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
+        subscriptions: crate::shell::host::open_product_subscriptions(),
+        openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
+            &paths,
+        ),
+        product_home: paths.home().to_path_buf(),
+        home: paths.session_home(),
+        store: std::sync::Arc::new(crate::store::session_records::SqliteSessionStore::new(
+            paths.clone(),
+        )),
+        session,
+        cwd: dir.path().to_path_buf(),
+        reason: "missing_defaults".into(),
+        ready_catalog: plakous_host_protocol::views::ReadyCatalog::new(codex_catalog()),
+    });
+    tx.send(UserAction::Extension(SurfaceIntent::ApplyProfile {
+        name: "mine".into(),
+        fork_now: true,
+    }))
+    .unwrap();
+    join.join().unwrap().unwrap();
+    let observed = rx.try_iter().collect::<Vec<_>>();
+    assert!(
+        observed.iter().any(|event| matches!(
+            event,
+            HostEvent::Extension(SurfaceObservation::ProfileApplied {
+                outcome: ProfileOutcome::Bound,
+                ..
+            })
+        )),
+        "{observed:#?}"
+    );
+    let config = ProductConfig::load(&paths).unwrap();
+    assert_eq!(config.root_agent.as_deref(), Some("kept-root"));
+    assert!(config.working_set.is_empty(), "{:?}", config.working_set);
 }
 
 /// Use now on an unattached, empty session binds an OpenRouter root with

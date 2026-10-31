@@ -12,7 +12,11 @@ fn handoff(cause: &str) -> ReloadHandoff {
 #[test]
 fn a_written_handoff_is_read_once_and_deleted() {
     let (_home, paths) = PlakPaths::isolated_test_home();
-    let written = handoff("its model adapter profile differs");
+    let mut written = handoff("its model adapter profile differs");
+    written.profile = Some(crate::profiles::SessionSelection {
+        root: Some("lead".to_owned()),
+        working_set: vec!["worker".to_owned()],
+    });
     let path = written.write(&paths, "session").unwrap();
     assert_eq!(
         fs::metadata(&path).unwrap().permissions().mode() & 0o777,

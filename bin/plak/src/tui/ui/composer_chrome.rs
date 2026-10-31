@@ -54,31 +54,47 @@ pub(super) fn clip_text(text: &str, width: usize) -> String {
     result
 }
 
+/// The session's nearest profile, then up to two values that differ from it:
+/// `claude-default · root effort xhigh (profile: high)`.
 fn profile_label(profile: &ProfileRow) -> String {
     use crate::tui::ProfileDifference as Difference;
     if profile.differences.is_empty() {
         return profile.id.clone();
     }
+    let value = |what: &str, session: &str, profile: &str| {
+        format!(
+            "{what} {} (profile: {})",
+            clip_text(session, 32),
+            clip_text(profile, 32)
+        )
+    };
     let fields = profile
         .differences
         .iter()
         .take(2)
         .map(|difference| match difference {
-            Difference::RootAccount => "root account".to_owned(),
-            Difference::RootModel => "root model".to_owned(),
-            Difference::RootEffort => "root effort".to_owned(),
-            Difference::RootFast => "root fast".to_owned(),
-            Difference::WorkingSet => "working set".to_owned(),
-            Difference::Card(name) => format!("{} card", clip_text(name, 24)),
-            Difference::Roster => "roster".to_owned(),
+            Difference::RootAccount { session, profile } => value("root account", session, profile),
+            Difference::RootModel { session, profile } => value("root model", session, profile),
+            Difference::RootEffort { session, profile } => value("root effort", session, profile),
+            Difference::RootFast { session } => {
+                let (now, then) = if *session {
+                    ("on", "off")
+                } else {
+                    ("off", "on")
+                };
+                value("root fast", now, then)
+            }
+            Difference::WorkingSet => "working set differs".to_owned(),
+            Difference::Card(name) => format!("{} card differs", clip_text(name, 24)),
+            Difference::Roster => "roster differs".to_owned(),
         })
         .collect::<Vec<_>>()
         .join(", ");
     let rest = profile.differences.len().saturating_sub(2);
     if rest == 0 {
-        format!("custom: {fields}")
+        format!("{} · {fields}", profile.id)
     } else {
-        format!("custom: {fields} +{rest}")
+        format!("{} · {fields} +{rest}", profile.id)
     }
 }
 

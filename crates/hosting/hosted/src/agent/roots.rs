@@ -490,6 +490,14 @@ impl ProductStateRoots {
         Ok(self)
     }
 
+    /// Replaces the roster a genesis built from these roots freezes. A carry
+    /// keeps its source's own profile this way rather than the home default.
+    #[must_use]
+    pub fn with_roster_source(mut self, roster: Arc<dyn RosterSource>) -> Self {
+        self.roster_source = roster;
+        self
+    }
+
     /// The product's roster and topology gate.
     pub(crate) fn roster_source(&self) -> &Arc<dyn RosterSource> {
         &self.roster_source

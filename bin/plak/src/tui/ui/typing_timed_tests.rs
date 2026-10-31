@@ -490,7 +490,7 @@ fn profiles_app() -> App {
 }
 
 /// The profile dialog is the same pop-up: focus starts on Fork now, `Enter`
-/// forks at once, a letter does nothing, and `→` then `Enter` is Next session.
+/// forks at once, a letter does nothing, and `→` then `Enter` is Set as default.
 #[test]
 fn the_profile_dialog_confirms_on_enter_at_once() {
     let mut app = profiles_app();
