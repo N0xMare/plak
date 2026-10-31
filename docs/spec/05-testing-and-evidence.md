@@ -586,7 +586,7 @@ of it.
 scripts/dev-check.sh --fast [PKG...]   # just fast: iteration, no serial lanes
 scripts/dev-check.sh                   # just check: Linux workspace gate (no durability)
 scripts/dev-check.sh --platform        # just platform: per-install platform evidence
-scripts/dev-check.sh --full            # just full: every group; gate changes, installs, publication
+scripts/dev-check.sh --full            # just full: every group; release candidate and publication
 scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these groups (independent lanes)
 ```
 
@@ -594,7 +594,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | --- | --- |
 | `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings |
 | `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build. All deny rustc warnings |
-| `variants` | Four distinct reduced Plak resolutions (`without-tui`, `without-clipboard`, `without-images`, `without-product-features`), built and clippy-linted with warnings denied using the gate's target and rustflags; feature-admission and JSONL contracts, plus canonical Python/MCP store read/refusal and byte-preservation fixtures. Selected by full only, never check, fast or platform |
+| `variants` | Reduced Plak resolutions, each built (lib and bins) and clippy-linted with warnings denied, using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): headless is default minus `tui` and `clipboard`; api is default minus `codex`, `grok` and `claude`; minimal is exactly `tui`, `openrouter` and `git-cli`; the admission fixture is default minus `tui`, `clipboard`, `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
 | `rustdoc` | Workspace all-features rustdoc, then each supported package alone with default features; denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
@@ -629,10 +629,19 @@ separate checkout, target and temporary roots. Each group prints a
 `== group: <name> ==` banner and a `== time: <name> <seconds> s ==` line.
 
 Worker branches iterate and finish with `just fast <packages>` plus the groups
-their change needs. Main advances one integration batch at a time: before a
-batch lands, its tip tree passes the integration batch gate (`just full`,
-`just dev crash-sweep --strict` and `just musl native` on Linux, and
-`just platform` on macOS); commits inside a batch are not gated individually.
+their change needs. Main advances one integration batch at a time. Before a
+batch lands, its tip tree passes the integration batch gate: `just musl native`
+on Linux x86_64, the target-independent groups once
+(`just steps static,rustdoc,contracts,tooling,package`), `just platform` on
+Apple Silicon macOS, and the crash sweep (`just dev crash-sweep --strict` over
+the whole matrix when recovery, persistence, store, or host-loop code changed;
+otherwise `just dev crash-sweep --shapes <list>` for the affected shapes).
+Commits inside a batch are not gated individually. An install requires that
+batch gate on the tree being installed.
+
+A release candidate or publication runs `just full` on both supported
+platforms, `just musl native` and `just musl container`, the full strict crash
+sweep, and the publish dry run.
 
 After argument validation and the prerequisite check, every selected group runs
 even if an earlier group fails. The static group also runs every step (fmt,
@@ -709,9 +718,9 @@ warning that exists only in a default or maintainer closure, and is hidden from
 `--all-features` clippy, fails this group.
 
 Platform-independent structure checks, public contracts and Python tooling run
-once on Linux in check/full; rustdoc runs once on Linux in full. Each install
-additionally requires `just platform` on Apple Silicon macOS and
-`just musl native` on Linux x86_64. The native musl lane defaults to
+once on Linux in check and full; rustdoc runs once on Linux in full. The
+integration batch gate runs those groups once and does not repeat them on
+Apple Silicon. The native musl lane defaults to
 `--platform`; `just musl container` runs the full tier in the pinned offline musl
 container before publication (chapter 06 §6.1). Both musl scripts set
 `CARGO_BUILD_TARGET` to `x86_64-unknown-linux-musl`; the gate passes an
@@ -3502,10 +3511,9 @@ The pre-release bar is the evidence a release candidate must carry before
 that revision is qualified. It runs once per release candidate, not per
 install. It has three parts, all bound to the same source revision:
 
-1. the integrated gate on every supported platform (`just full` groups across
-   Linux x86_64 musl and Apple Silicon) with the offline crash-point sweep
-   (§2.3) passing in full, every REFUSED signature reviewed against its
-   allowlist;
+1. `just full` on both supported platforms, `just musl native` and
+   `just musl container`, the full strict crash-point sweep (§2.3) with every
+   REFUSED signature reviewed against its allowlist, and the publish dry run;
 2. the live matrix below;
 3. a maintainer's sign-off after reviewing the candidate's maintainer build in
    the TUI on their own work.

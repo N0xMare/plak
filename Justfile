@@ -1,5 +1,8 @@
-# Plak / Plakous recipes (Linux/macOS). Workers run `just fast <packages>` plus the groups their change needs;
-# each integration batch tip passes `just full`, the strict crash sweep, musl native and macOS platform.
+# Plak / Plakous recipes (Linux/macOS). Workers run `just fast <packages>` plus the groups their change needs.
+# An integration batch tip passes `just musl native`, `just steps static,rustdoc,contracts,tooling,package` once,
+# macOS `just platform`, and the crash sweep (full strict when recovery, persistence, store, or host-loop code
+# changed; otherwise `just dev crash-sweep --shapes <list>` for the affected shapes). An install requires that batch gate. A release candidate or publication
+# runs `just full` on both platforms, musl native and container, the full strict sweep, and the publish dry run.
 # Module files live beside this justfile, so their recipes run from the
 # repository root (just uses the module file's directory as the working
 # directory).

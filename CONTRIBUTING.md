@@ -30,8 +30,15 @@ There is no CI except the release workflow, which runs only when a release
 tag is pushed. Worker branches iterate and finish with `just fast <packages>`
 plus the groups their change needs; say in the pull request which gates passed
 and on which platform. Before an integration batch lands, its tip tree passes
-`just full`, `just dev crash-sweep --strict` and `just musl native` on Linux,
-and `just platform` on macOS. Commits inside a batch are not gated individually.
+`just musl native` on Linux x86_64, the target-independent groups once
+(`just steps static,rustdoc,contracts,tooling,package`), `just platform` on
+Apple Silicon macOS, and the crash sweep (full strict when recovery,
+persistence, store, or host-loop code changed; otherwise
+`just dev crash-sweep --shapes <list>` for the affected shapes).
+Commits inside a batch are not gated individually. An install requires that
+batch gate. A release candidate or publication runs `just full` on both
+supported platforms, `just musl native` and `just musl container`, the full
+strict crash sweep, and the publish dry run.
 
 ## Pull requests
 

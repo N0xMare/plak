@@ -1652,10 +1652,18 @@ workspace gate: structure checkers, feature builds, the parallel and serial
 lanes, contracts and tooling, but no durability lane; no landing, install or
 publication rule requires it. Worker branches iterate and finish with
 `just fast <packages>` plus the groups their change needs. Main advances one
-integration batch at a time: before a batch lands, its tip tree passes the
-integration batch gate (`just full`, `just dev crash-sweep --strict` and
-`just musl native` on Linux, and `just platform` on macOS); commits inside a
-batch are not gated individually.
+integration batch at a time. Before a batch lands, its tip tree passes the
+integration batch gate: `just musl native` on Linux x86_64, the
+target-independent groups once
+(`just steps static,rustdoc,contracts,tooling,package`), `just platform` on
+Apple Silicon macOS, and the crash sweep (`just dev crash-sweep --strict` over
+the whole matrix when recovery, persistence, store, or host-loop code changed;
+otherwise `just dev crash-sweep --shapes <list>` for the affected shapes).
+Commits inside a batch are not gated individually. An install requires that
+batch gate on the tree being installed.
+A release candidate or publication runs `just full` on both supported
+platforms, `just musl native` and `just musl container`, the full strict crash
+sweep, and the publish dry run.
 
 This does not weaken release requirements, nor claim that an unprotected branch
 is suitable for public collaboration. The desired remote settings are:

@@ -28,13 +28,18 @@ MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest and cargo-deny. Worker branches iterate and finish with
 `just fast <packages>` plus the groups their change needs. Main advances one
-integration batch at a time: before a batch lands, its tip tree passes the
-integration batch gate (`just full`, `just dev crash-sweep --strict` and
-`just musl native` on Linux, and `just platform` on macOS); commits inside a
-batch are not gated individually. Before `just install maintainer`, run `just full` and a
-strict crash sweep (`just dev crash-sweep --strict`) on Linux, plus
-`just platform` on macOS and `just musl native` on Linux. The full strict
-crash sweep runs at publication boundaries.
+integration batch at a time. Before a batch lands, its tip tree passes the
+integration batch gate: `just musl native` on Linux x86_64, the
+target-independent groups once
+(`just steps static,rustdoc,contracts,tooling,package`), `just platform` on
+Apple Silicon macOS, and the crash sweep (`just dev crash-sweep --strict` over
+the whole matrix when recovery, persistence, store, or host-loop code changed;
+otherwise `just dev crash-sweep --shapes <list>` for the affected shapes).
+Commits inside a batch are not gated individually. An install requires that
+batch gate on the tree being installed.
+A release candidate or publication runs `just full` on both supported
+platforms, `just musl native` and `just musl container`, the full strict crash
+sweep, and the publish dry run.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
 offline image `plak-qual-base:2f225fd7`, which is not published (spec 06).
 
