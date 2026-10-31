@@ -1304,6 +1304,173 @@ fn idle_context_names_prepared_tools_until_a_model_rebind() {
     worker.join().unwrap().unwrap();
 }
 
+#[test]
+fn usage_watch_is_due_only_after_the_freshness_interval() {
+    let now = Instant::now();
+    assert!(usage_watch_due(None, now));
+    assert!(!usage_watch_due(Some(now), now));
+    let started = now
+        .checked_sub(crate::subscription_usage::USAGE_PROJECTION_FRESHNESS)
+        .unwrap();
+    assert!(usage_watch_due(Some(started), now));
+    let earlier = now.checked_sub(Duration::from_secs(59)).unwrap();
+    assert!(!usage_watch_due(Some(earlier), now));
+}
+
+#[test]
+fn busy_watch_rereads_only_after_the_freshness_interval() {
+    let (tx, _rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(tx);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let worker_calls = Arc::clone(&calls);
+    let refresh = SubscriptionUsageRefresh::new_with_projector(&events, move |_| {
+        worker_calls.fetch_add(1, Ordering::AcqRel);
+        (
+            plakous_host_protocol::views::presentation::SubscriptionUsageView::Read,
+            None,
+        )
+    });
+    refresh.poll_while_watched(None);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while calls.load(Ordering::Acquire) < 1 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    thread::sleep(Duration::from_millis(30));
+    refresh.poll_while_watched(None);
+    thread::sleep(Duration::from_millis(30));
+    assert_eq!(calls.load(Ordering::Acquire), 1);
+    refresh.backdate_last_request(crate::subscription_usage::USAGE_PROJECTION_FRESHNESS);
+    refresh.poll_while_watched(None);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while calls.load(Ordering::Acquire) < 2 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(calls.load(Ordering::Acquire), 2);
+    drop(refresh);
+}
+
+/// A busy re-read publishes the next observation without a loading notice, so
+/// the figures already on screen stay up.
+#[test]
+fn busy_watch_does_not_announce_loading() {
+    let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(tx);
+    let refresh = SubscriptionUsageRefresh::new_with_projector(&events, |_| {
+        (
+            plakous_host_protocol::views::presentation::SubscriptionUsageView::Read,
+            None,
+        )
+    });
+    refresh.poll_while_watched(None);
+    let mut saw_loading = false;
+    let mut saw_read = false;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && !saw_read {
+        if let Ok(event) = rx.recv_timeout(Duration::from_millis(20)) {
+            match event {
+                HostEvent::SubscriptionUsage(
+                    plakous_host_protocol::views::presentation::SubscriptionUsageView::Loading,
+                ) => saw_loading = true,
+                HostEvent::SubscriptionUsage(
+                    plakous_host_protocol::views::presentation::SubscriptionUsageView::Read,
+                ) => saw_read = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(saw_read);
+    assert!(!saw_loading);
+    drop(refresh);
+}
+
+/// The turn loop asks for allowances only while the surface says the Usage tab
+/// is open. Several ticks with the watch closed read nothing; opening it reads
+/// once. Replacing the gate with `if true` reads during the closed window.
+#[test]
+fn a_busy_turn_rereads_allowances_only_while_the_usage_tab_is_open() {
+    use crate::runtime::recover_tests::{scripted_host_with, wait_for};
+    use crate::runtime::test_support::send_attached_action;
+    use crate::runtime::{SurfaceEffect, SurfaceFacts, SurfaceHandler, spawn_host_worker};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    struct WatchProbe {
+        armed: Arc<AtomicBool>,
+    }
+    impl SurfaceHandler<TestExtension> for WatchProbe {
+        fn usage_watch_armed(&self) -> bool {
+            self.armed.load(Ordering::Acquire)
+        }
+        fn dispatch(&self, _: ProbeIntent, _: SurfaceFacts<'_>, _: &Sender) -> SurfaceEffect {
+            SurfaceEffect::default()
+        }
+        fn publish_template_readiness(
+            &self,
+            _: &[plakous_host_protocol::views::ProviderSection],
+            _: &Sender,
+        ) {
+        }
+        fn readiness_read(&self) -> ReadinessRead {
+            Box::new(|| Ok((Vec::new(), Vec::new())))
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let plan = serde_json::json!({
+        "version": 1,
+        "steps": [{"stream": [{"text": "busy prefix"}, {"stall": 30000}]}]
+    });
+    let plan: Arc<plakous_offline_crash_harness::script::ScriptPlan> =
+        Arc::new(serde_json::from_value(plan).unwrap());
+    let (mut config, _) = scripted_host_with(root.path(), plan);
+    let armed = Arc::new(AtomicBool::new(false));
+    config.surface = Some(Box::new(WatchProbe {
+        armed: Arc::clone(&armed),
+    }));
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("start".into()));
+    wait_for(
+        &events,
+        &mut seen,
+        "the stalled turn's prefix",
+        |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("busy prefix")),
+    );
+    let before = seen.iter().filter(|event| is_allowance_read(event)).count();
+    thread::sleep(Duration::from_millis(250));
+    let quiet_until = Instant::now() + Duration::from_millis(40);
+    while Instant::now() < quiet_until {
+        if let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
+            seen.push(event);
+        }
+    }
+    let closed = seen.iter().filter(|event| is_allowance_read(event)).count() - before;
+    assert_eq!(closed, 0, "a closed Usage tab read allowances: {seen:#?}");
+
+    armed.store(true, Ordering::Release);
+    let open_deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < open_deadline
+        && seen.iter().filter(|event| is_allowance_read(event)).count() - before == 0
+    {
+        if let Ok(event) = events.recv_timeout(Duration::from_millis(20)) {
+            seen.push(event);
+        }
+    }
+    let opened = seen.iter().filter(|event| is_allowance_read(event)).count() - before;
+    assert_eq!(opened, 1, "opening Usage should read once: {seen:#?}");
+    thread::sleep(Duration::from_millis(120));
+    let settle = Instant::now() + Duration::from_millis(40);
+    while Instant::now() < settle {
+        if let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
+            seen.push(event);
+        }
+    }
+    let afterwards = seen.iter().filter(|event| is_allowance_read(event)).count() - before;
+    assert_eq!(afterwards, 1, "the fresh read was repeated: {seen:#?}");
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+}
+
 fn rebind_status_at(events: &[HostEvent], from: usize) -> Option<usize> {
     events[from..]
         .iter()
@@ -1455,4 +1622,8 @@ impl SurfaceHandler<TestExtension> for Arc<IdleToolFork> {
     fn readiness_read(&self) -> ReadinessRead {
         Box::new(|| Ok((Vec::new(), Vec::new())))
     }
+}
+
+fn is_allowance_read(event: &HostEvent) -> bool {
+    matches!(event, HostEvent::SubscriptionUsage(_))
 }

@@ -13,6 +13,8 @@
 //! - a non-Ready vertical carries no numbers and draws no bar;
 //! - an unknown cost is `not available`, never `$0`;
 //! - idle `/usage` reuses a projection younger than [`USAGE_PROJECTION_FRESHNESS`](crate::subscription_usage::USAGE_PROJECTION_FRESHNESS);
+//! - while the Usage tab is open during a turn, allowances are re-read on that
+//!   same interval over the coalesced request path, and not while it is closed;
 //! - a rate-limited or Busy vertical keeps the last Ready meters rather than replacing them;
 //! - a projection that is only Busy is not treated as fresh.
 

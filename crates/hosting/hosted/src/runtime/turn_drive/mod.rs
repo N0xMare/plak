@@ -467,6 +467,11 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                     // the one tree observation of this window. The emitter drops
                     // every non-advancing revision, so an idle tree costs a lookup
                     // and nothing leaves.
+                    if surface::usage_watch_armed(self.host.surface.as_deref()) {
+                        self.host
+                            .subscription_usage_refresh
+                            .poll_while_watched(self.host.subscription_service.clone());
+                    }
                     flush_assistant_delta(&mut self.delta_buf, &mut self.last_flush, self.host.events, false);
                     emit_tree_snapshot_if_revision_advanced(
                         self.host.rows,

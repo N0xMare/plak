@@ -444,9 +444,10 @@ impl App {
 
     fn usage_tab_layout(&self, width: u16) -> usage_tab::LimitsLayout {
         let note = match &self.subscription_usage {
-            SubscriptionUsageView::Loading => {
+            SubscriptionUsageView::Loading if !self.allowance_observation_shown() => {
                 Some("Loading provider allowance snapshots…".to_owned())
             }
+            SubscriptionUsageView::Loading => None,
             SubscriptionUsageView::Unavailable { reason } => {
                 Some(format!("Allowance read unavailable · {reason}"))
             }
@@ -469,6 +470,18 @@ impl App {
                 }),
         };
         usage_tab::limits_layout(&self.usage_limits, &chrome, width, &self.theme)
+    }
+
+    /// A Ready vertical is allowance data already on screen. A busy re-read
+    /// keeps those figures instead of covering them with the loading note.
+    /// A credential row that is not an allowance observation still shows it.
+    fn allowance_observation_shown(&self) -> bool {
+        self.usage_limits.verticals.iter().any(|vertical| {
+            matches!(
+                vertical.state,
+                crate::tui::presentation::VerticalUsageState::Ready { .. }
+            )
+        })
     }
 
     /// The Context tab body: the canonical context projection (spec 02 §5.6).

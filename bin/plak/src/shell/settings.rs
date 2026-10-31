@@ -906,6 +906,8 @@ pub struct ProductSurface {
     chrome_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_accounts_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_refreshing: std::sync::Arc<std::sync::Mutex<bool>>,
+    /// True only while the TUI's Usage tab is the open control tab.
+    usage_watch: std::sync::atomic::AtomicBool,
     state_home: Result<std::path::PathBuf, String>,
 }
 
@@ -942,6 +944,7 @@ impl ProductSurface {
             chrome_refresh: crate::shell::chrome_refresh::ChromeRefresh::default(),
             chrome_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
             usage_accounts_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
+            usage_watch: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -1063,6 +1066,10 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         matches!(intent, SurfaceIntent::RereadUsage)
     }
 
+    fn usage_watch_armed(&self) -> bool {
+        self.usage_watch.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     fn needs_session_tools(&self, intent: &SurfaceIntent) -> bool {
         matches!(intent, SurfaceIntent::ShowMcp)
     }
@@ -1122,6 +1129,10 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             }
             SurfaceIntent::RereadUsage => {
                 self.send_usage_refresh_accounts(facts.usage_reads, events);
+            }
+            SurfaceIntent::WatchUsage(armed) => {
+                self.usage_watch
+                    .store(armed, std::sync::atomic::Ordering::Release);
             }
             SurfaceIntent::OpenUsage => {
                 self.send_usage_refresh_accounts(facts.usage_reads, events);

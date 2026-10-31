@@ -236,6 +236,8 @@ pub enum SurfaceIntent {
     },
     /// Re-read provider allowances after an explicit credential refresh.
     RereadUsage,
+    /// Arm or clear the busy allowance re-read. True only while Usage is open.
+    WatchUsage(bool),
     /// Request the profile list ([`SurfaceObservation::Profiles`]).
     ListProfiles,
     /// Re-read workspace branch and profile facts for composer chrome.
@@ -283,6 +285,7 @@ impl fmt::Debug for SurfaceIntent {
             Self::OpenUsage => "OpenUsage",
             Self::RefreshUsageCredential { .. } => "RefreshUsageCredential{..}",
             Self::RereadUsage => "RereadUsage",
+            Self::WatchUsage(_) => "WatchUsage(_)",
             Self::ListProfiles => "ListProfiles",
             Self::RefreshComposerChrome => "RefreshComposerChrome",
             Self::ShowMcp => "ShowMcp",

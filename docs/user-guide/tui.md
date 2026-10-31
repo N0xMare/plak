@@ -589,7 +589,10 @@ transcript keep a scrollbar. Usage rows wrap complete words, including reset tim
   root and each sub-agent. A profile file that could not be used is listed
   under the profiles with the reason. See [Agent profiles](#agent-profiles).
 - **Providers** — read-only credential status per vertical.
-- **Usage** — subscription plan limits and the turn's usage.
+- **Usage** — subscription plan limits and the turn's usage. While this tab
+  is open during a turn, allowances refresh about every 60 seconds; closing
+  it stops those reads. A refresh keeps the figures already shown. The loading
+  note appears only when the tab has no allowance observation yet.
 - **Context** — the 100-cell breakdown of what is occupying the window.
 - **Session** — the Plak version, the running build's id (with
   `new build installed · /reload` when a newer one is installed), session id

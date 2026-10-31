@@ -576,7 +576,8 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
                 | SurfaceIntent::ShowMcp
                 | SurfaceIntent::ApplyProfile { .. }
                 | SurfaceIntent::AcknowledgeAgent { .. }
-                | SurfaceIntent::ListAgentAcknowledgements { .. } => {
+                | SurfaceIntent::ListAgentAcknowledgements { .. }
+                | SurfaceIntent::WatchUsage(_) => {
                     unreachable!("profile and acknowledgement intents have their own tests")
                 }
             }
@@ -1679,4 +1680,27 @@ fn an_identity_settings_save_still_rewrites_the_root_template() {
             .map(|template| template.model.as_str()),
         Some("gpt-5.3-codex-spark")
     );
+}
+
+#[test]
+fn usage_watch_follows_the_open_tab_and_does_not_read() {
+    use plakous_hosted::runtime::{SurfaceFacts, SurfaceHandler, SurfacePhase, UsageReads};
+    let (_root, paths) = PlakPaths::isolated_test_home();
+    let handler = ProductSurface::new(paths);
+    assert!(!handler.usage_watch_armed());
+    assert!(!handler.needs_usage(&SurfaceIntent::WatchUsage(true)));
+    let facts = || SurfaceFacts {
+        session: None,
+        phase: SurfacePhase::Busy,
+        attached_one_shot: false,
+        catalog: &[],
+        queue_len: 0,
+        usage_reads: UsageReads::default(),
+    };
+    let (events, received) = host_event_sink();
+    handler.dispatch(SurfaceIntent::WatchUsage(true), facts(), &events);
+    assert!(handler.usage_watch_armed());
+    assert!(received.try_iter().next().is_none());
+    handler.dispatch(SurfaceIntent::WatchUsage(false), facts(), &events);
+    assert!(!handler.usage_watch_armed());
 }

@@ -1858,3 +1858,57 @@ fn usage_refresh_is_keyboard_reachable_and_completion_does_not_reopen_menu() {
     );
     assert!(app.usage_refresh.active.is_none());
 }
+
+#[test]
+fn the_usage_tab_arms_the_host_watch_and_leaving_it_clears_it() {
+    let mut app = App::new(launch_basic(), true);
+    let (sender, receiver) = user_action_channel();
+    app.maybe_sync_usage_watch(Some(&sender));
+    assert!(receiver.try_recv().is_err());
+    app.activate_control_tab(super::ControlTab::Usage);
+    app.maybe_sync_usage_watch(Some(&sender));
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        UserAction::Extension(SurfaceIntent::WatchUsage(true))
+    );
+    app.maybe_sync_usage_watch(Some(&sender));
+    assert!(receiver.try_recv().is_err());
+    app.activate_control_tab(super::ControlTab::Context);
+    app.maybe_sync_usage_watch(Some(&sender));
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        UserAction::Extension(SurfaceIntent::WatchUsage(false))
+    );
+    app.close_control_center();
+    app.maybe_sync_usage_watch(Some(&sender));
+    assert!(receiver.try_recv().is_err());
+    app.activate_control_tab(super::ControlTab::Usage);
+    app.maybe_sync_usage_watch(Some(&sender));
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        UserAction::Extension(SurfaceIntent::WatchUsage(true))
+    );
+    app.close_control_center();
+    app.maybe_sync_usage_watch(Some(&sender));
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        UserAction::Extension(SurfaceIntent::WatchUsage(false))
+    );
+}
+
+/// The loading note is the first read. A later read keeps the figures already
+/// shown instead of covering them each minute.
+#[test]
+fn a_usage_reread_keeps_shown_allowances_instead_of_the_loading_note() {
+    let mut fresh = App::new(launch_basic(), true);
+    fresh.subscription_usage = crate::tui::presentation::SubscriptionUsageView::Loading;
+    assert!(usage_body_text(&mut fresh, 120).contains("Loading provider allowance snapshots"));
+    let mut app = usage_fixture();
+    app.subscription_usage = crate::tui::presentation::SubscriptionUsageView::Loading;
+    let body = usage_body_text(&mut app, 120);
+    assert!(
+        !body.contains("Loading provider allowance snapshots"),
+        "{body}"
+    );
+    assert!(body.contains("Weekly limit"), "{body}");
+}

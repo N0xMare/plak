@@ -5332,8 +5332,10 @@ host did not report renders `not reported` — never blank, and never
 `unavailable`, which is reserved for a thing that genuinely does not exist.
 
 Opening `/usage` explicitly refreshes even mid-turn, coalescing to one
-in-flight read. Idle refreshes are spaced in minutes. The view retains fetch
-time; a 429 does not renew freshness, and a dropped read clears loading.
+in-flight read. While the Usage tab stays open during a turn, the host
+re-reads allowances every 60 seconds on that same coalesced path, and stops
+when the tab closes. Idle refreshes are spaced in minutes. The view retains
+fetch time; a 429 does not renew freshness, and a dropped read clears loading.
 
 ### 5.6 The context gauge
 
@@ -7179,8 +7181,11 @@ re-querying every provider, and a rate-limited or Busy vertical **keeps its
 last Ready meters** rather than replacing a true observation with a lock-miss
 or rate-limit sentence. A projection that is only Busy is not treated as
 fresh: the next idle open retries, because a lock miss is contention, not a
-stable observation. A read during a turn cannot re-query at all and is served
-with its age stated.
+stable observation. A read during a turn is served with its age stated and does not re-query,
+except while the Usage tab is open: that tab re-reads every 60 seconds,
+coalesced to one in-flight read, and stops when the tab closes. A re-read
+keeps the previous allowance figures on screen. The loading note is shown
+only when the tab has no allowance observation yet.
 
 `plak usage --account <id>` narrows both the network read and output to that
 vertical; it accepts `codex`, `grok`, `claude`, `openrouter`, and `supergrok`,

@@ -310,6 +310,11 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
         false
     }
 
+    /// Whether the Usage tab is open, so a busy turn re-reads allowances.
+    fn usage_watch_armed(&self) -> bool {
+        false
+    }
+
     /// Whether the dispatch reads the session's frozen MCP tools
     /// ([`SurfaceSession::mcp`]); they are gathered only when it does.
     fn needs_session_tools(&self, _intent: &P::Intent) -> bool {
@@ -351,6 +356,12 @@ pub(super) fn needs_usage<P: ProtocolExtension>(
     intent: &P::Intent,
 ) -> bool {
     surface.is_some_and(|handler| handler.needs_usage(intent))
+}
+
+pub(super) fn usage_watch_armed<P: ProtocolExtension>(
+    surface: Option<&dyn SurfaceHandler<P>>,
+) -> bool {
+    surface.is_some_and(SurfaceHandler::usage_watch_armed)
 }
 
 pub(super) fn publish_template_readiness<P: ProtocolExtension>(

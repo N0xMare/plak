@@ -780,6 +780,8 @@ pub(crate) struct App {
     /// Menu clears it, so a late reply cannot reopen a modal the
     /// operator already dismissed.
     pending_open_usage: bool,
+    /// Last `WatchUsage` arming sent. Tracks whether the Usage tab is open.
+    usage_watch_sent: bool,
     /// True between `/resume` and the host's session list. Cleared on Esc, on
     /// accept, and whenever another modal takes input, so a late reply cannot
     /// reopen a picker the operator dismissed or stack one over a newer
@@ -1021,6 +1023,7 @@ impl App {
             session_open_ms: None,
             pending_open_settings: false,
             pending_open_usage: false,
+            usage_watch_sent: false,
             pending_open_resume: launch.open_resume_picker,
             launch_resume_picker: launch.open_resume_picker,
             usage_decoration: launch.usage_decoration,

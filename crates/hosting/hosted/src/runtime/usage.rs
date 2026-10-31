@@ -691,6 +691,13 @@ pub(super) fn report_context<P: plakous_host_protocol::ProtocolExtension>(
     Ok(projection)
 }
 
+/// Whether a busy Usage-tab watch should start another allowance read.
+pub(super) fn usage_watch_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|at| {
+        now.saturating_duration_since(at) >= crate::subscription_usage::USAGE_PROJECTION_FRESHNESS
+    })
+}
+
 pub(super) fn request_subscription_usage_service<P: plakous_host_protocol::ProtocolExtension>(
     subscriptions: Option<NativeSubscriptions>,
     refresh: &SubscriptionUsageRefresh<P>,
@@ -925,17 +932,45 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         }
     }
 
+    /// Re-reads allowances on the coalesced in-turn path while the Usage tab
+    /// is open. A request younger than the freshness window is left alone, so
+    /// the busy tick does not start a read every pass.
+    pub(super) fn poll_while_watched(&self, subscriptions: Option<NativeSubscriptions>) {
+        let due = self
+            .last_request
+            .lock()
+            .is_ok_and(|last| usage_watch_due(*last, Instant::now()));
+        if due {
+            // A busy re-read keeps the figures already on screen. The loading
+            // note is only for a tab that has no observation yet, which the
+            // open itself announces.
+            self.request_inner(subscriptions, false, false);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn backdate_last_request(&self, age: Duration) {
+        if let Ok(mut last) = self.last_request.lock() {
+            *last = Instant::now().checked_sub(age);
+        }
+    }
+
     pub(super) fn request(&self, subscriptions: Option<NativeSubscriptions>) {
-        self.request_inner(subscriptions, false);
+        self.request_inner(subscriptions, false, true);
     }
 
     /// An explicit credential change must be read even if an older read is in flight.
     /// The bounded request channel coalesces multiple explicit requests into one follow-up.
     pub(super) fn request_fresh(&self, subscriptions: Option<NativeSubscriptions>) {
-        self.request_inner(subscriptions, true);
+        self.request_inner(subscriptions, true, true);
     }
 
-    fn request_inner(&self, subscriptions: Option<NativeSubscriptions>, fresh: bool) {
+    fn request_inner(
+        &self,
+        subscriptions: Option<NativeSubscriptions>,
+        fresh: bool,
+        announce_loading: bool,
+    ) {
         let Some(requests) = &self.requests else {
             let _ = self.events.send(ContentEvent::SubscriptionUsage(
                 plakous_host_protocol::views::presentation::SubscriptionUsageView::Unavailable {
@@ -954,9 +989,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         if let Ok(mut last) = self.last_request.lock() {
             *last = Some(Instant::now());
         }
-        let _ = self.events.send(ContentEvent::SubscriptionUsage(
-            plakous_host_protocol::views::presentation::SubscriptionUsageView::Loading,
-        ));
+        if announce_loading {
+            let _ = self.events.send(ContentEvent::SubscriptionUsage(
+                plakous_host_protocol::views::presentation::SubscriptionUsageView::Loading,
+            ));
+        }
         // A refused send drops its guard; a queued read absorbs this request.
         match requests.try_send((subscriptions, self.reads.begin())) {
             Ok(()) | Err(std::sync::mpsc::TrySendError::Full(_)) => {}

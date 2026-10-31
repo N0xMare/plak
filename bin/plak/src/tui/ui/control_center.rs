@@ -237,6 +237,27 @@ impl App {
         }
     }
 
+    /// Tells the host to re-read allowances every 60 seconds only while the
+    /// Usage tab is the open control tab.
+    pub(super) fn maybe_sync_usage_watch(
+        &mut self,
+        actions: Option<&crate::tui::UserActionSender>,
+    ) {
+        let armed = self.control_tab == Some(ControlTab::Usage);
+        if armed == self.usage_watch_sent {
+            return;
+        }
+        let Some(actions) = actions else {
+            return;
+        };
+        if actions
+            .send(UserAction::Extension(SurfaceIntent::WatchUsage(armed)))
+            .is_ok()
+        {
+            self.usage_watch_sent = armed;
+        }
+    }
+
     pub(super) fn copy_active_tab(&mut self) {
         let Some(tab) = self.control_tab else {
             return;
