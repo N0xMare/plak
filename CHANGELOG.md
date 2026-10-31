@@ -9,7 +9,7 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plak
 
-- Agent trees use schema 9 and state key `r26.e33.p34.t9`. Carry sessions by
+- Agent trees use schema 9 and state key `r26.e34.p35.t9`. Carry sessions by
   `/reload` or export/import. Forks use short
   `plak/<tree8>/<agent_id>` branches and `<tree8>-<agent_id>` copy directories,
   with a full-digest prefix collision guard. Base, candidate and landing
@@ -34,9 +34,8 @@ one cross-build carrier (a build imports its own and the previous version).
   `refresh:false` opts out, and candidate-minted copies keep their pinned bases.
   Conflicts leave the old copy unchanged and report paths to both agents.
 
-- Session export v10 retains Messages native citation replay, including protected
-  citation tokens. Versions 10 and 9 import; version 8 is refused before session
-  creation. Runtime epoch, product/tree schemas and state key are unchanged.
+- Session exports retain Messages native citation replay, including protected
+  citation tokens.
 
 - Fast children retain their start and finished transcript milestones even
   when they complete before the host's first tree observation. Durable notice
@@ -62,7 +61,7 @@ one cross-build carrier (a build imports its own and the previous version).
   text stays unchanged. This root opens no topology; child templates and
   optional tools refuse this root-only surface before inference.
 - Session exports carry the selected composition and committed named state.
-  Product schema 34 admits `py-sdk`; state key `r26.e33.p34.t9`.
+  The product store admits `py-sdk`.
   `[root] composition` overrides the root template's composition without
   granting that selection to children.
 
@@ -112,6 +111,25 @@ one cross-build carrier (a build imports its own and the previous version).
 - OpenRouter Chat, Messages and Responses refuse to send a key that was rotated
   after the model was admitted, before any bearer is read. Invalid xAI product
   keys are refused before admission.
+- Operator help is chosen by the frontend. Hosted and library refusal text is
+  neutral; Plak renders TUI, `plak run` and JSONL help from a closed set of
+  typed remedies stored on notice rows, never from diagnostic prose, and a row
+  without a remedy (including an imported version-10 row) displays verbatim.
+  An exact reopen refused for a changed frozen binding leads with the carry
+  (`/rebind`) and names restoring the original account as the exact-reopen
+  alternative; a missing login is never a binding change, and contract drift
+  carries no login remedy. A missing MCP secret names `plak secret set <name>`,
+  low storage names `plak doctor`, and a reasoning downgrade is classified from
+  the requested and resolved reasoning state.
+- Write refuses to overwrite an existing file the agent has not explicitly read
+  in its current form in this attachment; reads are remembered in memory only,
+  so a reopened session reads again. Edit, Write, patch and SDK results name
+  each changed path and its action, binary overwrites are refused with a
+  delete-then-create remedy, and unreadable or directory targets fail with a
+  remedy.
+- A background process whose ownership was explicitly released shows
+  `released`: its notice, trailer and write refusal say the process may still
+  be running, never that it exited.
 
 ### Plakous
 
@@ -130,6 +148,30 @@ one cross-build carrier (a build imports its own and the previous version).
   head would attach, with no lease, driver, recovery or write.
   `TopologyHubAttach::Inspect` and `McpToolPack::unbound` compile tree and MCP
   tools without attaching, leasing or starting anything.
+- Image residency: the driver replaces the oldest resident images with
+  placeholders, unpaid and deterministically, at admission, at tool-batch and
+  continue fences and before every model round, keeping image counts and bytes
+  within the adapter's budgets (75 % is the batching target). A candidate that
+  does not fit defers to the ordinary compaction ladder; a round refuses with
+  `RequestBudget` only while images still exceed a budget after it. Selection,
+  audits and reconstruction bind one unpaid commit and both recovery consumers.
+  `ResidentImageBudget::new` returns a typed error.
+- A definite turn refusal (model, request budget, round limit, invalid input)
+  at a round start or tool-batch fence first finalizes any open server-pause or
+  provider-programmatic continuation, so the turn settles with one terminal.
+- Explicit job release is durable: a restored released job reports `released`
+  in the process tool output schemas and raised results without claiming exit
+  or stop authority.
+- Whole-file overwrites require the last explicit text read of the target in
+  the same execution environment; mutations revalidate content or absence in
+  backend preflight and consume touched observations. SDK operation indexes
+  stay on ordinary policy refusals.
+- `plakous-host-protocol` carries typed host phases, pauses, failures and the
+  closed `NoticeRemedy` vocabulary; tool operations are derived by
+  `ToolOperation::classify` rather than stored; hosted launch and startup
+  timing names no longer name a frontend. `AgentError::reresolution_error`
+  keeps a live re-resolution refusal in memory (never in canonical records),
+  and MCP errors carry a typed missing-secret requirement.
 
 - `plakous-responses-dialect` is folded into `plakous-responses` and retired;
   its last published version stays 0.0.2 (not yanked). The workspace has 37
@@ -258,10 +300,20 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Persisted formats
 
+- Runtime format epoch 34, product schema 35, export document version 11;
+  state key `r26.e34.p35.t9`. Epoch 34 adds compaction strategy tag 5 with v3
+  image-residency requests and evidence and an explicit Released job terminal
+  (tag 3), and runtime schema 26 checks codec 34. Process tool output schemas
+  (`released`) and the file-mutation tool descriptions rotate the
+  description-derived tool, projection, plan and Code Mode cell identities in
+  the same epoch; read observations are not persisted. Product schema 35 and
+  export version 11 store the typed remedy on notice rows. Version 11 imports
+  versions 11 and 10 (version-10 notices import verbatim, without a remedy);
+  version 9 and older are refused. Carry sessions with `/reload` or
+  export/import; agent trees do not carry across the key change.
 - New home config key `tui.reload_requests` (bool, default false). Reload
   handoff sidecars are private transient files under `carry/`; reload requests,
   listeners and outcomes are private transient files under `run/reload-requests/`.
-  No other persisted format changes in this batch.
 
 - Runtime format epoch 33: the cell compiler uses one v3 descriptor identity
   recipe for product JavaScript, Python PTC (structured and freeform), and
@@ -288,9 +340,7 @@ one cross-build carrier (a build imports its own and the previous version).
   Runtime SQLite schema 26 admits `NamedStateValue` objects (kind 20). The
   manifest gains a sorted named-state key/address group; checkpoint integrity
   and commit identities bind keys and immutable value addresses.
-  State key `r26.e33.p34.t9`; carry conversation history and named state with
-  `/reload` or export/import through document version 9; version 8 imports
-  with empty named state.
+  Conversation history and named state carry with `/reload` or export/import.
   Claude OAuth session authority now binds the canonical provider account UUID
   instead of a grant lineage, so a same-account re-login can continue and
   reopen. This identity change rides unreleased epoch 33 without changing
@@ -326,6 +376,12 @@ one cross-build carrier (a build imports its own and the previous version).
   Export document version 8 is unchanged.
 
 ### Pins
+
+- Process tool output schemas gain `released` and the file-mutation tool
+  descriptions are rewritten, so the eight durable descriptor registry and
+  eight projection pins, five Code Mode cell identities, the Python SDK
+  identity, four tool-text digests, 48 prompt-render rows, eight
+  compaction-wire rows and the tool-results lifecycle row move.
 
 - Review windows. The subscription profiles (Codex, Grok, Claude) expire
   exactly 90 days after their review, at 00:00 UTC; Claude moves from 365
