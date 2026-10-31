@@ -786,13 +786,14 @@ async fn a_finished_session_stays_live_until_it_is_retired() -> Result<(), TestE
     Ok(())
 }
 
-/// A working directory that is not there says so, and nothing ran.
+/// A missing working directory is not found, and a parent that is a file is
+/// not a directory. Nothing ran.
 ///
 /// The message always read "choose an existing directory" while the kind said
 /// policy, so a consumer branching on the kind saw a refusal where a user had
 /// made a typo. It is the same defect the read path had, on the process path.
 #[tokio::test]
-async fn a_missing_process_working_directory_is_not_found_and_nothing_started()
+async fn a_missing_or_file_parent_working_directory_is_refused_and_nothing_started()
 -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
     fs::write(workspace.path().join("a-file"), b"contents")?;
@@ -825,13 +826,25 @@ async fn a_missing_process_working_directory_is_not_found_and_nothing_started()
     assert!(missing.message().as_str().contains("missing"));
     assert!(missing.proven_no_effect());
 
-    // A parent that is a file cannot hold the directory, and that is why the
-    // path does not exist rather than a separate kind of refusal.
+    // A parent that is a file cannot hold the directory. That is its own
+    // refusal, the same one a workspace open reports, and nothing started.
     let through_file = sessions
         .start(start("a-file/workdir")?, control())
         .err()
         .ok_or_else(|| TestError::from("a working directory under a file started a process"))?;
-    assert_eq!(through_file.kind(), ExecutionBackendErrorKind::NotFound);
+    assert_eq!(
+        through_file.kind(),
+        ExecutionBackendErrorKind::NotADirectory
+    );
+    assert!(
+        through_file
+            .message()
+            .as_str()
+            .starts_with("a parent component is not a directory: "),
+        "{:?}",
+        through_file.message()
+    );
+    assert!(through_file.message().as_str().contains("a-file"));
     assert!(through_file.proven_no_effect());
 
     assert!(!workspace.path().join("marker").exists());

@@ -146,6 +146,10 @@ fn workspace_path_components(
 /// link as `ELOOP`, so a linked component is refused as symlink traversal on
 /// both platforms and a non-directory component stays `ENOTDIR`. The check only
 /// turns one refusal into another; it never opens anything.
+///
+/// `name` is one path component. `AT_SYMLINK_NOFOLLOW` does not stop the stat
+/// from following earlier components, so a multi-component path can lstat
+/// outside the directory the open was confined to.
 fn link_errno<P: rustix::path::Arg + Copy>(
     parent: &fs::File,
     name: P,
@@ -341,6 +345,47 @@ fn open_directory_entry_for_query(directory: &fs::File, name: &Path) -> Reposito
     }
 }
 
+/// Classifies a beneath-open `ENOTDIR` without stating a path that can leave
+/// the workspace.
+///
+/// The stat is only the final component, relative to a parent opened `O_PATH`
+/// beneath the root with the same no-symlink flags, or relative to the root
+/// when the path has one component. `O_PATH` does not need read permission, so
+/// a search-only parent can still be classified. A parent that cannot be
+/// opened beneath the root is not stated, and the original errno stands.
+#[cfg(target_os = "linux")]
+fn confined_link_errno(root: &fs::File, relative: &Path, flags: OFlags, errno: Errno) -> Errno {
+    if errno != Errno::NOTDIR || !flags.contains(OFlags::DIRECTORY) {
+        return errno;
+    }
+    let Ok(names) = workspace_path_components(relative) else {
+        return errno;
+    };
+    let Some((final_name, parents)) = names.split_last() else {
+        return errno;
+    };
+    if parents.is_empty() {
+        return link_errno(root, *final_name, flags, errno);
+    }
+    let mut parent_path = PathBuf::new();
+    for name in parents {
+        parent_path.push(name);
+    }
+    // `O_RDONLY` needs read permission. A search-only parent (mode 0100) would
+    // fail `EACCES` and a final link would be reported `ENOTDIR`.
+    let parent = match openat2(
+        root,
+        &parent_path,
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+        ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+    ) {
+        Ok(descriptor) => fs::File::from(descriptor),
+        Err(_) => return errno,
+    };
+    link_errno(&parent, *final_name, flags, errno)
+}
+
 fn open_workspace_beneath(
     workspace: &ExecutionWorkspace,
     relative: &Path,
@@ -357,7 +402,9 @@ fn open_workspace_beneath(
             Mode::empty(),
             ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
         )
-        .map_err(|errno| workspace_open_error(relative, link_errno(&root, &path, flags, errno)))?;
+        .map_err(|errno| {
+            workspace_open_error(relative, confined_link_errno(&root, &path, flags, errno))
+        })?;
         Ok(fs::File::from(descriptor))
     }
     #[cfg(not(target_os = "linux"))]
@@ -1425,9 +1472,9 @@ fn publish_replacement_file(
 // reusing this mapping after dispatch would incorrectly erase uncertainty.
 /// The refusal one component of a resolved path earns from its own errno.
 ///
-/// A path that is not there is not a policy decision, and a component that is
-/// not a directory is why the rest of the path cannot exist. Both are the same
-/// answer to the caller: choose an existing directory. Anything else is the
+/// A path that is not there is not a policy decision. A component that exists
+/// and is not a directory is why the rest of the path cannot exist, and it is
+/// the same `NotADirectory` a workspace open reports. Anything else is the
 /// filesystem refusing for a reason of its own and stays an I/O failure.
 fn resolve_component_error(path: &Path, error: &std::io::Error) -> ExecutionBackendError {
     let path = path.display();
@@ -1437,8 +1484,8 @@ fn resolve_component_error(path: &Path, error: &std::io::Error) -> ExecutionBack
             format!("path does not exist: {path}"),
         ),
         std::io::ErrorKind::NotADirectory => backend_error(
-            ExecutionBackendErrorKind::NotFound,
-            format!("path does not exist; a parent component is not a directory: {path}"),
+            ExecutionBackendErrorKind::NotADirectory,
+            format!("a parent component is not a directory: {path}"),
         ),
         _ => backend_error(
             ExecutionBackendErrorKind::Io,

@@ -245,6 +245,41 @@ async fn an_existing_path_is_refused_before_the_request() -> TestResult {
 }
 
 #[tokio::test]
+async fn an_output_beneath_a_non_directory_is_refused_before_the_request() -> TestResult {
+    let port = FakePort::answering(Ok(PNG.to_vec()));
+    let workspace = workspace(Arc::clone(&port))?;
+    std::fs::write(workspace.dir.path().join("not-a-dir"), b"x")?;
+    let outcome = call(
+        &workspace,
+        json!({"prompt": "fox", "path": "not-a-dir/out.png"}),
+    )
+    .await?;
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    assert!(text_of(&outcome).starts_with("image_gen refuses to write not-a-dir/out.png"));
+    assert_eq!(port.requests(), []);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_edit_input_beneath_a_non_directory_does_not_exist() -> TestResult {
+    let port = FakePort::answering(Ok(PNG.to_vec()));
+    let workspace = workspace(Arc::clone(&port))?;
+    std::fs::write(workspace.dir.path().join("not-a-dir"), b"x")?;
+    let outcome = call(
+        &workspace,
+        json!({"prompt": "fox", "path": "out.png", "edit_from": ["not-a-dir/in.png"]}),
+    )
+    .await?;
+    assert_eq!(
+        text_of(&outcome),
+        "image_gen cannot edit not-a-dir/in.png: the file does not exist"
+    );
+    assert_eq!(port.requests(), []);
+    assert!(!workspace.dir.path().join("out.png").exists());
+    Ok(())
+}
+
+#[tokio::test]
 async fn paths_outside_the_workspace_are_refused_before_the_request() -> TestResult {
     let port = FakePort::answering(Ok(PNG.to_vec()));
     let workspace = workspace(Arc::clone(&port))?;

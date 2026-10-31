@@ -238,17 +238,25 @@ root descriptor with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`, and
 and free of a check-to-use race. Elsewhere it opens component by component with
 `O_NOFOLLOW`, refusing symlink and cross-device traversal. Linux and macOS both
 answer an `O_NOFOLLOW | O_DIRECTORY` open of a symbolic link with `ENOTDIR`, as
-for a regular file, so every per-component open and the Linux beneath-open with
-`O_DIRECTORY` check such an entry with `fstatat(AT_SYMLINK_NOFOLLOW)` and report
-a link as `ELOOP`: a linked component, including the parent of a write and a
-missing parent a create would make, is refused as a pre-effect `SymlinkEscape`
-on both platforms, never read as a missing path. A component that exists and is
-not a directory is refused as a pre-effect `NotADirectory`, so a write beneath a
-file is refused before any effect instead of being read as a create.
+for a regular file, so every per-component open checks that one component with
+`fstatat(AT_SYMLINK_NOFOLLOW)` and reports a link as `ELOOP`. The Linux
+beneath-open classifies the same `ENOTDIR` by stating only the final component,
+relative to its parent opened with the same beneath and no-symlink flags, or
+relative to the root when the path has a single component. It never states a
+multi-component path from the root: that resolution follows intermediate links
+and can lstat outside the workspace. A linked component, including the parent
+of a write and a missing parent a create would make, is refused as a pre-effect
+`SymlinkEscape` on both platforms, never read as a missing path. A component
+that exists and is not a directory is refused as a pre-effect `NotADirectory`,
+so a write beneath a file is refused before any effect instead of being read as
+a create.
 
 The lexical layer alone does **not** claim race-free containment, and says so.
 Process-tool working directories get the additional per-component symlink check
-and a re-verification that the canonical path is still under the root.
+and a re-verification that the canonical path is still under the root. A parent
+component that exists and is not a directory is the same pre-effect
+`NotADirectory` (`a parent component is not a directory: {path}`); a component
+that is absent stays `NotFound`.
 
 **The job-output read exception.** The one path a file tool may read outside
 the workspace is a job output file (chapter 01 §8.5) that the process service of

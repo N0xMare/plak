@@ -346,7 +346,11 @@ async fn read_input(context: &ToolContext, path: &Path) -> Result<ImageGenSource
     let (bytes, more) = read_one_slice(context, path.to_path_buf(), MAX_IMAGE_EDIT_INPUT_BYTES)
         .await
         .map_err(|kind| match kind {
-            ExecutionBackendErrorKind::NotFound => "the file does not exist".to_owned(),
+            // A parent that is not a directory names nothing, same as a path
+            // that is not there.
+            ExecutionBackendErrorKind::NotFound | ExecutionBackendErrorKind::NotADirectory => {
+                "the file does not exist".to_owned()
+            }
             _ => "the file cannot be read".to_owned(),
         })?;
     if more {

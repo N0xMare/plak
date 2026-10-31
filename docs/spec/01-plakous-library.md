@@ -5199,8 +5199,13 @@ Filesystem, process, environment, and network effects require an explicit
 validated against traversal and symlink escape. Process-cwd resolution happens
 before spawn: an absolute or parent-traversing `workdir`, a symlink escape, or a
 missing or inaccessible cwd that cannot be inspected or resolved is a no-effect
-workspace-policy rejection, returned as a model-visible tool failure. The model
-may correct the cwd and issue a new invocation. Failures after process spawn
+workspace-policy rejection, returned as a model-visible tool failure. A parent
+component of the cwd that exists and is not a directory is `NotADirectory`
+(`a parent component is not a directory: {path}`), the same pre-effect refusal
+as a workspace open; a component that is absent stays `NotFound`. A cwd that
+is itself a file stays the caller's `WorkspacePolicy` refusal (`cwd is not a
+contained directory`). The model may correct the cwd and issue a new
+invocation. Failures after process spawn
 retain their effect and recovery classification; uncertain execution still
 requires `OutcomeUnknown`. Child environments are frozen
 and filtered, starting from a captured environment rather than ambient process
@@ -5251,9 +5256,11 @@ generates one image, or edits workspace images, through the session's own
 route and writes the result into the workspace. It is `PlakLocal`,
 `ToolEffect::Mutating`, `ToolConcurrency::Serial` and nested-eligible; its
 arguments are `{prompt, path, size?, edit_from?}`. A call refuses an output
-path that exists or leaves the workspace and an edit input that is missing,
-outside the workspace, larger than 4 MiB or not PNG, JPEG or WebP, before
-any request is sent. It hands one neutral `ImageGenRequest` to the session's
+path that exists, lies beneath a non-directory, or leaves the workspace and an
+edit input that is missing, outside the workspace, larger than 4 MiB or not
+PNG, JPEG or WebP, before any request is sent. An edit input that lies beneath
+a non-directory is the same missing-file refusal (`the file does not exist`).
+It hands one neutral `ImageGenRequest` to the session's
 `ImageGenPort`; the route's port revalidates admission before every physical
 request, as before a model round, and never falls back to another route or
 account. The returned bytes must sniff as an image; they are published by
