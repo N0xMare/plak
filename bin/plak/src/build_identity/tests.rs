@@ -359,3 +359,57 @@ fn a_replaced_file_is_a_different_build() {
     std::fs::rename(&staged, &path).unwrap();
     assert!(FileIdentity::of(&path) != Some(old));
 }
+
+#[test]
+fn a_replaced_install_is_detected_as_a_newer_build() {
+    use super::interactive::installed_build_is_newer;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plak");
+    std::fs::write(&path, b"old").unwrap();
+    let running = FileIdentity::of(&path).unwrap();
+    assert!(!installed_build_is_newer(Some(&running), Some(&running)));
+    assert!(!installed_build_is_newer(None, Some(&running)));
+    assert!(!installed_build_is_newer(Some(&running), None));
+    let staged = dir.path().join("plak.new");
+    std::fs::write(&staged, b"new").unwrap();
+    std::fs::rename(&staged, &path).unwrap();
+    let installed = FileIdentity::of(&path).unwrap();
+    assert!(installed_build_is_newer(Some(&running), Some(&installed)));
+}
+
+/// A `PATH` name follows the install symlink. Replacing the target is a newer
+/// build; the name itself does not change.
+#[test]
+fn a_path_name_follows_its_symlink_and_sees_a_replaced_target() {
+    use super::interactive::{installed_build_is_newer, resolve_installed_name};
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let root = tempfile::tempdir().unwrap();
+    let bin_dir = root.path().join("bin");
+    let real_dir = root.path().join("real");
+    std::fs::create_dir(&bin_dir).unwrap();
+    std::fs::create_dir(&real_dir).unwrap();
+    let target = real_dir.join("plak");
+    std::fs::write(&target, b"old").unwrap();
+    let mut permissions = std::fs::metadata(&target).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&target, permissions).unwrap();
+    symlink(&target, bin_dir.join("plak")).unwrap();
+    let path = std::env::join_paths([bin_dir]).unwrap();
+
+    let resolved = resolve_installed_name("plak".as_ref(), Some(path.as_os_str())).unwrap();
+    assert_eq!(resolved, std::fs::canonicalize(&target).unwrap());
+    let running = FileIdentity::of(&resolved).unwrap();
+
+    let staged = real_dir.join("plak.new");
+    std::fs::write(&staged, b"new-bytes").unwrap();
+    let mut permissions = std::fs::metadata(&staged).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&staged, permissions).unwrap();
+    std::fs::rename(&staged, &target).unwrap();
+
+    let again = resolve_installed_name("plak".as_ref(), Some(path.as_os_str())).unwrap();
+    assert_eq!(again, std::fs::canonicalize(&target).unwrap());
+    let installed = FileIdentity::of(&again).unwrap();
+    assert!(installed_build_is_newer(Some(&running), Some(&installed)));
+}

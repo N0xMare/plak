@@ -16,12 +16,22 @@ pub(crate) fn invocation_argv0() -> OsString {
 /// The executable the same invocation would start now: `argv[0]` resolved on
 /// `PATH` (or as recorded), with symlinks followed to the installed file.
 pub(crate) fn installed_executable() -> Option<PathBuf> {
-    let candidate = match &launch().invocation {
-        Invocation::Path(path) => path.clone(),
-        Invocation::Name(name) => std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
-            .find(|path| is_executable_file(path))?,
-    };
+    match &launch().invocation {
+        Invocation::Path(path) => std::fs::canonicalize(path).ok(),
+        Invocation::Name(name) => resolve_installed_name(name, std::env::var_os("PATH").as_deref()),
+    }
+}
+
+/// Resolve a command name on `path` (`PATH`'s shape) to the installed file,
+/// following symlinks.
+pub(super) fn resolve_installed_name(
+    name: &std::ffi::OsStr,
+    path: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    let path = path?;
+    let candidate = std::env::split_paths(path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))?;
     std::fs::canonicalize(candidate).ok()
 }
 
@@ -38,13 +48,23 @@ fn is_executable_file(path: &Path) -> bool {
     metadata.is_file()
 }
 
+/// Whether `installed` is a different file from the one this process runs.
+///
+/// A missing launch record or a missing install is not a newer build: the
+/// banner stays off until both identities exist and differ.
+pub(super) fn installed_build_is_newer(
+    running: Option<&FileIdentity>,
+    installed: Option<&FileIdentity>,
+) -> bool {
+    match (running, installed) {
+        (Some(running), Some(installed)) => installed != running,
+        _ => false,
+    }
+}
+
 /// Whether the invocation now resolves to a different file than the one this
 /// process is running: a new snapshot, or a rebuild in place.
 pub(crate) fn newer_build_installed() -> bool {
-    let Some(running) = &launch().executable else {
-        return false;
-    };
-    installed_executable()
-        .and_then(|path| FileIdentity::of(&path))
-        .is_some_and(|installed| installed != *running)
+    let installed = installed_executable().and_then(|path| FileIdentity::of(&path));
+    installed_build_is_newer(launch().executable.as_ref(), installed.as_ref())
 }
