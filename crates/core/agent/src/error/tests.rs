@@ -133,3 +133,20 @@ fn paid_recovery_dominates_model_and_cancellation_projection()
     }
     Ok(())
 }
+
+#[test]
+fn a_binding_change_is_named_and_never_reconstructed_from_canonical_parts() {
+    let change = crate::BindingChange::ToolBinding {
+        tool: "shell".to_owned(),
+    };
+    let error = AgentError::new(AgentErrorKind::InvalidInput, "reopen refused")
+        .with_binding_change(change.clone());
+    assert_eq!(error.binding_change(), Some(&change));
+    assert_eq!(change.to_string(), "executor binding for tool `shell`");
+    let decoded = AgentError::from_canonical_parts(error.kind(), error.message(), None, None, None);
+    assert_eq!(decoded.binding_change(), None);
+    assert_eq!(
+        AgentError::new(AgentErrorKind::InvalidInput, "plain").binding_change(),
+        None
+    );
+}

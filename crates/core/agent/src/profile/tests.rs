@@ -154,12 +154,56 @@ fn plan_model_binding_still_compares_every_identity_axis_exactly() {
                     provider_configuration_ids(b"different").1;
             }
         }
+        let recorded = |value: &str, current: &str| (value.to_owned(), current.to_owned());
+        let expected = match axis {
+            "route" => {
+                let (recorded, current) = recorded(model.route().as_str(), "different.route");
+                crate::BindingChange::Route { recorded, current }
+            }
+            "model" => {
+                let (recorded, current) = recorded(model.model.as_str(), "different-model");
+                crate::BindingChange::Model { recorded, current }
+            }
+            "protocol" => {
+                let (recorded, current) = recorded(model.protocol.as_str(), "different.protocol");
+                crate::BindingChange::Protocol { recorded, current }
+            }
+            "adapter" => {
+                let (recorded, current) =
+                    recorded(model.model_adapter_profile().as_str(), "different.adapter");
+                crate::BindingChange::AdapterProfile { recorded, current }
+            }
+            "binding" => crate::BindingChange::ModelCapabilities,
+            _ => crate::BindingChange::ProviderConfiguration,
+        };
+        let refusal = plan.ensure_model_binding(&changed);
         assert_eq!(
-            plan.ensure_model_binding(&changed),
-            Err(ProfileError::PlanModelBindingMismatch),
+            refusal,
+            Err(ProfileError::PlanModelBindingMismatch {
+                change: expected.clone()
+            }),
+            "{axis}"
+        );
+        assert_eq!(
+            refusal.err().map(|error| error.to_string()),
+            Some(format!(
+                "resolved harness plan is bound to a different {expected}"
+            )),
             "{axis}"
         );
     }
+}
+
+#[test]
+fn plan_model_binding_names_the_adapter_revision_change_in_words() {
+    let change = crate::BindingChange::AdapterProfile {
+        recorded: "anthropic.claude.oauth.v8".to_owned(),
+        current: "anthropic.claude.oauth.v9".to_owned(),
+    };
+    assert_eq!(
+        ProfileError::PlanModelBindingMismatch { change }.to_string(),
+        "resolved harness plan is bound to a different model adapter profile (recorded `anthropic.claude.oauth.v8`, this build `anthropic.claude.oauth.v9`)"
+    );
 }
 
 #[test]
@@ -193,7 +237,9 @@ fn provider_configuration_ids_are_required_plan_authority() {
     assert_ne!(baseline.plan_digest(), selected_plan.plan_digest());
     assert_eq!(
         baseline.ensure_model_binding(selected_inputs.model()),
-        Err(ProfileError::PlanModelBindingMismatch)
+        Err(ProfileError::PlanModelBindingMismatch {
+            change: crate::BindingChange::ProviderConfiguration
+        })
     );
 
     let mut effective_model = model_facts(FeatureSupportFact::Supported);
@@ -211,7 +257,9 @@ fn provider_configuration_ids_are_required_plan_authority() {
     assert_ne!(baseline.plan_digest(), effective_plan.plan_digest());
     assert_eq!(
         baseline.ensure_model_binding(effective_inputs.model()),
-        Err(ProfileError::PlanModelBindingMismatch)
+        Err(ProfileError::PlanModelBindingMismatch {
+            change: crate::BindingChange::ProviderConfiguration
+        })
     );
 
     let canonical_inputs = String::from_utf8(

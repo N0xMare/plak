@@ -386,7 +386,10 @@ pub(in crate::runtime) fn reconstruct_persisted_tools(
             ToolBindingError::BindingIdentityMismatch { id, .. } => AgentError::new(
                 AgentErrorKind::ExternalBindingUnavailable,
                 format!("a required tool executor binding has a different identity: {id}"),
-            ),
+            )
+            .with_binding_change(crate::BindingChange::ToolBinding {
+                tool: id.to_string(),
+            }),
             ToolBindingError::Descriptor(_) => AgentError::new(
                 AgentErrorKind::Session,
                 "durable tool registry failed exact reconstruction",

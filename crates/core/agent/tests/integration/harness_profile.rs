@@ -460,6 +460,15 @@ async fn foreign_plan_model_binding_is_rejected() -> TestResult<()> {
         "unexpected error: {}",
         error.message()
     );
+    assert_eq!(
+        error.binding_change(),
+        Some(&plakous_agent::BindingChange::Route {
+            recorded: "test.route".to_owned(),
+            current: "foreign.route".to_owned(),
+        }),
+        "{}",
+        error.message()
+    );
 
     let (_foreign_directory, foreign_workspace) = workspace()?;
     let environment_model = Arc::new(SilentModel::new("test.route")?);
@@ -474,7 +483,13 @@ async fn foreign_plan_model_binding_is_rejected() -> TestResult<()> {
     assert!(
         environment_error
             .message()
-            .contains("execution-environment")
+            .contains("bound to a different execution environment"),
+        "{}",
+        environment_error.message()
+    );
+    assert_eq!(
+        environment_error.binding_change(),
+        Some(&plakous_agent::BindingChange::ExecutionEnvironment)
     );
 
     let registry_model = Arc::new(SilentModel::new("test.route")?);

@@ -53,6 +53,7 @@ pub struct AgentError {
     model_error: Option<Box<ModelError>>,
     tool_kind: Option<ToolRuntimeErrorKind>,
     store_error: Option<SessionStoreError>,
+    binding_change: Option<Box<crate::BindingChange>>,
 }
 
 impl AgentError {
@@ -70,7 +71,20 @@ impl AgentError {
             model_error: None,
             tool_kind: None,
             store_error: None,
+            binding_change: None,
         }
+    }
+
+    /// Names the frozen binding input this build reconstructs differently,
+    /// when an exact reopen refused for that reason.
+    #[must_use]
+    pub fn binding_change(&self) -> Option<&crate::BindingChange> {
+        self.binding_change.as_deref()
+    }
+
+    pub(crate) fn with_binding_change(mut self, change: crate::BindingChange) -> Self {
+        self.binding_change = Some(Box::new(change));
+        self
     }
 
     /// Returns the stable category.
@@ -159,6 +173,7 @@ impl AgentError {
             model_error: Some(Box::new(error)),
             tool_kind: None,
             store_error: None,
+            binding_change: None,
         }
     }
 
@@ -175,6 +190,7 @@ impl AgentError {
             model_error: Some(Box::new(error)),
             tool_kind: None,
             store_error: None,
+            binding_change: None,
         }
     }
 
@@ -185,6 +201,7 @@ impl AgentError {
             model_error: Some(Box::new(error)),
             tool_kind: None,
             store_error: None,
+            binding_change: None,
         }
     }
 
@@ -200,6 +217,7 @@ impl AgentError {
             model_error: None,
             tool_kind: Some(error.kind()),
             store_error: None,
+            binding_change: None,
         }
     }
 
@@ -214,6 +232,7 @@ impl AgentError {
             model_error: None,
             tool_kind: None,
             store_error: Some(error),
+            binding_change: None,
         }
     }
 
@@ -226,6 +245,7 @@ impl AgentError {
             model_error: None,
             tool_kind: None,
             store_error: Some(error),
+            binding_change: None,
         }
     }
 
@@ -242,6 +262,7 @@ impl AgentError {
             model_error: model_error.map(Box::new),
             tool_kind,
             store_error,
+            binding_change: None,
         }
     }
 }
@@ -256,6 +277,7 @@ impl fmt::Debug for AgentError {
             .field("model_error", &self.model_error)
             .field("tool_kind", &self.tool_kind)
             .field("store_error", &self.store_error)
+            .field("binding_change", &self.binding_change)
             .finish()
     }
 }

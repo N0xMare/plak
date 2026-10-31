@@ -151,10 +151,16 @@ pub(super) fn runtime_rehydration_error(error: crate::RuntimeRehydrationError) -
 }
 
 pub(super) fn profile_construction_error(error: &ProfileError) -> AgentError {
-    AgentError::new(
+    let failure = AgentError::new(
         AgentErrorKind::InvalidInput,
         format!("harness profile construction failed: {error}"),
-    )
+    );
+    match error {
+        ProfileError::PlanModelBindingMismatch { change } => {
+            failure.with_binding_change(change.clone())
+        }
+        _ => failure,
+    }
 }
 
 impl RestoredContinuationFrame {

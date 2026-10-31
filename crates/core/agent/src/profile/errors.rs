@@ -112,8 +112,11 @@ pub enum ProfileError {
         source_id: String,
     },
     /// Explicit plan binding does not match the selected model adapter facts.
-    #[error("resolved harness plan is bound to a different model/route/adapter")]
-    PlanModelBindingMismatch,
+    #[error("resolved harness plan is bound to a different {change}")]
+    PlanModelBindingMismatch {
+        /// The first differing binding input.
+        change: crate::BindingChange,
+    },
     /// Explicit plan tool exposure disagrees with the provided exposure map.
     #[error("resolved harness plan tool exposure disagrees with the tool exposure map")]
     PlanToolExposureMismatch,

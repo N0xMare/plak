@@ -681,7 +681,8 @@ impl PreparedAgent {
             return Err(AgentError::new(
                 AgentErrorKind::IncompatibleSession,
                 "builder presentation disagrees with durable tool semantics",
-            ));
+            )
+            .with_binding_change(crate::BindingChange::ToolPresentation));
         }
         let stable_request_prefix = stable_prefix_from_effective_configuration(
             &builder.provider_configuration,
@@ -887,7 +888,8 @@ fn adopt_persisted_tool_semantics(
                 return Err(AgentError::new(
                     AgentErrorKind::InvalidInput,
                     "durable local composition descriptor disagrees with reconstructed tool semantics",
-                ));
+                )
+                .with_binding_change(crate::BindingChange::ToolPresentation));
             }
             local_composition.descriptor = reconstructed;
         }

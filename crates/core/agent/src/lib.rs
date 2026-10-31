@@ -59,6 +59,7 @@
 
 #![forbid(unsafe_code)]
 
+mod binding_change;
 mod checkpoint_bundle;
 mod compaction_verdict;
 mod context_source;
@@ -87,6 +88,7 @@ mod usage;
 /// Items in this namespace are deliberately nameable but are not part of the
 /// supported `plakous-agent` compatibility inventory.
 pub mod internal {
+    pub use crate::binding_change::BindingChange;
     pub use crate::checkpoint_bundle::{
         CheckpointBundleError, CheckpointBundleStats, CheckpointObjectBundle, RUNTIME_FORMAT_EPOCH,
         RuntimeCheckpointCodec, RuntimeCheckpointInspection, RuntimeObject, RuntimeObjectAddress,
@@ -274,15 +276,15 @@ pub(crate) use internal::{
 pub use internal::{
     AbandonedTurnClaim, AbandonedTurnReport, AbandonmentCause, Actor, Agent, AgentBuilder,
     AgentConfig, AgentError, AgentErrorKind, AgentEvent, AgentEventKind, AgentId,
-    AgentRequestPolicy, AgentViewReducer, AgentViewSnapshot, AgentViewState, AttemptId, BranchId,
-    CachePreferenceStrategy, CallId, CancellationStatus, CapabilityRequirement, CheckpointId,
-    ChildExitEscalation, ChildProcessExit, ChildProcessKind, Clock, CommandAck,
-    CommandAckDisposition, CommandId, CompactionEventOutcome, CompactionEventReason,
-    CompactionRefusalReason, CompactionRung, CompactionSummary, CompilerModelFacts,
-    CompilerRuntimeFacts, CompilerToolFacts, ContentBlock, ContextCapacityFailure,
-    ContextOverflowRemedy, ContextSourceCatalog, ContextSourceResolver, ContextSourceSelector,
-    ContinuationPreferenceStrategy, ControlError, ControlErrorKind, ConversationItem,
-    ConversationItemView, CredentialProviderLabel, CredentialRefreshDetail,
+    AgentRequestPolicy, AgentViewReducer, AgentViewSnapshot, AgentViewState, AttemptId,
+    BindingChange, BranchId, CachePreferenceStrategy, CallId, CancellationStatus,
+    CapabilityRequirement, CheckpointId, ChildExitEscalation, ChildProcessExit, ChildProcessKind,
+    Clock, CommandAck, CommandAckDisposition, CommandId, CompactionEventOutcome,
+    CompactionEventReason, CompactionRefusalReason, CompactionRung, CompactionSummary,
+    CompilerModelFacts, CompilerRuntimeFacts, CompilerToolFacts, ContentBlock,
+    ContextCapacityFailure, ContextOverflowRemedy, ContextSourceCatalog, ContextSourceResolver,
+    ContextSourceSelector, ContinuationPreferenceStrategy, ControlError, ControlErrorKind,
+    ConversationItem, ConversationItemView, CredentialProviderLabel, CredentialRefreshDetail,
     CredentialRefreshDiagnostic, CredentialRefreshFailureClass, CredentialRefreshFailureReason,
     CredentialRefreshPhase, CredentialWait, DEFAULT_STORE_OPERATION_TIMEOUT, DataClassification,
     Digest, DigestDomain, DurabilityAttemptKind, DurabilityAttemptOutcome, EffectDecisionChoice,

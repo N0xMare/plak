@@ -5,7 +5,7 @@ use plakous_agent::internal::facade_support::{
 use plakous_agent::internal::{
     SessionStoreCapacity, SessionStoreError, StoreAdmission, StoreCapacityBound,
 };
-use plakous_agent::{AgentError, AgentErrorKind};
+use plakous_agent::{AgentError, AgentErrorKind, BindingChange};
 use plakous_model::StableRequestPrefixField;
 use std::fmt;
 
@@ -130,6 +130,7 @@ pub struct AgentSessionsError {
     released: Option<Box<SessionLocator>>,
     session: Option<SessionId>,
     pressure: Option<Box<SessionStorePressure>>,
+    binding_change: Option<Box<BindingChange>>,
 }
 
 impl AgentSessionsError {
@@ -141,6 +142,7 @@ impl AgentSessionsError {
             released: None,
             session: None,
             pressure: None,
+            binding_change: None,
         }
     }
 
@@ -163,6 +165,7 @@ impl AgentSessionsError {
             released: None,
             session: None,
             pressure: None,
+            binding_change: None,
         }
     }
 
@@ -195,6 +198,13 @@ impl AgentSessionsError {
         self.session
     }
 
+    /// Names the frozen binding input this build reconstructs differently,
+    /// when an exact open or its verification refused for that reason.
+    #[must_use]
+    pub fn binding_change(&self) -> Option<&BindingChange> {
+        self.binding_change.as_deref()
+    }
+
     /// Returns the aggregate bound and class of a
     /// [`AgentSessionsErrorKind::StoragePressure`] refusal, when the refused
     /// write was held to an admission class.
@@ -213,6 +223,12 @@ impl fmt::Display for AgentSessionsError {
 impl std::error::Error for AgentSessionsError {}
 
 pub(super) fn runtime_error(error: &AgentError) -> AgentSessionsError {
+    let mut mapped = runtime_error_kind(error);
+    mapped.binding_change = error.binding_change().cloned().map(Box::new);
+    mapped
+}
+
+fn runtime_error_kind(error: &AgentError) -> AgentSessionsError {
     if let Some(origin) = agent_store_origin(error) {
         return store_origin_error(origin);
     }

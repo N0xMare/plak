@@ -1,3 +1,5 @@
+use crate::BindingChange;
+
 use super::{
     CapabilityRequirement, CompilerModelFacts, Digest, EffectiveProviderConfigurationId,
     HarnessCompilerInputs, HarnessProfileId, HarnessProfileSpec, InstructionBlock,
@@ -231,21 +233,42 @@ impl ResolvedHarnessPlan {
     /// Returns [`ProfileError::PlanModelBindingMismatch`] on disagreement.
     pub fn ensure_model_binding(&self, model: &CompilerModelFacts) -> Result<(), ProfileError> {
         let bound = self.model_facts();
-        if bound.selected_provider_configuration_id() != self.selected_provider_configuration_id()
+        // The most specific differing input is reported first; the accepted
+        // set is exactly the conjunction of every comparison.
+        let pair = |recorded: &dyn std::fmt::Display, current: &dyn std::fmt::Display| {
+            (recorded.to_string(), current.to_string())
+        };
+        let change = if bound.protocol != model.protocol {
+            let (recorded, current) = pair(&bound.protocol, &model.protocol);
+            Some(BindingChange::Protocol { recorded, current })
+        } else if bound.route() != model.route() {
+            let (recorded, current) = pair(bound.route(), model.route());
+            Some(BindingChange::Route { recorded, current })
+        } else if bound.model != model.model {
+            let (recorded, current) = pair(&bound.model, &model.model);
+            Some(BindingChange::Model { recorded, current })
+        } else if bound.model_adapter_profile() != model.model_adapter_profile() {
+            let (recorded, current) =
+                pair(bound.model_adapter_profile(), model.model_adapter_profile());
+            Some(BindingChange::AdapterProfile { recorded, current })
+        } else if bound.model_binding_digest != model.model_binding_digest {
+            Some(BindingChange::ModelCapabilities)
+        } else if bound.selected_provider_configuration_id()
+            != self.selected_provider_configuration_id()
             || bound.effective_provider_configuration_id()
                 != self.effective_provider_configuration_id()
-            || bound.route() != model.route()
-            || bound.model_adapter_profile() != model.model_adapter_profile()
             || self.selected_provider_configuration_id()
                 != model.selected_provider_configuration_id()
             || self.effective_provider_configuration_id()
                 != model.effective_provider_configuration_id()
-            || bound.protocol != model.protocol
-            || bound.model != model.model
-            || bound.model_binding_digest != model.model_binding_digest
         {
-            return Err(ProfileError::PlanModelBindingMismatch);
+            Some(BindingChange::ProviderConfiguration)
+        } else {
+            None
+        };
+        match change {
+            Some(change) => Err(ProfileError::PlanModelBindingMismatch { change }),
+            None => Ok(()),
         }
-        Ok(())
     }
 }

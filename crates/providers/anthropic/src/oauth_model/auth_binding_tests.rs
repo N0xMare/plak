@@ -178,9 +178,10 @@ async fn exact_reopen(different_account: bool) -> TestResult {
         assert!(
             error
                 .to_string()
-                .contains("bound to a different model/route/adapter"),
+                .contains("resolved harness plan is bound to a different "),
             "{error}"
         );
+        assert!(error.binding_change().is_some(), "{error:?}");
         assert!(!error.to_string().contains("provider account changed"));
     } else {
         let DurableRuntimeOpen::Opened(agent) = result? else {

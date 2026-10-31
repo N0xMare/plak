@@ -60,10 +60,16 @@ pub(in crate::runtime) fn resolve_construction_harness_plan(
     if plan.tool_registry_digest() != registry_digest
         || plan.execution_environment_digest() != environment_digest
     {
+        let change = if plan.tool_registry_digest() == registry_digest {
+            crate::BindingChange::ExecutionEnvironment
+        } else {
+            crate::BindingChange::ToolRegistry
+        };
         return Err(AgentError::new(
             AgentErrorKind::InvalidInput,
-            "resolved harness plan is bound to different tool or execution-environment facts",
-        ));
+            format!("resolved harness plan is bound to a different {change}"),
+        )
+        .with_binding_change(change));
     }
     let derived_exposure = derive_plan_tool_exposure(&builder.tools, &plan)?;
     let tool_exposure_map = derived_exposure;

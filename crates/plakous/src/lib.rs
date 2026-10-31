@@ -198,6 +198,7 @@ pub mod agent {
         AgentViewReducer,
         AgentViewSnapshot,
         AgentViewState,
+        BindingChange,
         // Profiles / harness
         CachePreferenceStrategy,
         CancellationStatus,

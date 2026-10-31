@@ -445,7 +445,7 @@ fn unattached_binding_refusal_can_carry_via_reload_or_rebind() {
     app.agent_enabled = false;
     app.phase = "not_ready".into();
     app.status_detail = Some(
-        "resolve_failed: resolved harness plan is bound to a different model/route/adapter".into(),
+        "resolve_failed: resolved harness plan is bound to a different model capability binding (adapter revision, declared features or context contract)".into(),
     );
     app.apply_slash_effect(SlashEffect::Reload);
     assert!(

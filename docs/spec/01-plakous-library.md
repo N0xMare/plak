@@ -1730,6 +1730,21 @@ an account, profile, model-binding or admission mismatch stays `Revalidation`,
 so exact-URL auth never reads as a build problem. A session is never
 half-recoverable: it opens, or it is refused.
 
+A reopen refused because the reopening build derives a different frozen binding
+input names that input. `plakous::agent::BindingChange`, carried by
+`AgentError::binding_change` and `AgentSessionsError::binding_change`, is one
+of: the model protocol, route, model or model adapter profile (each with its
+recorded and current identifier), the model capability binding (adapter
+revision, declared features or context contract, compared by digest), the
+provider configuration, one tool's executor binding identity (named by its
+executor id), the tool presentation, the tool registry, or the execution
+environment. A plan model-binding refusal reads `resolved harness plan is bound
+to a different <change>`; the most specific differing input is named first, and
+the comparison accepts only fully identical bindings. Identifiers are build and catalog
+constants; no credential, account bytes or content enters a change. A missing or
+quarantined credential, an unavailable binding, a recovery requirement and a
+storage failure carry no binding change.
+
 Resume seeds only the safe committed projection. It creates no synthetic turn,
 does not expose working output as committed, and performs no implicit provider
 or tool dispatch.

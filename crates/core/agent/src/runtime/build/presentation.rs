@@ -264,7 +264,8 @@ pub(in crate::runtime) fn validate_reopened_projection(
         }
         _ => "builder projection mode disagrees with durable tool semantics",
     };
-    Err(AgentError::new(AgentErrorKind::InvalidInput, message))
+    Err(AgentError::new(AgentErrorKind::InvalidInput, message)
+        .with_binding_change(crate::BindingChange::ToolPresentation))
 }
 
 pub(in crate::runtime) fn construction_tool_presentation(
