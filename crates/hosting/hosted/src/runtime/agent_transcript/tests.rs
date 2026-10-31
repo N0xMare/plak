@@ -484,6 +484,17 @@ fn mail_is_a_tree_notice_and_harness_notes_and_hidden_reasoning_have_no_row() {
     );
 }
 
+/// A placeholder pass leaves a harness-authored user note. It is not a prompt
+/// and not a steer: the transcript draws no row for it.
+#[test]
+fn a_placeholder_harness_note_is_not_a_user_or_steer_row() {
+    let note = "[plak: oldest tool results replaced this round]\nreplaced 1 oldest tool result";
+    let mut harness = item(Actor::User, vec![TranscriptPart::Text(note)]);
+    harness.harness_authored = true;
+    let rows = rows_from_items(&[harness], locator(), &[], false);
+    assert!(rows.is_empty(), "{rows:?}");
+}
+
 #[test]
 fn a_call_joins_its_result_by_call_id_and_a_credential_in_the_result_is_redacted() {
     let preview = format!("token={SECRET}\nok");
