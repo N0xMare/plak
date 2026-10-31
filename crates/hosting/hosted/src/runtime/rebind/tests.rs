@@ -962,9 +962,13 @@ fn a_rebind_keeps_the_sessions_frozen_mcp_tools_without_listing_again() {
     let successor = config.store.load(&config.session.id).unwrap();
     assert_eq!(successor.model.as_deref(), Some("gpt-5.6-sol"));
     assert_eq!(successor.frozen_tools.as_ref(), Some(&frozen));
-    let registrations =
-        crate::agent::injected_root_tool_registrations(&frozen, &successor, &config.state_roots)
-            .unwrap();
+    let registrations = crate::agent::injected_root_tool_registrations(
+        &frozen,
+        &successor,
+        &config.state_roots,
+        crate::mcp_binding::McpBinding::Lease,
+    )
+    .unwrap();
     assert!(
         registrations
             .iter()

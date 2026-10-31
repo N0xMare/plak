@@ -17,7 +17,9 @@ use std::sync::Arc;
 /// The registrations a root session's frozen optional tools bind to, for an
 /// injected offline runtime that compiles its own registry over them: the
 /// same plan a native Codex runtime binds, MCP tools rebuilt from their
-/// frozen records when the record has them.
+/// frozen records when the record has them. `mcp_binding` is how its MCP
+/// servers are reached: leased, or (for an exact-reopen probe) rebuilt from
+/// the frozen records with no server started.
 ///
 /// # Errors
 ///
@@ -26,6 +28,7 @@ pub fn injected_root_tool_registrations(
     frozen: &crate::frozen_tools::FrozenRootTools,
     session: &crate::sessions::SessionRecord,
     state_roots: &ProductStateRoots,
+    mcp_binding: crate::mcp_binding::McpBinding,
 ) -> Result<Vec<plakous::tools::ToolRegistration>, String> {
     let tools = frozen.selection();
     tools
@@ -39,7 +42,7 @@ pub fn injected_root_tool_registrations(
             .account_name(NativeProvider::Codex),
         &session.workspace_root,
         state_roots,
-        crate::mcp_binding::McpBinding::Lease,
+        mcp_binding,
     )
     .map_err(|failure| failure.message().to_owned())?;
     let extensions = ProductToolExtensions::empty()

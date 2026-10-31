@@ -824,6 +824,8 @@ async fn bind_process_child(
 /// starts no server and a session's runtimes share one binding.
 struct RootTools {
     frozen: plakous_hosted::frozen_tools::FrozenRootTools,
+    /// Leased, or for the reopen probe rebuilt from frozen records.
+    mcp_binding: plakous_hosted::mcp_binding::McpBinding,
     session: product_sessions::SessionRecord,
     state_roots: product_agent::ProductStateRoots,
     bound: std::sync::OnceLock<Result<Vec<plakous::tools::ToolRegistration>, String>>,
@@ -834,6 +836,7 @@ impl RootTools {
         paths: &product_paths::PlakPaths,
         state_roots: &product_agent::ProductStateRoots,
         session: &product_sessions::SessionRecord,
+        face: OfflineFace,
     ) -> Result<Self, String> {
         let frozen = match &session.frozen_tools {
             Some(frozen) => frozen.clone(),
@@ -845,6 +848,11 @@ impl RootTools {
         };
         Ok(Self {
             frozen,
+            mcp_binding: if face == OfflineFace::Verify {
+                plakous_hosted::mcp_binding::McpBinding::Recorded
+            } else {
+                plakous_hosted::mcp_binding::McpBinding::Lease
+            },
             session: session.clone(),
             state_roots: state_roots.clone(),
             bound: std::sync::OnceLock::new(),
@@ -858,6 +866,7 @@ impl RootTools {
                     &self.frozen,
                     &self.session,
                     &self.state_roots,
+                    self.mcp_binding,
                 )
             })
             .clone()
@@ -959,7 +968,7 @@ impl OfflineSelection {
         .map_err(|error| format!("offline evidence log: {error}"))?;
         let workspace = cwd.to_path_buf();
         let plan = Arc::clone(&self.plan);
-        let root_tools = Arc::new(RootTools::new(paths, state_roots, &session)?);
+        let root_tools = Arc::new(RootTools::new(paths, state_roots, &session, face)?);
         // One session, one script position. The host may build more than one
         // runtime for a session, and a per-binding cursor would restart the
         // script at step one each time, which is silent and would look like the

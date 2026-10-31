@@ -4760,6 +4760,79 @@ fn v8_exports_refuse_file_import_without_creating_sessions() {
     }
 }
 
+/// The exact-reopen probe never starts a session's MCP server: it rebuilds
+/// the root's MCP tools from the records the session froze at creation. A
+/// later run that reopens the session leases the server again.
+#[test]
+fn the_reopen_probe_never_spawns_a_sessions_mcp_server() {
+    let fixture = Fixture::new(&json!({
+        "version": 1, "repeat_last_step": true,
+        "steps": [{"output": {"text": "answered beside the mcp tools"}}]
+    }));
+    let spawns = fixture.root.join("mcp-spawns.log");
+    let wrapper = fixture.root.join("mcp-wrapper.sh");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\necho spawn >> '{}'\nexec '{}' \"$@\"\n",
+            spawns.display(),
+            fake_mcp_server().display()
+        ),
+    )
+    .expect("wrapper");
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).expect("mode");
+    let config = fixture.home().join("config.toml");
+    let mut body = std::fs::read_to_string(&config).expect("config");
+    write!(
+        body,
+        "\n[mcp_servers.fake]\ntransport = \"stdio\"\ncommand = {:?}\n",
+        wrapper.to_str().expect("wrapper path")
+    )
+    .expect("config body");
+    write_private(&config, &body);
+    let lead = fixture.home().join("agents").join("lead.toml");
+    let mut body = std::fs::read_to_string(&lead).expect("lead template");
+    body.push_str("tools = [\"mcp:fake\"]\n");
+    write_private(&lead, &body);
+    let spawned = || std::fs::read_to_string(&spawns).map_or(0, |log| log.lines().count());
+
+    let first = run_cli(
+        &fixture,
+        &[
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--effort",
+            "medium",
+            "--print-session-id",
+            "--",
+            "first prompt",
+        ],
+    );
+    assert!(first.status.success(), "{}\n{}", first.stdout, first.stderr);
+    let session = first.session_id();
+    let created = spawned();
+    assert!(
+        created >= 1,
+        "the creation listed the server and froze its tools"
+    );
+
+    let probe = run_cli(&fixture, &["version", "--reopen-probe", &session]);
+    assert!(probe.status.success(), "{}", probe.stderr);
+    let verdict: Value = serde_json::from_str(&probe.stdout).expect("verdict json");
+    assert_eq!(verdict["verdict"], "opens", "{verdict}");
+    assert_eq!(spawned(), created, "the probe started the mcp server");
+
+    let again = run_cli(
+        &fixture,
+        &["run", "--session", &session, "--", "second prompt"],
+    );
+    assert!(again.status.success(), "{}\n{}", again.stdout, again.stderr);
+    assert!(spawned() > created, "a reopening run leases the server");
+}
+
 /// A Code Mode cell reaches a template's MCP tool as a nested call: the
 /// product catalog admits it, and the cell gets the server's answer.
 #[test]

@@ -20,7 +20,7 @@ pub use secret_value::NamedSecretValue;
 
 /// How a compile reaches the MCP servers its selection names.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum McpBinding {
+pub enum McpBinding {
     /// Start or lease each server: a create, open or spawn.
     Lease,
     /// Rebuild the tools from the session's frozen records with no server

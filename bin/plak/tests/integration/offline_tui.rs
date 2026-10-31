@@ -2549,7 +2549,7 @@ fn a_binding_carry_counts_the_finished_sub_agents_it_does_not_restore() {
     terminal.send(b"run one child before the new adapter\r");
     terminal.wait_screen("the child's work is adopted");
     terminal.wait_absent("Esc stop");
-    let before = fixture.session_ids().len();
+    let earlier = fixture.session_ids();
     script["adapter_profile"] = json!("offline-loopback-adapter-v2");
     fixture.write_script(&script);
     terminal.send(b"/reload\r");
@@ -2565,9 +2565,25 @@ fn a_binding_carry_counts_the_finished_sub_agents_it_does_not_restore() {
     });
     assert!(screen.contains("offline-loopback-adapter-v2"), "{screen}");
     terminal.wait_ready();
-    // The carry note proves the successor; a finished child's own record may
-    // be listed late, so the count only has to grow.
-    assert!(fixture.session_ids().len() > before, "a carried successor");
+    // Exactly one session was carried forward, from a session that existed
+    // before the reload.
+    let database = rusqlite::Connection::open(
+        plak::home::paths::PlakPaths::explicit(fixture.home()).product_database(),
+    )
+    .expect("product database");
+    let mut carried = database
+        .prepare(
+            "SELECT source_session_id FROM sessions \
+             WHERE source_operation_id LIKE 'plak:carry-forward:%'",
+        )
+        .expect("carried query");
+    let sources = carried
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("carried rows")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("carried sources");
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    assert!(earlier.contains(&sources[0]), "{sources:?}");
     terminal.quit();
 }
 
