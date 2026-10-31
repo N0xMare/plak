@@ -13,9 +13,10 @@ use http_body_util::Full;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use plakous_http::{
-    AddressPolicy, Bytes, CancellationToken, Client, ErrorKind, ExchangeControl, HeaderMap,
-    HeaderValue, LimitKind, Limits, Method, Origin, Phase, Request, SensitiveBytes, StatusCode,
-    TlsCause, TransmissionFact, Version, WireProtocol, sensitive_header_value,
+    AddressPolicy, Bytes, CancellationToken, Client, ErrorKind, ExchangeControl, Failure,
+    HeaderMap, HeaderValue, LimitKind, Limits, Method, Origin, Phase, Request, Response,
+    SensitiveBytes, StatusCode, TlsCause, TransmissionFact, Version, WireProtocol,
+    sensitive_header_value,
 };
 use rcgen::{CertifiedKey, generate_simple_self_signed};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -336,6 +337,53 @@ fn make_request(
 
 fn control() -> ExchangeControl {
     ExchangeControl::new(Instant::now() + Duration::from_secs(10))
+}
+
+/// Keeps a paused current-thread runtime from auto-advancing. It parks with
+/// nothing ready while loopback setup is still in flight, and the absolute
+/// deadline is then the next timer. Drop the sender once the peer has admitted
+/// the exchange. A 15 s wall bound releases the hold if admission never
+/// arrives, so auto-advance resumes and the product's own deadlines fail the
+/// exchange.
+fn inhibit_auto_advance() -> (std::sync::mpsc::Sender<()>, JoinHandle<()>) {
+    let (hold_tx, hold_rx) = std::sync::mpsc::channel::<()>();
+    let hold = tokio::task::spawn_blocking(move || {
+        let _ = hold_rx.recv_timeout(Duration::from_secs(15));
+    });
+    (hold_tx, hold)
+}
+
+/// Fails fast when the exchange ends before the peer signal, with that
+/// outcome in the error. A missed admission then surfaces as the product's
+/// deadline instead of a silent wait.
+async fn wait_for_peer_signal(
+    signal: oneshot::Receiver<()>,
+    exchange: &mut JoinHandle<Result<Response, Failure>>,
+) -> TestResult<()> {
+    tokio::select! {
+        biased;
+        outcome = &mut *exchange => Err(exchange_ended_before_signal(outcome)),
+        result = signal => {
+            result.map_err(|_| {
+                io::Error::other("peer signal dropped before the exchange was ready")
+            })?;
+            Ok(())
+        }
+    }
+}
+
+fn exchange_ended_before_signal(
+    outcome: Result<Result<Response, Failure>, tokio::task::JoinError>,
+) -> TestError {
+    let detail = match outcome {
+        Ok(Ok(response)) => format!(
+            "exchange finished before the peer was ready with status {}",
+            response.status()
+        ),
+        Ok(Err(failure)) => format!("exchange ended before the peer was ready: {failure}"),
+        Err(error) => format!("exchange task ended before the peer was ready: {error}"),
+    };
+    io::Error::other(detail).into()
 }
 
 async fn required_chunk(body: &mut plakous_http::ResponseBody) -> TestResult<Bytes> {
@@ -740,8 +788,11 @@ async fn cancellation_and_body_drop_close_and_join_connection_work() -> TestResu
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn admitted_exchange_deadline_is_conservative_and_joins_work() -> TestResult {
+    // A 100ms absolute deadline includes resolution, connect and TLS. A
+    // blocking hold freezes auto-advance until the peer has the request.
+    // One millisecond before the deadline the exchange is still open.
     let endpoint = make_endpoint(&[b"http/1.1"]).await?;
     let Endpoint {
         listener,
@@ -749,11 +800,15 @@ async fn admitted_exchange_deadline_is_conservative_and_joins_work() -> TestResu
         client_config,
         origin,
     } = endpoint;
+    let (admitted_tx, admitted_rx) = oneshot::channel();
     let (closed_tx, closed_rx) = oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await?;
         let mut stream = acceptor.accept(stream).await?;
         let _request = read_request(&mut stream).await?;
+        admitted_tx
+            .send(())
+            .map_err(|()| io::Error::other("admitted receiver dropped"))?;
         let mut byte = [0_u8; 1];
         let closed = !matches!(stream.read(&mut byte).await, Ok(1));
         closed_tx
@@ -771,18 +826,50 @@ async fn admitted_exchange_deadline_is_conservative_and_joins_work() -> TestResu
         Bytes::new(),
         &limits,
     )?;
-    let failure = client
-        .execute(
-            request,
-            ExchangeControl::new(Instant::now() + Duration::from_millis(100)),
-        )
+    let (hold_tx, hold) = inhibit_auto_advance();
+    let deadline = Instant::now() + Duration::from_millis(100);
+    let mut exchange = tokio::spawn(async move {
+        client
+            .execute(request, ExchangeControl::new(deadline))
+            .await
+    });
+    wait_for_peer_signal(admitted_rx, &mut exchange).await?;
+    drop(hold_tx);
+    hold.await?;
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    let deadline_at = tokio::time::Instant::from_std(deadline);
+    let now = tokio::time::Instant::now();
+    if let Some(early) = deadline_at.checked_sub(Duration::from_millis(1))
+        && let Some(step) = early.checked_duration_since(now)
+    {
+        tokio::time::advance(step).await;
+    }
+    assert!(
+        !exchange.is_finished(),
+        "admitted exchange finished before its deadline"
+    );
+    let now = tokio::time::Instant::now();
+    let past_deadline =
+        deadline_at.checked_duration_since(now).unwrap_or_default() + Duration::from_millis(1);
+    // Tokio rounds timers up to the next millisecond tick. One extra
+    // millisecond lets the deadline fire while time is still paused.
+    tokio::time::advance(past_deadline).await;
+    // Resuming lets the connection abort and the peer observe the close
+    // on the wall clock. The phase was chosen on the paused clock.
+    tokio::time::resume();
+    // This wall bound only waits for the abort to be observed; it is not
+    // the deadline under test.
+    let failure = timeout(Duration::from_secs(15), exchange)
         .await
+        .map_err(|_| io::Error::other("admitted exchange did not reach its deadline"))??
         .err()
         .ok_or_else(|| io::Error::other("timed-out exchange unexpectedly succeeded"))?;
     assert_eq!(failure.phase(), Phase::ResponseHead);
     assert_eq!(failure.kind(), ErrorKind::DeadlineExceeded);
     assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
-    assert!(timeout(Duration::from_secs(2), closed_rx).await??);
+    assert!(timeout(Duration::from_secs(15), closed_rx).await??);
     server.await??;
     Ok(())
 }
@@ -879,7 +966,19 @@ async fn stalled_request_write_after_body_poll_keeps_write_deadline() -> TestRes
     Ok(())
 }
 
-#[tokio::test]
+fn h2_body_idle_limits(stalled: bool) -> Limits {
+    Limits {
+        request_write_idle_timeout: Duration::from_millis(500),
+        response_head_timeout: if stalled {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_secs(1)
+        },
+        ..Limits::default()
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn http2_steady_and_stalled_body_consumption_obey_idle_bound() -> TestResult {
     use http_body_util::BodyExt as _;
     for stalled in [false, true] {
@@ -889,11 +988,17 @@ async fn http2_steady_and_stalled_body_consumption_obey_idle_bound() -> TestResu
             client_config,
             origin,
         } = make_endpoint(&[b"h2"]).await?;
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let (go_tx, go_rx) = oneshot::channel();
         let (release, released) = oneshot::channel();
         let released = Arc::new(tokio::sync::Mutex::new(Some(released)));
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await?;
             let stream = acceptor.accept(stream).await?;
+            // TLS is up. The stall stopwatch starts after resume, so setup is
+            // outside the 2s cap. The body pauses below are real.
+            let _ = ready_tx.send(());
+            let _ = go_rx.await;
             let service = service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
                 let released = Arc::clone(&released);
                 async move {
@@ -920,15 +1025,7 @@ async fn http2_steady_and_stalled_body_consumption_obey_idle_bound() -> TestResu
                 .await;
             Ok::<_, TestError>(())
         });
-        let limits = Limits {
-            request_write_idle_timeout: Duration::from_millis(500),
-            response_head_timeout: if stalled {
-                Duration::from_secs(5)
-            } else {
-                Duration::from_secs(1)
-            },
-            ..Limits::default()
-        };
+        let limits = h2_body_idle_limits(stalled);
         let client = make_client(client_config, limits.clone())?;
         let request = make_request(
             origin,
@@ -938,27 +1035,47 @@ async fn http2_steady_and_stalled_body_consumption_obey_idle_bound() -> TestResu
             Bytes::from(vec![b'x'; 1024 * 1024]),
             &limits,
         )?;
+        let (hold_tx, hold) = inhibit_auto_advance();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut exchange = tokio::spawn(async move {
+            client
+                .execute(request, ExchangeControl::new(deadline))
+                .await
+        });
+        wait_for_peer_signal(ready_rx, &mut exchange).await?;
+        drop(hold_tx);
+        hold.await?;
+        tokio::time::resume();
+        let _ = go_tx.send(());
+        // The idle and the 2s stall cap are real time after the handshake.
+        // Joining is a hang bound, not the budget under test.
         let start = Instant::now();
-        let result = client
-            .execute(
-                request,
-                ExchangeControl::new(start + Duration::from_secs(10)),
-            )
-            .await;
+        let result = timeout(Duration::from_secs(15), exchange)
+            .await
+            .map_err(|_| io::Error::other("h2 exchange did not finish"))?
+            .map_err(|error| io::Error::other(format!("h2 exchange task failed: {error}")))?;
+        let elapsed = start.elapsed();
         let _ = release.send(());
         if stalled {
-            assert!(start.elapsed() < Duration::from_secs(2));
+            assert!(
+                elapsed < Duration::from_secs(2),
+                "stalled elapsed {elapsed:?}"
+            );
             let failure = result.err().ok_or("stalled H2 request succeeded")?;
             assert_eq!(failure.phase(), Phase::RequestWriteOrResponseHead);
             assert_eq!(failure.kind(), ErrorKind::DeadlineExceeded);
             assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
         } else {
-            assert!(start.elapsed() > limits.request_write_idle_timeout);
+            assert!(
+                elapsed > limits.request_write_idle_timeout,
+                "elapsed {elapsed:?} did not outlive the idle bound"
+            );
             let mut body = result?.into_body();
             assert_eq!(required_chunk(&mut body).await?, "ok");
             assert!(body.next_chunk().await.is_none());
         }
-        timeout(Duration::from_secs(2), server).await???;
+        timeout(Duration::from_secs(15), server).await???;
+        tokio::time::pause();
     }
     Ok(())
 }
@@ -1006,8 +1123,13 @@ async fn slow_allowed_write_does_not_spend_response_head_budget() -> TestResult 
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn asymmetric_write_and_head_timeouts_are_sequential() -> TestResult {
+    // The server waits 100ms after it has the request: longer than the 30ms
+    // write idle, inside the 500ms head budget. A blocking hold freezes
+    // auto-advance until admission. Scheduling the write itself can spend
+    // that 30ms idle; the handshake does not, because the write clock starts
+    // after the connection is established.
     let endpoint = make_endpoint(&[b"http/1.1"]).await?;
     let Endpoint {
         listener,
@@ -1015,10 +1137,14 @@ async fn asymmetric_write_and_head_timeouts_are_sequential() -> TestResult {
         client_config,
         origin,
     } = endpoint;
+    let (admitted_tx, admitted_rx) = oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await?;
         let mut stream = acceptor.accept(stream).await?;
         let _request = read_request(&mut stream).await?;
+        admitted_tx
+            .send(())
+            .map_err(|()| io::Error::other("admitted receiver dropped"))?;
         tokio::time::sleep(Duration::from_millis(100)).await;
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
@@ -1039,9 +1165,26 @@ async fn asymmetric_write_and_head_timeouts_are_sequential() -> TestResult {
         Bytes::from_static(b"payload"),
         &limits,
     )?;
-    let mut body = client.execute(request, control()).await?.into_body();
+    let (hold_tx, hold) = inhibit_auto_advance();
+    let mut exchange = tokio::spawn(async move { client.execute(request, control()).await });
+    wait_for_peer_signal(admitted_rx, &mut exchange).await?;
+    drop(hold_tx);
+    hold.await?;
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    let started = tokio::time::Instant::now();
+    while !exchange.is_finished() && started.elapsed() < limits.response_head_timeout {
+        tokio::time::advance(Duration::from_millis(20)).await;
+    }
+    assert!(
+        exchange.is_finished(),
+        "asymmetric exchange did not finish inside the head budget"
+    );
+    let mut body = exchange.await??.into_body();
     assert_eq!(required_chunk(&mut body).await?, "ok");
     assert!(body.next_chunk().await.is_none());
+    tokio::time::resume();
     server.await??;
     Ok(())
 }
@@ -1413,7 +1556,7 @@ async fn held_streaming_body(
     response_body_timeout: Duration,
     control: ExchangeControl,
 ) -> TestResult<(
-    JoinHandle<Result<Option<Bytes>, plakous_http::Failure>>,
+    JoinHandle<Result<Option<Bytes>, Failure>>,
     oneshot::Sender<()>,
     JoinHandle<TestResult>,
 )> {
