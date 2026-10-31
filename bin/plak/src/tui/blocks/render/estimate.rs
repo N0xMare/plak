@@ -84,9 +84,9 @@ pub(in crate::tui::blocks) fn estimate_block_rows(
         // this estimate has to hold: a block the anchor lands on vanished
         // when it was measured, and the viewport fell to the tail.
         ScrollBlock::Assistant(text) if text.trim().is_empty() => 0,
+        ScrollBlock::Assistant(text) => estimate_assistant_rows(text, body_width),
         ScrollBlock::User { text, .. }
         | ScrollBlock::Steer { text, .. }
-        | ScrollBlock::Assistant(text)
         | ScrollBlock::Error(text)
         | ScrollBlock::Header(text) => estimate_wrapped_rows(text, body_width),
         ScrollBlock::Milestone { milestone, open } => {
@@ -211,6 +211,75 @@ fn estimate_fenced_source_rows(source: &str, markdown_width: usize) -> usize {
         .map(|line| estimate_code_line_rows(line, markdown_width))
         .fold(0usize, usize::saturating_add)
         .saturating_add(2)
+}
+
+/// Rows one assistant message paints.
+///
+/// Prose keeps the byte estimate. A fenced listing (indent of at most three,
+/// then a run of at least three backticks or tildes) charges each body line
+/// as a soft-wrapped code row, and never fewer than the byte estimate. The
+/// opening and closing fence lines stay on the byte estimate. The closing run
+/// is the same marker, at least as long, with only whitespace after it.
+fn estimate_assistant_rows(text: &str, body_width: usize) -> usize {
+    let width = body_width.max(1);
+    let mut total = 0usize;
+    let mut open: Option<(char, usize)> = None;
+    for line in text.split('\n') {
+        let rows = if let Some((marker, len)) = open {
+            if fence_closes(line, marker, len) {
+                open = None;
+                byte_rows(line, width)
+            } else {
+                estimate_code_line_rows(line, width).max(byte_rows(line, width))
+            }
+        } else if let Some(opened) = fence_opens(line) {
+            open = Some(opened);
+            byte_rows(line, width)
+        } else {
+            byte_rows(line, width)
+        };
+        total = total.saturating_add(rows);
+    }
+    total.max(1)
+}
+
+fn byte_rows(line: &str, width: usize) -> usize {
+    line.len().div_ceil(width.max(1)).max(1)
+}
+
+/// Opening fence: at most three spaces, then `` ` `` or `~` at least three
+/// long. A backtick fence's info string cannot itself contain a backtick.
+fn fence_opens(line: &str) -> Option<(char, usize)> {
+    let rest = fence_indent(line)?;
+    let marker = rest.chars().next()?;
+    if marker != '`' && marker != '~' {
+        return None;
+    }
+    let run = rest.chars().take_while(|ch| *ch == marker).count();
+    if run < 3 {
+        return None;
+    }
+    let after = &rest[marker.len_utf8() * run..];
+    if marker == '`' && after.contains('`') {
+        return None;
+    }
+    Some((marker, run))
+}
+
+fn fence_closes(line: &str, marker: char, min_len: usize) -> bool {
+    let Some(rest) = fence_indent(line) else {
+        return false;
+    };
+    let run = rest.chars().take_while(|ch| *ch == marker).count();
+    if run < min_len {
+        return false;
+    }
+    rest[marker.len_utf8() * run..].trim().is_empty()
+}
+
+fn fence_indent(line: &str) -> Option<&str> {
+    let spaces = line.chars().take_while(|ch| *ch == ' ').count();
+    (spaces <= 3).then_some(&line[spaces..])
 }
 
 /// Rows one code line paints.

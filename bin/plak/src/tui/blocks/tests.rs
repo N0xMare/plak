@@ -482,6 +482,31 @@ fn an_empty_assistant_block_estimates_the_nothing_it_draws() {
     );
 }
 
+/// Five code lines one cell shorter than the markdown width wrap under the
+/// rail. The fence-aware estimate is at least the painted row count.
+#[test]
+fn an_assistant_fence_estimates_wrapped_code_rows() {
+    let width = 40usize;
+    let body_width = width.saturating_sub(2);
+    let line = "a".repeat(body_width.saturating_sub(1));
+    let source = format!("```\n{line}\n{line}\n{line}\n{line}\n{line}\n```\n");
+    let block = ScrollBlock::Assistant(source);
+    let theme = crate::tui::Theme::dark();
+    let exact = render::block_lines(
+        &block,
+        &RowPlan::default(),
+        &theme,
+        width,
+        RenderPrefs::default(),
+    )
+    .len();
+    let estimated = render::estimate_rows_for_test(&block, width, RenderPrefs::default());
+    assert!(
+        estimated >= exact,
+        "five wrapped code lines: estimated {estimated}, painted {exact}"
+    );
+}
+
 #[test]
 fn a_bare_terminal_update_never_clears_a_recorded_duration() {
     // The yielded Compose head: `done:12.3s` measured at the exec terminal,
