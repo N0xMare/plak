@@ -167,6 +167,26 @@ fn product_diagnostics_are_listed_under_the_profiles() {
 }
 
 #[test]
+fn a_failed_config_is_one_diagnostic_not_no_matching_profiles() {
+    let mut app = App::new(launch_basic(), true);
+    app.activate_control_tab(ControlTab::Models);
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::Profiles(
+        ProfilesView {
+            diagnostics: vec![
+                "templates could not be loaded because config.toml failed: unknown config key: not_a_key"
+                    .into(),
+            ],
+            ..ProfilesView::default()
+        },
+    )));
+    let frame = super::super::test_support::render_to_string(&mut app, 100, 30);
+    assert!(frame.contains("templates could not be loaded"), "{frame}");
+    assert!(!frame.contains("No matching profiles"), "{frame}");
+    assert!(!frame.contains("does not exist"), "{frame}");
+    assert!(!frame.contains("custom"), "{frame}");
+}
+
+#[test]
 fn agents_name_resolves_like_the_list() {
     let mut app = App::new(launch_basic(), true);
     let action = app.open_profile_confirm("codex");

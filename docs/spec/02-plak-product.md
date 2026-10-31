@@ -4892,6 +4892,10 @@ profile and at most two differences, such as `claude-default · root effort
 xhigh (profile: high)` or `claude-default · worker card differs`, with a count
 for any others. Values and card names are cell-bounded; no template body or
 credential enters these labels.
+When `config.toml` fails to load, the product does not match the session
+against the default product and does not label it `custom`. `SessionProfile`
+names the chip `unavailable` with no differences, and still carries the
+session's own root and frozen cards.
 The inert TUI performs no profile matching.
 
 The queue panel is absent when the durable queue, admitted, unapplied steers
@@ -5212,8 +5216,13 @@ tab bar.
 opening the tab sends `ListProfiles`, and the product answers with a typed
 `Profiles` view — the rows, the row the config already points at, and one
 line for every profile file it left out and why (a file named like a
-built-in, an unknown key, a template that does not exist). The tab paints that
-view; it reads no file and resolves no name itself. The list has a Profiles
+built-in, an unknown key, a template that does not exist). When `config.toml`
+itself fails to load, that view has no rows and exactly one diagnostic,
+`templates could not be loaded because config.toml failed: <error>`. It does
+not fall back to the default product, and it does not report
+`agents/<name>.toml does not exist` once per profile. The tab paints that
+view; it reads no file and resolves no name itself. An empty list whose only
+content is that diagnostic is not `No matching profiles`. The list has a Profiles
 heading and a filter line (`type to filter`; every printable key filters,
 `/` included, and Esc clears the filter). `❯` marks the highlighted row and
 `default` marks the row the product reports: the profile brand-new sessions

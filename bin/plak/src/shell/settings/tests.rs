@@ -1704,3 +1704,92 @@ fn usage_watch_follows_the_open_tab_and_does_not_read() {
     handler.dispatch(SurfaceIntent::WatchUsage(false), facts(), &events);
     assert!(!handler.usage_watch_armed());
 }
+
+#[test]
+fn a_failed_config_loads_no_profile_templates_and_does_not_say_custom() {
+    let (_root, paths) = PlakPaths::isolated_test_home();
+    paths.ensure_layout().unwrap();
+    std::fs::write(paths.config_file(), "not_a_key = true\n").unwrap();
+    std::fs::create_dir_all(paths.home().join("profiles")).unwrap();
+    std::fs::write(
+        paths.home().join("profiles/mine.toml"),
+        "root = \"worker\"\nworking_set = [\"reviewer\"]\n",
+    )
+    .unwrap();
+    let session = plakous_hosted::runtime::SurfaceSession {
+        account: Some("claude".into()),
+        model: Some("claude-opus".into()),
+        effort: Some("xhigh".into()),
+        fast: false,
+        workspace: paths.home().to_path_buf(),
+        roster: None,
+        mcp: None,
+    };
+    let (events, rx) = host_event_sink();
+    send_profiles(&paths, &events);
+    send_session_profile(&paths, &session, &events);
+    let HostEvent::Extension(SurfaceObservation::Profiles(view)) = rx.try_recv().unwrap() else {
+        panic!("profiles view");
+    };
+    assert!(view.rows.is_empty(), "{view:?}");
+    assert_eq!(view.diagnostics.len(), 1, "{view:?}");
+    let diagnostic = &view.diagnostics[0];
+    assert!(
+        diagnostic.starts_with("templates could not be loaded because config.toml failed: "),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("unknown config key"), "{diagnostic}");
+    assert!(!diagnostic.contains("does not exist"), "{diagnostic}");
+    assert!(!diagnostic.contains("custom"), "{diagnostic}");
+    let HostEvent::Extension(SurfaceObservation::SessionProfile(row)) = rx.try_recv().unwrap()
+    else {
+        panic!("session profile");
+    };
+    assert_eq!(row.id, "unavailable");
+    assert!(row.differences.is_empty(), "{row:?}");
+
+    let (events, rx) = host_event_sink();
+    ProductSurface::new(paths).dispatch(
+        SurfaceIntent::RefreshComposerChrome,
+        SurfaceFacts {
+            phase: SurfacePhase::Detached,
+            attached_one_shot: false,
+            catalog: &[],
+            queue_len: 0,
+            usage_reads: UsageReads::default(),
+            session: Some(session),
+        },
+        &events,
+    );
+    let HostEvent::Extension(SurfaceObservation::SessionProfile(row)) =
+        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()
+    else {
+        panic!("refreshed profile");
+    };
+    assert_eq!(row.id, "unavailable");
+    assert!(row.differences.is_empty(), "{row:?}");
+}
+
+#[test]
+fn fixing_config_toml_restores_profiles_after_the_single_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = profile_paths(dir.path());
+    let original = b"# product defaults\n";
+    std::fs::write(paths.config_file(), original).unwrap();
+    std::fs::write(paths.config_file(), "not_a_key = true\n").unwrap();
+    let (events, rx) = host_event_sink();
+    send_profiles(&paths, &events);
+    let HostEvent::Extension(SurfaceObservation::Profiles(view)) = rx.try_recv().unwrap() else {
+        panic!("profiles view");
+    };
+    assert!(view.rows.is_empty(), "{view:?}");
+    assert_eq!(view.diagnostics.len(), 1);
+    std::fs::write(paths.config_file(), original).unwrap();
+    let (events, rx) = host_event_sink();
+    send_profiles(&paths, &events);
+    let HostEvent::Extension(SurfaceObservation::Profiles(view)) = rx.try_recv().unwrap() else {
+        panic!("restored profiles");
+    };
+    assert!(view.diagnostics.is_empty(), "{view:?}");
+    assert!(view.rows.iter().any(|row| row.id == "mine"), "{view:?}");
+}

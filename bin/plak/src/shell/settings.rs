@@ -19,14 +19,18 @@ use plakous_hosted::sessions::{NoticeScope, TranscriptRow};
 fn send_profiles(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     let view = match ProductConfig::load(paths) {
         Ok(config) => crate::profiles::list(&config, paths.home()),
-        Err(error) => {
-            let mut view = crate::profiles::list(&ProductConfig::default_product(), paths.home());
-            view.diagnostics
-                .insert(0, format!("config.toml could not be loaded: {error}"));
-            view
-        }
+        Err(error) => crate::surface_protocol::ProfilesView {
+            diagnostics: vec![config_load_diagnostic(&error)],
+            ..crate::surface_protocol::ProfilesView::default()
+        },
     };
     let _ = events.send(ContentEvent::Extension(SurfaceObservation::Profiles(view)));
+}
+
+/// One line when `config.toml` cannot be loaded. Listing profiles against the
+/// default product would report each named template as missing.
+fn config_load_diagnostic(error: &str) -> String {
+    format!("templates could not be loaded because config.toml failed: {error}")
 }
 
 fn profile_differences(
@@ -96,8 +100,6 @@ fn session_profile(
     home: &std::path::Path,
     session: &plakous_hosted::runtime::SurfaceSession,
 ) -> crate::surface_protocol::ProfileRow {
-    use crate::surface_protocol::{ProfileRole, ProfileRow};
-    let effort = session.effort.as_deref().unwrap_or("default");
     let mut matched_order = None;
     let mut nearest: Option<(String, Vec<crate::surface_protocol::ProfileDifference>)> = None;
     let matched = crate::profiles::list(config, home)
@@ -131,8 +133,44 @@ fn session_profile(
             )
         }),
     };
+    session_profile_row(config, session, id, differences, matched_order.as_deref())
+}
+
+/// Config failed to load: the chip is not a nearest-profile match, and it is
+/// not labeled `custom`.
+fn unavailable_session_profile(
+    session: &plakous_hosted::runtime::SurfaceSession,
+) -> crate::surface_protocol::ProfileRow {
+    session_profile_row(
+        &ProductConfig::default_product(),
+        session,
+        "unavailable".to_owned(),
+        Vec::new(),
+        None,
+    )
+}
+
+fn session_profile_for(
+    paths: &PlakPaths,
+    session: &plakous_hosted::runtime::SurfaceSession,
+) -> crate::surface_protocol::ProfileRow {
+    match ProductConfig::load(paths) {
+        Ok(config) => session_profile(&config, paths.home(), session),
+        Err(_) => unavailable_session_profile(session),
+    }
+}
+
+fn session_profile_row(
+    config: &ProductConfig,
+    session: &plakous_hosted::runtime::SurfaceSession,
+    id: String,
+    differences: Vec<crate::surface_protocol::ProfileDifference>,
+    matched_order: Option<&[plakous_hosted::agent_tree_protocol::TemplateName]>,
+) -> crate::surface_protocol::ProfileRow {
+    use crate::surface_protocol::{ProfileRole, ProfileRow};
+    let effort = session.effort.as_deref().unwrap_or("default");
     let cards = session.roster.as_ref().map_or_else(Vec::new, |snapshot| {
-        let working_set = ordered_working_set(config, snapshot, matched_order.as_deref());
+        let working_set = ordered_working_set(config, snapshot, matched_order);
         crate::roster_input::nested_spawns(&working_set, |name| {
             snapshot
                 .binding(name)
@@ -211,10 +249,8 @@ fn send_session_profile(
     session: &plakous_hosted::runtime::SurfaceSession,
     events: &Sender<PlakExtension>,
 ) {
-    let config = ProductConfig::load(paths).unwrap_or_else(|_| ProductConfig::default_product());
-    let row = session_profile(&config, paths.home(), session);
     let _ = events.send(ContentEvent::Extension(SurfaceObservation::SessionProfile(
-        row,
+        session_profile_for(paths, session),
     )));
 }
 
@@ -1160,9 +1196,7 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                     let generation = std::sync::Arc::clone(&self.chrome_generation);
                     let events = events.clone();
                     self.chrome_refresh.request(move || {
-                        let config = ProductConfig::load(&paths)
-                            .unwrap_or_else(|_| ProductConfig::default_product());
-                        let row = session_profile(&config, paths.home(), &session);
+                        let row = session_profile_for(&paths, &session);
                         let label = crate::shell::workspace::read(&session.workspace);
                         publish_composer_chrome(&generation, expected, row, label, &events);
                     });

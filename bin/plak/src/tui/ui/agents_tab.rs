@@ -324,7 +324,11 @@ impl App {
                 " Loading profiles…",
                 self.theme.slash_item_help,
             )));
-        } else if window.is_empty() {
+        } else if window.is_empty()
+            && !(self.profiles.filter.is_empty()
+                && self.profiles.rows().is_empty()
+                && !diagnostics.is_empty())
+        {
             lines.push(Line::from(Span::styled(
                 " No matching profiles",
                 self.theme.slash_item_help,

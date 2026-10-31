@@ -31,7 +31,9 @@ context meter (`15%/272k`, or `awaiting context` until a window is reported;
 and a short activity HUD. The profile id sits at the top right; hover it for
 role models, efforts and flags from this session's frozen roster. `custom`
 means no saved profile matches both this root and those cards; it does not
-replace the session's roles with the current configuration's roles.
+replace the session's roles with the current configuration's roles. If
+`config.toml` cannot be loaded, the chip says `unavailable` instead, and does
+not call the session `custom`.
 The plain bottom border carries the workspace, `~/path · branch`, at its
 right; a narrow terminal shortens the path to its tail first and shows the
 branch longest. The branch is refreshed after every turn. The hint line below
@@ -603,7 +605,10 @@ transcript keep a scrollbar. Usage rows wrap complete words, including reset tim
   `claude-default`, `grok-default`, `multi-default`) and any `~/.plak/profiles/<name>.toml`.
   Type to filter; `Esc` clears the filter. The box under the list shows the
   root and each sub-agent. A profile file that could not be used is listed
-  under the profiles with the reason. See [Agent profiles](#agent-profiles).
+  under the profiles with the reason. If `config.toml` cannot be loaded, the
+  list is empty and one line says `templates could not be loaded because
+  config.toml failed: …` rather than a missing-template line for each profile.
+  See [Agent profiles](#agent-profiles).
 - **Providers** — read-only credential status per vertical.
 - **Usage** — subscription plan limits and the turn's usage. While this tab
   is open during a turn, allowances refresh about every 60 seconds; closing
@@ -657,7 +662,8 @@ Set as default.
 
 The profile chip in the composer border names the session's profile, or the
 nearest one and what differs, for example `claude-default · root effort
-xhigh (profile: high)`.
+xhigh (profile: high)`. If `config.toml` cannot be loaded, the chip says
+`unavailable` and does not call the session `custom`.
 
 ### Settings
 
