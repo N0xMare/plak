@@ -4414,7 +4414,14 @@ two-space gutter and renders as markdown against theme tokens. Fenced and
 indented code in that markdown is syntax-highlighted. Prose, including inline
 code and URLs, wraps at the pane width; an over-wide token hard-breaks at
 grapheme boundaries without dropping text or its styles. Fenced and indented
-code listings keep their source line breaks and clip over-wide rows instead.
+code listings keep their source line breaks. An over-wide source line
+soft-wraps under the code rail: each continuation row repeats that rail and a
+`↳` marker. A continuation row narrower than two cells, or narrower than a
+grapheme, clips instead of wrapping. The language label, table rows and rules
+stay clipped rather than wrapped. A selection that covers every visual row of one source line through
+the end of the last row copies that source line once, without the rail or the
+marker; a selection inside one visual row copies only the cells it covers.
+A partial selection across wrapped rows copies the covered cells as one line.
 GFM tables are laid out
 with measured columns and a full grid in the muted rule colour: top and bottom
 rules, outer edges, a rule under the header, and a rule between every body row,

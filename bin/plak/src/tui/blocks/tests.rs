@@ -1720,7 +1720,7 @@ fn a_compose_header_is_its_host_counted_tally() {
 
 /// Wrapped composition source keeps its rail within the terminal width.
 #[test]
-fn a_clipped_compose_source_row_keeps_its_rail() {
+fn a_wrapped_compose_source_row_keeps_its_rail() {
     let theme = crate::tui::theme::Theme::dark();
     let block = ScrollBlock::Tool {
         call_id: Some("cell-1".into()),
@@ -1754,7 +1754,7 @@ fn a_clipped_compose_source_row_keeps_its_rail() {
         .map(|line| line.to_string().trim_end().to_owned())
         .filter(|row| !row.is_empty())
         .collect::<Vec<_>>();
-    assert!(rows.len() > 3, "the source clipped: {rows:?}");
+    assert!(rows.len() > 3, "the source wraps: {rows:?}");
     assert_eq!(rows[1], "    │ ┌ javascript", "{rows:?}");
     for row in &rows[2..] {
         assert!(
@@ -1763,6 +1763,10 @@ fn a_clipped_compose_source_row_keeps_its_rail() {
         );
         assert!(row.width() <= 76, "{row:?}");
     }
+    assert!(
+        rows.iter().any(|row| row.contains("\u{2502} \u{21b3}")),
+        "a continuation row keeps the marker under the rail: {rows:?}"
+    );
 }
 
 #[test]

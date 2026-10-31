@@ -402,34 +402,39 @@ impl OpenFence {
                 self.highlight.clone().line(&clean, &theme.syntax)
             };
             visited += 1;
-            let (row, copy) = code_row(spans, source, width, theme);
+            let painted = code_rows(spans, source, width, theme);
             if complete {
                 self.offset += raw.len();
-                lines.push(row);
-                copy_rows.push(copy);
+                for (row, copy) in painted {
+                    lines.push(row);
+                    copy_rows.push(copy);
+                }
                 if content {
                     self.complete_rows = lines.len();
                 }
                 visible_rows = self.complete_rows;
             } else if content {
                 visible_rows = lines.len();
-                rest.push(row);
-                rest_copy.push(copy);
+                for (row, copy) in painted {
+                    rest.push(row);
+                    rest_copy.push(copy);
+                }
             }
         }
         (rest, rest_copy, visible_rows, visited)
     }
 }
 
-fn code_row(
+fn code_rows(
     spans: Vec<Span<'static>>,
     source: &str,
     width: u16,
     theme: &MarkdownTheme,
-) -> (Line<'static>, RowCopy) {
+) -> Vec<(Line<'static>, RowCopy)> {
     let mut renderer = Renderer::new(theme, usize::from(width.max(1)));
     renderer.ensure_code_rail();
-    renderer.current.no_reflow = true;
+    renderer.current.code = true;
+    renderer.current.soft_wrap = true;
     renderer.current.code_source = Some(code_copy_line(source));
     for span in spans {
         if !span.content.is_empty() {
@@ -438,7 +443,7 @@ fn code_row(
     }
     let mut rows = Vec::new();
     wrap_line(&renderer.current, renderer.width, &mut rows);
-    rows.remove(0)
+    rows
 }
 
 fn starts_top_level_block(line: &str) -> bool {

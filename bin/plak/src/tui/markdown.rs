@@ -103,10 +103,14 @@ struct LogicalLine {
     body: Vec<StyledText>,
     /// Whitespace inside the body is content, not a wrap opportunity.
     code: bool,
-    /// The line is a fenced/indented code row: it is clipped at the width
-    /// rather than reflowed, so a code listing keeps its own line breaks
-    /// (§5.6).
+    /// Clip at the width. Language labels, table rows and rules use this so
+    /// they are not reflowed. Fenced and indented code bodies do not: they
+    /// soft-wrap instead.
     no_reflow: bool,
+    /// Soft-wrap a fenced or indented code body. Source line breaks stay;
+    /// each source line may paint as several visual rows, and every
+    /// continuation repeats the code rail plus [`CODE_CONTINUATION`].
+    soft_wrap: bool,
     /// Leading cells of `prefix` that are a quote rail or a code rail.
     /// List markers and table rails are not decoration.
     prefix_decoration: usize,
@@ -128,11 +132,15 @@ struct LogicalLine {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct RowCopy {
     pub(crate) decoration: u16,
-    /// Unclipped code body. Copy uses it when the selection runs through the
-    /// row's end; a clipped listing then pastes the whole source line.
+    /// Unclipped code body. Copy uses it when the selection covers this source
+    /// line through the end of its last visual row, so a soft-wrapped listing
+    /// pastes the original line once.
     pub(crate) code: Option<String>,
     /// Language-label row. A selection that covers it through its end omits it.
     pub(crate) language: bool,
+    /// Visual continuation of the previous row's code source. It carries no
+    /// source of its own: a selection that already took that source skips it.
+    pub(crate) code_continuation: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -144,6 +152,8 @@ enum ListKind {
 /// Left rail drawn down a fenced or indented code block, so a listing reads as
 /// one raised object instead of as prose that happens to be monospaced.
 const CODE_RAIL: &str = "\u{2502} ";
+/// One cell on a soft-wrapped code continuation, after the rail.
+const CODE_CONTINUATION: &str = "\u{21b3}";
 /// Opening corner of a fenced block that named its language.
 const CODE_RAIL_HEAD: &str = "\u{250c} ";
 
@@ -397,6 +407,7 @@ impl<'a> Renderer<'a> {
                     self.push_clean(language, self.theme.code_language);
                     self.current.code = true;
                     self.current.no_reflow = true;
+                    self.current.soft_wrap = false;
                     self.flush();
                 }
             }
@@ -592,7 +603,7 @@ impl<'a> Renderer<'a> {
         for (spans, source_line) in highlighted.into_iter().zip(sources) {
             self.ensure_code_rail();
             self.current.code = true;
-            self.current.no_reflow = true;
+            self.current.soft_wrap = true;
             self.current.code_source = Some(code_copy_line(source_line));
             for span in spans {
                 if !span.content.is_empty() {
@@ -1036,35 +1047,29 @@ fn code_source_lines(source: &str) -> Vec<&str> {
     lines
 }
 
-fn copy_row(decoration: usize, code: Option<String>, language: bool) -> RowCopy {
+fn copy_row(
+    decoration: usize,
+    code: Option<String>,
+    language: bool,
+    code_continuation: bool,
+) -> RowCopy {
     RowCopy {
         decoration: cells_u16(decoration),
         code,
         language,
+        code_continuation,
     }
 }
 
 fn wrap_line(line: &LogicalLine, width: usize, output: &mut Vec<(Line<'static>, RowCopy)>) {
-    // A code listing owns its own line breaks. Reflowing it at the pane width
-    // re-writes the program the model actually produced, so an over-wide row
-    // is clipped at the rail instead.
+    if line.soft_wrap {
+        wrap_code_line(line, width, output);
+        return;
+    }
+    // A language label, a table row or a rule is already fitted. Reflow would
+    // split it on the spaces around a rail.
     if line.no_reflow {
-        let prefix = fit_spans(styled_spans(&line.prefix), width);
-        let prefix_cells = spans_width(&prefix);
-        let mut spans = prefix;
-        let used = prefix_cells;
-        spans.extend(fit_spans(
-            styled_spans(&line.body),
-            width.saturating_sub(used),
-        ));
-        output.push((
-            Line::from(spans),
-            copy_row(
-                line.prefix_decoration.min(prefix_cells),
-                line.code_source.clone(),
-                line.language,
-            ),
-        ));
+        clip_line(line, width, output);
         return;
     }
     let indent_width = width.saturating_sub(1);
@@ -1090,7 +1095,7 @@ fn wrap_line(line: &LogicalLine, width: usize, output: &mut Vec<(Line<'static>, 
         {
             output.push((
                 Line::from(std::mem::take(&mut spans)),
-                copy_row(decoration, None, false),
+                copy_row(decoration, None, false, false),
             ));
             spans.clone_from(&continuation);
             used = continuation_width;
@@ -1107,7 +1112,7 @@ fn wrap_line(line: &LogicalLine, width: usize, output: &mut Vec<(Line<'static>, 
             if used > continuation_width && used.saturating_add(cells) > width {
                 output.push((
                     Line::from(std::mem::take(&mut spans)),
-                    copy_row(decoration, None, false),
+                    copy_row(decoration, None, false, false),
                 ));
                 spans.clone_from(&continuation);
                 used = continuation_width;
@@ -1138,7 +1143,133 @@ fn wrap_line(line: &LogicalLine, width: usize, output: &mut Vec<(Line<'static>, 
         }
     }
     place_word(&mut word, &mut pending_space);
-    output.push((Line::from(spans), copy_row(decoration, None, false)));
+    output.push((Line::from(spans), copy_row(decoration, None, false, false)));
+}
+
+fn clip_line(line: &LogicalLine, width: usize, output: &mut Vec<(Line<'static>, RowCopy)>) {
+    let prefix = fit_spans(styled_spans(&line.prefix), width);
+    let prefix_cells = spans_width(&prefix);
+    let mut spans = prefix;
+    let used = prefix_cells;
+    spans.extend(fit_spans(
+        styled_spans(&line.body),
+        width.saturating_sub(used),
+    ));
+    output.push((
+        Line::from(spans),
+        copy_row(
+            line.prefix_decoration.min(prefix_cells),
+            line.code_source.clone(),
+            line.language,
+            false,
+        ),
+    ));
+}
+
+/// Soft-wrap one fenced or indented source line. The rail repeats on every
+/// visual row; a continuation also paints [`CODE_CONTINUATION`]. Copy metadata
+/// names the original source only on the first visual row.
+fn wrap_code_line(line: &LogicalLine, width: usize, output: &mut Vec<(Line<'static>, RowCopy)>) {
+    let prefix = styled_spans(&line.prefix);
+    let prefix_cells = spans_width(&prefix);
+    let marker_cells = CODE_CONTINUATION.width().max(1);
+    let first_budget = width.saturating_sub(prefix_cells);
+    let next_budget = width.saturating_sub(prefix_cells.saturating_add(marker_cells));
+    // A one-cell continuation cannot hold a wide grapheme beside the marker,
+    // and a grapheme wider than an empty continuation row would paint past
+    // the pane. Both clip, matching a row that never exceeds `width`.
+    if first_budget == 0 || next_budget < 2 || code_body_exceeds(&line.body, next_budget) {
+        clip_line(line, width, output);
+        return;
+    }
+    let chunks = split_styled_width(&line.body, first_budget, next_budget);
+    let marker_style = prefix.first().map(|span| span.style).unwrap_or_default();
+    let head_decoration = line.prefix_decoration.min(prefix_cells);
+    if chunks.is_empty() {
+        output.push((
+            Line::from(prefix),
+            copy_row(head_decoration, line.code_source.clone(), false, false),
+        ));
+        return;
+    }
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        if index == 0 {
+            let mut spans = prefix.clone();
+            spans.extend(chunk);
+            output.push((
+                Line::from(spans),
+                copy_row(head_decoration, line.code_source.clone(), false, false),
+            ));
+        } else {
+            let mut spans = prefix.clone();
+            spans.push(Span::styled(CODE_CONTINUATION.to_owned(), marker_style));
+            spans.extend(chunk);
+            output.push((
+                Line::from(spans),
+                copy_row(prefix_cells.saturating_add(marker_cells), None, false, true),
+            ));
+        }
+    }
+}
+
+/// Whether any grapheme is wider than an empty continuation row.
+///
+/// A budget under two cells is the caller's clip, not this check: reporting
+/// it here would hide a guard that only clips on `next_budget == 0`.
+fn code_body_exceeds(body: &[StyledText], budget: usize) -> bool {
+    if budget < 2 {
+        return false;
+    }
+    body.iter().any(|part| {
+        part.text.graphemes(true).any(|grapheme| {
+            let cells = if grapheme.chars().all(char::is_control) {
+                1
+            } else {
+                grapheme.width().max(1)
+            };
+            cells > budget
+        })
+    })
+}
+
+/// Split styled code into visual rows. The first row gets `first_budget`
+/// cells and every later row gets `next_budget`, so the continuation marker
+/// fits beside the rail. The caller clips a grapheme wider than `next_budget`
+/// before this runs, so a row this returns does not exceed its budget.
+fn split_styled_width(
+    body: &[StyledText],
+    first_budget: usize,
+    next_budget: usize,
+) -> Vec<Vec<Span<'static>>> {
+    let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
+    let mut used = 0usize;
+    let mut budget = first_budget;
+    for part in body {
+        for grapheme in part.text.graphemes(true) {
+            let cells = grapheme.width().max(1);
+            if used > 0 && used.saturating_add(cells) > budget {
+                rows.push(std::mem::take(&mut current));
+                used = 0;
+                budget = next_budget;
+            }
+            if let Some(span) = current.last_mut().filter(|span| span.style == part.style) {
+                span.content.to_mut().push_str(grapheme);
+            } else {
+                current.push(Span::styled(grapheme.to_owned(), part.style));
+            }
+            used = used.saturating_add(cells);
+            if used >= budget {
+                rows.push(std::mem::take(&mut current));
+                used = 0;
+                budget = next_budget;
+            }
+        }
+    }
+    if !current.is_empty() {
+        rows.push(current);
+    }
+    rows
 }
 
 fn styled_spans(parts: &[StyledText]) -> Vec<Span<'static>> {

@@ -292,10 +292,14 @@ impl TranscriptSelection {
     ///
     /// `copy` is parallel to `lines`: leading decoration (the transcript block
     /// indent plus a code or quote rail) is dropped when the selection starts
-    /// at or before it. A fenced or indented code row selected through its end
-    /// copies `RowCopy::code`, the unclipped source. A language-label row
-    /// covered the same way is omitted. `full` names the untruncated text of a
-    /// one-line tool row (spec 02 §5.4) and is used only when the row has no
+    /// at or before it. A fenced or indented source line copies
+    /// `RowCopy::code` once when the selection covers every visual row of that
+    /// line through the end of the last one. Continuation rows of a line
+    /// already copied that way are skipped. A partial selection that crosses
+    /// those wrapped rows appends the covered cells to the previous painted
+    /// slice, so one source line stays one copied line. A language-label row
+    /// covered through its end is omitted. `full` names the untruncated text of
+    /// a one-line tool row (spec 02 §5.4) and is used only when the row has no
     /// code source of its own.
     pub(crate) fn take_text(
         &mut self,
@@ -311,12 +315,22 @@ impl TranscriptSelection {
         let (start, end) = self.ordered()?;
         let mut selected = Vec::new();
         let last_row = end.row.min(lines.len().saturating_sub(1));
+        let mut skip_through = None;
+        // The previous emitted row was a painted slice, not a whole source
+        // line. A soft-wrap continuation joins that slice instead of starting
+        // a new copied line.
+        let mut painted_open = false;
         for (row, line) in lines
             .iter()
             .enumerate()
             .take(last_row.saturating_add(1))
             .skip(start.row)
         {
+            if skip_through.is_some_and(|end_row| row <= end_row) {
+                painted_open = false;
+                continue;
+            }
+            skip_through = None;
             let first = if row == start.row { start.column } else { 0 };
             let last = if row == end.row {
                 end.column
@@ -331,14 +345,26 @@ impl TranscriptSelection {
             let through_end = row != end.row || last.saturating_add(1) >= line.width();
             let whole = first <= decoration && through_end;
             if whole && meta.is_some_and(|meta| meta.language) {
+                painted_open = false;
                 continue;
             }
-            if whole && let Some(source) = meta.and_then(|meta| meta.code.clone()) {
-                selected.push(source);
-                continue;
+            if let Some(source) = meta.and_then(|meta| meta.code.clone()) {
+                let group_end = code_group_end(copy, row);
+                if first <= decoration && selection_reaches(lines, end, group_end) {
+                    selected.push(source);
+                    skip_through = Some(group_end);
+                    painted_open = false;
+                    continue;
+                }
             }
-            if whole && let Some(text) = full(row) {
+            let code_visual =
+                meta.is_some_and(|meta| meta.code.is_some() || meta.code_continuation);
+            if whole
+                && !code_visual
+                && let Some(text) = full(row)
+            {
                 selected.push(text);
+                painted_open = false;
                 continue;
             }
             // Drop the decoration when the selection starts inside it. A
@@ -354,9 +380,18 @@ impl TranscriptSelection {
                 if whole && line.width() <= decoration {
                     selected.push(String::new());
                 }
+                painted_open = false;
                 continue;
             }
-            selected.push(slice_cells(line, start_cell, last));
+            let slice = slice_cells(line, start_cell, last);
+            let join =
+                painted_open && row > start.row && meta.is_some_and(|meta| meta.code_continuation);
+            if join && let Some(last) = selected.last_mut() {
+                last.push_str(&slice);
+            } else {
+                selected.push(slice);
+            }
+            painted_open = true;
         }
         self.clear();
         let text = selected.join("\n");
@@ -377,6 +412,30 @@ impl TranscriptSelection {
             (head, anchor)
         })
     }
+}
+
+/// Last visual row of a soft-wrapped code line that starts at `row`.
+fn code_group_end(copy: &[RowCopy], row: usize) -> usize {
+    let mut end = row;
+    while copy
+        .get(end.saturating_add(1))
+        .is_some_and(|meta| meta.code_continuation)
+    {
+        end = end.saturating_add(1);
+    }
+    end
+}
+
+/// Whether `end` covers `group_end` through that row's last cell.
+fn selection_reaches(lines: &[String], end: ContentPosition, group_end: usize) -> bool {
+    if end.row > group_end {
+        return true;
+    }
+    if end.row < group_end {
+        return false;
+    }
+    let width = lines.get(group_end).map(|line| line.width()).unwrap_or(0);
+    width == 0 || end.column.saturating_add(1) >= width
 }
 
 /// Include a whole grapheme when any of its occupied terminal cells intersects

@@ -104,11 +104,13 @@ fn copy_drops_leading_decoration_and_keeps_wide_graphemes() {
             decoration: 4,
             code: Some("界e\u{301}".to_owned()),
             language: false,
+            code_continuation: false,
         },
         RowCopy {
             decoration: 4,
             code: Some("next".to_owned()),
             language: false,
+            code_continuation: false,
         },
     ];
     let mut selection = TranscriptSelection::default();
@@ -151,11 +153,13 @@ fn copy_omits_a_language_label_covered_through_its_end() {
             decoration: 4,
             code: None,
             language: true,
+            code_continuation: false,
         },
         RowCopy {
             decoration: 4,
             code: Some("echo".to_owned()),
             language: false,
+            code_continuation: false,
         },
     ];
     let mut selection = TranscriptSelection::default();
@@ -176,5 +180,113 @@ fn copy_omits_a_language_label_covered_through_its_end() {
             .take_text(2, &lines, &copy, &mut |_| None)
             .as_deref(),
         Some("bas")
+    );
+}
+
+#[test]
+fn a_soft_wrapped_code_line_copies_its_source_once() {
+    let lines = vec![
+        "  │ let x = collection".to_owned(),
+        "  │ ↳.iter().sum()".to_owned(),
+        "  │ short".to_owned(),
+    ];
+    let copy = vec![
+        RowCopy {
+            decoration: 4,
+            code: Some("let x = collection.iter().sum()".to_owned()),
+            language: false,
+            code_continuation: false,
+        },
+        RowCopy {
+            decoration: 5,
+            code: None,
+            language: false,
+            code_continuation: true,
+        },
+        RowCopy {
+            decoration: 4,
+            code: Some("short".to_owned()),
+            language: false,
+            code_continuation: false,
+        },
+    ];
+    let mut selection = TranscriptSelection::default();
+    selection.begin(ContentPosition { row: 0, column: 0 }, 20, 1);
+    selection.drag(ContentPosition { row: 2, column: 20 });
+    assert_eq!(
+        selection
+            .take_text(1, &lines, &copy, &mut |_| None)
+            .as_deref(),
+        Some("let x = collection.iter().sum()\nshort")
+    );
+
+    // Inside one visual row: painted cells only, no hidden tail and no marker.
+    selection.begin(ContentPosition { row: 1, column: 5 }, 20, 2);
+    selection.drag(ContentPosition { row: 1, column: 9 });
+    assert_eq!(
+        selection
+            .take_text(2, &lines, &copy, &mut |_| None)
+            .as_deref(),
+        Some(".iter")
+    );
+
+    // Across the wrap, but not through the end of the last visual row: the
+    // covered cells of one source line, with no newline inserted at the wrap.
+    selection.begin(ContentPosition { row: 0, column: 0 }, 20, 3);
+    selection.drag(ContentPosition { row: 1, column: 9 });
+    assert_eq!(
+        selection
+            .take_text(3, &lines, &copy, &mut |_| None)
+            .as_deref(),
+        Some("let x = collection.iter")
+    );
+}
+
+#[test]
+fn a_partial_soft_wrap_copies_painted_cells_not_the_source_line() {
+    let source = "let x = collection.iter().map(|item| item.value).sum()";
+    let lines = vec![
+        "  │ let x = collection".to_owned(),
+        "  │ ↳.iter().map(|item|".to_owned(),
+        "  │ ↳ item.value).sum()".to_owned(),
+    ];
+    let copy = vec![
+        RowCopy {
+            decoration: 4,
+            code: Some(source.to_owned()),
+            language: false,
+            code_continuation: false,
+        },
+        RowCopy {
+            decoration: 5,
+            code: None,
+            language: false,
+            code_continuation: true,
+        },
+        RowCopy {
+            decoration: 5,
+            code: None,
+            language: false,
+            code_continuation: true,
+        },
+    ];
+    let mut selection = TranscriptSelection::default();
+    selection.begin(ContentPosition { row: 0, column: 0 }, 24, 1);
+    selection.drag(ContentPosition { row: 0, column: 22 });
+    assert_eq!(
+        selection
+            .take_text(1, &lines, &copy, &mut |_| None)
+            .as_deref(),
+        Some("let x = collection"),
+        "ending on the first visual row copies its cells, not the source"
+    );
+    selection.begin(ContentPosition { row: 0, column: 0 }, 24, 2);
+    selection.drag(ContentPosition { row: 1, column: 9 });
+    assert_eq!(
+        selection
+            .take_text(2, &lines, &copy, &mut |_| None)
+            .as_deref(),
+        Some("let x = collection.iter"),
+        "a selection that stops mid-continuation copies the painted cells"
     );
 }

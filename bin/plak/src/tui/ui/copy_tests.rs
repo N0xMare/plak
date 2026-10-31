@@ -1,4 +1,4 @@
-//! Transcript copy drops code and quote rails and copies a clipped code row
+//! Transcript copy drops code and quote rails and copies a wrapped code row
 //! whole (spec 02 §5.4).
 
 use super::App;
@@ -193,7 +193,7 @@ fn copying_a_fenced_block_drops_rails_and_keeps_lists_quotes_and_tables() {
 }
 
 #[test]
-fn copying_a_clipped_code_row_through_its_end_copies_the_source_line() {
+fn copying_a_wrapped_code_row_through_its_end_copies_the_source_line() {
     const WIDTH: u16 = 40;
     const HEIGHT: u16 = 30;
     let long = "plak logout claude --local --and-then-remove-the-stored-token-cache";
@@ -207,7 +207,7 @@ fn copying_a_clipped_code_row_through_its_end_copies_the_source_line() {
     assert_eq!(short.len(), 1, "{rows:?}");
     assert!(
         !rows[wide[0]].contains("token-cache"),
-        "the row should be clipped at this width: {:?}",
+        "the row should be wrapped at this width: {:?}",
         rows[wide[0]]
     );
     assert!(rows[wide[0]].contains('│'), "{:?}", rows[wide[0]]);

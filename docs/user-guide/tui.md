@@ -512,14 +512,17 @@ selection that covers a whole line copies its full text (a cut command with its
 real line breaks), while a selection inside a line copies just what it covers.
 A prompt or steer line copies without its send time or the `steer` tag.
 Copying an assistant reply drops the two-space indent, and drops a quote rail
-or a code rail, so a fenced block of commands pastes as the commands. A code
-line cut off at the pane edge still copies the whole line when the selection
-runs through that row; a selection that starts inside the line copies only the
-cells it covers. The language on the fence (`bash`, `rust`) is left out when
-the selection covers that label row. List markers and table borders stay. An
-agent's transcript copies the same way.
-The scrollbar shows where you are; there is no percentage badge. An opened call that answered `preview` or was
-refused while the session was busy asks again when you close and reopen it.
+or a code rail, so a fenced block of commands pastes as the commands. A long
+code line soft-wraps under its rail, with `↳` on each continuation, and copies
+as the original line when the selection covers every wrapped row through the
+end of the last one. A selection inside one visual row copies only the cells
+it covers, not the rail or the marker. A partial selection across wrapped rows
+copies the covered cells as one line. The language on the fence (`bash`,
+`rust`) is left out when the selection covers that label row. List markers and
+table borders stay. An agent's transcript copies the same way.
+The scrollbar shows where you are; there is no percentage badge. An opened
+call that answered `preview` or was refused while the session was busy
+asks again when you close and reopen it.
 
 Code mode cells (`exec`/`wait`, `exec_js`/`wait_js`, `exec_py`/`wait_py`)
 show a header (`✓ CodeMode · 3 calls   4.2s ▸`) and their calls as one-line

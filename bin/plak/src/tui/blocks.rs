@@ -22,4 +22,6 @@ pub use wrap::*;
 
 #[cfg(test)]
 pub(super) use render::TRANSCRIPT_RENDER_CACHE_BYTES;
+#[cfg(test)]
+pub(in crate::tui) use render::code_line_rows_for_test;
 pub(super) use render::{LeadRow, TranscriptChange, TranscriptRenderCache, lead_rows};

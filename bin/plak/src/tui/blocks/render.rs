@@ -17,6 +17,8 @@ mod tests;
 pub(in crate::tui) use cache::TRANSCRIPT_RENDER_CACHE_BYTES;
 pub(in crate::tui) use cache::{TranscriptChange, TranscriptRenderCache};
 #[cfg(test)]
+pub(in crate::tui) use estimate::code_line_rows_for_test;
+#[cfg(test)]
 pub(super) use estimate::{estimate_block_rows, estimate_rows_for_test};
 pub(in crate::tui) use lead::{LeadRow, lead_rows};
 

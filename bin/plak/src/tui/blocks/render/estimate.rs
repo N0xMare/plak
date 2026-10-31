@@ -1,5 +1,6 @@
 //! Row estimates for blocks the cache has not measured.
 
+use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;
 
 use super::detail::{ItemFacts, detail_text};
@@ -198,6 +199,71 @@ pub(in crate::tui::blocks) fn estimate_block_rows(
     }
 }
 
+/// Visual rows of a compose cell's fenced source.
+///
+/// Body lines soft-wrap under the two-cell code rail, with a one-cell
+/// continuation marker on later rows. The added two rows are the language
+/// label and the fence's closing row, which the unwrapped line count already
+/// included.
+fn estimate_fenced_source_rows(source: &str, markdown_width: usize) -> usize {
+    source
+        .lines()
+        .map(|line| estimate_code_line_rows(line, markdown_width))
+        .fold(0usize, usize::saturating_add)
+        .saturating_add(2)
+}
+
+/// Rows one code line paints.
+///
+/// The same greedy grapheme breaks as `split_styled_width`: a grapheme that
+/// does not fit the current row starts the next one, and a row ends when it
+/// fills its budget. A continuation budget under two cells, or a grapheme
+/// wider than that budget, clips to one row, matching `wrap_code_line`.
+fn estimate_code_line_rows(line: &str, markdown_width: usize) -> usize {
+    const PREFIX: usize = 2;
+    const MARKER: usize = 1;
+    let first = markdown_width.saturating_sub(PREFIX);
+    let next = markdown_width.saturating_sub(PREFIX.saturating_add(MARKER));
+    if first == 0 || next < 2 {
+        return 1;
+    }
+    let mut rows = 0usize;
+    let mut used = 0usize;
+    let mut budget = first;
+    for grapheme in line.graphemes(true) {
+        let cells = if grapheme.chars().all(char::is_control) {
+            1
+        } else {
+            grapheme.width().max(1)
+        };
+        // Budgets under two cells are clipped above. A weakened guard that
+        // reaches here must keep counting, or it would still match the painter.
+        if next >= 2 && cells > next {
+            return 1;
+        }
+        if used > 0 && used.saturating_add(cells) > budget {
+            rows = rows.saturating_add(1);
+            used = 0;
+            budget = next;
+        }
+        used = used.saturating_add(cells);
+        if used >= budget {
+            rows = rows.saturating_add(1);
+            used = 0;
+            budget = next;
+        }
+    }
+    if used > 0 {
+        rows = rows.saturating_add(1);
+    }
+    rows.max(1)
+}
+
+#[cfg(test)]
+pub(in crate::tui) fn code_line_rows_for_test(line: &str, markdown_width: usize) -> usize {
+    estimate_code_line_rows(line, markdown_width)
+}
+
 fn estimate_cell_footer(tail: &CellTail, blocks: &[ScrollBlock], width: usize) -> usize {
     let more = usize::from(tail.hidden_calls > 0);
     let Some(ScrollBlock::Tool {
@@ -215,8 +281,11 @@ fn estimate_cell_footer(tail: &CellTail, blocks: &[ScrollBlock], width: usize) -
     };
     let source = detail
         .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .map_or(0, |s| s.lines().count() + 2);
+        .filter(|source| !source.trim().is_empty())
+        .map_or(0, |source| {
+            let markdown_width = width.saturating_sub(detail_rail(tail.rail).width()).max(1);
+            estimate_fenced_source_rows(source, markdown_width)
+        });
     let output = if view.output_open {
         let facts = ItemFacts {
             name,

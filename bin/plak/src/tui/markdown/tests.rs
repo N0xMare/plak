@@ -68,26 +68,94 @@ fn a_javascript_fence_highlights_keywords_separately() {
     );
 }
 
-/// A code listing owns its own line breaks: reflowing it at the pane width
-/// re-writes the program the model produced. An over-wide row is clipped
-/// at the rail instead, and the row count matches the source's.
+/// A code listing keeps its source line breaks and soft-wraps an over-wide
+/// row. Continuation rows repeat the rail and a marker; prose is not joined
+/// onto the listing, and nothing exceeds the pane.
 #[test]
-fn a_code_block_is_clipped_at_the_width_and_never_reflowed() {
+fn a_code_block_soft_wraps_over_wide_rows_and_keeps_source_breaks() {
     let long = "let x = collection.iter().map(|item| item.value).sum::<u64>();";
     let source = format!("```\n{long}\nshort\n```");
     let lines = plain(&render_markdown(&source, 24, &MarkdownTheme::default()));
     let code = lines
         .iter()
-        .filter(|line| line.starts_with('│'))
+        .filter(|line| line.starts_with('\u{2502}'))
+        .cloned()
         .collect::<Vec<_>>();
-    assert_eq!(code.len(), 2, "one painted row per source row: {lines:?}");
-    assert!(code[0].starts_with("│ let x = collection.i"), "{code:?}");
-    assert_eq!(code[1], "│ short");
+    assert!(code.len() > 2, "the long source row wraps: {lines:?}");
+    assert!(
+        code[0].starts_with("\u{2502} let x = collection"),
+        "{code:?}"
+    );
+    assert!(
+        code[1].starts_with("\u{2502} \u{21b3}"),
+        "continuation marker: {code:?}"
+    );
+    assert_eq!(code.last().map(String::as_str), Some("\u{2502} short"));
+    assert!(
+        !code
+            .iter()
+            .any(|line| line.contains("short") && line.contains("let")),
+        "{code:?}"
+    );
     assert!(lines.iter().all(|line| line.width() <= 24), "{lines:?}");
 }
 
+/// A continuation budget under two cells cannot hold a wide grapheme beside
+/// the marker, and a grapheme wider than that budget cannot sit on a later
+/// row. The fence clips instead of painting past the pane, and the row
+/// estimate matches that clip.
+#[test]
+fn a_narrow_fence_clips_wide_graphemes_to_the_pane() {
+    let line = "a\u{754c}b\u{754c}c";
+    let source = format!("```\n{line}\n```");
+    for width in [3usize, 4, 5] {
+        let rows = plain(&render_markdown(
+            &source,
+            u16::try_from(width).unwrap(),
+            &MarkdownTheme::default(),
+        ));
+        assert!(
+            rows.iter().all(|row| row.width() <= width),
+            "width {width}: {rows:?}"
+        );
+    }
+    let painted = plain(&render_markdown(&source, 4_u16, &MarkdownTheme::default()));
+    let body = painted
+        .iter()
+        .filter(|row| row.starts_with('\u{2502}'))
+        .count();
+    assert_eq!(
+        crate::tui::blocks::code_line_rows_for_test(line, 4),
+        body,
+        "estimate must match the painted rows of the clipped line: {painted:?}"
+    );
+    // U+17D8 is three cells. At pane width 5 the continuation budget is two,
+    // so the grapheme does not fit a later row. Clipping keeps the pane;
+    // wrapping would paint it past the rail.
+    let wider = "a\u{17D8}";
+    let wider_source = format!("```\n{wider}\n```");
+    let wider_rows = plain(&render_markdown(
+        &wider_source,
+        5,
+        &MarkdownTheme::default(),
+    ));
+    assert!(
+        wider_rows.iter().all(|row| row.width() <= 5),
+        "width 5: {wider_rows:?}"
+    );
+    let wider_body = wider_rows
+        .iter()
+        .filter(|row| row.starts_with('\u{2502}'))
+        .count();
+    assert_eq!(
+        crate::tui::blocks::code_line_rows_for_test(wider, 5),
+        wider_body,
+        "estimate must match the clipped three-cell grapheme: {wider_rows:?}"
+    );
+}
+
 /// Copy metadata is not inferred from the painted cells: a code rail and a
-/// quote rail are decoration, a clipped code row still names its source,
+/// quote rail are decoration, a wrapped code row still names its source,
 /// and list markers and table rails are content.
 #[test]
 fn copy_rows_name_code_and_quote_decoration_and_leave_lists_and_tables() {
@@ -153,20 +221,33 @@ plak logout claude
     let codex = at("plak logout codex");
     assert_eq!(copy[codex].code.as_deref(), Some("    plak logout codex"));
 
-    let clipped_line = "let x = collection.iter().map(|item| item.value).sum::<u64>();";
-    let (clipped, clipped_copy) = render_markdown_rows(
-        &format!("```\n{clipped_line}\nshort\n```"),
+    let wrapped_line = "let x = collection.iter().map(|item| item.value).sum::<u64>();";
+    let (wrapped, wrapped_copy) = render_markdown_rows(
+        &format!("```\n{wrapped_line}\nshort\n```"),
         24,
         &MarkdownTheme::default(),
     );
-    let wide = clipped
+    let wide = wrapped
         .iter()
         .position(|line| line.to_string().starts_with("│ let"))
-        .expect("clipped code row");
-    assert!(clipped[wide].to_string().width() <= 24);
-    assert!(!clipped[wide].to_string().contains(clipped_line));
-    assert_eq!(clipped_copy[wide].code.as_deref(), Some(clipped_line));
-    assert!(!clipped_copy[wide].language);
+        .expect("wrapped code row");
+    assert!(wrapped[wide].to_string().width() <= 24);
+    assert!(!wrapped[wide].to_string().contains(wrapped_line));
+    assert_eq!(wrapped_copy[wide].code.as_deref(), Some(wrapped_line));
+    assert!(!wrapped_copy[wide].language);
+    assert!(!wrapped_copy[wide].code_continuation);
+    let continuations: Vec<_> = wrapped_copy
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.code_continuation)
+        .collect();
+    assert!(!continuations.is_empty(), "{wrapped:?}");
+    assert!(continuations.iter().all(|(_, row)| row.code.is_none()));
+    assert!(
+        continuations
+            .iter()
+            .all(|(index, _)| wrapped[*index].to_string().contains('\u{21b3}'))
+    );
 }
 
 #[test]
