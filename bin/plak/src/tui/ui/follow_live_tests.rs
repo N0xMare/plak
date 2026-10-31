@@ -1,11 +1,14 @@
 //! Follow-live must show the true tail, including after a windowed settle.
 
-use crossterm::event::{MouseButton, MouseEventKind};
+use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
+use plakous_host_protocol::views::transcript::TranscriptRow;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use serde::Deserialize;
 
-use super::test_support::{launch_basic, left_mouse};
+use super::test_support::{key, launch_basic, left_mouse, queue_item};
 use super::{App, ScrollBlock};
+use crate::tui::{ContextCapacityRecovery, QueueDrainState};
 
 const TAIL_MARKER: &str = "VISIBLE_TAIL_LINE";
 
@@ -165,4 +168,273 @@ fn follow_live_shows_a_fully_measured_markdown_tail() {
         );
         assert_follow_live_shows_tail(&app, &format!("exact width {width}"));
     }
+}
+
+/// Last line of the scrambled session's final assistant message.
+const SCRAMBLED_TAIL: &str = "Xxxx xx xx xxx xxxx xx xxx xxxxxxxx xxxx, xx xxxx xxx xxxxxx?";
+
+#[derive(Deserialize)]
+struct ScrambledRow {
+    anchor: u64,
+    lane: u64,
+    ordinal: u64,
+    row: TranscriptRow,
+}
+
+#[derive(Clone, Copy)]
+enum Shelf {
+    None,
+    Queue,
+    Recovery,
+}
+
+fn scrambled_session(banner: bool, shelf: Shelf) -> App {
+    let fixture: Vec<ScrambledRow> =
+        serde_json::from_str(include_str!("fixtures/follow_live_tail.json")).unwrap();
+    assert_eq!(fixture.len(), 74);
+    assert!(fixture.iter().all(|row| row.lane == 0));
+    assert!(
+        fixture
+            .windows(2)
+            .all(|pair| { (pair[0].anchor, pair[0].ordinal) < (pair[1].anchor, pair[1].ordinal) })
+    );
+    let mut blocks = Vec::with_capacity(fixture.len());
+    for item in fixture {
+        blocks.push(ScrollBlock::from_row(item.row).expect("every row renders"));
+    }
+    let ScrollBlock::Assistant(text) = blocks.last().expect("tail") else {
+        panic!("the fixture ends on an assistant row");
+    };
+    assert!(
+        text.ends_with(SCRAMBLED_TAIL),
+        "scrambled tail line missing"
+    );
+    let mut app = App::new(launch_basic(), true);
+    if banner {
+        app.arm_launch_intro_cells();
+    }
+    match shelf {
+        Shelf::None => {}
+        Shelf::Queue => app.replace_queue_snapshot(
+            vec![queue_item("q-1", 1, "xxxx")],
+            QueueDrainState::RestoredPaused,
+        ),
+        Shelf::Recovery => {
+            app.capacity_recovery = Some(ContextCapacityRecovery::Compactable);
+        }
+    }
+    app.pane.blocks = blocks;
+    app.mark_transcript_replaced();
+    app
+}
+
+/// `None` when follow-live shows the final assistant line and hides the arrow.
+fn follow_live_gap(app: &App, where_: &str) -> Option<String> {
+    let assistant = app
+        .pane
+        .blocks
+        .iter()
+        .rposition(|block| matches!(block, ScrollBlock::Assistant(_)))
+        .expect("assistant");
+    let layout = app.pane.transcript_cache.layout();
+    let mut marker_at = layout
+        .block_index
+        .iter()
+        .rposition(|owner| *owner == Some(assistant))
+        .expect("assistant rows");
+    while marker_at > 0
+        && layout
+            .plain
+            .get(marker_at)
+            .is_some_and(|line| line.trim().is_empty())
+        && layout.block_index.get(marker_at - 1).copied().flatten() == Some(assistant)
+    {
+        marker_at -= 1;
+    }
+    let body = app.transcript_body_area.expect("transcript body");
+    let visible_end = app
+        .pane
+        .transcript_visible_start
+        .saturating_add(usize::from(body.height));
+    let mut problems = Vec::new();
+    if app.pane.scroll_from_bottom != 0 {
+        problems.push(format!("from_bottom={}", app.pane.scroll_from_bottom));
+    }
+    if app.jump_to_live_hit.is_some() {
+        problems.push("arrow".to_owned());
+    }
+    if marker_at < app.pane.transcript_visible_start || marker_at >= visible_end {
+        problems.push(format!(
+            "tail {marker_at} outside {}..{visible_end}",
+            app.pane.transcript_visible_start
+        ));
+    }
+    if problems.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "{where_}: {} (rows {})",
+            problems.join(", "),
+            layout.plain.len()
+        ))
+    }
+}
+
+fn scan_scrambled(
+    banner: bool,
+    shelf: Shelf,
+    width_lo: u16,
+    width_hi: u16,
+    width_step: usize,
+    height_step: usize,
+) -> Vec<String> {
+    let shelf_label = match shelf {
+        Shelf::None => "plain",
+        Shelf::Queue => "queue",
+        Shelf::Recovery => "recovery",
+    };
+    let banner_label = if banner { "banner" } else { "no-banner" };
+    let mut failures = Vec::new();
+    let mut width = width_lo;
+    while width <= width_hi {
+        let mut app = scrambled_session(banner, shelf);
+        let mut height = 20u16;
+        while height <= 90 {
+            app.pane.scroll_from_bottom = 0;
+            app.pane.transcript_view_anchor = None;
+            let _terminal = paint(&mut app, width, height);
+            if let Some(gap) = follow_live_gap(
+                &app,
+                &format!("{banner_label}/{shelf_label} {width}x{height}"),
+            ) {
+                failures.push(gap);
+            }
+            height = height.saturating_add(u16::try_from(height_step).unwrap_or(1));
+        }
+        width = width.saturating_add(u16::try_from(width_step).unwrap_or(1));
+    }
+    failures
+}
+
+fn replay_scrambled_actions(width: u16, height: u16) -> Vec<String> {
+    let mut app = scrambled_session(true, Shelf::None);
+    let mut terminal = paint(&mut app, width, height);
+    let mut failures = Vec::new();
+    app.handle_key(key(KeyCode::PageUp));
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    if let Some(hit) = app.jump_to_live_hit {
+        app.handle_mouse(left_mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            hit.x,
+            hit.y,
+        ));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        if let Some(gap) = follow_live_gap(&app, &format!("click {width}x{height}")) {
+            failures.push(gap);
+        }
+    } else if let Some(gap) = follow_live_gap(&app, &format!("page-up {width}x{height}")) {
+        failures.push(gap);
+    }
+    app.pane.scroll_from_bottom = 0;
+    let _resized = paint(
+        &mut app,
+        width.saturating_add(17),
+        height.saturating_sub(6).max(20),
+    );
+    if let Some(gap) = follow_live_gap(&app, &format!("resize {width}x{height}")) {
+        failures.push(gap);
+    }
+    // Scroll back to the end by key after leaving it, not only by the click.
+    let mut again = scrambled_session(true, Shelf::None);
+    let mut terminal = paint(&mut again, width, height);
+    again.handle_key(key(KeyCode::PageUp));
+    terminal.draw(|frame| again.draw(frame)).unwrap();
+    again.handle_key(key(KeyCode::PageDown));
+    terminal.draw(|frame| again.draw(frame)).unwrap();
+    if let Some(gap) = follow_live_gap(&again, &format!("page-down {width}x{height}")) {
+        failures.push(gap);
+    }
+    failures
+}
+
+/// Ten notes, user `w`, a one-line assistant filler, a user prompt that wraps
+/// to three lines, and user `y` with nothing between them. The answer is `n`
+/// short paragraphs. A reserve that shrinks after it grows leaves the tail
+/// below the body when the height is `11 + 2n`.
+fn consecutive_user_prompts_app(paragraphs: usize) -> App {
+    let mut blocks = Vec::new();
+    for index in 0..10 {
+        blocks.push(ScrollBlock::System(format!("note {index}")));
+    }
+    blocks.push(ScrollBlock::user("w".to_owned()));
+    blocks.push(ScrollBlock::Assistant("filler".to_owned()));
+    blocks.push(ScrollBlock::user("X".repeat(180)));
+    blocks.push(ScrollBlock::user("y".to_owned()));
+    let answer = (0..paragraphs)
+        .map(|index| {
+            if index + 1 == paragraphs {
+                TAIL_MARKER.to_owned()
+            } else {
+                format!("paragraph {index}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    blocks.push(ScrollBlock::Assistant(answer));
+    let mut app = App::new(launch_basic(), true);
+    app.pane.blocks = blocks;
+    app.mark_transcript_replaced();
+    app
+}
+
+#[test]
+fn follow_live_stays_on_the_tail_when_consecutive_user_prompts_change_the_sticky_bar() {
+    let mut failures = Vec::new();
+    for paragraphs in 1..=39 {
+        for width in [60u16, 90] {
+            let mut app = consecutive_user_prompts_app(paragraphs);
+            let mut height = 10u16;
+            while height <= 48 {
+                app.pane.scroll_from_bottom = 0;
+                app.pane.transcript_view_anchor = None;
+                let _terminal = paint(&mut app, width, height);
+                if let Some(gap) =
+                    follow_live_gap(&app, &format!("prompts n={paragraphs} {width}x{height}"))
+                {
+                    failures.push(gap);
+                }
+                height = height.saturating_add(1);
+            }
+        }
+    }
+    let shown: Vec<_> = failures.iter().take(24).cloned().collect();
+    assert!(
+        failures.is_empty(),
+        "consecutive user prompts left the tail at {} sizes; first {}:\n{}",
+        failures.len(),
+        shown.len(),
+        shown.join("\n")
+    );
+}
+
+#[test]
+fn follow_live_shows_the_scrambled_session_tail() {
+    // Dense only on the widths that missed the tail. Elsewhere a coarse grid.
+    let mut failures = scan_scrambled(true, Shelf::None, 60, 240, 20, 10);
+    failures.extend(scan_scrambled(true, Shelf::None, 92, 108, 1, 1));
+    failures.extend(scan_scrambled(true, Shelf::None, 180, 204, 1, 1));
+    failures.extend(scan_scrambled(false, Shelf::None, 80, 220, 40, 20));
+    failures.extend(scan_scrambled(true, Shelf::Queue, 80, 220, 40, 20));
+    failures.extend(scan_scrambled(true, Shelf::Recovery, 80, 220, 40, 20));
+    for width in [96u16, 104, 184, 200] {
+        failures.extend(replay_scrambled_actions(width, 48));
+    }
+    let shown: Vec<_> = failures.iter().take(40).cloned().collect();
+    assert!(
+        failures.is_empty(),
+        "follow-live left the tail at {} sizes; first {}:\n{}",
+        failures.len(),
+        shown.len(),
+        shown.join("\n")
+    );
 }

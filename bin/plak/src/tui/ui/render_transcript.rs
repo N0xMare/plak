@@ -121,24 +121,43 @@ impl App {
         // header: follow-live and scroll offsets count it in the total, so it
         // moves off once the transcript fills the pane.
         let banner_h = self.session_banner_rows(area);
-        // Sticky prompt: when scrolled up, pin the user message above the viewport
-        // into a 2–3 line bar at the top of the transcript region. Sticky
-        // height feeds back into the body height, so it settles in two rounds,
-        // and the estimated region is measured inside the same loop — the
-        // window the operator reads has to be exact before anything reads it.
+        // Sticky prompt: when scrolled up, pin the user message above the
+        // viewport into a 2–3 line bar at the top of the transcript region.
+        // The bar's height feeds back into the body height. Reserving a
+        // shorter bar sits the viewport higher, which can clear the next user
+        // message and grow the bar; reserving a taller one can then reveal a
+        // shorter prompt and shrink it. That pair oscillates, and the loop
+        // ends with the viewport still placed for the shorter bar. The
+        // reserve only grows inside this placement, so a later shorter
+        // measurement cannot move the viewport back. The bar is at most 3
+        // lines. Follow-live settles the window on the first pass, and again
+        // only when that measurement changed the document length.
         let height = usize::from(area.height.max(1));
         let mut sticky_h = 0;
         let mut sticky = None;
-        let mut start;
         let mut vstart = 0;
-        for _ in 0..2 {
-            let body_h = height.saturating_sub(sticky_h).max(1);
-            vstart = self.viewport_start(follow_live, held_anchor, toward_tail, banner_h, body_h);
+        let mut settled_rows = None;
+        for _ in 0..4 {
+            let reserved = sticky_h;
+            let body_h = height.saturating_sub(reserved).max(1);
+            let rows_now = self.pane.transcript_cache.layout().plain.len();
+            let settle = follow_live && settled_rows != Some(rows_now);
+            vstart = self.viewport_start(
+                follow_live,
+                held_anchor,
+                toward_tail,
+                banner_h,
+                body_h,
+                settle,
+            );
+            if follow_live {
+                settled_rows = Some(self.pane.transcript_cache.layout().plain.len());
+            }
             let message_rows = self.pane.transcript_cache.layout().plain.len();
             let total = message_rows.saturating_add(banner_h);
             let vend = vstart.saturating_add(body_h).min(total);
             vstart = vend.saturating_sub(body_h);
-            start = vstart.saturating_sub(banner_h);
+            let start = vstart.saturating_sub(banner_h);
             sticky = sticky_user_lines(
                 &self.pane.blocks,
                 self.pane.transcript_cache.layout(),
@@ -146,9 +165,13 @@ impl App {
                 STICKY_MAX,
                 content_w,
             );
-            sticky_h = sticky
+            let measured = sticky
                 .as_ref()
                 .map_or(0, |preview| preview.lines.len().min(STICKY_MAX));
+            sticky_h = sticky_h.max(measured);
+            if sticky_h == reserved {
+                break;
+            }
         }
 
         let body_h = height.saturating_sub(sticky_h).max(1);
@@ -456,6 +479,10 @@ impl App {
     /// Follow-live pins to the tail. Unfollowed always remaps the last
     /// block-space anchor first, then applies this frame's wheel/key delta in
     /// row space, so a growing stream cannot fight a down-scroll.
+    ///
+    /// `settle` applies to follow-live only. A later sticky pass skips it
+    /// when the document length is unchanged, so one placement does not scan
+    /// the layout once per pass.
     fn viewport_start(
         &mut self,
         follow_live: bool,
@@ -463,10 +490,14 @@ impl App {
         toward_tail: i64,
         banner_h: usize,
         body_h: usize,
+        settle: bool,
     ) -> usize {
         let message_rows = self.pane.transcript_cache.layout().plain.len();
         let total = message_rows.saturating_add(banner_h);
         if follow_live {
+            if !settle {
+                return total.saturating_sub(body_h);
+            }
             // Promoting an estimated block above the tail grows the document
             // after vstart was chosen. Recompute from the settled total and
             // measure the new tail until it stops moving; one pass leaves the
