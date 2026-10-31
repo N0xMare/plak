@@ -405,9 +405,10 @@ list you own, in your home, that a repository cannot edit for you. Until
 trusted, the project config is skipped entirely and `plak config show` marks
 it `untrusted — ignored`.
 
-Orchestration controls (`[orchestration]`) always come from your home config.
-Project values in that section are ignored with a warning, even after trust.
-Use `plak config set orchestration.<key> <value> --scope user` to change them.
+Orchestration controls (`[orchestration]`), `turn.auto_continue`,
+`tui.reload_requests` and `mcp.client_id_metadata_url` always come from your
+home config. Project values for them are ignored with a warning, even after
+trust. Use `plak config set <key> <value> --scope user` to change them.
 
 Once trusted, the merge is asymmetric by design: your global config can never
 accidentally name a project template (the global file is validated before the

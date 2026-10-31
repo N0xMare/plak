@@ -84,3 +84,9 @@ steering variables removed, hooks and fsmonitor disabled, external diff drivers 
 textconv ignored, and scratch files private to you. This keeps repository
 configuration from running code inside Plak's own steps; it does not constrain
 what a model-launched shell does.
+
+## Write reads the file before it overwrites it
+
+Write refuses to overwrite a file the agent has not read in its current form
+in this attachment; reads are not persisted, so after resume or reload the
+agent reads again. Results name each changed path and its action.

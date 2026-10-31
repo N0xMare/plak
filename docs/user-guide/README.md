@@ -9,7 +9,7 @@ Start here:
   run your first turn, open your first TUI session.
 - **[CLI reference](cli.md)** — every command, its flags, its output shape, and
   the exit codes.
-- **[TUI](tui.md)** — the composer, the 22 slash commands, the key bindings, the
+- **[TUI](tui.md)** — the composer, the 25 slash commands, the key bindings, the
   Menu, themes, and the Agents list.
 - **[Agents and orchestration](agents-and-orchestration.md)** — agent templates,
   the working set, tiers, spawning children, candidates and adoption, and the

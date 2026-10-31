@@ -72,7 +72,10 @@ without text. The model receives the images in token order, with the tokens
 renumbered from `#1` to match. A queued message keeps its images when you
 edit its text, and the queue panel marks it `[1 image]`. In the transcript
 the message shows one chip per image, such as `[image: png 1280x720 412 KB]`
-(history keeps the type, not the file name). The context meter counts each
+(history keeps the type, not the file name). Long sessions keep at most 20
+images (16 MiB) resident; older ones are replaced, unpaid, by a placeholder
+naming the image, and the model is told to ask you to attach it again. The
+context meter counts each
 image before it is sent (4,784 tokens on Claude routes, the most a Claude
 model charges for one image; a conservative 8,192 elsewhere). A model without
 image input refuses the message, naming the route and model. Images are not drawn in the terminal.
@@ -243,7 +246,12 @@ not reopen it: <reason>`. The check never renews a login: when the stored login
 is renewing or about to need renewal, the installed build gives no answer and
 `/reload` resumes as it would without one. When the installed build cannot read this build's
 state, `/reload` likewise carries the session forward into a linked session
-with the full conversation and typed transcript. The handoff reports
+with the full conversation and typed transcript. If the installed build cannot
+import this build's export version, the session stays open with `reload kept
+this session open: the new build cannot import this build's version N export;
+...`. 0.0.2 wrote version 8, so a 0.0.2 session stays on 0.0.2: finish it
+there, or start a new one. 0.0.2 state is left untouched for the 0.0.2 binary.
+The handoff reports
 `N messages, ~T tokens; the first request rebuilds the prompt cache`. Every
 carry keeps the session's own profile (its root template and sub-agent cards).
 

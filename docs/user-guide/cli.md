@@ -607,7 +607,7 @@ Safe independent entries may be removed while protected entries are kept.
 Review `kept:` reasons before manually removing anything. Export files under
 `carry/` are never selected. Implementation details live in spec 02 §2.5.
 
-### `plak session list|show|log|recover|export|import|delete|gc`
+### `plak session list|show|log|recover|export|import|reload|delete|gc`
 
 ```
 plak session list
@@ -616,6 +616,7 @@ plak session log <uuid>[.cN] [--kind tool] [--tail N] [--json]
 plak session recover <uuid>
 plak session export <uuid> [--out <path>]
 plak session import <path>
+plak session reload <uuid> --expect-binary <binary-id>
 plak session delete <uuid> [--yes] [--abandon-children]
 plak session gc <uuid> | --all
 ```
@@ -668,6 +669,9 @@ An unknown destination window is reported but does not block carry.
 This build writes version 11 and imports versions 11 and 10. Both versions preserve
 the composition selection, including `py-sdk`, and session-owned named state.
 Version 9 and older are refused with `this build imports versions 10 and 11`.
+0.0.2 wrote version 8, which this build refuses, so a 0.0.2 session cannot be
+carried into 0.0.3: finish it on 0.0.2, or start a new one. 0.0.2 state is
+left untouched for the 0.0.2 binary.
 New exports have no separate archive.
 Keep exports private: they contain full conversation/tool contents and named
 values, not a redacted transcript.
@@ -676,6 +680,14 @@ and malformed content are refused, not truncated. A document already imported
 into this workspace is refused, naming its existing successor.
 `session list` and `session show` name the lineage link. A build imports its
 own document version and the immediately previous one.
+
+`reload` asks a running interactive session to reload onto the installed build
+at its next idle boundary. It is off unless `~/.plak/config.toml` sets
+`tui.reload_requests = true`. It is refused unless the `plak` you run is
+exactly build `<binary-id>` and a live interactive `plak` announced that
+session. It prints `reload requested for session <id> onto build <binary-id>;
+it runs when the session is idle; outcome: <path>`. See
+[the hint line and /reload](tui.md#the-hint-line-and-reload).
 
 `delete` removes a session and its retained `~/.plak/references/<id>.json` archive,
 plus all of its retained history, together with the

@@ -428,16 +428,18 @@ If a child still reads recovery-required:
 ## `session … was created by an incompatible plak build (state …); carry it forward …`
 
 The session was written by a plak build whose stored format this build does not
-read. Plak never opens another build's state. To keep working in that
-conversation, run the build named by the state key (an installed snapshot
+read. Plak never opens another build's state. 0.0.2 wrote export version 8,
+which this build refuses, so a 0.0.2 session cannot be carried in: finish it
+on 0.0.2, or start a new one. 0.0.2 state is left untouched for the 0.0.2
+binary. When the other build's export version is one this build imports (10
+or 11), run that build with `plak session export <id>` (an installed snapshot
 under `~/.local/lib/plak/release/` or `~/.local/lib/plak/maintainer/`, or an
-older checkout) with
-`plak session export <id>`, then run `plak session import <file>` with this
-build: you get a new session carried forward from the old one, with its full
-history. `plak --resume <id>` does this by itself when a kept installed
-snapshot for that state key exists; resuming a session already carried
-forward opens the carried session instead of importing it again. Otherwise
-start a new session; the old one is left untouched.
+older checkout), then run `plak session import <file>` with this build: you
+get a new session carried forward from the old one, with its full history.
+`plak --resume <id>` does this by itself when a kept installed snapshot for
+that state key exists and the export is importable; resuming a session already
+carried forward opens the carried session instead of importing it again.
+Otherwise start a new session; the old one is left untouched.
 
 If a carry fails after the export was written (`/reload` could not start the
 new build, or the import was refused), the export file is kept under
@@ -706,8 +708,11 @@ telemetry and OAuth credentials live outside `state/` and are shared.
 
 Inspect paths with `plak doctor` and use `plak state prune-legacy` only when you
 no longer need the sessions in those older or newer builds. A `plak resume` of
-one of those sessions says it was created by an incompatible plak build and names `plak session export` / `plak session import`, the way to
-carry it into this build.
+one of those sessions says it was created by an incompatible plak build and
+names `plak session export` / `plak session import`, the way to carry it into
+this build when that build's export version is one this build imports (10 or
+11; 0.0.2 wrote version 8, which is refused). Finish a 0.0.2 session on 0.0.2,
+or start a new one. 0.0.2 state is left untouched for the 0.0.2 binary.
 
 ## `… was created by an incompatible plak build; move it aside to start fresh`
 
@@ -941,6 +946,14 @@ Physical disk exhaustion is separate from the logical retained-state limits.
 Run `plak session gc --all`, delete sessions you no longer need with
 `plak session delete <id>`, or free disk space. The logical reserve does not
 reserve disk blocks.
+
+## Low storage
+
+`plak doctor` and the idle TUI warn when the product volume has less than
+5 GiB free. Below 512 MiB, new root turns and spawns are refused
+(`storage_low`); work already running is not cancelled. Free space, then
+retry. `plak doctor` names the volume, and `plak session gc --all` reclaims
+history this build no longer needs. Plak does not delete files to make space.
 
 `prompt was not admitted` means the runtime definitely refused the prompt
 before starting a turn. Its text remains queued with a `prompt remains queued`
