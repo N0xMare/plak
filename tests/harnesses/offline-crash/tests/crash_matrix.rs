@@ -22,7 +22,10 @@ use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
-const REPLY_DEADLINE: Duration = Duration::from_secs(10);
+/// Hang watchdog for one child reply or exit. Not a timing assertion: the
+/// child can take more than ten seconds to reach its cut; 30 s bounds a hang.
+/// Outcome checks are unchanged. The routes matrix uses the same watchdog.
+const REPLY_DEADLINE: Duration = Duration::from_secs(30);
 
 struct Fixture {
     _root: TempDir,
