@@ -604,11 +604,46 @@ class ReloadRehearsalTests(unittest.TestCase):
             1, "plak: session has no exact effort binding; see /tmp/plak-home/secrets/token\n",
         )))
 
+    def test_native_acceptance_refusal_matches_only_the_typed_resolve_line(self):
+        def result(code, stderr):
+            return subprocess.CompletedProcess([], code, "", stderr)
+
+        def line(account, model, cause="exact native compatibility acceptance is required"):
+            return (f"plak: resolve {account}/{model}: {cause} \u2014 check `plak login {account}` "
+                    f"and `plak models {account}`\n")
+
+        for account, model in (("claude", "claude-opus-5-5"), ("codex", "gpt-6-luna"),
+                               ("grok", "grok-4.7-build-fast")):
+            with self.subTest(account=account):
+                self.assertTrue(MODULE.import_lacks_credentials(result(1, line(account, model))))
+        self.assertFalse(MODULE.import_lacks_credentials(result(3, line("claude", "claude-opus-5-5"))))
+        self.assertFalse(MODULE.import_lacks_credentials(result(
+            1, line("claude", "claude-opus-5-5") + "plak: also this\n")))
+        self.assertFalse(MODULE.import_lacks_credentials(result(1, line("openai", "gpt-6-luna"))))
+        self.assertFalse(MODULE.import_lacks_credentials(result(1, line("claude", "claude-opus-5-5").replace(
+            "plak login claude", "plak login grok"))))
+        self.assertFalse(MODULE.import_lacks_credentials(result(1, line("claude", "/tmp/plak-home/secrets"))))
+        for cause in ("native subscription storage is unsafe",
+                      "stored native login was written by a newer build; use that build or replace the login"):
+            with self.subTest(cause=cause):
+                self.assertFalse(MODULE.import_lacks_credentials(
+                    result(1, line("claude", "claude-opus-5-5", cause))))
+
     def test_cross_key_credential_binding_refusal_is_not_rehearsed(self):
+        refusals = (
+            "plak: session has no exact effort binding",
+            "plak: resolve claude/claude-opus-5-5: exact native compatibility acceptance is required"
+            " \u2014 check `plak login claude` and `plak models claude`",
+        )
+        for refusal in refusals:
+            with self.subTest(refusal=refusal):
+                self.assert_credential_refusal_is_not_rehearsed(refusal)
+
+    def assert_credential_refusal_is_not_rehearsed(self, refusal):
         with self.wrapper_fixture() as (base, repo, home, env, output):
             env, extra, before = self.prepare_carry(
                 base, repo, home, env, output, 1,
-                import_failure="plak: session has no exact effort binding",
+                import_failure=refusal,
             )
             result = self.run_wrapper(repo, env, extra)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

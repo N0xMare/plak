@@ -880,9 +880,13 @@ paths removed, and import does not run. Otherwise the staged build imports the
 document and runs `plak session rehearse <new-id>`. The report prints the new
 id, the carried-from line, and the root and child rehearse verdicts. Exit 0
 requires export, config validation, import and rehearse to succeed, except an
-import whose only refusal is `plak: session has no exact effort binding` (the
-disposable home has no credentials, so the Ready catalog cannot admit the
-binding): that reports `import=not rehearsed: credentials unavailable in the
+import whose only refusal is the disposable home's missing credential state:
+`plak: session has no exact effort binding` (an API route: the home has no
+credentials, so the Ready catalog cannot admit the binding) or
+`plak: resolve <account>/<model>: exact native compatibility acceptance is
+required — check ...` for `claude`, `codex` or `grok` (a native subscription
+route: subscription state is never copied, so resolution stops at the missing
+acceptance). That reports `import=not rehearsed: credentials unavailable in the
 disposable home (export, config and document conversion rehearsed)` and exits 0
 without rehearse.
 The allowlist copies

@@ -43,11 +43,18 @@ USAGE = (
 CARRIED_LINE = re.compile(
     r"^session ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) linked from .+$"
 )
-# `plak session import` prints this one stderr line and exits 1 when
-# attached_host_config cannot admit the recorded model from a Ready catalog.
-# A disposable home has no credentials, so that catalog is empty. Only this
-# exact line is the credential case; any other import failure still refuses.
+# `plak session import` prints one of these stderr lines and exits 1 when
+# attached_host_config cannot resolve the recorded route in a disposable home,
+# which holds no credentials and no native subscription state: an API route
+# finds an empty catalog, and a native subscription route stops at its missing
+# compatibility acceptance. Only these exact lines are the credential case; any
+# other import failure still refuses.
 IMPORT_CREDENTIAL_REFUSAL = "plak: session has no exact effort binding"
+IMPORT_NATIVE_ACCEPTANCE_REFUSAL = re.compile(
+    r"^plak: resolve (claude|codex|grok)/[A-Za-z0-9][A-Za-z0-9._-]*: "
+    r"exact native compatibility acceptance is required"
+    r" \u2014 check `plak login \1` and `plak models \1`$"
+)
 WAIT_IDLE_INTERVAL = 15.0
 IDLE_EXPORT_REFUSALS = (
     "a turn is running or parked with an unresolved operation; let it finish or run "
@@ -370,7 +377,9 @@ def import_lacks_credentials(result):
     if result.returncode != 1:
         return False
     lines = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
-    return lines == [IMPORT_CREDENTIAL_REFUSAL]
+    if len(lines) != 1:
+        return False
+    return lines[0] == IMPORT_CREDENTIAL_REFUSAL or bool(IMPORT_NATIVE_ACCEPTANCE_REFUSAL.match(lines[0]))
 
 
 def report_refusal(label, result, roots):
