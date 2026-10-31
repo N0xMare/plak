@@ -96,8 +96,20 @@ one cross-build carrier (a build imports its own and the previous version).
   working set. The profile chip names the nearest profile and the values that
   differ, e.g. `claude-default · root effort xhigh (profile: high)`.
 
-<!-- Agents-tab lane: entry goes here. -->
-
+- Agents list rows show the status glyph, elapsed time, `#id`, role and one
+  live fact; model, turns, tokens and process count move to the inspector. A
+  narrow row drops the role before the id.
+- Dormant children (parked, retired conversation, reclaimed checkout, closed)
+  are dimmed with the reason. JSONL `tree` rows carry an optional `dormancy`
+  object with only the true facts.
+- `t` opens a history of settled agents grouped by local day, with search
+  (`/`) and a failures filter (`!`).
+- `u` recovers a failed or recovery-required child after a confirmation,
+  through the same exact recovery path as `recover_agent`. A paused agent tree
+  shows a clickable resume row at the top of the list and of the history.
+- When `config.toml` fails to load, the Agents and profile surfaces show one
+  diagnostic naming the config error instead of a missing-template error per
+  profile, and the profile chip reads `unavailable`.
 - `plak session reload <session> --expect-binary <id>` lets the same user's
   processes, including an agent's shell, ask a running interactive session to
   reload onto the installed build at its next idle boundary. When that build
