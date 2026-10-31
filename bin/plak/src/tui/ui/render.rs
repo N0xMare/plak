@@ -4,7 +4,7 @@ use super::{
     Alignment, App, Block, BorderType, Borders, Clear, Constraint, Duration, Frame,
     HUD_SCAN_BLOCKS, Instant, Layout, Line, PROMPT_PREFIX, Paragraph, QUITTING_STATUS,
     QueueDrainState, Rect, ScrollBlock, Span, Style, TREE_PAUSED_STATUS, UnicodeWidthStr,
-    bounded_panel_height, desired_block_height, modal_chrome, tool_is_running, user_phase,
+    block_height_for_rows, bounded_panel_height, modal_chrome, tool_is_running, user_phase,
     user_status_detail, visual_cursor_xy_from_rows,
 };
 use plakous_host_protocol::status::HostPhase;
@@ -71,8 +71,9 @@ impl App {
         // chat block's bottom lines and must not outlive the view.
         self.agent_bar_hit = None;
         // Transcript-only top; floating chat block at bottom (max ⅓ height).
-        let content_w = area.width.saturating_sub(4).max(1);
-        let block_h = desired_block_height(area.height, content_w, &self.input);
+        let wrap_w = usize::from(area.width.saturating_sub(4).max(1));
+        let rows = self.composer_wrap.rows(&self.input, wrap_w).len().max(1);
+        let block_h = block_height_for_rows(area.height, rows);
         let queue_n = self.local_queue.len()
             + self.provisional_queue_rows().count()
             + self.composer_chrome.sent_steers.len();

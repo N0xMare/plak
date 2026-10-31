@@ -3,7 +3,7 @@
 use super::typing_guard::CHIP_SETTLE;
 use super::{
     App, ClickSelection, ComposerClick, Instant, MouseEvent, MouseEventKind, PointerButton, Rect,
-    UserAction, cursor_from_visual_rows, event, picker, visual_line_count,
+    UserAction, cursor_from_visual_rows, event, picker,
 };
 
 impl App {
@@ -187,8 +187,12 @@ impl App {
             )
         {
             let wrap_w = usize::from(inner.width.saturating_sub(2).max(1));
-            let max_scroll =
-                visual_line_count(&self.input, wrap_w).saturating_sub(usize::from(inner.height));
+            let max_scroll = self
+                .composer_wrap
+                .rows(&self.input, wrap_w)
+                .len()
+                .max(1)
+                .saturating_sub(usize::from(inner.height));
             let current = self
                 .composer_wheel_scroll
                 .unwrap_or(self.composer_visual_scroll)

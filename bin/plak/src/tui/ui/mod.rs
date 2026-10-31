@@ -78,10 +78,9 @@ use crate::tui::composer_selection::{
     ClickSelection, ComposerClick, ComposerSelection, ComposerUndo, EditKind, PointerButton,
 };
 use crate::tui::composer_view::{
-    DraftWrapCache, cursor_from_visual_click, cursor_from_visual_rows, desired_block_height,
-    format_context_meter, logical_line_end, logical_line_start, next_grapheme_boundary,
-    next_word_boundary, previous_grapheme_boundary, previous_word_boundary, visual_cursor_xy,
-    visual_cursor_xy_from_rows, visual_line_count,
+    DraftWrapCache, block_height_for_rows, cursor_from_visual_rows, format_context_meter,
+    logical_line_end, logical_line_start, next_grapheme_boundary, next_word_boundary,
+    previous_grapheme_boundary, previous_word_boundary, visual_cursor_xy_from_rows,
 };
 use crate::tui::control::{is_drop_command, is_quit_command, local_echo_line, route_submit};
 use crate::tui::keymap;

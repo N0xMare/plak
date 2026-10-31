@@ -619,6 +619,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # The highlighter cache is thread-local because syntect parse/highlight
     # state is mutable and TUI rendering may occur on more than one thread.
     ("plak", "src/tui/highlight.rs"): {"thread_local"},
+    # cfg(test) counter of composer wrap calls. Production paint does not
+    # include it; the macro is still in this source file.
+    ("plak", "src/tui/composer_view.rs"): {"thread_local"},
     ("plak", "src/tui/activity.rs"): {"thread_local"},
     ("plakous-host-protocol", "src/jsonl.rs"): {"json"},
     ("plakous-host-protocol", "src/topology.rs"): {"json"},

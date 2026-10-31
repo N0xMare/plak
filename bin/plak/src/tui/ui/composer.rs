@@ -3,8 +3,8 @@
 use super::terminal::copy_text_osc52;
 use super::{
     App, ControlTab, EditKind, MAX_COMPOSER_BYTES, ScrollBlock, SlashEffect, TreeNavigator,
-    UserAction, char_range_bytes, cursor_from_visual_click, modal_chrome, sanitize_composer_text,
-    sanitize_single_line, truncate_utf8_bytes, utf8_prefix, visual_cursor_xy, visual_line_count,
+    UserAction, char_range_bytes, cursor_from_visual_rows, modal_chrome, sanitize_composer_text,
+    sanitize_single_line, truncate_utf8_bytes, utf8_prefix, visual_cursor_xy_from_rows,
 };
 use plakous_host_protocol::status::HostPhase;
 
@@ -219,10 +219,13 @@ impl App {
         let width = self
             .composer_inner
             .map_or(1, |inner| usize::from(inner.width.saturating_sub(2).max(1)));
-        let (column, row) = visual_cursor_xy(&self.input, width, self.input_cursor);
-        let last_row = visual_line_count(&self.input, width).saturating_sub(1);
-        let target_row = row.saturating_add_signed(row_delta).min(last_row);
-        let next = cursor_from_visual_click(&self.input, width, target_row, column);
+        let next = {
+            let rows = self.composer_wrap.rows(&self.input, width);
+            let (column, row) = visual_cursor_xy_from_rows(rows, self.input_cursor);
+            let last_row = rows.len().max(1).saturating_sub(1);
+            let target_row = row.saturating_add_signed(row_delta).min(last_row);
+            cursor_from_visual_rows(rows, self.input.chars().count(), target_row, column)
+        };
         if extend {
             if self.composer_selection.range(&self.input).is_none() {
                 self.composer_selection

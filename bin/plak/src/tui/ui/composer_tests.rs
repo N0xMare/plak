@@ -278,7 +278,8 @@ fn exact_width_caret_wraps_inside_the_composer() {
     terminal.draw(|frame| app.draw(frame)).unwrap();
     let inner = app.composer_inner.expect("composer");
     let wrap_width = usize::from(inner.width.saturating_sub(2));
-    let (column, row) = super::visual_cursor_xy(&app.input, wrap_width, app.input_cursor);
+    let (column, row) =
+        crate::tui::composer_view::visual_cursor_xy(&app.input, wrap_width, app.input_cursor);
     assert_eq!((column, row), (0, 1));
     assert!(inner.x.saturating_add(2) < inner.right());
     assert_eq!(
@@ -370,7 +371,7 @@ fn capped_composer_keys_move_caret_and_extend_selection_by_visual_rows() {
     app.handle_key(key(KeyCode::PageUp));
     assert!(app.input_cursor < end - 7);
     terminal.draw(|frame| app.draw(frame)).unwrap();
-    let (_, caret_row) = super::visual_cursor_xy(
+    let (_, caret_row) = crate::tui::composer_view::visual_cursor_xy(
         &app.input,
         usize::from(app.composer_inner.unwrap().width.saturating_sub(2)),
         app.input_cursor,
@@ -1478,4 +1479,29 @@ fn alt_shift_word_moves_select_in_both_keyboard_encodings() {
             );
         }
     }
+}
+
+/// A large draft calls `visual_rows` once for a text and width: the first
+/// frame, then not again across later frames, a cursor-row move, or a wheel
+/// scroll, and once more when the wrap width changes.
+#[test]
+fn a_large_draft_lays_out_once_per_text_and_width() {
+    let mut app = App::new(launch_basic(), true);
+    app.set_input("word ".repeat(400));
+    let _ = crate::tui::composer_view::take_visual_row_calls();
+    let _ = render_to_string(&mut app, 80, 24);
+    assert_eq!(crate::tui::composer_view::take_visual_row_calls(), 1);
+    for _ in 0..20 {
+        let _ = render_to_string(&mut app, 80, 24);
+    }
+    app.move_composer_cursor(1, false);
+    let inner = app.composer_inner.expect("composer");
+    app.handle_mouse(left_mouse(
+        MouseEventKind::ScrollDown,
+        inner.x.saturating_add(2),
+        inner.y,
+    ));
+    assert_eq!(crate::tui::composer_view::take_visual_row_calls(), 0);
+    let _ = render_to_string(&mut app, 100, 24);
+    assert_eq!(crate::tui::composer_view::take_visual_row_calls(), 1);
 }

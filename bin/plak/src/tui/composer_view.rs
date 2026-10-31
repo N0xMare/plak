@@ -51,25 +51,33 @@ pub fn format_window_label(window: u64) -> String {
 }
 
 /// Count terminal-cell visual wrap lines for a Unicode draft.
+#[cfg(test)]
 #[must_use]
 pub fn visual_line_count(text: &str, width: usize) -> usize {
     visual_rows(text, width).len().max(1)
+}
+
+/// Floating block height for `rows` of wrapped draft, capped near 35% of
+/// the terminal. An empty draft keeps two content rows plus the borders.
+#[must_use]
+pub fn block_height_for_rows(term_h: u16, rows: usize) -> u16 {
+    let max_total = term_h.saturating_mul(35).div_ceil(100).max(4);
+    let max_content = max_total.saturating_sub(2).max(MIN_CONTENT_ROWS);
+    let content = u16::try_from(rows.max(1))
+        .unwrap_or(u16::MAX)
+        .clamp(MIN_CONTENT_ROWS, max_content);
+    content.saturating_add(2)
 }
 
 /// Desired floating block height for terminal `term_h` and content width.
 ///
 /// Max total height is approximately **35%** of the terminal. An empty or
 /// single-line draft retains two content rows plus the two border rows.
+#[cfg(test)]
 #[must_use]
 pub fn desired_block_height(term_h: u16, content_width: u16, draft: &str) -> u16 {
-    let max_total = term_h.saturating_mul(35).div_ceil(100).max(4);
-    let max_content = max_total.saturating_sub(2).max(MIN_CONTENT_ROWS);
     let wrap_w = usize::from(content_width.max(1));
-    let needed = visual_line_count(draft, wrap_w);
-    let content = u16::try_from(needed)
-        .unwrap_or(u16::MAX)
-        .clamp(MIN_CONTENT_ROWS, max_content);
-    content.saturating_add(2)
+    block_height_for_rows(term_h, visual_line_count(draft, wrap_w))
 }
 
 /// Split draft into visual lines for rendering (width in cells).
@@ -82,12 +90,30 @@ pub fn wrap_draft_lines(text: &str, width: usize) -> Vec<String> {
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    static VISUAL_ROW_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Layouts of `visual_rows` on this thread since the last take.
+///
+/// Counts the function itself, so a frame that wraps by calling it again
+/// instead of the draft cache fails the one-layout assertion.
+#[cfg(test)]
+pub(crate) fn take_visual_row_calls() -> usize {
+    VISUAL_ROW_CALLS.with(|calls| calls.replace(0))
+}
+
 /// Visual rows as `(start_char_idx, end_char_idx, line_text)`.
 ///
 /// Indices are into the **char** sequence of `text` (not bytes). End is exclusive.
 /// Soft-wrap rows do not consume a newline; hard-break rows end just before `\n`.
 #[must_use]
 pub fn visual_rows(text: &str, width: usize) -> Vec<(usize, usize, String)> {
+    #[cfg(test)]
+    VISUAL_ROW_CALLS.with(|calls| {
+        calls.set(calls.get().saturating_add(1));
+    });
     let width = width.max(1);
     let mut out: Vec<_> = wrap_plain_rows(text, width)
         .into_iter()
@@ -126,6 +152,7 @@ impl DraftWrapCache {
 }
 
 /// Char index of the cursor for a click on visual row `row`, content col `col`.
+#[cfg(test)]
 #[must_use]
 pub fn cursor_from_visual_click(text: &str, width: usize, row: usize, col: usize) -> usize {
     cursor_from_visual_rows(&visual_rows(text, width), text.chars().count(), row, col)
@@ -158,6 +185,7 @@ pub fn cursor_from_visual_rows(
 }
 
 /// Visual (col, row) for a char cursor index.
+#[cfg(test)]
 #[must_use]
 pub fn visual_cursor_xy(text: &str, width: usize, cursor: usize) -> (usize, usize) {
     visual_cursor_xy_from_rows(&visual_rows(text, width), cursor)
