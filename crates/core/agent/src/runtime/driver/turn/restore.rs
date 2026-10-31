@@ -107,7 +107,7 @@ impl Driver {
                 provider_artifact_transition(&provider_plan, &frame.provider_response),
             )
             .await;
-        self.finalize_continuation_on_request_budget(
+        self.finalize_continuation_on_refusal(
             command.turn_id,
             frame.hosted_continuation_operation,
             promoted,
@@ -351,7 +351,7 @@ impl Driver {
                 provider_artifact_transition(&plan, &frame.provider_response),
             )
             .await;
-        self.finalize_continuation_on_request_budget(
+        self.finalize_continuation_on_refusal(
             command.turn_id,
             Some(continuation_operation),
             promoted,

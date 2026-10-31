@@ -1,5 +1,6 @@
 //! Mandatory aggregate-image admission, independent of optional pressure folds.
 
+use crate::runtime::PromptCommand;
 use crate::runtime::compaction::record::compaction_operation_component;
 use crate::runtime::compaction::residency::record::{
     ResidencyEvidence, ResidencyRequest, operation_identity, publication,
@@ -10,13 +11,12 @@ use crate::runtime::continuation::runtime_manifest_error;
 use crate::runtime::driver::Driver;
 use crate::runtime::driver::compaction::MANUAL_COMPACTION_REMEDY;
 use crate::runtime::durable::DurableSessionAddress;
-use crate::runtime::{OperationId, PromptCommand};
 use crate::{
     AgentError, AgentErrorKind, AgentEventKind, CompactionEventOutcome, CompactionEventReason,
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
     DurableOperationTransition, EventContext, StoreAdmission, TelemetryObservationKind,
 };
-use plakous_model::{ContentBlock, ContextStatusKind, ResidentImageBudget, TurnId};
+use plakous_model::{ContentBlock, ContextStatusKind, ResidentImageBudget};
 use std::sync::Arc;
 
 impl Driver {
@@ -48,23 +48,6 @@ impl Driver {
             ));
         }
         Ok(())
-    }
-
-    /// A request-budget refusal ends the turn, so an open hosted continuation
-    /// is finalized first, as the other round refusals do.
-    pub(in crate::runtime::driver) async fn finalize_continuation_on_request_budget(
-        &mut self,
-        turn_id: TurnId,
-        continuation: Option<OperationId>,
-        result: Result<(), AgentError>,
-    ) -> Result<(), AgentError> {
-        if let Err(refusal) = &result
-            && refusal.kind() == AgentErrorKind::RequestBudget
-        {
-            self.finalize_hosted_continuation(turn_id, continuation)
-                .await?;
-        }
-        result
     }
 
     fn resident_images_fit(&self) -> bool {

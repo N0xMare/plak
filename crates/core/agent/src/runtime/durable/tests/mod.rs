@@ -76,6 +76,7 @@ mod compaction_fallback;
 mod compaction_instruction;
 mod compaction_recovery_cases;
 mod composition_scheduler;
+mod continuation_refusal;
 mod continuation_reopen;
 mod descriptor_fixtures;
 mod fence_compaction;

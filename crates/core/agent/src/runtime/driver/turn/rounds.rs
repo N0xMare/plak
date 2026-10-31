@@ -343,12 +343,8 @@ impl Driver {
             }
             self.reresolve_expired_model(command).await?;
             let residency = self.require_image_residency(command).await;
-            self.finalize_continuation_on_request_budget(
-                command.turn_id,
-                continuation_baton,
-                residency,
-            )
-            .await?;
+            self.finalize_continuation_on_refusal(command.turn_id, continuation_baton, residency)
+                .await?;
             self.turn_budgets.model_rounds = self.turn_budgets.model_rounds.saturating_add(1);
             // The budget ends exploration, not the turn. One wrap-up round runs
             // with tool selection withdrawn so the user still gets an answer;
@@ -374,14 +370,17 @@ impl Driver {
                     wrap_up_note_appended = true;
                 }
             }
-            let (attempt_id, request) =
-                if let Some(admitted) = self.take_admitted_round(command.turn_id, over_budget)? {
-                    (admitted.attempt_id, RoundRequest::Admitted(admitted))
-                } else {
-                    let attempt_id = self.attempt_id()?;
-                    let request = self.model_request(command, attempt_id, over_budget)?;
-                    (attempt_id, RoundRequest::Fresh(Box::new(request)))
-                };
+            let prepared = match self.take_admitted_round(command.turn_id, over_budget) {
+                Ok(Some(admitted)) => Ok((admitted.attempt_id, RoundRequest::Admitted(admitted))),
+                Ok(None) => self.attempt_id().and_then(|attempt_id| {
+                    self.model_request(command, attempt_id, over_budget)
+                        .map(|request| (attempt_id, RoundRequest::Fresh(Box::new(request))))
+                }),
+                Err(error) => Err(error),
+            };
+            let (attempt_id, request) = self
+                .finalize_continuation_on_refusal(command.turn_id, continuation_baton, prepared)
+                .await?;
             let operation = self.run_model(command, attempt_id, request).await;
             let last_round_usage = operation.usage;
             let usage_result = command.shared.record_model_operation(last_round_usage);
@@ -716,12 +715,8 @@ impl Driver {
                     provider_artifact_transition(&provider_plan, &response),
                 )
                 .await;
-            self.finalize_continuation_on_request_budget(
-                command.turn_id,
-                continuation_baton,
-                promoted,
-            )
-            .await?;
+            self.finalize_continuation_on_refusal(command.turn_id, continuation_baton, promoted)
+                .await?;
             let _ = self.apply_steering(command).await?;
             command.shared.begin_preparing()?;
         }

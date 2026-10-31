@@ -756,6 +756,17 @@ and the restored turn, with the same budgets, fails the same way without
 dispatch. After it, P is `Finalized` `Continue` with nothing after it, which
 closes as `ToolRoundCompleted` with the model-round wording.
 
+Every other definite refusal that ends a turn while a server-pause or
+provider-programmatic continuation baton is open follows the same order: the
+driver finalizes the baton first, so the head settles Quiescent with one
+terminal. This covers refusals before a round dispatches (segment limit,
+request preparation, resident-image budget) and refusals at the tool-batch
+fence (next-round capacity, zero headroom, resident-image budget). Definite
+means typed `Model` (other than cancellation or outcome unknown),
+`RequestBudget`, `RoundLimit` or `InvalidInput` without a storage failure.
+Cancellation, outcome-unknown, storage and unavailable-binding failures keep
+the baton for their own recovery.
+
 Before a response's stream ends the provider operation stays `Dispatched`; a
 host lost there closes the turn as an unobserved model request (§5.5). Effect
 completions inside a batch remain their own commits; they are execution

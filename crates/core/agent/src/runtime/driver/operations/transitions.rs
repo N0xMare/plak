@@ -413,6 +413,26 @@ impl Driver {
         Ok(())
     }
 
+    /// A definite refusal ends the turn, so an open server-pause or
+    /// provider-programmatic continuation is finalized before it fails and
+    /// the head settles Quiescent with one terminal. Cancellation,
+    /// outcome-unknown, storage and binding failures keep the baton for their
+    /// own recovery.
+    pub(in crate::runtime::driver) async fn finalize_continuation_on_refusal<T>(
+        &mut self,
+        turn_id: TurnId,
+        continuation: Option<OperationId>,
+        result: Result<T, AgentError>,
+    ) -> Result<T, AgentError> {
+        if let Err(refusal) = &result
+            && definite_refusal(refusal)
+        {
+            self.finalize_hosted_continuation(turn_id, continuation)
+                .await?;
+        }
+        result
+    }
+
     pub(in crate::runtime::driver) async fn finish_effect_decision_operation(
         &mut self,
         turn_id: TurnId,
@@ -461,4 +481,18 @@ impl Driver {
             );
         }
     }
+}
+
+/// A refusal decided before dispatch, with no ambiguous effect, storage
+/// state or unavailable binding left for recovery to reconcile; a restored
+/// frame retries an unavailable binding instead.
+fn definite_refusal(error: &AgentError) -> bool {
+    error.store_error().is_none()
+        && matches!(
+            error.kind(),
+            AgentErrorKind::RequestBudget
+                | AgentErrorKind::Model
+                | AgentErrorKind::RoundLimit
+                | AgentErrorKind::InvalidInput
+        )
 }
