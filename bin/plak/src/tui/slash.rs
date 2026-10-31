@@ -9,7 +9,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("keybinds", "View Plak key bindings"),
     ("status", "View session status"),
     ("settings", "Go to interactive settings menu"),
-    ("agents", "Choose an agent profile"),
+    ("agents", "Choose an agent profile · <profile>"),
     ("providers", "View connected providers"),
     ("mcp", "View MCP servers and this session's MCP tools"),
     ("usage", "View usage data for connected providers"),
@@ -23,14 +23,17 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("clear", "Start a new conversation"),
     ("compact", "Compact this conversation"),
     ("config", "Open config.toml in your editor"),
-    ("resume", "Resume a previous session"),
-    ("tree", "Open Activity: Agents"),
+    ("resume", "Resume a previous session · <id>"),
+    ("tree", "Open Activity: Agents · [resume]"),
     ("ps", "Open Activity: Processes"),
     ("stop-all", "Stop all non-root agents"),
     ("fork", "Fork this conversation"),
     ("fork-then-compact", "Fork, then compact the new session"),
     ("drop", "Drop the last queued message"),
-    ("image", "Attach image files to the next message"),
+    (
+        "image",
+        "Attach image files to the next message · <path>...",
+    ),
     (
         "reload",
         "Restart on the installed Plak and resume this session",
@@ -280,11 +283,11 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
 }
 
 fn resolve_resume(args: &str) -> SlashEffect {
-    let id = args
-        .split_whitespace()
-        .next()
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
+    let mut words = args.split_whitespace();
+    let id = words.next().map(str::to_owned);
+    if words.next().is_some() {
+        return SlashEffect::LocalNote("usage: /resume  —  or  /resume <id>".to_owned());
+    }
     SlashEffect::Action(UserAction::ResumeSession { id })
 }
 

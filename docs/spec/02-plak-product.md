@@ -3467,7 +3467,7 @@ requests. Pending terminal notices alone do not refuse a transition.
 Same-branch recovery and authority refresh transfer the process service instead;
 compaction preserves that branch's jobs.
 
-The catalog is **closed**. Twenty-four commands ship, and a command that does
+The catalog is **closed**. Twenty-five commands ship, and a command that does
 nothing but announce a deferred capability is not one of them:
 
 `/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`, `/mcp`,
@@ -3666,7 +3666,7 @@ What the argument-taking ones do:
 
 | Command | Arguments |
 | --- | --- |
-| `/resume` | bare opens the cwd-scoped picker; a uuid resumes exactly |
+| `/resume` | bare opens the cwd-scoped picker; a uuid resumes exactly; any further word is refused and does nothing |
 | `/agents` | bare opens the Agents tab; `<profile>` resolves the name against the product's list (an exact id, then an alias the list shows) and asks whether to use that profile in this session now or set it as the default for new sessions |
 | `/fork` | takes no argument. Forks on the current binding with the source's history, recompiling the session's current configuration for the same target: the `AGENTS.md` files as they are now, harness settings and tool presentation (chapter 01 §5.6). A fork whose tool authority changed since the session started is refused with `cannot fork: this session's tools changed; start a new session`. When any `AGENTS.md` differs from the source's, the transcript note names each by scope as changed, added, or removed, also when the fork is saved without attaching. Recovery of an interrupted fork first reads its receipt before anything opens: a recorded fork becomes current; otherwise the source opens and the fork recompiles the same way, with the same note. A recovered fork that is refused outright (another target, changed tool authority, an operation published with other semantics, storage pressure) is abandoned: the session opens unchanged with the abandoned-fork note and the refusal, and does not retry it. A different profile is `/agents <profile>`. If the canonical fork lands but its session cannot attach, the fork is saved as its own resumable session, the workflow resolves, and this session stays attached and promptable; the note names the saved session. A stop before canonical dispatch leaves the exact source unchanged; a stop during successor projection says `fork stopped; saved as session X` and offers `/resume X` with the source still attached |
 | `/fork-then-compact` | takes no argument. Forks on the current binding, then compacts only the new session. If compaction fails, the fork stands and `/compact` retries it |
@@ -3697,9 +3697,11 @@ shorter word completes it exactly as `Tab` does and runs nothing, and an
 `Enter` within 600 ms of that completion, the draft unchanged, runs nothing
 either. Every other command keeps the prefix rule.
 Each row is the command and a short first-time-user sentence of the effect —
-`View session status`, `Select a model` — not the Menu tab name and
-not a usage grammar. Argument syntax lives in `/help` notes and in the
-refusal line when a command is invoked wrongly.
+`View session status`, `Select a model` — not the Menu tab name.
+Rows that take an argument also show a short hint (`<id>`, `<profile>`,
+`[resume]`, `<path>...`). The full grammar stays in `/help` notes and in the
+refusal line when a command is invoked wrongly. `/resume` with more than one
+word refuses and does nothing.
 
 `/help` is a **generated sheet**. Its body is one row per catalog entry with
 that command's own help text, the deferred-capability paragraph, the CLI-only

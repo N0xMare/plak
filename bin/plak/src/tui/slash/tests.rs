@@ -166,6 +166,10 @@ fn a_command_without_arguments_refuses_trailing_text() {
             id: Some("abc".into())
         })
     );
+    assert_eq!(
+        resolve(&parse_slash("/resume abc extra").unwrap(), &ctx),
+        SlashEffect::LocalNote("usage: /resume  —  or  /resume <id>".to_owned())
+    );
 
     // An unknown command is still named as unknown, arguments or not.
     assert!(matches!(
@@ -226,6 +230,27 @@ fn the_catalog_is_closed_and_carries_no_deferred_capability_rows() {
             "/{dead} must not be in the catalog"
         );
         assert!(fuzzy_list(dead).is_empty(), "/{dead} must not complete");
+    }
+    assert_eq!(
+        COMMANDS.len(),
+        25,
+        "spec 02 §5.1 ships twenty-five commands"
+    );
+    for (name, hint) in [
+        ("resume", "<id>"),
+        ("agents", "<profile>"),
+        ("tree", "[resume]"),
+        ("image", "<path>..."),
+    ] {
+        let help = COMMANDS
+            .iter()
+            .find(|(command, _)| *command == name)
+            .map(|(_, help)| *help)
+            .unwrap();
+        assert!(
+            help.contains(hint),
+            "/{name} row should hint {hint}: {help}"
+        );
     }
     // Nothing left in the catalog is a placeholder row.
     for (name, help) in COMMANDS {

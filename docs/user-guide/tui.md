@@ -320,7 +320,7 @@ commands that act for good, `/clear`, `/compact`, `/fork-then-compact`,
 `/fork`, `/drop` and `/recover`, run from `Enter` only when you typed the
 full name: `Enter` on a shorter word (`/co`) completes it, as `Tab` does, and
 runs nothing, and an `Enter` within about 600 ms of that completion runs
-nothing either; look, then press `Enter` again. There are 24 commands:
+nothing either; look, then press `Enter` again. There are 25 commands:
 
 | Command | Effect |
 | --- | --- |
@@ -328,24 +328,25 @@ nothing either; look, then press `Enter` again. There are 24 commands:
 | `/keybinds` | View Plak key bindings |
 | `/status` | View session status |
 | `/settings` | Go to interactive settings menu |
-| `/agents` | Choose an agent profile |
+| `/agents` | Choose an agent profile · `<profile>` |
 | `/providers` | View connected providers |
 | `/mcp` | View MCP servers and this session's MCP tools |
 | `/usage` | View usage data for connected providers |
 | `/context` | View context window data |
 | `/attach` | Reconnect the agent |
+| `/rebind` | Carry this conversation under the current configuration and login |
 | `/recover` | Recover an interrupted turn |
 | `/clear` | Start a new conversation |
 | `/compact` | Compact this conversation |
 | `/config` | Open `config.toml` in your editor |
-| `/resume` | Resume a previous session |
-| `/tree` | Open Activity: Agents |
+| `/resume` | Resume a previous session · `<id>` |
+| `/tree` | Open Activity: Agents · `[resume]` |
 | `/ps` | Open Activity: Processes |
 | `/stop-all` | Stop all non-root agents |
 | `/fork` | Fork this conversation |
 | `/fork-then-compact` | Fork, then compact the new session |
 | `/drop` | Drop the last queued message |
-| `/image <path>...` | Attach image files to the next message |
+| `/image` | Attach image files to the next message · `<path>...` |
 | `/reload` | Restart on the installed Plak and resume this session |
 | `/quit` | Exit Plak |
 
@@ -357,6 +358,7 @@ Notes worth knowing:
 - `/recover` reopens the session, records once what the interrupted turn left
   unobserved, and continues; the next prompt does this on its own.
 - `/reload`: see [the hint line and `/reload`](#the-hint-line-and-reload).
+- `/resume <id>` resumes that session. Extra words are refused and do nothing.
 - `/resume` waits briefly if this host is still releasing that session's old
   attachment. If it says the previous switch is still finishing, retry shortly;
   the resumed history is rebuilt from the committed runtime feed.
