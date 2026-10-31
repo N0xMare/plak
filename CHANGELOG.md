@@ -82,7 +82,54 @@ one cross-build carrier (a build imports its own and the previous version).
   advice; an exhausted budget ends the turn as temporarily unavailable. Every
   other 401, and every other route, is still a refused credential.
 
+- `/reload` asks the installed build, before teardown, whether the session
+  reopens exactly. When a frozen binding input changed (an adapter revision or
+  a tool description) and the session is quiescent, it carries the session into
+  a new linked session in one step; the note names the change, says the provider
+  cache rebuilds, and counts the finished sub-agents that are not restored. With
+  a running turn, live sub-agents or background processes it refuses and stays
+  attached. The check writes nothing, never renews a login and never starts an
+  MCP server; when it cannot answer, `/reload` resumes as before. Exact-reopen
+  refusals name the changed input. `just dev reload-rehearsal` reports
+  `reopen=exact|carries|unknown|refused`.
+- Each session keeps its own profile. Fork now changes only that session;
+  `Set as default` in the Agents tab sets the profile new sessions start with.
+  `/reload`, import-resume and `/rebind` keep the session's root template and
+  working set. The profile chip names the nearest profile and the values that
+  differ, e.g. `claude-default · root effort xhigh (profile: high)`.
+- `plak session reload <session> --expect-binary <id>` lets the same user's
+  processes, including an agent's shell, ask a running interactive session to
+  reload onto the installed build at its next idle boundary; it works across a
+  state-format change and wakes the root with one host-authored continuation.
+  It is off unless the home sets `tui.reload_requests = true`.
+- Following the live transcript stays on the last row after block heights are
+  corrected and after the sticky prompt bar grows, so the jump-to-bottom arrow no
+  longer sticks over a clipped final paragraph. On a light theme the caret uses
+  the theme's text color; while Plak owns the terminal the caret is a steady
+  block, and leaving restores the terminal's cursor color and shape.
+- Codex web search and image generation retry the wrapped-503 HTTP 401 as a
+  temporary overload, honoring Retry-After, with no credential refresh.
+- OpenRouter Chat, Messages and Responses refuse to send a key that was rotated
+  after the model was admitted, before any bearer is read. Invalid xAI product
+  keys are refused before admission.
+
 ### Plakous
+
+- API keys are one shared zeroizing secret type with typed generation-bound
+  sources in `plakous-auth`; raw key text and bearer request constructors stay
+  inside the integrations, outside the supported facade. API catalogs share one
+  bounded transport and row projection in `plakous-exchange`.
+- Claimed refresh and revoke share one execution ladder; a revoke whose accept
+  fails leaves the credential quarantined. Chat and Messages share one attempt
+  host and one HTTP/SSE host, Chat seals a successful terminal before publishing
+  it, and Chat, Messages, Responses and image side requests share one bounded
+  executor. OpenAI Platform, xAI Platform and OpenRouter Responses share one
+  API-key preparation and dispatch skeleton in `plakous-responses`.
+- `plakous::agent::BindingChange` names the frozen binding input an exact reopen
+  found changed; `AgentSessions::verify_open` answers whether an exact quiescent
+  head would attach, with no lease, driver, recovery or write.
+  `TopologyHubAttach::Inspect` and `McpToolPack::unbound` compile tree and MCP
+  tools without attaching, leasing or starting anything.
 
 - `plakous-responses-dialect` is folded into `plakous-responses` and retired;
   its last published version stays 0.0.2 (not yanked). The workspace has 37
@@ -210,6 +257,11 @@ one cross-build carrier (a build imports its own and the previous version).
   both limits output bytes and request pins are unchanged.
 
 ### Persisted formats
+
+- New home config key `tui.reload_requests` (bool, default false). Reload
+  handoff sidecars are private transient files under `carry/`; reload requests,
+  listeners and outcomes are private transient files under `run/reload-requests/`.
+  No other persisted format changes in this batch.
 
 - Runtime format epoch 33: the cell compiler uses one v3 descriptor identity
   recipe for product JavaScript, Python PTC (structured and freeform), and
