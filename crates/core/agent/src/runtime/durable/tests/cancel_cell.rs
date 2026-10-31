@@ -2179,7 +2179,10 @@ fn nested_terminal_read_does_not_consume_the_job_notice() -> TestResult {
 #[test]
 fn cancel_during_a_cell_running_a_real_process_command_joins_inside_the_settle_window() -> TestResult
 {
-    run_cancel_cell_scenario(|| async {
+    // The wrapper covers agent setup, the real process start, the cancel and
+    // shutdown; it is a 60 s hang watchdog. The property stays the join bound
+    // below.
+    run_cancel_cell_scenario_with_timeout(8 << 20, Duration::from_secs(60), || async {
         let directory = tempfile::tempdir()?;
         let evidence = Arc::new(CancelCellEvidence::default());
         let agent = cancel_cell_agent(
