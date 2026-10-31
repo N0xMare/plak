@@ -3166,7 +3166,7 @@ subprocess.run(["python3", "wait.py", "service.port"], check=True)
         let isolated = service_namespace != host_namespace;
         // A port in another namespace cannot identify a host listener. Only
         // the shared-network fixture may receive the cleanup request.
-        let cleanup = (!isolated).then_some(ServiceCleanup(endpoint));
+        let cleanup = (!isolated).then_some(ServiceCleanup(endpoint, None));
         // Full Linux containment has its own loopback. The server's self-
         // request proves startup; an external localhost request cannot do so.
         assert_eq!(service_request(endpoint, "/").is_some(), !isolated);
@@ -3195,12 +3195,75 @@ subprocess.run(["python3", "wait.py", "service.port"], check=True)
     }
 }
 
-struct ServiceCleanup(SocketAddr);
+struct ServiceCleanup(SocketAddr, Option<u32>);
 
 impl Drop for ServiceCleanup {
     fn drop(&mut self) {
         let _ = service_request(self.0, "/stop");
+        if let Some(pid) = self.1 {
+            // A missed /stop must not leave the writer until its shutdown timer.
+            terminate_writer(pid);
+        }
     }
+}
+
+fn terminate_writer(pid: u32) {
+    let _ = Command::new("kill")
+        .arg(format!("-{SIGTERM}"))
+        .arg(pid.to_string())
+        .status();
+    if writer_process_alive(pid) {
+        let _ = Command::new("kill")
+            .arg(format!("-{SIGKILL}"))
+            .arg(pid.to_string())
+            .status();
+    }
+}
+
+fn writer_process_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn service_answers_while_writer_lives(endpoint: SocketAddr, pid: u32) {
+    // Connect completes in the kernel backlog, so a miss there is not the
+    // failure. Retry only connect errors while the pid is alive. One accepted
+    // connection uses a 15s hang-bound read: a short read timeout would drop a
+    // request this single-threaded server still serves.
+    let watchdog = Instant::now() + Duration::from_secs(15);
+    let mut stream = loop {
+        if let Ok(stream) = TcpStream::connect_timeout(&endpoint, Duration::from_millis(200)) {
+            break stream;
+        }
+        assert!(
+            writer_process_alive(pid),
+            "writer died after output capture was released"
+        );
+        assert!(
+            Instant::now() < watchdog,
+            "writer stayed live but never answered"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .expect("read timeout");
+    let wrote = stream
+        .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+        .is_ok();
+    let mut answer = Vec::new();
+    let read_ok = wrote && stream.read_to_end(&mut answer).is_ok();
+    let answered = read_ok
+        && answer
+            .windows(b"service-ready".len())
+            .any(|part| part == b"service-ready");
+    assert!(
+        answered || writer_process_alive(pid),
+        "writer died after output capture was released"
+    );
+    assert!(answered, "writer stayed live but never answered");
 }
 
 fn service_request(endpoint: SocketAddr, path: &str) -> Option<Vec<u8>> {
@@ -3543,15 +3606,18 @@ fn leftover_jobs_unredirected_http_writer_survives_run_exit() {
         let fixture = Fixture::new(&script);
         std::fs::write(
             fixture.workspace().join("server.py"),
-            r#"import http.server, pathlib, threading
+            r#"import http.server, os, pathlib, threading
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         print("AFTER-RUN-WRITE", flush=True)
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"service-ready")
-        threading.Thread(target=self.server.shutdown, daemon=True).start()
+        if self.path == "/stop":
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
 server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+pathlib.Path("service.pid.tmp").write_text(str(os.getpid()))
+pathlib.Path("service.pid.tmp").replace("service.pid")
 pathlib.Path("service.port.tmp").write_text(str(server.server_port))
 pathlib.Path("service.port.tmp").replace("service.port")
 timer = threading.Timer(30, server.shutdown)
@@ -3566,13 +3632,16 @@ server.serve_forever()
             .unwrap()
             .parse::<u16>()
             .unwrap();
+        let pid = std::fs::read_to_string(fixture.workspace().join("service.pid"))
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-        let _cleanup = ServiceCleanup(endpoint);
+        let _cleanup = ServiceCleanup(endpoint, Some(pid));
         assert!(result.status.success(), "{}", result.stderr);
-        assert!(
-            service_request(endpoint, "/").is_some(),
-            "writer died after output capture was released"
-        );
+        // Only /stop shuts the server down. Process exit is still "writer died".
+        service_answers_while_writer_lives(endpoint, pid);
     }
 }
 
