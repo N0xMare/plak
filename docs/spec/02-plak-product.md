@@ -3017,8 +3017,14 @@ carries optional `waiting_on`, the flat ids it waits on (`["p3", "c2"]`: its
 own running processes, then its children that are still live work). It is
 present exactly while the child is parked or held for its reopen wake, and
 `[]` is the explicit parked marker when nothing is named yet; it is absent
-otherwise, including while a wake is being admitted. The closed JSONL event-kind vocabulary is
-unchanged.
+otherwise, including while a wake is being admitted. A non-root row also
+carries optional `dormancy`, an object of only the true facts among `parked`,
+`conversation_retired`, `workspace_reclaimed` and `closed`
+(`{"conversation_retired":true,"workspace_reclaimed":true}`). It is omitted
+when none apply, including on the root. The facts are the tree's own park,
+retirement, reclamation and closed status; a missing session locator is not
+retirement and a missing directory is not reclamation. The closed JSONL
+event-kind vocabulary is unchanged.
 
 JSONL attachment requests an initial tree snapshot only when topology is
 enabled for the host. A single-agent prompt does not issue an implicit
@@ -5606,7 +5612,7 @@ buttons that do not fit one row stack right-aligned. `[ Cancel ]` comes first,
 then the action (`[ Stop turn ]` and `[ Stop turn + processes ]`,
 `[ Stop operation ]`, `[ Interrupt ]`, `[ Close ]`, `[ Stop all ]`,
 `[ Resume all ]`, `[ Stop ]`, `[ Quit ]`, `[ Allow ]`, `[ Deny ]`,
-`[ Reset ]`); focus starts on the primary action, and a dim
+`[ Reset ]`, `[ Recover ]`); focus starts on the primary action, and a dim
 `Enter confirms · Esc cancels` under the lines says how to confirm. Focus is
 absolute and moves the moment a key arrives: `←` and `→` move it one button
 without wrapping, and `Tab` moves right while `Shift+Tab` moves left.
@@ -5629,7 +5635,7 @@ snapshots do not retarget it; it closes when its target stops being active
 (the turn settles, the agent settles, the process exits, the tree is no longer
 paused, no agent or process is left) and a session switch closes it. The
 painted controls that open it (the Agents footer's `r resumes`, `i interrupt`,
-`c close`, `s stop all`, the agent view's controls, the Processes footer's
+`c close`, `s stop all`, `u recover`, the agent view's controls, the Processes footer's
 `s stop`, `S stop all`, and their short forms on a narrow footer) are
 clickable, so it is reachable and usable by mouse alone.
 
@@ -5652,12 +5658,23 @@ cycles degrade to a forest rather than failing. The host never drops a node;
 the projection only decides what the list shows.
 
 The live scope shows active agents (pending, running, paused, sealing,
-adopting, and interrupted, which paints as waiting), the root, agents whose
-current attempt finished within the last five minutes (dimmed after two),
-agents that need attention until acknowledged, and every ancestor needed to
-explain a shown agent (dimmed when it is settled). Ages come from the current
-attempt's durable end stamp, so a restart does not reset them. `f` switches to
-every agent and back.
+adopting, and interrupted, which paints as waiting), parked live work, the
+root, agents whose current attempt finished within the last five minutes
+(dimmed after two), agents that need attention until acknowledged, and every
+ancestor needed to explain a shown agent (dimmed when it is settled). A
+dormant child — parked, a retired conversation, a reclaimed checkout, or
+closed — dims its row body immediately and names the reason. Several facts
+may be true together; the row's one reason is closed, then retired
+conversation, then reclaimed checkout, then parked (`waiting on p3, c2` when
+the wait is named). The inspector lists every fact and says whether a
+followup can revive it: a reclaimed checkout can, a retired conversation
+cannot. Retirement does not delete work or candidates. An outstanding
+attention mark stays bright, and the inspector keeps the recovery remedy.
+Parked live work stays in the live scope. Settled dormant rows use the same
+five-minute window and attention and ancestor exceptions; retiring an old
+conversation does not make it newly recent. Ages come from the current
+attempt's durable end stamp, so a restart does not reset them. `f` switches
+to every agent and back, and every row is available there.
 
 Attention is read from the node's **current** attempt only: failed (including
 a provider cancel and a refused recovery), blocked by a quota, finished
@@ -5689,25 +5706,24 @@ names the keys, wrapping rather than truncating.
 
 A row is one line, in this order: status glyph, elapsed (running time while
 active, run time once finished; right-aligned so ids line up), short `#id`,
-then the role, the bound model, admitted turns, tokens (`12.4k tok`) and
-`· N processes` it owns while they fit in the row less a 12-cell status
-reserve (two thirds of a narrow row); then, right-aligned at the row's end and
-taking whatever the facts leave, one live fact (the current tool verb while it
-runs, else what a parked child waits on, `waiting on p3, c2` (chapter 03 §5.2),
-or `parked` when it waits on nothing named yet, else its status, a
-blocked quota reset, or an adopted candidate), cut at its end with `…` when
-longer (a `waiting on p3, c2` too long for its room reads `on p3, c2`, keeping
-the ids); and last a three-cell mark, `⚠` while it needs attention and blank
-otherwise. The facts never depend on the status and the status ends in the
-same cell on every row, so a status that changes length (waiting, thinking,
-running a command) never moves the rest of the row; live and restored rows lay out identically. The role is the template's card
-label in the session's profile (`my-profile-worker` reads
-`worker` in `my-profile`); a template the profile does not
-carry, or any template under `custom`, reads in full, and the root reads
-`root`. The description is not on the row; the inspector carries it. Narrow
-widths drop the left part's facts from the right and leave the status less;
-glyph, elapsed, id, status and the mark stay. The agent view's agent bar paints
-the same row. Running and
+the role, then one live fact right-aligned at the row's end (the current tool
+verb while it runs, else what a parked child waits on, `waiting on p3, c2`
+(chapter 03 §5.2), or `parked` when it waits on nothing named yet, else its
+status, a blocked quota reset, or an adopted candidate), cut at its end with
+`…` when longer (a `waiting on p3, c2` too long for its room reads `on p3,
+c2`, keeping the ids); and last a three-cell mark, `⚠` while it needs
+attention and blank otherwise. The bound model, admitted turns, tokens and
+process count are not on the row; the inspector carries them with the
+description. The fact's column is reserved first, so the left part never
+depends on the fact and a fact that changes length (waiting, thinking, running
+a command) never moves the rest of the row; live and restored rows lay out
+identically. The role is the template's card label in the session's profile
+(`my-profile-worker` reads `worker` in `my-profile`); a template the profile
+does not carry, or any template under `custom`, reads in full, and the root
+reads `root`. Narrow widths truncate the role first, then the fact. Fewer than three cells left for the role omits it instead of painting a lone `…`. Glyph, elapsed, `#id`
+and the mark are not truncated to make room; only a width smaller than the
+identity itself may cut those. The agent view's agent
+bar paints the same row. Running and
 submitted agents animate a spinner glyph that reduced motion freezes; waiting
 is `◐`, done `✓`, failed `✕`, no result `!`, blocked `⊘` and closed `○`.
 Settled context is dimmed; the selected row is one selection.
@@ -5717,11 +5733,11 @@ nearest shown ancestor stands in for it, and it returns when the agent is shown
 again; rows appearing and disappearing never move it to an unrelated agent.
 `↑`/`k` and `↓`/`j` select the previous and next row without wrapping,
 `←`/`h` the parent, `→`/`l` the remembered child (or first child), and `Home`
-the root; the list scrolls to keep the selection in view. A docked inspector
-names the selected agent, its description and its status (the `recover_agent` remedy when
-recovery is required, `x acknowledges` only while the selected row needs
+the root; the list scrolls to keep the selection in view. A docked inspector is six lines.
+It names the selected agent, its description and its status (`u recovers` when
+recovery is required, or `Resume agents first` while the tree is paused, and `x acknowledges` only while the selected row needs
 attention and an acknowledgement can be recorded), its task or
-fault, model with attempt and workspace, turns, tokens and times, its place in
+fault, model with attempt and workspace, turns, tokens, process count and times, its place in
 the tree with its full id, and what it is authorised to do; it is dropped when
 the overlay is too short.
 
@@ -5729,15 +5745,71 @@ the overlay is too short.
 root row closes Activity and shows the root transcript. `i`
 asks to interrupt the selected agent, `c` to close it (neither on the root
 row), and `s` to stop every non-root agent, each in the destructive
-confirmation pop-up (above), which is the only place they are sent; a key the
+confirmation pop-up (above), which is the only place they are sent. `u`
+asks to recover the selected child when that child is a failed or recovery-required child,
+in the same pop-up: `Recover #id?` and `Settle this child's recorded session recovery. No task is retried and no model call or tool is replayed.`
+The intent is `RecoverTopologyNode`, bound to the tree id, revision, agent
+id and attempt id the pop-up opened on. It is not the root `Recover` intent
+and not a model tool call. A restored-paused tree does not confirm it; the
+inspector says `Resume agents first`. A child that is not waiting on
+recovery, or the root, does nothing. The pop-up stays open while that same tree, agent and attempt are still
+eligible and the tree is not paused. Eligibility is the host's predicate:
+a non-root `failed` or `recovery_required` child that still has an attempt,
+on a live, interrupted, or terminal-cleanup tree. A moved revision does not
+close it; the revision stays only in the intent the host fences. The
+child need not be active. `u` through the pop-up is the only place it is
+sent. A key the
 list does not map does nothing. `y` copies the agent id, `R` requests a fresh
 snapshot and re-reads acknowledgements, and `Esc` dismisses the list (`q` does
 nothing). `r`
 (or `/tree resume`) resumes a restored-paused tree, `r` through the pop-up,
 and is **the only exit from that state inside the TUI**; the footer names it
-explicitly. A footer that would need more rows than it has reads every key in
-short form (`↑/↓ · Enter · x · i · c · s · y · R · f all · Esc`, led by
-`paused · r resume ·` on a paused tree), each still clickable.
+explicitly. While the tree is paused the list pins a non-agent control,
+`▶ resume agents`, above the agents. Opening the list focuses it. `Enter`
+or a click confirms `ResumeTopologyTree`; it is not an agent and it is not
+counted as one. It stays until a host snapshot reports the tree resumed. A footer that would need more rows than it has reads every key in
+short form (`↑/↓ · Enter · x · i · c · s · y · u · R · t · f all · Esc`, led by
+`paused · r resume ·` on a paused tree), each still clickable. `t history`
+is clickable on the long footer.
+
+**History.** `t` replaces the outline with a flat history of this snapshot and
+restores the previous live/all scope when pressed again. History is
+presentation only: it does not query the host and it does not change the tree.
+The root, active work (including interrupted), and parked agents stay in the
+tree. Every other non-root agent is one row, dimmed, newest first inside a
+local-calendar-day group: `Today`, then `Earlier`, then `Unknown time` when
+the attempt has no readable end or start stamp. End time orders a row, else
+start time, else the agent id. The operator's zone decides the day, and the
+list regroups at the next local midnight without a host event. `f` from
+history leaves it and shows every agent.
+
+`/` opens history (from the tree or from history) and owns typed input,
+including `u`, `r`, `t`, `!` and `/`, until `Enter` keeps the query and leaves
+search or `Esc` clears the query and leaves search. `Backspace` deletes one
+character. A paste is admitted by the same single-line rule as other filters
+and stops at 128 characters. The query matches the agent id, its short id, its
+role, its template, or its description, case-insensitively. `!` toggles
+failures only: failed, blocked, unfinished (`completed_without_submission`),
+and recovery-required rows. Cancelled, closed, and resolved attempts are not
+failures. An acknowledgement does not remove a failure from history. While
+search is open those keys do not resume, interrupt, close, stop, toggle
+history, or toggle the failure filter.
+
+A filter never moves the selection onto another agent. A selected agent the
+filter hides stays selected, its row is absent, and the inspector reads
+`Hidden by the filter. Esc clears it.` The same line is the inspector when the
+filter matches nothing. `Esc` then, while search is closed, clears the query
+and the failures filter before a later `Esc` dismisses the list. An empty
+history with no filter reads `No settled agents`. A filter with no rows reads
+`No matches · Esc clears`. Headers and those notices are not selectable.
+`Home` and `End` move to the first and last history row; `←` and `→` do
+nothing. The history footer is
+`t tree · / search · ! failures · ↑/↓ select · Enter transcript · x acknowledge · R refresh · Esc back`,
+plus ` · u recover` only while the selection is eligible,
+led by `failures only ·` and `/ <query> ·` when those are set. A narrow
+history footer is `t · / · ! · ↑/↓ · Enter · x · R · Esc` (`failures ·` when
+that filter is on, and ` · u` when the selection is eligible). `t tree`, `/ search`, `! failures` and `u recover` are
+clickable, and so are the short `t`, `/`, `!` and `u`.
 
 **Agent transcript view.** An agent's transcript is the Agents tab's body, not a second main view, and it is shown in exactly that place. It is rendered by the root's block
 renderer from typed rows, live while the agent runs and readable after it
@@ -5745,8 +5817,8 @@ finishes. The frame keeps the Activity title, the Agents and Processes tabs (Age
 #<id> · <description>` (the session banner belongs to the root and is not
 drawn), the scrollable transcript, and the agent bar: the agent's row exactly as the Agents list paints it (the
 same row function, no second format). A recovery-required agent shows
-`remedy: ask the root to run recover_agent`, warning-coloured, above the bar.
-The footer carries the view's keys: `Esc back`, `↑↓ PgUp/PgDn scroll`, `Enter expand`, `[ ] prev/next agent`, `i interrupt`, `c close`, `y copy`, and `x acknowledge` while the agent needs
+`u recovers`, or `Resume agents first` while the tree is paused, warning-coloured, above the bar.
+The footer carries the view's keys: `Esc back`, `↑↓ PgUp/PgDn scroll`, `Enter expand`, `[ ] prev/next agent`, `i interrupt`, `c close`, `u recover` while this child is a failed or recovery-required child and the tree is not paused, `y copy`, and `x acknowledge` while the agent needs
 attention that can be acknowledged. `i`, `c`, `y` and `x` are clickable.
 The view has **no composer** and no line that says so: a key it does
 not map does nothing.

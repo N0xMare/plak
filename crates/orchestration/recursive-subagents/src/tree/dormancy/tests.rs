@@ -386,3 +386,56 @@ fn dormant_reclaim_disk_pressure_selects_oldest_and_never_shared_live_copy() {
     assert!(!tree.take_effects().is_empty());
     assert!(path.exists(), "preparation cannot delete the copy");
 }
+
+#[test]
+fn projected_view_names_retired_and_reclaimed_and_revival_clears_reclaimed() {
+    let (_repo, mut tree, child, _path) = finished();
+    tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+    assert!(
+        tree.settle_for_test().cleanup_failures.is_empty(),
+        "{:?}",
+        tree.fault_reason(&child)
+    );
+    let row = crate::tree::view::project_tree_view(&tree)
+        .nodes
+        .into_iter()
+        .find(|node| node.agent_id == child)
+        .unwrap();
+    assert!(row.dormancy.workspace_reclaimed);
+    assert!(!row.dormancy.conversation_retired);
+    assert_eq!(row.dormancy.followup_revives(), Some(true));
+    let tickets = tree.prepare_child_retention(u64::MAX).unwrap();
+    assert!(tickets.iter().any(|ticket| ticket.agent_id == child));
+    let row = crate::tree::view::project_tree_view(&tree)
+        .nodes
+        .into_iter()
+        .find(|node| node.agent_id == child)
+        .unwrap();
+    assert!(row.dormancy.conversation_retired);
+    assert!(row.dormancy.workspace_reclaimed);
+    assert_eq!(row.dormancy.followup_revives(), Some(false));
+
+    let (_repo, mut tree, child, path) = finished();
+    tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+    assert_eq!(tree.settle_for_test().cleanup_failures, Vec::new());
+    assert!(!path.exists());
+    tree.state = super::super::TreeAdmissionState::Live;
+    let request = SendAgentMessageRequest {
+        refresh: None,
+        agent_id: child.clone(),
+        message: "continue".into(),
+        purpose: Some(super::super::MessagePurpose::Followup),
+        priority: None,
+        in_reply_to: None,
+        output_schema_json: None,
+    };
+    tree.rehydrate_followup("root", &request, "revive").unwrap();
+    assert_eq!(tree.settle_for_test().cleanup_failures, Vec::new());
+    let row = crate::tree::view::project_tree_view(&tree)
+        .nodes
+        .into_iter()
+        .find(|node| node.agent_id == child)
+        .unwrap();
+    assert!(!row.dormancy.workspace_reclaimed);
+    assert!(path.exists());
+}

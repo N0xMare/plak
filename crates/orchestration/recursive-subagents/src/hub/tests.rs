@@ -1983,3 +1983,56 @@ async fn shutdown_aborts_a_recovery_pass_that_overruns() {
     );
     assert!(runtime.is_closed());
 }
+
+/// An operator child recover is not the background pass, and shutdown still
+/// aborts it before the hub is closed for good.
+#[tokio::test]
+async fn shutdown_aborts_an_explicit_child_recover() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = recovery_runtime("explicit-recover-shutdown", root.path());
+    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
+    assert!(runtime.track_explicit_recover(tokio::spawn(async move {
+        let _dropped = dropped_tx;
+        std::future::pending::<()>().await;
+    })));
+    assert!(runtime.recovery_pass.lock().unwrap().task.is_none());
+    let _ = tokio::time::timeout(Duration::from_secs(4), shutdown_runtime(runtime.clone()))
+        .await
+        .expect("shutdown must not wait out a stuck child recover");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), dropped_rx)
+            .await
+            .expect("the abort is observed")
+            .is_err(),
+        "the aborted recover dropped its state"
+    );
+    assert!(runtime.is_closed());
+}
+
+/// `abandon_live_agents` aborts an operator child recover the same way
+/// shutdown does, and the drop is observed within a bound.
+#[tokio::test]
+async fn abandon_live_agents_aborts_an_explicit_child_recover() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let runtime = insert_root(
+        tree_id.clone(),
+        bootstrap(&tree_id, root.path().to_path_buf()),
+        None,
+    )
+    .unwrap();
+    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
+    assert!(runtime.track_explicit_recover(tokio::spawn(async move {
+        let _dropped = dropped_tx;
+        std::future::pending::<()>().await;
+    })));
+    let _agents = abandon_live_agents(&tree_id).await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), dropped_rx)
+            .await
+            .expect("the abort is observed")
+            .is_err(),
+        "the abandoned recover dropped its state"
+    );
+    force_release(&tree_id).await;
+}

@@ -1,4 +1,6 @@
+use super::rows::{attempts_strip, dormancy_fact, live_fact};
 use super::*;
+use crate::tui::SurfaceIntent;
 use crate::tui::status_glyph::UNKNOWN_STATUS_GLYPH;
 use plakous_host_protocol::views::{BlockedObservation, PROJECTED_STATUS_LABELS};
 
@@ -35,23 +37,68 @@ fn node(id: &str, parent: Option<&str>, depth: u8) -> CanvasNode {
         finished: false,
         fault: None,
         waiting_on: None,
+        dormancy: plakous_host_protocol::views::NodeDormancy::default(),
     }
+}
+
+#[test]
+fn dormancy_reasons_keep_priority_and_the_inspector_lists_every_fact() {
+    use plakous_host_protocol::views::NodeDormancy;
+    let mut node = node("c1", Some("root"), 1);
+    node.dormancy = NodeDormancy {
+        parked: true,
+        conversation_retired: true,
+        workspace_reclaimed: true,
+        closed: true,
+    };
+    node.waiting_on = Some(vec!["p3".into(), "c2".into()]);
+    node.live_progress = Some(plakous_host_protocol::views::ChildProgress {
+        activity: Some("reading".into()),
+        ..plakous_host_protocol::views::ChildProgress::default()
+    });
+    node.active_turn = true;
+    assert_eq!(live_fact(&node, 0), "reading", "in-flight work wins");
+    node.live_progress = None;
+    assert_eq!(live_fact(&node, 0), "closed");
+    node.dormancy.closed = false;
+    assert_eq!(live_fact(&node, 0), "retired conversation");
+    node.dormancy.conversation_retired = false;
+    assert_eq!(live_fact(&node, 0), "reclaimed checkout");
+    node.dormancy.workspace_reclaimed = false;
+    assert_eq!(live_fact(&node, 0), "waiting on p3, c2");
+    node.dormancy = NodeDormancy {
+        conversation_retired: true,
+        workspace_reclaimed: true,
+        ..NodeDormancy::default()
+    };
+    let inspector = dormancy_inspector(&node);
+    assert!(inspector.contains("retired conversation"), "{inspector}");
+    assert!(inspector.contains("reclaimed checkout"), "{inspector}");
+    assert!(inspector.contains("cannot revive"), "{inspector}");
+    node.dormancy = NodeDormancy {
+        workspace_reclaimed: true,
+        ..NodeDormancy::default()
+    };
+    assert!(dormancy_inspector(&node).contains("can revive"));
+    let mut missing = node.clone();
+    missing.has_session = false;
+    missing.dormancy = NodeDormancy::default();
+    assert!(dormancy_fact(&missing).is_none());
 }
 
 #[test]
 fn a_parked_child_reads_what_it_waits_on() {
     let mut parked = node("c1", Some("root"), 1);
     parked.status = "running".to_owned();
+    parked.dormancy.parked = true;
     parked.waiting_on = Some(vec!["p3".to_owned(), "c2".to_owned()]);
     assert_eq!(live_fact(&parked, 0), "waiting on p3, c2");
     parked.waiting_on = Some(Vec::new());
     assert_eq!(live_fact(&parked, 0), "parked");
     // The cue is the row's right-aligned status column.
-    let processes = BTreeMap::new();
     let clock = AgentRowClock {
         now_unix: 0,
         spinner: None,
-        processes: &processes,
         profile: None,
     };
     let row = agent_row(&parked, "", false, &clock, 100).body;
@@ -94,15 +141,16 @@ fn a_row_names_the_profile_role_and_leaves_the_description_to_the_inspector() {
     let clock = AgentRowClock {
         now_unix: 100,
         spinner: None,
-        processes: &processes,
         profile: Some(&profile),
     };
     let row = agent_row(&staff, "", false, &clock, 120).body;
     assert!(
-        row.contains("#c23  staff-worker  grok-4.6  1 turn  12.4k tok · 2 processes"),
+        row.contains("#c23  staff-worker") && row.trim_end().ends_with("running"),
         "{row}"
     );
-    assert!(row.trim_end().ends_with("  running"), "{row}");
+    assert!(!row.contains("grok-4.6"), "{row}");
+    assert!(!row.contains("12.4k"), "{row}");
+    assert!(!row.contains("process"), "{row}");
     assert!(!row.contains("description"), "{row}");
     let row = agent_row(&outside, "", false, &clock, 120).body;
     assert!(row.contains("  my-profile-reviewer  "), "{row}");
@@ -116,15 +164,13 @@ fn a_row_names_the_profile_role_and_leaves_the_description_to_the_inspector() {
     let mut nav = TreeNavigator::awaiting();
     nav.apply_snapshot(snapshot(vec![node("root", None, 0), staff]));
     nav.focus_on("c23");
-    let frame = nav.frame(120, 30, None, &BTreeMap::new(), Some(&profile));
-    assert!(
-        frame
-            .inspector
-            .iter()
-            .any(|line| line.contains("· description ·")),
-        "{:?}",
-        frame.inspector
-    );
+    let frame = nav.frame(120, 30, None, &processes, Some(&profile));
+    let inspector = frame.inspector.join("\n");
+    assert!(inspector.contains("· description ·"), "{inspector}");
+    assert!(inspector.contains("grok-4.6"), "{inspector}");
+    assert!(inspector.contains("1 turn"), "{inspector}");
+    assert!(inspector.contains("12000 in"), "{inspector}");
+    assert!(inspector.contains("2 processes"), "{inspector}");
 }
 
 fn snapshot(nodes: Vec<CanvasNode>) -> CanvasTree {
@@ -198,12 +244,28 @@ fn footer_hint_explicit_when_restored_paused() {
     // The paused footer says what the key does, in words the
     // operator can act on, and never repeats a wire value or a request
     // type name.
-    let paused = agents_footer_hint(true, AgentScope::All, 0);
+    let paused = agents_footer_hint(FooterView {
+        restored_paused: true,
+        scope: AgentScope::All,
+        hidden: 0,
+        history: false,
+        failures_only: false,
+        query: "",
+        offer_recover: false,
+    });
     assert!(paused.contains("Tree paused"), "{paused}");
     assert!(paused.contains("r resumes"), "{paused}");
     assert!(!paused.contains("ResumeTree"), "{paused}");
     assert!(!paused.contains("restored_paused"), "{paused}");
-    let live = agents_footer_hint(false, AgentScope::All, 0);
+    let live = agents_footer_hint(FooterView {
+        restored_paused: false,
+        scope: AgentScope::All,
+        hidden: 0,
+        history: false,
+        failures_only: false,
+        query: "",
+        offer_recover: false,
+    });
     assert!(live.contains("Enter transcript"), "{live}");
     assert!(live.contains("all agents · f live"), "{live}");
     assert!(live.contains("R refresh"), "{live}");
@@ -712,17 +774,19 @@ fn agent_rows_and_inspector_show_derived_compaction_counts() {
     let mut nav = TreeNavigator::from_snapshot(snapshot(vec![node("root", None, 0), child]));
     nav.focus_on("c1");
     let frame = paint(&mut nav, 200, 44, 0);
+    assert_eq!(frame.inspector.len(), 6, "{:?}", frame.inspector);
     assert!(
-        frame.inspector.iter().any(|line| line.contains(
-            "Compact 2 committed · 1 failed · 3 no-eligible · 900 -> 300 input · retained only"
-        )),
+        frame.inspector.iter().any(|line| line.starts_with("Usage")
+            && line.contains(
+                "Compact 2 committed · 1 failed · 3 no-eligible · 900 -> 300 input · retained only"
+            )),
         "{:?}",
         frame.inspector
     );
+    let painted = painted_text(&frame);
     assert!(
-        painted_text(&frame).contains("2 compact"),
-        "{}",
-        painted_text(&frame)
+        painted.contains("running") && !painted.contains("compact"),
+        "compaction counts stay in the inspector\n{painted}"
     );
 }
 
@@ -1079,4 +1143,321 @@ fn orphaned_children_survive_a_hidden_parent() {
         "a long-closed parent stays, dimmed, to explain its running child"
     );
     assert!(frame.rows[1].dim);
+}
+
+fn settled(id: &str, ended: u64, description: &str) -> CanvasNode {
+    let mut node = terminal_node(id, Some("root"), 1, "completed");
+    node.ended_at_unix = Some(ended);
+    node.started_at_unix = Some(ended);
+    node.description = description.to_owned();
+    node.attempt_id = Some(format!("{id}-a1"));
+    node.attempt_status = Some("completed".into());
+    node
+}
+
+fn opened_history() -> (TreeNavigator, u64) {
+    let now = 1_700_000_000_u64;
+    let today = settled("c-today", now, "alpha notes");
+    let mut earlier = settled("c-old", now.saturating_sub(3 * 86_400), "old notes");
+    earlier.status = "failed".into();
+    earlier.attempt_status = Some("failed".into());
+    let mut unknown = settled("c-unknown", now, "no clock");
+    unknown.started_at_unix = None;
+    unknown.ended_at_unix = None;
+    let running = node("c-run", Some("root"), 1);
+    let mut nav = TreeNavigator::from_snapshot(snapshot(vec![
+        node("root", None, 0),
+        today,
+        earlier,
+        unknown,
+        running,
+    ]));
+    nav.set_zone(&crate::tui::UTC_ZONE);
+    nav.toggle_scope();
+    assert!(matches!(nav.scope, AgentScope::All));
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::History),
+        TopologyNavigatorOutcome::Consumed
+    );
+    (nav, now)
+}
+
+#[test]
+fn history_groups_by_local_day() {
+    let (mut nav, now) = opened_history();
+    let frame = paint(&mut nav, 100, 24, now);
+    let ids: Vec<&str> = frame.rows.iter().map(|row| row.id.as_str()).collect();
+    assert!(
+        ids.windows(2)
+            .any(|pair| pair == ["", "c-today"] || pair[0].is_empty()),
+        "{ids:?}"
+    );
+    assert!(frame.header.starts_with("History · "));
+    assert!(frame.footer.contains("t tree"));
+    assert!(!ids.contains(&"c-run"));
+    assert!(!ids.contains(&"root"));
+    assert!(
+        frame
+            .rows
+            .iter()
+            .any(|row| row.cells.body.contains("Today"))
+    );
+    assert!(
+        frame
+            .rows
+            .iter()
+            .any(|row| row.cells.body.contains("Earlier"))
+    );
+    assert!(
+        frame
+            .rows
+            .iter()
+            .any(|row| row.cells.body.contains("Unknown time"))
+    );
+    assert!(
+        frame
+            .rows
+            .iter()
+            .filter(|row| row.id.is_empty())
+            .all(|row| !row.selectable)
+    );
+    let midnight = nav.age_wake_at.expect("history regroups at local midnight");
+    let regrouped = paint(&mut nav, 100, 24, midnight);
+    assert!(
+        regrouped
+            .rows
+            .iter()
+            .all(|row| !row.cells.body.contains("Today")),
+        "a local midnight moves today's rows into Earlier"
+    );
+}
+
+#[test]
+fn history_search_keeps_a_hidden_selection_and_restores_scope() {
+    let (mut nav, now) = opened_history();
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    let selected = nav.selected_agent_id().unwrap().to_owned();
+    let _ = nav.handle_key(TopologyNavigatorKey::Search);
+    assert!(nav.is_searching());
+    for ch in ['u', 'r', 't', '!', '/'] {
+        nav.push_search(ch);
+        assert_eq!(
+            nav.handle_key(TopologyNavigatorKey::Resume),
+            TopologyNavigatorOutcome::Consumed
+        );
+        assert_eq!(
+            nav.handle_key(TopologyNavigatorKey::History),
+            TopologyNavigatorOutcome::Consumed
+        );
+    }
+    assert_eq!(nav.search, "urt!/");
+    assert!(nav.is_searching());
+    nav.paste_search(" notes\nextra");
+    assert!(!nav.search.contains('\n'));
+    assert!(nav.search.contains("notes"));
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Enter),
+        TopologyNavigatorOutcome::Consumed
+    );
+    assert!(!nav.is_searching());
+    assert_eq!(nav.selected_agent_id(), Some(selected.as_str()));
+    let hidden = paint(&mut nav, 100, 24, now);
+    assert!(
+        hidden
+            .inspector
+            .iter()
+            .any(|line| line.contains("Hidden by the filter"))
+    );
+    assert!(
+        hidden
+            .rows
+            .iter()
+            .any(|row| row.cells.body.contains("No matches"))
+    );
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Escape),
+        TopologyNavigatorOutcome::Consumed
+    );
+    assert_eq!(nav.search, "");
+    assert_eq!(nav.selected_agent_id(), Some(selected.as_str()));
+
+    let _ = nav.handle_key(TopologyNavigatorKey::Failures);
+    let failures = paint(&mut nav, 100, 24, now);
+    let failure_ids: Vec<&str> = failures
+        .rows
+        .iter()
+        .filter(|row| !row.id.is_empty())
+        .map(|row| row.id.as_str())
+        .collect();
+    assert_eq!(failure_ids, ["c-old"]);
+    let _ = nav.handle_key(TopologyNavigatorKey::History);
+    assert!(!nav.history);
+    assert!(matches!(nav.scope, AgentScope::All));
+}
+
+#[test]
+fn a_paused_tree_leads_with_a_resume_control_until_the_host_resumes() {
+    let mut paused = family();
+    paused.restored_paused = true;
+    let mut nav = TreeNavigator::from_snapshot(paused);
+    assert_eq!(nav.selected.as_deref(), Some(RESUME_ROW_ID));
+    let frame = paint(&mut nav, 80, 24, 0);
+    assert_eq!(frame.rows[0].id, RESUME_ROW_ID);
+    assert!(frame.rows[0].cells.body.contains("resume agents"));
+    assert!(frame.rows[0].selected);
+    assert_ne!(frame.rows[1].id, RESUME_ROW_ID);
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Enter),
+        TopologyNavigatorOutcome::Confirm(crate::tui::UserAction::ResumeTopologyTree)
+    );
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    assert_eq!(nav.selected_agent_id(), Some("root"));
+    let _ = nav.handle_key(TopologyNavigatorKey::Up);
+    assert_eq!(nav.selected.as_deref(), Some(RESUME_ROW_ID));
+    let mut live = family();
+    live.revision = 4;
+    live.restored_paused = false;
+    nav.apply_snapshot(live);
+    let frame = paint(&mut nav, 80, 24, 0);
+    assert!(frame.rows.iter().all(|row| row.id != RESUME_ROW_ID));
+    assert_eq!(nav.selected_agent_id(), Some("root"));
+}
+
+#[test]
+fn u_recovers_only_a_child_that_still_needs_recovery() {
+    let mut child = settled("c-stuck", 10, "stuck");
+    child.status = "recovery_required".into();
+    child.attempt_status = Some("recovery_required".into());
+    let mut nav = TreeNavigator::from_snapshot(snapshot(vec![node("root", None, 0), child]));
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Recover),
+        TopologyNavigatorOutcome::Consumed,
+        "the root is not recovered from the list"
+    );
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Recover),
+        TopologyNavigatorOutcome::Confirm(crate::tui::UserAction::RecoverTopologyNode {
+            tree_id: "tree1".into(),
+            revision: 3,
+            agent_id: "c-stuck".into(),
+            expected_attempt_id: "c-stuck-a1".into(),
+        })
+    );
+
+    let mut paused = snapshot(vec![node("root", None, 0), {
+        let mut child = settled("c-stuck", 10, "stuck");
+        child.status = "recovery_required".into();
+        child.attempt_status = Some("recovery_required".into());
+        child
+    }]);
+    paused.restored_paused = true;
+    let mut nav = TreeNavigator::from_snapshot(paused);
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Recover),
+        TopologyNavigatorOutcome::Consumed
+    );
+    let frame = paint(&mut nav, 100, 24, 20);
+    assert_eq!(frame.inspector.len(), 6, "{:?}", frame.inspector);
+    assert!(
+        frame.inspector[0].contains("Resume agents first"),
+        "{:?}",
+        frame.inspector
+    );
+}
+
+#[test]
+fn history_esc_clears_a_filter_that_hides_the_selection() {
+    let (mut nav, now) = opened_history();
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    let selected = nav.selected_agent_id().unwrap().to_owned();
+    assert_eq!(selected, "c-old");
+    let _ = nav.handle_key(TopologyNavigatorKey::Search);
+    nav.paste_search("alpha");
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Enter),
+        TopologyNavigatorOutcome::Consumed
+    );
+    let hidden = paint(&mut nav, 100, 24, now);
+    assert!(hidden.rows.iter().any(|row| row.id == "c-today"));
+    assert!(hidden.rows.iter().all(|row| row.id != selected));
+    assert!(
+        hidden
+            .inspector
+            .iter()
+            .any(|line| line.contains("Hidden by the filter"))
+    );
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Acknowledge),
+        TopologyNavigatorOutcome::Consumed
+    );
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Recover),
+        TopologyNavigatorOutcome::Consumed
+    );
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Enter),
+        TopologyNavigatorOutcome::Consumed
+    );
+    assert_eq!(nav.copy_text(), "");
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Escape),
+        TopologyNavigatorOutcome::Consumed
+    );
+    assert_eq!(nav.search, "");
+    assert_eq!(nav.selected_agent_id(), Some(selected.as_str()));
+}
+
+#[test]
+fn history_keeps_the_resume_row_and_the_agent_under_it() {
+    let now = 1_700_000_000_u64;
+    let mut paused = snapshot(vec![
+        node("root", None, 0),
+        settled("c-old", now, "old notes"),
+    ]);
+    paused.restored_paused = true;
+    paused.revision = 3;
+    let mut nav = TreeNavigator::from_snapshot(paused);
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::History),
+        TopologyNavigatorOutcome::Consumed
+    );
+    let _ = nav.handle_key(TopologyNavigatorKey::Search);
+    nav.paste_search("missing");
+    let _ = nav.handle_key(TopologyNavigatorKey::Enter);
+    let frame = paint(&mut nav, 80, 24, now);
+    assert_eq!(frame.rows[0].id, RESUME_ROW_ID);
+    assert!(
+        frame.footer.contains("t tree") || frame.rows.iter().any(|row| row.id == RESUME_ROW_ID)
+    );
+    let _ = nav.handle_key(TopologyNavigatorKey::Escape);
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    let remembered = nav.selected_agent_id().unwrap().to_owned();
+    let _ = nav.handle_key(TopologyNavigatorKey::Up);
+    assert_eq!(nav.selected.as_deref(), Some(RESUME_ROW_ID));
+    let mut live = snapshot(vec![
+        node("root", None, 0),
+        settled("c-old", now, "old notes"),
+    ]);
+    live.revision = 4;
+    nav.apply_snapshot(live);
+    assert_eq!(nav.selected_agent_id(), Some(remembered.as_str()));
+}
+
+#[test]
+fn an_eighty_column_footer_keeps_t_history_on_one_row() {
+    let footer = agents_footer_hint(FooterView {
+        restored_paused: false,
+        scope: AgentScope::Live,
+        hidden: 0,
+        history: false,
+        failures_only: false,
+        query: "",
+        offer_recover: false,
+    });
+    let rows = wrap_footer_hint(&footer, 80, 3);
+    assert!(rows.iter().any(|row| row.contains("t history")), "{rows:?}");
 }

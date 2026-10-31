@@ -211,6 +211,29 @@ impl App {
             }
             return None;
         }
+        if self
+            .tree_navigator
+            .as_ref()
+            .is_some_and(super::super::tree_navigator::TreeNavigator::is_searching)
+        {
+            match code {
+                KeyCode::Char(ch) => {
+                    if let Some(nav) = self.tree_navigator.as_mut() {
+                        nav.push_search(ch);
+                    }
+                    self.mark_dirty();
+                    return None;
+                }
+                KeyCode::Backspace => {
+                    if let Some(nav) = self.tree_navigator.as_mut() {
+                        nav.pop_search();
+                    }
+                    self.mark_dirty();
+                    return None;
+                }
+                _ => {}
+            }
+        }
         let nav_key = tree_navigator_key(code)?;
         if matches!(nav_key, TopologyNavigatorKey::Refresh) {
             self.rearm_agent_acknowledgements();
@@ -284,7 +307,7 @@ impl App {
                         nav.focus_on(&agent_id);
                     }
                     self.mark_dirty();
-                    if double {
+                    if double || agent_id == crate::tui::tree_navigator::RESUME_ROW_ID {
                         return self.handle_tree_navigator_key(KeyCode::Enter);
                     }
                 }

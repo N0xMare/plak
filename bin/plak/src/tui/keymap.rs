@@ -414,6 +414,12 @@ pub const BINDINGS: &[Binding] = &[
         double_tap: None,
     },
     Binding {
+        chord: "u",
+        when: When::Agent,
+        effect: "ask to recover this child's recorded session, in the confirmation pop-up",
+        double_tap: None,
+    },
+    Binding {
         chord: "x",
         when: When::Agent,
         effect: "acknowledge this agent's attention",
@@ -574,7 +580,49 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         chord: "f",
         when: When::Tree,
-        effect: "switch between the live working set and every agent",
+        effect: "switch between the live working set and every agent; from history, show every agent",
+        double_tap: None,
+    },
+    Binding {
+        chord: "t",
+        when: When::Tree,
+        effect: "switch between the agent tree and history",
+        double_tap: None,
+    },
+    Binding {
+        chord: "/",
+        when: When::Tree,
+        effect: "search history by id, role, or description",
+        double_tap: None,
+    },
+    Binding {
+        chord: "!",
+        when: When::Tree,
+        effect: "show only failed, blocked, unfinished, and recovery required rows",
+        double_tap: None,
+    },
+    Binding {
+        chord: "PageUp",
+        when: When::Tree,
+        effect: "page up the agent list",
+        double_tap: None,
+    },
+    Binding {
+        chord: "PageDown",
+        when: When::Tree,
+        effect: "page down the agent list",
+        double_tap: None,
+    },
+    Binding {
+        chord: "End",
+        when: When::Tree,
+        effect: "select the last listed agent",
+        double_tap: None,
+    },
+    Binding {
+        chord: "Backspace",
+        when: When::Tree,
+        effect: "while history search is open, delete the last character",
         double_tap: None,
     },
     Binding {
@@ -691,6 +739,12 @@ pub const BINDINGS: &[Binding] = &[
         chord: "c",
         when: When::Tree,
         effect: "ask to close the selected agent, in the confirmation pop-up",
+        double_tap: None,
+    },
+    Binding {
+        chord: "u",
+        when: When::Tree,
+        effect: "ask to recover the selected child's recorded session, in the confirmation pop-up",
         double_tap: None,
     },
     Binding {

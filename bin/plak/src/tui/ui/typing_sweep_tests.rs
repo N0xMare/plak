@@ -12,7 +12,7 @@ use super::test_support::{
 };
 use crate::tui::{HostEvent, QueueDrainState, UserAction};
 use crossterm::event::KeyCode;
-use plakous_host_protocol::topology::NodeStatus;
+use plakous_host_protocol::topology::{AttemptStatus, NodeStatus, TreeAdmissionState};
 use plakous_host_protocol::views::{ProcessStatus, ProcessView};
 use std::sync::Arc;
 
@@ -26,6 +26,7 @@ fn irreversible(action: &UserAction) -> bool {
             | UserAction::CloseTopologyNode { .. }
             | UserAction::StopAllTopology
             | UserAction::ResumeTopologyTree
+            | UserAction::RecoverTopologyNode { .. }
             | UserAction::DeleteQueued { .. }
             | UserAction::DropQueued { .. }
             | UserAction::SendQueuedNow { .. }
@@ -140,7 +141,7 @@ fn r_on_a_paused_tree_opens_the_pop_up() {
         tree_node("root", None, 0),
         tree_node("child-a", Some("root"), 1),
     ]);
-    snapshot.state = plakous_host_protocol::topology::TreeAdmissionState::RestoredPaused;
+    snapshot.state = TreeAdmissionState::RestoredPaused;
     open_tree(&mut app, snapshot);
     assert_eq!(app.handle_key(key(KeyCode::Char('r'))), None);
     assert_eq!(
@@ -194,6 +195,259 @@ fn the_pop_up_closes_when_its_target_settles() {
         done,
     ])));
     assert!(app.destructive_confirm.is_none());
+}
+
+/// History's short footer names `t`, `/` and `!` as clicks, in that order.
+#[test]
+fn a_narrow_history_footer_keeps_search_keys_clickable() {
+    let mut app = agents_app();
+    app.handle_key(key(KeyCode::Char('t')));
+    render_to_string(&mut app, 40, 16);
+    let codes: Vec<KeyCode> = app.key_label_hits.iter().map(|(_, code)| *code).collect();
+    for code in [KeyCode::Char('t'), KeyCode::Char('/'), KeyCode::Char('!')] {
+        assert!(codes.contains(&code), "{code:?} in {codes:?}");
+    }
+    let positions: Vec<u16> = [KeyCode::Char('t'), KeyCode::Char('/'), KeyCode::Char('!')]
+        .into_iter()
+        .map(|code| {
+            app.key_label_hits
+                .iter()
+                .find(|(_, hit)| *hit == code)
+                .unwrap()
+                .0
+                .x
+        })
+        .collect();
+    assert!(positions[0] < positions[1] && positions[1] < positions[2]);
+}
+
+/// `u` opens the recover pop-up from the list, a footer click, and the agent view.
+#[test]
+fn u_opens_the_recover_pop_up_from_the_list_and_the_agent_view() {
+    let mut child = tree_node("child-a", Some("root"), 1);
+    child.status = NodeStatus::RecoveryRequired;
+    child.attempt_status = Some(AttemptStatus::RecoveryRequired);
+    child.attempt_id = Some("child-a-a1".into());
+    let snapshot = tree_snapshot(vec![tree_node("root", None, 0), child]);
+    let mut app = App::new(launch_basic(), true);
+    app.render_prefs.reduced_motion = true;
+    open_tree(&mut app, snapshot.clone());
+    app.tree_navigator.as_mut().unwrap().focus_on("child-a");
+    assert!(app.handle_key(key(KeyCode::Char('u'))).is_none());
+    assert_eq!(
+        app.destructive_confirm
+            .as_ref()
+            .map(DestructiveConfirm::kind),
+        Some("recover")
+    );
+    let asked = render_to_string(&mut app, 80, 24);
+    assert!(asked.contains("Recover"), "{asked}");
+    assert!(
+        asked.contains("Settle this child's recorded session"),
+        "{asked}"
+    );
+    app.handle_key(key(KeyCode::Esc));
+    render_to_string(&mut app, 120, 30);
+    let (hit, _) = *app
+        .key_label_hits
+        .iter()
+        .find(|(_, code)| *code == KeyCode::Char('u'))
+        .expect("u recover is clickable");
+    assert_eq!(app.handle_mouse(left_click(hit.x, hit.y)), None);
+    assert_eq!(
+        app.destructive_confirm
+            .as_ref()
+            .map(DestructiveConfirm::kind),
+        Some("recover")
+    );
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.handle_key(key(KeyCode::Char('u'))).is_none());
+    assert_eq!(
+        app.destructive_confirm
+            .as_ref()
+            .map(DestructiveConfirm::kind),
+        Some("recover")
+    );
+    let revision = snapshot.revision;
+    let mut moved = snapshot.clone();
+    moved.revision = revision + 1;
+    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(moved));
+    assert!(
+        app.destructive_confirm.is_some(),
+        "a new revision does not retire a still-eligible recover"
+    );
+    let mut paused = snapshot.clone();
+    paused.state = TreeAdmissionState::RestoredPaused;
+    paused.revision = revision + 2;
+    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(paused));
+    assert!(
+        app.destructive_confirm.is_none(),
+        "a paused tree retires it"
+    );
+}
+
+/// Three snapshots each close a freshly opened recover pop-up. Dropping the
+/// attempt match, the eligibility call, or the tree-id compare leaves that
+/// one assertion's pop-up open.
+#[test]
+fn the_recover_pop_up_closes_when_attempt_eligibility_or_tree_changes() {
+    let mut child = tree_node("child-a", Some("root"), 1);
+    child.status = NodeStatus::RecoveryRequired;
+    child.attempt_status = Some(AttemptStatus::RecoveryRequired);
+    child.attempt_id = Some("child-a-a1".into());
+    let snapshot = tree_snapshot(vec![tree_node("root", None, 0), child]);
+    let open = |app: &mut App| {
+        app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(snapshot.clone()));
+        app.tree_navigator.as_mut().unwrap().focus_on("child-a");
+        assert!(app.handle_key(key(KeyCode::Char('u'))).is_none());
+        assert!(app.destructive_confirm.is_some());
+    };
+    let mut app = App::new(launch_basic(), true);
+    app.render_prefs.reduced_motion = true;
+    open_tree(&mut app, snapshot.clone());
+    let mut new_attempt = snapshot.clone();
+    new_attempt.nodes[1].attempt_id = Some("child-a-a2".into());
+    open(&mut app);
+    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(new_attempt));
+    assert!(
+        app.destructive_confirm.is_none(),
+        "a new attempt id retires it"
+    );
+    let mut completed = snapshot.clone();
+    completed.nodes[1].status = NodeStatus::Completed;
+    completed.nodes[1].attempt_status = Some(AttemptStatus::Completed);
+    open(&mut app);
+    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(completed));
+    assert!(
+        app.destructive_confirm.is_none(),
+        "a completed attempt retires it"
+    );
+    let mut other_tree = snapshot.clone();
+    other_tree.tree_id = "tree-other".into();
+    open(&mut app);
+    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(other_tree));
+    assert!(
+        app.destructive_confirm.is_none(),
+        "a different tree id retires it"
+    );
+}
+
+/// A footer segment that is itself a clickable key, not a letter inside one.
+fn footer_segment_key(segment: &str) -> Option<KeyCode> {
+    let segment = segment
+        .trim()
+        .trim_matches(|ch: char| "│╭╮╰╯─".contains(ch))
+        .trim();
+    Some(match segment {
+        "r resumes" | "r resume" => KeyCode::Char('r'),
+        "i interrupt" | "i" => KeyCode::Char('i'),
+        "c close" | "c" => KeyCode::Char('c'),
+        "s stop all" | "s" => KeyCode::Char('s'),
+        "u recover" | "u" => KeyCode::Char('u'),
+        "t history" | "t tree" | "t" => KeyCode::Char('t'),
+        "/ search" | "/" => KeyCode::Char('/'),
+        "! failures" | "!" => KeyCode::Char('!'),
+        "f all" | "f live" => KeyCode::Char('f'),
+        "Enter" | "Enter transcript" => KeyCode::Enter,
+        "Esc" | "Esc back" => KeyCode::Esc,
+        "y copy" | "y" => KeyCode::Char('y'),
+        "x acknowledge" | "x" => KeyCode::Char('x'),
+        "R refresh" | "R" => KeyCode::Char('R'),
+        _ => return None,
+    })
+}
+
+fn painted_footer_keys(screen: &str) -> Vec<KeyCode> {
+    let mut keys = Vec::new();
+    for line in screen.lines() {
+        let interior = line
+            .trim()
+            .trim_matches(|ch: char| "│╭╮╰╯─".contains(ch))
+            .trim();
+        let parts: Vec<&str> = if interior.contains('·') {
+            interior.split(" · ").collect()
+        } else {
+            vec![interior]
+        };
+        for part in parts {
+            if let Some(code) = footer_segment_key(part) {
+                keys.push(code);
+            }
+        }
+    }
+    keys
+}
+
+fn paused_agents() -> App {
+    let mut app = agents_app();
+    let mut snapshot = tree_snapshot(vec![
+        tree_node("root", None, 0),
+        tree_node("child-a", Some("root"), 1),
+    ]);
+    snapshot.revision = snapshot.revision.saturating_add(1);
+    snapshot.state = TreeAdmissionState::RestoredPaused;
+    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(snapshot));
+    app
+}
+
+fn failures_history() -> App {
+    let mut child = tree_node("child-a", Some("root"), 1);
+    child.status = NodeStatus::RecoveryRequired;
+    child.attempt_status = Some(AttemptStatus::RecoveryRequired);
+    child.attempt_id = Some("child-a-a1".into());
+    child.ended_at_unix = Some(FIXED_NOW.saturating_sub(10));
+    let mut app = App::new(launch_basic(), true);
+    app.render_prefs.reduced_motion = true;
+    app.agents_clock = Some(FIXED_NOW);
+    open_tree(
+        &mut app,
+        tree_snapshot(vec![tree_node("root", None, 0), child]),
+    );
+    app.tree_navigator.as_mut().unwrap().focus_on("child-a");
+    app.handle_key(key(KeyCode::Char('t')));
+    app.handle_key(key(KeyCode::Char('!')));
+    app
+}
+
+fn sweep_footer_keys(name: &str, make: View) {
+    for width in 30..=110 {
+        let mut app = make();
+        let screen = render_to_string(&mut app, width, 28);
+        if width == 80 {
+            let marker = match name {
+                "paused" => "pause",
+                "failures" => "failures",
+                _ => "Esc",
+            };
+            assert!(screen.contains(marker), "{name} {width}:\n{screen}");
+        }
+        assert!(
+            !painted_footer_keys(&screen).is_empty(),
+            "{name} {width}: no footer keys painted\n{screen}"
+        );
+        for (y, line) in screen.lines().enumerate() {
+            let y = u16::try_from(y).unwrap();
+            for code in painted_footer_keys(line) {
+                assert!(
+                    app.key_label_hits
+                        .iter()
+                        .any(|(rect, hit)| *hit == code && rect.y == y),
+                    "{name} {width}: {code:?} on row {y} is painted but not hit\n{line}"
+                );
+            }
+        }
+    }
+}
+
+/// Widths 30–110 on a live tree, a paused tree, and failures-filtered history.
+/// Every key painted as its own footer segment is a click, including when an
+/// earlier letter of that key sits inside another word on the same row.
+#[test]
+fn every_painted_footer_key_is_a_click_across_widths() {
+    sweep_footer_keys("live", agents_app);
+    sweep_footer_keys("paused", paused_agents);
+    sweep_footer_keys("failures", failures_history);
 }
 
 /// A narrow Agents footer keeps `i`, `c` and `s` short and clickable.

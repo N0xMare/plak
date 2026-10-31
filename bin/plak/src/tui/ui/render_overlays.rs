@@ -185,8 +185,10 @@ impl App {
             let spinner = (!self.render_prefs.reduced_motion).then(|| self.counter_spinner(0));
             let owned = self.running_processes_by_owner();
             let now = self.agents_now();
+            let zone = self.time_zone;
             let Some(list) = self.tree_navigator.as_mut().map(|nav| {
                 nav.set_now(now);
+                nav.set_zone(zone);
                 nav.frame(
                     inner.width,
                     inner.height,
@@ -213,7 +215,9 @@ impl App {
                     .y
                     .saturating_add(1)
                     .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX));
-                hits.push((row.id.clone(), Rect::new(inner.x, y, inner.width, 1)));
+                if row.selectable {
+                    hits.push((row.id.clone(), Rect::new(inner.x, y, inner.width, 1)));
+                }
             }
             let used = 1 + list.rows.len() + list.inspector.len();
             let footer_rows = crate::tui::tree_navigator::wrap_footer_hint(
@@ -236,26 +240,10 @@ impl App {
                 let y = inner
                     .y
                     .saturating_add(u16::try_from(lines.len()).unwrap_or(u16::MAX));
+                let labels = footer_click_labels(&row);
                 self.key_label_hits
                     .extend(super::destructive_confirm::key_label_hits(
-                        &row,
-                        inner.x,
-                        y,
-                        if list.footer.contains("interrupt") {
-                            &[
-                                ("r resumes", super::KeyCode::Char('r')),
-                                ("i interrupt", super::KeyCode::Char('i')),
-                                ("c close", super::KeyCode::Char('c')),
-                                ("s stop all", super::KeyCode::Char('s')),
-                            ]
-                        } else {
-                            &[
-                                ("r resume", super::KeyCode::Char('r')),
-                                ("i", super::KeyCode::Char('i')),
-                                ("c", super::KeyCode::Char('c')),
-                                ("s", super::KeyCode::Char('s')),
-                            ]
-                        },
+                        &row, inner.x, y, &labels,
                     ));
                 lines.push(Line::from(Span::styled(row, self.theme.footer)));
             }
@@ -292,4 +280,62 @@ pub(super) fn agent_row_line(
         spans.push(Span::styled(cells.mark.clone(), mark));
     }
     Line::from(spans)
+}
+
+/// Key labels in this footer row, left to right. Every occurrence is tested,
+/// so a letter inside another word (`t` in `Enter`, `s` in `paused`, `u` in
+/// `failures`) is not the hit. A longer label wins over a short prefix
+/// (`t history` rather than `t`), so each painted key is hit once.
+fn footer_click_labels(row: &str) -> Vec<(&'static str, super::KeyCode)> {
+    const CANDIDATES: &[(&str, super::KeyCode)] = &[
+        ("r resumes", super::KeyCode::Char('r')),
+        ("r resume", super::KeyCode::Char('r')),
+        ("i interrupt", super::KeyCode::Char('i')),
+        ("c close", super::KeyCode::Char('c')),
+        ("s stop all", super::KeyCode::Char('s')),
+        ("u recover", super::KeyCode::Char('u')),
+        ("t history", super::KeyCode::Char('t')),
+        ("t tree", super::KeyCode::Char('t')),
+        ("/ search", super::KeyCode::Char('/')),
+        ("! failures", super::KeyCode::Char('!')),
+        ("f all", super::KeyCode::Char('f')),
+        ("f live", super::KeyCode::Char('f')),
+        ("Enter", super::KeyCode::Enter),
+        ("Esc", super::KeyCode::Esc),
+        ("i", super::KeyCode::Char('i')),
+        ("c", super::KeyCode::Char('c')),
+        ("s", super::KeyCode::Char('s')),
+        ("u", super::KeyCode::Char('u')),
+        ("y", super::KeyCode::Char('y')),
+        ("x", super::KeyCode::Char('x')),
+        ("R", super::KeyCode::Char('R')),
+        ("t", super::KeyCode::Char('t')),
+        ("/", super::KeyCode::Char('/')),
+        ("!", super::KeyCode::Char('!')),
+    ];
+    let mut found = Vec::new();
+    for (label, code) in CANDIDATES {
+        for (at, _) in row.match_indices(label) {
+            let before = row[..at].chars().next_back();
+            let after = row[at + label.len()..].chars().next();
+            if before.is_some_and(|ch| ch != ' ') || after.is_some_and(|ch| ch != ' ') {
+                continue;
+            }
+            found.push((at, *label, *code));
+        }
+    }
+    found.sort_by_key(|(at, label, _)| (*at, std::cmp::Reverse(label.len())));
+    let mut kept: Vec<(usize, &str, super::KeyCode)> = Vec::new();
+    for (at, label, code) in found {
+        if kept
+            .iter()
+            .any(|(start, existing, _)| at >= *start && at < start + existing.len())
+        {
+            continue;
+        }
+        kept.push((at, label, code));
+    }
+    kept.into_iter()
+        .map(|(_, label, code)| (label, code))
+        .collect()
 }

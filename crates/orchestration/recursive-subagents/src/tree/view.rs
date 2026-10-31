@@ -114,7 +114,26 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
                 .chain(waiting.network.then(|| "network".to_owned()))
                 .collect()
         }),
+        dormancy: project_dormancy(tree, node),
     })
+}
+
+/// Facts the tree already knows. The root has none. A missing session locator
+/// is not retirement, and a missing directory is not reclamation.
+fn project_dormancy(
+    tree: &ProductAgentTree,
+    node: &super::NodeRecord,
+) -> plakous_host_protocol::views::NodeDormancy {
+    use plakous_host_protocol::topology::NodeStatus;
+    if node.parent_agent_id.is_none() {
+        return plakous_host_protocol::views::NodeDormancy::default();
+    }
+    plakous_host_protocol::views::NodeDormancy {
+        parked: tree.waiting_on(&node.agent_id).is_some(),
+        conversation_retired: tree.conversation_retired(&node.agent_id),
+        workspace_reclaimed: tree.reclaimed(&node.workspace_id),
+        closed: node.presentation_status(tree.state) == NodeStatus::Closed,
+    }
 }
 
 fn unread_inbound(tree: &ProductAgentTree, agent_id: &str) -> u32 {
@@ -178,5 +197,68 @@ mod tests {
             attempt_sequence("agent-7", &AttemptId::from_persisted("agent-7-aX".into())),
             None
         );
+    }
+
+    #[test]
+    fn dormancy_comes_from_the_tree_and_a_missing_locator_is_not_retirement() {
+        use crate::tree::test_support::{close_req, spawn_req, tree};
+        use plakous_host_protocol::views::NodeDormancy;
+
+        let (_root, mut agents) = tree();
+        let child = agents
+            .spawn_agent("root", &spawn_req(), None)
+            .unwrap()
+            .agent_id;
+        let view = project_tree_view(&agents);
+        let row = view
+            .nodes
+            .iter()
+            .find(|node| node.agent_id == child)
+            .unwrap();
+        assert!(!row.has_session);
+        assert_eq!(row.dormancy, NodeDormancy::default());
+        assert!(
+            view.nodes
+                .iter()
+                .find(|node| node.parent_agent_id.is_none())
+                .unwrap()
+                .dormancy
+                .is_empty()
+        );
+
+        agents
+            .bind_session_locator(&child, "locator".to_owned())
+            .unwrap();
+        agents.set_active_turn(&child, true).unwrap();
+        agents
+            .bind_attempt_turn(&child, "00000000-0000-0000-0000-000000000001")
+            .unwrap();
+        agents.release_attempt_turn(&child).unwrap();
+        agents.park_child(&child, vec!["p3".to_owned()]).unwrap();
+        let parked = project_tree_view(&agents);
+        let row = parked
+            .nodes
+            .iter()
+            .find(|node| node.agent_id == child)
+            .unwrap();
+        assert!(row.dormancy.parked);
+        assert!(!row.dormancy.conversation_retired);
+        assert!(!row.dormancy.workspace_reclaimed);
+        assert!(!row.dormancy.closed);
+
+        agents.unpark_child(&child);
+        agents
+            .close_agent("root", &close_req(&child), None)
+            .unwrap();
+        agents.settle_for_test();
+        let closed = project_tree_view(&agents);
+        let row = closed
+            .nodes
+            .iter()
+            .find(|node| node.agent_id == child)
+            .unwrap();
+        assert!(row.dormancy.closed);
+        assert!(!row.dormancy.parked);
+        assert!(!row.dormancy.conversation_retired);
     }
 }

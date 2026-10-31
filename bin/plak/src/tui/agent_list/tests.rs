@@ -43,6 +43,7 @@ fn node(id: &str, parent: Option<&str>, status: &str) -> CanvasNode {
         finished: !matches!(status, "pending" | "running" | "paused" | "sealing"),
         fault: None,
         waiting_on: None,
+        dormancy: plakous_host_protocol::views::NodeDormancy::default(),
     }
 }
 
@@ -237,31 +238,28 @@ fn a_followup_supersedes_attention_and_an_old_ack_does_not_cover_the_new_attempt
     assert_eq!(failed_again.rows[1].attention, Some(Attention::Failed));
 }
 
-/// Spec 02 §5.7: glyph, elapsed, id, role, model, turns, tokens,
-/// `· N processes`, then the status right-aligned in its own column; a
-/// narrow row drops from the right of the left part and keeps glyph,
-/// elapsed, id and status, then the attention mark.
+/// Spec 02 §5.7: glyph, elapsed, id, role, then one live fact right-aligned.
+/// Model, turns, tokens and process count stay off the row. A narrow row
+/// drops or truncates the role before the fact, and keeps glyph, elapsed,
+/// id, fact and the mark.
 #[test]
-fn a_row_reads_left_to_right_and_drops_from_the_right_when_narrow() {
+fn a_row_reads_left_to_right_and_drops_the_role_before_the_fact() {
     let facts = RowFacts {
         glyph: "\u{2715}",
         elapsed: "3m04s",
         short_id: "#107",
         fact: "failed",
         role: "staff-worker",
-        model: "grok-4.6",
-        turns: "5 turns",
-        tokens: "12.4k tok",
-        processes: "2 processes",
     };
     let wide = compose_row("  ├─ ", &facts, true, 110);
     assert!(
-        wide.body.starts_with(
-            "\u{2715}  3m04s  #107  staff-worker  grok-4.6  5 turns  12.4k tok · 2 processes"
-        ),
+        wide.body.starts_with("\u{2715}  3m04s  #107  staff-worker"),
         "{wide:?}"
     );
     assert!(wide.body.ends_with("  failed"), "{wide:?}");
+    assert!(!wide.body.contains("grok"), "{wide:?}");
+    assert!(!wide.body.contains("tok"), "{wide:?}");
+    assert!(!wide.body.contains("process"), "{wide:?}");
     assert_eq!(wide.mark, "  \u{26a0}");
     let narrow = compose_row("  ├─ ", &facts, true, 60);
     assert!(
@@ -270,7 +268,6 @@ fn a_row_reads_left_to_right_and_drops_from_the_right_when_narrow() {
             .starts_with("\u{2715}  3m04s  #107  staff-worker"),
         "{narrow:?}"
     );
-    assert!(!narrow.body.contains("12.4k"), "{narrow:?}");
     assert!(narrow.body.ends_with("failed"), "{narrow:?}");
     let status_only = compose_row("  ├─ ", &facts, true, 36);
     assert!(
@@ -280,7 +277,11 @@ fn a_row_reads_left_to_right_and_drops_from_the_right_when_narrow() {
     assert!(status_only.body.ends_with(" failed"), "{status_only:?}");
     assert!(!status_only.body.contains("staff"), "{status_only:?}");
     let tiny = compose_row("  ├─ ", &facts, true, 20);
-    assert!(tiny.body.contains('…'), "{tiny:?}");
+    assert!(
+        tiny.body.contains("failed") || tiny.body.contains('…'),
+        "{tiny:?}"
+    );
+    assert!(!tiny.body.contains("staff"), "{tiny:?}");
     for row in [&wide, &narrow, &status_only, &tiny] {
         assert!(!row.body.contains("tests"), "the description left the row");
     }
@@ -292,9 +293,10 @@ fn a_row_reads_left_to_right_and_drops_from_the_right_when_narrow() {
     }
 }
 
-/// The status changes length as an agent waits,
-/// thinks and runs commands; the rest of the row must not move, and the
-/// status column ends in the same cell on every row, marked or not.
+/// The identity (glyph, elapsed, `#id`) does not move when the fact changes,
+/// and the status column ends in the same cell on every row, marked or not.
+/// The role may yield cells to a longer fact. At 40 columns a nested rail
+/// still keeps the id.
 #[test]
 fn the_status_column_is_stable_across_status_changes_and_rows() {
     for width in [40, 60, 80, 120] {
@@ -304,14 +306,10 @@ fn the_status_column_is_stable_across_status_changes_and_rows() {
             short_id: "#c3",
             fact,
             role: "staff-worker",
-            model: "grok-4.6",
-            turns: "3 turns",
-            tokens: "8.1k tok",
-            processes: "",
         };
-        // The row with no status is the stable part every status follows.
-        let base = compose_row("  ├─ ", &facts(""), false, width);
-        let base = base.body.trim_end();
+        let identity = compose_row("  ├─ ", &facts(""), false, width);
+        let identity = identity.body.split("  staff").next().unwrap_or("");
+        assert!(identity.contains("#c3"), "{width}: {identity}");
         let mut ends = Vec::new();
         for (fact, attention) in [
             ("waiting", false),
@@ -327,27 +325,33 @@ fn the_status_column_is_stable_across_status_changes_and_rows() {
             let row = compose_row("  ├─ ", &facts(fact), attention, width);
             let body_width = UnicodeWidthStr::width(row.body.as_str());
             assert!(
-                row.body.starts_with(base),
-                "{width}: the left part moved for {fact:?}: {row:?}"
+                row.body.starts_with(identity),
+                "{width}: the identity moved for {fact:?}: {row:?}"
             );
+            assert!(row.body.contains("#c3"), "{width}: the id was cut: {row:?}");
             ends.push(UnicodeWidthStr::width(row.rails.as_str()) + body_width);
             assert_eq!(UnicodeWidthStr::width(row.mark.as_str()), MARK_CELLS);
-            let status = row.body[base.len()..].trim();
+            let status = row.body.trim_end();
+            let status = status.rsplit("  ").next().unwrap_or("");
             if !fact.is_empty() {
                 let first = fact.split(' ').next().unwrap_or_default();
                 assert!(
                     status.starts_with(first) || fact.contains(status.trim_end_matches('…')),
                     "{width}: the status {fact:?} shows: {row:?}"
                 );
-                // The facts leave the status at least its reserve.
                 let shown = fact.strip_prefix("waiting ").unwrap_or(fact);
+                let floor = shown.len().min(STATUS_RESERVE);
+                let room = body_width.saturating_sub(UnicodeWidthStr::width(identity) + 2);
                 assert!(
-                    UnicodeWidthStr::width(status) >= shown.len().min(STATUS_RESERVE),
+                    UnicodeWidthStr::width(status) >= floor.min(room),
                     "{width}: {fact:?} got {status:?}"
                 );
             }
             if fact.starts_with("waiting on") {
-                assert!(status.contains("p3"), "{width}: the ids were cut: {row:?}");
+                assert!(
+                    row.body.contains("p3"),
+                    "{width}: the ids were cut: {row:?}"
+                );
             }
         }
         assert!(
@@ -355,6 +359,43 @@ fn the_status_column_is_stable_across_status_changes_and_rows() {
             "{width}: the status column moved: {ends:?}"
         );
     }
+    let nested = compose_row(
+        "  │ └─ ",
+        &RowFacts {
+            glyph: "\u{2713}",
+            elapsed: "1m06s",
+            short_id: "#105",
+            fact: "done",
+            role: "web",
+        },
+        false,
+        36,
+    );
+    assert!(
+        nested.body.contains("#105"),
+        "a 40-column nested row keeps the id: {nested:?}"
+    );
+    assert!(!nested.body.contains("#…"), "{nested:?}");
+    // The 40-column research row has one cell left for the role. That is not
+    // enough for a truncated label, so the role is omitted rather than `…`.
+    let tight = compose_row(
+        "  ├─ ",
+        &RowFacts {
+            glyph: "⠋",
+            elapsed: "8m12s",
+            short_id: "#102",
+            fact: "Searching",
+            role: "research",
+        },
+        false,
+        36,
+    );
+    assert!(
+        !tight.body.contains('…'),
+        "fewer than three cells left omits the role: {tight:?}"
+    );
+    assert!(tight.body.contains("#102"), "{tight:?}");
+    assert!(tight.body.contains("Searching"), "{tight:?}");
 }
 
 #[test]
@@ -381,6 +422,52 @@ fn malformed_links_degrade_to_a_forest() {
         layout_node("c", Some("missing")),
     ]);
     assert_eq!(layout.placements().len(), 3);
+}
+
+#[test]
+fn dormant_rows_dim_at_once_and_parked_live_work_stays_in_live() {
+    use plakous_host_protocol::views::NodeDormancy;
+    let mut parked = node("parked", Some("root"), "running");
+    parked.dormancy.parked = true;
+    parked.waiting_on = Some(vec!["p3".into()]);
+    let mut retired = finished("old", "root", "completed", 3_600);
+    retired.dormancy.conversation_retired = true;
+    let mut recent = finished("recent", "root", "completed", 30);
+    recent.dormancy.workspace_reclaimed = true;
+    let mut failed = finished("failed", "root", "failed", 3_600);
+    failed.dormancy.closed = true;
+    failed.dormancy.conversation_retired = true;
+    let live = project(
+        &[
+            node("root", None, "idle"),
+            parked.clone(),
+            retired.clone(),
+            recent.clone(),
+            failed.clone(),
+        ],
+        &BTreeSet::new(),
+        NOW,
+        AgentScope::Live,
+    );
+    let row = |id: &str| live.rows.iter().find(|row| row.id == id);
+    assert_eq!(row("parked").map(|row| row.dim), Some(true));
+    assert!(
+        row("old").is_none(),
+        "an old retired row is not newly recent"
+    );
+    assert_eq!(row("recent").map(|row| row.dim), Some(true));
+    assert_eq!(
+        row("failed").map(|row| (row.dim, row.attention.is_some())),
+        Some((true, true))
+    );
+    let all = project(
+        &[node("root", None, "idle"), parked, retired, recent, failed],
+        &BTreeSet::new(),
+        NOW,
+        AgentScope::All,
+    );
+    assert!(all.rows.iter().any(|row| row.id == "old" && row.dim));
+    let _ = NodeDormancy::default();
 }
 
 #[test]

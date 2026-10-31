@@ -50,6 +50,7 @@ fn view() -> TreeView {
                 fault: None,
                 waiting_on: None,
                 recovery_abandoned: false,
+                dormancy: super::NodeDormancy::default(),
             },
             NodeView {
                 agent_id: "c1".to_owned(),
@@ -94,6 +95,7 @@ fn view() -> TreeView {
                 fault: Some("bind failed".to_owned()),
                 waiting_on: None,
                 recovery_abandoned: false,
+                dormancy: super::NodeDormancy::default(),
             },
         ],
     }
@@ -167,6 +169,29 @@ fn a_parked_childs_waiting_on_is_additive_on_jsonl_tree_rows() {
     tree.nodes[1].waiting_on = Some(Vec::new());
     let wire: serde_json::Value = serde_json::from_str(&projected(tree)).unwrap();
     assert_eq!(wire["nodes"][1]["waiting_on"], serde_json::json!([]));
+}
+
+#[test]
+fn dormancy_is_an_additive_object_of_only_the_true_facts() {
+    let mut tree = view();
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&projected(tree.clone())).unwrap()["nodes"][1]
+            .get("dormancy")
+            .is_none()
+    );
+    tree.nodes[1].dormancy = super::NodeDormancy {
+        parked: false,
+        conversation_retired: true,
+        workspace_reclaimed: true,
+        closed: false,
+    };
+    let wire: serde_json::Value = serde_json::from_str(&projected(tree)).unwrap();
+    assert_eq!(wire["v"], 1);
+    assert!(wire["nodes"][0].get("dormancy").is_none());
+    assert_eq!(
+        wire["nodes"][1]["dormancy"],
+        serde_json::json!({"conversation_retired": true, "workspace_reclaimed": true})
+    );
 }
 
 /// The two facts the view derives rather than stores.

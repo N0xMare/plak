@@ -737,6 +737,7 @@ fn tool_error_tree_are_required_stdout() {
                 fault: None,
                 waiting_on: None,
                 recovery_abandoned: false,
+                dormancy: plakous_host_protocol::views::NodeDormancy::default(),
             }],
         }),
         JsonlCorrelation::default(),
@@ -788,6 +789,7 @@ fn tree_rows_carry_the_tier_attempt_and_candidate_or_omit_them() {
         fault: None,
         waiting_on: None,
         recovery_abandoned: false,
+        dormancy: plakous_host_protocol::views::NodeDormancy::default(),
     };
     let snapshot = |node: NodeView| {
         let line = project_host_event(

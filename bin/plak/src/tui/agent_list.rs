@@ -371,17 +371,27 @@ fn ended_age(node: &CanvasNode, now_unix: u64) -> Option<u64> {
         .map(|ended| now_unix.saturating_sub(ended))
 }
 
+/// A dormant body is dimmed at once. Parked live work stays listed.
+fn dormant_dim(node: &CanvasNode) -> bool {
+    !node.dormancy.is_empty()
+}
+
 /// `Some(dim)` when the node is shown on its own account.
 fn shown_on_own(
     node: &CanvasNode,
     acks: &BTreeSet<AgentAcknowledgement>,
     now_unix: u64,
 ) -> Option<bool> {
+    // Parked work is live and dimmed immediately, whatever its status reads.
+    if node.dormancy.parked {
+        return Some(true);
+    }
     if is_active(node) {
         return Some(false);
     }
     if attention(node).is_some() && !acknowledged(node, acks) {
-        return Some(false);
+        // The attention mark stays bright; a dormant body still dims.
+        return Some(dormant_dim(node));
     }
     if node.parent_agent_id.is_none() {
         return Some(false);
@@ -391,7 +401,7 @@ fn shown_on_own(
     }
     ended_age(node, now_unix)
         .filter(|age| *age <= RECENT_SECS)
-        .map(|age| age > DIM_AFTER_SECS)
+        .map(|age| dormant_dim(node) || age > DIM_AFTER_SECS)
 }
 
 /// Projects the snapshot's nodes onto the list `scope` shows at `now_unix`.
@@ -450,11 +460,14 @@ pub fn project(
         .filter_map(|placement| {
             let node = by_id.get(placement.id.as_str())?;
             let attention = attention(node).filter(|_| !acknowledged(node, acks));
+            let body_dim = dim.get(placement.id.as_str()).copied().unwrap_or(false);
+            // Attention stays marked; a dormant body still dims so the mark is
+            // what stays bright.
+            let dimmed = body_dim && (attention.is_none() || !node.dormancy.is_empty());
             Some(AgentRow {
                 id: placement.id.clone(),
                 prefix: outline_prefix(&layout, placement),
-                dim: dim.get(placement.id.as_str()).copied().unwrap_or(false)
-                    && attention.is_none(),
+                dim: dimmed,
                 attention,
             })
         })
@@ -489,32 +502,30 @@ pub struct RowCells {
 }
 
 /// The facts one row shows, in display order (spec 02 §5.7).
+///
+/// Model, turns, tokens and process count stay in the inspector.
 pub struct RowFacts<'a> {
     pub glyph: &'a str,
     pub elapsed: &'a str,
     pub short_id: &'a str,
-    /// The live fact: the current tool verb while it runs, else the status.
+    /// The one live fact, right-aligned.
     pub fact: &'a str,
     pub role: &'a str,
-    pub model: &'a str,
-    pub turns: &'a str,
-    pub tokens: &'a str,
-    /// `N processes`, painted as `· N processes`; empty when none run.
-    pub processes: &'a str,
 }
 
-/// Cells the left facts always leave for the status at the row's end.
+/// Cells the live fact keeps before the role may take any.
 const STATUS_RESERVE: usize = 12;
 /// Cells the attention mark takes, reserved on every row.
 const MARK_CELLS: usize = 3;
 
-/// Lays one row out in `width` cells. Glyph, elapsed and id lead; role,
-/// model, turns, tokens and processes follow while they fit in the row less
-/// [`STATUS_RESERVE`], dropping from the right. The live status is
-/// right-aligned at the end and takes whatever the facts leave (cut at its
-/// own end when longer; a narrow `waiting on p3, c2` keeps its ids as `on p3,
-/// c2`). The facts never depend on the status, so a status change never moves
-/// the rest of the row. The attention mark always stays.
+/// Lays one row out in `width` cells: glyph, right-aligned elapsed, `#id`,
+/// role, then one live fact right-aligned at the end. The role is truncated
+/// before the fact, and the fact before the identity. Fewer than three cells
+/// left for the role omits it rather than painting a lone `…`. Glyph,
+/// elapsed, `#id` and the mark are not truncated to reserve the fact. A
+/// narrow `waiting on p3, c2` keeps its ids as `on p3, c2`. The identity
+/// does not move when the fact changes length; the role yields cells to the
+/// fact's reserve, which is `min(fact width, STATUS_RESERVE) + 2`.
 #[must_use]
 pub fn compose_row(rails: &str, facts: &RowFacts<'_>, attention: bool, width: usize) -> RowCells {
     let mark = if attention { "  \u{26a0}" } else { "   " };
@@ -523,27 +534,36 @@ pub fn compose_row(rails: &str, facts: &RowFacts<'_>, attention: bool, width: us
         .saturating_sub(MARK_CELLS);
     // Elapsed is right-aligned in six cells (`59m59s`) so ids line up.
     let head = format!("{} {:>6}  {}", facts.glyph, facts.elapsed, facts.short_id);
-    // A narrow row still gives the facts two thirds of its cells.
-    let left_budget = budget
-        .saturating_sub(STATUS_RESERVE + 2)
-        .max(budget * 2 / 3);
-    let mut left = head;
-    let optional = [
-        ("  ", facts.role),
-        ("  ", facts.model),
-        ("  ", facts.turns),
-        ("  ", facts.tokens),
-        (" \u{b7} ", facts.processes),
-    ];
-    for (separator, part) in optional.into_iter().filter(|(_, part)| !part.is_empty()) {
-        let next = format!("{left}{separator}{part}");
-        if UnicodeWidthStr::width(next.as_str()) > left_budget {
-            break;
+    let head_width = UnicodeWidthStr::width(head.as_str());
+    let fact_width = UnicodeWidthStr::width(facts.fact).min(STATUS_RESERVE);
+    let fact_gap = usize::from(!facts.fact.is_empty()) * 2;
+    // The reserve never takes cells the identity needs.
+    let reserved = (fact_width + fact_gap).min(budget.saturating_sub(head_width));
+    let left_budget = budget.saturating_sub(reserved);
+    let mut left = head.clone();
+    if !facts.role.is_empty() && left_budget > head_width + 2 {
+        let room = left_budget - head_width - 2;
+        let role = if UnicodeWidthStr::width(facts.role) <= room {
+            facts.role.to_owned()
+        } else if room < 3 {
+            String::new()
+        } else {
+            truncate_display(facts.role, room)
+        };
+        if !role.is_empty() {
+            left = format!("{left}  {role}");
         }
-        left = next;
     }
-    let left = truncate_display(&left, left_budget);
-    let room = budget.saturating_sub(UnicodeWidthStr::width(left.as_str()) + 2);
+    // Only a budget smaller than the identity itself may cut it, and only
+    // after the role and the fact have already yielded.
+    let left = if head_width <= budget {
+        left
+    } else {
+        truncate_display(&head, budget)
+    };
+    let separator =
+        usize::from(!facts.fact.is_empty() && budget > UnicodeWidthStr::width(left.as_str())) * 2;
+    let room = budget.saturating_sub(UnicodeWidthStr::width(left.as_str()) + separator);
     let fact = match facts.fact.strip_prefix("waiting ") {
         Some(on) if UnicodeWidthStr::width(facts.fact) > room && on.starts_with("on ") => on,
         _ => facts.fact,

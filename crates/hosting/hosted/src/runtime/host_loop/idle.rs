@@ -859,7 +859,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     | UserAction::ResumeTopologyTree
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }
-                    | UserAction::StopAllTopology),
+                    | UserAction::StopAllTopology
+                    | UserAction::RecoverTopologyNode { .. }),
                 ) => {
                     dispatch_topology_navigator_sync(
                         &self.executor,

@@ -39,6 +39,7 @@ fn node(status: NodeStatus, attempt: Option<AttemptStatus>) -> NodeView {
         fault: None,
         waiting_on: None,
         recovery_abandoned: false,
+        dormancy: plakous_host_protocol::views::NodeDormancy::default(),
     }
 }
 

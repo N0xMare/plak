@@ -35,6 +35,10 @@ pub async fn abandon_live_agents(tree_id: &str) -> Vec<Agent> {
         pass.abort();
         let _ = pass.await;
     }
+    for task in runtime.take_explicit_recovers() {
+        task.abort();
+        let _ = task.await;
+    }
     let live = runtime.live.lock().await;
     for startup in live.starting.values() {
         startup.request_cancel();
@@ -93,6 +97,7 @@ async fn close_runtime_admission(runtime: &ProductTopologyRuntime) -> TopologySh
         pass.abort();
         let _ = tokio::time::timeout(HOST_SHUTDOWN_DETACH_TIMEOUT, pass).await;
     }
+    finish_explicit_recovers(runtime).await;
     let mut failure = TopologyShutdownError::default();
     if let Ok(mut tree) = runtime.driver().lock() {
         tree.emit_shutdown_detaches(runtime.observer().as_ref());
@@ -113,6 +118,25 @@ async fn close_runtime_admission(runtime: &ProductTopologyRuntime) -> TopologySh
         failure.tree_failure = Some("topology tree lock is poisoned".into());
     }
     failure
+}
+
+async fn finish_explicit_recovers(runtime: &ProductTopologyRuntime) {
+    let tasks = runtime.take_explicit_recovers();
+    if tasks.is_empty() {
+        return;
+    }
+    let deadline = tokio::time::Instant::now() + HOST_SHUTDOWN_RELEASE_TIMEOUT;
+    let mut aborted = Vec::new();
+    for mut task in tasks {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if tokio::time::timeout(left, &mut task).await.is_err() {
+            task.abort();
+            aborted.push(task);
+        }
+    }
+    for task in aborted {
+        let _ = tokio::time::timeout(HOST_SHUTDOWN_DETACH_TIMEOUT, task).await;
+    }
 }
 
 async fn join_runtime_children(

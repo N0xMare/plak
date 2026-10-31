@@ -483,8 +483,5 @@ fn a_recovery_required_agent_shows_its_remedy_on_the_agent_bar() {
     ])));
     open_agent(&mut app);
     let screen = render_to_string(&mut app, 120, 40);
-    assert!(
-        screen.contains("remedy: ask the root to run recover_agent"),
-        "{screen}"
-    );
+    assert!(screen.contains("u recovers"), "{screen}");
 }

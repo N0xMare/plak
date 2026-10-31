@@ -24,6 +24,7 @@ fn irreversible(action: &UserAction) -> bool {
             | UserAction::CloseTopologyNode { .. }
             | UserAction::StopAllTopology
             | UserAction::ResumeTopologyTree
+            | UserAction::RecoverTopologyNode { .. }
             | UserAction::DeleteQueued { .. }
             | UserAction::DropQueued { .. }
             | UserAction::SendQueuedNow { .. }

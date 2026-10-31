@@ -301,7 +301,8 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         | UserAction::ResumeTopologyTree
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
-        | UserAction::StopAllTopology => {
+        | UserAction::StopAllTopology
+        | UserAction::RecoverTopologyNode { .. } => {
             crate::topology_navigator::emit_navigator_unavailable(
                 |event| {
                     let _ = events.send(event);

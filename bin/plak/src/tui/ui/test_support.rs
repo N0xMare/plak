@@ -977,6 +977,7 @@ pub(super) fn tree_node(id: &str, parent: Option<&str>, depth: u8) -> NodeView {
         fault: None,
         waiting_on: None,
         recovery_abandoned: false,
+        dormancy: plakous_host_protocol::views::NodeDormancy::default(),
     }
 }
 

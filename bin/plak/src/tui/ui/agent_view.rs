@@ -13,7 +13,7 @@ use super::{
 };
 use crate::tui::agent_list::{self, AgentScope};
 use crate::tui::tree_navigator::{
-    AgentRowClock, RECOVERY_REMEDY, acknowledge_intent, agent_row, agent_view_label,
+    AgentRowClock, RECOVERY_REMEDY, acknowledge_intent, agent_row, agent_view_label, recover_intent,
 };
 
 impl App {
@@ -60,6 +60,14 @@ impl App {
         hints.push(super::Hint::new("[ ]", "prev/next agent"));
         hints.push(super::Hint::new("i", "interrupt"));
         hints.push(super::Hint::new("c", "close"));
+        if self.viewed_agent_id().is_some_and(|agent_id| {
+            self.agent_tree
+                .as_ref()
+                .and_then(|tree| recover_intent(tree, agent_id))
+                .is_some()
+        }) {
+            hints.push(super::Hint::new("u", "recover"));
+        }
         hints.push(super::Hint::new("y", "copy"));
         if self.viewed_agent_acknowledgement().is_some() {
             hints.push(super::Hint::new("x", "acknowledge"));
@@ -72,6 +80,7 @@ impl App {
         let labels: &[(&str, KeyCode)] = &[
             ("i interrupt", KeyCode::Char('i')),
             ("c close", KeyCode::Char('c')),
+            ("u recover", KeyCode::Char('u')),
             ("y copy", KeyCode::Char('y')),
             ("x acknowledge", KeyCode::Char('x')),
         ];
@@ -133,11 +142,9 @@ impl App {
         let line = match node {
             Some(node) => {
                 let spinner = (!self.render_prefs.reduced_motion).then(|| self.counter_spinner(0));
-                let processes = self.running_processes_by_owner();
                 let clock = AgentRowClock {
                     now_unix: self.agents_now(),
                     spinner,
-                    processes: &processes,
                     profile: self.composer_chrome.profile.as_ref(),
                 };
                 let cells = agent_row(
@@ -174,7 +181,15 @@ impl App {
         }
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                RECOVERY_REMEDY,
+                if self
+                    .agent_tree
+                    .as_ref()
+                    .is_some_and(|tree| tree.restored_paused)
+                {
+                    "Resume agents first"
+                } else {
+                    RECOVERY_REMEDY
+                },
                 self.theme.warning,
             ))),
             Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), 1),
@@ -207,6 +222,14 @@ impl App {
                 } else {
                     UserAction::CloseTopologyNode { agent_id }
                 });
+            }
+            KeyCode::Char('u') => {
+                let agent_id = self.viewed_agent_id()?.to_owned();
+                let action = self
+                    .agent_tree
+                    .as_ref()
+                    .and_then(|tree| recover_intent(tree, &agent_id))?;
+                return self.confirm_destructive(action);
             }
             KeyCode::Char('x') => return self.viewed_agent_acknowledgement(),
             KeyCode::Char('y') => {

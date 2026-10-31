@@ -545,12 +545,16 @@ fn the_agents_list_goldens_cover_every_width() {
         } else {
             &["●·1", "✓·3", "⚠·2"]
         };
-        for fragment in counts.iter().chain(&["#107"]) {
+        for fragment in counts.iter().chain(&["#107", "#105"]) {
             assert!(
                 actual.contains(fragment),
                 "`{fragment}` is missing at {width}"
             );
         }
+        assert!(
+            !actual.contains("#\u{2026}"),
+            "a 40-column row truncated the id at {width}"
+        );
         assert!(
             !actual.contains("#90"),
             "an agent finished an hour ago is history"

@@ -78,6 +78,8 @@ pub struct CanvasNode {
     /// What a parked child waits on, present exactly while it is parked
     /// (empty when the wait is not named yet).
     pub waiting_on: Option<Vec<String>>,
+    /// Typed dormancy from the tree. Not inferred from labels or the locator.
+    pub dormancy: plakous_host_protocol::views::NodeDormancy,
 }
 
 /// A revisioned complete canvas tree. Replace, never patch locally.
@@ -136,6 +138,7 @@ impl From<&NodeView> for CanvasNode {
             finished: node.finished(),
             fault: crate::refusal_text::node_fault(node),
             waiting_on: node.waiting_on.clone(),
+            dormancy: node.dormancy,
         }
     }
 }

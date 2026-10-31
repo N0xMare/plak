@@ -1005,6 +1005,7 @@ fn unsolicited_tree_snapshot_omits_id_while_prompt_in_flight() {
                 fault: None,
                 waiting_on: None,
                 recovery_abandoned: false,
+                dormancy: plakous_host_protocol::views::NodeDormancy::default(),
             }],
         }),
         &mut JsonlSession {
@@ -1071,6 +1072,7 @@ fn explicit_tree_command_snapshot_uses_tree_command_id() {
                 fault: None,
                 waiting_on: None,
                 recovery_abandoned: false,
+                dormancy: plakous_host_protocol::views::NodeDormancy::default(),
             }],
         }),
         &mut JsonlSession {
@@ -1138,6 +1140,7 @@ fn unsolicited_snapshot_does_not_consume_pending_tree_id() {
                 fault: None,
                 waiting_on: None,
                 recovery_abandoned: false,
+                dormancy: plakous_host_protocol::views::NodeDormancy::default(),
             }],
         }),
         &mut JsonlSession {

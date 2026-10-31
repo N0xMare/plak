@@ -771,7 +771,13 @@ agent finishes, the process exits). SIGTERM/SIGHUP stop without asking.
 `/tree` opens the Agents list: the agents that matter right now, as an
 indented outline. It shows running and waiting agents, agents that finished in
 the last five minutes (dimmed after two), agents that need your attention, and
-the parents needed to place them. The header counts
+the parents needed to place them. A parked agent, a retired conversation, a
+reclaimed checkout, or a closed agent is dimmed at once and the row says why
+(`parked`, `waiting on p3, c2`, `retired conversation`, `reclaimed checkout`,
+or `closed`). Parked work stays in the live list. The inspector lists every
+such fact and whether a follow-up can revive the agent: a reclaimed checkout
+can, a retired conversation cannot. `f` still shows every agent, including
+ones the live list has aged out. The header counts
 `● 3 active   ✓ 21 completed   ⚠ 1 attention`; the footer says how many older
 agents are hidden, and `f` shows every agent.
 
@@ -787,13 +793,14 @@ candidate was adopted, not every agent that stopped.
 Re-tasking the agent with a follow-up clears its attention
 without an acknowledgement; a later failure needs a new one.
 
-Each row shows the status glyph, how long the agent has run and its `#id`,
-then its role in the session's profile (`worker` for
-`my-profile-worker`; other templates in full), model, turns,
-tokens and `· N processes` when the width allows. What the agent is doing now
-(waiting, thinking, running a command) sits in a right-aligned column at the
-end of the row, so the row does not shift as it changes; `⚠` follows it. The description is
-in the inspector below the list. Running
+Each row shows the status glyph, how long the agent has run, its `#id`, and
+its role in the session's profile (`worker` for `my-profile-worker`; other
+templates in full). What the agent is doing now (waiting, thinking, running a
+command) sits in one right-aligned fact at the end of the row, so the row does
+not shift as it changes; `⚠` follows it. A narrow row drops the role when
+fewer than three cells remain, and otherwise shortens it, before that fact.
+Model, turns, tokens and process count are not on the
+row; they are in the inspector with the description. Running
 agents animate unless reduced motion is on. The selection follows the agent,
 not the row: when it leaves the list its parent is selected instead.
 
@@ -805,18 +812,37 @@ not the row: when it leaves the list its parent is selected instead.
 | `Home` | Root |
 | `Enter` | Show the agent's transcript in Activity (on root: close Activity and show the root's) |
 | `x` | Acknowledge the selected agent's attention |
-| `f` | Switch between the live list and every agent |
+| `f` | Switch between the live list and every agent; from history, show every agent |
+| `t` | Switch between the agent tree and history |
+| `/` | Search history by id, role, or description |
+| `!` | Show only failed, blocked, unfinished (`completed_without_submission`), and recovery-required rows |
+| `PageUp` / `PageDown` | Page the list |
+| `End` | Last listed agent |
 | `y` | Copy the agent id to the clipboard |
 | `R` | Ask the host for a fresh snapshot and re-read acknowledgements |
-| `r` | Resume a restored-paused tree (in the confirmation pop-up; also `/tree resume`) — the only exit from it |
+| `r` | Resume a restored-paused tree (in the confirmation pop-up; also `/tree resume` and the `▶ resume agents` row) — the only exit from it |
 | `i` | Interrupt the selected agent (in the confirmation pop-up; not the root) |
 | `c` | Close the selected agent (in the confirmation pop-up; not the root) |
 | `s` | Stop every non-root agent (in the confirmation pop-up) |
+| `u` | Recover the selected child that is a failed or recovery-required child (in the confirmation pop-up; not while agents are paused) |
 | `Esc` | Leave the list |
 
-The footer's `i interrupt`, `c close` and `s stop all` are clickable too; on a
-narrow terminal the footer keeps every key in short form (`… · i · c · s · …`),
-still clickable.
+The footer's `i interrupt`, `c close`, `s stop all` and `t history` are
+clickable too; on a narrow terminal the footer keeps every key in short form
+(`… · i · c · s · t · …`), still clickable.
+
+`t` opens history: settled agents other than the root, grouped into Today,
+Earlier, and Unknown time, newest first. Running, waiting, interrupted, and
+parked agents stay on the tree. `t` again returns to the list you left. `/`
+searches by id, role, or description; while the query is open, letters
+(including `t`, `r` and `!`) type into it, `Backspace` deletes, `Enter` keeps
+the query, and `Esc` clears it. A paste goes into the query. `!` keeps only
+failures, including ones you already acknowledged with `x`. A search that
+hides the selected agent leaves it selected and says so; `Esc` clears the
+filter when the selection is hidden or nothing matches, and a later `Esc`
+leaves history. `x`, `u` and `Enter` do nothing while that selection is
+hidden. History does not ask the
+host for another snapshot.
 
 `Esc` in the list never cancels the root turn — that is deliberate, so
 closing the view cannot kill your work.
@@ -828,7 +854,7 @@ owning-cell receipt and definitive tool outcome, including failed calls. Missing
 or oversized older outcomes are not reconstructed. Calls whose receipt was pruned
 or whose parent is outside the visible history remain ordinary rows; the cell
 keeps its own result status. The Activity title, the Agents and Processes tabs and the close glyph stay. The body starts with `root › #<id> · <description>`, then the transcript, then the agent's row from the Agents list
-(click it to return to the list on that agent). The transcript's scrollbar pages when you click the track and follows when you drag the thumb. `Tab`, `Shift+Tab` or a click on Processes leaves the transcript; a click on Agents, or coming back to Agents, shows the list on this agent. An agent that needs recovery shows the remedy above that row. The footer carries the keys below; `i`, `c`, `y` and `x` are clickable.
+(click it to return to the list on that agent). The transcript's scrollbar pages when you click the track and follows when you drag the thumb. `Tab`, `Shift+Tab` or a click on Processes leaves the transcript; a click on Agents, or coming back to Agents, shows the list on this agent. An agent that needs recovery shows `u recovers` above that row, or `Resume agents first` while agents are paused. The footer carries the keys below; `i`, `c`, `y` and `x` are clickable.
 
 | Key | Effect |
 | --- | --- |
@@ -837,6 +863,7 @@ keeps its own result status. The Activity title, the Agents and Processes tabs a
 | `Enter` | Open or close the focused row |
 | `[` / `]` | Previous / next agent in the Agents list's order |
 | `i` / `c` | Interrupt / close this agent (in the confirmation pop-up) |
+| `u` | Recover this child when it is a failed or recovery-required child (in the confirmation pop-up; resume agents first while the tree is paused) |
 | `x` | Acknowledge this agent's attention |
 | `y` | Copy the agent id |
 | `Ctrl+T`, close glyph | Close Activity and return to the root transcript |

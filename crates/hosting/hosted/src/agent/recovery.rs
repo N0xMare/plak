@@ -1047,6 +1047,88 @@ impl ProductChildRecoverer {
     }
 }
 
+/// Why an operator `u` must not call [`ProductChildRecoverer::recover`].
+///
+/// Eligibility is [`operator_child_recover_eligible`]: failed-idle and
+/// `recovery_required` children, on a tree `recover_agent` would still
+/// accept, with no model-grant check. The revision fence stays here.
+pub(crate) fn refuse_operator_child_recover(
+    revision: u64,
+    expected_revision: u64,
+    state: crate::agent_tree_protocol::TreeAdmissionState,
+    is_root: bool,
+    status: crate::agent_tree_protocol::NodeStatus,
+    attempt_id: Option<&str>,
+    expected_attempt_id: &str,
+) -> Option<&'static str> {
+    use crate::agent_tree_protocol::TreeAdmissionState;
+    if revision != expected_revision {
+        return Some("stale tree revision");
+    }
+    if state == TreeAdmissionState::RestoredPaused {
+        return Some("Resume agents first");
+    }
+    if state == TreeAdmissionState::Closed {
+        return Some("tree is closed");
+    }
+    if is_root {
+        return Some("the root is not recovered from the agent list");
+    }
+    if !plakous_host_protocol::topology::operator_child_recover_eligible(
+        state.as_str(),
+        status.as_str(),
+        is_root,
+        attempt_id.is_some(),
+    ) {
+        return Some("this agent is not waiting on recovery");
+    }
+    match attempt_id {
+        Some(id) if id == expected_attempt_id => None,
+        Some(_) => Some("attempt mismatch"),
+        None => Some("this agent has no attempt to recover"),
+    }
+}
+
+/// One operator child recover: the `recover_agent` port, not the model tool
+/// and not the tree's background pass. The tree mutex is not held across the
+/// lease wait.
+pub(crate) async fn operator_child_recover(
+    runtime: &Arc<ProductTopologyRuntime>,
+    expected_revision: u64,
+    agent_id: &str,
+    expected_attempt_id: &str,
+) -> Result<RecoverAgentOutput, String> {
+    let parent = {
+        let refusal = runtime
+            .read(|tree| -> Result<Option<&'static str>, String> {
+                let node = tree.node(agent_id).map_err(|error| error.message.clone())?;
+                Ok(refuse_operator_child_recover(
+                    tree.revision,
+                    expected_revision,
+                    tree.state,
+                    node.parent_agent_id.is_none(),
+                    node.presentation_status(tree.state),
+                    node.attempt_id.as_ref().map(AttemptId::as_str),
+                    expected_attempt_id,
+                ))
+            })
+            .map_err(|error| error.message)??;
+        if let Some(reason) = refusal {
+            return Err(reason.to_owned());
+        }
+        super::build::rejoin_parent(runtime)
+            .ok_or_else(|| "no parent session is attached".to_owned())?
+    };
+    let attempt = AttemptId::from_persisted(expected_attempt_id.to_owned());
+    ProductChildRecoverer {
+        parent,
+        runtime: Arc::clone(runtime),
+    }
+    .recover(agent_id.to_owned(), Some(attempt))
+    .await
+    .map_err(|error| format!("{}: {}", code_name(error.code), error.message))
+}
+
 /// The one recovery pass for a tree open, `ResumeTree`, or `/recover`: under
 /// the reattach lock, never waiting on a lease, and bounded by
 /// [`RECOVERY_PASS_DEADLINE`] from the moment it is asked for, waiting for
@@ -1197,6 +1279,67 @@ fn merge_pass_reports(
     recovered.append(&mut later.recovered);
     later.recovered = recovered;
     Some(later)
+}
+
+#[cfg(test)]
+mod operator_recover_tests {
+    use super::refuse_operator_child_recover;
+
+    #[test]
+    fn operator_recover_refuses_a_stale_revision_a_mismatch_and_a_paused_tree() {
+        use crate::agent_tree_protocol::{NodeStatus, TreeAdmissionState};
+        let live = TreeAdmissionState::Live;
+        let recover = NodeStatus::RecoveryRequired;
+        assert_eq!(
+            refuse_operator_child_recover(4, 3, live, false, recover, Some("a1"), "a1"),
+            Some("stale tree revision")
+        );
+        assert_eq!(
+            refuse_operator_child_recover(3, 3, live, false, recover, Some("a2"), "a1"),
+            Some("attempt mismatch")
+        );
+        assert_eq!(
+            refuse_operator_child_recover(
+                3,
+                3,
+                TreeAdmissionState::RestoredPaused,
+                false,
+                recover,
+                Some("a1"),
+                "a1"
+            ),
+            Some("Resume agents first")
+        );
+        assert_eq!(
+            refuse_operator_child_recover(
+                3,
+                3,
+                TreeAdmissionState::Closed,
+                false,
+                recover,
+                Some("a1"),
+                "a1"
+            ),
+            Some("tree is closed")
+        );
+        assert_eq!(
+            refuse_operator_child_recover(3, 3, live, true, recover, Some("a1"), "a1"),
+            Some("the root is not recovered from the agent list")
+        );
+        assert_eq!(
+            refuse_operator_child_recover(3, 3, live, false, NodeStatus::Running, Some("a1"), "a1"),
+            Some("this agent is not waiting on recovery")
+        );
+        assert_eq!(
+            refuse_operator_child_recover(3, 3, live, false, recover, Some("a1"), "a1"),
+            None
+        );
+        assert_eq!(
+            refuse_operator_child_recover(3, 3, live, false, NodeStatus::Failed, Some("a1"), "a1"),
+            None,
+            "a failed-idle child is eligible"
+        );
+    }
 }
 
 #[cfg(test)]

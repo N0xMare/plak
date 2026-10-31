@@ -321,6 +321,22 @@ pub fn project_host_event<P: ProtocolExtension>(
                     if let Some(waiting_on) = &node.waiting_on {
                         row.insert("waiting_on".to_owned(), serde_json::json!(waiting_on));
                     }
+                    if !node.dormancy.is_empty() {
+                        let mut dormancy = Map::new();
+                        if node.dormancy.parked {
+                            dormancy.insert("parked".to_owned(), Value::from(true));
+                        }
+                        if node.dormancy.conversation_retired {
+                            dormancy.insert("conversation_retired".to_owned(), Value::from(true));
+                        }
+                        if node.dormancy.workspace_reclaimed {
+                            dormancy.insert("workspace_reclaimed".to_owned(), Value::from(true));
+                        }
+                        if node.dormancy.closed {
+                            dormancy.insert("closed".to_owned(), Value::from(true));
+                        }
+                        row.insert("dormancy".to_owned(), Value::Object(dormancy));
+                    }
                     if let Some(progress) = &node.live_progress {
                         row.insert(
                             "live_progress".to_owned(),

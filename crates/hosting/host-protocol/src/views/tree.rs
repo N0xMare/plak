@@ -85,6 +85,48 @@ pub struct NodeView {
     /// is parked: an empty list is the parked marker for a child whose wait
     /// is not yet named (an arrival already woke it, or a reopen holds it).
     pub waiting_on: Option<Vec<String>>,
+    /// Observational dormancy. Empty on the root and when no fact is true.
+    pub dormancy: NodeDormancy,
+}
+
+/// Independent dormancy facts. Several may be true at once. This is not a
+/// lifecycle state, a timer, or recovery authority: retirement does not delete
+/// work, and a reclaimed checkout can be revived.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "dormancy facts are independent and several may be true at once"
+)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct NodeDormancy {
+    /// Parked, including a wait that is not named yet.
+    pub parked: bool,
+    /// The conversation was retired.
+    pub conversation_retired: bool,
+    /// The checkout was reclaimed.
+    pub workspace_reclaimed: bool,
+    /// The node is closed.
+    pub closed: bool,
+}
+
+impl NodeDormancy {
+    /// No fact is set.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        !self.parked && !self.conversation_retired && !self.workspace_reclaimed && !self.closed
+    }
+
+    /// Followup can revive a reclaimed checkout, and cannot revive a retired
+    /// conversation. `None` when neither fact applies.
+    #[must_use]
+    pub const fn followup_revives(self) -> Option<bool> {
+        if self.conversation_retired {
+            Some(false)
+        } else if self.workspace_reclaimed {
+            Some(true)
+        } else {
+            None
+        }
+    }
 }
 
 /// Non-authoritative, bounded observation of one running child's turn.

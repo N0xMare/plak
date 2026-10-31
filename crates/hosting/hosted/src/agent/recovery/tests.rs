@@ -4116,3 +4116,227 @@ async fn cursor_read_only_pages_new_records_of_a_ten_thousand_record_feed() {
     assert_eq!(feed.records.len(), 3);
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
+
+async fn navigator_notes(
+    fixture: &Fixture,
+    action: crate::surface_protocol::UserAction<crate::runtime::test_kit::TestExtension>,
+) -> Vec<String> {
+    use crate::runtime::test_kit::TestExtension;
+    use crate::surface_protocol::HostEvent;
+    use plakous_host_protocol::views::transcript::TranscriptRow;
+    let rows = crate::runtime::test_kit::MemoryRows::new();
+    let mut session = crate::sessions::SessionRecord::new(fixture.root.path().to_path_buf());
+    session.id = fixture.tree_id.clone();
+    let (wire, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = crate::runtime::Sender::over(wire);
+    crate::topology_navigator::dispatch_topology_navigator_action(
+        &rows, &session, &events, &action,
+    )
+    .await;
+    let mut notes = Vec::new();
+    for _ in 0..80 {
+        for event in receiver.try_iter() {
+            match event {
+                HostEvent::Row(TranscriptRow::Notice(row)) => notes.push(row.text),
+                HostEvent::TopologyNavigatorSnapshot(_) => notes.push("snapshot".into()),
+                _ => {}
+            }
+        }
+        let saw_note = notes.iter().any(|note| note != "snapshot");
+        let saw_snapshot = notes.iter().any(|note| note == "snapshot");
+        if saw_note && (saw_snapshot || notes.iter().any(|note| note.contains("different tree"))) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    notes
+}
+
+fn recover_action(
+    fixture: &Fixture,
+    revision: u64,
+    agent_id: &str,
+    attempt: &str,
+) -> crate::surface_protocol::UserAction<crate::runtime::test_kit::TestExtension> {
+    crate::surface_protocol::UserAction::RecoverTopologyNode {
+        tree_id: fixture.tree_id.clone(),
+        revision,
+        agent_id: agent_id.to_owned(),
+        expected_attempt_id: attempt.to_owned(),
+    }
+}
+
+fn tree_revision(fixture: &Fixture) -> u64 {
+    fixture.runtime.read(|tree| tree.revision).unwrap()
+}
+
+fn attempt_of(fixture: &Fixture, id: &str) -> String {
+    fixture
+        .runtime
+        .read(|tree| {
+            tree.node(id)
+                .unwrap()
+                .attempt_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .to_owned()
+        })
+        .unwrap()
+}
+
+/// `RecoverTopologyNode` against the process hub: each refusal, then one settle.
+#[tokio::test]
+async fn operator_recover_dispatch_refuses_what_the_host_will_not_settle() {
+    let fixture = Fixture::new("nav-recover-refuse");
+    let id = fixture.spawn();
+    let attempt = attempt_of(&fixture, &id);
+    let revision = tree_revision(&fixture);
+
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.state = crate::agent_tree_protocol::TreeAdmissionState::RestoredPaused;
+            Ok(())
+        })
+        .unwrap();
+    let notes = navigator_notes(&fixture, recover_action(&fixture, revision, &id, &attempt)).await;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("Resume agents first")),
+        "{notes:?}"
+    );
+
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.state = crate::agent_tree_protocol::TreeAdmissionState::Live;
+            Ok(())
+        })
+        .unwrap();
+    let notes = navigator_notes(
+        &fixture,
+        recover_action(&fixture, tree_revision(&fixture), "root", &attempt),
+    )
+    .await;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("the root is not recovered from the agent list")),
+        "{notes:?}"
+    );
+
+    let notes = navigator_notes(
+        &fixture,
+        recover_action(&fixture, tree_revision(&fixture), &id, &attempt),
+    )
+    .await;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("this agent is not waiting on recovery")),
+        "{notes:?}"
+    );
+
+    let notes = navigator_notes(
+        &fixture,
+        recover_action(&fixture, revision.saturating_add(9), &id, &attempt),
+    )
+    .await;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("stale tree revision")),
+        "{notes:?}"
+    );
+    assert!(notes.iter().any(|note| note == "snapshot"), "{notes:?}");
+
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.record_turn_failure(
+                &id,
+                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                "child turn outcome is unknown".into(),
+            )
+            .map_err(|error| error.message)
+        })
+        .unwrap();
+    let notes = navigator_notes(
+        &fixture,
+        recover_action(&fixture, tree_revision(&fixture), &id, "not-the-attempt"),
+    )
+    .await;
+    assert!(
+        notes.iter().any(|note| note.contains("attempt mismatch")),
+        "{notes:?}"
+    );
+
+    let mut wrong = recover_action(&fixture, tree_revision(&fixture), &id, &attempt);
+    if let crate::surface_protocol::UserAction::RecoverTopologyNode { tree_id, .. } = &mut wrong {
+        *tree_id = "other-tree".into();
+    }
+    let notes = navigator_notes(&fixture, wrong).await;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("this session has a different tree")),
+        "{notes:?}"
+    );
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+#[tokio::test]
+async fn operator_recover_dispatch_settles_and_names_the_child() {
+    let fixture = Fixture::new("nav-recover-ok");
+    let id = fixture.stuck_child().await;
+    let attempt = attempt_of(&fixture, &id);
+    let notes = navigator_notes(
+        &fixture,
+        recover_action(&fixture, tree_revision(&fixture), &id, &attempt),
+    )
+    .await;
+    assert!(
+        notes.iter().any(|note| note.starts_with("recovered #")),
+        "{notes:?}"
+    );
+    assert!(notes.iter().any(|note| note == "snapshot"), "{notes:?}");
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+#[tokio::test]
+async fn operator_recover_dispatch_refuses_a_held_lease_after_the_wait() {
+    let fixture = Fixture::new("nav-recover-lease");
+    let id = fixture.spawn();
+    let holder = fixture.sessions();
+    let (held, handle, _) = fixture.start_failing_turn(&holder, &id).await;
+    Fixture::await_unknown_outcome(&handle).await;
+    fixture.bind_turn(&id, &held.locator(), handle.turn_id());
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.record_turn_failure(
+                &id,
+                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                "child turn outcome is unknown".into(),
+            )
+            .map_err(|error| error.message)
+        })
+        .unwrap();
+    test_lease_wait::set(Duration::from_millis(200));
+    let attempt = attempt_of(&fixture, &id);
+    let notes = navigator_notes(
+        &fixture,
+        recover_action(&fixture, tree_revision(&fixture), &id, &attempt),
+    )
+    .await;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("recovery_lease_held")),
+        "{notes:?}"
+    );
+    held.release().await.unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}

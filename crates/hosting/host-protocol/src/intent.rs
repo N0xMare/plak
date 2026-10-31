@@ -199,6 +199,20 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     },
     /// Host stop-all: postorder-close every non-root non-terminal node.
     StopAllTopology,
+    /// Settle one child's recorded session recovery. Not the root `Recover`
+    /// intent and not a model `recover_agent` call. The host refuses a stale
+    /// revision or a different attempt, and it does not run while the tree is
+    /// restored-paused.
+    RecoverTopologyNode {
+        /// Tree the confirmation was bound to.
+        tree_id: String,
+        /// Snapshot revision the confirmation was bound to.
+        revision: u64,
+        /// Exact child agent id.
+        agent_id: String,
+        /// That child's attempt when the confirmation opened.
+        expected_attempt_id: String,
+    },
     /// Ask the host for the current agent-template readiness projection
     /// (spec 02 §5.5). Answered with [`SessionObservation::TemplateReadiness`](crate::observation::SessionObservation::TemplateReadiness).
     RefreshTemplates,
@@ -273,6 +287,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::InterruptTopologyNode { .. } => "InterruptTopologyNode(..)",
             Self::CloseTopologyNode { .. } => "CloseTopologyNode(..)",
             Self::StopAllTopology => "StopAllTopology",
+            Self::RecoverTopologyNode { .. } => "RecoverTopologyNode(..)",
             Self::RefreshTemplates => "RefreshTemplates",
             Self::InvokeTool { .. } => "InvokeTool(..)",
             Self::RequestCallDetail { .. } => "RequestCallDetail(..)",

@@ -1073,6 +1073,24 @@ but an interrupted seal, adopt, or copy removal still holds the node, the
 receipt also carries `workspace_recovery`, naming that blocker; `close_agent`
 then ends the node.
 
+The Agents list's `u`, after its confirmation pop-up, is the same port for
+one child: `RecoverTopologyNode` names the tree, the snapshot revision, the
+agent and the attempt. The host refuses a different tree (`this session has a different tree`), a revision that
+has moved (`stale tree revision`), a paused tree (`Resume agents first`),
+a closed tree (`tree is closed`),
+a root, a child that is not `failed` or `recovery_required` (or has no attempt),
+or a different attempt
+(`attempt mismatch`) before it calls this port. Failed-idle is eligible: the
+same predicate the Agents list uses, with no model-grant check, and the same
+tree-state guard as `recover_agent` (`live`, `interrupted`, or terminal
+cleanup). A matching call is
+`ProductChildRecoverer::recover` with that attempt. It is not the root
+`Recover` intent and not an `invoke_tool` of `recover_agent`. The call
+runs on the host executor without holding the tree mutex across the lease
+wait. The hub tracks that task apart from the background pass. Shutdown
+waits up to `HOST_SHUTDOWN_RELEASE_TIMEOUT`, then aborts it, before any
+lease is released. Quit or `/reload` uses that same shutdown.
+
 `recover_agent` is the one trigger that waits on a lease: it waits up to 35
 seconds for a lapsed owner's lease and then refuses. It polls: each try takes
 the tree's reattach lock and never waits on the lease, and the lock is released
@@ -3513,7 +3531,10 @@ outcome has not yet been reported; it is not automatic child recovery authority.
 
 Settlement has three triggers:
 
-- `recover_agent` (section 4.5a), for one child, with its bounded lease wait;
+- `recover_agent` (section 4.5a), for one child, with its bounded lease wait,
+  including the Agents list's confirmed `u` (`RecoverTopologyNode`), which
+  uses that port and no other;
+
 - the tree's background pass. One is started per root open, per `ResumeTree`
   (from the idle loop or during a running turn), per returned child startup or
   retirement release with recorded fault or remaining recovery need (including

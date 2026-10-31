@@ -25,6 +25,7 @@ pub(crate) use crate::config::{host_event_channel, user_action_channel};
 pub(crate) mod benchmark;
 
 mod activity;
+mod agent_history;
 mod agent_list;
 mod blocks;
 #[allow(
@@ -385,6 +386,7 @@ pub mod control {
             | UserAction::InterruptTopologyNode { .. }
             | UserAction::CloseTopologyNode { .. }
             | UserAction::StopAllTopology
+            | UserAction::RecoverTopologyNode { .. }
             | UserAction::RefreshTemplates
             | UserAction::InvokeTool { .. }
             | UserAction::RequestCallDetail { .. }

@@ -95,7 +95,92 @@ pub(crate) async fn dispatch_topology_navigator_action<
             close_node(session, &runtime, &send, agent_id).await;
         }
         UserAction::StopAllTopology => stop_all(session, &runtime, &send).await,
+        UserAction::RecoverTopologyNode {
+            tree_id,
+            revision,
+            agent_id,
+            expected_attempt_id,
+        } => {
+            if tree_id != &tree_id_for_session(rows, session) {
+                send(ContentEvent::Row(TranscriptRow::error(
+                    NoticeScope::Tree,
+                    "this session has a different tree",
+                )));
+                return;
+            }
+            spawn_operator_child_recover(
+                runtime,
+                session,
+                events,
+                *revision,
+                agent_id.clone(),
+                expected_attempt_id.clone(),
+                send,
+            );
+        }
         _ => {}
+    }
+}
+
+/// Starts one child recover on the host executor and returns. The hub keeps
+/// the task, and shutdown aborts it. The tree mutex is not held while the
+/// lease wait runs.
+fn spawn_operator_child_recover<P: plakous_host_protocol::ProtocolExtension>(
+    runtime: std::sync::Arc<ProductTopologyRuntime>,
+    session: &SessionRecord,
+    events: &crate::runtime::Sender<P>,
+    revision: u64,
+    agent_id: String,
+    expected_attempt_id: String,
+    send: impl Fn(ContentEvent<P>) + Copy,
+) {
+    if runtime.is_closed() {
+        send(ContentEvent::Row(TranscriptRow::error(
+            NoticeScope::Tree,
+            "agent tree navigator unavailable: hub is shutting down",
+        )));
+        return;
+    }
+    let task_runtime = std::sync::Arc::clone(&runtime);
+    let task_session = session.clone();
+    let task_events = events.clone();
+    let task = tokio::spawn(async move {
+        let send = |event| {
+            let _ = task_events.send(event);
+        };
+        match crate::agent::operator_child_recover(
+            &task_runtime,
+            revision,
+            &agent_id,
+            &expected_attempt_id,
+        )
+        .await
+        {
+            Ok(output) => {
+                let note = if output.recovered {
+                    format!("recovered {}", short_agent(&agent_id))
+                } else {
+                    format!("{} was not waiting on recovery", short_agent(&agent_id))
+                };
+                send(ContentEvent::Row(TranscriptRow::info(
+                    NoticeScope::Tree,
+                    note,
+                )));
+            }
+            Err(error) => {
+                send(ContentEvent::Row(TranscriptRow::error(
+                    NoticeScope::Tree,
+                    error,
+                )));
+            }
+        }
+        emit_snapshot(&task_runtime, &task_session, send, true);
+    });
+    if !runtime.track_explicit_recover(task) {
+        send(ContentEvent::Row(TranscriptRow::error(
+            NoticeScope::Tree,
+            "agent tree navigator unavailable: hub is shutting down",
+        )));
     }
 }
 

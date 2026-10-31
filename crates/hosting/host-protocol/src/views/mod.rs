@@ -32,5 +32,5 @@ pub use processes::{ProcessStatus, ProcessView};
 pub use resume::ResumeSessionEntry;
 pub use templates::TemplateRow;
 pub use tool_operation::ToolOperation;
-pub use tree::{ChildProgress, NodeView, TreeView};
+pub use tree::{ChildProgress, NodeDormancy, NodeView, TreeView};
 pub use usage_repair::{KeySource, UsageCredentialState, UsageRepair};

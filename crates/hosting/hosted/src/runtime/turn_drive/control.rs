@@ -592,7 +592,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     | UserAction::ResumeTopologyTree
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }
-                    | UserAction::StopAllTopology),
+                    | UserAction::StopAllTopology
+                    | UserAction::RecoverTopologyNode { .. }),
                 ) => {
                     crate::topology_navigator::dispatch_topology_navigator_action(
                         self.host.rows,

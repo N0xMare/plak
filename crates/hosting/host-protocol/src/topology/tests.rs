@@ -555,3 +555,51 @@ fn working_set_excludes_the_caller_and_bounds_its_size() {
     assert!(WorkingSet::parse(["roster"]).is_err());
     assert!(WorkingSet::parse(Vec::<&str>::new()).unwrap().is_empty());
 }
+
+/// The operator `u` gate: only a non-root failed or recovery-required child
+/// that still has an attempt, on a live, interrupted, or terminal-cleanup tree.
+/// A paused or closed tree is not eligible. Removing the tree-state guard
+/// accepts `restored_paused` and `closed`.
+#[test]
+fn operator_child_recover_eligible_matches_tree_state_and_node_status() {
+    let trees = [
+        TreeAdmissionState::Live,
+        TreeAdmissionState::Interrupted,
+        TreeAdmissionState::TreeTerminal,
+        TreeAdmissionState::RestoredPaused,
+        TreeAdmissionState::Closed,
+    ];
+    let statuses = [
+        NodeStatus::Pending,
+        NodeStatus::Running,
+        NodeStatus::Paused,
+        NodeStatus::Sealing,
+        NodeStatus::Completed,
+        NodeStatus::Interrupted,
+        NodeStatus::Failed,
+        NodeStatus::Closed,
+        NodeStatus::RecoveryRequired,
+    ];
+    for tree in trees {
+        for status in statuses {
+            let eligible =
+                operator_child_recover_eligible(tree.as_str(), status.as_str(), false, true);
+            let expect = matches!(
+                tree,
+                TreeAdmissionState::Live
+                    | TreeAdmissionState::Interrupted
+                    | TreeAdmissionState::TreeTerminal
+            ) && matches!(status, NodeStatus::Failed | NodeStatus::RecoveryRequired);
+            assert_eq!(eligible, expect, "{} / {}", tree.as_str(), status.as_str());
+        }
+    }
+    assert!(!operator_child_recover_eligible(
+        "live", "failed", true, true
+    ));
+    assert!(!operator_child_recover_eligible(
+        "live",
+        "recovery_required",
+        false,
+        false
+    ));
+}

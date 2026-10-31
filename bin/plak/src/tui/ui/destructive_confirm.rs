@@ -65,6 +65,7 @@ impl DestructiveConfirm {
             Some(ConfirmButton::Send(UserAction::CloseTopologyNode { .. })) => "close",
             Some(ConfirmButton::Send(UserAction::StopAllTopology)) => "stop-all",
             Some(ConfirmButton::Send(UserAction::ResumeTopologyTree)) => "resume",
+            Some(ConfirmButton::Send(UserAction::RecoverTopologyNode { .. })) => "recover",
             Some(ConfirmButton::Send(UserAction::StopProcesses { id: Some(_), .. })) => {
                 "process-stop"
             }
@@ -219,6 +220,13 @@ impl App {
                     "No new agents start until your next prompt.".to_owned(),
                 ],
                 "[ Stop all ]",
+            ),
+            UserAction::RecoverTopologyNode { agent_id, .. } => (
+                format!("Recover {}?", short_id(agent_id)),
+                vec![
+                    "Settle this child's recorded session recovery. No task is retried and no model call or tool is replayed.".to_owned(),
+                ],
+                "[ Recover ]",
             ),
             UserAction::ResumeTopologyTree => (
                 "Resume all agents?".to_owned(),
@@ -503,6 +511,25 @@ impl App {
                 .agent_tree
                 .as_ref()
                 .is_some_and(|tree| tree.restored_paused),
+            UserAction::RecoverTopologyNode {
+                tree_id,
+                agent_id,
+                expected_attempt_id,
+                ..
+            } => self.agent_tree.as_ref().is_some_and(|tree| {
+                !tree.restored_paused
+                    && tree.tree_id == *tree_id
+                    && tree.nodes.iter().any(|node| {
+                        node.agent_id == *agent_id
+                            && node.attempt_id.as_deref() == Some(expected_attempt_id.as_str())
+                            && plakous_host_protocol::topology::operator_child_recover_eligible(
+                                tree.state.as_str(),
+                                node.status.as_str(),
+                                node.parent_agent_id.is_none(),
+                                true,
+                            )
+                    })
+            }),
             UserAction::StopProcesses { id: Some(id), .. } => self
                 .processes
                 .iter()

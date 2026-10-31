@@ -31,6 +31,7 @@ impl ProductTopologyRuntime {
             reattach: tokio::sync::Mutex::new(()),
             recycling: Mutex::new(HashSet::new()),
             recovery_pass: Mutex::new(RecoveryPassSlot::default()),
+            explicit_recovers: Mutex::new(Vec::new()),
             rejoin_spec: Mutex::new(None),
             observer,
         }
@@ -311,6 +312,33 @@ impl ProductTopologyRuntime {
     /// Whether this tree's background recovery pass is still running.
     pub fn recovery_pass_running(&self) -> bool {
         self.recovery_pass.lock().is_ok_and(|slot| slot.busy())
+    }
+
+    /// Remembers one operator child-recover task. A closed hub aborts it
+    /// instead. Finished tasks are dropped so the list stays the live set.
+    pub fn track_explicit_recover(&self, task: tokio::task::JoinHandle<()>) -> bool {
+        let Ok(mut tasks) = self.explicit_recovers.lock() else {
+            task.abort();
+            return false;
+        };
+        // Closed is checked under this lock so a shutdown that already took
+        // the set cannot miss a task pushed after it looked.
+        if self.is_closed() {
+            drop(tasks);
+            task.abort();
+            return false;
+        }
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task);
+        true
+    }
+
+    /// Takes every operator child-recover task, for shutdown.
+    pub fn take_explicit_recovers(&self) -> Vec<tokio::task::JoinHandle<()>> {
+        self.explicit_recovers
+            .lock()
+            .map(|mut tasks| std::mem::take(&mut *tasks))
+            .unwrap_or_default()
     }
 
     /// The reattach lock without waiting, so a test can prove a second

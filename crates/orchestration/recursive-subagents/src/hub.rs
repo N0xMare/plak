@@ -456,6 +456,9 @@ pub struct ProductTopologyRuntime {
     recycling: Mutex<HashSet<String>>,
     /// The tree's background child-recovery pass, while one runs.
     recovery_pass: Mutex<RecoveryPassSlot>,
+    /// Operator recovers of one child (`u`), separate from the background pass.
+    /// Shutdown aborts every one before it releases leases.
+    explicit_recovers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     rejoin_spec: Mutex<Option<Arc<dyn Any + Send + Sync>>>,
     observer: Option<Arc<dyn TopologyObserver>>,
 }

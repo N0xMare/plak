@@ -702,6 +702,28 @@ impl NodeStatus {
     }
 }
 
+/// Whether the attached operator may confirm `u` for this child.
+///
+/// The same predicate the host refuses with: a non-root `failed` or
+/// `recovery_required` child that still has an attempt, on a tree
+/// `recover_agent` would still accept (`live`, `interrupted`, or
+/// `tree_terminal`). A paused or closed tree, the root, and any other
+/// status are not eligible. This is not a model grant and not a revision
+/// fence.
+#[must_use]
+pub fn operator_child_recover_eligible(
+    tree_state: &str,
+    node_status: &str,
+    is_root: bool,
+    has_attempt: bool,
+) -> bool {
+    if is_root || !has_attempt {
+        return false;
+    }
+    matches!(tree_state, "live" | "interrupted" | "tree_terminal")
+        && matches!(node_status, "failed" | "recovery_required")
+}
+
 /// Status of one attempt of one node (the attempt is the unit).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

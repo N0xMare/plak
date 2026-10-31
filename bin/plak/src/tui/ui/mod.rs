@@ -291,6 +291,21 @@ const TREE_KEYS: &[(&str, KeyCode, TopologyNavigatorKey)] = &[
     ("Home", KeyCode::Home, TopologyNavigatorKey::Home),
     ("Enter", KeyCode::Enter, TopologyNavigatorKey::Enter),
     ("f", KeyCode::Char('f'), TopologyNavigatorKey::Filter),
+    ("t", KeyCode::Char('t'), TopologyNavigatorKey::History),
+    ("/", KeyCode::Char('/'), TopologyNavigatorKey::Search),
+    ("!", KeyCode::Char('!'), TopologyNavigatorKey::Failures),
+    ("PageUp", KeyCode::PageUp, TopologyNavigatorKey::PageUp),
+    (
+        "PageDown",
+        KeyCode::PageDown,
+        TopologyNavigatorKey::PageDown,
+    ),
+    ("End", KeyCode::End, TopologyNavigatorKey::End),
+    (
+        "Backspace",
+        KeyCode::Backspace,
+        TopologyNavigatorKey::Backspace,
+    ),
     ("x", KeyCode::Char('x'), TopologyNavigatorKey::Acknowledge),
     ("y", KeyCode::Char('y'), TopologyNavigatorKey::Copy),
     ("R", KeyCode::Char('R'), TopologyNavigatorKey::Refresh),
@@ -298,6 +313,7 @@ const TREE_KEYS: &[(&str, KeyCode, TopologyNavigatorKey)] = &[
     ("i", KeyCode::Char('i'), TopologyNavigatorKey::Interrupt),
     ("c", KeyCode::Char('c'), TopologyNavigatorKey::Close),
     ("s", KeyCode::Char('s'), TopologyNavigatorKey::StopAll),
+    ("u", KeyCode::Char('u'), TopologyNavigatorKey::Recover),
     ("Esc", KeyCode::Esc, TopologyNavigatorKey::Escape),
 ];
 

@@ -460,6 +460,17 @@ impl App {
         if self.destructive_confirm.is_some() || self.info_overlay.is_some() {
             return None;
         }
+        if self
+            .tree_navigator
+            .as_ref()
+            .is_some_and(TreeNavigator::is_searching)
+        {
+            if let Some(nav) = self.tree_navigator.as_mut() {
+                nav.paste_search(text);
+            }
+            self.mark_dirty();
+            return None;
+        }
         // A view with no prompt has no draft: a paste does nothing, and the
         // hidden root draft is never pasted into.
         if self.has_no_prompt() || self.resume_menu.is_some() {

@@ -6,10 +6,23 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::tui::agent_list::{
-    self, AgentProjection, AgentScope, RowCells, RowFacts, compose_row, truncate_display,
+pub(super) use crate::tui::agent_list;
+use crate::tui::agent_list::{AgentProjection, AgentScope, RowCells, truncate_display};
+pub(super) use crate::tui::blocks::format_duration_secs;
+#[cfg(test)]
+pub(super) use crate::tui::status_glyph;
+use crate::tui::{AgentAcknowledgement, CanvasNode, CanvasTree};
+
+mod rows;
+pub use rows::{AgentRowClock, agent_row, agent_view_label, attempt_label};
+use rows::{
+    ROOT_TURN_OVERWRITABLE, agent_name, blank_as_unknown, dormancy_inspector, elapsed_label,
+    header_line, model_label, process_count_label, row_status, turns_label, until_label, work_line,
 };
-use crate::tui::{AgentAcknowledgement, CanvasNode, CanvasTree, SurfaceIntent, status_glyph};
+pub(crate) use rows::{acknowledge_intent, agent_role, recover_intent, short_id, wrap_footer_hint};
+
+/// The Agents list's resume control. Not an agent id.
+pub(crate) const RESUME_ROW_ID: &str = "resume-agents";
 
 /// Rows the docked inspector takes when the overlay is tall enough for it.
 const INSPECTOR_ROWS: u16 = 6;
@@ -19,23 +32,64 @@ const INSPECTOR_MIN_HEIGHT: u16 = 12;
 /// Compact chrome when a `restored_paused` snapshot arrives with the overlay closed.
 pub const RESTORED_PAUSED_NAVIGATOR_HINT: &str = "the agent tree is paused · /tree then r resumes";
 
+/// What the Agents footer names besides the keys.
+#[derive(Clone, Copy, Debug)]
+pub struct FooterView<'a> {
+    pub restored_paused: bool,
+    pub scope: AgentScope,
+    pub hidden: usize,
+    pub history: bool,
+    pub failures_only: bool,
+    pub query: &'a str,
+    /// `u recover` is named only when the selection is eligible.
+    pub offer_recover: bool,
+}
+
 /// Footer for the Agents tab: why agents are missing, then the keys.
 #[must_use]
-pub fn agents_footer_hint(restored_paused: bool, scope: AgentScope, hidden: usize) -> String {
-    let shown = match scope {
-        AgentScope::Live if hidden == 0 => "active + last 5m · f all".to_owned(),
-        AgentScope::Live => format!("active + last 5m · {hidden} older hidden · f all"),
+pub fn agents_footer_hint(view: FooterView<'_>) -> String {
+    if view.history {
+        let filter = if view.failures_only {
+            "failures only · "
+        } else {
+            ""
+        };
+        let typed = view.query.trim();
+        let query = if typed.is_empty() {
+            String::new()
+        } else {
+            format!("/ {typed} · ")
+        };
+        let recover = if view.offer_recover {
+            " · u recover"
+        } else {
+            ""
+        };
+        return format!(
+            "{filter}{query}t tree · / search · ! failures · ↑/↓ select · Enter transcript · x acknowledge{recover} · R refresh · Esc back"
+        );
+    }
+    let shown = match view.scope {
+        AgentScope::Live if view.hidden == 0 => "active + last 5m · f all".to_owned(),
+        AgentScope::Live => {
+            format!("active + last 5m · {} older hidden · f all", view.hidden)
+        }
         AgentScope::All => "all agents · f live".to_owned(),
     };
-    let head = if restored_paused {
+    let head = if view.restored_paused {
         // `restored_paused` is a wire value and `ResumeTree` is the
         // name of a request type. Neither is something an operator reads.
         "Tree paused · r resumes · "
     } else {
         ""
     };
+    let recover = if view.offer_recover {
+        " · u recover"
+    } else {
+        ""
+    };
     format!(
-        "{shown} · {head}↑/↓ select · Enter transcript · x acknowledge · i interrupt · c close · s stop all · y copy · R refresh · Esc back"
+        "{shown} · {head}↑/↓ select · Enter transcript · x acknowledge · i interrupt · c close · s stop all · y copy{recover} · R refresh · t history · Esc back"
     )
 }
 
@@ -43,28 +97,32 @@ pub fn agents_footer_hint(restored_paused: bool, scope: AgentScope, hidden: usiz
 /// otherwise every key in short form, so a narrow list still names (and a
 /// click still presses) `i`, `c` and `s` rather than clipping them away.
 #[must_use]
-pub fn fitted_agents_footer(
-    restored_paused: bool,
-    scope: AgentScope,
-    hidden: usize,
-    width: u16,
-    max_rows: usize,
-) -> String {
-    let long = agents_footer_hint(restored_paused, scope, hidden);
+pub fn fitted_agents_footer(view: FooterView<'_>, width: u16, max_rows: usize) -> String {
+    let long = agents_footer_hint(view);
     let budget = usize::from(width).saturating_sub(1).max(1);
-    if crate::tui::picker::wrap(long.trim(), budget).len() <= max_rows.max(1) {
+    if rows::wrap_footer_segments(long.trim(), budget).len() <= max_rows.max(1) {
         return long;
     }
-    let shown = match scope {
+    if view.history {
+        let filter = if view.failures_only {
+            "failures · "
+        } else {
+            ""
+        };
+        let recover = if view.offer_recover { " · u" } else { "" };
+        return format!("{filter}t · / · ! · ↑/↓ · Enter · x{recover} · R · Esc");
+    }
+    let shown = match view.scope {
         AgentScope::Live => "f all",
         AgentScope::All => "f live",
     };
-    let head = if restored_paused {
+    let head = if view.restored_paused {
         "paused · r resume · "
     } else {
         ""
     };
-    format!("{head}↑/↓ · Enter · x · i · c · s · y · R · {shown} · Esc")
+    let recover = if view.offer_recover { " · u" } else { "" };
+    format!("{head}↑/↓ · Enter · x · i · c · s · y{recover} · R · t · {shown} · Esc")
 }
 
 /// Rows the list footer may take before it gives up and clips.
@@ -76,17 +134,14 @@ pub(crate) const fn footer_max_rows(height: u16) -> usize {
     if height >= 12 { 3 } else { 2 }
 }
 
-/// Wraps a list footer onto the rows `width` needs, up to `max_rows`.
-#[must_use]
-pub(crate) fn wrap_footer_hint(hint: &str, width: u16, max_rows: usize) -> Vec<String> {
-    let budget = usize::from(width).saturating_sub(1).max(1);
-    let max_rows = max_rows.max(1);
-    let mut rows = crate::tui::picker::wrap(hint.trim(), budget);
-    if rows.len() > max_rows {
-        let tail = rows.split_off(max_rows - 1).join(" ");
-        rows.push(crate::tui::picker::clip(&tail, budget));
+fn footer_row_count(height: u16, footer: &str, width: u16) -> u16 {
+    if height < 4 {
+        return 0;
     }
-    rows.into_iter().map(|line| format!(" {line}")).collect()
+    u16::try_from(wrap_footer_hint(footer, width, footer_max_rows(height)).len())
+        .unwrap_or(1)
+        .min(height.saturating_sub(3))
+        .max(1)
 }
 
 /// Renders a host state token as prose: `tree_terminal` is a wire value, not
@@ -96,8 +151,8 @@ pub(crate) fn humanize_state(state: &str) -> String {
     state.replace('_', " ")
 }
 
-/// What a recovery-required agent needs; recovery is the root agent's.
-pub const RECOVERY_REMEDY: &str = "remedy: ask the root to run recover_agent";
+/// What a recovery-required agent needs from this list.
+pub const RECOVERY_REMEDY: &str = "u recovers";
 
 /// Result of one overlay key.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -146,6 +201,25 @@ pub struct TreeNavigator {
     list_scroll: usize,
     /// Sticky descent: the child last descended into, per parent id.
     remembered_child: BTreeMap<String, String>,
+    /// Flat history over this snapshot, instead of the live/all tree.
+    history: bool,
+    /// Tree scope to restore when `t` leaves history.
+    saved_scope: AgentScope,
+    /// In-memory history query. Letters edit it only while `searching`.
+    search: String,
+    searching: bool,
+    /// History shows only failed, blocked, unfinished, and recovery-required rows.
+    failures_only: bool,
+    /// Operator zone for Today/Earlier. UTC until the frame sets it.
+    zone: &'static jiff::tz::TimeZone,
+    /// Selectable rows the last frame could show, for paging.
+    list_rows: usize,
+    /// Profile the last frame used to name roles in the history query.
+    last_profile: Option<crate::tui::ProfileRow>,
+    /// Agent to restore when a paused tree leaves the resume row.
+    resume_agent: Option<String>,
+    /// History lines for one snapshot, query, failures flag, and local day.
+    history_cache: Option<crate::tui::agent_history::HistoryCache>,
 }
 
 /// One painted list row.
@@ -155,6 +229,8 @@ pub struct AgentListRow {
     pub cells: RowCells,
     pub dim: bool,
     pub selected: bool,
+    /// False for a history header or an empty-state notice.
+    pub selectable: bool,
 }
 
 /// One painted Agents body: header counts, rows in view, inspector, footer.
@@ -179,6 +255,56 @@ impl TreeNavigator {
             age_wake_at: None,
             list_scroll: 0,
             remembered_child: BTreeMap::new(),
+            history: false,
+            saved_scope: AgentScope::Live,
+            search: String::new(),
+            searching: false,
+            failures_only: false,
+            zone: &crate::tui::UTC_ZONE,
+            list_rows: 1,
+            last_profile: None,
+            resume_agent: None,
+            history_cache: None,
+        }
+    }
+
+    /// The operator's zone for history's local calendar day.
+    pub fn set_zone(&mut self, zone: &'static jiff::tz::TimeZone) {
+        self.zone = zone;
+    }
+
+    /// History search owns typed input.
+    #[must_use]
+    pub const fn is_searching(&self) -> bool {
+        self.searching
+    }
+
+    /// Append one accepted character to the history query.
+    pub fn push_search(&mut self, ch: char) {
+        if !self.searching || !crate::tui::text_input::is_accepted_single_line_char(ch) {
+            return;
+        }
+        if self.search.chars().count() >= crate::tui::agent_history::SEARCH_LIMIT {
+            return;
+        }
+        self.search.push(ch);
+    }
+
+    /// Delete the last history-query character.
+    pub fn pop_search(&mut self) {
+        if self.searching {
+            self.search.pop();
+        }
+    }
+
+    /// Single-line paste into the history query, bounded like other filters.
+    pub fn paste_search(&mut self, text: &str) {
+        if !self.searching {
+            return;
+        }
+        let clean = crate::tui::text_input::sanitize_single_line(text);
+        for ch in clean.chars() {
+            self.push_search(ch);
         }
     }
 
@@ -270,8 +396,40 @@ impl TreeNavigator {
             .is_some_and(|previous| previous.tree_id != snapshot.tree_id)
         {
             self.acknowledged.clear();
+            self.reset_history();
         }
+        let paused = snapshot.restored_paused;
         self.snapshot = Some(snapshot);
+        self.history_cache = None;
+        if paused && self.selected.is_none() {
+            self.selected = Some(RESUME_ROW_ID.to_owned());
+        } else if !paused && self.selected.as_deref() == Some(RESUME_ROW_ID) {
+            self.selected = self
+                .resume_agent
+                .take()
+                .filter(|id| self.node(id).is_some());
+        }
+    }
+
+    fn reset_history(&mut self) {
+        self.history = false;
+        self.saved_scope = AgentScope::Live;
+        self.scope = AgentScope::Live;
+        self.search.clear();
+        self.searching = false;
+        self.failures_only = false;
+    }
+
+    fn footer_view(&self, hidden: usize, restored_paused: bool) -> FooterView<'_> {
+        FooterView {
+            restored_paused,
+            scope: self.scope,
+            hidden,
+            history: self.history,
+            failures_only: self.failures_only,
+            query: &self.search,
+            offer_recover: self.offer_recover(),
+        }
     }
 
     /// The list at the navigator's clock.
@@ -323,8 +481,19 @@ impl TreeNavigator {
     }
 
     /// Selected node, if the snapshot has rows.
+    ///
+    /// History does not substitute another agent when the selection is hidden
+    /// by the query or the failures filter.
     #[must_use]
     pub fn selected_node(&self) -> Option<&CanvasNode> {
+        if self.selected.as_deref() == Some(RESUME_ROW_ID) {
+            return None;
+        }
+        if self.history {
+            let id = self.selected.as_deref()?;
+            let node = self.node(id)?;
+            return crate::tui::agent_history::history_member(node).then_some(node);
+        }
         let id = self.resolve_selection(&self.projection())?;
         self.node(&id)
     }
@@ -344,6 +513,19 @@ impl TreeNavigator {
 
     /// Move the selection one listed row forward or backward.
     pub fn move_selection(&mut self, delta: i8) {
+        if self.history {
+            self.move_by(isize::from(delta));
+            return;
+        }
+        if self.resume_row_shown() && self.selected.as_deref() == Some(RESUME_ROW_ID) {
+            if delta > 0 {
+                if let Some(first) = self.projection().rows.first() {
+                    let id = first.id.clone();
+                    self.focus_on(&id);
+                }
+            }
+            return;
+        }
         let projection = self.projection();
         if projection.rows.is_empty() {
             return;
@@ -352,6 +534,10 @@ impl TreeNavigator {
             .resolve_selection(&projection)
             .and_then(|id| projection.position(&id))
             .unwrap_or(0);
+        if delta < 0 && current == 0 && self.resume_row_shown() {
+            self.selected = Some(RESUME_ROW_ID.to_owned());
+            return;
+        }
         let next = if delta < 0 {
             current.saturating_sub(1)
         } else {
@@ -359,6 +545,47 @@ impl TreeNavigator {
         };
         let id = projection.rows[next].id.clone();
         self.focus_on(&id);
+    }
+
+    fn resume_row_shown(&self) -> bool {
+        self.snapshot
+            .as_ref()
+            .is_some_and(|snap| snap.restored_paused)
+    }
+
+    /// `u` is offered only for a visible eligible selection.
+    fn offer_recover(&self) -> bool {
+        let Some(tree) = self.snapshot.as_ref() else {
+            return false;
+        };
+        let Some(node) = self.actionable_node() else {
+            return false;
+        };
+        plakous_host_protocol::topology::operator_child_recover_eligible(
+            tree.state.as_str(),
+            node.status.as_str(),
+            node.parent_agent_id.is_none(),
+            node.attempt_id.is_some(),
+        )
+    }
+
+    /// A history selection the filter currently shows. The stored id stays
+    /// for restoration; it is not an action target while hidden.
+    fn history_selection_visible(&self) -> bool {
+        let Some(id) = self.selected.as_deref() else {
+            return false;
+        };
+        if id == RESUME_ROW_ID {
+            return self.resume_row_shown();
+        }
+        self.history_agent_ids().iter().any(|row| row == id)
+    }
+
+    fn actionable_node(&self) -> Option<&CanvasNode> {
+        if self.history && !self.history_selection_visible() {
+            return None;
+        }
+        self.selected_node()
     }
 
     /// `Left`: select the listed parent; a root stays selected.
@@ -404,9 +631,183 @@ impl TreeNavigator {
         self.scope = self.scope.toggled();
     }
 
+    fn toggle_history(&mut self) {
+        if self.history {
+            self.history = false;
+            self.searching = false;
+            self.scope = self.saved_scope;
+        } else {
+            self.saved_scope = self.scope;
+            self.history = true;
+        }
+    }
+
+    fn page(&self) -> isize {
+        isize::try_from(self.list_rows.max(1)).unwrap_or(1)
+    }
+
+    fn clear_or_dismiss(&mut self) -> TopologyNavigatorOutcome {
+        let filtered = self.failures_only || !self.search.trim().is_empty();
+        let hidden = self.selected.as_deref().is_some_and(|id| {
+            id != RESUME_ROW_ID && !self.history_agent_ids().iter().any(|row| row == id)
+        });
+        if self.history && filtered && (self.history_agent_ids().is_empty() || hidden) {
+            self.search.clear();
+            self.failures_only = false;
+            self.history_cache = None;
+            return TopologyNavigatorOutcome::Consumed;
+        }
+        TopologyNavigatorOutcome::Dismiss
+    }
+
+    fn navigate(&mut self, key: TopologyNavigatorKey) -> TopologyNavigatorOutcome {
+        match key {
+            TopologyNavigatorKey::Up => self.move_selection(-1),
+            TopologyNavigatorKey::Down => self.move_selection(1),
+            TopologyNavigatorKey::PageUp => self.move_by(-self.page()),
+            TopologyNavigatorKey::PageDown => self.move_by(self.page()),
+            TopologyNavigatorKey::Home => self.move_by(isize::MIN / 4),
+            TopologyNavigatorKey::End => self.move_by(isize::MAX / 4),
+            _ => {}
+        }
+        TopologyNavigatorOutcome::Consumed
+    }
+
+    fn history_selectable_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        if self.resume_row_shown() {
+            ids.push(RESUME_ROW_ID.to_owned());
+        }
+        ids.extend(self.history_agent_ids());
+        ids
+    }
+
+    fn history_lines_now(
+        &mut self,
+        profile: Option<&crate::tui::ProfileRow>,
+    ) -> Vec<crate::tui::agent_history::HistoryLine> {
+        let day = crate::tui::resume_pane::calendar_date(self.now_unix, self.zone);
+        if let Some(lines) = self.history_cache.as_ref().and_then(|cache| {
+            let snapshot = self.snapshot.as_ref()?;
+            (cache.revision == snapshot.revision
+                && cache.tree_id == snapshot.tree_id
+                && cache.query == self.search
+                && cache.failures_only == self.failures_only
+                && cache.day == day)
+                .then(|| cache.lines.clone())
+        }) {
+            return lines;
+        }
+        let Some(snapshot) = self.snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let lines = crate::tui::agent_history::history_lines(
+            &snapshot.nodes,
+            self.now_unix,
+            self.zone,
+            &self.search,
+            self.failures_only,
+            profile,
+        );
+        self.history_cache = Some(crate::tui::agent_history::HistoryCache {
+            revision: snapshot.revision,
+            tree_id: snapshot.tree_id.clone(),
+            query: self.search.clone(),
+            failures_only: self.failures_only,
+            day,
+            lines: lines.clone(),
+        });
+        lines
+    }
+
+    fn history_agent_ids(&self) -> Vec<String> {
+        let day = crate::tui::resume_pane::calendar_date(self.now_unix, self.zone);
+        let lines = if let Some(cache) = self.history_cache.as_ref().filter(|cache| {
+            self.snapshot.as_ref().is_some_and(|snapshot| {
+                cache.revision == snapshot.revision
+                    && cache.tree_id == snapshot.tree_id
+                    && cache.query == self.search
+                    && cache.failures_only == self.failures_only
+                    && cache.day == day
+            })
+        }) {
+            cache.lines.clone()
+        } else {
+            let Some(snapshot) = &self.snapshot else {
+                return Vec::new();
+            };
+            crate::tui::agent_history::history_lines(
+                &snapshot.nodes,
+                self.now_unix,
+                self.zone,
+                &self.search,
+                self.failures_only,
+                self.last_profile.as_ref(),
+            )
+        };
+        lines
+            .into_iter()
+            .filter_map(|line| match line {
+                crate::tui::agent_history::HistoryLine::Agent(id) => Some(id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn move_by(&mut self, delta: isize) {
+        if self.history {
+            let ids = self.history_selectable_ids();
+            if ids.is_empty() {
+                return;
+            }
+            let current = self
+                .selected
+                .as_ref()
+                .and_then(|id| ids.iter().position(|row| row == id));
+            let next = match current {
+                Some(index) => {
+                    let last = isize::try_from(ids.len() - 1).unwrap_or(0);
+                    let at = isize::try_from(index).unwrap_or(0).saturating_add(delta);
+                    usize::try_from(at.clamp(0, last)).unwrap_or(0)
+                }
+                None if delta < 0 => ids.len() - 1,
+                None => 0,
+            };
+            self.focus_on(&ids[next]);
+            return;
+        }
+        let projection = self.projection();
+        if projection.rows.is_empty() {
+            return;
+        }
+        let current = self
+            .resolve_selection(&projection)
+            .and_then(|id| projection.position(&id))
+            .unwrap_or(0);
+        let last = isize::try_from(projection.rows.len() - 1).unwrap_or(0);
+        let at = isize::try_from(current).unwrap_or(0).saturating_add(delta);
+        let next = usize::try_from(at.clamp(0, last)).unwrap_or(0);
+        let id = projection.rows[next].id.clone();
+        self.focus_on(&id);
+    }
+
     pub(crate) fn focus_on(&mut self, agent_id: &str) {
+        if agent_id == RESUME_ROW_ID && self.resume_row_shown() {
+            if self
+                .selected
+                .as_deref()
+                .is_some_and(|id| id != RESUME_ROW_ID && self.node(id).is_some())
+            {
+                self.resume_agent.clone_from(&self.selected);
+            }
+            self.selected = Some(RESUME_ROW_ID.to_owned());
+            return;
+        }
         if self.node(agent_id).is_some() {
             self.selected = Some(agent_id.to_owned());
+            if self.resume_row_shown() {
+                self.resume_agent = Some(agent_id.to_owned());
+            }
         }
     }
     /// Route one overlay key. The TUI maps Crossterm codes into this method.
@@ -421,33 +822,102 @@ impl TreeNavigator {
         self.handle_tree_key(key)
     }
 
-    fn handle_tree_key(&mut self, key: TopologyNavigatorKey) -> TopologyNavigatorOutcome {
+    fn handle_search_key(&mut self, key: TopologyNavigatorKey) -> TopologyNavigatorOutcome {
         match key {
-            TopologyNavigatorKey::Escape => TopologyNavigatorOutcome::Dismiss,
-            TopologyNavigatorKey::Up => {
-                self.move_selection(-1);
+            TopologyNavigatorKey::Escape => {
+                self.search.clear();
+                self.searching = false;
                 TopologyNavigatorOutcome::Consumed
             }
-            TopologyNavigatorKey::Down => {
-                self.move_selection(1);
+            TopologyNavigatorKey::Enter => {
+                self.searching = false;
                 TopologyNavigatorOutcome::Consumed
             }
+            TopologyNavigatorKey::Backspace => {
+                self.pop_search();
+                TopologyNavigatorOutcome::Consumed
+            }
+            TopologyNavigatorKey::Up
+            | TopologyNavigatorKey::Down
+            | TopologyNavigatorKey::PageUp
+            | TopologyNavigatorKey::PageDown
+            | TopologyNavigatorKey::Home
+            | TopologyNavigatorKey::End => self.navigate(key),
+            _ => TopologyNavigatorOutcome::Consumed,
+        }
+    }
+
+    fn handle_motion(&mut self, key: TopologyNavigatorKey) -> TopologyNavigatorOutcome {
+        match key {
+            TopologyNavigatorKey::Up => self.move_selection(-1),
+            TopologyNavigatorKey::Down => self.move_selection(1),
+            TopologyNavigatorKey::PageUp => self.move_by(-self.page()),
+            TopologyNavigatorKey::PageDown => self.move_by(self.page()),
+            TopologyNavigatorKey::End => self.move_by(isize::MAX / 4),
             TopologyNavigatorKey::Left => {
-                self.select_parent();
-                TopologyNavigatorOutcome::Consumed
+                if !self.history {
+                    self.select_parent();
+                }
             }
             TopologyNavigatorKey::Right => {
-                self.select_child();
-                TopologyNavigatorOutcome::Consumed
+                if !self.history {
+                    self.select_child();
+                }
             }
             TopologyNavigatorKey::Home => {
-                self.select_root();
-                TopologyNavigatorOutcome::Consumed
+                if self.history {
+                    self.move_by(isize::MIN / 4);
+                } else {
+                    self.select_root();
+                }
             }
+            _ => {}
+        }
+        TopologyNavigatorOutcome::Consumed
+    }
+
+    fn handle_tree_key(&mut self, key: TopologyNavigatorKey) -> TopologyNavigatorOutcome {
+        if self.searching {
+            return self.handle_search_key(key);
+        }
+        match key {
+            TopologyNavigatorKey::Escape => self.clear_or_dismiss(),
+            TopologyNavigatorKey::Up
+            | TopologyNavigatorKey::Down
+            | TopologyNavigatorKey::PageUp
+            | TopologyNavigatorKey::PageDown
+            | TopologyNavigatorKey::End
+            | TopologyNavigatorKey::Left
+            | TopologyNavigatorKey::Right
+            | TopologyNavigatorKey::Home => self.handle_motion(key),
             TopologyNavigatorKey::Filter => {
-                self.toggle_scope();
+                if self.history {
+                    self.history = false;
+                    self.scope = AgentScope::All;
+                } else {
+                    self.toggle_scope();
+                }
                 TopologyNavigatorOutcome::Consumed
             }
+            TopologyNavigatorKey::History => {
+                self.toggle_history();
+                TopologyNavigatorOutcome::Consumed
+            }
+            TopologyNavigatorKey::Search => {
+                self.saved_scope = self.scope;
+                self.history = true;
+                self.searching = true;
+                TopologyNavigatorOutcome::Consumed
+            }
+            TopologyNavigatorKey::Failures => {
+                if !self.history {
+                    self.saved_scope = self.scope;
+                    self.history = true;
+                }
+                self.failures_only = !self.failures_only;
+                TopologyNavigatorOutcome::Consumed
+            }
+            TopologyNavigatorKey::Backspace => TopologyNavigatorOutcome::Consumed,
             TopologyNavigatorKey::Acknowledge => self.acknowledge_action().map_or(
                 TopologyNavigatorOutcome::Consumed,
                 TopologyNavigatorOutcome::Action,
@@ -455,7 +925,13 @@ impl TreeNavigator {
             TopologyNavigatorKey::Refresh => {
                 TopologyNavigatorOutcome::Action(crate::tui::UserAction::RefreshTopologyTree)
             }
-            TopologyNavigatorKey::Enter => match self.selected_node() {
+            TopologyNavigatorKey::Enter if self.selected.as_deref() == Some(RESUME_ROW_ID) => {
+                self.resume_action().map_or(
+                    TopologyNavigatorOutcome::Consumed,
+                    TopologyNavigatorOutcome::Confirm,
+                )
+            }
+            TopologyNavigatorKey::Enter => match self.actionable_node() {
                 None => TopologyNavigatorOutcome::Consumed,
                 Some(node) if node.parent_agent_id.is_none() => TopologyNavigatorOutcome::ShowRoot,
                 Some(node) => TopologyNavigatorOutcome::ShowAgent {
@@ -478,6 +954,10 @@ impl TreeNavigator {
             TopologyNavigatorKey::StopAll => {
                 TopologyNavigatorOutcome::Confirm(crate::tui::UserAction::StopAllTopology)
             }
+            TopologyNavigatorKey::Recover => self.recover_action().map_or(
+                TopologyNavigatorOutcome::Consumed,
+                TopologyNavigatorOutcome::Confirm,
+            ),
             TopologyNavigatorKey::Copy => TopologyNavigatorOutcome::Consumed,
         }
     }
@@ -485,7 +965,9 @@ impl TreeNavigator {
     /// What `y` copies: the selected agent id.
     #[must_use]
     pub fn copy_text(&self) -> String {
-        self.selected_agent_id().unwrap_or_default().to_owned()
+        self.actionable_node()
+            .map(|node| node.agent_id.clone())
+            .unwrap_or_default()
     }
 
     /// Paint the Agents body at `width` x `height`. `spinner` is the frame for
@@ -499,6 +981,10 @@ impl TreeNavigator {
         processes: &BTreeMap<String, usize>,
         profile: Option<&crate::tui::ProfileRow>,
     ) -> AgentListFrame {
+        self.last_profile = profile.cloned();
+        if self.history {
+            return self.history_frame(width, height, spinner, processes, profile);
+        }
         let projection = self.projection();
         let now = self.now_unix;
         let wake = self
@@ -511,22 +997,13 @@ impl TreeNavigator {
             .as_ref()
             .is_some_and(|snap| snap.restored_paused);
         let footer = fitted_agents_footer(
-            restored_paused,
-            self.scope,
-            projection.hidden,
+            self.footer_view(projection.hidden, restored_paused),
             width,
             footer_max_rows(height),
         );
         let header = header_line(&projection, self.snapshot.as_ref(), width);
         // The footer owns however many rows its own text needs at this width.
-        let footer_rows = if height >= 4 {
-            u16::try_from(wrap_footer_hint(&footer, width, footer_max_rows(height)).len())
-                .unwrap_or(1)
-                .min(height.saturating_sub(3))
-                .max(1)
-        } else {
-            0
-        };
+        let footer_rows = footer_row_count(height, &footer, width);
         let inspector_rows = if height >= INSPECTOR_MIN_HEIGHT {
             INSPECTOR_ROWS
         } else {
@@ -538,24 +1015,64 @@ impl TreeNavigator {
                 .saturating_sub(footer_rows)
                 .saturating_sub(inspector_rows),
         );
-        let selected = self.resolve_selection(&projection);
-        let at = selected
-            .as_deref()
-            .and_then(|id| projection.position(id))
-            .unwrap_or(0);
-        if at < self.list_scroll {
-            self.list_scroll = at;
-        } else if list_rows > 0 && at >= self.list_scroll + list_rows {
-            self.list_scroll = at + 1 - list_rows;
+        self.list_rows = list_rows.max(1);
+        let resume = restored_paused;
+        let agent_slots = list_rows.saturating_sub(usize::from(resume));
+        let resume_selected = resume && self.selected.as_deref() == Some(RESUME_ROW_ID);
+        let selected = if resume_selected {
+            None
+        } else {
+            self.resolve_selection(&projection)
+        };
+        self.scroll_to(
+            selected.as_deref().and_then(|id| projection.position(id)),
+            projection.rows.len(),
+            agent_slots,
+        );
+        let mut rows = Vec::new();
+        if resume {
+            rows.push(Self::resume_row(resume_selected));
         }
-        self.list_scroll = self
-            .list_scroll
-            .min(projection.rows.len().saturating_sub(list_rows));
-        let rows = projection
+        rows.extend(self.visible_rows(
+            &projection,
+            selected.as_deref(),
+            agent_slots,
+            width,
+            spinner,
+            profile,
+        ));
+        let inspector = if inspector_rows == 0 {
+            Vec::new()
+        } else if resume_selected {
+            vec!["Resumes every paused agent. Turns continue and spend again.".to_owned()]
+        } else {
+            selected
+                .as_deref()
+                .map(|id| self.inspector_lines(id, &projection, width, processes))
+                .unwrap_or_default()
+        };
+        AgentListFrame {
+            header: truncate_display(&header, usize::from(width)),
+            rows,
+            inspector,
+            footer,
+        }
+    }
+
+    fn visible_rows(
+        &self,
+        projection: &AgentProjection,
+        selected: Option<&str>,
+        agent_slots: usize,
+        width: u16,
+        spinner: Option<&str>,
+        profile: Option<&crate::tui::ProfileRow>,
+    ) -> Vec<AgentListRow> {
+        projection
             .rows
             .iter()
             .skip(self.list_scroll)
-            .take(list_rows)
+            .take(agent_slots)
             .filter_map(|row| {
                 let node = self.node(&row.id)?;
                 Some(AgentListRow {
@@ -567,29 +1084,201 @@ impl TreeNavigator {
                         &AgentRowClock {
                             now_unix: self.now_unix,
                             spinner,
-                            processes,
                             profile,
                         },
                         usize::from(width),
                     ),
                     dim: row.dim,
-                    selected: selected.as_deref() == Some(row.id.as_str()),
+                    selected: selected == Some(row.id.as_str()),
+                    selectable: true,
                 })
             })
-            .collect();
+            .collect()
+    }
+
+    fn resume_row(selected: bool) -> AgentListRow {
+        AgentListRow {
+            id: RESUME_ROW_ID.to_owned(),
+            cells: RowCells {
+                rails: String::new(),
+                body: " \u{25b6} resume agents".to_owned(),
+                mark: "   ".to_owned(),
+            },
+            dim: false,
+            selected,
+            selectable: true,
+        }
+    }
+
+    fn history_frame(
+        &mut self,
+        width: u16,
+        height: u16,
+        spinner: Option<&str>,
+        processes: &BTreeMap<String, usize>,
+        profile: Option<&crate::tui::ProfileRow>,
+    ) -> AgentListFrame {
+        let lines = self.history_lines_now(profile);
+        self.age_wake_at = crate::tui::agent_history::next_local_midnight(self.now_unix, self.zone);
+        let restored_paused = self
+            .snapshot
+            .as_ref()
+            .is_some_and(|snap| snap.restored_paused);
+        let footer = fitted_agents_footer(
+            self.footer_view(0, restored_paused),
+            width,
+            footer_max_rows(height),
+        );
+        let header = header_line(&self.projection(), self.snapshot.as_ref(), width);
+        let header = truncate_display(&format!("History · {header}"), usize::from(width));
+        let footer_rows = footer_row_count(height, &footer, width);
+        let inspector_rows = if height >= INSPECTOR_MIN_HEIGHT {
+            INSPECTOR_ROWS
+        } else {
+            0
+        };
+        let list_rows = usize::from(
+            height
+                .saturating_sub(1)
+                .saturating_sub(footer_rows)
+                .saturating_sub(inspector_rows),
+        );
+        self.list_rows = list_rows.max(1);
+        let resume = self.resume_row_shown();
+        let resume_selected = resume && self.selected.as_deref() == Some(RESUME_ROW_ID);
+        let selected = self.selected_agent_id().map(str::to_owned);
+        let agent_at = selected.as_ref().and_then(|id| {
+            lines.iter().position(|line| {
+                matches!(line, crate::tui::agent_history::HistoryLine::Agent(row) if row == id)
+            })
+        });
+        let at = if resume_selected {
+            Some(0)
+        } else {
+            agent_at.map(|index| index + usize::from(resume))
+        };
+        let len = lines.len() + usize::from(resume);
+        self.scroll_to(at, len, list_rows);
+        let mut rows = Vec::new();
+        if resume && self.list_scroll == 0 {
+            rows.push(Self::resume_row(resume_selected));
+        }
+        let skip = self.list_scroll.saturating_sub(usize::from(resume));
+        rows.extend(
+            lines
+                .iter()
+                .skip(skip)
+                .take(list_rows.saturating_sub(rows.len()))
+                .filter_map(|line| {
+                    self.history_row(line, selected.as_deref(), width, spinner, profile)
+                }),
+        );
         let inspector = if inspector_rows == 0 {
             Vec::new()
+        } else if resume_selected {
+            vec!["Resumes every paused agent. Turns continue and spend again.".to_owned()]
         } else {
-            selected
-                .as_deref()
-                .map(|id| self.inspector_lines(id, &projection, width))
-                .unwrap_or_default()
+            self.history_inspector(
+                &lines,
+                selected.as_deref(),
+                width,
+                processes,
+                inspector_rows,
+            )
         };
         AgentListFrame {
-            header: truncate_display(&header, usize::from(width)),
+            header,
             rows,
             inspector,
             footer,
+        }
+    }
+
+    fn history_inspector(
+        &self,
+        lines: &[crate::tui::agent_history::HistoryLine],
+        selected: Option<&str>,
+        width: u16,
+        processes: &BTreeMap<String, usize>,
+        inspector_rows: u16,
+    ) -> Vec<String> {
+        if inspector_rows == 0 {
+            return Vec::new();
+        }
+        let visible = selected.is_some_and(|id| {
+            lines.iter().any(|line| {
+                matches!(line, crate::tui::agent_history::HistoryLine::Agent(row) if row == id)
+            })
+        });
+        let filtered = self.failures_only || !self.search.trim().is_empty();
+        let no_rows = lines
+            .iter()
+            .all(|line| !matches!(line, crate::tui::agent_history::HistoryLine::Agent(_)));
+        let selected_is_history = selected.is_some_and(|id| {
+            self.node(id)
+                .is_some_and(crate::tui::agent_history::history_member)
+        });
+        if filtered && !visible && (selected_is_history || no_rows) {
+            return vec!["Hidden by the filter. Esc clears it.".to_owned()];
+        }
+        selected.map_or_else(Vec::new, |id| {
+            self.inspector_lines(id, &self.projection(), width, processes)
+        })
+    }
+
+    fn scroll_to(&mut self, at: Option<usize>, len: usize, list_rows: usize) {
+        let at = at.unwrap_or(0);
+        if at < self.list_scroll {
+            self.list_scroll = at;
+        } else if list_rows > 0 && at >= self.list_scroll + list_rows {
+            self.list_scroll = at + 1 - list_rows;
+        }
+        self.list_scroll = self.list_scroll.min(len.saturating_sub(list_rows));
+    }
+
+    fn history_row(
+        &self,
+        line: &crate::tui::agent_history::HistoryLine,
+        selected: Option<&str>,
+        width: u16,
+        spinner: Option<&str>,
+        profile: Option<&crate::tui::ProfileRow>,
+    ) -> Option<AgentListRow> {
+        match line {
+            crate::tui::agent_history::HistoryLine::Header(title)
+            | crate::tui::agent_history::HistoryLine::Notice(title) => Some(AgentListRow {
+                id: String::new(),
+                cells: RowCells {
+                    rails: String::new(),
+                    body: format!(" {title}"),
+                    mark: "   ".to_owned(),
+                },
+                dim: true,
+                selected: false,
+                selectable: false,
+            }),
+            crate::tui::agent_history::HistoryLine::Agent(id) => {
+                let node = self.node(id)?;
+                let attention = agent_list::attention(node)
+                    .is_some_and(|_| !agent_list::acknowledged(node, &self.acknowledged));
+                Some(AgentListRow {
+                    id: id.clone(),
+                    cells: agent_row(
+                        node,
+                        "",
+                        attention,
+                        &AgentRowClock {
+                            now_unix: self.now_unix,
+                            spinner,
+                            profile,
+                        },
+                        usize::from(width),
+                    ),
+                    dim: true,
+                    selected: selected == Some(id.as_str()),
+                    selectable: true,
+                })
+            }
         }
     }
 
@@ -597,7 +1286,13 @@ impl TreeNavigator {
         clippy::too_many_lines,
         reason = "The agent inspector renders lifecycle, binding, workspace, and recovery facts from the same selected node."
     )]
-    fn inspector_lines(&self, id: &str, projection: &AgentProjection, width: u16) -> Vec<String> {
+    fn inspector_lines(
+        &self,
+        id: &str,
+        projection: &AgentProjection,
+        width: u16,
+        processes: &BTreeMap<String, usize>,
+    ) -> Vec<String> {
         let Some(node) = self.node(id) else {
             return Vec::new();
         };
@@ -634,19 +1329,28 @@ impl TreeNavigator {
             (None, _) => "start unknown".to_owned(),
         };
         let can_ack = attention.is_some() && !acknowledged && node.attempt_id.is_some();
-        let remedy = match (attention, can_ack, acknowledged) {
-            (Some(agent_list::Attention::RecoveryRequired), true, _) => {
-                format!(" · {RECOVERY_REMEDY} · x acknowledges")
+        let resume_first = self
+            .snapshot
+            .as_ref()
+            .is_some_and(|snap| snap.restored_paused)
+            && matches!(attention, Some(agent_list::Attention::RecoveryRequired));
+        let remedy = if resume_first {
+            " · Resume agents first".to_owned()
+        } else {
+            match (attention, can_ack, acknowledged) {
+                (Some(agent_list::Attention::RecoveryRequired), true, _) => {
+                    format!(" · {RECOVERY_REMEDY} · x acknowledges")
+                }
+                (Some(agent_list::Attention::RecoveryRequired), false, true) => {
+                    format!(" · {RECOVERY_REMEDY} · acknowledged")
+                }
+                (Some(agent_list::Attention::RecoveryRequired), _, _) => {
+                    format!(" · {RECOVERY_REMEDY}")
+                }
+                (Some(_), true, _) => " · needs attention · x acknowledges".to_owned(),
+                (Some(_), false, true) => " · acknowledged".to_owned(),
+                _ => String::new(),
             }
-            (Some(agent_list::Attention::RecoveryRequired), false, true) => {
-                format!(" · {RECOVERY_REMEDY} · acknowledged")
-            }
-            (Some(agent_list::Attention::RecoveryRequired), _, _) => {
-                format!(" · {RECOVERY_REMEDY}")
-            }
-            (Some(_), true, _) => " · needs attention · x acknowledges".to_owned(),
-            (Some(_), false, true) => " · acknowledged".to_owned(),
-            _ => String::new(),
         };
         let name = agent_name(node);
         let description = node.description.trim();
@@ -655,30 +1359,11 @@ impl TreeNavigator {
         } else {
             format!(" · {description}")
         };
-        let mut lines = vec![
-            format!(
-                "{} {name}{described} · {status}{remedy}",
-                short_id(&node.agent_id),
-            ),
-            node.fault.as_deref().map_or_else(
-                || format!("Task    {}", blank_as_unknown(&node.prompt)),
-                |fault| format!("Fault   {fault}"),
-            ),
-            format!(
-                "Model   {} · {} · {} {}",
-                model_label(node),
-                attempt_label(node),
-                node.workspace_mode,
-                node.workspace_path
-            ),
-            format!("Usage   {} · {tokens} · {times}", turns_label(node.turns)),
-            format!(
-                "Place   {parent} · {children} {} · id {}",
-                if children == 1 { "child" } else { "children" },
-                node.agent_id
-            ),
-            format!("Work    {}", work_line(node, now_unix)),
-        ];
+        let mut usage = format!(
+            "Usage   {} · {tokens}{} · {times}",
+            turns_label(node.turns),
+            process_count_label(processes.get(id).copied().unwrap_or(0)),
+        );
         if let Some(compaction) = node.usage.and_then(|usage| usage.compaction) {
             let measured = compaction
                 .tokens_before
@@ -691,11 +1376,36 @@ impl TreeNavigator {
             } else {
                 " · retained only"
             };
-            lines[3].push_str(&format!(
+            usage.push_str(&format!(
                 " · Compact {} committed · {} failed · {} no-eligible{measured}{coverage}",
                 compaction.committed, compaction.failed, compaction.no_eligible
             ));
         }
+        let lines = [
+            format!(
+                "{} {name}{described} · {status}{remedy}{}",
+                short_id(&node.agent_id),
+                dormancy_inspector(node),
+            ),
+            node.fault.as_deref().map_or_else(
+                || format!("Task    {}", blank_as_unknown(&node.prompt)),
+                |fault| format!("Fault   {fault}"),
+            ),
+            format!(
+                "Model   {} · {} · {} {}",
+                model_label(node),
+                attempt_label(node),
+                node.workspace_mode,
+                node.workspace_path
+            ),
+            usage,
+            format!(
+                "Place   {parent} · {children} {} · id {}",
+                if children == 1 { "child" } else { "children" },
+                node.agent_id
+            ),
+            format!("Work    {}", work_line(node, now_unix)),
+        ];
         lines
             .into_iter()
             .map(|line| truncate_display(&line, cells))
@@ -704,8 +1414,7 @@ impl TreeNavigator {
 
     fn acknowledge_action(&self) -> Option<crate::tui::UserAction> {
         let snap = self.snapshot.as_ref()?;
-        let projection = self.projection();
-        let node = self.node(self.resolve_selection(&projection)?.as_str())?;
+        let node = self.actionable_node()?;
         acknowledge_intent(&snap.tree_id, node, &self.acknowledged)
     }
 
@@ -718,7 +1427,7 @@ impl TreeNavigator {
     /// The selected agent, unless it is the root: the root's turn stops
     /// from the root view, and the root is never closed from the list.
     fn selected_child_id(&self) -> Option<&str> {
-        self.selected_node()
+        self.actionable_node()
             .filter(|node| node.parent_agent_id.is_some())
             .map(|node| node.agent_id.as_str())
     }
@@ -734,464 +1443,12 @@ impl TreeNavigator {
             agent_id: self.selected_child_id()?.to_owned(),
         })
     }
-}
 
-/// `x` on an agent (the Agents tab or the agent view): acknowledge the
-/// attention it needs now, unless this occurrence already is.
-pub(crate) fn acknowledge_intent(
-    tree_id: &str,
-    node: &CanvasNode,
-    acknowledged: &BTreeSet<AgentAcknowledgement>,
-) -> Option<crate::tui::UserAction> {
-    let attention = agent_list::attention(node)?;
-    if agent_list::acknowledged(node, acknowledged) {
-        return None;
-    }
-    Some(crate::tui::UserAction::Extension(
-        SurfaceIntent::AcknowledgeAgent {
-            tree_id: tree_id.to_owned(),
-            agent_id: node.agent_id.clone(),
-            attempt_id: node.attempt_id.clone()?,
-            attention: attention.label().to_owned(),
-            ended_at: node.ended_at_unix,
-        },
-    ))
-}
-
-/// Labels the root box may be repainted with by [`TreeNavigator::project_root_turn`].
-///
-/// Anything else on the root row is a durable observation the session's turn
-/// phase does not know about — `sealing` and `adopting` above all — and
-/// overwriting it would erase the operator-visible candidate state.
-const ROOT_TURN_OVERWRITABLE: &[&str] = &["running", "idle", "pending", "completed"];
-
-/// The bound model tuple as one label. Unknown stays unknown.
-fn model_label(node: &CanvasNode) -> String {
-    let tuple = node.model_tuple.trim();
-    let account = node.model_account.trim();
-    let head = match (tuple.is_empty(), account.is_empty()) {
-        (false, _) => tuple.to_owned(),
-        (true, false) => account.to_owned(),
-        (true, true) => return "\u{2014}".to_owned(),
-    };
-    node.model_effort
-        .as_deref()
-        .filter(|effort| !effort.is_empty())
-        .map_or(head.clone(), |effort| format!("{head} · {effort}"))
-}
-
-/// Admitted turns. `None` is unknown, never zero.
-fn turns_label(turns: Option<u32>) -> String {
-    match turns {
-        Some(1) => "1 turn".to_owned(),
-        Some(count) => format!("{count} turns"),
-        None => "turns \u{2014}".to_owned(),
-    }
-}
-
-/// The status a row paints: the node's own, unless its copy is mid-adopt.
-///
-/// Each row carries one in-flight status — a node seals, a workspace
-/// adopts — and the canvas draws one box per node, so the box has to choose.
-/// It shows `adopting`, because a node whose candidate is being landed reads
-/// `completed` on its own row while the thing the operator is waiting on is the
-/// adoption. Every other workspace status is history the `Work` line carries.
-#[must_use]
-fn row_status(node: &CanvasNode) -> &str {
-    match node.workspace_status.as_deref() {
-        Some("adopting") => "adopting",
-        Some("discarding") if node.status != "recovery_required" => "discarding",
-        _ => node.status.as_str(),
-    }
-}
-
-/// `a2 · running` for the node's current attempt. A node with no attempt row
-/// says so; the root never has one.
-///
-/// Only the current attempt is projected, so the label is always the current
-/// one — a `followup` re-task opens `a2` on the same node and this label moves
-/// with it.
-#[must_use]
-pub fn attempt_label(node: &CanvasNode) -> String {
-    match (node.attempt_seq, node.attempt_status.as_deref()) {
-        (Some(seq), Some(status)) => format!("a{seq} \u{b7} {status}"),
-        (Some(seq), None) => format!("a{seq}"),
-        (None, Some(status)) => status.to_owned(),
-        (None, None) => "no attempt".to_owned(),
-    }
-}
-
-/// `a1 ‹a2›` — every attempt this node has had, the current one bracketed.
-///
-/// Empty when there is at most one attempt: `Bind` already names it, and a
-/// strip of one is noise. Plain text carries the highlight because the
-/// inspector is a `Vec<String>` the overlay paints in one style.
-#[must_use]
-fn attempts_strip(node: &CanvasNode) -> String {
-    if node.attempts.len() < 2 {
-        return String::new();
-    }
-    node.attempts
-        .iter()
-        .map(|seq| {
-            if Some(*seq) == node.attempt_seq {
-                format!("\u{2039}a{seq}\u{203a}")
-            } else {
-                format!("a{seq}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Trailing segment of a candidate id, which is what a row has room for.
-#[must_use]
-fn short_candidate(candidate_id: &str) -> String {
-    let tail = candidate_id.rsplit('-').next().unwrap_or(candidate_id);
-    let tail = if tail.is_empty() { candidate_id } else { tail };
-    format!("#{}", truncate_display(tail, 8))
-}
-
-/// `sealed · #abc123` once the node's attempt has sealed a candidate.
-/// Only `execute` and `mutate` copies seal, so a `read_only`
-/// row never carries one and this stays `None` for it.
-#[must_use]
-fn sealed_line(node: &CanvasNode) -> Option<String> {
-    node.candidate_id
-        .as_deref()
-        .filter(|candidate| !candidate.trim().is_empty())
-        .map(|candidate| format!("sealed \u{b7} {}", short_candidate(candidate)))
-}
-
-/// `blocked · resets in 12m` from the attempt's `resets_at`, or plain `blocked`
-/// when the provider named no reset. The quota and account are
-/// spelled in the inspector, not in the box: the box has room for the fact and
-/// the clock, nothing else.
-#[must_use]
-fn blocked_line(node: &CanvasNode, now_unix: u64) -> Option<String> {
-    let blocked = node.blocked.as_ref()?;
-    Some(match blocked.resets_at_unix {
-        Some(resets_at) => format!(
-            "blocked \u{b7} resets in {}",
-            until_label(resets_at, now_unix)
-        ),
-        None => "blocked".to_owned(),
-    })
-}
-
-/// Time remaining until `at`. A reset already in the past reads `now`, never a
-/// negative or a wrapped duration.
-#[must_use]
-fn until_label(at: u64, now_unix: u64) -> String {
-    let seconds = at.saturating_sub(now_unix);
-    if seconds == 0 {
-        "now".to_owned()
-    } else if seconds < 60 {
-        format!("{seconds}s")
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86_400 {
-        format!("{}h{:02}m", seconds / 3600, (seconds % 3600) / 60)
-    } else {
-        format!("{}d{:02}h", seconds / 86_400, (seconds % 86_400) / 3600)
-    }
-}
-
-/// The inspector's `Work` line: what this node is authorised to do, what its
-/// copy is doing, and what it produced. Every segment is omitted when the host
-/// does not know it, so the line never invents a tier or a workspace state.
-#[must_use]
-fn work_line(node: &CanvasNode, now_unix: u64) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    let attempts = attempts_strip(node);
-    if !attempts.is_empty() {
-        parts.push(attempts);
-    }
-    parts.push(
-        node.tier
-            .as_deref()
-            .filter(|tier| !tier.trim().is_empty())
-            .map_or_else(|| "tier —".to_owned(), |tier| format!("tier {tier}")),
-    );
-    if let Some(status) = node
-        .workspace_status
-        .as_deref()
-        .filter(|status| !status.trim().is_empty())
-    {
-        parts.push(format!("copy {status}"));
-    }
-    if let Some(sealed) = sealed_line(node) {
-        parts.push(sealed);
-    }
-    if let Some(blocked) = node.blocked.as_ref() {
-        let reset = blocked.resets_at_unix.map_or_else(String::new, |at| {
-            format!(" · resets in {}", until_label(at, now_unix))
-        });
-        parts.push(format!(
-            "blocked {} on {}{reset}",
-            blank_as_unknown(&blocked.quota),
-            blank_as_unknown(&blocked.account)
-        ));
-    }
-    parts.join(" · ")
-}
-
-/// Elapsed wall time. Without a durable start stamp this stays unknown.
-fn elapsed_label(started_at_unix: Option<u64>, now_unix: u64) -> String {
-    let Some(started) = started_at_unix else {
-        return "\u{2014}".to_owned();
-    };
-    super::blocks::format_duration_secs(now_unix.saturating_sub(started))
-}
-
-/// Trailing segment of a durable id, which is what the boxes have room for.
-pub(crate) fn short_id(agent_id: &str) -> String {
-    let tail = agent_id.rsplit('-').next().unwrap_or(agent_id);
-    let tail = if tail.is_empty() { agent_id } else { tail };
-    format!("#{}", truncate_display(tail, 10))
-}
-
-fn blank_as_unknown(text: &str) -> String {
-    if text.trim().is_empty() {
-        "\u{2014}".to_owned()
-    } else {
-        text.trim().to_owned()
-    }
-}
-
-/// `● 3 active   ✓ 21 completed   ⚠ 1 attention`, then the tree state when it
-/// is not plainly live. A narrow body keeps the glyphs and counts.
-fn header_line(projection: &AgentProjection, snapshot: Option<&CanvasTree>, width: u16) -> String {
-    let counts = projection.counts;
-    let state = snapshot
-        .map(|snap| snap.state.as_str())
-        .filter(|state| *state != "live")
-        .map_or_else(String::new, |state| {
-            format!("   tree {}", humanize_state(state))
-        });
-    let full = format!(
-        "\u{25cf} {} active   \u{2713} {} completed   \u{26a0} {} attention{state}",
-        counts.active, counts.completed, counts.attention
-    );
-    if full.chars().count() <= usize::from(width) {
-        return full;
-    }
-    format!(
-        "\u{25cf} {}  \u{2713} {}  \u{26a0} {}{state}",
-        counts.active, counts.completed, counts.attention
-    )
-}
-
-/// What an agent row reads besides its node: the frame's clock, spinner
-/// frame (`None` under reduced motion) and running processes per owner.
-pub struct AgentRowClock<'a> {
-    pub now_unix: u64,
-    pub spinner: Option<&'a str>,
-    pub processes: &'a BTreeMap<String, usize>,
-    /// The session's profile, whose card labels name each template's role.
-    pub profile: Option<&'a crate::tui::ProfileRow>,
-}
-
-/// One Agents row for `node` in `width` cells: the one row format the
-/// Activity list and the agent view's bar both paint.
-#[must_use]
-pub fn agent_row(
-    node: &CanvasNode,
-    rails: &str,
-    attention: bool,
-    clock: &AgentRowClock<'_>,
-    width: usize,
-) -> RowCells {
-    let glyph = agent_glyph(node, attention, clock.spinner);
-    let short = short_id(&node.agent_id);
-    let fact = live_fact(node, clock.now_unix);
-    let role = agent_role(node, clock.profile);
-    let model = node.model_tuple.trim().to_owned();
-    let turns = if node.parent_agent_id.is_some() {
-        turns_label(node.turns)
-    } else {
-        String::new()
-    };
-    let tokens = node.usage.map_or_else(String::new, |usage| {
-        let mut tokens = format!(
-            "{} tok",
-            compact_count(usage.input_tokens.saturating_add(usage.output_tokens))
-        );
-        if let Some(compaction) = usage.compaction {
-            tokens.push_str(&format!(
-                " · {} compact{}",
-                compaction.committed,
-                if compaction.complete { "" } else { "+" }
-            ));
-        }
-        tokens
-    });
-    let owned = clock
-        .processes
-        .get(&node.agent_id)
-        .copied()
-        .unwrap_or_default();
-    let processes = match owned {
-        0 => String::new(),
-        1 => "1 process".to_owned(),
-        count => format!("{count} processes"),
-    };
-    let elapsed = row_elapsed(node, clock.now_unix);
-    let facts = RowFacts {
-        glyph: &glyph,
-        elapsed: &elapsed,
-        short_id: &short,
-        fact: &fact,
-        role: &role,
-        model: &model,
-        turns: &turns,
-        tokens: &tokens,
-        processes: &processes,
-    };
-    compose_row(rails, &facts, attention, width)
-}
-
-/// The agent view's breadcrumb label: `#<id> · <description>`, the
-/// description falling back to the row's name.
-#[must_use]
-pub fn agent_view_label(node: &CanvasNode) -> String {
-    let description = node.description.trim();
-    let description = if description.is_empty() {
-        agent_name(node)
-    } else {
-        description.to_owned()
-    };
-    format!("{} \u{b7} {description}", short_id(&node.agent_id))
-}
-
-/// The template's role within the session's profile: a template the profile
-/// carries reads as its card label (`my-profile-worker` is
-/// `worker` in `my-profile`); any other template reads in
-/// full. The root is `root`; a node without a template has no role.
-fn agent_role(node: &CanvasNode, profile: Option<&crate::tui::ProfileRow>) -> String {
-    if node.parent_agent_id.is_none() {
-        return "root".to_owned();
-    }
-    let Some(template) = node
-        .template
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-    else {
-        return String::new();
-    };
-    profile
-        .and_then(|profile| {
-            let label = template.strip_prefix(&format!("{}-", profile.id))?;
-            profile
-                .cards
-                .iter()
-                .any(|card| card.label == label)
-                .then(|| label.to_owned())
-        })
-        .unwrap_or_else(|| template.to_owned())
-}
-
-/// `950`, `12.4k`, `3.1M`.
-fn compact_count(count: u64) -> String {
-    match count {
-        0..1_000 => count.to_string(),
-        1_000..1_000_000 => format!("{}.{}k", count / 1_000, count % 1_000 / 100),
-        _ => format!("{}.{}M", count / 1_000_000, count % 1_000_000 / 100_000),
-    }
-}
-
-/// The row's name: the template, else the description; the root is `root`.
-fn agent_name(node: &CanvasNode) -> String {
-    if node.parent_agent_id.is_none() {
-        return "root".to_owned();
-    }
-    node.template
-        .as_deref()
-        .filter(|template| !template.trim().is_empty())
-        .map_or_else(|| blank_as_unknown(&node.description), str::to_owned)
-}
-
-/// The status glyph (spec 02 §5.7 vocabulary): running and submitted animate,
-/// waiting is `◐`, done `✓`, failed `✕`, no result `!`, cancelled `○`.
-fn agent_glyph(node: &CanvasNode, attention: bool, spinner: Option<&str>) -> String {
-    let status = row_status(node);
-    let running = matches!(status, "running")
-        || node.attempt_status.as_deref() == Some("submitted") && agent_list::is_active(node);
-    if running {
-        return spinner.unwrap_or("\u{25cf}").to_owned();
-    }
-    let glyph = match status {
-        "pending" | "paused" | "interrupted" => '\u{25d0}',
-        "idle" => '\u{25cc}',
-        "closed" | "discarding" => '\u{25cb}',
-        _ if agent_list::is_active(node) => status_glyph(status),
-        _ => match node.attempt_status.as_deref() {
-            Some("completed_without_submission") => '!',
-            Some("blocked") => '\u{2298}',
-            Some("cancelled" | "closed") => '\u{25cb}',
-            _ if attention || status == "failed" || status == "recovery_required" => '\u{2715}',
-            _ => '\u{2713}',
-        },
-    };
-    glyph.to_string()
-}
-
-/// One live fact: the current tool verb while it runs, else the status.
-fn live_fact(node: &CanvasNode, now_unix: u64) -> String {
-    if agent_list::is_active(node)
-        && let Some(activity) = node
-            .live_progress
-            .as_ref()
-            .and_then(|progress| progress.activity.as_deref())
-            .filter(|activity| !activity.trim().is_empty())
-    {
-        return activity.trim().to_owned();
-    }
-    if let Some(attention) = agent_list::attention(node) {
-        return match attention {
-            agent_list::Attention::Blocked => {
-                blocked_line(node, now_unix).unwrap_or_else(|| attention.label().to_owned())
-            }
-            _ => attention.label().to_owned(),
-        };
-    }
-    if !node.active_turn
-        && let Some(waiting_on) = &node.waiting_on
-    {
-        return if waiting_on.is_empty() {
-            "parked".to_owned()
-        } else {
-            format!("waiting on {}", waiting_on.join(", "))
-        };
-    }
-    match row_status(node) {
-        "interrupted" => "waiting".to_owned(),
-        "adopting" => sealed_line(node).map_or_else(
-            || "adopting".to_owned(),
-            |sealed| format!("adopting · {}", sealed.trim_start_matches("sealed · ")),
-        ),
-        "completed" => {
-            let done = if node.attempt_status.as_deref() == Some("adopted") {
-                "adopted"
-            } else {
-                "done"
-            };
-            sealed_line(node).map_or_else(
-                || done.to_owned(),
-                |sealed| format!("{done} · {}", sealed.trim_start_matches("sealed · ")),
-            )
-        }
-        status => humanize_state(status),
-    }
-}
-
-/// Running agents count up from their start; finished ones show how long
-/// they ran.
-fn row_elapsed(node: &CanvasNode, now_unix: u64) -> String {
-    match node.ended_at_unix {
-        Some(ended) if !agent_list::is_active(node) => elapsed_label(node.started_at_unix, ended),
-        _ => elapsed_label(node.started_at_unix, now_unix),
+    fn recover_action(&self) -> Option<crate::tui::UserAction> {
+        recover_intent(
+            self.snapshot.as_ref()?,
+            self.actionable_node()?.agent_id.as_str(),
+        )
     }
 }
 
@@ -1220,8 +1477,24 @@ pub enum TopologyNavigatorKey {
     StopAll,
     /// y — copy the focused node id.
     Copy,
-    /// Home — jump to the root.
+    /// Home — jump to the root, or the first history row.
     Home,
+    /// End — last listed row.
+    End,
+    /// Page up.
+    PageUp,
+    /// Page down.
+    PageDown,
+    /// Backspace — edit the history query.
+    Backspace,
+    /// t — toggle history.
+    History,
+    /// / — history search.
+    Search,
+    /// ! — history failures.
+    Failures,
+    /// u — recover the selected child's recorded session.
+    Recover,
     /// f — toggle the live/all scope.
     Filter,
     /// x — acknowledge the selected agent's attention.

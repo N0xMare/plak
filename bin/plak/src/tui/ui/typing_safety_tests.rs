@@ -22,6 +22,7 @@ fn destructive(action: &UserAction) -> bool {
             | UserAction::CloseTopologyNode { .. }
             | UserAction::StopAllTopology
             | UserAction::ResumeTopologyTree
+            | UserAction::RecoverTopologyNode { .. }
             | UserAction::StopProcesses { .. }
     )
 }

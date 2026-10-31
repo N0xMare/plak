@@ -125,7 +125,8 @@ pub(crate) use recovery::TREE_FEED_READ_FAILED;
 #[cfg(test)]
 pub(crate) use recovery::tests::Fixture as RecoveryFixture;
 pub(crate) use recovery::{
-    RecoveryPassStart, TerminalExchange, read_tree_feed, start_tree_recovery_pass, wait_evidence_in,
+    RecoveryPassStart, TerminalExchange, operator_child_recover, read_tree_feed,
+    start_tree_recovery_pass, wait_evidence_in,
 };
 pub use roots::ProductStateRoots;
 pub use roots::TelemetryHealth;
