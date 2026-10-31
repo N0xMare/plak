@@ -590,8 +590,9 @@ fn cut_after_kill(
     let mut requeued_lifecycle = Value::Null;
     if outcome == "REQUEUED" {
         assert!(requeued, "unexpected restored prompt behind admitted root");
+        let resumed = shapes::resumed_lifecycle(fixture);
         reopened.send(&json!({"v": 1, "kind": "resume_queue"}));
-        requeued_lifecycle = resume_original(&mut reopened, fixture, shape);
+        requeued_lifecycle = resume_original(&mut reopened, fixture, shape, resumed);
         assert_eq!(
             expected.published(&summary::read_converged(fixture)),
             1,
@@ -733,11 +734,12 @@ fn requeued_seeded_shape_uses_configured_post_setup_steps() {
     );
 }
 
-fn resume_original(agent: &mut AgentProcess, fixture: &Fixture, shape: &str) -> Value {
-    let mut state = shapes::Lifecycle {
-        sent: true,
-        ..shapes::Lifecycle::default()
-    };
+fn resume_original(
+    agent: &mut AgentProcess,
+    fixture: &Fixture,
+    shape: &str,
+    mut state: shapes::Lifecycle,
+) -> Value {
     let deadline = Instant::now() + WAIT;
     let mut commands = Vec::new();
     loop {

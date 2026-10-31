@@ -121,6 +121,9 @@ pub(super) struct Lifecycle {
     pub sent: bool,
     pub quit: bool,
     pub stage: usize,
+    /// Provider dispatches already on disk when this drive started waiting.
+    pub(super) baseline_dispatches: usize,
+    pub(super) saw_baseline: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -315,7 +318,7 @@ pub(super) const REGISTRY: &[Shape] = &[
         subset: false,
         terminal: ExpectedTerminal::Answer,
         script: steer_script,
-        configure: no_configure,
+        configure: configure_steer,
         setup: no_setup,
         lifecycle: steer_lifecycle,
         assert_live: assert_steer,
@@ -1013,25 +1016,121 @@ fn assert_refusal(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Su
 
 fn steer_script() -> Value {
     json!({"version": 1, "steps": [
-        {"output": {"text": "crash-sweep-steered-round"}, "stall_ms": 300},
+        {"output": {"text": "crash-sweep-steered-round"}, "gate": {"file": "steer-release"}},
         {"output": {"text": ANSWER}}
     ]})
 }
 
+fn steer_release_file(fixture: &Fixture) -> std::path::PathBuf {
+    fixture.root.join("steer-release")
+}
+
+/// The first response waits on a file gate until the steer is queued. A fixed
+/// stall ends under load before the steer is read, and an idle turn rejects it.
+fn configure_steer(fixture: &Fixture) {
+    let mut script: Value =
+        serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
+    let Some(gate) = script["steps"][0].get_mut("gate") else {
+        return;
+    };
+    if gate["file"] != "steer-release" {
+        return;
+    }
+    gate["file"] = json!(steer_release_file(fixture));
+    fixture.write_script(&script);
+}
+
+fn provider_dispatch_count(fixture: &Fixture) -> usize {
+    invariants::dispatches(fixture)
+        .iter()
+        .filter(|(kind, _)| kind == "ProviderDispatched")
+        .count()
+}
+
+/// Dispatch count before `resume_queue`. A baseline taken on the first resumed
+/// poll is already after that send, so the original can dispatch first and the
+/// steer never leaves.
+pub(super) fn resumed_lifecycle(fixture: &Fixture) -> Lifecycle {
+    Lifecycle {
+        sent: true,
+        saw_baseline: true,
+        baseline_dispatches: provider_dispatch_count(fixture),
+        stage: if steer_release_file(fixture).is_file() {
+            2
+        } else {
+            0
+        },
+        ..Lifecycle::default()
+    }
+}
+
+fn steer_frame() -> Value {
+    let mut steer = prompt_frame("crash-sweep-mid-turn-steer");
+    steer["id"] = json!("crash-sweep-steer");
+    steer["steer"] = json!(true);
+    steer
+}
+
+fn steer_queued(records: &[Value]) -> bool {
+    records
+        .iter()
+        .any(|row| row["kind"] == "steer_ack" && row["state"] == "queued")
+}
+
 fn steer_lifecycle(fixture: &Fixture, records: &[Value], state: &mut Lifecycle) -> Option<Value> {
-    if state.sent
-        && state.stage == 0
-        && invariants::dispatches(fixture)
-            .iter()
-            .any(|(kind, _)| kind == "ProviderDispatched")
-    {
+    if !state.sent {
+        let frame = prompt_then_quit(fixture, records, state)?;
+        state.baseline_dispatches = provider_dispatch_count(fixture);
+        state.saw_baseline = true;
+        return Some(frame);
+    }
+    assert!(
+        state.saw_baseline,
+        "resumed steer lifecycle must record its dispatch baseline before resume_queue"
+    );
+    if state.stage == 0 && provider_dispatch_count(fixture) > state.baseline_dispatches {
         state.stage = 1;
-        let mut steer = prompt_frame("crash-sweep-mid-turn-steer");
-        steer["id"] = json!("crash-sweep-steer");
-        steer["steer"] = json!(true);
-        return Some(steer);
+        return Some(steer_frame());
+    }
+    if state.stage == 1 {
+        if !steer_queued(records) {
+            return None;
+        }
+        let release = steer_release_file(fixture);
+        if !release.exists() {
+            std::fs::write(&release, b"release").unwrap();
+        }
+        state.stage = 2;
     }
     prompt_then_quit(fixture, records, state)
+}
+
+#[test]
+fn resumed_steer_poll_returns_the_frame_above_the_seeded_baseline() {
+    use plakous_offline_crash_harness::evidence::{EvidenceKind, EvidenceRecord};
+    use plakous_offline_crash_harness::protocol::{CrashBoundary, PROTOCOL_VERSION};
+
+    let fixture = Fixture::new(&steer_script());
+    let record = EvidenceRecord {
+        version: PROTOCOL_VERSION,
+        sequence: 1,
+        kind: EvidenceKind::ProviderDispatched,
+        round: Some(1),
+        operation_id: Some("dispatched-before-resume".to_owned()),
+        boundary: CrashBoundary::ProviderDispatchOne,
+    };
+    let mut line = serde_json::to_vec(&record).unwrap();
+    line.push(b'\n');
+    std::fs::write(fixture.root.join("evidence.jsonl"), line).unwrap();
+    let mut state = Lifecycle {
+        sent: true,
+        saw_baseline: true,
+        baseline_dispatches: 0,
+        ..Lifecycle::default()
+    };
+    let frame = steer_lifecycle(&fixture, &[], &mut state).expect("steer frame");
+    assert_eq!(frame, steer_frame());
+    assert_eq!(state.stage, 1);
 }
 
 fn assert_steer(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
