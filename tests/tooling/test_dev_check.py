@@ -85,6 +85,8 @@ class DevCheckWorkerTests(unittest.TestCase):
         # PLAK_HOME would look like the non-test cargo commands inherited one.
         self.env.pop('PLAK_HOME', None)
         self.env.pop('RUSTFLAGS', None)
+        self.env.pop('CARGO_ENCODED_RUSTFLAGS', None)
+        self.env.pop('CARGO_BUILD_RUSTFLAGS', None)
         for key in [key for key in self.env if key.startswith('CARGO_TARGET_') and key.endswith('_RUSTFLAGS')]:
             del self.env[key]
         self.executable('cargo', r'''import json, os, sys
@@ -100,6 +102,7 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              plak_home=os.environ.get('PLAK_HOME'),
                              rustdocflags=os.environ.get('RUSTDOCFLAGS'),
                              rustflags=os.environ.get('RUSTFLAGS'),
+                             encoded_rustflags=os.environ.get('CARGO_ENCODED_RUSTFLAGS'),
                              rustc_wrapper=os.environ.get('RUSTC_WRAPPER'),
                              git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
                              git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'),
@@ -133,6 +136,7 @@ if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
                               rustflags=os.environ.get('RUSTFLAGS'),
+                              encoded_rustflags=os.environ.get('CARGO_ENCODED_RUSTFLAGS'),
                               rustc_wrapper=os.environ.get('RUSTC_WRAPPER'),
                               target_rustflags=os.environ.get('CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'),
                               git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
@@ -187,8 +191,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual([call['args'] for call in calls], [['nextest', '--version']])
         self.assertIn(['tools/checks/check_features.py', '--product-builds', '--target', 'host-triple'], scripts)
         call = next(call for call in self.python_calls if '--product-builds' in call['python'])
-        self.assertEqual(call['target_rustflags'], '-C target-feature=+crt-static -D warnings')
-        self.assertEqual(call['rustflags'], 'unused-base-flags')
+        self.assertEqual(call['target_rustflags'], '-C target-feature=+crt-static')
+        self.assertEqual(call['rustflags'], 'unused-base-flags -D warnings')
 
     def test_variants_bypass_the_compiler_wrapper_without_disabling_other_groups(self):
         self.env['RUSTC_WRAPPER'] = 'sccache'
@@ -392,15 +396,126 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(result.returncode, 0, result.stderr)
         builds = [c for c in calls if c['args'][0] == 'build']
         self.assertEqual(
-            [c['target_rustflags'] for c in builds],
-            ['-C link-arg=-fuse-ld=mold -D warnings'] * len(BUILDS),
+            [c['rustflags'] for c in builds],
+            ['should-not-be-used -D warnings'] * len(BUILDS),
         )
-        self.assertTrue(all(c['rustflags'] == 'should-not-be-used' for c in builds))
+        self.assertTrue(all(c['target_rustflags'] == '-C link-arg=-fuse-ld=mold' for c in builds))
         for call in calls:
             if call['args'][0] == 'build':
                 continue
             self.assertEqual(call['target_rustflags'], '-C link-arg=-fuse-ld=mold', call['args'][:3])
             self.assertEqual(call['rustflags'], 'should-not-be-used')
+
+        self.log.unlink()
+        self.env['CARGO_ENCODED_RUSTFLAGS'] = 'linker\x1fmold'
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        self.assertEqual(
+            [c['encoded_rustflags'] for c in builds],
+            ['linker\x1fmold\x1f-D\x1fwarnings'] * len(BUILDS),
+        )
+        self.assertTrue(all(c['rustflags'] == 'should-not-be-used' for c in builds))
+        self.assertTrue(all(c['target_rustflags'] == '-C link-arg=-fuse-ld=mold' for c in builds))
+        self.env.pop('CARGO_ENCODED_RUSTFLAGS')
+
+        # No rustflags environment variable: configured target rustflags (not
+        # build.rustflags) are copied through, and an explicit RUSTFLAGS still
+        # replaces them.
+        self.log.unlink()
+        self.env.pop('RUSTFLAGS', None)
+        self.env.pop('CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS', None)
+        cargo_home = self.root / 'cargo-home'
+        cargo_home.mkdir()
+        (cargo_home / 'config.toml').write_text(
+            '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=gold"]\n',
+            encoding='utf-8',
+        )
+        (self.root / '.cargo').mkdir()
+        (self.root / '.cargo' / 'config.toml').write_text(
+            '[target.host-triple]\n'
+            'rustflags = ["-C", "link-arg=-B/opt/mold/bin", "-C", "link-arg=-fuse-ld=mold"]\n'
+            '[build]\n'
+            'rustflags = ["-C", "link-arg=-fuse-ld=bfd"]\n',
+            encoding='utf-8',
+        )
+        self.env['CARGO_HOME'] = str(cargo_home)
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        self.assertEqual(
+            [c['rustflags'] for c in builds],
+            ['-C link-arg=-B/opt/mold/bin -C link-arg=-fuse-ld=mold -D warnings'] * len(BUILDS),
+        )
+        self.log.unlink()
+        (self.root / '.cargo' / 'config.toml').write_text(
+            '[target.\'cfg(target_os = "other")\']\n'
+            'rustflags = ["-C", "link-arg=-fuse-ld=lld"]\n',
+            encoding='utf-8',
+        )
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        self.assertEqual(
+            [c['rustflags'] for c in builds],
+            ['-C link-arg=-fuse-ld=gold -D warnings'] * len(BUILDS),
+        )
+        self.log.unlink()
+        self.env['RUSTFLAGS'] = '-C link-arg=-fuse-ld=lld'
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        self.assertEqual(
+            [c['rustflags'] for c in builds],
+            ['-C link-arg=-fuse-ld=lld -D warnings'] * len(BUILDS),
+        )
+        # An empty RUSTFLAGS is set, so it replaces configured rustflags.
+        self.log.unlink()
+        self.env['RUSTFLAGS'] = ''
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        self.assertEqual([c['rustflags'] for c in builds], ['-D warnings'] * len(BUILDS))
+
+    def test_configured_rustflags_are_read_once_and_build_env_is_build_rustflags(self):
+        cargo = self.root / '.cargo'
+        cargo.mkdir()
+        (cargo / 'config.toml').write_text(
+            '[build]\n'
+            'rustflags = ["-C", "link-arg=-B/opt/mold/bin", "-C", "link-arg=-fuse-ld=mold"]\n',
+            encoding='utf-8',
+        )
+        # CARGO_HOME is also an ancestor `.cargo` of the gate's cwd.
+        self.env['CARGO_HOME'] = str(cargo)
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        once = '-C link-arg=-B/opt/mold/bin -C link-arg=-fuse-ld=mold -D warnings'
+        self.assertEqual([c['rustflags'] for c in builds], [once] * len(BUILDS))
+
+        self.log.unlink()
+        self.env['CARGO_BUILD_RUSTFLAGS'] = '-C link-arg=-fuse-ld=lld'
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        self.assertEqual(
+            [c['rustflags'] for c in builds],
+            ['-C link-arg=-B/opt/mold/bin -C link-arg=-fuse-ld=mold -C link-arg=-fuse-ld=lld -D warnings'] * len(BUILDS),
+        )
+
+        self.log.unlink()
+        (cargo / 'config.toml').write_text(
+            '[target.host-triple]\n'
+            'rustflags = ["-C", "link-arg=-fuse-ld=gold"]\n',
+            encoding='utf-8',
+        )
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        builds = [c for c in calls if c['args'][0] == 'build']
+        self.assertEqual(
+            [c['rustflags'] for c in builds],
+            ['-C link-arg=-fuse-ld=gold -D warnings'] * len(BUILDS),
+        )
 
     def test_full_tier_adds_rustdoc_before_tests_and_structure_after(self):
         result, calls, scripts = self.run_gate('--full')

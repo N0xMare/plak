@@ -1234,6 +1234,9 @@ The native musl qualification script selects the environment's compiler/linker
 and defaults to rust-lld for static PIE as described in §6.1. A
 contributor who wants faster Linux links configures `clang` plus `mold` for
 `x86_64-unknown-linux-gnu` in their own Cargo configuration, outside the tree.
+Warning denial appends `-D warnings` to those configured rustflags instead of
+replacing them, so the linker stays on every group that denies warnings
+(chapter 05 §1).
 
 ### 6.5 Publishing the cohort
 

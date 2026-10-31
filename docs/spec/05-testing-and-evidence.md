@@ -689,10 +689,22 @@ the same per-package resolutions with clippy, all targets included, so a lint
 or a test that compiles only in a package's own default closure (a constant
 gated behind a feature its default build lacks, a test helper only a
 feature-gated test uses) fails there too.
-`-D warnings` is appended to the rustflags Cargo will actually pass
-(`CARGO_TARGET_<triple>_RUSTFLAGS` when that variable is set, otherwise
-`RUSTFLAGS`) and is not exported to later steps, so the all-features test
-artifacts are not rebuilt. Registry dependencies stay `--cap-lints allow`. A
+`-D warnings` is appended to the rustflags Cargo will actually pass. Cargo
+keeps one source, in order: `CARGO_ENCODED_RUSTFLAGS`, `RUSTFLAGS`, then all
+matching `target.<triple>` and `target.<cfg>` rustflags including
+`CARGO_TARGET_<triple>_RUSTFLAGS`, then `build.rustflags`.
+`CARGO_ENCODED_RUSTFLAGS`, when set, is extended with the encoded flag.
+Otherwise `RUSTFLAGS`, when set, is extended and still replaces configured
+rustflags, matching Cargo. Otherwise `CARGO_TARGET_<triple>_RUSTFLAGS`, when
+set, is extended; it merges with the file's matching target rustflags and
+ranks below those two variables. When none of those variables is set, that
+build's `RUSTFLAGS` are the configured `target.<triple>.rustflags` and
+matching `target.<cfg>.rustflags`, or else `build.rustflags` (the file value plus
+`CARGO_BUILD_RUSTFLAGS`, which Cargo merges after it), plus
+`-D warnings`. The addition is not exported to later steps, so the
+all-features test artifacts are not rebuilt. A linker configured in Cargo's
+rustflags therefore stays on the builds and variants groups.
+Registry dependencies stay `--cap-lints allow`. A
 warning that exists only in a default or maintainer closure, and is hidden from
 `--all-features` clippy, fails this group.
 

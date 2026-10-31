@@ -147,28 +147,278 @@ PY_WORKER
   trap - EXIT
 }
 
-# Deny rustc warnings on one build. Cargo ignores RUSTFLAGS when
-# CARGO_TARGET_<triple>_RUSTFLAGS is set, so -D warnings is appended to
-# whichever variable this invocation actually passes through. The addition is
-# process-local: the all-features test build keeps its own artifact set.
-# Registry crates are capped at allow; only workspace crates fail closed.
+# Rustflags Cargo would take from config for this triple, space-separated.
+# Empty when none are configured. Cargo keeps a single rustflags source, so a
+# later `RUSTFLAGS=-D warnings` would drop a configured linker; callers copy
+# this value into that variable instead. The same config path is read once.
+# `CARGO_BUILD_RUSTFLAGS` merges with the file's `build.rustflags`, as Cargo does.
+configured_rustflags() {
+  python3 - "$1" "$PWD" <<'PY'
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:
+    raise SystemExit("python 3.11+ is required to read Cargo rustflags")
+
+triple, cwd = sys.argv[1], Path(sys.argv[2])
+
+def load(path):
+    try:
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+def flags_of(table):
+    if not isinstance(table, dict) or "rustflags" not in table:
+        return None
+    value = table["rustflags"]
+    if isinstance(value, str):
+        return value.split()
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return list(value)
+    raise SystemExit(f"rustflags must be a string or array of strings, not {value!r}")
+
+def configs():
+    found = []
+    seen = set()
+
+    def consider(path):
+        if not path.is_file():
+            return
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        found.append(load(path))
+
+    home = os.environ.get("CARGO_HOME")
+    if not home:
+        user = os.environ.get("HOME")
+        home = str(Path(user) / ".cargo") if user else ""
+    if home:
+        directory = Path(home)
+        toml = directory / "config.toml"
+        legacy = directory / "config"
+        if toml.is_file():
+            consider(toml)
+        elif legacy.is_file():
+            consider(legacy)
+    ancestors = []
+    current = cwd
+    while True:
+        ancestors.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for directory in reversed(ancestors):
+        cargo = directory / ".cargo"
+        toml = cargo / "config.toml"
+        legacy = cargo / "config"
+        if toml.is_file():
+            consider(toml)
+        elif legacy.is_file():
+            consider(legacy)
+    return found
+
+def rustc_cfg():
+    if not triple:
+        return set(), {}
+    result = subprocess.run(
+        ["rustc", "--target", triple, "--print", "cfg"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    atoms, pairs = set(), {}
+    if result.returncode != 0:
+        return atoms, pairs
+    for line in result.stdout.splitlines():
+        if "=" not in line:
+            atoms.add(line.strip())
+            continue
+        key, value = line.split("=", 1)
+        pairs[key.strip()] = value.strip().strip('"')
+    return atoms, pairs
+
+class Parser:
+    def __init__(self, text):
+        self.text = text
+        self.index = 0
+
+    def parse(self):
+        self.skip()
+        if not self.take("cfg"):
+            raise SystemExit(f"target rustflags key must be cfg(...): {self.text}")
+        self.skip()
+        self.expect("(")
+        node = self.expr()
+        self.expect(")")
+        self.skip()
+        if self.index != len(self.text):
+            raise SystemExit(f"unparsed target cfg: {self.text}")
+        return node
+
+    def expr(self):
+        self.skip()
+        if self.take("all"):
+            return ("all", self.group())
+        if self.take("any"):
+            return ("any", self.group())
+        if self.take("not"):
+            self.skip()
+            self.expect("(")
+            node = self.expr()
+            self.expect(")")
+            return ("not", node)
+        name = self.ident()
+        self.skip()
+        if self.take("="):
+            self.skip()
+            return ("eq", name, self.string())
+        return ("atom", name)
+
+    def group(self):
+        self.skip()
+        self.expect("(")
+        nodes = []
+        while True:
+            nodes.append(self.expr())
+            self.skip()
+            if self.take(","):
+                continue
+            break
+        self.expect(")")
+        return nodes
+
+    def ident(self):
+        start = self.index
+        while self.index < len(self.text) and (self.text[self.index].isalnum() or self.text[self.index] == "_"):
+            self.index += 1
+        if start == self.index:
+            raise SystemExit(f"expected cfg identifier in {self.text}")
+        return self.text[start:self.index]
+
+    def string(self):
+        self.expect('"')
+        start = self.index
+        while self.index < len(self.text) and self.text[self.index] != '"':
+            self.index += 1
+        value = self.text[start:self.index]
+        self.expect('"')
+        return value
+
+    def expect(self, token):
+        if not self.take(token):
+            raise SystemExit(f"expected {token!r} in target cfg {self.text}")
+
+    def take(self, token):
+        if self.text.startswith(token, self.index):
+            self.index += len(token)
+            return True
+        return False
+
+    def skip(self):
+        while self.index < len(self.text) and self.text[self.index].isspace():
+            self.index += 1
+
+def matches(node, atoms, pairs):
+    kind = node[0]
+    if kind == "atom":
+        return node[1] in atoms
+    if kind == "eq":
+        return pairs.get(node[1]) == node[2]
+    if kind == "not":
+        return not matches(node[1], atoms, pairs)
+    if kind == "all":
+        return all(matches(child, atoms, pairs) for child in node[1])
+    if kind == "any":
+        return any(matches(child, atoms, pairs) for child in node[1])
+    raise SystemExit(f"unknown cfg form {node!r}")
+
+atoms, pairs = rustc_cfg()
+target_flags = []
+build_flags = []
+saw_target = False
+for document in configs():
+    target = document.get("target")
+    if isinstance(target, dict):
+        for key, table in target.items():
+            if not isinstance(key, str):
+                continue
+            selected = key == triple or (
+                key.startswith("cfg(") and matches(Parser(key).parse(), atoms, pairs)
+            )
+            if not selected:
+                continue
+            parsed = flags_of(table)
+            if parsed is None:
+                continue
+            saw_target = True
+            target_flags.extend(parsed)
+    build = document.get("build")
+    parsed = flags_of(build) if isinstance(build, dict) else None
+    if parsed:
+        build_flags.extend(parsed)
+# CARGO_BUILD_RUSTFLAGS is the env form of build.rustflags; Cargo merges it
+# after the file value. Target rustflags, including their env form, still win.
+build_env = os.environ.get("CARGO_BUILD_RUSTFLAGS")
+if build_env is not None:
+    build_flags = build_flags + build_env.split()
+chosen = target_flags if saw_target else build_flags
+if any(any(character.isspace() for character in flag) for flag in chosen):
+    raise SystemExit(
+        "configured rustflags contain whitespace; list them as separate strings so warning denial can keep them"
+    )
+sys.stdout.write(" ".join(chosen))
+PY
+}
+
+# Deny rustc warnings on one build. Cargo uses one rustflags source, in order:
+# CARGO_ENCODED_RUSTFLAGS, RUSTFLAGS, then all matching target.<triple> and
+# target.<cfg> rustflags including CARGO_TARGET_<triple>_RUSTFLAGS (that env
+# form merges with the file's target rustflags), then build.rustflags.
+# `-D warnings` is appended to the source Cargo will use. Copying configured
+# flags into RUSTFLAGS keeps a configured linker; the addition is process-local,
+# so the all-features test build keeps its own artifact set. Registry crates
+# are capped at allow; only workspace crates fail closed.
 run_build_denying_warnings() {
   local key="" triple="${CARGO_BUILD_TARGET:-}"
   if [[ -z "$triple" ]]; then triple="$(rustc -vV | sed -n 's/^host: //p' || true)"; fi
   if [[ -n "$triple" ]]; then
     key="CARGO_TARGET_$(printf '%s' "$triple" | tr '[:lower:]-' '[:upper:]_')_RUSTFLAGS"
   fi
-  if [[ -n "$key" && -n "${!key+x}" ]]; then
+  if [[ -n "${CARGO_ENCODED_RUSTFLAGS+x}" ]]; then
+    env "CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS}"$'\x1f'"-D"$'\x1f'"warnings" "$@"
+  elif [[ -n "${RUSTFLAGS+x}" ]]; then
+    if [[ -n "$RUSTFLAGS" ]]; then
+      env "RUSTFLAGS=${RUSTFLAGS} -D warnings" "$@"
+    else
+      env RUSTFLAGS="-D warnings" "$@"
+    fi
+  elif [[ -n "$key" && -n "${!key+x}" ]]; then
     local current="${!key}"
     if [[ -n "$current" ]]; then
       env "$key=$current -D warnings" "$@"
     else
       env "$key=-D warnings" "$@"
     fi
-  elif [[ -n "${RUSTFLAGS:-}" ]]; then
-    env "RUSTFLAGS=${RUSTFLAGS} -D warnings" "$@"
   else
-    env RUSTFLAGS="-D warnings" "$@"
+    local configured=""
+    configured="$(configured_rustflags "$triple")"
+    if [[ -n "$configured" ]]; then
+      env "RUSTFLAGS=${configured} -D warnings" "$@"
+    else
+      env RUSTFLAGS="-D warnings" "$@"
+    fi
   fi
 }
 
