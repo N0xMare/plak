@@ -372,6 +372,7 @@ pub fn build_host_config(
                 ready_path: product_host::ReadyPathTiming::default(),
                 seed_history: None,
                 source_releases: product_host::SourceReleases::default(),
+                continuation: crate::environment::take_reload_continuation(),
             });
         }
         plakous_hosted::binding::AttachRoute::NativeOauth { provider, .. } => provider,
@@ -487,5 +488,6 @@ pub fn build_host_config(
         ready_path: product_host::ReadyPathTiming::default(),
         seed_history: None,
         source_releases: product_host::SourceReleases::default(),
+        continuation: crate::environment::take_reload_continuation(),
     })
 }

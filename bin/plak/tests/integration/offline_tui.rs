@@ -2571,6 +2571,211 @@ fn a_binding_carry_counts_the_finished_sub_agents_it_does_not_restore() {
     terminal.quit();
 }
 
+/// Opts the fixture home into reload requests.
+fn enable_reload_requests(fixture: &Fixture) {
+    let path = fixture.home().join("config.toml");
+    let config = std::fs::read_to_string(&path).unwrap();
+    write_private(&path, &format!("{config}\n[tui]\nreload_requests = true\n"));
+}
+
+/// What the agent's shell would run: `plak` on its PATH is the installed build.
+fn ask_reload(fixture: &Fixture, session: &str, binary: &str) -> std::process::Output {
+    let installed_path = format!(
+        "{}:{}",
+        fixture.root.join("real-bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    Command::new(env!("CARGO_BIN_EXE_plak"))
+        .args(["session", "reload", session, "--expect-binary", binary])
+        .current_dir(fixture.workspace())
+        .env_clear()
+        .env("PATH", &installed_path)
+        .env("HOME", fixture.root.join("fake-home"))
+        .env("TMPDIR", fixture.root.join("tmp"))
+        .env("PLAK_HOME", fixture.home())
+        .env("PLAK_TEST_MODEL", "offline-loopback-v1")
+        .env("PLAK_TEST_SCRIPT", fixture.script())
+        .env("PLAK_TEST_EVIDENCE", fixture.evidence())
+        .output()
+        .expect("reload request")
+}
+
+/// The running binary's id, as `version --reload-probe` reports it.
+fn running_binary_id(fixture: &Fixture) -> String {
+    let probe = fixture.cli(&["version", "--reload-probe"]);
+    let probe: Value = serde_json::from_slice(&probe.stdout).expect("reload probe json");
+    probe["binary_id"].as_str().expect("binary id").to_owned()
+}
+
+/// Asks until the host has announced itself (on its installed-build check,
+/// every 5 s), then returns the outcome file the request names.
+fn ask_reload_until_announced(fixture: &Fixture, session: &str, binary: &str) -> PathBuf {
+    let deadline = Instant::now() + WAIT;
+    let accepted = loop {
+        let output = ask_reload(fixture, session, binary);
+        if output.status.success() {
+            break output;
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains("not open in an interactive plak") && Instant::now() < deadline,
+            "{stderr}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let stdout = String::from_utf8(accepted.stdout).unwrap();
+    PathBuf::from(
+        stdout
+            .trim()
+            .rsplit_once("outcome: ")
+            .expect("outcome path")
+            .1,
+    )
+}
+
+fn wait_for_outcome(path: &Path) -> Value {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if let Ok(bytes) = std::fs::read(path) {
+            break serde_json::from_slice::<Value>(&bytes).expect("outcome json");
+        }
+        assert!(Instant::now() < deadline, "no outcome was written");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The session's own shell asks its interactive host to reload onto the
+/// installed build: refused for any other build id, performed at the next idle
+/// boundary, and finished by a host-authored continuation the new build posts.
+#[test]
+fn a_requested_reload_lands_on_the_named_build_and_wakes_the_root() {
+    let fixture = Fixture::new(&tool_then_answer("the answer around the reload"));
+    enable_reload_requests(&fixture);
+    let fake_bin = fixture.root.join("fake-bin-request");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    terminal.send(b"answer before the requested reload\r");
+    terminal.wait_screen("the answer around the reload");
+    terminal.wait_absent("Esc stop");
+    let session = fixture.session_ids()[0].clone();
+    let binary = running_binary_id(&fixture);
+    let refused = ask_reload(&fixture, &session, "not-the-installed-build");
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains(&format!(
+            "this plak is build {binary}, not not-the-installed-build"
+        )),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    let outcome = ask_reload_until_announced(&fixture, &session, &binary);
+    // The new build's host-authored continuation is a hidden host wake; the
+    // root answering it again is what shows.
+    terminal.wait_where("the root answering the continuation", |frame| {
+        frame.matches("the answer around the reload").count() >= 2
+    });
+    let written = wait_for_outcome(&outcome);
+    assert_eq!(written["outcome"], "reloaded");
+    assert_eq!(written["binary"], binary.as_str());
+    assert_eq!(written["session"], session.as_str());
+    assert_eq!(fixture.session_ids(), [session]);
+    terminal.quit();
+}
+
+/// The installed build reports another state key: the requester still finds
+/// the session through the key-independent channel, the host carries it, and
+/// the destination completes the request it was handed for the successor.
+#[test]
+fn a_requested_reload_onto_another_state_key_carries_and_wakes_the_successor() {
+    let fixture = Fixture::new(&tool_then_answer("the answer across the key"));
+    enable_reload_requests(&fixture);
+    let fake_bin = fixture.root.join("fake-bin-other-key");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    let real = fixture.root.join("real-bin").join("plak");
+    // The fake installed build answers its probes under another state key and
+    // otherwise is this binary.
+    write_script_file(
+        &fake_bin.join("plak"),
+        &format!(
+            "#!/bin/sh\n\
+             if [ \"$1 $2\" = 'version --state-key' ]; then echo 'r99.e99.p99.t99'; exit 0; fi\n\
+             if [ \"$1 $2\" = 'version --reload-probe' ]; then '{real}' \"$@\" | sed 's/\"state_key\":\"[^\"]*\"/\"state_key\":\"r99.e99.p99.t99\"/'; exit 0; fi\n\
+             exec '{real}' \"$@\"\n",
+            real = real.display()
+        ),
+    );
+    terminal.send(b"answer before the carried reload\r");
+    terminal.wait_screen("the answer across the key");
+    terminal.wait_absent("Esc stop");
+    let source = fixture.session_ids()[0].clone();
+    let binary = running_binary_id(&fixture);
+    let outcome = ask_reload_until_announced(&fixture, &source, &binary);
+    let written = wait_for_outcome(&outcome);
+    assert_eq!(written["outcome"], "reloaded", "{written}");
+    assert_eq!(written["binary"], binary.as_str());
+    let successor = written["session"].as_str().expect("successor").to_owned();
+    assert_ne!(successor, source, "the reload carried");
+    terminal.wait_where("the successor answering the continuation", |frame| {
+        frame.contains(&format!("session {}", &successor[..8]))
+            && frame.contains("the answer across the key")
+    });
+    assert!(fixture.session_ids().contains(&successor));
+    terminal.quit();
+}
+
+/// A live sub-agent at the idle boundary refuses a requested reload instead
+/// of waiting: the transcript and the requester's outcome both say so.
+#[test]
+fn a_requested_reload_is_refused_while_a_sub_agent_runs() {
+    let spawn = tree_turn_script()["steps"][0].clone();
+    let fixture = Fixture::new(&json!({
+        "version": 1, "tree": true, "durable_tree": true,
+        "child_hold_ms": 60_000, "repeat_last_step": true,
+        "steps": [spawn, {"output": {"text": "a child is still running"}}]
+    }));
+    enable_subagents(&fixture);
+    enable_reload_requests(&fixture);
+    let fake_bin = fixture.root.join("fake-bin-live-child");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    terminal.send(b"start a child and stop\r");
+    terminal.wait_screen("a child is still running");
+    terminal.wait_absent("Esc stop");
+    let binary = running_binary_id(&fixture);
+    // The root's host is the one that announces itself.
+    let channel = fixture.home().join("run").join("reload-requests");
+    let deadline = Instant::now() + WAIT;
+    let source = loop {
+        let announced = std::fs::read_dir(&channel).ok().and_then(|entries| {
+            entries.flatten().find_map(|entry| {
+                let name = entry.file_name().into_string().ok()?;
+                name.strip_suffix(".listener").map(str::to_owned)
+            })
+        });
+        if let Some(session) = announced {
+            break session;
+        }
+        assert!(Instant::now() < deadline, "the host never announced itself");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let outcome = ask_reload_until_announced(&fixture, &source, &binary);
+    let written = wait_for_outcome(&outcome);
+    assert_eq!(written["outcome"], "refused", "{written}");
+    assert!(
+        written["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("sub-agents are still running")),
+        "{written}"
+    );
+    terminal.wait_screen("requested reload refused");
+    assert!(terminal.is_alive());
+    terminal.quit();
+}
+
 fn assert_same_key_reload_starts_installed_build(changed_orchestration: bool) {
     let fixture = Fixture::new(&tool_then_answer("same-key answer"));
     let key = Command::new(env!("CARGO_BIN_EXE_plak"))

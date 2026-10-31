@@ -185,6 +185,7 @@ pub fn run_actual_host(
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),
+            continuation: None,
         },
         internal,
         actions,

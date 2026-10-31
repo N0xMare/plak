@@ -60,6 +60,8 @@ pub(crate) struct ReloadTarget {
     /// The destination's exact-reopen verdict for a same-key reload; `None`
     /// when it was not asked, did not answer in time, or predates the question.
     pub(crate) reopen: Option<Box<ReopenProbe>>,
+    /// The session's own reload request this reload performs, if any.
+    pub(crate) request: Option<Box<crate::reload_request::ReloadRequest>>,
 }
 
 impl ReloadTarget {
@@ -127,6 +129,7 @@ fn probe_reload_target_with_timeout(
             state_key: None,
             probe: None,
             reopen: None,
+            request: None,
         };
     };
     let probe = Some(output)
@@ -144,6 +147,7 @@ fn probe_reload_target_with_timeout(
         state_key,
         probe,
         reopen: None,
+        request: None,
     }
 }
 
@@ -632,7 +636,7 @@ impl super::ReloadHandoff {
         session_id: &str,
         command: &mut std::process::Command,
     ) -> Result<Option<PathBuf>, String> {
-        if self.cause.is_none() && self.profile.is_none() {
+        if self.cause.is_none() && self.profile.is_none() && self.request.is_none() {
             return Ok(None);
         }
         let path = self.write(paths, session_id)?;

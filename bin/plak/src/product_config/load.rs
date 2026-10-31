@@ -214,6 +214,8 @@ pub struct ProductConfig {
     pub group_tool_calls: bool,
     /// `[tui] reduced_motion`: suppress spinner, pulse and camera easing.
     pub reduced_motion: bool,
+    /// `[tui] reload_requests`: accept same-user reload requests (home-scoped).
+    pub reload_requests: bool,
     pub theme: ProductTheme,
     pub compaction_enabled: bool,
     pub telemetry_max_bytes: u64,
@@ -256,6 +258,7 @@ impl PartialEq for ProductConfig {
             && self.show_thinking == other.show_thinking
             && self.group_tool_calls == other.group_tool_calls
             && self.reduced_motion == other.reduced_motion
+            && self.reload_requests == other.reload_requests
             && self.theme == other.theme
             && self.compaction_enabled == other.compaction_enabled
             && self.telemetry_max_bytes == other.telemetry_max_bytes
@@ -559,6 +562,7 @@ impl ProductConfig {
             ConfigField::ShowThinking => self.show_thinking = source.show_thinking,
             ConfigField::GroupToolCalls => self.group_tool_calls = source.group_tool_calls,
             ConfigField::ReducedMotion => self.reduced_motion = source.reduced_motion,
+            ConfigField::ReloadRequests => self.reload_requests = source.reload_requests,
             ConfigField::CompactionEnabled => {
                 self.compaction_enabled = source.compaction_enabled;
             }
@@ -666,6 +670,7 @@ impl ProductConfig {
             show_thinking: true,
             group_tool_calls: true,
             reduced_motion: false,
+            reload_requests: false,
             theme: ProductTheme::DefaultDark,
             compaction_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
@@ -941,6 +946,7 @@ impl ProductConfig {
             ConfigField::ShowThinking => Value::from(self.show_thinking),
             ConfigField::GroupToolCalls => Value::from(self.group_tool_calls),
             ConfigField::ReducedMotion => Value::from(self.reduced_motion),
+            ConfigField::ReloadRequests => Value::from(self.reload_requests),
             ConfigField::CompactionEnabled => Value::from(self.compaction_enabled),
             // A TOML integer is an `i64`; the two retention bounds are held as
             // `u64` for the store and can only have come from one.
@@ -1444,6 +1450,7 @@ impl ProductConfig {
             ConfigField::ShowThinking => self.show_thinking = value.boolean()?,
             ConfigField::GroupToolCalls => self.group_tool_calls = value.boolean()?,
             ConfigField::ReducedMotion => self.reduced_motion = value.boolean()?,
+            ConfigField::ReloadRequests => self.reload_requests = value.boolean()?,
             ConfigField::CompactionEnabled => self.compaction_enabled = value.boolean()?,
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = parse_positive(key.path, value)?;

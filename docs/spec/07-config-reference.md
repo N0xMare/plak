@@ -61,8 +61,8 @@ source as a warning.
 global `root.agent` or `working_set` name must name a **global** template — a
 project file can never satisfy a reference the global home made. A trusted
 `project/.plak/config.toml` then overrides only the keys it carries, except
-`[orchestration]`, `turn.auto_continue` and `mcp.client_id_metadata_url`:
-those controls are home-scoped. Project orchestration
+`[orchestration]`, `turn.auto_continue`, `tui.reload_requests` and
+`mcp.client_id_metadata_url`: those controls are home-scoped. Project orchestration
 values are ignored with a warning, and their displayed origins remain user
 or default. The entire file still must satisfy TOML syntax and schema validation;
 invalid values are load errors even in a home-scoped section.
@@ -200,6 +200,7 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 | `tui.show_thinking` | bool | `true` | subject to the provider's reasoning policy | Render reasoning blocks where the provider admits them. |
 | `tui.group_tool_calls` | bool | `true` | — | Collapse consecutive tool activities to a summary when assistant prose resumes; false keeps action lines visible. |
 | `tui.reduced_motion` | bool | `false` | — | Suppress the spinner, the pulse and camera easing. |
+| `tui.reload_requests` | bool | `false` | true or false; home-scoped | Let this user's own processes, including an agent's shell, ask a running interactive session to reload onto the installed build (plak session reload <session> --expect-binary <id>) at its next idle boundary. Takes effect when a session next attaches. |
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |

@@ -130,6 +130,10 @@ group_tool_calls = true
 # type: bool · default: false
 reduced_motion = false
 
+# Let this user's own processes, including an agent's shell, ask a running interactive session to reload onto the installed build (plak session reload <session> --expect-binary <id>) at its next idle boundary. Takes effect when a session next attaches.
+# type: bool · default: false · true or false; home-scoped
+reload_requests = false
+
 # Automatic transcript compaction.
 [compaction]
 

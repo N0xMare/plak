@@ -229,6 +229,7 @@ impl TuiAttacher for OfflineAttacher {
             ready_path: crate::product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
+            continuation: None,
         });
         if let Err(error) = &attached {
             let _ = std::fs::write(paths.home().join("pty-attach-error.txt"), error.message());
@@ -1696,6 +1697,7 @@ fn host_config(
         ready_path: crate::product_host::ReadyPathTiming::default(),
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
+        continuation: None,
     }
 }
 

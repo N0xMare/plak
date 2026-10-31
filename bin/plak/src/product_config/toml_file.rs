@@ -109,6 +109,7 @@ struct TuiSection {
     show_thinking: Entry,
     group_tool_calls: Entry,
     reduced_motion: Entry,
+    reload_requests: Entry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +236,7 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
         assign("tui.show_thinking", &section.show_thinking)?;
         assign("tui.group_tool_calls", &section.group_tool_calls)?;
         assign("tui.reduced_motion", &section.reduced_motion)?;
+        assign("tui.reload_requests", &section.reload_requests)?;
     }
     if let Some(section) = &file.compaction {
         assign("compaction.enabled", &section.enabled)?;

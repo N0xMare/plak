@@ -162,6 +162,7 @@ pub(super) fn launch_basic() -> TuiLaunch {
         usage_decoration: None,
         time_zone: &crate::tui::UTC_ZONE,
         opening_note: None,
+        reload_home: None,
     }
 }
 

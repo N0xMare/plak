@@ -584,6 +584,8 @@ fn prepare_tui_launch(
         });
     }
 
+    crate::reload_request::complete_handoff(&paths, &record, resume);
+
     let initial_cfg = product_config::ProductConfig::load(&paths)
         .map_err(|error| CliFailure::new(format!("invalid product config: {error}")))?;
     for warning in &initial_cfg.warnings {
@@ -847,6 +849,7 @@ fn run_tui_rounds(
                 .pending_note
                 .take()
                 .or_else(|| declined_resume_round.then(|| tui::DECLINED_RESUME_NOTE.to_owned())),
+            reload_home: Some(paths.clone()),
         };
 
         let ready_catalog = plakous_host_protocol::views::ReadyCatalog::new(model_sections.clone());
@@ -1461,6 +1464,7 @@ fn reload_installed_plak(
     let mut carry_file = None;
     let mut unverified = None;
     let mut handoff = carry::ReloadHandoff::default();
+    handoff.request = target.request.map(|request| *request);
     match plan {
         carry::ReloadPlan::Fresh => {}
         carry::ReloadPlan::Resume => {}

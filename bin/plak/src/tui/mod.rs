@@ -173,6 +173,10 @@ pub struct TuiLaunch {
     /// default, and the operator must read why the session they are looking at
     /// is not the one they were choosing between.
     pub opening_note: Option<String>,
+    /// The product home whose reload-request channel this session announces
+    /// itself on (spec 02 §5.1), stated by the composition root; `None`
+    /// keeps the channel closed.
+    pub(crate) reload_home: Option<crate::home::paths::PlakPaths>,
 }
 
 /// UTC, the zone a launch reads dates in unless the product names another.
@@ -204,6 +208,7 @@ impl Default for TuiLaunch {
             usage_decoration: None,
             time_zone: &UTC_ZONE,
             opening_note: None,
+            reload_home: None,
         }
     }
 }
@@ -527,6 +532,7 @@ mod tests_entry {
             usage_decoration: None,
             time_zone: &super::UTC_ZONE,
             opening_note: None,
+            reload_home: None,
         };
         assert_eq!(launch().session_id.as_deref(), Some("test-session"));
 

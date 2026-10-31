@@ -462,6 +462,7 @@ fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
         ready_path: ReadyPathTiming::default(),
         seed_history: None,
         source_releases: SourceReleases::default(),
+        continuation: None,
     };
     let shell_host = test_kit::doubles_shell_host();
     let (actions, events, worker) = spawn_deferred_tui_host(move || TuiHostPreparation {

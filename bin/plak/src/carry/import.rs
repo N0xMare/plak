@@ -180,9 +180,7 @@ pub(crate) fn import_and_resume(
     path: &Path,
     handoff: Option<&Path>,
 ) -> CliResult<ProcessOutcome> {
-    let handoff = handoff
-        .and_then(|handoff| super::ReloadHandoff::take(handoff, services.paths().ok()?.home()))
-        .unwrap_or_default();
+    let handoff = super::take_reload_handoff(services, handoff);
     let document = read_document(path).map_err(|failure| {
         CliFailure::new(format!(
             "could not carry the session forward: {failure}; the export is kept at {}",

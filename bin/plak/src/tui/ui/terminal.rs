@@ -716,6 +716,7 @@ pub(super) fn run_app(
         if let Some(cause) = app.pending_rebind.take() {
             request_terminal_handoff(&mut app, actions, TuiHandoff::Rebind { cause });
         }
+        app.service_reload_request();
         if std::mem::take(&mut app.pending_reload) {
             // Asked while the session is still attached: once the handoff
             // starts there is nothing left to show a slow answer on.

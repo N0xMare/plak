@@ -657,6 +657,10 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// (`SourceReleases::default()`). Switch-back joins that source's release;
     /// host exit joins every outstanding release under one bounded deadline.
     pub source_releases: SourceReleases,
+    /// A host-authored continuation the root receives at its first idle
+    /// boundary, through the same durable host-wake submission as an idle
+    /// wake (a reload the session requested posts one). Taken once.
+    pub continuation: Option<String>,
 }
 
 /// What an exact reopen of a session's head would do on this build.

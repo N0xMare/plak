@@ -25,7 +25,7 @@ pub(crate) use document::{
 };
 
 pub(crate) use export::{export_session, new_carry_file};
-pub(crate) use handoff::ReloadHandoff;
+pub(crate) use handoff::{ReloadHandoff, take_reload_handoff};
 pub(crate) use reload::{
     CarryCapacityProbe, ReloadProbe, ReopenProbe, reload_probe, reopen_credential_gate,
     reopen_probe,

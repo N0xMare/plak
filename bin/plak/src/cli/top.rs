@@ -204,6 +204,7 @@ impl TopCommand {
             ),
             Self::Resume { session } => Ok(Command::Resume {
                 session_id: session,
+                handoff: None,
             }),
             #[cfg(feature = "maintainer")]
             Self::Fork { session: None, .. } => Ok(Command::CommandHelp {

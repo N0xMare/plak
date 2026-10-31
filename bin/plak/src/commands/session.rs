@@ -22,7 +22,7 @@ pub(crate) use delete::{delete_session, gc_sessions};
 
 pub(crate) use import_export::{
     PreparedImport, export_session, import_document, import_prepared, import_reload_handoff,
-    import_session,
+    import_session, request_reload,
 };
 
 pub use lookup::load_exact_product_session;

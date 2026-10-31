@@ -1,7 +1,7 @@
 //! The private sidecar a reloading build leaves for the build it starts.
 //!
-//! It carries what the export document does not: why a reload carried and
-//! the profile the session ran. The old build writes it 0600 under the home's
+//! It carries what the export document does not: why a reload carried, the
+//! profile the session ran and the reload request it completes. The old build writes it 0600 under the home's
 //! private carry directory and names it with the hidden `--reload-handoff
 //! <path>` argument (the writer is the interactive reload's); the destination
 //! reads it once and deletes it. It is never part of the export document, and a
@@ -28,6 +28,10 @@ pub(crate) struct ReloadHandoff {
     /// freezes instead of the home default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) profile: Option<crate::profiles::SessionSelection>,
+    /// The reload request the session asked for, which the destination
+    /// completes; it is honored only when well formed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) request: Option<crate::reload_request::ReloadRequest>,
 }
 
 impl Default for ReloadHandoff {
@@ -36,6 +40,7 @@ impl Default for ReloadHandoff {
             version: VERSION,
             cause: None,
             profile: None,
+            request: None,
         }
     }
 }
@@ -54,12 +59,28 @@ impl ReloadHandoff {
     }
 
     fn bounded(mut self) -> Self {
+        self.request = self
+            .request
+            .filter(crate::reload_request::ReloadRequest::is_valid);
         self.cause = self.cause.as_deref().and_then(|cause| {
             let line = cause.lines().next()?.trim();
             (!line.is_empty()).then(|| line.chars().take(MAX_CAUSE_CHARS).collect())
         });
         self
     }
+}
+
+/// Reads the sidecar a reload named on this process's argv, if any, and keeps
+/// its reload request for the first attach to complete.
+pub(crate) fn take_reload_handoff(
+    services: &crate::shell::services::Services,
+    path: Option<&Path>,
+) -> ReloadHandoff {
+    let mut handoff = path
+        .and_then(|path| ReloadHandoff::take(path, services.paths().ok()?.home()))
+        .unwrap_or_default();
+    crate::reload_request::accept_handoff(handoff.request.take());
+    handoff
 }
 
 /// Opens `path` without following a link and validates the opened file, so

@@ -113,6 +113,7 @@ pub(crate) fn product_injected_attached_host(
         ready_path: ReadyPathTiming::default(),
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
+        continuation: None,
     };
     (config, injection, paths)
 }
@@ -894,6 +895,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
         ready_path: ReadyPathTiming::default(),
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
+        continuation: None,
     };
     let (event_tx, _event_rx) = surface_protocol::host_event_channel();
     let events = Sender::over(event_tx);

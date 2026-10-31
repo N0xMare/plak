@@ -1127,6 +1127,9 @@ impl OfflineSelection {
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),
+            continuation: (face == OfflineFace::Attached)
+                .then(crate::environment::take_reload_continuation)
+                .flatten(),
         })
     }
 }

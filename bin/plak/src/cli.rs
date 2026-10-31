@@ -33,6 +33,37 @@ fn split_reload_handoff(values: &[String]) -> (&[String], Option<std::path::Path
     }
 }
 
+/// `plak --resume [uuid]` and the hidden `plak --import-resume <file>` that
+/// `/reload` onto a build with another state key execs, each optionally
+/// followed by the hidden `--reload-handoff <file>`.
+fn resume_command(values: &[String]) -> Option<Result<Command, String>> {
+    let (values, handoff) = split_reload_handoff(values);
+    Some(match values.first().map(String::as_str)? {
+        "--import-resume" => match values {
+            [_, path] if !path.starts_with('-') => Ok(Command::ImportResume {
+                path: path.into(),
+                handoff,
+            }),
+            _ => Err("plak --import-resume takes exactly one export file".to_owned()),
+        },
+        "--resume" => match values {
+            [_] if handoff.is_none() => Ok(Command::Resume {
+                session_id: None,
+                handoff: None,
+            }),
+            [_, session_id] if !session_id.starts_with('-') => Ok(Command::Resume {
+                session_id: Some(session_id.clone()),
+                handoff,
+            }),
+            [_, option] if option.starts_with('-') => Err(
+                "unknown option for `plak --resume`; expected an optional session UUID".to_owned(),
+            ),
+            _ => Err("plak --resume accepts at most one session UUID".to_owned()),
+        },
+        _ => return None,
+    })
+}
+
 pub(super) fn parse_with_image_capability(
     arguments: impl IntoIterator<Item = OsString>,
     images_available: Result<(), plakous_hosted::capabilities::CapabilityUnavailable>,
@@ -64,7 +95,10 @@ pub(super) fn parse_with_image_capability(
             return Ok(Command::Version);
         }
         [single] if single == "--resume" => {
-            return Ok(Command::Resume { session_id: None });
+            return Ok(Command::Resume {
+                session_id: None,
+                handoff: None,
+            });
         }
         _ => {}
     }
@@ -92,33 +126,8 @@ pub(super) fn parse_with_image_capability(
         });
     }
 
-    // Hidden: `/reload` onto a build with another state key execs
-    // `plak --import-resume <file>`.
-    if values.first().map(String::as_str) == Some("--import-resume") {
-        let (values, handoff) = split_reload_handoff(&values);
-        return match values {
-            [_, path] if !path.starts_with('-') => Ok(Command::ImportResume {
-                path: path.into(),
-                handoff,
-            }),
-            _ => Err("plak --import-resume takes exactly one export file".to_owned()),
-        }
-        .map_err(usage);
-    }
-
-    // `plak --resume [uuid]`
-    if values.first().map(String::as_str) == Some("--resume") {
-        return match values.as_slice() {
-            [_] => Ok(Command::Resume { session_id: None }),
-            [_, session_id] if !session_id.starts_with('-') => Ok(Command::Resume {
-                session_id: Some(session_id.clone()),
-            }),
-            [_, option] if option.starts_with('-') => Err(
-                "unknown option for `plak --resume`; expected an optional session UUID".to_owned(),
-            ),
-            _ => Err("plak --resume accepts at most one session UUID".to_owned()),
-        }
-        .map_err(usage);
+    if let Some(resume) = resume_command(&values) {
+        return resume.map_err(usage);
     }
 
     let cli = Cli::try_parse_from(values.iter().map(String::as_str)).map_err(|error| {
@@ -737,6 +746,13 @@ enum SessionAction {
         #[arg(long, action = ArgAction::SetTrue)]
         all: bool,
     },
+    /// Ask a running interactive session to reload onto the installed build.
+    Reload {
+        id: Option<String>,
+        /// The installed build's binary id the reload must land on.
+        #[arg(long)]
+        expect_binary: Option<String>,
+    },
 }
 
 impl SessionAction {
@@ -761,6 +777,13 @@ impl SessionAction {
             #[cfg(feature = "maintainer")]
             Self::Rehearse { id } => Ok(Command::SessionRehearse { id }),
             Self::Export { id: Some(id), out } => Ok(Command::SessionExport { id, out }),
+            Self::Reload {
+                id: Some(id),
+                expect_binary: Some(expect_binary),
+            } => Ok(Command::SessionReloadRequest { id, expect_binary }),
+            Self::Reload { .. } => Ok(Command::CommandHelp {
+                command: "session".to_owned(),
+            }),
             Self::Import { path: Some(path) } => Ok(Command::SessionImport { path }),
             Self::Delete {
                 id: Some(id),

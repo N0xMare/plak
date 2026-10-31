@@ -33,6 +33,32 @@ pub(crate) fn export_session(
     writeln!(stdout, "{}", path.display()).map_err(|_| CliFailure::new("stdout failed"))
 }
 
+/// `plak session reload <id> --expect-binary <binary>`: queues one request
+/// that the interactive host running this session reloads onto the installed
+/// build at its next idle boundary, and prints where the outcome lands.
+pub(crate) fn request_reload(
+    services: &crate::shell::services::Services,
+    id: &str,
+    expect_binary: &str,
+    stdout: &mut dyn io::Write,
+) -> CliResult<()> {
+    // The announcement, not this build's store, locates the session: its host
+    // may run another state key.
+    let (session, outcome) = crate::reload_request::request(
+        services.paths()?,
+        id,
+        expect_binary,
+        crate::build_identity::binary_id(),
+    )
+    .map_err(CliFailure::new)?;
+    writeln!(
+        stdout,
+        "reload requested for session {session} onto build {expect_binary}; it runs when the session is idle; outcome: {}",
+        outcome.display()
+    )
+    .map_err(|_| CliFailure::new("stdout failed"))
+}
+
 /// Creates a new session from the export document at `path` and returns its
 /// record and the note that says where it came from. The document is left in
 /// place; the caller decides whether it is spent. A document whose session

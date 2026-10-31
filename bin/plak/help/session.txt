@@ -9,6 +9,7 @@ USAGE:
   plak session import <path>
   plak session delete <session> [--yes] [--abandon-children]
   plak session gc <session> | --all
+  plak session reload <session> --expect-binary <binary-id>
 
   show/log accept .cN to read only that child. Child log reads its canonical
   history, not the root event log; --kind filters its actor (e.g. user).
@@ -39,5 +40,12 @@ USAGE:
   home and finishes deletes an earlier crash interrupted; sub-agent runtime
   sessions are pruned by their own turns. Turns also reclaim their own history
   automatically once enough of it builds up.
+
+  reload asks a running interactive plak to reload that session onto the
+  installed build at its next idle boundary; it is refused unless the home
+  sets tui.reload_requests = true and this plak is build <binary-id> (the
+  session checks the installed build again). A full id or a unique prefix of
+  an announced session works under any state format. It prints the file the
+  outcome is written to and returns at once.
 
   Event logs: ~/.plak/state/<format key>/sessions/<session>.events.jsonl (agent-readable).

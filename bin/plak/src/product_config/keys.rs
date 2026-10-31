@@ -257,6 +257,8 @@ pub enum ConfigField {
     GroupToolCalls,
     /// `[tui] reduced_motion`.
     ReducedMotion,
+    /// `[tui] reload_requests`.
+    ReloadRequests,
     /// `[compaction] enabled`.
     CompactionEnabled,
     /// `[telemetry] max_bytes`.
@@ -282,6 +284,7 @@ impl ConfigField {
                 | Self::RequestsPerAccount
                 | Self::RequireReviewEvidence
                 | Self::McpClientIdMetadataUrl
+                | Self::ReloadRequests
         )
     }
 }
@@ -566,6 +569,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         kind: "bool",
         constraint: "",
         doc: "Suppress the spinner, the pulse and camera easing.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "tui.reload_requests",
+        field: ConfigField::ReloadRequests,
+        kind: "bool",
+        constraint: "true or false; home-scoped",
+        doc: "Let this user's own processes, including an agent's shell, ask a running interactive session to reload onto the installed build (plak session reload <session> --expect-binary <id>) at its next idle boundary. Takes effect when a session next attaches.",
         example: "false",
         scope: ConfigScope::Immediate,
     },

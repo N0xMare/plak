@@ -38,6 +38,8 @@ pub(crate) enum Command {
     },
     Resume {
         session_id: Option<String>,
+        /// The reload handoff sidecar the old build named (hidden).
+        handoff: Option<PathBuf>,
     },
     Fork {
         session_id: String,
@@ -104,6 +106,11 @@ pub(crate) enum Command {
         id: String,
         yes: bool,
         abandon_children: bool,
+    },
+    /// `plak session reload <id> --expect-binary <binary>`.
+    SessionReloadRequest {
+        id: String,
+        expect_binary: String,
     },
     /// `plak session gc <id>` or, with `None`, `plak session gc --all`.
     SessionGc {
@@ -308,6 +315,7 @@ impl Command {
             | Self::SessionImport { .. }
             | Self::SessionDelete { .. }
             | Self::SessionGc { .. }
+            | Self::SessionReloadRequest { .. }
             | Self::SessionLog { .. } => "session",
             #[cfg(feature = "maintainer")]
             Self::SessionRehearse { .. } => "session",
@@ -355,6 +363,7 @@ pub(crate) fn command_needs_product_state(command: &Command) -> bool {
             | Command::SessionImport { .. }
             | Command::SessionDelete { .. }
             | Command::SessionGc { .. }
+            | Command::SessionReloadRequest { .. }
             | Command::Fork { .. }
             | Command::Compact { .. }
             | Command::Usage {

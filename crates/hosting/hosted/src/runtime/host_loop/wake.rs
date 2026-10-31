@@ -225,6 +225,57 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         step
     }
 
+    /// Posts the host-authored continuation this host was started with, as a
+    /// root host wake: the same journaled submission, crash and reopen rules
+    /// as an idle wake. It waits while another submission is unresolved.
+    pub(super) fn continuation_prompt(&mut self) -> CliResult<HostStep> {
+        if self.recovery_blocked
+            || self.pending_start.is_some()
+            || self.config.session.queue_commands.has_pending()
+        {
+            return Ok(HostStep::Continue);
+        }
+        let Some(text) = self.config.continuation.take() else {
+            return Ok(HostStep::Continue);
+        };
+        // The same context preflight a wake runs, which a host-authored
+        // prompt's admission reads back.
+        match self.fit_child_wake(&text) {
+            Ok(WakeFit::Fits) => {}
+            Ok(WakeFit::Stopped(_)) => {
+                self.config.continuation = Some(text);
+                return Ok(HostStep::Continue);
+            }
+            Ok(WakeFit::DoesNotFit) | Err(_) => {
+                self.child_wake.prepared_context = None;
+                let _ = self.events.notice(TranscriptRow::warning(
+                    NoticeScope::Session,
+                    "the reload continuation could not be prepared; send a prompt to continue",
+                ));
+                return Ok(HostStep::Continue);
+            }
+        }
+        let mut candidate = self.config.session.clone();
+        let item = candidate
+            .enqueue_live(text.as_str())
+            .map_err(|_| CliFailure::new("the continuation was refused by the queue"))?;
+        self.config.session = super::super::result_mail::prepare_instruction(
+            &self.config.topology_rows(),
+            self.config.store.as_ref(),
+            &candidate,
+            &item,
+            &text,
+            None,
+            &["host-continuation".to_owned()],
+        )
+        .map_err(CliFailure::from)?;
+        Ok(HostStep::Prompt {
+            text: item.text.clone(),
+            queued_delivery: Some(item),
+            user_echoed: true,
+        })
+    }
+
     fn wake_deferred(&mut self) -> CliResult<HostStep> {
         self.publish_pending_continuation();
         Ok(HostStep::Continue)

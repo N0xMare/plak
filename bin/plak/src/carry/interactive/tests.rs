@@ -75,6 +75,7 @@ fn reload_probe_checks_config_and_carry_versions_before_handoff() {
         state_key: key.clone(),
         export_versions: IMPORTABLE_VERSIONS.to_vec(),
         config_error: Some("config.toml: unknown key; run `plak config edit`".into()),
+        binary_id: None,
     };
     fs::write(
         &executable,

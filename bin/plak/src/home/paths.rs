@@ -262,6 +262,14 @@ impl PlakPaths {
         Ok(true)
     }
 
+    /// Transient process state: announcements and requests between live
+    /// processes of this home. Never session authority, never a build's state,
+    /// so legacy-state reports and prunes never see it.
+    #[must_use]
+    pub fn run_dir(&self) -> PathBuf {
+        self.home.join("run")
+    }
+
     /// Parent of every build's state directory.
     #[must_use]
     pub fn state_root(&self) -> PathBuf {

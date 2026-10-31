@@ -158,6 +158,7 @@ impl TuiAttacher for CompactionAttacher {
             ready_path: crate::product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
+            continuation: None,
         })
         .map_err(|failure| failure.message().to_owned())
     }

@@ -239,6 +239,23 @@ with the full conversation and typed transcript. The handoff reports
 `N messages, ~T tokens; the first request rebuilds the prompt cache`. Every
 carry keeps the session's own profile (its root template and sub-agent cards).
 
+An agent, or any of your own processes, can ask a running session to reload
+once you set `tui.reload_requests = true` in `~/.plak/config.toml`:
+
+```text
+plak session reload <session> --expect-binary <binary-id>
+```
+
+It is refused unless the `plak` you run is exactly that build, and the
+session checks the installed build again before it reloads. The session
+notes the request and performs it when it is next idle (after the requesting
+turn ends); with sub-agents or background processes running it refuses
+instead. After the reload the new build tells the agent `Plak reloaded this
+session onto build <id> ...` so it continues. This works across an install
+that changed the state format: the session is carried and the agent is told
+which session it now runs in. The command prints the file the outcome is
+written to; a newer request for the same session replaces a waiting one.
+
 `/rebind` carries the full history into a new session under the current login,
 keeping the source account, model, effort, composition and target selection
 when they can still be resolved. A removed account or a model missing from a

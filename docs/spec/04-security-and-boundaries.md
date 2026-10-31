@@ -1277,11 +1277,66 @@ destination reads it once and deletes it, and treats one that is not a regular
 file this user owns, is group- or world-accessible, lies elsewhere, exceeds
 64 KiB or names another version as absent. Its fields are bounded and
 validated before use, and none grants authority the destination would not
-otherwise have: it can only name why a carry happened and which of the
-operator's own templates the successor freezes, which the destination resolves
-against the home's files as it would any profile. A same-user process
+otherwise have: it can only name why a carry happened, which of the
+operator's own templates the successor freezes (resolved against the home's
+files as any profile is), and which reload request the destination completes
+(§4.6). A same-user process
 could write such a file, but only a reload's own argument makes a build read
 it.
+
+### 4.6 Reload requests are a same-user local channel
+
+`plak session reload <session> --expect-binary <id>` lets a process ask a
+running interactive session to reload onto the installed build (chapter 02
+§5.1). The permission model is the product home's own boundary:
+
+- It is off unless the home's `config.toml` sets `tui.reload_requests = true`.
+  The key is home-scoped: a trusted project's configuration cannot turn it on.
+- The channel is files, not a listener: a 0700 `run/reload-requests/`
+  directory under the product home's transient `run/` directory, outside
+  `state/` and every state key's directory, owned by the user. `run/` holds
+  only process state between live processes, so no legacy-state notice,
+  report or prune lists or removes it. It holds the host's `<session>.listener`, one
+  `<session>.request` and `<request>.outcome` files, each 0600, published by
+  rename and carrying a `version`; readers ignore fields they do not know.
+  Because the directory does not depend on the state key, a requester of any
+  build finds the session through the listener file, not through its own
+  key's store, and the destination of a carry to another key still writes the
+  outcome. A requester must already be able to write this user's product
+  home; there is no socket, no port and no network surface. The directory is
+  refused when it is not a private directory this user owns, and a file that
+  is not a private regular file this user owns (a link, a group- or
+  world-accessible file) is discarded unread.
+- Any process of the same user may target any announced session, not only its
+  own: the home is the boundary, not the session. The listener names the
+  host's pid, its start time, its state key and a random instance nonce; a
+  request must echo that nonce, so a request written for an earlier host of
+  the session (or replayed later) is refused, with an outcome saying so. A
+  host that announces itself discards any request left from before it, and a
+  host whose announcement vanished or was replaced re-announces on its next
+  check; a host never removes an announcement that is no longer its own. A
+  well-formed request of another version is refused with an outcome saying
+  so. Every file is opened without following links and validated on the
+  opened descriptor. A
+  request that replaces one the host has not yet taken gives the replaced one
+  a `superseded` outcome. Outcomes nobody collected are pruned after seven
+  days.
+- A request names the installed build it expects. The requester refuses
+  unless it is itself that build, and the host refuses when the `plak` its
+  `PATH` resolves reports another binary id. The destination checks its own
+  binary id against the request once more; a mismatch records a refused
+  outcome and the root's continuation says the requested build is not
+  running rather than that the request was met.
+- What crosses into the new build travels in the private reload handoff
+  sidecar (§4.5), never in the environment. Its request id and session id
+  must be UUIDs and its build a binary id before anything uses them, so the
+  host-authored continuation interpolates only those validated values.
+- A request grants no authority beyond `/reload` itself: the host performs
+  it only at an idle boundary with no turn, sub-agent or background process
+  live, through the same exact-reopen verdict and carry, and never interrupts
+  or replaces work. An agent that can already run commands as the user could
+  equally edit that user's state; the opt-in exists so a home that never
+  wants agents to restart its sessions is not asked.
 
 ## 5. Redaction
 

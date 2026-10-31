@@ -87,6 +87,14 @@ pub mod product_config;
 mod profiles;
 #[doc(hidden)]
 pub mod prompts;
+#[cfg_attr(
+    not(feature = "tui"),
+    allow(
+        dead_code,
+        reason = "the interactive host is the request channel's reader"
+    )
+)]
+mod reload_request;
 #[doc(hidden)]
 #[doc(hidden)]
 pub mod roster_input;
@@ -448,10 +456,16 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             session_id,
             resume_picker,
         } => return launch_tui(&services, session_id, resume_picker, None),
-        Command::Resume { session_id: None } => return launch_tui(&services, None, true, None),
+        Command::Resume {
+            session_id: None, ..
+        } => return launch_tui(&services, None, true, None),
         Command::Resume {
             session_id: Some(id),
-        } => return launch_tui(&services, Some(id), false, None),
+            handoff,
+        } => {
+            carry::take_reload_handoff(&services, handoff.as_deref());
+            return launch_tui(&services, Some(id), false, None);
+        }
         Command::ImportResume { path, handoff } => {
             return carry::import_and_resume(&services, &path, handoff.as_deref());
         }
@@ -517,6 +531,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                     state_key: home::state::state_key(),
                     export_versions: carry::IMPORTABLE_VERSIONS.to_vec(),
                     config_error: Some(error.message().to_owned()),
+                    binary_id: Some(build_identity::binary_id().to_owned()),
                 },
             };
             serde_json::to_writer(&mut stdout, &verdict)
@@ -1038,6 +1053,10 @@ fn execute_command(
         }
         Command::SessionExport { id, out } => {
             commands::session::export_session(services, &id, out, stdout)?;
+            Ok(ProcessOutcome::Success)
+        }
+        Command::SessionReloadRequest { id, expect_binary } => {
+            commands::session::request_reload(services, &id, &expect_binary, stdout)?;
             Ok(ProcessOutcome::Success)
         }
         Command::SessionImport { path } => {

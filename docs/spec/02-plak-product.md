@@ -950,7 +950,7 @@ the same current product writer fence. Both current session ids and every
 references of current sessions and their carried predecessors are never orphans,
 even under the explicit flag. Import commits its session before writing its
 reference, and cannot commit a new row through that fence. `config.toml`,
-`secrets/`, `agents/`, `logs/`, `telemetry/` and `carry/` are untouched, and credentials
+`secrets/`, `agents/`, `logs/`, `telemetry/`, `carry/` and `run/` are untouched, and credentials
 live elsewhere entirely. Concurrent first launches need no lock: directory
 creation is idempotent and each SQLite store initializes inside its own
 transaction.
@@ -1258,7 +1258,8 @@ omitted for none). That line reaches the destination in the reload handoff
 sidecar, never in the export: a private file (mode 0600, this user's, directly
 under the home's private `carry/` directory, at most 64 KiB) holding a JSON
 object with a `version` and additive optional fields, named by the hidden
-`--reload-handoff <file>` argument after `--import-resume <file>`. The
+`--reload-handoff <file>` argument after `--import-resume <file>` (or after
+`--resume <id>` when a requested reload resumes, §5.1). The
 destination honors a sidecar only when that argument names it, reads it once
 and deletes it; one that is missing, not private, elsewhere, oversized or of
 another version reads as none. `refused` keeps the session open on this build:
@@ -3536,6 +3537,65 @@ each observation poll, and the TUI refreshes its process snapshot before handlin
 input; a process exiting while the root idles stops blocking `/reload` without
 another turn. Pending notices alone do not refuse reload. This count is neither
 a JSONL command nor durable authority.
+
+A running interactive session can also be asked to reload by this user's own
+processes, including the agent's shell: `plak session reload <session>
+--expect-binary <binary-id>`. Requests are off unless the operator sets the
+home-scoped `tui.reload_requests = true` (chapter 07 §3). The command refuses
+unless the requesting `plak` is itself build `<binary-id>` (the agent runs the
+installed `plak`), and unless an interactive `plak` announced the session (a
+full id, or a prefix that only one announcement matches) and that announcing
+process is alive; the host checks the installed build again before it acts
+(hidden `version --reload-probe` carries the answering build's binary id). The
+channel lives in the home's transient `run/reload-requests/` directory,
+outside `state/` and so outside every state key's directory, so a requester of any build
+reaches a session whose host runs another state key. The command queues the
+request, echoing the announcing host's instance nonce, and returns at once,
+printing `reload requested for session <id> onto build <binary-id>; it runs
+when the session is idle; outcome: <path>`. A request still waiting is
+replaced by a newer one and its outcome reads `{"outcome":"superseded",
+"by":<request>}`; a request for another instance of the host (one that was
+restarted since the request was written) is refused with an outcome saying so,
+and a host discards any request it finds when it announces itself. A host
+whose announcement file vanished, or now carries another instance's nonce,
+re-announces on its next installed-build check. A request of another version
+is refused with `unsupported request version`. Because `run/` is not state, no
+legacy-state notice, `plak doctor` report or `plak state prune-legacy` lists
+or removes it. The
+channel, its permission model and its targeting rules are chapter 04 §4.6. The
+TUI takes a queued request on its installed-build check (every five seconds),
+notes `reload requested onto build <binary-id>; it runs when this session is
+idle`, and performs it at the next idle boundary: never during a turn, so a
+request from the agent's own turn runs after that turn ends. If sub-agents or
+background processes are live at that boundary it refuses instead of waiting
+(`requested reload refused: <reason>`). Otherwise it runs exactly `/reload`:
+the same probes, exact-reopen verdict and one-step carry. It refuses, and does
+not hand off, when the installed build now reports another binary id, when the
+probe or verdict refuses, or when a carry would need the capacity confirmation
+an operator gives (`/reload` by hand confirms it). Every refusal is noted in
+the transcript and written to the outcome file as
+`{"outcome":"refused","reason":...}`; every outcome file carries a `version`.
+A handoff passes the request to the new build in the reload handoff sidecar
+(§2.5.1), never the environment, whether the reload resumes (`--resume <id>
+--reload-handoff <file>`) or carries; the new build honors it only with a
+well-formed request id and session id (UUIDs) and binary id. When its own
+binary id is the requested one it writes `{"outcome":"reloaded","binary":...,
+"session":...}` (the carried successor when it carried) and posts one
+host-authored continuation to the root at its first idle boundary: `Plak
+reloaded this session onto build <binary-id> exactly, as requested.` (or `and
+carried into session <new> from <old>`) followed by `Continue the current task,
+or reply briefly if nothing remains.` When it is another build it records a
+refused outcome and the continuation says the reload landed on build
+`<binary-id>` but the request named another, so the requested build is not
+running. The continuation is a root host wake: the same journaled instruction
+submission, crash and reopen rules as an idle wake (§2.6), so a crash before
+its fact withdraws it with one notice and never resubmits it. The host
+consumes a request file when it takes it; a crash before the outcome is
+written leaves no outcome and the request is not retried, and a crash after
+the handoff but before the new build records its outcome leaves the reload
+itself governed by the ordinary handoff rules (§2.5.1). Requests are
+process-local intent, never session state: none is exported, carried or
+recovered. Outcomes nobody collected are pruned after seven days.
 
 There is no `/skills`, `/sandbox`, `/workflows`, `/login`,
 `/connect`, or `/load-api-key` — not in the catalog and not in completion.

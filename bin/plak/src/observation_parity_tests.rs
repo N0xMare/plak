@@ -990,6 +990,7 @@ impl Fixture {
             ready_path: ReadyPathTiming::default(),
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
+            continuation: None,
         }
     }
 }

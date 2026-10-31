@@ -860,6 +860,10 @@ fn product_command_argv_matrix() {
             ],
             |c| matches!(c, Command::ImportResume { path, handoff: Some(handoff) } if path.as_os_str() == "/tmp/x.json" && handoff.as_os_str() == "/tmp/h.json"),
         ),
+        (
+            &["--resume", "aaaaaaaa", "--reload-handoff", "/tmp/h.json"],
+            |c| matches!(c, Command::Resume { session_id: Some(id), handoff: Some(handoff) } if id == "aaaaaaaa" && handoff.as_os_str() == "/tmp/h.json"),
+        ),
         (&["status"], |c| matches!(c, Command::StatusAll)),
         (&["models", "claude"], |c| {
             matches!(c, Command::Models(NativeProvider::Claude))
@@ -951,14 +955,26 @@ fn product_command_argv_matrix() {
             |c| matches!(c, Command::CommandHelp { command } if command == "secret"),
         ),
         (&["resume"], |c| {
-            matches!(c, Command::Resume { session_id: None })
+            matches!(
+                c,
+                Command::Resume {
+                    session_id: None,
+                    handoff: None
+                }
+            )
         }),
         (
             &["resume", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
-            |c| matches!(c, Command::Resume { session_id: Some(id) } if id.starts_with("aaaa")),
+            |c| matches!(c, Command::Resume { session_id: Some(id), handoff: None } if id.starts_with("aaaa")),
         ),
         (&["--resume"], |c| {
-            matches!(c, Command::Resume { session_id: None })
+            matches!(
+                c,
+                Command::Resume {
+                    session_id: None,
+                    handoff: None
+                }
+            )
         }),
         (
             &["usage", "--session", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
@@ -1249,7 +1265,7 @@ fn resume_aliases_accept_at_most_one_session_id() {
     for argv in [["resume", session_id], ["--resume", session_id]] {
         assert!(matches!(
             parse(args(&argv)),
-            Ok(Command::Resume { session_id: Some(actual) }) if actual == session_id
+            Ok(Command::Resume { session_id: Some(actual), .. }) if actual == session_id
         ));
     }
 

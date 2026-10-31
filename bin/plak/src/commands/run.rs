@@ -591,6 +591,7 @@ impl PlakousApplication {
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),
+            continuation: None,
         };
         run_config(
             &self.executor,

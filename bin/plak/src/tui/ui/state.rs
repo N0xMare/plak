@@ -32,6 +32,7 @@ impl App {
             return false;
         }
         self.next_build_check = now + BUILD_CHECK_INTERVAL;
+        self.poll_reload_requests();
         let newer = crate::build_identity::newer_build_installed();
         let changed = newer != self.newer_build_installed;
         self.newer_build_installed = newer;

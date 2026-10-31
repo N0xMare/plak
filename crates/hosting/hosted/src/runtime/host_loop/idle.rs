@@ -883,6 +883,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     if self.pending_resume.is_some() {
                         return self.transient_resume_prompt();
                     }
+                    if one_shot.is_none() && self.config.continuation.is_some() {
+                        return self.continuation_prompt();
+                    }
                     if one_shot.is_none() && observed_tree {
                         return self.child_wake_prompt(Instant::now());
                     }
