@@ -545,6 +545,7 @@ TEST_ONLY_DEPENDENCY_FEATURES = {
         ("plakous-openrouter", "test-clock"),
         ("plakous-store", "commit-trace"),
         ("plakous-recursive-subagents-store", "commit-trace"),
+        ("plakous-hosted", "test-support"),
     ),
     ("plakous-recursive-subagents-store", "commit-trace"): (
         ("plakous-store", "commit-trace"),

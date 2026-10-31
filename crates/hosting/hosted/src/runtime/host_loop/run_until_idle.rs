@@ -20,9 +20,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 return Ok(HostStep::Quit);
             };
             let timeout = run.timed_out.load(Ordering::Relaxed)
-                || run
-                    .deadline
-                    .is_some_and(|deadline| Instant::now() >= deadline);
+                || run.deadline.is_some_and(|deadline| {
+                    Instant::now() >= deadline
+                        || super::super::oneshot::injected_run_deadline_elapsed()
+                });
             let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
             watch.poll();
             let interrupted = watch.interrupted();

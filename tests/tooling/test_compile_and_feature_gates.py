@@ -616,6 +616,7 @@ class FeatureGateTests(unittest.TestCase):
     def test_commit_trace_inventory_is_test_only(self) -> None:
         pins = feature_gate.TEST_ONLY_DEPENDENCY_FEATURES
         self.assertIn(("plakous-store", "commit-trace"), pins[("plak", "test-hooks")])
+        self.assertIn(("plakous-hosted", "test-support"), pins[("plak", "test-hooks")])
         self.assertIn(
             ("plakous-recursive-subagents-store", "commit-trace"),
             pins[("plak", "test-hooks")],

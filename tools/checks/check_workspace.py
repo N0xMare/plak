@@ -389,6 +389,12 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
         ("var_os", (("string", "PLAK_TEST_EVIDENCE"),)),
         ("var_os", (("string", "PLAK_TEST_PROVIDER_RELEASE"),)),
     ],
+    # `test-support` only, enabled by `plak`'s `test-hooks`: a file whose
+    # existence collapses a configured whole-run deadline. Release builds do
+    # not compile this module, so they do not read the variable.
+    ("plakous-hosted", "src/runtime/oneshot/test_support_run_deadline.rs"): [
+        ("var_os", (("string", "PLAK_TEST_RUN_DEADLINE"),)),
+    ],
     # cfg(test)-only process-test seam: the PTY latency budgets scale with an
     # explicit operator knob instead of flaking under nextest load.
     ("plak", "src/test_support.rs"): [

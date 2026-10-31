@@ -171,8 +171,9 @@ impl OneShot {
             }
         });
         while !worker.is_finished() {
-            if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
-                && !timed_out.swap(true, std::sync::atomic::Ordering::Relaxed)
+            if deadline.is_some_and(|deadline| {
+                std::time::Instant::now() >= deadline || injected_run_deadline_elapsed()
+            }) && !timed_out.swap(true, std::sync::atomic::Ordering::Relaxed)
             {
                 let _ = controls.send(UserAction::Interrupt);
             }
@@ -189,6 +190,24 @@ impl OneShot {
         }
         result
     }
+}
+
+#[cfg(feature = "test-support")]
+mod test_support_run_deadline;
+
+#[cfg(not(feature = "test-support"))]
+mod test_support_run_deadline {
+    pub(super) fn elapsed() -> bool {
+        false
+    }
+}
+
+/// `PLAK_TEST_RUN_DEADLINE` names a file. While it exists, a configured
+/// `--timeout` is already elapsed: the same bound and interrupt. With no
+/// deadline the file does nothing. Release builds compile the stub and do not
+/// read the variable.
+pub(super) fn injected_run_deadline_elapsed() -> bool {
+    test_support_run_deadline::elapsed()
 }
 
 pub(super) fn terminal(drive: &Result<TurnHostOutcome, String>) -> CliResult<OneShotOutcome> {

@@ -148,8 +148,19 @@ fn run_cli_pty(fixture: &Fixture, arguments: &[&str]) -> (portable_pty::ExitStat
 /// revision-pinned compatibility acknowledgement, and the answer persists in
 /// the home for every later run. Nothing else on this face reads stdin.
 fn spawn_cli(fixture: &Fixture, arguments: &[&str]) -> Child {
-    let mut child = fixture
-        .command()
+    spawn_cli_with_run_deadline(fixture, arguments, None)
+}
+
+fn spawn_cli_with_run_deadline(
+    fixture: &Fixture,
+    arguments: &[&str],
+    run_deadline: Option<&Path>,
+) -> Child {
+    let mut command = fixture.command();
+    if let Some(path) = run_deadline {
+        command.env("PLAK_TEST_RUN_DEADLINE", path);
+    }
+    let mut child = command
         .args(arguments)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -3334,6 +3345,17 @@ struct RunJobCli {
 
 impl RunJobCli {
     fn start(fixture: &Fixture, bounds: &[&str]) -> Self {
+        Self::start_with_run_deadline(fixture, bounds, None)
+    }
+
+    /// `run_deadline` is a `PLAK_TEST_RUN_DEADLINE` file. It collapses a
+    /// configured `--timeout`, so the test passes `--timeout 3600` and does
+    /// not wait it out.
+    fn start_with_run_deadline(
+        fixture: &Fixture,
+        bounds: &[&str],
+        run_deadline: Option<&Path>,
+    ) -> Self {
         let mut args = vec![
             "run",
             "--provider",
@@ -3345,7 +3367,7 @@ impl RunJobCli {
         ];
         args.extend_from_slice(bounds);
         args.extend_from_slice(&["--", "start a background job"]);
-        let mut child = spawn_cli(fixture, &args);
+        let mut child = spawn_cli_with_run_deadline(fixture, &args, run_deadline);
         let pipe = child.stderr.take().unwrap();
         let (sender, stderr) = std::sync::mpsc::channel();
         let reader = std::thread::spawn(move || {
@@ -3586,14 +3608,16 @@ fn run_max_turns_stops_a_real_promoted_process_and_exits_six() {
 fn run_timeout_stops_a_real_promoted_process_while_waiting_and_exits_six() {
     let command = RUN_OWNED_COMMAND;
     let fixture = Fixture::new(&promoted_run_script(command));
-    // The run timeout counts from process start, so it can fire before the
-    // job installs its TERM trap and leave no marker. Fifteen seconds did on
-    // a loaded lane; the bound is startup liveness, as in
-    // `prepare_bound_child_job`, and `owned.pid` proves the trap came first.
-    let mut run = RunJobCli::start(&fixture, &["--timeout", "60"]);
+    // The deadline file is the whole-run timeout. It is created only after
+    // `owned.pid`, which the owned process writes once its TERM trap is
+    // installed, so a stop cannot land before the marker.
+    let deadline = fixture.root.join("run-deadline");
+    let mut run =
+        RunJobCli::start_with_run_deadline(&fixture, &["--timeout", "3600"], Some(&deadline));
     run.wait_for_line(&format!("plak: waiting for p1 ({command}); Ctrl-C to stop"));
     wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
-    let result = run.finish_within(Duration::from_secs(90));
+    std::fs::write(&deadline, b"elapsed").unwrap();
+    let result = run.finish();
     assert_eq!(result.status.code(), Some(6), "{}", result.stderr);
     assert!(
         result
@@ -3684,12 +3708,10 @@ fn run_bound_records_child_jobs(sigint: bool, modes: &[bool]) {
         .map(|quiescent| prepare_bound_child_job(sigint, *quiescent))
         .collect();
     for (fixture, run) in runs {
-        let result = if sigint {
+        if sigint {
             signal(run.child.id(), SIGINT);
-            run.finish()
-        } else {
-            run.finish_within(Duration::from_secs(90))
-        };
+        }
+        let result = run.finish();
         assert_bound_child_job_exact_reopen(&fixture, &result, sigint);
     }
 }
@@ -3707,22 +3729,26 @@ fn prepare_bound_child_job(sigint: bool, quiescent: bool) -> (Fixture, RunJobCli
             {"output":{"text":"root is waiting"}}
         ]
     }));
-    // The run timeout is counted from process start. Fifteen seconds has
-    // fired during the child's `sleep 1` (before its TERM trap) on a cold
-    // loaded lane, so `stopped.txt` never appears. The bound is liveness
-    // for startup, not the behavior under test: the timeout must still
-    // land only after `owned.pid` proves the trap is installed. `finish`
-    // then has to outlast whatever of that bound remains.
-    let bounds: &[&str] = if sigint {
-        &["--print-session-id"]
+    // The deadline file is the whole-run timeout. Creating it before
+    // `owned.pid` would stop the child during its `sleep 1`, before the TERM
+    // trap, and `stopped.txt` would never appear.
+    let deadline = fixture.root.join("run-deadline");
+    let mut run = if sigint {
+        RunJobCli::start(&fixture, &["--print-session-id"])
     } else {
-        &["--print-session-id", "--timeout", "60"]
+        RunJobCli::start_with_run_deadline(
+            &fixture,
+            &["--print-session-id", "--timeout", "3600"],
+            Some(&deadline),
+        )
     };
-    let mut run = RunJobCli::start(&fixture, bounds);
     run.wait_for_line("plak: waiting for c1; Ctrl-C to stop");
     // The child's shell sleeps before it traps TERM; a stop sent before
     // `owned.pid` exists would kill it without the marker.
     wait_for_owned_pid_under(&fixture.root);
+    if !sigint {
+        std::fs::write(&deadline, b"elapsed").unwrap();
+    }
     (fixture, run)
 }
 

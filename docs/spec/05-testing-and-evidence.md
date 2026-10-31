@@ -1754,8 +1754,13 @@ delay or a persisted-format change. With the offline model selected,
 the already-sent input frame before consuming another host event; release with
 `release` does not require input. A gate containing `idle` drains host events
 through the actual busy-false observation before checking stdin. This
-deterministic scheduling hook never applies without the offline model. The
-failure-wave chain checks the
+deterministic scheduling hook never applies without the offline model.
+`PLAK_TEST_RUN_DEADLINE`, only with `test-hooks`, names a file. While that file
+exists and a `--timeout` is configured, a non-interactive run is at its
+whole-run deadline: the same timeout bound and interrupt as an elapsed
+`--timeout`, including stopping owned processes. Without a configured deadline
+the file does nothing. It is not a second timeout policy, and release builds
+do not read it. The failure-wave chain checks the
 failed child on both the JSONL face and the TUI, then sends another root prompt.
 It does not require root refusal while a child locator is unavailable: child recovery
 inspection and root admission are separate facts.
@@ -1768,7 +1773,9 @@ tree-store dependency. The direct tree feature avoids a harness-to-tree normal
 edge cycling through the subagents crate's harness dev-dependency. All are
 pinned — `check_workspace.py` refuses any other contents for the feature, and
 `check_features.py` requires the forwarding edge, without which the scripted
-factory registration is unavailable. The sealed production construction port
+factory registration is unavailable. `check_features.py` also refuses a default
+or maintainer `plak` that enables `plakous-hosted/test-support`; only
+`test-hooks` may. The sealed production construction port
 remains available without test support. The default and release binaries
 contain none of the selector's strings. The harness also carries
 `plakous-http/fault-injection` (§2.8) unconditionally, so `test-hooks` is the
