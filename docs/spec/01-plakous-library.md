@@ -1745,6 +1745,18 @@ constants; no credential, account bytes or content enters a change. A missing or
 quarantined credential, an unavailable binding, a recovery requirement and a
 storage failure carry no binding change.
 
+`AgentSessions::verify_open(locator, runtime)` answers whether `open` of that
+exact head would attach, without owning it. It performs the same exact-head
+validation, runtime admission and runtime construction (persisted plan, tools,
+presentation, environment and request-prefix comparisons), then drops the
+constructed runtime. It acquires no lease, registers no driver, starts no turn,
+publishes no recovery and writes nothing, so it may run while another process
+owns the branch; the construction holds an inspection token in a lease domain
+no store grants, so any store mutation it attempted would be refused. A head
+with unsettled work answers `OpenVerification::UnsettledWork` without
+construction; otherwise it returns `OpenVerification::Opens` or the open's own
+typed refusal, including its `binding_change`.
+
 Resume seeds only the safe committed projection. It creates no synthetic turn,
 does not expose working output as committed, and performs no implicit provider
 or tool dispatch.
@@ -4512,7 +4524,9 @@ new access-token expiry; it never reports success without a grant.
 `access_token_expired` reports whether a `Ready` credential's stored access
 token has expired, from local state only (no provider network I/O, no claim);
 the offline status stays `Ready` for such a token, and the call fails closed
-like the offline status for a missing, non-`Ready` or unreadable record. A usage read that finds a durable `Unknown`
+like the offline status for a missing, non-`Ready` or unreadable record;
+`access_token_expires_within` asks the same of a window ahead of now, for a
+caller that must never renew. A usage read that finds a durable `Unknown`
 record while a refresh claim still owns the execution lock, in this or another
 process, or whose record changes under the probe, reports retryable `Busy`
 rather than quarantine; the probe neither waits nor writes.
@@ -6217,7 +6231,10 @@ refuses an invalid server id, an exposed name its server and MCP name do not
 produce, and a description over 4 KiB. `McpToolPack::from_records` rebuilds
 the pack from persisted records over a later lease without listing again
 (a record of another server refuses), so the next call's digest check is
-where drift surfaces. Lowering onto `PortableToolSchemaV2` applies only
+where drift surfaces. `McpToolPack::unbound` rebuilds the same registrations
+(definitions, executor ids and binding identities) from records with no server
+behind them, for an embedder that only compares a reopen's registry: nothing
+is started, connected or leased, and every call refuses. Lowering onto `PortableToolSchemaV2` applies only
 meaning-preserving or tightening rewrites: annotation keywords (`$schema`,
 `$id`, `$comment`, `default`, `examples`, `format`, `readOnly`, `writeOnly`,
 `deprecated`), every `x-*` vendor extension keyword (such as GitHub's

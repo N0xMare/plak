@@ -1309,6 +1309,7 @@ fn reload_hands_off_to_the_installed_executable_before_applying_an_epoch() {
                 capacity_error: None,
                 state_key: Some(crate::home::state::state_key()),
                 probe: None,
+                reopen: None,
             })
         });
         let outcome = settle_reload_probe(&mut app);

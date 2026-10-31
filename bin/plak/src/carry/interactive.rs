@@ -3,7 +3,7 @@
 use super::document::{CarryDocument, IMPORTABLE_VERSIONS, VERSION, read_document, write_document};
 use super::export::{export_session, new_carry_file};
 use super::import::already_carried;
-use super::reload::{CarryCapacityProbe, ReloadProbe};
+use super::reload::{CarryCapacityProbe, ReloadProbe, ReopenProbe};
 use crate::cli_output::safe_terminal_block;
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
@@ -19,25 +19,30 @@ use std::time::{Duration, Instant};
 pub(crate) enum ReloadPlan {
     /// The shell never committed a session: start the new build fresh.
     Fresh,
-    /// Same state key: the new build opens the session as it is.
+    /// Same state key and exact reopen attaches: the new build opens the
+    /// session as it is.
     Resume,
-    /// Another state key: export here, import there.
+    /// Another state key, or the same key with a changed frozen binding:
+    /// export here, import there.
     Carry,
     /// The new build did not say its state key: resume plainly and say so.
     ResumeUnverified,
 }
 
 /// Chooses the reload path from facts alone, so it is testable without exec.
+/// `binding_changed` is the destination's exact-reopen verdict for the same
+/// state key; a different key always carries.
 pub(crate) fn reload_plan(
     resumable: bool,
     running_key: &str,
     installed_key: Option<&str>,
+    binding_changed: bool,
 ) -> ReloadPlan {
     if !resumable {
         return ReloadPlan::Fresh;
     }
     match installed_key {
-        Some(key) if key == running_key => ReloadPlan::Resume,
+        Some(key) if key == running_key && !binding_changed => ReloadPlan::Resume,
         Some(_) => ReloadPlan::Carry,
         None => ReloadPlan::ResumeUnverified,
     }
@@ -52,6 +57,9 @@ pub(crate) struct ReloadTarget {
     /// `None` when the build did not answer in time or with one key.
     pub(crate) state_key: Option<String>,
     pub(crate) probe: Option<ReloadProbe>,
+    /// The destination's exact-reopen verdict for a same-key reload; `None`
+    /// when it was not asked, did not answer in time, or predates the question.
+    pub(crate) reopen: Option<Box<ReopenProbe>>,
 }
 
 impl ReloadTarget {
@@ -70,7 +78,22 @@ impl ReloadTarget {
                 "reload kept this session open: the new build cannot import this build's version {VERSION} export; install a build that imports it and retry /reload"
             ));
         }
+        if let Some(ReopenProbe::Refused { reason }) = self.reopen.as_deref() {
+            return Some(format!(
+                "reload kept this session open: the installed build would not reopen it: {}",
+                safe_terminal_block(reason)
+            ));
+        }
         None
+    }
+
+    /// The frozen binding input the installed build derives differently, when
+    /// exact reopen there would refuse for that reason.
+    pub(crate) fn binding_change(&self) -> Option<&str> {
+        match self.reopen.as_deref() {
+            Some(ReopenProbe::BindingChanged { change }) => Some(change),
+            _ => None,
+        }
     }
 }
 
@@ -103,6 +126,7 @@ fn probe_reload_target_with_timeout(
             capacity_error: None,
             state_key: None,
             probe: None,
+            reopen: None,
         };
     };
     let probe = Some(output)
@@ -119,6 +143,7 @@ fn probe_reload_target_with_timeout(
         capacity_error: None,
         state_key,
         probe,
+        reopen: None,
     }
 }
 
@@ -128,15 +153,20 @@ pub(crate) fn reload_target_for_session(
     session_id: Option<&str>,
 ) -> Option<ReloadTarget> {
     let mut target = reload_target(workspace)?;
-    if target.refusal(&crate::home::state::state_key()).is_some()
-        || target.state_key.as_deref() == Some(crate::home::state::state_key().as_str())
-        || target.state_key.is_none()
-    {
+    let running_key = crate::home::state::state_key();
+    if target.refusal(&running_key).is_some() || target.state_key.is_none() {
         return Some(target);
     }
     let Some(id) = session_id else {
         return Some(target);
     };
+    if target.state_key.as_deref() == Some(running_key.as_str()) {
+        target.reopen = reopen_verdict(&target.executable, workspace, id).map(Box::new);
+        // Only a carry needs the destination's capacity inspection.
+        if target.binding_change().is_none() {
+            return Some(target);
+        }
+    }
     let inspect = || -> Result<CarryCapacityProbe, String> {
         let services = Services::from_env(None);
         let paths = services.paths().map_err(|e| e.message().to_owned())?;
@@ -186,6 +216,27 @@ pub(crate) fn reload_target_for_session(
     }
     Some(target)
 }
+
+/// Asks the installed build whether exact reopen of `id` would attach there.
+/// A build that predates the question, fails, or does not answer in time
+/// gives no verdict, and the reload resumes plainly as before.
+fn reopen_verdict(executable: &Path, workspace: &Path, id: &str) -> Option<ReopenProbe> {
+    let mut command = std::process::Command::new(executable);
+    command
+        .arg("version")
+        .arg("--reopen-probe")
+        .arg(id)
+        .current_dir(workspace);
+    let output = run_bounded(&mut command, REOPEN_PROBE_TIMEOUT).ok()??;
+    if !output.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&output.stdout).ok()
+}
+
+/// How long the installed build gets to verify an exact reopen; it resolves
+/// the session's route and catalog like an attach.
+const REOPEN_PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long an installed build gets to answer `version --state-key`.
 const STATE_KEY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -373,11 +424,31 @@ fn snapshot_export_version(snapshot: &Path) -> Result<Option<u32>, String> {
     Ok(text.trim().parse::<u32>().ok())
 }
 
+/// What a carry export left behind for the handoff note.
+pub(crate) struct CarriedOut {
+    pub(crate) summary: String,
+    /// Non-live sub-agents of the source tree; their trees are not restored.
+    pub(crate) finished_subagents: usize,
+}
+
+/// The note a same-key reload records when exact reopen on the installed
+/// build would refuse for `change`.
+pub(crate) fn binding_carry_cause(change: &str, finished_subagents: usize) -> String {
+    let children = match finished_subagents {
+        0 => String::new(),
+        1 => "; 1 finished sub-agent is not restored".to_owned(),
+        n => format!("; {n} finished sub-agents are not restored"),
+    };
+    format!(
+        "the installed build would not reopen it exactly: its {change} differs; the provider cache rebuilds on the first request{children}"
+    )
+}
+
 /// Exports `record` into a fresh private carry file and returns its path.
 pub(crate) fn carry_out(
     paths: &PlakPaths,
     record: &SessionRecord,
-) -> Result<(PathBuf, String), String> {
+) -> Result<(PathBuf, CarriedOut), String> {
     let document = export_session(paths, record)
         .map_err(|refusal| format!("session {} cannot be exported: {refusal}", record.id))?;
     let path = new_carry_file(paths, &record.id)?;
@@ -387,7 +458,13 @@ pub(crate) fn carry_out(
         let _ = fs::remove_file(&path);
         return Err(error);
     }
-    Ok((path, document.carry_summary()))
+    Ok((
+        path,
+        CarriedOut {
+            summary: document.carry_summary(),
+            finished_subagents: document.source_subagents,
+        },
+    ))
 }
 
 /// `plak --resume` of a session another build's state holds. When a kept
@@ -488,6 +565,63 @@ pub(super) fn write_private_new(path: &Path, bytes: &[u8]) -> Result<(), String>
 impl CarryDocument {
     pub(crate) fn carry_summary(&self) -> String {
         self.history.summary()
+    }
+}
+
+/// How long a handoff sidecar nobody read is kept: a reload that wrote one
+/// either `exec`ed its reader at once or removed it.
+const STALE_HANDOFF: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Removes handoff sidecars older than [`STALE_HANDOFF`] from `dir`.
+fn prune_stale_handoffs(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let cutoff = std::time::SystemTime::now().checked_sub(STALE_HANDOFF);
+    for entry in entries.flatten() {
+        let stale = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.ends_with(".reload.json"))
+            && entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|modified| cutoff.is_some_and(|cutoff| modified < cutoff));
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+impl super::ReloadHandoff {
+    /// Writes the sidecar for `session_id` under the private carry directory
+    /// and returns its path.
+    pub(crate) fn write(&self, paths: &PlakPaths, session_id: &str) -> Result<PathBuf, String> {
+        let dir = super::document::private_dir(&paths.home().join("carry"))?;
+        prune_stale_handoffs(&dir);
+        let path = dir.join(format!("{session_id}.{}.reload.json", uuid::Uuid::new_v4()));
+        let bytes = serde_json::to_vec(self).map_err(|error| error.to_string())?;
+        if let Err(error) = write_private_new(&path, &bytes) {
+            let _ = fs::remove_file(&path);
+            return Err(error);
+        }
+        Ok(path)
+    }
+
+    /// Writes a non-empty handoff and names it on `command`; returns the
+    /// sidecar's path, which the caller removes if the exec fails.
+    pub(crate) fn pass(
+        &self,
+        paths: &PlakPaths,
+        session_id: &str,
+        command: &mut std::process::Command,
+    ) -> Result<Option<PathBuf>, String> {
+        if self.cause.is_none() {
+            return Ok(None);
+        }
+        let path = self.write(paths, session_id)?;
+        command.arg(crate::cli::RELOAD_HANDOFF_FLAG).arg(&path);
+        Ok(Some(path))
     }
 }
 

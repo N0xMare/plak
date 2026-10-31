@@ -5,7 +5,7 @@ mod available;
 #[cfg(not(feature = "mcp"))]
 #[path = "mcp_binding/unavailable.rs"]
 mod available;
-pub(crate) use available::{BoundMcpTools, bind_mcp_tools};
+pub(crate) use available::{BoundMcpTools, bind_mcp_tools, recorded_mcp_tools};
 #[cfg(feature = "mcp")]
 pub use available::{
     McpProbe, get_mcp_prompt, list_mcp_prompts, mcp_login_status, mcp_oauth_spec, probe_mcp_server,
@@ -17,6 +17,31 @@ mod secret_value;
 #[path = "mcp_binding/secret_value_unavailable.rs"]
 mod secret_value;
 pub use secret_value::NamedSecretValue;
+
+/// How a compile reaches the MCP servers its selection names.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum McpBinding {
+    /// Start or lease each server: a create, open or spawn.
+    Lease,
+    /// Rebuild the tools from the session's frozen records with no server
+    /// behind them: an exact-reopen verification, which never starts,
+    /// connects or leases a server and so never renews an MCP login.
+    Recorded,
+}
+
+impl McpBinding {
+    /// A verification ([`TopologyHubAttach::Inspect`]) compiles from records;
+    /// every other compile leases.
+    ///
+    /// [`TopologyHubAttach::Inspect`]: crate::topology_runtime::TopologyHubAttach::Inspect
+    pub(crate) fn for_attach(attach: crate::topology_runtime::TopologyHubAttach) -> Self {
+        if attach == crate::topology_runtime::TopologyHubAttach::Inspect {
+            Self::Recorded
+        } else {
+            Self::Lease
+        }
+    }
+}
 
 /// The product's named secrets (`plak secret set <name>`).
 ///

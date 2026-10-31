@@ -54,15 +54,44 @@ static MCP_PROMPT_PINS: &[PromptPin] = &[PromptPin::new(
 /// whatever its annotations claim: the server is untrusted, and a call that
 /// may have acted is never replayed.
 pub struct McpToolPack {
-    lease: Arc<McpLease>,
+    server: PackServer,
     records: Vec<McpToolRecord>,
+}
+
+/// Where a pack's tools run.
+enum PackServer {
+    /// A leased server, started or connected.
+    Leased(Arc<McpLease>),
+    /// No server: the pack was rebuilt from frozen records only to compare
+    /// an exact reopen's registry. Nothing was started, connected or leased,
+    /// and every call refuses.
+    Unbound {
+        name: plakous_tools::McpServerName,
+        resources: bool,
+    },
+}
+
+impl PackServer {
+    fn name(&self) -> &plakous_tools::McpServerName {
+        match self {
+            Self::Leased(lease) => lease.server(),
+            Self::Unbound { name, .. } => name,
+        }
+    }
+
+    fn resources(&self) -> bool {
+        match self {
+            Self::Leased(lease) => lease.spec().resources(),
+            Self::Unbound { resources, .. } => *resources,
+        }
+    }
 }
 
 impl std::fmt::Debug for McpToolPack {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("McpToolPack")
-            .field("server", self.lease.server())
+            .field("server", self.server.name())
             .field("tools", &self.records.len())
             .finish()
     }
@@ -73,7 +102,7 @@ impl McpToolPack {
     #[must_use]
     pub fn new(lease: McpLease, listing: &FrozenMcpListing) -> Self {
         Self {
-            lease: Arc::new(lease),
+            server: PackServer::Leased(Arc::new(lease)),
             records: listing.records().to_vec(),
         }
     }
@@ -86,9 +115,37 @@ impl McpToolPack {
     ///
     /// Refuses a record of another server.
     pub fn from_records(lease: McpLease, records: Vec<McpToolRecord>) -> Result<Self, McpError> {
+        Self::checked(PackServer::Leased(Arc::new(lease)), records)
+    }
+
+    /// A pack rebuilt from records frozen earlier with no server behind it,
+    /// for verifying that an exact reopen would build the same registry: the
+    /// definitions and binding identities are the leased pack's, but nothing
+    /// is started, connected or leased (so no credential is renewed), and
+    /// every call refuses. `resources` is the server definition's
+    /// `resources` flag.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a record of another server.
+    pub fn unbound(
+        server: plakous_tools::McpServerName,
+        resources: bool,
+        records: Vec<McpToolRecord>,
+    ) -> Result<Self, McpError> {
+        Self::checked(
+            PackServer::Unbound {
+                name: server,
+                resources,
+            },
+            records,
+        )
+    }
+
+    fn checked(server: PackServer, records: Vec<McpToolRecord>) -> Result<Self, McpError> {
         if let Some(record) = records
             .iter()
-            .find(|record| record.server() != lease.server())
+            .find(|record| record.server() != server.name())
         {
             return Err(McpError::new(
                 McpErrorKind::Selection,
@@ -96,14 +153,11 @@ impl McpToolPack {
                     "mcp tool record {} belongs to server {}, not {}",
                     record.exposed_name().as_str(),
                     record.server(),
-                    lease.server()
+                    server.name()
                 ),
             ));
         }
-        Ok(Self {
-            lease: Arc::new(lease),
-            records,
-        })
+        Ok(Self { server, records })
     }
 
     /// Returns every model-visible name the pack registers, in presentation
@@ -119,8 +173,8 @@ impl McpToolPack {
             .iter()
             .map(|record| record.exposed_name().clone())
             .collect::<Vec<_>>();
-        if self.lease.spec().resources() {
-            names.push(exposed_tool_name(self.lease.server(), READ_RESOURCE)?);
+        if self.server.resources() {
+            names.push(exposed_tool_name(self.server.name(), READ_RESOURCE)?);
         }
         Ok(names)
     }
@@ -135,10 +189,10 @@ impl ToolPack for McpToolPack {
         let mut registrations = self
             .records
             .iter()
-            .map(|record| registration(&self.lease, record))
+            .map(|record| registration(&self.server, record))
             .collect::<Result<Vec<_>, _>>()?;
-        if self.lease.spec().resources() {
-            registrations.push(resource_registration(&self.lease)?);
+        if self.server.resources() {
+            registrations.push(resource_registration(&self.server)?);
         }
         Ok(registrations)
     }
@@ -155,7 +209,7 @@ impl ToolPack for McpToolPack {
     }
 
     fn pins(&self) -> &'static [PromptPin] {
-        if self.lease.spec().resources() {
+        if self.server.resources() {
             MCP_PROMPT_PINS
         } else {
             &[]
@@ -164,7 +218,7 @@ impl ToolPack for McpToolPack {
 }
 
 fn registration(
-    lease: &Arc<McpLease>,
+    pack_server: &PackServer,
     record: &McpToolRecord,
 ) -> Result<ToolRegistration, ToolRuntimeError> {
     let invalid = |error: &(dyn std::error::Error + 'static)| {
@@ -205,15 +259,18 @@ fn registration(
             ],
         )?,
         definition,
-        Arc::new(McpToolExecutor {
-            lease: Arc::clone(lease),
-            record: record.clone(),
-        }),
+        match pack_server {
+            PackServer::Leased(lease) => Arc::new(McpToolExecutor {
+                lease: Arc::clone(lease),
+                record: record.clone(),
+            }) as Arc<dyn ToolExecutor>,
+            PackServer::Unbound { .. } => Arc::new(UnboundExecutor),
+        },
     )
     .with_owner(ToolOwnerClass::Mcp(record.server().clone())))
 }
 
-fn resource_registration(lease: &Arc<McpLease>) -> Result<ToolRegistration, ToolRuntimeError> {
+fn resource_registration(pack_server: &PackServer) -> Result<ToolRegistration, ToolRuntimeError> {
     let invalid = |error: &(dyn std::error::Error + 'static)| {
         ToolRuntimeError::from_sensitive_source(
             ToolRuntimeErrorKind::InvalidDefinition,
@@ -221,7 +278,7 @@ fn resource_registration(lease: &Arc<McpLease>) -> Result<ToolRegistration, Tool
             error,
         )
     };
-    let server = lease.server();
+    let server = pack_server.name();
     let exposed = exposed_tool_name(server, READ_RESOURCE).map_err(|error| invalid(&error))?;
     let definition = ToolDefinition::new(
         exposed.clone(),
@@ -248,11 +305,28 @@ fn resource_registration(lease: &Arc<McpLease>) -> Result<ToolRegistration, Tool
             &[b"mcp-resources-tool", executor_id.as_str().as_bytes()],
         )?,
         definition,
-        Arc::new(ReadResourceExecutor {
-            lease: Arc::clone(lease),
-        }),
+        match pack_server {
+            PackServer::Leased(lease) => Arc::new(ReadResourceExecutor {
+                lease: Arc::clone(lease),
+            }) as Arc<dyn ToolExecutor>,
+            PackServer::Unbound { .. } => Arc::new(UnboundExecutor),
+        },
     )
     .with_owner(ToolOwnerClass::Mcp(server.clone())))
+}
+
+/// The executor of a pack with no server behind it; it never runs a call.
+struct UnboundExecutor;
+
+impl ToolExecutor for UnboundExecutor {
+    fn execute(self: Arc<Self>, _invocation: ToolInvocation, _context: ToolContext) -> ToolFuture {
+        Box::pin(async {
+            Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Execution,
+                "this mcp tool has no server behind it; it was rebuilt only to verify a reopen",
+            ))
+        })
+    }
 }
 
 #[derive(Deserialize)]

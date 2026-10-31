@@ -357,6 +357,7 @@ pub(super) async fn api_session_runtime_binding_with_owner(
         parent.target.account(),
         &parent.workspace_root,
         &parent.state_roots,
+        crate::mcp_binding::McpBinding::for_attach(topology_attach),
     )?;
     let spawn_parent = SpawnParent::Api(parent.clone());
     let topology_extensions = if parent.composition == CompositionSelection::PySdk {
@@ -633,6 +634,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         state_roots.roster_source().account_name(provider),
         &workspace_root,
         &state_roots,
+        crate::mcp_binding::McpBinding::for_attach(topology_attach),
     )?;
     let product_extensions = if product_sdk {
         ProductToolExtensions::empty().with_host_facts(topology_spec.prompt_host_facts)

@@ -55,6 +55,21 @@ pub(super) fn script_descriptor(
                 .ok_or("native fixture context contract")?,
         );
     }
+    if let Some(profile) = &script.adapter_profile {
+        let mut adapted = ResolvedModelDescriptor::new_custom(
+            descriptor.protocol().clone(),
+            descriptor.route().clone(),
+            descriptor.requested_model().clone(),
+            None,
+            descriptor.model_family().cloned(),
+            ModelAdapterProfileId::new(profile.as_str())?,
+            descriptor.capabilities().clone(),
+        );
+        if let Some(contract) = descriptor.context_contract() {
+            adapted = adapted.with_context_contract(contract.clone());
+        }
+        descriptor = adapted;
+    }
     if script.omit_context_contract {
         return Ok(ResolvedModelDescriptor::new_custom(
             descriptor.protocol().clone(),

@@ -213,6 +213,92 @@ fn unreadable_roster_refuses_fresh_genesis_without_publishing_a_tree() {
     assert!(!roots.tree_store().unwrap().exists(&tree_id).unwrap());
 }
 
+fn stored_tree_facts(
+    store: &dyn crate::agent_tree::TreeStore,
+    tree_id: &str,
+) -> (u64, u64, crate::agent_tree::TreeAdmissionState) {
+    // The reopen law is deterministic, so equal facts mean equal stored rows.
+    let tree = crate::agent_tree::ProductAgentTree::reopen(store.load(tree_id).unwrap().unwrap());
+    (tree.revision, tree.host_generation, tree.state)
+}
+
+/// An exact-reopen verification compiles a persisted tree's tools over a
+/// detached copy: the stored rows are untouched, no hub is attached and no
+/// root lease is claimed.
+#[test]
+fn inspecting_a_persisted_tree_compiles_its_tools_without_attaching_or_saving() {
+    let home = tempfile::tempdir().unwrap();
+    let roots =
+        ProductStateRoots::with_doubles(home.path().to_path_buf(), home.path().join("state"));
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    let store = roots.tree_store().unwrap();
+    let _published = store
+        .save(&crate::topology_runtime::test_support::bootstrap(
+            &tree_id,
+            home.path().to_path_buf(),
+        ))
+        .unwrap();
+    let before = stored_tree_facts(store.as_ref(), &tree_id);
+    let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
+        created_output_bound: None,
+        workspace_root: home.path().to_path_buf(),
+        cwd: home.path().to_path_buf(),
+        plan_state_authority: tree_id.clone(),
+        composition: crate::binding::CompositionSelection::Direct,
+        topology_tree_id: None,
+        topology_caller_id: None,
+        state_roots: roots.clone(),
+        model: "offline-model".into(),
+        effort: None,
+        target: crate::binding::ApiTarget::OpenRouter {
+            wire: crate::binding::ResolvedProtocol::Chat,
+        },
+        scheduled_compaction: true,
+        max_model_rounds: 8,
+        topology_enabled: true,
+        product_home: Some(home.path().to_path_buf()),
+        tool_selection: crate::tool_plan::NodeToolSelection::default(),
+    });
+    for _ in 0..2 {
+        let mut owner = None;
+        let extensions = crate::agent::build::topology_extensions_if_enabled(
+            &parent,
+            "offline-model",
+            crate::topology_runtime::TopologyHubAttach::Inspect,
+            true,
+            &mut owner,
+        )
+        .unwrap();
+        assert!(!extensions.is_empty(), "the tree's tools compile");
+        assert_eq!(owner, None, "no root lease is claimed");
+        assert!(crate::topology_runtime::lookup(&tree_id).is_none());
+        assert_eq!(stored_tree_facts(store.as_ref(), &tree_id), before);
+    }
+    // A tree this process holds is copied too: the live runtime is neither
+    // replaced nor moved.
+    let live = crate::runtime::test_kit::install_idle_topology_hub(&tree_id, home.path());
+    let live_facts = || {
+        live.read(|tree| (tree.revision, tree.host_generation, tree.state))
+            .unwrap()
+    };
+    let before = live_facts();
+    let extensions = crate::agent::build::topology_extensions_if_enabled(
+        &parent,
+        "offline-model",
+        crate::topology_runtime::TopologyHubAttach::Inspect,
+        true,
+        &mut None,
+    )
+    .unwrap();
+    assert!(!extensions.is_empty());
+    assert_eq!(live_facts(), before);
+    assert!(Arc::ptr_eq(
+        &crate::topology_runtime::lookup(&tree_id).unwrap(),
+        &live
+    ));
+}
+
 #[test]
 fn reopen_pin_is_exact_engine_scoped_and_cleared_for_new_children() {
     use plakous::tools::SidecarLocator;

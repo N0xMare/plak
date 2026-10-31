@@ -79,6 +79,33 @@ pub(crate) fn import_document(
     import_prepared(services, PreparedImport::new(document, local_handoff)?)
 }
 
+/// The `--import-resume` half of a reload handoff: when it carries a changed
+/// binding, the source names why.
+pub(crate) fn import_reload_handoff(
+    services: &crate::shell::services::Services,
+    document: crate::carry::CarryDocument,
+    local_handoff: bool,
+    cause: Option<&str>,
+) -> CliResult<(product_sessions::SessionRecord, String)> {
+    let estimated_tokens = document.estimated_tokens();
+    let messages = document.message_count();
+    let carried = match cause {
+        Some(cause) => document.into_noticed_import(cause, local_handoff)?,
+        None => document
+            .into_import_with_replay(local_handoff)
+            .map_err(|e| CliFailure::new(e.to_string()))?,
+    };
+    crate::build_features::admit_session(&carried.record)?;
+    import_prepared(
+        services,
+        PreparedImport {
+            carried,
+            estimated_tokens,
+            messages,
+        },
+    )
+}
+
 pub(crate) fn import_prepared(
     services: &crate::shell::services::Services,
     prepared: PreparedImport,
@@ -194,7 +221,7 @@ fn import_host_config(
     let source_error = match source {
         Ok(config) => return Ok(config),
         Err(super::attached::AttachedConfigError::Unresolvable(error)) => error,
-        Err(super::attached::AttachedConfigError::Other(error)) => return Err(error),
+        Err(error) => return Err(error.into()),
     };
     let Some(root) = root_fallback else {
         return Err(source_error);

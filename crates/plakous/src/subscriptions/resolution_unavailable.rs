@@ -55,6 +55,11 @@ impl ResolvedProvider {
     pub fn selected_model(&self) -> &ModelId {
         match self.0 {}
     }
+    /// Returns the route adapter revision this build resolved.
+    #[must_use]
+    pub fn adapter_revision(&self) -> &str {
+        match self.0 {}
+    }
     /// Returns the fresh execution authority obtained during this resolution.
     #[must_use]
     pub fn initial_authority(&self) -> &RuntimeModelAuthority {

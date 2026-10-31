@@ -188,4 +188,51 @@ impl AgentSessions {
             }
         }
     }
+
+    /// Answers whether [`Self::open`] of this exact quiescent head would attach
+    /// under `runtime`, without owning the branch.
+    ///
+    /// The same exact-head validation, runtime admission and runtime
+    /// construction run as for an open; the constructed runtime is dropped.
+    /// It takes no lease, registers no driver, starts no turn, publishes no
+    /// recovery and writes nothing, so it may run while another process owns
+    /// the session. A head with unsettled work answers
+    /// [`OpenVerification::UnsettledWork`] without construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns the typed refusal the open would return; a changed frozen
+    /// binding input is named by [`AgentSessionsError::binding_change`].
+    pub async fn verify_open(
+        &self,
+        locator: SessionLocator,
+        runtime: super::SessionRuntimeBinding,
+    ) -> Result<OpenVerification, AgentSessionsError> {
+        let exact = self.load_exact(locator).await?;
+        if exact.recovery_report().is_some() {
+            return Ok(OpenVerification::UnsettledWork);
+        }
+        let address = DurableSessionAddress::new(
+            locator.session_id,
+            locator.branch_id,
+            locator.checkpoint_id,
+        );
+        match Box::pin(self.runtime.verify_open(address, runtime.builder)).await {
+            Ok(plakous_agent::internal::DurableOpenVerification::Opens) => {
+                Ok(OpenVerification::Opens)
+            }
+            Ok(_) => Ok(OpenVerification::UnsettledWork),
+            Err(error) => Err(runtime_error(&error).for_session(locator.session_id)),
+        }
+    }
+}
+
+/// Whether an exact open of a head would attach, answered without owning it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum OpenVerification {
+    /// The head is quiescent and this build reconstructs it exactly.
+    Opens,
+    /// The head holds unsettled work that only an owning open settles.
+    UnsettledWork,
 }

@@ -37,11 +37,17 @@ use plakous_workspace::occupancy_vcs::VcsOps;
 
 /// Whether this catalog compile may create the process hub for a missing root.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum TopologyHubAttach {
     /// Child spawn, mail reopen, compact, and rebind: lookup only.
     LookupOnly,
     /// Root `build_or_open` may load-or-bootstrap and insert the hub once.
     AttachRoot,
+    /// Exact-reopen verification: the catalog compiles over a detached copy
+    /// of the tree (this process's attached one, or the persisted rows). It
+    /// never inserts a hub, takes a lease, folds startup, settles effects or
+    /// saves, never bootstraps a tree, and binds nothing to a live driver.
+    Inspect,
 }
 
 /// What cancelling one live child turn owes the hub.

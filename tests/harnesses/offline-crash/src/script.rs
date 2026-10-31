@@ -104,6 +104,11 @@ pub struct ScriptPlan {
     /// Signal tests that need an unobserved request set this and say why.
     #[serde(default)]
     pub stall_ignores_cancellation: bool,
+    /// Bind the scripted model under this adapter profile id instead of the
+    /// fixture's own, so a later build of the same session can be shown to
+    /// derive a different frozen binding input.
+    #[serde(default)]
+    pub adapter_profile: Option<String>,
     /// Shrink the observation budget to this many bytes.
     ///
     /// The budget is otherwise derived from the prepared request's own

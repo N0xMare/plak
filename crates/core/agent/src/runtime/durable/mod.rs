@@ -128,6 +128,16 @@ pub struct DurableSessionAddress {
     pub(in crate::runtime) checkpoint_id: CheckpointId,
 }
 
+/// Whether an exact open of a checkpoint would construct its runtime.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum DurableOpenVerification {
+    /// The checkpoint is quiescent and this build reconstructs it exactly.
+    Opens,
+    /// The checkpoint holds unsettled work; only an owning open settles it.
+    UnsettledWork,
+}
+
 /// Honest result of opening an exact runtime checkpoint.
 pub enum DurableRuntimeOpen {
     /// A certified quiescent checkpoint was attached to the one private driver.

@@ -28,6 +28,9 @@ use std::time::Duration;
 pub struct CodingSessionOpenFailure {
     pub failure: CliFailure,
     pub current_locator: Option<SessionLocator>,
+    /// The frozen binding input this build reconstructs differently, when the
+    /// open (or its verification) refused for that reason.
+    pub binding_change: Option<Box<plakous::agent::BindingChange>>,
 }
 
 impl From<CliFailure> for CodingSessionOpenFailure {
@@ -35,13 +38,59 @@ impl From<CliFailure> for CodingSessionOpenFailure {
         Self {
             failure,
             current_locator: None,
+            binding_change: None,
         }
+    }
+}
+
+/// What one build/open call does with the runtime its source compiles.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::agent) enum RuntimeTarget {
+    /// Create a new session.
+    Create,
+    /// Open this exact head and attach it.
+    Open(SessionLocator),
+    /// Answer whether opening this exact head would attach, without owning
+    /// it: nothing is attached, recovered or reattached.
+    Verify(SessionLocator),
+}
+
+impl RuntimeTarget {
+    const fn locator(self) -> Option<SessionLocator> {
+        match self {
+            Self::Create => None,
+            Self::Open(locator) | Self::Verify(locator) => Some(locator),
+        }
+    }
+
+    const fn verifies(self) -> bool {
+        matches!(self, Self::Verify(_))
+    }
+
+    /// How a root compile under this target reaches its agent tree: an
+    /// attaching open owns the hub, and a verification compiles over a
+    /// detached copy that it never inserts, leases or saves.
+    pub(in crate::agent) const fn root_topology_attach(
+        self,
+    ) -> crate::topology_runtime::TopologyHubAttach {
+        if self.verifies() {
+            crate::topology_runtime::TopologyHubAttach::Inspect
+        } else {
+            crate::topology_runtime::TopologyHubAttach::AttachRoot
+        }
+    }
+}
+
+impl From<Option<SessionLocator>> for RuntimeTarget {
+    fn from(locator: Option<SessionLocator>) -> Self {
+        locator.map_or(Self::Create, Self::Open)
     }
 }
 
 impl From<AgentSessionsError> for CodingSessionOpenFailure {
     fn from(error: AgentSessionsError) -> Self {
         let current_locator = error.current_locator();
+        let binding_change = error.binding_change().cloned().map(Box::new);
         let failure = if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
             CliFailure::new(incompatible_session_message(&error))
         } else {
@@ -50,6 +99,7 @@ impl From<AgentSessionsError> for CodingSessionOpenFailure {
         Self {
             failure,
             current_locator,
+            binding_change,
         }
     }
 }
@@ -571,7 +621,7 @@ fn product_reopen_failed(error: &AgentSessionsError) -> String {
 /// the runtime `source` yields. The one build/open entry point.
 pub(super) async fn build_or_open(
     source: SessionSource<'_>,
-    locator: Option<SessionLocator>,
+    target: RuntimeTarget,
     seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
@@ -579,7 +629,7 @@ pub(super) async fn build_or_open(
         SessionSource::Native { spec, stderr } => {
             Box::pin(attach_native_source(
                 *spec,
-                locator,
+                target,
                 seed,
                 operation_id,
                 stderr,
@@ -594,7 +644,7 @@ pub(super) async fn build_or_open(
         } => {
             Box::pin(attach_api_source(
                 *parent,
-                locator,
+                target,
                 seed,
                 operation_id,
                 topology_attach,
@@ -613,7 +663,7 @@ pub(super) async fn build_or_open(
             Box::pin(attach_runtime_source(
                 sessions,
                 *runtime,
-                locator,
+                target,
                 seed,
                 operation_id,
                 topology_owner,
@@ -657,7 +707,7 @@ pub(crate) async fn build_coding_session_seed(
             spec: Box::new(spec),
             stderr,
         },
-        None,
+        RuntimeTarget::Create,
         seed,
         operation_id,
     ))
@@ -679,7 +729,7 @@ pub async fn open_coding_session(
             spec: Box::new(spec),
             stderr,
         },
-        Some(locator),
+        RuntimeTarget::Open(locator),
         None,
         operation_id,
     ))
@@ -703,7 +753,7 @@ pub async fn build_runtime_session(
             output_bound_rederived: None,
             wording: &PRODUCT_WORDING,
         },
-        None,
+        RuntimeTarget::Create,
         None,
         operation_id,
     ))
@@ -711,9 +761,55 @@ pub async fn build_runtime_session(
     .map_err(|error| error.failure)
 }
 
+/// Answers whether [`open_coding_session`] of `locator` would attach,
+/// compiling the same runtime without owning, attaching or recovering it.
+pub(crate) async fn verify_coding_session(
+    spec: ProductAgentSpec,
+    locator: SessionLocator,
+    stderr: &mut dyn Write,
+) -> Result<(), CodingSessionOpenFailure> {
+    let operation_id = SessionOperationId::new(format!("plak:verify:{}", uuid::Uuid::new_v4()))
+        .map_err(|_| CliFailure::new("plak verify operation identity is invalid"))?;
+    Box::pin(build_or_open(
+        SessionSource::Native {
+            spec: Box::new(spec),
+            stderr,
+        },
+        RuntimeTarget::Verify(locator),
+        None,
+        operation_id,
+    ))
+    .await
+    .map(drop)
+}
+
+/// The API-route twin of [`verify_coding_session`].
+pub(crate) async fn verify_api_coding_session(
+    parent: ApiTopologyParent,
+    locator: SessionLocator,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
+) -> Result<(), CodingSessionOpenFailure> {
+    let operation_id = SessionOperationId::new(format!("plak:verify:{}", uuid::Uuid::new_v4()))
+        .map_err(|_| CliFailure::new("plak verify operation identity is invalid"))?;
+    let target = RuntimeTarget::Verify(locator);
+    Box::pin(build_or_open(
+        SessionSource::Api {
+            parent: Box::new(parent),
+            topology_attach: target.root_topology_attach(),
+            cached_evidence: cached_evidence.map(Box::new),
+            tool_fence: SessionToolFence::Full,
+        },
+        target,
+        None,
+        operation_id,
+    ))
+    .await
+    .map(drop)
+}
+
 async fn attach_native_source(
     mut spec: ProductAgentSpec,
-    locator: Option<SessionLocator>,
+    target: RuntimeTarget,
     seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
     stderr: &mut dyn Write,
@@ -723,7 +819,7 @@ async fn attach_native_source(
         .runtime_sessions()
         .map_err(CodingSessionOpenFailure::from)?;
     // Attachment catalogs are identity-bearing, so restore bounds before compilation.
-    if let Some(locator) = locator {
+    if let Some(locator) = target.locator() {
         spec.state_roots = spec
             .state_roots
             .for_exact_reopen(&sessions, locator)
@@ -735,12 +831,33 @@ async fn attach_native_source(
     let is_root = spec.topology_caller_id.is_none();
     let reattach_spec = spec.clone();
     let reattach_parent = SpawnParent::from_native(reattach_spec.clone());
+    if target.verifies() {
+        let runtime = coding_session_runtime_binding_for(
+            spec,
+            stderr,
+            true,
+            SessionToolFence::Full,
+            target.root_topology_attach(),
+            &mut None,
+        )?;
+        return attach_runtime_source(
+            sessions,
+            runtime,
+            target,
+            seed,
+            operation_id,
+            None,
+            None,
+            &PRODUCT_WORDING,
+        )
+        .await;
+    }
     let runtime = match coding_session_runtime_binding_for(
         spec,
         stderr,
-        locator.is_some(),
+        target.locator().is_some(),
         SessionToolFence::Full,
-        crate::topology_runtime::TopologyHubAttach::AttachRoot,
+        target.root_topology_attach(),
         &mut None,
     ) {
         Ok(runtime) => runtime,
@@ -762,7 +879,7 @@ async fn attach_native_source(
     let result = attach_runtime_source(
         sessions,
         runtime,
-        locator,
+        target,
         seed,
         operation_id,
         topology_owner,
@@ -775,6 +892,7 @@ async fn attach_native_source(
             return result.map_err(|error| CodingSessionOpenFailure {
                 failure: error.failure.with_cleanup_failure(cleanup),
                 current_locator: error.current_locator,
+                binding_change: error.binding_change,
             });
         }
         return result;
@@ -833,7 +951,7 @@ pub(crate) async fn build_api_coding_session_seed(
             cached_evidence: cached_evidence.map(Box::new),
             tool_fence: SessionToolFence::Full,
         },
-        None,
+        RuntimeTarget::Create,
         seed,
         operation_id,
     ))
@@ -887,7 +1005,7 @@ pub(crate) async fn open_api_coding_session_with_fence(
             cached_evidence: cached_evidence.map(Box::new),
             tool_fence,
         },
-        Some(locator),
+        RuntimeTarget::Open(locator),
         None,
         operation_id,
     ))
@@ -896,7 +1014,7 @@ pub(crate) async fn open_api_coding_session_with_fence(
 
 async fn attach_api_source(
     parent: ApiTopologyParent,
-    locator: Option<SessionLocator>,
+    target: RuntimeTarget,
     seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
@@ -926,7 +1044,7 @@ async fn attach_api_source(
     // failure here would strand every API session whose record lagged, which is
     // the one case adoption exists for.
     let mut parent = parent;
-    if let Some(locator) = locator {
+    if let Some(locator) = target.locator() {
         parent.state_roots = parent
             .state_roots
             .for_exact_reopen(&sessions, locator)
@@ -946,7 +1064,7 @@ async fn attach_api_source(
     let output_bound_rederived;
     let runtime = match Box::pin(api_session_runtime_binding_with_owner(
         &parent,
-        locator.is_some(),
+        target.locator().is_some(),
         tool_fence,
         topology_attach,
         cached_evidence,
@@ -973,7 +1091,7 @@ async fn attach_api_source(
     let result = attach_runtime_source(
         sessions,
         runtime,
-        locator,
+        target,
         seed,
         operation_id,
         topology_owner,
@@ -981,12 +1099,13 @@ async fn attach_api_source(
         &PRODUCT_WORDING,
     )
     .await;
-    if result.is_err() {
+    if result.is_err() || target.verifies() {
         if let Some(acquired) = acquired_owner {
             if let Err(cleanup) = crate::topology_runtime::release_root_lease(&acquired).await {
                 return result.map_err(|error| CodingSessionOpenFailure {
                     failure: error.failure.with_cleanup_failure(cleanup),
                     current_locator: error.current_locator,
+                    binding_change: error.binding_change,
                 });
             }
         }
@@ -1014,7 +1133,7 @@ async fn attach_api_source(
 async fn attach_runtime_source(
     sessions: Arc<AgentSessions>,
     runtime: SessionRuntimeBinding,
-    locator: Option<SessionLocator>,
+    target: RuntimeTarget,
     mut seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
     topology_owner: Option<String>,
@@ -1029,17 +1148,39 @@ async fn attach_runtime_source(
         seed.inspect(&runtime)?;
     }
     let reachability_probe = plakous::sessions::internal::reachability_probe(&runtime);
-    if let Some(locator) = locator {
+    let reopen_failure = |error: AgentSessionsError| CodingSessionOpenFailure {
+        failure: CliFailure::new((wording.reopen_failed)(&error)),
+        current_locator: error.current_locator(),
+        binding_change: error.binding_change().cloned().map(Box::new),
+    };
+    if let RuntimeTarget::Verify(locator) = target {
+        if seed.is_some() {
+            return Err(CliFailure::new("a carried history seeds only a new session").into());
+        }
+        return match Box::pin(sessions.verify_open(locator, runtime))
+            .await
+            .map_err(reopen_failure)?
+        {
+            plakous::sessions::OpenVerification::Opens => Ok(AttachedCodingSession {
+                output_bound_rederived,
+                reachability_probe,
+                sessions: Arc::clone(&sessions),
+                opened: None,
+                recovered_turn: None,
+                locator,
+                topology_owner,
+            }),
+            _ => Err(reopen_refusal(wording.reopen_needs_recovery, None).into()),
+        };
+    }
+    if let Some(locator) = target.locator() {
         if seed.is_some() {
             return Err(CliFailure::new("a carried history seeds only a new session").into());
         }
         let opened =
             Box::pin(sessions.open(OpenSessionRequest::new(operation_id, locator, runtime)))
                 .await
-                .map_err(|error| CodingSessionOpenFailure {
-                    failure: CliFailure::new((wording.reopen_failed)(&error)),
-                    current_locator: error.current_locator(),
-                })?;
+                .map_err(reopen_failure)?;
         let recovered = classify_opened(&opened);
         return match opened {
             OpenSessionOutcome::Opened { session, .. }
@@ -1121,4 +1262,31 @@ pub(in crate::agent) fn require_reconstructed_coding_projection(
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests {
+    use super::RuntimeTarget;
+    use crate::topology_runtime::TopologyHubAttach;
+
+    /// Both the native and the API root compile under a verification reach
+    /// their tree as an inspection; only an open or create attaches it.
+    #[test]
+    fn only_a_verification_compiles_over_a_detached_tree() {
+        fn id<T: std::str::FromStr>() -> T
+        where
+            T::Err: std::fmt::Debug,
+        {
+            uuid::Uuid::new_v4().to_string().parse().unwrap()
+        }
+        let locator = plakous::sessions::SessionLocator::new(id(), id(), id());
+        assert_eq!(
+            RuntimeTarget::Verify(locator).root_topology_attach(),
+            TopologyHubAttach::Inspect
+        );
+        for target in [RuntimeTarget::Open(locator), RuntimeTarget::Create] {
+            assert_eq!(target.root_topology_attach(), TopologyHubAttach::AttachRoot);
+        }
+    }
 }

@@ -857,7 +857,14 @@ source, toolchain, target, build environment and same checkout path it matches w
 The requested session's source key is located
 by read-only sessions-table ID membership. When it matches the staged key, only
 that key's runtime, product and tree are backed up and `plak session rehearse`
-runs there. When it differs, the report says `state key changed <old> -> <new>:
+runs there; when that passes, the staged build then answers the exact-reopen
+binding verdict `/reload` asks before teardown (`version --reopen-probe <id>`,
+chapter 02 §2.5.1) against the live home, from the session's workspace, with
+only `PATH`, `HOME`, `TMPDIR`, locale and the XDG state/config locations
+inherited: it reads the session and its login read-only, takes no lease and
+writes no session state. It prints `reopen=exact`, `reopen=carries: <change>`
+(the reload will carry, exit 0) or `reopen=refused: <reason>` (exit 1); this is
+the reopen check to run before an install handoff. When it differs, the report says `state key changed <old> -> <new>:
 rehearsing carry-forward` and the tool rehearses carry-forward in disposable
 homes: the installed `plak` on `PATH` (or `--installed <path>`) exports the
 session from a copy of the source key (`plak session export <id> --out <tmp>`);

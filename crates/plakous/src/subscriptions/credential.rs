@@ -106,10 +106,27 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<bool, NativeSubscriptionError> {
+        self.access_token_expires_within(provider, Duration::ZERO)
+            .await
+    }
+
+    /// Reports whether a `Ready` credential's stored access token expires
+    /// within `window`, from local state only: no provider network I/O and no
+    /// claim. A caller that must never renew (an exact-reopen probe the
+    /// source may kill at its deadline) asks this before resolving a route.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed like [`Self::access_token_expired`].
+    pub async fn access_token_expires_within(
+        &self,
+        provider: NativeProvider,
+        window: Duration,
+    ) -> Result<bool, NativeSubscriptionError> {
         let lock = self.acquire_compatibility_lock(provider).await?;
         let access_expires_at = self.access_expires_at_locked(provider).await?;
         lock.verify()?;
-        Ok(access_expires_at <= self.state.now()?)
+        Ok(access_expires_at <= self.state.now()?.saturating_add(window.as_secs()))
     }
 
     /// Stored access-token expiry under the held compatibility lock; opening

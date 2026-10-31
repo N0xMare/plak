@@ -64,6 +64,13 @@ impl ResolvedProvider {
         self.model.selected_model()
     }
 
+    /// Returns the route adapter revision this build resolved: a build
+    /// constant that feeds the model binding digest, never credential bytes.
+    #[must_use]
+    pub fn adapter_revision(&self) -> &str {
+        &self.model.evidence.adapter_revision
+    }
+
     /// Returns the fresh execution authority obtained during this resolution.
     #[must_use]
     pub const fn initial_authority(&self) -> &RuntimeModelAuthority {

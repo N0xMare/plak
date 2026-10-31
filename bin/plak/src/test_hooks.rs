@@ -128,6 +128,7 @@ fn prepare_scripted_tree(
     plan: &ScriptPlan,
     sessions: Arc<dyn plakous_hosted::session_store::SessionRecordStore>,
     state_roots: product_agent::ProductStateRoots,
+    detached: bool,
 ) -> Result<PreparedTree, String> {
     use plakous_hosted::agent_tree::{MemoryTreeStore, ProductAgentTree, TreeStore};
     use plakous_hosted::agent_tree_protocol::WriterMode;
@@ -177,18 +178,28 @@ fn prepare_scripted_tree(
         tree = ProductAgentTree::reopen(persisted);
         tree.set_vcs(Arc::clone(&vcs));
     }
-    let revision = store
-        .save(&tree)
-        .map_err(|error| format!("offline scripted tree could not be saved: {}", error.detail))?;
-    tree.acknowledge_revision(revision);
-    drop(vcs);
-    // Attach rather than construct: `insert_root_with` puts the tree in the
-    // process hub *and* hands back the runtime that owns it, so the navigator
-    // and the tools are looking at one tree rather than two copies of one.
-    // Building a `TreeDriver` directly would leave the hub empty.
-    let runtime =
+    let runtime = if detached {
+        Arc::new(
+            plakous_hosted::topology_runtime::ProductTopologyRuntime::new(
+                tree,
+                Arc::new(MemoryTreeStore::new()),
+                vcs,
+                None,
+            ),
+        )
+    } else {
+        let revision = store.save(&tree).map_err(|error| {
+            format!("offline scripted tree could not be saved: {}", error.detail)
+        })?;
+        tree.acknowledge_revision(revision);
+        drop(vcs);
+        // Attach rather than construct: `insert_root_with` puts the tree in the
+        // process hub *and* hands back the runtime that owns it, so the navigator
+        // and the tools are looking at one tree rather than two copies of one.
+        // Building a `TreeDriver` directly would leave the hub empty.
         plakous_hosted::topology_runtime::insert_root_with(tree_id, tree, Arc::clone(&store), None)
-            .map_err(|error| format!("offline scripted tree could not attach: {error}"))?;
+            .map_err(|error| format!("offline scripted tree could not attach: {error}"))?
+    };
     let driver = runtime.driver().clone();
     let binder = Arc::new(ScriptedChildBinder {
         services: plakous_hosted::agent_tree_tools::ChildServices {
@@ -908,6 +919,9 @@ pub(crate) enum OfflineFace {
     Attached,
     /// The single-turn `plak run` face.
     OneShot,
+    /// The exact-reopen probe: the scripted tree is read, never saved or
+    /// attached, as the product's verification compiles over a detached copy.
+    Verify,
 }
 
 impl OfflineSelection {
@@ -962,6 +976,7 @@ impl OfflineSelection {
                 &plan,
                 state_roots.session_records(),
                 state_roots.clone(),
+                face == OfflineFace::Verify,
             )?)
         } else {
             None
@@ -1100,11 +1115,11 @@ impl OfflineSelection {
             topology_admission: Some(product_config::topology_admission_probe(paths)),
             surface: match face {
                 OfflineFace::Attached => Some(crate::shell::settings::ProductSurface::boxed(paths)),
-                OfflineFace::OneShot => None,
+                OfflineFace::OneShot | OfflineFace::Verify => None,
             },
             root_template: policy.root_template,
-            attached_one_shot: face == OfflineFace::OneShot,
-            interactive: face != OfflineFace::OneShot,
+            attached_one_shot: face != OfflineFace::Attached,
+            interactive: face == OfflineFace::Attached,
             cwd: cwd.to_path_buf(),
             ready_catalog: ready_catalog.clone(),
             resume_publication,

@@ -397,6 +397,7 @@ pub(in crate::agent) fn bind_node_tool_plan(
     route_label: &str,
     workspace_root: &Path,
     state_roots: &ProductStateRoots,
+    mcp_binding: crate::mcp_binding::McpBinding,
 ) -> CliResult<crate::tool_plan::ToolPlan> {
     let selection = &tools.selection;
     crate::capabilities::require_tools(selection)?;
@@ -421,13 +422,21 @@ pub(in crate::agent) fn bind_node_tool_plan(
                 .map_err(CliFailure::new)?,
         )
         .map_err(|refusal| CliFailure::new(refusal.to_string()))?;
-    let mcp = crate::mcp_binding::bind_mcp_tools(
-        selection,
-        &tools.tool_sections,
-        workspace_root,
-        state_roots.named_secrets(),
-        tools.mcp_tools.as_deref(),
-    )
+    let mcp = match mcp_binding {
+        crate::mcp_binding::McpBinding::Lease => crate::mcp_binding::bind_mcp_tools(
+            selection,
+            &tools.tool_sections,
+            workspace_root,
+            state_roots.named_secrets(),
+            tools.mcp_tools.as_deref(),
+        ),
+        crate::mcp_binding::McpBinding::Recorded => crate::mcp_binding::recorded_mcp_tools(
+            selection,
+            &tools.tool_sections,
+            &state_roots.named_secrets(),
+            tools.mcp_tools.as_deref(),
+        ),
+    }
     .map_err(CliFailure::new)?;
     Ok(plan.with_mcp(selection, mcp))
 }

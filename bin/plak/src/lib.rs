@@ -298,6 +298,7 @@ fn log_command_start(command: &Command) {
     match command {
         Command::StateKey
         | Command::ReloadProbe
+        | Command::ReopenProbe { .. }
         | Command::WriteBinaryManifest { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion => {}
@@ -451,7 +452,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         Command::Resume {
             session_id: Some(id),
         } => return launch_tui(&services, Some(id), false, None),
-        Command::ImportResume { path } => return carry::import_and_resume(&services, &path),
+        Command::ImportResume { path, handoff } => {
+            return carry::import_and_resume(&services, &path, handoff.as_deref());
+        }
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
         command => command,
     };
@@ -516,6 +519,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                     config_error: Some(error.message().to_owned()),
                 },
             };
+            serde_json::to_writer(&mut stdout, &verdict)
+                .map_err(|_| CliFailure::new("stdout failed"))?;
+            writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
+            Ok(ProcessOutcome::Success)
+        }
+        Command::ReopenProbe { session } => {
+            let verdict = carry::reopen_probe(&services, &session);
             serde_json::to_writer(&mut stdout, &verdict)
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
@@ -1128,6 +1138,7 @@ fn execute_command(
         | Command::StateKey
         | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe
+        | Command::ReopenProbe { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion
         | Command::ImportResume { .. }

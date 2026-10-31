@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Offline reload preflight against disposable backups, never live credentials.
+"""Offline reload preflight against disposable backups, then the reopen verdict.
 
 A staged build whose state key differs from the session's rehearses
 carry-forward: export with the installed build, then validate config, import
 and rehearse with the staged build. Every home is temporary and removed.
+
+On the same state key the staged build then answers the exact-reopen binding
+verdict `/reload` asks before teardown (`version --reopen-probe`): it reads the
+live home and its logins read-only, takes no lease, writes no session, tree or
+credential state and never renews a login, and reports `reopen=exact`,
+`reopen=carries: <change>`, `reopen=unknown: <reason>` (a login that would need
+renewal first) or `reopen=refused`.
 """
 
 import argparse
@@ -466,6 +473,49 @@ def rehearse_copy(live, backup, key, binary, session_id, wait_idle, timeout, int
         time.sleep(min(interval, max(0, deadline - time.monotonic())))
 
 
+def verdict_environment(live, source=None):
+    """The live home and the operator's logins, nothing else inherited."""
+    source = os.environ if source is None else source
+    names = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "XDG_STATE_HOME", "XDG_CONFIG_HOME")
+    env = {name: source[name] for name in names if name in source}
+    env["PLAK_HOME"] = str(live)
+    return env
+
+
+def reopen_verdict(live, key, binary, session_id):
+    """Asks the staged build whether exact reopen would attach, as /reload does."""
+    roots = [live, binary, ROOT]
+    try:
+        cwd = session_workspace(live, key, session_id)
+    except (ValueError, sqlite3.Error):
+        print("reopen=refused: session_workspace_unavailable", flush=True)
+        return 1
+    roots.append(cwd)
+    result = run_command(
+        [str(binary), "version", "--reopen-probe", session_id],
+        verdict_environment(live), cwd, 120,
+    )
+    try:
+        payload = json.loads(result.stdout) if result.returncode == 0 else None
+    except json.JSONDecodeError:
+        payload = None
+    verdict = payload.get("verdict") if isinstance(payload, dict) else None
+    if verdict == "opens":
+        print("reopen=exact", flush=True)
+        return 0
+    if verdict == "binding_changed" and isinstance(payload.get("change"), str):
+        print("reopen=carries: " + scrub(payload["change"], roots), flush=True)
+        return 0
+    if verdict == "refused" and isinstance(payload.get("reason"), str):
+        print("reopen=refused: " + scrub(payload["reason"], roots), flush=True)
+        return 1
+    if verdict == "unknown" and isinstance(payload.get("reason"), str):
+        print("reopen=unknown: " + scrub(payload["reason"], roots), flush=True)
+        return 1
+    report_refusal("reopen", result, roots)
+    return 1
+
+
 def workspace_cwd(document, fallback):
     # The reload probe validates the session workspace, not this checkout.
     try:
@@ -736,10 +786,13 @@ def rehearse(home, options):
                 options.installed, options.config_overlay, options.wait_idle, options.timeout, options.interval
             )
         backup = temporary / "home"
-        return rehearse_copy(
+        status = rehearse_copy(
             home, backup, key, stage / "plak", session_id,
             options.wait_idle, options.timeout, options.interval,
         )
+        if status != 0:
+            return status
+        return reopen_verdict(home, key, stage / "plak", session_id)
 
 
 if __name__ == "__main__":

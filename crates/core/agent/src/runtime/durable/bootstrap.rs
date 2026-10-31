@@ -204,7 +204,64 @@ impl DurableRuntimeBootstrap {
         )
         .await
         .map_err(StoreCallError::into_agent)?;
-        validate_loaded_address(&loaded, expected, durability)?;
+        Self::from_loaded(
+            store,
+            lease,
+            &loaded,
+            expected,
+            durability,
+            admission,
+            store_timeouts,
+        )
+    }
+
+    /// Validates an already loaded exact branch for a reopen verification
+    /// that never owns it. Nothing here acquires, renews or releases a lease.
+    ///
+    /// The branch facts hold an inspection token minted in a domain no store
+    /// grants: a store authenticating it against its own state refuses, so the
+    /// bootstrap can only build and drop a runtime, never mutate the branch.
+    pub(in crate::runtime) fn inspect(
+        store: Arc<dyn SessionStore>,
+        loaded: &crate::LoadedBranch,
+        expected: DurableSessionAddress,
+        durability: RuntimeDurability,
+        admission: SealedRuntimeAdmission,
+        store_timeouts: StoreTimeouts,
+    ) -> Result<Self, AgentError> {
+        let inspection = BranchLease::from_store(
+            expected.session(),
+            RunId::try_from(session_operation_uuid(
+                "plakous:reopen-verification",
+                b"inspection-run",
+            )?)
+            .map_err(|error| AgentError::from_identity(&error))?,
+            NonZeroU64::MIN,
+            crate::lease::LeaseInstant::new(crate::lease::LeaseDomain::new([0; 16], [0; 32]), 0, 0)
+                .map_err(AgentError::from_store)?,
+            NonZeroU64::MIN,
+        );
+        Self::from_loaded(
+            store,
+            inspection,
+            loaded,
+            expected,
+            durability,
+            admission,
+            store_timeouts,
+        )
+    }
+
+    fn from_loaded(
+        store: Arc<dyn SessionStore>,
+        lease: BranchLease,
+        loaded: &crate::LoadedBranch,
+        expected: DurableSessionAddress,
+        durability: RuntimeDurability,
+        admission: SealedRuntimeAdmission,
+        store_timeouts: StoreTimeouts,
+    ) -> Result<Self, AgentError> {
+        validate_loaded_address(loaded, expected, durability)?;
         let head = loaded.head();
         let stored = loaded.checkpoint();
         let checkpoint = Arc::clone(stored.checkpoint());

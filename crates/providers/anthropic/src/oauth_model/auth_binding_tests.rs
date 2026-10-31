@@ -163,11 +163,29 @@ async fn exact_reopen(different_account: bool) -> TestResult {
             TEST_GRANT_BINDING
         },
     )?;
+    // The lease-free verification answers exactly what the open does.
+    let verified = runtime
+        .verify_open(
+            address,
+            builder(&manager, temp.path())
+                .await?
+                .harness_plan(plan.clone()),
+        )
+        .await;
+    match &verified {
+        Ok(verdict) => assert!(!different_account, "{verdict:?}"),
+        Err(error) => {
+            assert!(different_account, "{error}");
+            assert!(error.binding_change().is_some(), "{error:?}");
+        }
+    }
     let result = runtime
         .open(
             "auth-binding-open",
             address,
-            builder(&manager, temp.path()).await?.harness_plan(plan),
+            builder(&manager, temp.path())
+                .await?
+                .harness_plan(plan.clone()),
         )
         .await;
     if different_account {
@@ -184,9 +202,24 @@ async fn exact_reopen(different_account: bool) -> TestResult {
         assert!(error.binding_change().is_some(), "{error:?}");
         assert!(!error.to_string().contains("provider account changed"));
     } else {
+        assert_eq!(
+            verified?,
+            plakous_agent::internal::DurableOpenVerification::Opens
+        );
         let DurableRuntimeOpen::Opened(agent) = result? else {
             return Err("reopen was not attached".into());
         };
+        // Verification never needs the branch: it answers while another
+        // owner holds the lease, and leaves that owner attached.
+        assert_eq!(
+            runtime
+                .verify_open(
+                    address,
+                    builder(&manager, temp.path()).await?.harness_plan(plan)
+                )
+                .await?,
+            plakous_agent::internal::DurableOpenVerification::Opens
+        );
         agent.shutdown().await?;
     }
     Ok(())

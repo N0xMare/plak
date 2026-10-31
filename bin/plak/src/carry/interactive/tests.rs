@@ -52,10 +52,17 @@ fn a_snapshot_that_hangs_is_killed_and_reads_as_unknown() {
 
 #[test]
 fn reload_resumes_plainly_on_the_same_key_and_carries_across_keys() {
-    assert_eq!(reload_plan(false, "a", Some("b")), ReloadPlan::Fresh);
-    assert_eq!(reload_plan(true, "a", Some("a")), ReloadPlan::Resume);
-    assert_eq!(reload_plan(true, "a", Some("b")), ReloadPlan::Carry);
-    assert_eq!(reload_plan(true, "a", None), ReloadPlan::ResumeUnverified);
+    assert_eq!(reload_plan(false, "a", Some("b"), false), ReloadPlan::Fresh);
+    assert_eq!(reload_plan(true, "a", Some("a"), false), ReloadPlan::Resume);
+    assert_eq!(reload_plan(true, "a", Some("b"), false), ReloadPlan::Carry);
+    assert_eq!(
+        reload_plan(true, "a", None, false),
+        ReloadPlan::ResumeUnverified
+    );
+    // A changed frozen binding on the same key carries in one step; an
+    // unknown key never carries on a verdict it could not have been asked.
+    assert_eq!(reload_plan(true, "a", Some("a"), true), ReloadPlan::Carry);
+    assert_eq!(reload_plan(false, "a", Some("a"), true), ReloadPlan::Fresh);
 }
 
 #[test]

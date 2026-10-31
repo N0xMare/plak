@@ -18,6 +18,8 @@ use std::path::Path;
 pub(super) enum AttachedConfigError {
     Unresolvable(CliFailure),
     Other(CliFailure),
+    /// An exact-reopen verification answered before resolving anything.
+    Answered(Box<crate::carry::ReopenProbe>),
 }
 
 impl From<CliFailure> for AttachedConfigError {
@@ -30,6 +32,9 @@ impl From<AttachedConfigError> for CliFailure {
     fn from(error: AttachedConfigError) -> Self {
         match error {
             AttachedConfigError::Unresolvable(error) | AttachedConfigError::Other(error) => error,
+            AttachedConfigError::Answered(_) => {
+                CliFailure::new("exact reopen was answered before resolution")
+            }
         }
     }
 }
@@ -82,25 +87,53 @@ pub(crate) fn probe_prepared_capacity(
     ))
 }
 
+/// Whether an exact reopen of `record` would attach on this build, answered
+/// without owning it: the attach's own binding resolution, then the open's
+/// verification at `head` (spec 02 §2.5.1).
+pub(crate) fn verify_exact_reopen(
+    services: &crate::shell::services::Services,
+    record: product_sessions::SessionRecord,
+    head: plakous::sessions::SessionLocator,
+) -> CliResult<crate::carry::ReopenProbe> {
+    let config = match build_attached_host_config(services, record, AttachedPurpose::Verify) {
+        Ok(config) => config,
+        Err(AttachedConfigError::Answered(probe)) => return Ok(*probe),
+        Err(error) => return Err(error.into()),
+    };
+    product_host::verify_exact_reopen(config, head).map(Into::into)
+}
+
+/// What an attached host configuration is built for.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum AttachedPurpose {
+    /// One attached action.
+    Action,
+    /// A `/rebind` target, which classifies a removed binding as fallback.
+    Rebind,
+    /// An exact-reopen verification, which must not write.
+    Verify,
+}
+
 pub(super) fn attached_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
-    build_attached_host_config(services, record, false)
+    build_attached_host_config(services, record, AttachedPurpose::Action)
 }
 
 pub(super) fn rebind_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
-    build_attached_host_config(services, record, true)
+    build_attached_host_config(services, record, AttachedPurpose::Rebind)
 }
 
 fn build_attached_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
-    classify_rebind_fallback: bool,
+    purpose: AttachedPurpose,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
+    let classify_rebind_fallback = purpose == AttachedPurpose::Rebind;
     crate::build_features::admit_session(&record)?;
     let paths = &crate::home::paths::PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
@@ -116,7 +149,11 @@ fn build_attached_host_config(
         return selection
             .and_then(|selection| {
                 selection.host_config(
-                    crate::test_hooks::OfflineFace::OneShot,
+                    if purpose == AttachedPurpose::Verify {
+                        crate::test_hooks::OfflineFace::Verify
+                    } else {
+                        crate::test_hooks::OfflineFace::OneShot
+                    },
                     paths,
                     &state_roots,
                     record,
@@ -128,6 +165,12 @@ fn build_attached_host_config(
                 )
             })
             .map_err(|error| AttachedConfigError::Other(CliFailure::new(error)));
+    }
+    // After the offline model's early return: the probe never renews a login.
+    if purpose == AttachedPurpose::Verify
+        && let Some(probe) = crate::carry::reopen_credential_gate(record.account.as_deref())
+    {
+        return Err(AttachedConfigError::Answered(Box::new(probe)));
     }
     let account = record
         .account

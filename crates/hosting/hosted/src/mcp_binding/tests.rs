@@ -628,3 +628,69 @@ fn login_remedy_single_quotes_validated_scopes_and_supports_scope_less_fallback(
     );
     Ok(())
 }
+
+/// An exact-reopen verification rebuilds the frozen MCP tools with no server
+/// behind them: the registry is the one a leasing reopen builds, a server
+/// whose command no longer exists is never started, and a selection whose
+/// tools were never frozen is refused rather than listed.
+#[test]
+fn a_verification_rebuilds_frozen_mcp_tools_without_starting_a_server() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let server = fixture()?;
+    let selection = TemplateToolSelection::parse(["mcp:fake"])?;
+    let table = sections(rendered(
+        server.to_str().ok_or("fixture path")?,
+        &[],
+        &[],
+        None,
+    ));
+    let created = bind_mcp_tools(&selection, &table, workspace.path(), secrets(&[]), None)?;
+    let reopened = bind_mcp_tools(
+        &selection,
+        &table,
+        workspace.path(),
+        secrets(&[]),
+        Some(&created.records),
+    )?;
+    let gone = sections(rendered(
+        workspace
+            .path()
+            .join("no-such-server")
+            .to_str()
+            .ok_or("path")?,
+        &[],
+        &[],
+        None,
+    ));
+    let verified = recorded_mcp_tools(&selection, &gone, &secrets(&[]), Some(&created.records))?;
+    assert_eq!(verified.names, reopened.names);
+    assert_eq!(verified.records, reopened.records);
+    let definitions = |bound: &BoundMcpTools| {
+        bound
+            .registrations
+            .iter()
+            .map(|registration| {
+                (
+                    registration.definition().clone(),
+                    registration.owner().clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(definitions(&verified), definitions(&reopened));
+    assert!(recorded_mcp_tools(&selection, &gone, &secrets(&[]), None).is_err());
+    Ok(())
+}
+
+#[test]
+fn only_a_verification_compiles_mcp_tools_from_records() {
+    use crate::mcp_binding::McpBinding;
+    use crate::topology_runtime::TopologyHubAttach;
+    assert_eq!(
+        McpBinding::for_attach(TopologyHubAttach::Inspect),
+        McpBinding::Recorded
+    );
+    for attach in [TopologyHubAttach::AttachRoot, TopologyHubAttach::LookupOnly] {
+        assert_eq!(McpBinding::for_attach(attach), McpBinding::Lease);
+    }
+}

@@ -1212,7 +1212,60 @@ session deletion cleans them up, and `state prune-legacy
 `/reload` (§5.1) resolves the installed build and asks its state key with the
 hidden `plak version --state-key` while the session is still attached, before
 any teardown; a build that does not answer within 5 seconds, or answers
-anything but one key, counts as unknown. Same key: plain `plak --resume <id>`.
+anything but one key, counts as unknown. Same key: the source then asks the
+installed build, still before teardown, whether exact reopen of this session
+would attach there (hidden `plak version --reopen-probe <id>`, 60 seconds,
+off the UI thread). The destination answers with the revalidation an open
+runs: it reads the session record and its projected head without writing,
+resolves the recorded binding exactly as an attach does, then runs the open's
+authority check, runtime compilation and Plakous construction comparisons
+through `AgentSessions::verify_open`, which loads the exact head, takes no
+lease, registers no driver, publishes no recovery, reattaches no children and
+drops what it built (a head that trails the runtime is adopted once, as the
+open adopts it). A session with an agent tree compiles its tree tools over a
+detached in-memory copy of the tree (of the persisted rows, or of the tree a
+process already holds): the probe never attaches the tree, takes its lease,
+applies the reopen law to the stored rows, folds startup effects, saves, or
+binds anything to a live tree's driver, so the live owner's next tree save
+finds the revision and host generation it wrote. A session whose root tools
+name MCP servers rebuilds those tools from the records it froze at creation
+with no server behind them (`McpToolPack::unbound`, chapter 01): the probe
+never starts, connects or leases an MCP server, so it never renews an MCP
+login; a session whose MCP tools were never frozen answers `unknown`
+(`mcp_tools_unfrozen`) instead of listing the servers. The verdict is one of
+`opens`, `binding_changed` with the named change (chapter 01 §5.4), `refused`
+with the open's refusal, or `unknown`. It runs in the destination because only the
+destination derives its own binding; it reads the real home because the route,
+catalog and credential it must resolve are the operator's, the same reads the
+carry-capacity probe already performs. It writes no session, product, tree or
+credential state, and it never renews a credential: the source kills a probe
+that overruns its deadline, and a renewal killed mid-exchange could leave a
+rotating credential quarantined. A native login that is renewing, needs
+renewal, or whose access token expires within ten minutes answers `unknown`
+(`needs_refresh`) before anything resolves; a signed-out, quarantined,
+revoked, earlier-build or newer-build login answers `refused` with its login
+remedy, never a binding change. A model capability binding that differs only by digest
+(chapter 01 §5.4) is named by that category, since the recorded side keeps only
+the digest, and adds `this build: <revision>` when the destination's route
+reports its adapter revision. `opens` is a plain `plak --resume <id>`.
+`binding_changed` on a quiescent session (no root turn, live sub-agent or
+background process; the TUI's own refusals and export's quiescence checks
+hold) carries in one step through the same export/import handoff as another
+key, and the successor records `carried forward from <id>: the installed build
+would not reopen it exactly: its <change> differs; the provider cache rebuilds
+on the first request; N finished sub-agents are not restored` (the clause is
+omitted for none). That line reaches the destination in the reload handoff
+sidecar, never in the export: a private file (mode 0600, this user's, directly
+under the home's private `carry/` directory, at most 64 KiB) holding a JSON
+object with a `version` and additive optional fields, named by the hidden
+`--reload-handoff <file>` argument after `--import-resume <file>`. The
+destination honors a sidecar only when that argument names it, reads it once
+and deletes it; one that is missing, not private, elsewhere, oversized or of
+another version reads as none. `refused` keeps the session open on this build:
+`reload kept this session open: the installed build would not reopen it:
+<reason>`. `unknown`, a build that predates the question, one that fails it and
+one that does not answer in time give no verdict, and the reload resumes
+plainly as before.
 Another key: after the TUI's ordinary handoff, this build reloads the session
 record from the store (the loop's copy can trail the host's last commit),
 exports it into a carry file and `exec`s the installed build with the hidden
@@ -3416,11 +3469,15 @@ or background processes are live, including non-terminal children in the
 persisted source tree even when the root is unattached. Queued prompts carry paused, never dispatch
 automatically. No shell export/import round trip is required.
 
-An unattached exact reopen refusal naming a different account or frozen
-model/route/adapter binding offers `/rebind`; `/reload` from that refusal takes
-the same in-process carry path. Restoring the original account/configuration
-instead permits exact reopen. A missing login or quarantined credential alone
-is not a binding mismatch and is repaired with the named login command.
+An unattached exact reopen refusal names the account or the specific frozen
+binding input that differs (`resolved harness plan is bound to a different
+<change>`, chapter 01 §5.4) and its guidance names the one carry command:
+`fix: carry the full history into a new session with /rebind; restoring the
+original account and configuration reopens it exactly instead`. `plak --resume
+<id>` of such a session opens unattached with that reason and guidance. `/reload`
+from that refusal takes the same in-process carry path. A missing login or
+quarantined credential alone is not a binding mismatch and is repaired with the
+named login command.
 
 `/reload` restarts on the installed build before applying changed epoch-scoped
 orchestration/roster settings. On a same-state resume, the destination process
@@ -3455,7 +3512,8 @@ TUI selects that successor and names it in a repair notice, rather than
 remaining on the source and creating another successor at the next reload.
 
 The normal reload handoff carries the session forward when
-that build has another state key (§2.5.1). It is refused while a turn runs,
+that build has another state key, or the same key and an exact-reopen verdict
+of `binding_changed` (§2.5.1). It is refused while a turn runs,
 while sub-agents or background processes are live, or when no installed `plak` resolves on `PATH`, so a
 refusal never closes the TUI. Asking the installed build its state key runs off
 the UI thread: the transcript reads `checking installed build…` while the TUI

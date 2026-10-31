@@ -1730,6 +1730,7 @@ fn carry(executable: &str, snapshot: &str) {
     let _ = std::process::Command::new(&executable);
     let _ = std::process::Command::new(&target.executable);
     let _ = std::process::Command::new(executable);
+    let _ = std::process::Command::new(executable);
     let _ = std::process::Command::new(snapshot);
 }
 """,

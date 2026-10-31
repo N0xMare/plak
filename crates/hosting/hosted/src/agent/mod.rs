@@ -99,10 +99,13 @@ pub(crate) use build::{
     SessionToolFence, api_session_runtime_binding, build_api_coding_session_seed,
     build_coding_session_seed, coding_session_runtime_binding_with_attach,
     invoke_topology_tool_on_hub, node_coding_presentation, occupancy_session_fence,
-    open_api_coding_session_with_fence, vocabulary_for_presentation,
+    open_api_coding_session_with_fence, verify_api_coding_session, verify_coding_session,
+    vocabulary_for_presentation,
 };
 #[cfg(any(test, feature = "test-support"))]
-pub use build::{build_or_open_bound_session, injected_root_tool_registrations};
+pub use build::{
+    build_or_open_bound_session, injected_root_tool_registrations, verify_bound_session,
+};
 use build::{
     coding_session_runtime_binding_for, require_reconstructed_coding_projection,
     spawn_child_composition, spawn_parent_tree_id, spawn_roster_composition,

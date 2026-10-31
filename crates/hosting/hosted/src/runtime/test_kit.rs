@@ -916,6 +916,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
         Box::pin(self.open_binding(config, head, Self::role(config)))
     }
+    fn verify_head<'a>(
+        &'a self,
+        config: &'a mut HostConfig<P>,
+        head: SessionLocator,
+        _: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>> {
+        Box::pin(async move {
+            crate::agent::verify_bound_session(
+                config.state_roots.runtime_sessions()?,
+                head,
+                self.binding(config, Self::role(config))?,
+            )
+            .await
+        })
+    }
     fn create<'a>(
         &'a self,
         config: &'a mut HostConfig<P>,

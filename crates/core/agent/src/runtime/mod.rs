@@ -58,7 +58,7 @@ pub use durable::DurableCompactionRecoveryOutcome;
 pub use durable::DurableEffectEvidenceRecoveryOutcome;
 pub use durable::DurableEffectEvidenceRecoveryRequest;
 pub use durable::DurableRuntimeBranchOutcome;
-pub use durable::DurableRuntimeOpen;
+pub use durable::{DurableOpenVerification, DurableRuntimeOpen};
 
 pub use config::AgentConfig;
 

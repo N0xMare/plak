@@ -1265,6 +1265,22 @@ record names the successor, projected without a second read) or withdrawn at
 reopen with a notice to run it again; reopening never re-reads them on its
 own.
 
+### 4.5 Reload handoffs are private files
+
+A reload that `exec`s another build passes what the export document does not
+carry (chapter 02 §2.5.1) in a handoff sidecar, never in the process
+environment, which every later process of the session would inherit. The old
+build writes it with `create_new`, mode 0600, directly under the product home's
+private (0700) `carry/` directory, and names it with the hidden
+`--reload-handoff <file>` argument; nothing else selects a sidecar. The
+destination reads it once and deletes it, and treats one that is not a regular
+file this user owns, is group- or world-accessible, lies elsewhere, exceeds
+64 KiB or names another version as absent. Its fields are bounded and
+validated before use, and none grants authority the destination would not
+otherwise have: it can only name why a carry happened. A same-user process
+could write such a file, but only a reload's own argument makes a build read
+it.
+
 ## 5. Redaction
 
 Composition named state is session data in the runtime store, not a credential

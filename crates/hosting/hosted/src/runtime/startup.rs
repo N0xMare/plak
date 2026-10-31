@@ -476,6 +476,30 @@ pub(super) async fn production_open_head<P: plakous_host_protocol::ProtocolExten
     Box::pin(open_coding_session(native_spec(config)?, head, stderr_buf)).await
 }
 
+/// The verification twin of [`production_open_head`]: the same authority
+/// refresh and runtime compilation, answered without owning the head.
+pub(super) async fn production_verify_head<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+    head: plakous::sessions::SessionLocator,
+    stderr_buf: &mut Vec<u8>,
+) -> Result<(), crate::agent::CodingSessionOpenFailure> {
+    if config.target.is_api() {
+        return Box::pin(crate::agent::verify_api_coding_session(
+            api_parent_from_config(config, &config.session)?,
+            head,
+            openrouter_cached_evidence(config),
+        ))
+        .await;
+    }
+    refresh_native_target(config).await?;
+    Box::pin(crate::agent::verify_coding_session(
+        native_spec(config)?,
+        head,
+        stderr_buf,
+    ))
+    .await
+}
+
 pub(super) async fn production_create_session<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     seed: Option<crate::agent::SeededHistory>,

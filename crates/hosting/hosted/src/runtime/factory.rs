@@ -40,6 +40,7 @@ pub trait TurnObserver: Send {
 /// impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
 /// # fn runtime( &self, config: &HostConfig<plakous_host_protocol::Core>, role: RuntimeRole, stderr: &mut Vec<u8>, ) -> CliResult<SessionRuntimeBinding> { unreachable!() }
 /// # fn open_head<'a>( &'a self, config: &'a mut HostConfig<plakous_host_protocol::Core>, head: SessionLocator, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> { unreachable!() }
+/// # fn verify_head<'a>( &'a self, config: &'a mut HostConfig<plakous_host_protocol::Core>, head: SessionLocator, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>> { unreachable!() }
 /// # fn create<'a>( &'a self, config: &'a mut HostConfig<plakous_host_protocol::Core>, seed: Option<SeededHistory>, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, CliResult<AttachedCodingSession>> { unreachable!() }
 /// # fn open<'a>( &'a self, config: &'a HostConfig<plakous_host_protocol::Core>, record: &'a SessionRecord, head: SessionLocator, role: RuntimeRole, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> { unreachable!() }
 /// # fn open_rebind_target<'a>( &'a self, config: &'a HostConfig<plakous_host_protocol::Core>, record: &'a SessionRecord, spec: Option<&'a ProductAgentSpec>, locator: SessionLocator, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> { unreachable!() }
@@ -65,6 +66,14 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         head: SessionLocator,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>>;
+    /// Answers whether [`Self::open_head`] of `head` would attach, without
+    /// owning, attaching or recovering it.
+    fn verify_head<'a>(
+        &'a self,
+        config: &'a mut HostConfig<P>,
+        head: SessionLocator,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>>;
     fn create<'a>(
         &'a self,
         config: &'a mut HostConfig<P>,
@@ -213,6 +222,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Producti
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
         Box::pin(super::startup::production_open_head(config, head, stderr))
+    }
+    fn verify_head<'a>(
+        &'a self,
+        config: &'a mut HostConfig<P>,
+        head: SessionLocator,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>> {
+        Box::pin(super::startup::production_verify_head(config, head, stderr))
     }
     fn create<'a>(
         &'a self,

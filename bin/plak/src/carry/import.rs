@@ -175,7 +175,14 @@ fn consume_handoff_receipt(path: &Path, home: &Path, digest: Option<&str>) -> bo
 /// `plak --import-resume <file>`: the new build's half of a carrying
 /// `/reload`. The file is deleted once the import committed and kept, with
 /// its path named, when it did not.
-pub(crate) fn import_and_resume(services: &Services, path: &Path) -> CliResult<ProcessOutcome> {
+pub(crate) fn import_and_resume(
+    services: &Services,
+    path: &Path,
+    handoff: Option<&Path>,
+) -> CliResult<ProcessOutcome> {
+    let handoff = handoff
+        .and_then(|handoff| super::ReloadHandoff::take(handoff, services.paths().ok()?.home()))
+        .unwrap_or_default();
     let document = read_document(path).map_err(|failure| {
         CliFailure::new(format!(
             "could not carry the session forward: {failure}; the export is kept at {}",
@@ -212,14 +219,19 @@ pub(crate) fn import_and_resume(services: &Services, path: &Path) -> CliResult<P
         services.paths()?.home(),
         document.local_digest.as_deref(),
     );
-    let (record, note) = commands::session::import_document(services, document, local_handoff)
-        .map_err(|failure| {
-            CliFailure::new(format!(
-                "could not carry the session forward: {}; the export is kept at {}",
-                failure.message(),
-                path.display()
-            ))
-        })?;
+    let imported = commands::session::import_reload_handoff(
+        services,
+        document,
+        local_handoff,
+        handoff.cause.as_deref(),
+    );
+    let (record, note) = imported.map_err(|failure| {
+        CliFailure::new(format!(
+            "could not carry the session forward: {}; the export is kept at {}",
+            failure.message(),
+            path.display()
+        ))
+    })?;
     let note = match fs::remove_file(path) {
         Ok(()) => note,
         Err(error) => format!("{note}; could not delete {}: {error}", path.display()),
@@ -234,6 +246,34 @@ fn import_resume_failure(failure: CliFailure, successor: &str, source: &str) -> 
         "{}; session {successor} was carried forward from {source}; fix the error and run: plak --resume {successor}",
         failure.message()
     ))
+}
+
+impl CarryDocument {
+    /// An import whose successor records why it was carried, as one notice.
+    pub(crate) fn into_noticed_import(
+        self,
+        cause: &str,
+        local_handoff: bool,
+    ) -> CliResult<CarriedImport> {
+        let mut carried = self
+            .into_import_with_replay(local_handoff)
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        let record = &mut carried.record;
+        let source = record
+            .carried_forward_from()
+            .map(|(id, _)| id)
+            .unwrap_or("unknown");
+        let notice = format!(
+            "carried forward from {source}: {}",
+            plakous::model::SafeDiagnostic::new(cause)
+        );
+        record.record_notice(TranscriptRow::info(
+            crate::store::sessions::NoticeScope::Session,
+            &notice,
+        ));
+        carried.note.push_str(&format!("; {notice}"));
+        Ok(carried)
+    }
 }
 
 #[cfg(test)]

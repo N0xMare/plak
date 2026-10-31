@@ -279,6 +279,10 @@ impl TopCommand {
                 ..
             } => Ok(Command::CarryProbe { path }),
             Self::Version {
+                reopen_probe: Some(session),
+                ..
+            } => Ok(Command::ReopenProbe { session }),
+            Self::Version {
                 reload_probe: true, ..
             } => Ok(Command::ReloadProbe),
             Self::Version {

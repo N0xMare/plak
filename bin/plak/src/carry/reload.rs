@@ -38,3 +38,146 @@ pub(crate) fn reload_probe(paths: &PlakPaths) -> ReloadProbe {
         config_error: crate::product_config::SessionPolicy::load(paths).err(),
     }
 }
+
+/// The destination's answer to "would exact reopen of this session attach?",
+/// asked by `/reload` before teardown (hidden `version --reopen-probe <id>`).
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(tag = "verdict", rename_all = "snake_case")]
+pub(crate) enum ReopenProbe {
+    /// Exact reopen attaches.
+    Opens,
+    /// Exact reopen refuses because this build derives a different frozen
+    /// binding input, named by `change`.
+    BindingChanged { change: String },
+    /// Exact reopen refuses for another reason (login, configuration,
+    /// unsettled work, storage); never a carry trigger.
+    Refused { reason: String },
+    /// The destination could not answer without renewing a credential
+    /// (`needs_refresh`); the source treats it as no verdict.
+    Unknown { reason: String },
+}
+
+/// How far ahead of now a native access token must stay valid for the probe
+/// to resolve its route: past every route's renewal lead and the source's
+/// deadline, so resolution never renews.
+const PROBE_TOKEN_MARGIN: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Runs in the destination build with the real home: reads the session and
+/// its projected head without writing, resolves the binding as an attach
+/// does, and verifies the exact open without taking its lease.
+pub(crate) fn reopen_probe(services: &crate::shell::services::Services, id: &str) -> ReopenProbe {
+    let verdict = || -> Result<ReopenProbe, String> {
+        let paths = services
+            .paths()
+            .map_err(|error| error.message().to_owned())?;
+        let record = services
+            .session_records()
+            .map_err(|error| error.message().to_owned())?
+            .load(id)?;
+        let (_, recorded, _, views) =
+            crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)?;
+        let recorded = recorded
+            .or(record.plakous_locator)
+            .ok_or_else(|| "the session has no runtime to reopen".to_owned())?;
+        let head = views.as_ref().map_or(recorded, |views| {
+            plakous_hosted::runtime::projected_head(recorded, views)
+        });
+        crate::commands::session::verify_exact_reopen(services, record, head)
+            .map_err(|error| error.message().to_owned())
+    };
+    verdict().unwrap_or_else(|reason| ReopenProbe::Refused { reason })
+}
+
+impl From<plakous_hosted::runtime::ReopenVerdict> for ReopenProbe {
+    fn from(verdict: plakous_hosted::runtime::ReopenVerdict) -> Self {
+        match verdict {
+            plakous_hosted::runtime::ReopenVerdict::Opens => Self::Opens,
+            plakous_hosted::runtime::ReopenVerdict::BindingChanged {
+                change,
+                current_revision,
+            } => Self::BindingChanged {
+                change: binding_change_words(&change, current_revision.as_deref()),
+            },
+            plakous_hosted::runtime::ReopenVerdict::Refused(reason) => Self::Refused { reason },
+            plakous_hosted::runtime::ReopenVerdict::Unknown(reason) => Self::Unknown { reason },
+        }
+    }
+}
+
+/// Names a binding change for the carry note. A capability binding that
+/// differs only by digest is named by its category, since the recorded side
+/// keeps only the digest; this build's adapter revision is added when known.
+pub(super) fn binding_change_words(
+    change: &plakous::agent::BindingChange,
+    current_revision: Option<&str>,
+) -> String {
+    match (change, current_revision) {
+        (plakous::agent::BindingChange::ModelCapabilities, Some(revision)) => format!(
+            "model capability binding (adapter revision, declared features or context contract; this build: {revision})"
+        ),
+        _ => change.to_string(),
+    }
+}
+
+/// The probe never renews a credential: the source kills it at a deadline,
+/// and a renewal killed mid-exchange could leave a rotating credential
+/// quarantined. A native login that is renewing, needs renewal or expires
+/// within the margin answers `unknown`; an unusable one is refused with its
+/// login remedy. Routes without a native login pass.
+pub(crate) fn reopen_credential_gate(account: Option<&str>) -> Option<ReopenProbe> {
+    let account = account?;
+    let provider = plakous_hosted::capabilities::for_account(account)?.native_provider()?;
+    let state_home = crate::home::paths::application_state_home().ok()?;
+    let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state_home).ok()?;
+    let subscriptions = plakous::subscriptions::NativeSubscriptions::new(paths);
+    let executor = plakous::application::ApplicationExecutor::new().ok()?;
+    let status = match executor.block_on(subscriptions.status(provider)) {
+        Ok(Ok(status)) => Some(status.credential()),
+        _ => None,
+    };
+    let expiring = || {
+        executor
+            .block_on(subscriptions.access_token_expires_within(provider, PROBE_TOKEN_MARGIN))
+            .ok()
+            .and_then(Result::ok)
+    };
+    credential_verdict(account, status, expiring)
+}
+
+/// The gate's decision from the credential's local state alone.
+pub(super) fn credential_verdict(
+    account: &str,
+    status: Option<plakous::subscriptions::NativeAuthStatus>,
+    expiring: impl FnOnce() -> Option<bool>,
+) -> Option<ReopenProbe> {
+    use plakous::subscriptions::NativeAuthStatus;
+    let needs_refresh = || ReopenProbe::Unknown {
+        reason: "needs_refresh".to_owned(),
+    };
+    let unusable = |state: &str| ReopenProbe::Refused {
+        reason: format!("the {account} login is {state}; run `plak login {account}`, then /reload"),
+    };
+    match status {
+        Some(NativeAuthStatus::Ready) => match expiring() {
+            Some(false) => None,
+            _ => Some(needs_refresh()),
+        },
+        Some(NativeAuthStatus::RefreshRequired | NativeAuthStatus::Refreshing) | None => {
+            Some(needs_refresh())
+        }
+        Some(NativeAuthStatus::SignedOut) => Some(unusable("signed out")),
+        Some(NativeAuthStatus::Quarantined) => Some(unusable("quarantined")),
+        Some(NativeAuthStatus::Revoked) => Some(unusable("revoked")),
+        Some(NativeAuthStatus::LoginRequired) => Some(unusable("stored by an earlier build")),
+        Some(NativeAuthStatus::WrittenByNewerBuild) => Some(ReopenProbe::Refused {
+            reason: format!(
+                "the {account} login was written by a newer build; run that build, or replace the login with `plak login {account}`"
+            ),
+        }),
+        Some(_) => Some(unusable("not usable by this build")),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests;

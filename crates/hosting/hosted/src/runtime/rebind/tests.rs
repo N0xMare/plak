@@ -277,6 +277,33 @@ fn topology_tool_names(tree_id: &str) -> Vec<String> {
     .collect()
 }
 
+/// Verifying an exact reopen of an API root whose tree is persisted, in a
+/// process that does not hold it, compiles over a detached copy: the verdict
+/// is `Opens`, no hub is attached, and the stored tree is unchanged.
+#[test]
+fn verifying_an_api_root_with_a_persisted_tree_writes_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (config, opened) = actual_api_topology_host(root.path(), &executor);
+    let tree_id = config.session.id.clone();
+    let locator = opened.locator();
+    executor.block_on(opened.release()).unwrap().unwrap();
+    assert!(crate::topology_runtime::lookup(&tree_id).is_none());
+    let store = config.state_roots.tree_store().unwrap();
+    let facts = || {
+        let tree =
+            crate::agent_tree::ProductAgentTree::reopen(store.load(&tree_id).unwrap().unwrap());
+        (tree.revision, tree.host_generation, tree.state)
+    };
+    let before = facts();
+    assert_eq!(
+        verify_exact_reopen(config, locator).unwrap(),
+        ReopenVerdict::Opens
+    );
+    assert!(crate::topology_runtime::lookup(&tree_id).is_none());
+    assert_eq!(facts(), before);
+}
+
 #[test]
 fn production_api_rebind_projects_complete_staging_lineage() {
     let root = tempfile::tempdir().unwrap();

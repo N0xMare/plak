@@ -2,7 +2,6 @@
 
 use super::{CarriedImport, CarryDocument, export_session};
 use crate::{CliFailure, CliResult};
-use plakous_hosted::sessions::TranscriptRow;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ReboundMode {
@@ -43,23 +42,6 @@ pub(super) fn ensure_carry_quiescence(
 
 impl CarryDocument {
     pub(crate) fn into_rebound_import(self, cause: &str) -> CliResult<CarriedImport> {
-        let mut carried = self
-            .into_import_with_replay(true)
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        let record = &mut carried.record;
-        let source = record
-            .carried_forward_from()
-            .map(|(id, _)| id)
-            .unwrap_or("unknown");
-        let notice = format!(
-            "carried forward from {source}: {}",
-            plakous::model::SafeDiagnostic::new(cause)
-        );
-        record.record_notice(TranscriptRow::info(
-            crate::store::sessions::NoticeScope::Session,
-            &notice,
-        ));
-        carried.note.push_str(&format!("; {notice}"));
-        Ok(carried)
+        self.into_noticed_import(cause, true)
     }
 }

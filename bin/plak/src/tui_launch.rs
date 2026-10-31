@@ -1440,6 +1440,7 @@ fn reload_installed_plak(
     if let Some(reason) = target.refusal(&home::state::state_key()) {
         return Ok(reason);
     }
+    let binding_change = target.binding_change().map(str::to_owned);
     let executable = target.executable;
     let installed_key = target.state_key;
     // The loop's copy can trail the store: the host commits every turn's
@@ -1453,11 +1454,13 @@ fn reload_installed_plak(
         resumable,
         &home::state::state_key(),
         installed_key.as_deref(),
+        binding_change.is_some(),
     );
     let mut command = reload_command(&executable, &plan, &record.id);
     std::os::unix::process::CommandExt::arg0(&mut command, build_identity::invocation_argv0());
     let mut carry_file = None;
     let mut unverified = None;
+    let mut handoff = carry::ReloadHandoff::default();
     match plan {
         carry::ReloadPlan::Fresh => {}
         carry::ReloadPlan::Resume => {}
@@ -1469,20 +1472,35 @@ fn reload_installed_plak(
             ));
         }
         carry::ReloadPlan::Carry => {
-            let (path, summary) = match carry::carry_out(paths, record) {
+            let (path, carried) = match carry::carry_out(paths, record) {
                 Ok(path) => path,
                 Err(reason) => {
+                    let why = if binding_change.is_some() {
+                        "the installed build cannot reopen this session exactly"
+                    } else {
+                        "the new build reads another state format"
+                    };
                     return Ok(format!(
-                        "reload kept this session open: the new build reads another state format, and {reason}"
+                        "reload kept this session open: {why}, and {reason}"
                     ));
                 }
             };
-            let _ = writeln!(io::stdout(), "carrying {summary}");
+            let _ = writeln!(io::stdout(), "carrying {}", carried.summary);
             let _ = io::stdout().flush();
+            handoff.cause = binding_change
+                .as_deref()
+                .map(|change| carry::binding_carry_cause(change, carried.finished_subagents));
             command.arg("--import-resume").arg(&path);
             carry_file = Some(path);
         }
     }
+    let handoff_file = match handoff.pass(paths, &record.id, &mut command) {
+        Ok(handoff_file) => handoff_file,
+        Err(reason) => {
+            remove_failed_handoff(carry_file.as_deref(), None);
+            return Ok(format!("reload kept this session open: {reason}"));
+        }
+    };
     tracing::info!(
         target: "plak.reload",
         executable = %executable.display(),
@@ -1491,6 +1509,7 @@ fn reload_installed_plak(
         "exec installed plak"
     );
     let error = std::os::unix::process::CommandExt::exec(&mut command);
+    remove_failed_handoff(None, handoff_file.as_deref());
     remove_failed_handoff_receipt(carry_file.as_deref());
     if resumable {
         let _ = writeln!(
@@ -1529,6 +1548,15 @@ fn reload_command(
 fn remove_failed_handoff_receipt(path: Option<&Path>) {
     if let Some(path) = path {
         let _ = std::fs::remove_file(path.with_extension("handoff"));
+    }
+}
+
+/// Removes what a reload that will not exec wrote for its destination: the
+/// carry file with its receipt, and the handoff sidecar.
+fn remove_failed_handoff(carry_file: Option<&Path>, sidecar: Option<&Path>) {
+    remove_failed_handoff_receipt(carry_file);
+    for path in carry_file.into_iter().chain(sidecar) {
+        let _ = std::fs::remove_file(path);
     }
 }
 

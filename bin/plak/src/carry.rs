@@ -10,6 +10,7 @@ mod document;
 #[cfg(any(test, feature = "tui"))]
 mod epoch;
 mod export;
+mod handoff;
 mod history;
 mod import;
 #[cfg(any(test, feature = "tui"))]
@@ -24,13 +25,17 @@ pub(crate) use document::{
 };
 
 pub(crate) use export::{export_session, new_carry_file};
-pub(crate) use reload::{CarryCapacityProbe, ReloadProbe, reload_probe};
+pub(crate) use handoff::ReloadHandoff;
+pub(crate) use reload::{
+    CarryCapacityProbe, ReloadProbe, ReopenProbe, reload_probe, reopen_credential_gate,
+    reopen_probe,
+};
 #[cfg(feature = "tui")]
 pub(crate) use {
     epoch::apply_on_reload,
     interactive::{
-        ReloadPlan, ReloadTarget, carry_foreign_session, carry_out, reload_plan,
-        reload_target_for_session,
+        ReloadPlan, ReloadTarget, binding_carry_cause, carry_foreign_session, carry_out,
+        reload_plan, reload_target_for_session,
     },
 };
 

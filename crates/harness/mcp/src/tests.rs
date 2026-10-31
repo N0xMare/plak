@@ -684,6 +684,22 @@ async fn persisted_records_rebuild_the_pack_and_a_changed_tool_is_refused_unsent
         .map(|registration| registration.name().as_str().to_owned())
         .collect::<Vec<_>>();
     assert_eq!(names, ["mcp__fake__echo", "mcp__fake__slow"]);
+    // With no server behind it, the same records build the same registry.
+    let unbound = McpToolPack::unbound(decoded[0].server().clone(), false, decoded.clone())?;
+    let definitions = |pack: &McpToolPack| -> TestResult<Vec<_>> {
+        Ok(pack
+            .registrations()?
+            .iter()
+            .map(|registration| {
+                (
+                    registration.definition().clone(),
+                    registration.owner().clone(),
+                )
+            })
+            .collect())
+    };
+    assert_eq!(definitions(&unbound)?, definitions(&rebuilt)?);
+    assert_eq!(unbound.exposed_names()?, rebuilt.exposed_names()?);
     reopened.shutdown().await;
 
     let drifted = McpPool::new();

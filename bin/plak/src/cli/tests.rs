@@ -849,7 +849,16 @@ fn product_command_argv_matrix() {
         }),
         (
             &["--import-resume", "/tmp/x.json"],
-            |c| matches!(c, Command::ImportResume { path } if path.as_os_str() == "/tmp/x.json"),
+            |c| matches!(c, Command::ImportResume { path, handoff: None } if path.as_os_str() == "/tmp/x.json"),
+        ),
+        (
+            &[
+                "--import-resume",
+                "/tmp/x.json",
+                "--reload-handoff",
+                "/tmp/h.json",
+            ],
+            |c| matches!(c, Command::ImportResume { path, handoff: Some(handoff) } if path.as_os_str() == "/tmp/x.json" && handoff.as_os_str() == "/tmp/h.json"),
         ),
         (&["status"], |c| matches!(c, Command::StatusAll)),
         (&["models", "claude"], |c| {

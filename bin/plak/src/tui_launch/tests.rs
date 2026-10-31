@@ -10,7 +10,7 @@ use super::*;
 fn reload_applies_orchestration_in_the_installed_build_without_a_second_import() {
     let executable = Path::new("/new-build/plak");
     for (installed_key, applies_on_resume) in [("same", true), ("other", false)] {
-        let plan = carry::reload_plan(true, "same", Some(installed_key));
+        let plan = carry::reload_plan(true, "same", Some(installed_key), false);
         let command = reload_command(executable, &plan, "source-session");
         assert_eq!(command.get_program(), executable.as_os_str());
         let marker = command
@@ -50,6 +50,7 @@ fn reload_handoff_reuses_the_tui_probe_verdict_without_reprobing() {
             export_versions: carry::IMPORTABLE_VERSIONS.to_vec(),
             config_error: Some("synthetic config refusal".to_owned()),
         }),
+        reopen: None,
     };
     let note = reload_installed_plak(
         &paths,

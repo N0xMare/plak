@@ -15,7 +15,8 @@ use crate::runtime::durable::turn_recovery::{
     checkpoint_requires_closed_recovery, reopen_closes_working_turn, validate_loaded_address,
 };
 use crate::runtime::durable::{
-    DurableGenesisIdentities, DurableRuntimeOpen, DurableSessionAddress, DurableSessionRuntime,
+    DurableGenesisIdentities, DurableOpenVerification, DurableRuntimeOpen, DurableSessionAddress,
+    DurableSessionRuntime,
 };
 use crate::runtime::{Agent, AgentBuilder, DurableRuntimeBootstrap};
 use crate::{
@@ -389,6 +390,51 @@ impl DurableSessionRuntime {
             ));
         }
         Ok(DurableRuntimeOpen::Opened(agent))
+    }
+
+    /// Answers whether [`Self::open`] of this exact quiescent checkpoint would
+    /// construct its runtime, without owning the branch.
+    ///
+    /// It loads the branch, runs the same runtime admission and the same
+    /// construction (persisted plan, tools, presentation, environment and
+    /// request-prefix comparisons) an open runs, then drops the constructed
+    /// runtime. It acquires no lease, starts no driver, publishes no recovery
+    /// and writes nothing. A head with unsettled work is not verified.
+    ///
+    /// # Errors
+    ///
+    /// Returns the typed error the open would return, including
+    /// [`AgentError::binding_change`] when a frozen binding input differs.
+    pub async fn verify_open(
+        &self,
+        address: DurableSessionAddress,
+        builder: AgentBuilder,
+    ) -> Result<DurableOpenVerification, AgentError> {
+        validate_durable_builder(&builder)?;
+        let loaded = store_call(
+            StorePhase::LoadBranch,
+            self.store_timeouts.operation,
+            self.store.load_branch(address.session()),
+        )
+        .await
+        .map_err(StoreCallError::into_agent)?;
+        validate_loaded_address(&loaded, address, self.durability)?;
+        if checkpoint_requires_closed_recovery(loaded.checkpoint().checkpoint()) {
+            return Ok(DurableOpenVerification::UnsettledWork);
+        }
+        let admission = sealed_runtime_admission(&builder).await?;
+        let bootstrap = DurableRuntimeBootstrap::inspect(
+            Arc::clone(&self.store),
+            &loaded,
+            address,
+            self.durability,
+            admission,
+            self.store_timeouts,
+        )?;
+        drop(crate::runtime::PreparedAgent::new_durable(
+            builder, bootstrap,
+        )?);
+        Ok(DurableOpenVerification::Opens)
     }
 
     /// Stops the selected semantic backend under the runtime-owned cleanup bound.

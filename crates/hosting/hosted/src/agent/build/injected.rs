@@ -39,6 +39,7 @@ pub fn injected_root_tool_registrations(
             .account_name(NativeProvider::Codex),
         &session.workspace_root,
         state_roots,
+        crate::mcp_binding::McpBinding::Lease,
     )
     .map_err(|failure| failure.message().to_owned())?;
     let extensions = ProductToolExtensions::empty()
@@ -67,11 +68,36 @@ pub async fn build_or_open_bound_session(
             output_bound_rederived: None,
             wording: &INJECTED_WORDING,
         },
-        locator,
+        locator.into(),
         seed.map(SeededHistory::new),
         operation_id,
     ))
     .await
+}
+
+/// Answers whether opening `locator` under an injected `runtime` would attach,
+/// without owning or attaching it.
+pub async fn verify_bound_session(
+    sessions: Arc<AgentSessions>,
+    locator: SessionLocator,
+    runtime: SessionRuntimeBinding,
+) -> Result<(), CodingSessionOpenFailure> {
+    let operation_id = SessionOperationId::new(format!("plak:verify:{}", uuid::Uuid::new_v4()))
+        .map_err(|_| crate::CliFailure::new("injected verify operation identity is invalid"))?;
+    Box::pin(build_or_open(
+        SessionSource::Runtime {
+            sessions,
+            runtime: Box::new(runtime),
+            topology_owner: None,
+            output_bound_rederived: None,
+            wording: &INJECTED_WORDING,
+        },
+        super::session::RuntimeTarget::Verify(locator),
+        None,
+        operation_id,
+    ))
+    .await
+    .map(drop)
 }
 
 /// An injected runtime is not checked against the product's tool

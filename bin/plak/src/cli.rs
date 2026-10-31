@@ -15,9 +15,22 @@ use plakous::subscriptions::{NativeLoginMode, NativeProvider};
 
 use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
 
+/// The hidden argument a reload passes to name its handoff sidecar.
+pub(crate) const RELOAD_HANDOFF_FLAG: &str = "--reload-handoff";
+
 /// Parse argv tokens (without binary name) into a product [`Command`].
 pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> crate::CliResult<Command> {
     parse_with_image_capability(arguments, crate::build_features::require_feature("images"))
+}
+
+/// Splits a trailing hidden `--reload-handoff <file>` off a reload's argv.
+fn split_reload_handoff(values: &[String]) -> (&[String], Option<std::path::PathBuf>) {
+    match values {
+        [rest @ .., flag, path] if flag == RELOAD_HANDOFF_FLAG && !path.starts_with('-') => {
+            (rest, Some(path.into()))
+        }
+        _ => (values, None),
+    }
 }
 
 pub(super) fn parse_with_image_capability(
@@ -82,8 +95,12 @@ pub(super) fn parse_with_image_capability(
     // Hidden: `/reload` onto a build with another state key execs
     // `plak --import-resume <file>`.
     if values.first().map(String::as_str) == Some("--import-resume") {
-        return match values.as_slice() {
-            [_, path] if !path.starts_with('-') => Ok(Command::ImportResume { path: path.into() }),
+        let (values, handoff) = split_reload_handoff(&values);
+        return match values {
+            [_, path] if !path.starts_with('-') => Ok(Command::ImportResume {
+                path: path.into(),
+                handoff,
+            }),
             _ => Err("plak --import-resume takes exactly one export file".to_owned()),
         }
         .map_err(usage);
@@ -168,6 +185,17 @@ fn hidden_reload_and_export_version_queries_are_accepted() {
     for query in ["--reload-probe", "--export-version"] {
         assert!(parse([OsString::from("version"), OsString::from(query)]).is_ok());
     }
+    assert!(matches!(
+        parse(
+            [
+                "version",
+                "--reopen-probe",
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            ]
+            .map(OsString::from)
+        ),
+        Ok(Command::ReopenProbe { .. })
+    ));
 }
 
 #[cfg(all(test, feature = "maintainer"))]
@@ -447,6 +475,10 @@ enum TopCommand {
         carry_probe: Option<std::path::PathBuf>,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with_all = ["state_key", "export_version"])]
         reload_probe: bool,
+        /// Hidden: whether an exact reopen of this session would attach on
+        /// this build (`/reload` asks it before teardown).
+        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe"])]
+        reopen_probe: Option<String>,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with = "state_key")]
         export_version: bool,
     },

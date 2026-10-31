@@ -224,6 +224,9 @@ pub(super) fn topology_extensions_if_enabled_with_owner(
     opening_durable_session: bool,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<ProductToolExtensions> {
+    if attach == crate::topology_runtime::TopologyHubAttach::Inspect {
+        return inspected_topology_extensions(parent, opening_durable_session);
+    }
     if attach == crate::topology_runtime::TopologyHubAttach::LookupOnly {
         if crate::topology_runtime::lookup(spawn_parent_tree_id(parent)).is_some() {
             return topology_extensions_from_hub_with_owner(
@@ -296,6 +299,62 @@ pub(super) fn topology_extensions_if_enabled_with_owner(
         return Ok(ProductToolExtensions::empty());
     }
     topology_extensions_from_hub_with_owner(parent, selected_tuple, attach, false, acquired_owner)
+}
+
+/// The topology catalog an exact-reopen verification compiles, always over a
+/// detached copy of the tree with the reopen law applied in memory: a copy of
+/// this process's attached tree when it holds one, otherwise of the persisted
+/// rows. The copy has an empty in-memory store and is never inserted, leased,
+/// folded, settled or saved, and the tools it registers bind to the copy's
+/// driver, never the live one (so a live driver's job host is untouched). The
+/// tree's live owner, here or in another process, still finds the revision
+/// and host generation it wrote.
+fn inspected_topology_extensions(
+    parent: &SpawnParent,
+    opening_durable_session: bool,
+) -> CliResult<ProductToolExtensions> {
+    let tree_id = spawn_parent_tree_id(parent);
+    let unopened = |error: &str| {
+        CliFailure::recovery_required(format!(
+            "known topology tree could not be opened ({error}); RecoveryRequired"
+        ))
+    };
+    let persisted = if let Some(runtime) = crate::topology_runtime::lookup(tree_id) {
+        runtime
+            .read(crate::agent_tree::ProductAgentTree::to_persisted)
+            .map_err(|error| unopened(&error.message))?
+    } else {
+        if !topology_home_stated(parent, opening_durable_session)? {
+            return Ok(ProductToolExtensions::empty());
+        }
+        let store = parent
+            .state_roots()
+            .tree_store()
+            .map_err(|failure| unopened(failure.message()))?;
+        let Some(persisted) = store
+            .load(tree_id)
+            .map_err(|error| unopened(&error.detail))?
+        else {
+            // An open never bootstraps a tree for a session it reopens.
+            return Ok(ProductToolExtensions::empty());
+        };
+        persisted
+    };
+    let mut tree = crate::agent_tree::ProductAgentTree::reopen(persisted);
+    if !tree.snapshot.digest_matches() {
+        return Err(CliFailure::recovery_required(
+            "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
+        ));
+    }
+    stamp_root_account(&mut tree, spawn_parent_root_account(parent));
+    let vcs = tree.vcs_port();
+    let detached = Arc::new(crate::topology_runtime::ProductTopologyRuntime::new(
+        tree,
+        Arc::new(crate::agent_tree::MemoryTreeStore::new()),
+        vcs,
+        None,
+    ));
+    topology_extensions_from_runtime(detached, parent, spawn_parent_caller_id(parent))
 }
 
 fn topology_extensions_from_hub_with_owner(

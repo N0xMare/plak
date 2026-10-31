@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 import selectors
 import signal
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import subprocess
 import sys
 import tempfile
@@ -141,6 +141,56 @@ class ReloadRehearsalTests(unittest.TestCase):
             (base / "source/agents/linked").symlink_to(base / "private")
             with self.assertRaises(ValueError):
                 MODULE.capture_home(base / "source", base / "copy", "key")
+
+    def reopen_fixture(self, base, answer, code=0):
+        live = base / "live"
+        (live / "state/key").mkdir(parents=True)
+        workspace = base / "workspace"
+        workspace.mkdir()
+        with closing(sqlite3.connect(live / "state/key/product.sqlite3")) as connection:
+            connection.execute("CREATE TABLE sessions (id TEXT, workspace_root TEXT)")
+            connection.execute("INSERT INTO sessions VALUES (?, ?)", ("session", str(workspace)))
+            connection.commit()
+        binary = base / "plak"
+        binary.write_text(
+            "#!/usr/bin/env python3\nimport os,sys\nfrom pathlib import Path\n"
+            f"Path({str(base / 'probe-call')!r}).write_text(' '.join(sys.argv[1:]) + '\\n' + os.environ['PLAK_HOME'] + '\\n' + os.getcwd())\n"
+            f"print({answer!r}); sys.exit({code})\n")
+        binary.chmod(0o700)
+        return live, binary, workspace
+
+    def test_reopen_verdict_reports_exact_carry_and_refusal_from_the_live_home(self):
+        cases = [
+            ('{"verdict":"opens"}', 0, 0, "reopen=exact"),
+            ('{"verdict":"binding_changed","change":"model adapter profile (recorded `a`, this build `b`)"}',
+             0, 0, "reopen=carries: model adapter profile (recorded `a`, this build `b`)"),
+            ('{"verdict":"refused","reason":"run `plak login claude`"}', 0, 1,
+             "reopen=refused: run `plak login claude`"),
+            ('{"verdict":"unknown","reason":"needs_refresh"}', 0, 1,
+             "reopen=unknown: needs_refresh"),
+            ("not json", 2, 1, "reopen refused: not json"),
+        ]
+        for answer, code, expected, line in cases:
+            with tempfile.TemporaryDirectory() as directory:
+                base = Path(directory).resolve()
+                live, binary, workspace = self.reopen_fixture(base, answer, code)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    status = MODULE.reopen_verdict(live, "key", binary, "session")
+                self.assertEqual(status, expected, output.getvalue())
+                self.assertIn(line, output.getvalue())
+                argv, home, cwd = (base / "probe-call").read_text().splitlines()
+                self.assertEqual(argv, "version --reopen-probe session")
+                self.assertEqual(home, str(live))
+                self.assertEqual(Path(cwd).resolve(), workspace.resolve())
+
+    def test_verdict_environment_keeps_logins_but_not_keys_or_test_hooks(self):
+        env = MODULE.verdict_environment(Path("/live"), {
+            "PATH": "/bin", "HOME": "/home/fixture", "XDG_STATE_HOME": "/state",
+            "OPENAI_API_KEY": "synthetic", "PLAK_TEST_SCRIPT": "fixture", "PLAK_HOME": "/other",
+        })
+        self.assertEqual(env, {"PATH": "/bin", "HOME": "/home/fixture",
+                               "XDG_STATE_HOME": "/state", "PLAK_HOME": "/live"})
 
     def test_run_environment_does_not_inherit_credentials_or_test_hooks(self):
         env = MODULE.run_environment(Path("/fixture"), {

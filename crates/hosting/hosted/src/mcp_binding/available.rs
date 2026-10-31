@@ -74,12 +74,7 @@ pub(crate) fn bind_mcp_tools(
     frozen: Option<&[McpToolRecord]>,
 ) -> Result<BoundMcpTools, String> {
     if selection.mcp_servers().next().is_none() {
-        return Ok(BoundMcpTools {
-            names: Vec::new(),
-            registrations: Vec::new(),
-            notices: Vec::new(),
-            records: Vec::new(),
-        });
+        return Ok(BoundMcpTools::empty());
     }
     let (pool, runtime) = pool()?;
     let (selection, tool_sections, workspace_root, frozen) = (
@@ -114,12 +109,7 @@ async fn bind_on_pool(
     secrets: Arc<dyn NamedSecrets>,
     frozen: Option<&[McpToolRecord]>,
 ) -> Result<BoundMcpTools, String> {
-    let mut bound = BoundMcpTools {
-        names: Vec::new(),
-        registrations: Vec::new(),
-        notices: Vec::new(),
-        records: Vec::new(),
-    };
+    let mut bound = BoundMcpTools::empty();
     let servers = selection.mcp_servers().cloned().collect::<Vec<_>>();
     let environment = Arc::new(service_environment(workspace_root)?);
     for server in servers {
@@ -180,14 +170,36 @@ async fn bind_on_pool(
                 McpToolPack::new(lease, &listing),
             )
         };
-        bound.names.extend(
+        bound.add(&server, &pack, records, &|error| refused(error, &remedy))?;
+    }
+    Ok(bound)
+}
+
+impl BoundMcpTools {
+    fn empty() -> Self {
+        Self {
+            names: Vec::new(),
+            registrations: Vec::new(),
+            notices: Vec::new(),
+            records: Vec::new(),
+        }
+    }
+
+    fn add(
+        &mut self,
+        server: &McpServerName,
+        pack: &McpToolPack,
+        records: Vec<McpToolRecord>,
+        refused: &dyn Fn(McpError) -> String,
+    ) -> Result<(), String> {
+        self.names.extend(
             pack.exposed_names()
-                .map_err(|error| refused(error, &remedy))?
+                .map_err(refused)?
                 .into_iter()
                 .map(|name| (server.clone(), name)),
         );
-        bound.records.extend(records);
-        bound.registrations.extend(
+        self.records.extend(records);
+        self.registrations.extend(
             pack.registrations()
                 .map_err(|error| {
                     format!("mcp server {server} tools could not be registered: {error}")
@@ -195,6 +207,48 @@ async fn bind_on_pool(
                 .into_iter()
                 .map(ToolRegistration::nested_eligible),
         );
+        Ok(())
+    }
+}
+
+/// The node's MCP tools as an exact-reopen verification compiles them:
+/// rebuilt from the session's frozen records with no server behind them.
+/// Nothing is started, connected or leased, so no MCP login is renewed; the
+/// definitions and binding identities are the ones a leasing reopen builds.
+pub(crate) fn recorded_mcp_tools(
+    selection: &TemplateToolSelection,
+    tool_sections: &BTreeMap<String, String>,
+    secrets: &Arc<dyn NamedSecrets>,
+    frozen: Option<&[McpToolRecord]>,
+) -> Result<BoundMcpTools, String> {
+    let mut bound = BoundMcpTools::empty();
+    if selection.mcp_servers().next().is_none() {
+        return Ok(bound);
+    }
+    crate::capabilities::require_feature("mcp").map_err(|error| error.to_string())?;
+    let frozen = frozen.ok_or_else(|| {
+        "the session's mcp tools were never frozen, so a reopen would list its servers again"
+            .to_owned()
+    })?;
+    for server in selection.mcp_servers() {
+        let rendered = tool_sections
+            .get(&format!("mcp_servers.{server}"))
+            .ok_or_else(|| {
+                format!(
+                    "mcp server {server} is not configured; remedy: add [mcp_servers.{server}] \
+                     to config.toml or remove mcp:{server} from the template's tools"
+                )
+            })?;
+        let spec = server_spec(server, rendered, secrets)?;
+        let records = frozen
+            .iter()
+            .filter(|record| record.server() == server)
+            .cloned()
+            .collect::<Vec<_>>();
+        let refused = |error: McpError| format!("mcp server {server}: {error}");
+        let pack = McpToolPack::unbound(server.clone(), spec.resources(), records.clone())
+            .map_err(refused)?;
+        bound.add(server, &pack, records, &refused)?;
     }
     Ok(bound)
 }

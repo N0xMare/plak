@@ -2392,6 +2392,185 @@ fn rebind_and_epoch_reload_preserve_committed_named_state() {
     }
 }
 
+/// The installed build is this binary under another adapter profile: exact
+/// reopen there would refuse, so `/reload` asks it first and carries the idle
+/// session in one step, naming the change, instead of leaving it unattached.
+#[test]
+fn a_reload_whose_binding_changed_carries_in_one_step_naming_the_change() {
+    let fixture = Fixture::new(&tool_then_answer("the answer before the new adapter"));
+    let fake_bin = fixture.root.join("fake-bin-binding");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    terminal.send(b"carry me onto the new adapter\r");
+    terminal.wait_screen("the answer before the new adapter");
+    terminal.wait_absent("Esc stop");
+    let source = fixture.session_ids()[0].clone();
+    let mut script = tool_then_answer("the answer after the new adapter");
+    script["adapter_profile"] = json!("offline-loopback-adapter-v2");
+    fixture.write_script(&script);
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("carried forward from");
+    let screen = terminal.wait_screen("offline-loopback-adapter-v2");
+    assert!(screen.contains("model adapter profile"), "{screen}");
+    assert!(screen.contains("provider cache rebuilds"), "{screen}");
+    terminal.wait_ready();
+    let ids: std::collections::BTreeSet<String> = fixture.session_ids().into_iter().collect();
+    assert_eq!(ids.len(), 2, "one carried successor: {ids:?}");
+    assert!(ids.contains(&source));
+    assert!(
+        !fixture.home().join("carry").exists()
+            || std::fs::read_dir(fixture.home().join("carry"))
+                .expect("carry dir")
+                .next()
+                .is_none(),
+        "the spent handoff export is removed"
+    );
+    terminal.quit();
+}
+
+/// A changed binding never carries live work: a running turn refuses the
+/// reload before anything is asked or torn down, and the session stays.
+#[test]
+fn a_reload_whose_binding_changed_is_refused_while_a_turn_runs() {
+    let fixture = Fixture::new(&stalled_then_answers(30_000));
+    let fake_bin = fixture.root.join("fake-bin-busy");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    terminal.send(b"stall while I reload\r");
+    fixture.wait_for_provider_dispatch();
+    let mut script = stalled_then_answers(30_000);
+    script["adapter_profile"] = json!("offline-loopback-adapter-v2");
+    fixture.write_script(&script);
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("reload refused: wait for the turn to finish or cancel it");
+    assert!(terminal.is_alive());
+    assert_eq!(fixture.session_ids().len(), 1);
+    assert!(!fixture.home().join("carry").exists());
+    terminal.send(b"\x11");
+    terminal.wait_screen("Quit plak?");
+    terminal.send(b"\r");
+    assert!(terminal.finish().success());
+}
+
+/// Turns sub-agents on in the fixture home, so sessions bind a tree.
+fn enable_subagents(fixture: &Fixture) {
+    let path = fixture.home().join("config.toml");
+    let config = std::fs::read_to_string(&path).expect("config");
+    write_private(
+        &path,
+        &config.replace("subagents = false", "subagents = true"),
+    );
+}
+
+/// `(revision, host_generation, state)` of one durable agent tree.
+fn tree_row(fixture: &Fixture, tree_id: &str) -> (i64, i64, String) {
+    let state = std::fs::read_dir(fixture.home().join("state"))
+        .expect("state dir")
+        .map(|entry| entry.expect("state entry").path().join("subagents.sqlite3"))
+        .find(|path| path.exists())
+        .expect("a durable tree store");
+    rusqlite::Connection::open(state)
+        .expect("tree store")
+        .query_row(
+            "SELECT revision, host_generation, state FROM agent_trees WHERE tree_id = ?1",
+            [tree_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("the session's tree row")
+}
+
+/// Two tree turns, each spawning, waiting on and adopting one child.
+fn two_tree_turns_script() -> Value {
+    let steps = tree_turn_script()["steps"].clone();
+    let mut second = steps.as_array().expect("steps").clone();
+    second[3] = json!({"output": {"text": "the second child's work is adopted"}});
+    let mut all = steps.as_array().expect("steps").clone();
+    all.extend(second);
+    json!({"version": 1, "tree": true, "durable_tree": true, "repeat_last_step": true, "steps": all})
+}
+
+/// The reopen probe compiles a session's tree tools over a detached copy:
+/// the live session's durable tree row is identical across probes, and its
+/// owner still runs a turn that mutates and saves the tree afterwards.
+#[test]
+fn the_reopen_probe_leaves_a_live_durable_tree_unchanged() {
+    let fixture = Fixture::new(&two_tree_turns_script());
+    enable_subagents(&fixture);
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"run the first child\r");
+    terminal.wait_screen("the child's work is adopted");
+    terminal.wait_absent("Esc stop");
+    let session = fixture.session_ids()[0].clone();
+    let before = tree_row(&fixture, &session);
+    for _ in 0..2 {
+        let probe = fixture.cli(&["version", "--reopen-probe", &session]);
+        assert!(
+            probe.status.success(),
+            "{}",
+            String::from_utf8_lossy(&probe.stderr)
+        );
+        let verdict: Value = serde_json::from_slice(&probe.stdout).expect("verdict json");
+        assert_eq!(verdict["verdict"], "opens", "{verdict}");
+        assert_eq!(
+            tree_row(&fixture, &session),
+            before,
+            "the probe wrote the tree"
+        );
+    }
+    terminal.send(b"run the second child\r");
+    terminal.wait_screen("the second child's work is adopted");
+    terminal.wait_absent("Esc stop");
+    let after = tree_row(&fixture, &session);
+    assert!(
+        after.0 > before.0,
+        "the live owner kept saving: {before:?} -> {after:?}"
+    );
+    assert_eq!(
+        after.1, before.1,
+        "the live owner's host generation is its own"
+    );
+    terminal.quit();
+}
+
+/// A one-step carry names how many finished sub-agents the successor does
+/// not restore.
+#[test]
+fn a_binding_carry_counts_the_finished_sub_agents_it_does_not_restore() {
+    let mut script = tree_turn_script();
+    script["durable_tree"] = json!(true);
+    let fixture = Fixture::new(&script);
+    enable_subagents(&fixture);
+    let fake_bin = fixture.root.join("fake-bin-children");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    terminal.send(b"run one child before the new adapter\r");
+    terminal.wait_screen("the child's work is adopted");
+    terminal.wait_absent("Esc stop");
+    let before = fixture.session_ids().len();
+    script["adapter_profile"] = json!("offline-loopback-adapter-v2");
+    fixture.write_script(&script);
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("carried forward from");
+    // The note can wrap; compare its words.
+    let screen = terminal.wait_where("the finished sub-agent clause", |frame| {
+        frame
+            .split_whitespace()
+            .filter(|word| *word != "│")
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains("1 finished sub-agent is not restored")
+    });
+    assert!(screen.contains("offline-loopback-adapter-v2"), "{screen}");
+    terminal.wait_ready();
+    // The carry note proves the successor; a finished child's own record may
+    // be listed late, so the count only has to grow.
+    assert!(fixture.session_ids().len() > before, "a carried successor");
+    terminal.quit();
+}
+
 fn assert_same_key_reload_starts_installed_build(changed_orchestration: bool) {
     let fixture = Fixture::new(&tool_then_answer("same-key answer"));
     let key = Command::new(env!("CARGO_BIN_EXE_plak"))

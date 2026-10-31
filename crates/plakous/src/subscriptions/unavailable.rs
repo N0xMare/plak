@@ -117,6 +117,17 @@ impl NativeSubscriptions {
     ///
     /// # Errors
     /// Returns the exact omitted route without I/O.
+    pub async fn access_token_expires_within(
+        &self,
+        provider: NativeProvider,
+        _window: std::time::Duration,
+    ) -> Result<bool, NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
+    /// Refuses an exact native operation without a compiled vertical.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route without I/O.
     pub async fn revoke(
         &self,
         provider: NativeProvider,

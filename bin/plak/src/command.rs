@@ -109,9 +109,12 @@ pub(crate) enum Command {
     SessionGc {
         id: Option<String>,
     },
-    /// Hidden `plak --import-resume <file>`: import, delete the file, resume.
+    /// Hidden `plak --import-resume <file> [--reload-handoff <file>]`:
+    /// import, delete the file, resume.
     ImportResume {
         path: PathBuf,
+        /// The reload handoff sidecar the old build named.
+        handoff: Option<PathBuf>,
     },
     /// Hidden `plak version --state-key`.
     StateKey,
@@ -119,6 +122,10 @@ pub(crate) enum Command {
         directory: PathBuf,
     },
     ReloadProbe,
+    /// Hidden `plak version --reopen-probe <id>`.
+    ReopenProbe {
+        session: String,
+    },
     CarryProbe {
         path: PathBuf,
     },
@@ -276,6 +283,7 @@ impl Command {
             | Self::ReloadProbe
             | Self::WriteBinaryManifest { .. }
             | Self::CarryProbe { .. }
+            | Self::ReopenProbe { .. }
             | Self::ExportVersion => "version",
             Self::Tui { .. } => "tui",
             Self::Resume { .. } | Self::ImportResume { .. } => "resume",

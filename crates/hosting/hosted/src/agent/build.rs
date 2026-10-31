@@ -32,7 +32,9 @@ pub use binding::{
     selected_coding_provider_configuration_with_processing_tier,
 };
 #[cfg(any(test, feature = "test-support"))]
-pub use injected::{build_or_open_bound_session, injected_root_tool_registrations};
+pub use injected::{
+    build_or_open_bound_session, injected_root_tool_registrations, verify_bound_session,
+};
 pub use policy::{
     NATIVE_RUN_MAX_MODEL_ROUNDS, NATIVE_RUN_MAX_MODEL_ROUNDS_CEILING, NATIVE_RUN_MAX_OUTPUT_TOKENS,
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT,
@@ -63,6 +65,7 @@ pub use session::{
 };
 pub(crate) use session::{
     build_api_coding_session_seed, build_coding_session_seed, open_api_coding_session_with_fence,
+    verify_api_coding_session, verify_coding_session,
 };
 #[cfg(test)]
 pub(crate) use tools::coding_tool_registry;

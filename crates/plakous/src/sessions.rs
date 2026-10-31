@@ -296,6 +296,7 @@ mod branch;
 mod compaction;
 mod maintenance;
 mod open;
+pub use open::OpenVerification;
 mod reads;
 mod recovery;
 

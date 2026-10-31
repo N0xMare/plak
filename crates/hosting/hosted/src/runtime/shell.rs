@@ -612,7 +612,7 @@ pub(super) fn attach_repair_guidance(detail: &str) -> String {
         || detail.contains("binding mismatch")
         || detail.contains("explicit rebind required")
     {
-        "fix: restore the original account and configuration for exact reopen, or use /rebind (also /reload after this refusal) to carry the full history under the current login; choosing /agents cannot repair a frozen binding"
+        "fix: carry the full history into a new session with /rebind; restoring the original account and configuration reopens it exactly instead; choosing /agents cannot repair a frozen binding"
     } else if detail.contains("quarantined") || detail.contains("rejected at refresh") {
         "fix: the credential was rejected or its refresh outcome is unknown; run `plak login <account>` in a shell, then retry /attach; a same-account Claude login preserves the session"
     } else if detail.contains("credential")

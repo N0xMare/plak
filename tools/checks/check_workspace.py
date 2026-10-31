@@ -504,12 +504,13 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
         ("std::process::Command", (("string", "/usr/sbin/ioreg"),)),
     ],
     # Carry-forward asks the installed `plak` for its reload verdict (the
-    # destination/config and carry-capacity probes, then the bare state-key
-    # fallback) and has a kept
+    # destination/config and carry-capacity probes, the exact-reopen verdict,
+    # then the bare state-key fallback) and has a kept
     # maintainer snapshot export a session its own state holds.
     ("plak", "src/carry/interactive.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
         ("std::process::Command", (("punct", "&"), ("identifier", "target"), ("punct", "."), ("identifier", "executable"))),
+        ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "snapshot"),)),
     ],
@@ -768,6 +769,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "AgentConfig",
         "AgentError",
         "AgentErrorKind",
+        # Names the frozen binding input an exact reopen found changed.
+        "BindingChange",
         "AgentEvent",
         "AgentEventKind",
         "AgentRequestPolicy",
@@ -1069,6 +1072,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "DeleteSessionReport",
         "OpenSessionOutcome",
         "OpenSessionRequest",
+        "OpenVerification",
         "OpenedSession",
         "PortableSessionHistory",
         "PruneHistoryOutcome",

@@ -10,7 +10,9 @@ mod read_only;
 pub(crate) mod rebind;
 mod recovery;
 
-pub(crate) use attached::{probe_carry_capacity, probe_prepared_capacity, run_attached_action};
+pub(crate) use attached::{
+    probe_carry_capacity, probe_prepared_capacity, run_attached_action, verify_exact_reopen,
+};
 
 pub use binding::seed_new_session_binding;
 pub(crate) use binding::{ROOT_BINDING_REMEDY, resolve_api_composition};
@@ -19,7 +21,8 @@ pub use delete::confirm_session_mutation;
 pub(crate) use delete::{delete_session, gc_sessions};
 
 pub(crate) use import_export::{
-    PreparedImport, export_session, import_document, import_prepared, import_session,
+    PreparedImport, export_session, import_document, import_prepared, import_reload_handoff,
+    import_session,
 };
 
 pub use lookup::load_exact_product_session;

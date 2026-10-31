@@ -4474,6 +4474,7 @@ fn a_codex_root_template_selecting_x_search_refuses_the_native_bind()
             "codex",
             directory.path(),
             &roots,
+            crate::mcp_binding::McpBinding::Lease,
         )
         .is_ok()
     );
@@ -4488,6 +4489,7 @@ fn a_codex_root_template_selecting_x_search_refuses_the_native_bind()
         "codex",
         directory.path(),
         &roots,
+        crate::mcp_binding::McpBinding::Lease,
     )
     .err()
     .ok_or("x_search bound on codex")?;

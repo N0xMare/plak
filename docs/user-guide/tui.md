@@ -220,8 +220,21 @@ while:
 - no `plak` is installed on `PATH`: `reload refused: no installed plak found
   on PATH`.
 
-A refusal never closes the TUI. When the installed build cannot read this
-build's state, `/reload` carries the session forward into a linked session
+A refusal never closes the TUI. Before closing anything, `/reload` asks the
+installed build whether it would reopen this session exactly. If it would, the
+session resumes as it is. If the installed build derives a different frozen
+binding (a new model adapter revision, a changed tool description), `/reload`
+carries the idle session into a linked session in one step, and the new
+transcript says what changed, for example `carried forward from <id>: the
+installed build would not reopen it exactly: its model adapter profile
+(recorded `...`, this build `...`) differs; the provider cache rebuilds on the
+first request; 3 finished sub-agents are not restored`. If the installed build
+would refuse for another reason (a missing login, for instance), the session
+stays open here with `reload kept this session open: the installed build would
+not reopen it: <reason>`. The check never renews a login: when the stored login
+is renewing or about to need renewal, the installed build gives no answer and
+`/reload` resumes as it would without one. When the installed build cannot read this build's
+state, `/reload` likewise carries the session forward into a linked session
 with the full conversation and typed transcript. The handoff reports
 `N messages, ~T tokens; the first request rebuilds the prompt cache`.
 
@@ -234,8 +247,11 @@ source selected. It works even if the old root cannot attach. The new transcript
 links `carried forward from <id>` and names the cause; the old session stays
 unchanged. It refuses while a turn, child or background process is live. A
 different-account or model/route/adapter binding refusal also makes `/reload`
-take this path. Missing login or quarantine alone still needs the named login
-command, not a new binding.
+take this path. The refusal names what changed and the carry command, for
+example `resolved harness plan is bound to a different model adapter profile
+(recorded `...`, this build `...`)` with `fix: carry the full history into a
+new session with /rebind`. Missing login or quarantine alone still needs the
+named login command, not a new binding.
 
 After changing orchestration or roster settings, `/reload` on an idle session
 with no live children/processes carries the history to apply them at fresh
