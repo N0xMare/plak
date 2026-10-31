@@ -2,37 +2,32 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use plakous_attempt::LedgerPolicy;
-use plakous_http::{
-    Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
-    sensitive_header_value,
-};
+use plakous_http::{Client, HeaderName, Origin, sensitive_header_value};
 use plakous_model::{
     CapabilityRequirement, Clock, CompiledProviderConfiguration, ConfiguredLanguageModel,
-    CountObservation, CredentialSelectionId, LanguageModel, ModelAdapterProfileId,
-    ModelPreparationContext, ModelPreparationError, ModelPreparationErrorKind,
-    OutputBoundDisposition, PreparedCacheUse, PreparedCallRecord, PreparedModelCall,
-    PreparedModelProjection, PreparedOutputLimit, PreparedTokenProjection, ProtocolId,
-    ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
-    ProviderRouteSelection, ReasoningEffortDisposition, ReasoningPolicy, ResolvedModelDescriptor,
-    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, SelectedProviderConfiguration,
-    Timestamp, ValidatedRequestPlan,
+    CredentialSelectionId, LanguageModel, ModelAdapterProfileId, ModelPreparationContext,
+    ModelPreparationError, ModelPreparationErrorKind, OutputBoundDisposition, PreparedCacheUse,
+    PreparedModelCall, ProviderAuthorityClassId, ProviderBehaviorConfiguration,
+    ProviderProfileRevisionId, ProviderRouteSelection, ReasoningEffortDisposition, ReasoningPolicy,
+    ResolvedModelDescriptor, RuntimeModelAuthorityError, RuntimeModelAuthorityOperation,
+    SelectedProviderConfiguration, Timestamp, ValidatedRequestPlan,
+};
+use plakous_responses::api_key::{
+    Preparation, Wire, configuration_matches, dispatch_available, fingerprint_matches, prepare,
+    request_authority, seal, stateless_stream_body,
 };
 use plakous_responses::{
-    CanonicalIdSources, ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits,
+    ResponsesAttemptDialectData, ResponsesAttemptService, ResponsesAttemptTarget,
+    ResponsesAuthSlots, ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData,
+    ResponsesDispatchRejection, ResponsesPreflightFuture, ResponsesPreflightRequest,
+    ResponsesProviderErrorPolicy, ResponsesReplayKind, ResponsesRequestAuthority,
+    ResponsesResponseLimits, ResponsesRevalidationRequest, canonical_local_tools,
+    is_unprojected_string_custom_tool_definition,
 };
-use plakous_responses::{
-    PreparedResponsesModelExecution, ResponsesArtifactReplayBridge, ResponsesAttemptDialectData,
-    ResponsesAttemptService, ResponsesAttemptTarget, ResponsesAuthSlot, ResponsesAuthSlots,
-    ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData, ResponsesCredentialAuthority,
-    ResponsesDispatchRejection, ResponsesHeaderBinding, ResponsesPreflightFuture,
-    ResponsesPreflightRequest, ResponsesPreparedPhysicalRequest, ResponsesProviderErrorPolicy,
-    ResponsesRequestAuthority, ResponsesResponseLimits, ResponsesRevalidationRequest,
-    ResponsesStoragePolicy, canonical_local_tools, is_unprojected_string_custom_tool_definition,
-    prepare_responses_attempt, start_prepared_responses_model_call,
-};
+use plakous_responses::{ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits};
 use thiserror::Error;
 
 use crate::{
@@ -44,7 +39,6 @@ const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 64;
 const PREFLIGHT_REVISION: u32 = 1;
 const FINAL_AUTHORIZATION_REVISION: u32 = 1;
-const RESPONSES_FAMILY: &str = "responses-family";
 pub(crate) const OPENROUTER_ADAPTER_REVISION: &str = "plakous-openrouter-responses-adapter-v2";
 const OPENROUTER_PROJECTION_REVISION: &str = "responses-canonical-openrouter-v1";
 const OPENROUTER_ACCOUNTING_REVISION: &str = "responses-wire-bytes-openrouter-v1";
@@ -54,9 +48,6 @@ const OPENROUTER_AUTH_REVISION: &str = "openrouter-platform-api-key-v1";
 const OPENROUTER_AUTHORITY_CLASS: &str = "platform-api-key";
 const OPENROUTER_CREDENTIAL_SELECTION: &str = "openrouter-product-key-generation";
 
-const HEADER_ACCEPT: HeaderName = HeaderName::from_static("accept");
-const HEADER_CONTENT_TYPE: HeaderName = HeaderName::from_static("content-type");
-const HEADER_AUTHORIZATION: HeaderName = HeaderName::from_static("authorization");
 const HEADER_GENERATION_ID: HeaderName = HeaderName::from_static("x-generation-id");
 const HEADER_HTTP_REFERER: HeaderName = HeaderName::from_static("http-referer");
 const HEADER_CATEGORIES: HeaderName = HeaderName::from_static("x-openrouter-categories");
@@ -369,82 +360,28 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
             )
         })?;
         let authority = self.request_authority(&plan, &context)?;
-        let replay_bridge = context
-            .active_family_artifact()
-            .map(|active| {
-                ResponsesArtifactReplayBridge::from_active_artifact(
-                    active,
-                    request,
-                    authority.clone(),
-                    plakous_responses::ResponsesReplayKind::new(
-                        crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_KIND,
-                        crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION,
-                    ),
-                    None,
-                    None,
-                    context.prepared_at(),
-                )
-            })
-            .transpose()
-            // An artifact covering a different canonical or stable prefix is
-            // not this request's, so prepare fresh rather than refuse.
-            .or_else(|error: plakous_responses::ResponsesRequestError| {
-                error
-                    .artifact_is_not_for_this_request()
-                    .then_some(None)
-                    .ok_or(error)
-            })
-            .map_err(|_| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidRequest,
-                    "OpenRouter active Responses artifact is not reusable",
-                )
-            })?;
-        let artifact_binding = authority.artifact_binding().clone();
-        let prepared_attempt = prepare_responses_attempt(
-            authority,
-            request,
-            replay_bridge
-                .as_ref()
-                .map(ResponsesArtifactReplayBridge::context),
-            &self.attempt_data,
-        )
-        .map_err(|error| {
-            rejection(
-                error.preparation_error_kind(),
-                format!("OpenRouter shared request lowering failed: {error}"),
-            )
-        })?;
-        let record = self.prepare_record(&plan, &context, &prepared_attempt)?;
-        let execution = PreparedResponsesModelExecution::new(
-            prepared_attempt,
-            canonical,
-            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
-            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
-            replay_bridge
-                .as_ref()
-                .map(|bridge| bridge.hosted_programs().clone())
-                .unwrap_or_default(),
+        prepare(Preparation {
+            label: "OpenRouter",
+            descriptor: &self.descriptor,
             plan,
-            artifact_binding,
-            Arc::clone(&self.clock),
-            self.descriptor.clone(),
-            self.config.event_channel_capacity,
-            None,
-        )
-        .map_err(|_| {
-            rejection(
-                ModelPreparationErrorKind::InvalidConfiguration,
-                "OpenRouter prepared execution facts are inconsistent",
-            )
-        })?;
-        let service = Arc::clone(&self.service);
-        let clock = Arc::clone(&self.clock);
-        let timeout = self.config.operation_timeout;
-        Ok(PreparedModelCall::new(record, move |call_context| {
-            let deadline = operation_deadline(clock.as_ref(), timeout, None);
-            start_prepared_responses_model_call(execution, service, call_context, deadline)
-        }))
+            context: &context,
+            attempt: &self.attempt_data,
+            canonical,
+            authority,
+            output_item_replay: ResponsesReplayKind::new(
+                crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_KIND,
+                crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION,
+            ),
+            previous_response_replay: None,
+            adapter_revision: OPENROUTER_ADAPTER_REVISION,
+            projection_revision: OPENROUTER_PROJECTION_REVISION,
+            accounting_revision: OPENROUTER_ACCOUNTING_REVISION,
+            cache_use: openrouter_cache_use(&context),
+            observation_capacity: self.config.event_channel_capacity,
+            clock: Arc::clone(&self.clock),
+            service: Arc::clone(&self.service),
+            operation_timeout: self.config.operation_timeout,
+        })
     }
 }
 
@@ -463,11 +400,7 @@ impl OpenRouterResponsesLanguageModel {
                 )
             })?;
         self.descriptor.validate_plan_binding(plan)?;
-        if plan.request().selected_provider_configuration_id()
-            != self.configuration.selected_identity()
-            || plan.request().effective_provider_configuration_id()
-                != self.configuration.effective_identity()
-        {
+        if !configuration_matches(plan, &self.configuration) {
             return Err(rejection(
                 ModelPreparationErrorKind::InvalidConfiguration,
                 "OpenRouter request provider configuration is foreign",
@@ -500,22 +433,16 @@ impl OpenRouterResponsesLanguageModel {
         plan: &ValidatedRequestPlan,
         context: &ModelPreparationContext,
     ) -> Result<ResponsesRequestAuthority, ModelPreparationError> {
-        let request = plan.request();
-        ResponsesRequestAuthority::from_admitted_operation(
+        request_authority(
             &self.descriptor,
             plan,
-            request,
-            context.authority().account_binding(),
+            context,
             openrouter_semantic_revisions().map_err(|_| {
                 rejection(
                     ModelPreparationErrorKind::InvalidConfiguration,
                     "OpenRouter semantic revisions are invalid",
                 )
             })?,
-            context
-                .cache_affinity()
-                .map(plakous_model::ModelCacheAffinity::identity),
-            ResponsesStoragePolicy::Stateless,
         )
         .map_err(|error| {
             let kind = if matches!(
@@ -532,98 +459,6 @@ impl OpenRouterResponsesLanguageModel {
             )
         })
     }
-
-    fn prepare_record(
-        &self,
-        plan: &ValidatedRequestPlan,
-        context: &ModelPreparationContext,
-        prepared_attempt: &plakous_responses::PreparedResponsesAttempt,
-    ) -> Result<PreparedCallRecord, ModelPreparationError> {
-        let wire_digest = prepared_attempt.wire_digest();
-        let wire_size = u64::try_from(prepared_attempt.wire_size()).map_err(|_| {
-            rejection(
-                ModelPreparationErrorKind::ResourceLimit,
-                "OpenRouter prepared request exceeds addressable size",
-            )
-        })?;
-        let count_observation = self
-            .descriptor
-            .context_contract()
-            .and_then(|contract| contract.measurements().first())
-            .map(|certificate| {
-                CountObservation::new(
-                    certificate.certificate_id(),
-                    certificate.revision(),
-                    wire_size,
-                )
-                .map_err(|_| {
-                    rejection(
-                        ModelPreparationErrorKind::InvalidConfiguration,
-                        "OpenRouter local context measurement is invalid",
-                    )
-                })
-            })
-            .transpose()?;
-        let token_projection =
-            PreparedTokenProjection::new(wire_digest, wire_size, count_observation)?
-                .with_input_parts(plakous_model::ContextInputParts::measure_wire(
-                    prepared_attempt.body().as_ref(),
-                ))
-                .with_wire_input(
-                    prepared_attempt.body().as_ref(),
-                    Some(plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS),
-                    context,
-                )?;
-        let output_limit = prepared_attempt
-            .enforced_output_tokens()
-            .map(|tokens| {
-                PreparedOutputLimit::enforced_wire_maximum(
-                    tokens,
-                    "max_output_tokens",
-                    wire_digest,
-                    OPENROUTER_ADAPTER_REVISION,
-                )
-            })
-            .transpose()?;
-        let cache_use = match (
-            context.active_family_artifact(),
-            context
-                .cache_affinity()
-                .map(plakous_model::ModelCacheAffinity::identity),
-        ) {
-            (Some(artifact), Some(affinity)) => {
-                PreparedCacheUse::ActiveFamilyArtifactAndRuntimeAffinity {
-                    artifact: artifact.integrity(),
-                    affinity,
-                }
-            }
-            (Some(artifact), None) => PreparedCacheUse::ActiveFamilyArtifact {
-                artifact: artifact.integrity(),
-            },
-            (None, Some(affinity)) => PreparedCacheUse::RuntimeAffinity { affinity },
-            (None, None) => PreparedCacheUse::None,
-        };
-        let projection = PreparedModelProjection::new(
-            &self.descriptor,
-            plan,
-            context,
-            ProtocolId::new(RESPONSES_FAMILY).map_err(|_| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "Responses family identity is invalid",
-                )
-            })?,
-            OPENROUTER_ADAPTER_REVISION,
-            OPENROUTER_PROJECTION_REVISION,
-            OPENROUTER_ACCOUNTING_REVISION,
-            wire_digest,
-            wire_size,
-            token_projection,
-            cache_use,
-            output_limit,
-        )?;
-        PreparedCallRecord::for_prepared(&self.descriptor, plan, projection, context)
-    }
 }
 
 fn openrouter_preflight<'a>(
@@ -631,20 +466,14 @@ fn openrouter_preflight<'a>(
     request: ResponsesPreflightRequest<'a>,
 ) -> ResponsesPreflightFuture<'a, OpenRouterDispatchGuard> {
     Box::pin(async move {
-        if request.cancellation().is_cancelled() || Instant::now() >= request.deadline() {
-            return Err(ResponsesDispatchRejection::Unavailable);
-        }
+        dispatch_available(request.cancellation().is_cancelled(), request.deadline())?;
         dialect
             .target
             .runtime_authority(dialect.target.route().clock.now())
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
         let route = dialect.target.route();
-        let body: serde_json::Value = serde_json::from_slice(request.body_bytes())
-            .map_err(|_| ResponsesDispatchRejection::Binding)?;
-        if body.get("stream") != Some(&serde_json::Value::Bool(true))
-            || body.get("store") != Some(&serde_json::Value::Bool(false))
-            || body.get("provider").is_none()
-        {
+        let body = stateless_stream_body(request.body_bytes(), None)?;
+        if body.get("provider").is_none() {
             return Err(ResponsesDispatchRejection::Binding);
         }
         let generation = route
@@ -659,75 +488,32 @@ fn openrouter_preflight<'a>(
             .map_err(|_| ResponsesDispatchRejection::Authentication)?;
         let authorization = sensitive_header_value(crate::route::bearer_bytes(&key))
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
-        let mut headers = HeaderMap::new();
-        headers.insert(HEADER_ACCEPT, HeaderValue::from_static("text/event-stream"));
-        headers.insert(
-            HEADER_CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-        headers.insert(
-            HEADER_OPENROUTER_METADATA,
-            HeaderValue::from_static("enabled"),
-        );
-        headers.insert(HEADER_AUTHORIZATION, authorization);
-        let mut bindings = vec![
-            ResponsesHeaderBinding::PublicExact {
-                name: HEADER_ACCEPT,
-                value: b"text/event-stream".to_vec(),
-            },
-            ResponsesHeaderBinding::PublicExact {
-                name: HEADER_CONTENT_TYPE,
-                value: b"application/json".to_vec(),
-            },
-            ResponsesHeaderBinding::PublicExact {
-                name: HEADER_OPENROUTER_METADATA,
-                value: b"enabled".to_vec(),
-            },
-            ResponsesHeaderBinding::CredentialSecret {
-                name: HEADER_AUTHORIZATION,
-                slot: ResponsesAuthSlot::Primary,
-            },
-        ];
+        // Extras follow authorization. Attribution stays referer, title, categories.
+        // Physical identity sorts header frames, so this order does not change the digest.
+        let mut extra_headers = vec![(HEADER_OPENROUTER_METADATA, b"enabled".to_vec())];
         if let Some(attribution) = identity.attribution() {
-            headers.insert(
+            extra_headers.push((
                 HEADER_HTTP_REFERER,
-                HeaderValue::from_static(attribution.referer()),
-            );
-            headers.insert(HEADER_TITLE, HeaderValue::from_static(attribution.title()));
-            headers.insert(
+                attribution.referer().as_bytes().to_vec(),
+            ));
+            extra_headers.push((HEADER_TITLE, attribution.title().as_bytes().to_vec()));
+            extra_headers.push((
                 HEADER_CATEGORIES,
-                HeaderValue::from_static(crate::OpenRouterAttribution::CATEGORY),
-            );
-            bindings.push(ResponsesHeaderBinding::PublicExact {
-                name: HEADER_CATEGORIES,
-                value: crate::OpenRouterAttribution::CATEGORY.as_bytes().to_vec(),
-            });
-            bindings.push(ResponsesHeaderBinding::PublicExact {
-                name: HEADER_HTTP_REFERER,
-                value: attribution.referer().as_bytes().to_vec(),
-            });
-            bindings.push(ResponsesHeaderBinding::PublicExact {
-                name: HEADER_TITLE,
-                value: attribution.title().as_bytes().to_vec(),
-            });
+                crate::OpenRouterAttribution::CATEGORY.as_bytes().to_vec(),
+            ));
         }
-        let wire = Request::new(
-            Origin::parse(identity.origin().as_str())
+        seal(Wire {
+            origin: Origin::parse(identity.origin().as_str())
                 .map_err(|_| ResponsesDispatchRejection::Binding)?,
-            Method::POST,
-            crate::OPENROUTER_RESPONSES_PATH,
-            headers,
-            SensitiveBytes::new(request.body_bytes().to_vec()).into_bytes(),
-            dialect.client.limits(),
-        )
-        .map_err(|_| ResponsesDispatchRejection::Binding)?;
-        Ok(ResponsesPreparedPhysicalRequest::new(
-            request.physical().clone(),
-            wire,
-            ResponsesCredentialAuthority::primary(generation.fingerprint()),
-            bindings,
-            OpenRouterDispatchGuard { generation },
-        ))
+            path: crate::OPENROUTER_RESPONSES_PATH,
+            authorization,
+            extra_headers,
+            body: request.body_bytes().to_vec(),
+            limits: dialect.client.limits().clone(),
+            fingerprint: generation.fingerprint(),
+            physical: request.physical().clone(),
+            guard: OpenRouterDispatchGuard { generation },
+        })
     })
 }
 
@@ -735,9 +521,7 @@ fn revalidate_openrouter(
     dialect: &OpenRouterResponsesExecution,
     mut request: ResponsesRevalidationRequest<'_, OpenRouterDispatchGuard>,
 ) -> Result<(), ResponsesDispatchRejection> {
-    if request.cancellation().is_cancelled() || Instant::now() >= request.deadline() {
-        return Err(ResponsesDispatchRejection::Unavailable);
-    }
+    dispatch_available(request.cancellation().is_cancelled(), request.deadline())?;
     dialect
         .target
         .runtime_authority(dialect.target.route().clock.now())
@@ -747,15 +531,10 @@ fn revalidate_openrouter(
     route
         .revalidate_responses_credential_generation(request.binding().physical(), &generation)
         .map_err(|_| ResponsesDispatchRejection::Authentication)?;
-    if request
-        .binding()
-        .credential_authority()
-        .generation(ResponsesAuthSlot::Primary)
-        != Some(generation.fingerprint())
-    {
-        return Err(ResponsesDispatchRejection::Binding);
-    }
-    Ok(())
+    fingerprint_matches(
+        request.binding().credential_authority(),
+        generation.fingerprint(),
+    )
 }
 
 fn openrouter_semantic_revisions()
@@ -824,24 +603,25 @@ fn generation_number(grant: &OpenRouterKeyGeneration) -> u64 {
     u64::from_be_bytes(bytes[..8].try_into().unwrap_or([0; 8])).max(1)
 }
 
-fn operation_deadline(
-    clock: &dyn Clock,
-    timeout: Duration,
-    requested: Option<Timestamp>,
-) -> Instant {
-    let now = Instant::now();
-    let configured = now.checked_add(timeout).unwrap_or(now);
-    let Some(requested) = requested else {
-        return configured;
-    };
-    let wall_now = clock.now();
-    if requested <= wall_now {
-        return now;
+fn openrouter_cache_use(context: &ModelPreparationContext) -> PreparedCacheUse {
+    match (
+        context.active_family_artifact(),
+        context
+            .cache_affinity()
+            .map(plakous_model::ModelCacheAffinity::identity),
+    ) {
+        (Some(artifact), Some(affinity)) => {
+            PreparedCacheUse::ActiveFamilyArtifactAndRuntimeAffinity {
+                artifact: artifact.integrity(),
+                affinity,
+            }
+        }
+        (Some(artifact), None) => PreparedCacheUse::ActiveFamilyArtifact {
+            artifact: artifact.integrity(),
+        },
+        (None, Some(affinity)) => PreparedCacheUse::RuntimeAffinity { affinity },
+        (None, None) => PreparedCacheUse::None,
     }
-    now.checked_add(Duration::from_secs(
-        requested.seconds().saturating_sub(wall_now.seconds()),
-    ))
-    .map_or(configured, |deadline| deadline.min(configured))
 }
 
 fn rejection(kind: ModelPreparationErrorKind, message: impl AsRef<str>) -> ModelPreparationError {

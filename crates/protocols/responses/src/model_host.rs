@@ -1443,6 +1443,8 @@ fn model_error(
     .unwrap_or_else(|| ModelError::new(kind, message))
 }
 
+pub mod api_key;
+
 #[cfg(test)]
 mod tests;
 

@@ -10,8 +10,8 @@ use super::{
     RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, Timestamp, ValidatedRequestPlan,
     canonical_local_tools, codex_artifact_replay_bridge, codex_dispatch_service,
     codex_reference_client_input_tokens, codex_request_authority, is_native_compaction_request,
-    operation_deadline, preparation_rejection, prepare_responses_attempt,
-    start_prepared_responses_model_call, usage_limit, validate_codex_preparation_authority,
+    preparation_rejection, prepare_responses_attempt, start_prepared_responses_model_call,
+    usage_limit, validate_codex_preparation_authority,
 };
 #[cfg(all(feature = "native-auth", test))]
 use super::{ContextEvidenceClass, NonZeroU32, TEST_OUTPUT_HARD_CAP};
@@ -431,7 +431,8 @@ impl LanguageModel for OpenAiLanguageModel {
                         .map_err(plakous_model::ModelError::from)?
                         .service,
                 );
-                let deadline = operation_deadline(clock.as_ref(), config, None);
+                let now = std::time::Instant::now();
+                let deadline = now.checked_add(config.operation_timeout()).unwrap_or(now);
                 start_prepared_responses_model_call(
                     prepared_execution,
                     service,

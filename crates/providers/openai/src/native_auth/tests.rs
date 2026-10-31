@@ -39,24 +39,6 @@ use super::*;
 type TestError = Box<dyn Error + Send + Sync>;
 type TestResult<T = ()> = Result<T, TestError>;
 
-#[test]
-fn native_codex_operation_budget_still_obeys_earlier_caller_deadline() -> TestResult {
-    let config = StandardOpenAiHttpConfig::new(
-        Duration::from_secs(300),
-        StandardOpenAiHttpConfig::default().event_channel_capacity(),
-        plakous_responses::ResponsesStreamLimits::default(),
-    )?;
-    let clock = FixedClock::new(Timestamp::new(1_000, 0)?);
-    let before = Instant::now();
-    let full = crate::model::operation_deadline(&clock, config, None);
-    let earlier = crate::model::operation_deadline(&clock, config, Some(Timestamp::new(1_180, 0)?));
-    assert!(full.duration_since(before) >= Duration::from_secs(299));
-    assert!(earlier.duration_since(before) >= Duration::from_secs(179));
-    assert!(earlier.duration_since(before) < Duration::from_secs(181));
-    assert!(earlier < full);
-    Ok(())
-}
-
 fn test_cache_affinity() -> Result<ModelCacheAffinity, ModelError> {
     let session = "00000000-0000-7000-8000-000000000301"
         .parse::<plakous_model::SessionId>()

@@ -112,7 +112,7 @@ pub use images::{
     decode_responses_image, run_responses_image,
 };
 pub use model_host::{
-    PreparedResponsesModelExecution, ResponsesModelBuildError, ResponsesModelErrorHook,
+    PreparedResponsesModelExecution, ResponsesModelBuildError, ResponsesModelErrorHook, api_key,
     bind_reachability_probe, start_prepared_responses_model_call,
 };
 use plakous_auth::api_key::CredentialGenerationFingerprint;

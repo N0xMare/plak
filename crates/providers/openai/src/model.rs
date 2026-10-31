@@ -5,7 +5,6 @@ mod platform;
 
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 #[cfg(all(feature = "native-auth", test))]
 use std::num::NonZeroU32;
@@ -19,8 +18,8 @@ use plakous_model::{
     ModelPreparationContext, ModelPreparationError, ModelPreparationErrorKind, ModelRequest,
     PreparedCacheUse, PreparedCallRecord, PreparedModelCall, PreparedModelProjection,
     PreparedOutputLimit, PreparedTokenProjection, ProtocolId, ReplayKindId, RuntimeModelAuthority,
-    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, Support, ToolPresentationMode,
-    ValidatedRequestPlan,
+    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, Support, Timestamp,
+    ToolPresentationMode, ValidatedRequestPlan,
 };
 #[cfg(all(feature = "native-auth", test))]
 use plakous_model::{
@@ -30,7 +29,7 @@ use plakous_model::{
 use plakous_model::{
     CapacityRule, Clock, CompiledProviderConfiguration, ModelAdapterProfileId, ModelFamilyId,
     ModelId, ReasoningEffortDisposition, ResolvedModelDescriptor, ResolvedProviderAuthorityBinding,
-    SelectedProviderConfiguration, SystemClock, Timestamp,
+    SelectedProviderConfiguration, SystemClock,
 };
 use plakous_responses::ResponsesStreamLimits;
 #[cfg(feature = "native-auth")]
@@ -525,7 +524,7 @@ impl OpenAiLanguageModel {
         self: &Arc<Self>,
         path: &'static str,
         body: &[u8],
-        deadline: Instant,
+        deadline: std::time::Instant,
         cancellation: &plakous_model::CancellationToken,
     ) -> Result<(plakous_http::Request, CodexDispatchGuard), &'static str> {
         let checked_at = self
@@ -995,25 +994,6 @@ fn codex_tool_mode_accepts(
         }
         None => false,
     }
-}
-
-pub(crate) fn operation_deadline(
-    clock: &dyn Clock,
-    config: StandardOpenAiHttpConfig,
-    requested: Option<Timestamp>,
-) -> Instant {
-    let now = Instant::now();
-    let configured = now.checked_add(config.operation_timeout()).unwrap_or(now);
-    let Some(requested) = requested else {
-        return configured;
-    };
-    let wall_now = clock.now();
-    if requested <= wall_now {
-        return now;
-    }
-    let seconds = requested.seconds().saturating_sub(wall_now.seconds());
-    now.checked_add(Duration::from_secs(seconds))
-        .map_or(configured, |deadline| deadline.min(configured))
 }
 
 #[cfg(test)]

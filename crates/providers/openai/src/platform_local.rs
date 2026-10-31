@@ -1,8 +1,6 @@
 //! Exact OpenAI Platform execution through the shared Responses host.
 
-use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Instant;
 
 use plakous_attempt::LedgerPolicy;
 use plakous_http::{
@@ -10,29 +8,28 @@ use plakous_http::{
     sensitive_header_value,
 };
 use plakous_model::{
-    CapabilityRequirement, Clock, CompiledProviderConfiguration, CountObservation, Digest,
-    LanguageModel, ModelPreparationContext, ModelPreparationError, ModelPreparationErrorKind,
-    PreparedCacheUse, PreparedCallError, PreparedCallRecord, PreparedModelCall,
-    PreparedModelProjection, PreparedOutputLimit, PreparedTokenProjection, ProtocolId,
-    ProviderSemanticEvidence, ReasoningEffortDisposition, ReasoningPolicy, ReplayKindId,
-    ResolvedModelDescriptor, ResolvedProviderAuthorityBinding, RuntimeModelAuthority,
+    Clock, CompiledProviderConfiguration, LanguageModel, ModelPreparationContext,
+    ModelPreparationError, ModelPreparationErrorKind, PreparedModelCall, ProviderSemanticEvidence,
+    ReplayKindId, ResolvedModelDescriptor, ResolvedProviderAuthorityBinding, RuntimeModelAuthority,
     RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, SelectedProviderConfiguration,
     Timestamp, ValidatedRequestPlan,
 };
-use plakous_responses::{
-    CanonicalIdSources, LifecycleDialectPolicy, ResponsesDialectProfile,
-    ResponsesSemanticRevisions, ResponsesStorageMode,
+use plakous_responses::api_key::{
+    Preparation, Wire, artifact_cache, configuration_matches, dispatch_available,
+    fingerprint_matches, prepare, request_authority, request_matches_configuration, seal,
+    stateless_stream_body,
 };
 use plakous_responses::{
-    PreparedResponsesModelExecution, ResponsesArtifactReplayBridge, ResponsesAttemptDialectData,
-    ResponsesAttemptService, ResponsesAttemptTarget, ResponsesAuthSlot, ResponsesAuthSlots,
-    ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData, ResponsesCredentialAuthority,
-    ResponsesDispatchRejection, ResponsesHeaderBinding, ResponsesPreflightFuture,
-    ResponsesPreflightRequest, ResponsesPreparedPhysicalRequest, ResponsesProviderErrorPolicy,
-    ResponsesReplayKind, ResponsesReplayProjection, ResponsesRequestAuthority,
-    ResponsesResponseLimits, ResponsesRevalidationRequest, ResponsesStoragePolicy,
-    ResponsesStreamCapabilities, ResponsesStreamDialectData, ResponsesUsagePolicy,
-    canonical_local_tools, prepare_responses_attempt, start_prepared_responses_model_call,
+    LifecycleDialectPolicy, ResponsesDialectProfile, ResponsesSemanticRevisions,
+    ResponsesStorageMode,
+};
+use plakous_responses::{
+    ResponsesAttemptDialectData, ResponsesAttemptService, ResponsesAttemptTarget,
+    ResponsesAuthSlots, ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData,
+    ResponsesDispatchRejection, ResponsesPreflightFuture, ResponsesPreflightRequest,
+    ResponsesProviderErrorPolicy, ResponsesReplayKind, ResponsesReplayProjection,
+    ResponsesResponseLimits, ResponsesRevalidationRequest, ResponsesStreamCapabilities,
+    ResponsesStreamDialectData, ResponsesUsagePolicy, canonical_local_tools,
 };
 use thiserror::Error;
 
@@ -45,7 +42,6 @@ use crate::{
 
 const PREFLIGHT_REVISION: u32 = 1;
 const FINAL_AUTHORIZATION_REVISION: u32 = 1;
-const RESPONSES_FAMILY: &str = "responses-family";
 const PLATFORM_PROJECTION_REVISION: &str = "responses-canonical-openai-platform-v1";
 const PLATFORM_ACCOUNTING_REVISION: &str = "responses-wire-bytes-openai-platform-v1";
 const HEADER_ACCEPT: HeaderName = HeaderName::from_static("accept");
@@ -427,11 +423,7 @@ impl LanguageModel for OpenAiPlatformModel {
             .target()
             .validate_plan(&plan)
             .map_err(|_| rejection("Platform plan belongs to another target"))?;
-        if plan.request().selected_provider_configuration_id()
-            != self.configuration.selected_identity()
-            || plan.request().effective_provider_configuration_id()
-                != self.configuration.effective_identity()
-        {
+        if !configuration_matches(&plan, &self.configuration) {
             return Err(rejection(
                 "Platform request provider configuration is foreign",
             ));
@@ -469,131 +461,35 @@ impl LanguageModel for OpenAiPlatformModel {
             canonical_tools,
         )
         .map_err(|_| rejection("Platform canonical projection is invalid"))?;
-        let authority = ResponsesRequestAuthority::from_admitted_operation(
-            &self.descriptor,
-            &plan,
-            request,
-            context.authority().account_binding(),
-            semantic_revisions().map_err(|_| rejection("Platform revisions are invalid"))?,
-            context
-                .cache_affinity()
-                .map(plakous_model::ModelCacheAffinity::identity),
-            ResponsesStoragePolicy::Stateless,
-        )
-        .map_err(|_| rejection("Platform request authority is invalid"))?;
-        let replay_bridge = context
-            .active_family_artifact()
-            .map(|active| {
-                ResponsesArtifactReplayBridge::from_active_artifact(
-                    active,
-                    request,
-                    authority.clone(),
-                    ResponsesReplayKind::new("responses.output_item", 1),
-                    None,
-                    Some(ResponsesReplayKind::new("openai.previous_response_id", 1)),
-                    context.prepared_at(),
-                )
-            })
-            .transpose()
-            // An artifact covering a different canonical or stable prefix is
-            // not this request's, so prepare fresh rather than refuse. Same rule as the
-            // Codex route.
-            .or_else(|error: plakous_responses::ResponsesRequestError| {
-                error
-                    .artifact_is_not_for_this_request()
-                    .then_some(None)
-                    .ok_or(error)
-            })
-            .map_err(|_| rejection("Platform active Responses artifact is not reusable"))?;
-        let prepared_attempt = prepare_responses_attempt(
-            authority,
-            request,
-            replay_bridge
-                .as_ref()
-                .map(ResponsesArtifactReplayBridge::context),
-            &self.attempt_data,
-        )
-        .map_err(|error| {
-            ModelPreparationError::rejected(
-                error.preparation_error_kind(),
-                format!("Platform Responses request lowering failed: {error}"),
-            )
-        })?;
-        let artifact_binding = prepared_attempt.authority().artifact_binding().clone();
-        let wire_digest = prepared_attempt.wire_digest();
-        let wire_size = u64::try_from(prepared_attempt.wire_size())
-            .map_err(|_| rejection("Platform wire size is not representable"))?;
-        let count_observation = self
-            .descriptor
-            .context_contract()
-            .and_then(|contract| contract.measurements().first())
-            .map(|certificate| {
-                CountObservation::new(
-                    certificate.certificate_id(),
-                    certificate.revision(),
-                    wire_size,
-                )
-                .map_err(|_| rejection("Platform wire measurement is invalid"))
-            })
-            .transpose()?;
-        let token_projection =
-            PreparedTokenProjection::new(wire_digest, wire_size, count_observation)?
-                .with_input_parts(plakous_model::ContextInputParts::measure_wire(
-                    prepared_attempt.body().as_ref(),
-                ))
-                .with_wire_input(
-                    prepared_attempt.body().as_ref(),
-                    Some(plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS),
-                    &context,
-                )?;
-        let output_limit =
-            enforced_wire_output_limit(prepared_attempt.enforced_output_tokens(), wire_digest)?;
-        let projection = PreparedModelProjection::new(
+        let authority = request_authority(
             &self.descriptor,
             &plan,
             &context,
-            ProtocolId::new(RESPONSES_FAMILY).map_err(|_| rejection("invalid family ID"))?,
-            OPENAI_RESPONSES_ADAPTER_REVISION,
-            PLATFORM_PROJECTION_REVISION,
-            PLATFORM_ACCOUNTING_REVISION,
-            wire_digest,
-            wire_size,
-            token_projection,
-            context
-                .active_family_artifact()
-                .map_or(PreparedCacheUse::None, |artifact| {
-                    PreparedCacheUse::ActiveFamilyArtifact {
-                        artifact: artifact.integrity(),
-                    }
-                }),
-            output_limit,
-        )?;
-        let record =
-            PreparedCallRecord::for_prepared(&self.descriptor, &plan, projection, &context)?;
-        let execution = PreparedResponsesModelExecution::new(
-            prepared_attempt,
-            canonical,
-            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
-            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
-            replay_bridge
-                .as_ref()
-                .map(|bridge| bridge.hosted_programs().clone())
-                .unwrap_or_default(),
-            plan,
-            artifact_binding,
-            Arc::clone(&self.clock),
-            self.descriptor.clone(),
-            self.config.event_channel_capacity(),
-            None,
+            semantic_revisions().map_err(|_| rejection("Platform revisions are invalid"))?,
         )
-        .map_err(|_| rejection("Platform prepared execution is invalid"))?;
-        let service = Arc::clone(&self.service);
-        let clock = Arc::clone(&self.clock);
-        let config = self.config;
-        Ok(PreparedModelCall::new(record, move |call_context| {
-            let deadline = super::model::operation_deadline(clock.as_ref(), config, None);
-            start_prepared_responses_model_call(execution, service, call_context, deadline)
-        }))
+        .map_err(|_| rejection("Platform request authority is invalid"))?;
+        prepare(Preparation {
+            label: "Platform",
+            descriptor: &self.descriptor,
+            plan,
+            context: &context,
+            attempt: &self.attempt_data,
+            canonical,
+            authority,
+            output_item_replay: ResponsesReplayKind::new("responses.output_item", 1),
+            previous_response_replay: Some(ResponsesReplayKind::new(
+                "openai.previous_response_id",
+                1,
+            )),
+            adapter_revision: OPENAI_RESPONSES_ADAPTER_REVISION,
+            projection_revision: PLATFORM_PROJECTION_REVISION,
+            accounting_revision: PLATFORM_ACCOUNTING_REVISION,
+            cache_use: artifact_cache(&context),
+            observation_capacity: self.config.event_channel_capacity(),
+            clock: Arc::clone(&self.clock),
+            service: Arc::clone(&self.service),
+            operation_timeout: self.config.operation_timeout(),
+        })
     }
 }
 
@@ -644,46 +540,21 @@ impl LanguageModel for OpenAiPlatformLocalModel {
     }
 }
 
-fn enforced_wire_output_limit(
-    tokens: Option<NonZeroU32>,
-    wire_digest: Digest,
-) -> Result<Option<PreparedOutputLimit>, PreparedCallError> {
-    tokens
-        .map(|tokens| {
-            PreparedOutputLimit::enforced_wire_maximum(
-                tokens,
-                "max_output_tokens",
-                wire_digest,
-                OPENAI_RESPONSES_ADAPTER_REVISION,
-            )
-        })
-        .transpose()
-}
-
 fn platform_preflight<'a>(
     execution: &'a PlatformExecution,
     request: ResponsesPreflightRequest<'a>,
 ) -> ResponsesPreflightFuture<'a, PlatformDispatchGuard> {
     Box::pin(async move {
-        if request.cancellation().is_cancelled() || Instant::now() >= request.deadline() {
-            return Err(ResponsesDispatchRejection::Unavailable);
-        }
+        dispatch_available(request.cancellation().is_cancelled(), request.deadline())?;
         let authority = &execution.authority;
         authority
             .target()
             .validate_current_route_evidence()
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
-        let body: serde_json::Value = serde_json::from_slice(request.body_bytes())
-            .map_err(|_| ResponsesDispatchRejection::Binding)?;
-        if body.get("model")
-            != Some(&serde_json::Value::String(
-                authority.descriptor().requested_model().as_str().to_owned(),
-            ))
-            || body.get("stream") != Some(&serde_json::Value::Bool(true))
-            || body.get("store") != Some(&serde_json::Value::Bool(false))
-        {
-            return Err(ResponsesDispatchRejection::Binding);
-        }
+        stateless_stream_body(
+            request.body_bytes(),
+            Some(authority.descriptor().requested_model().as_str()),
+        )?;
         let generation = authority
             .target()
             .route()
@@ -702,52 +573,21 @@ fn platform_preflight<'a>(
                 .platform_bearer_header(&generation)
                 .map_err(|_| ResponsesDispatchRejection::Authentication)?
         };
-        let mut headers = HeaderMap::new();
-        headers.insert(HEADER_ACCEPT, HeaderValue::from_static("text/event-stream"));
-        headers.insert(
-            HEADER_CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-        headers.insert(HEADER_AUTHORIZATION, authorization);
-        let mut bindings = vec![
-            ResponsesHeaderBinding::PublicExact {
-                name: HEADER_ACCEPT,
-                value: b"text/event-stream".to_vec(),
-            },
-            ResponsesHeaderBinding::PublicExact {
-                name: HEADER_CONTENT_TYPE,
-                value: b"application/json".to_vec(),
-            },
-            ResponsesHeaderBinding::CredentialSecret {
-                name: HEADER_AUTHORIZATION,
-                slot: ResponsesAuthSlot::Primary,
-            },
-        ];
+        let mut extra_headers = Vec::new();
         if let PlatformProjectPolicy::Project(project) = authority.project() {
-            let value = HeaderValue::from_str(project.as_str())
-                .map_err(|_| ResponsesDispatchRejection::Binding)?;
-            headers.insert(HEADER_PROJECT, value);
-            bindings.push(ResponsesHeaderBinding::PublicExact {
-                name: HEADER_PROJECT,
-                value: project.as_str().as_bytes().to_vec(),
-            });
+            extra_headers.push((HEADER_PROJECT, project.as_str().as_bytes().to_vec()));
         }
-        let wire = Request::new(
-            execution.dial_origin.clone(),
-            Method::POST,
-            OPENAI_PLATFORM_RESPONSES_PATH,
-            headers,
-            SensitiveBytes::new(request.body_bytes().to_vec()).into_bytes(),
-            execution.client.limits(),
-        )
-        .map_err(|_| ResponsesDispatchRejection::Binding)?;
-        Ok(ResponsesPreparedPhysicalRequest::new(
-            request.physical().clone(),
-            wire,
-            ResponsesCredentialAuthority::primary(generation.fingerprint()),
-            bindings,
-            PlatformDispatchGuard { generation },
-        ))
+        seal(Wire {
+            origin: execution.dial_origin.clone(),
+            path: OPENAI_PLATFORM_RESPONSES_PATH,
+            authorization,
+            extra_headers,
+            body: request.body_bytes().to_vec(),
+            limits: execution.client.limits().clone(),
+            fingerprint: generation.fingerprint(),
+            physical: request.physical().clone(),
+            guard: PlatformDispatchGuard { generation },
+        })
     })
 }
 
@@ -755,9 +595,7 @@ fn revalidate_platform(
     execution: &PlatformExecution,
     mut request: ResponsesRevalidationRequest<'_, PlatformDispatchGuard>,
 ) -> Result<(), ResponsesDispatchRejection> {
-    if request.cancellation().is_cancelled() || Instant::now() >= request.deadline() {
-        return Err(ResponsesDispatchRejection::Unavailable);
-    }
+    dispatch_available(request.cancellation().is_cancelled(), request.deadline())?;
     let generation = request.response_head_guard_mut().generation.clone();
     execution
         .authority
@@ -765,15 +603,10 @@ fn revalidate_platform(
         .route()
         .revalidate_platform_generation(&generation)
         .map_err(|_| ResponsesDispatchRejection::Authentication)?;
-    if request
-        .binding()
-        .credential_authority()
-        .generation(ResponsesAuthSlot::Primary)
-        != Some(generation.fingerprint())
-    {
-        return Err(ResponsesDispatchRejection::Binding);
-    }
-    Ok(())
+    fingerprint_matches(
+        request.binding().credential_authority(),
+        generation.fingerprint(),
+    )
 }
 
 fn semantic_revisions() -> Result<ResponsesSemanticRevisions, OpenAiPlatformBuildError> {
@@ -843,37 +676,6 @@ fn compile_platform_configuration(
         .map_err(OpenAiPlatformBuildError::Policy)
 }
 
-fn request_matches_configuration(
-    request: &plakous_model::ModelRequest,
-    behavior: &plakous_model::ProviderBehaviorConfiguration,
-) -> bool {
-    let reasoning = match (request.reasoning(), behavior.reasoning_effort) {
-        (ReasoningPolicy::Disabled, ReasoningEffortDisposition::Disabled) => true,
-        (
-            ReasoningPolicy::Enabled {
-                effort: Some(requested),
-                requirement: CapabilityRequirement::Required,
-            },
-            ReasoningEffortDisposition::Enabled(configured),
-        ) => requested == configured,
-        _ => false,
-    };
-    reasoning
-        && request.output() == &behavior.output
-        && request.cache() == behavior.cache
-        && behavior.matches_request_execution_controls(request)
-        && request.context_admission_requirement() == behavior.context_evidence_requirement
-        && request.limits().stop_sequences().is_empty()
-        && request.native().entries().is_empty()
-        && request.tools().len() == behavior.tools.len()
-        && request.hosted_tools() == behavior.hosted_tools
-        && request
-            .tools()
-            .iter()
-            .zip(&behavior.tools)
-            .all(|(request, configured)| request == configured)
-}
-
 fn generation_number(grant: &OpenAiKeyGeneration) -> u64 {
     let fingerprint = grant.fingerprint();
     u64::from_be_bytes(fingerprint.as_bytes()[..8].try_into().unwrap_or([0; 8])).max(1)
@@ -902,32 +704,4 @@ pub enum OpenAiPlatformBuildError {
     /// Shared Responses construction facts were inconsistent.
     #[error("OpenAI Platform shared Responses construction failed")]
     SharedBinding,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use plakous_model::{DigestDomain, PreparedOutputLimitSource};
-
-    #[test]
-    fn emitted_output_bound_retains_exact_wire_projection_proof()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let wire_digest =
-            Digest::sha256(DigestDomain::Blob, 1, &[br#"{"max_output_tokens":128}"#])?;
-        let limit = enforced_wire_output_limit(NonZeroU32::new(128), wire_digest)?
-            .ok_or("emitted output maximum was absent")?;
-        assert_eq!(limit.tokens().get(), 128);
-        assert!(matches!(
-            limit.source(),
-            PreparedOutputLimitSource::EnforcedWireMaximum {
-                wire_field,
-                wire_digest: proof_wire_digest,
-                lowering_revision,
-            } if wire_field == "max_output_tokens"
-                && *proof_wire_digest == wire_digest
-                && lowering_revision == OPENAI_RESPONSES_ADAPTER_REVISION
-        ));
-        assert_eq!(enforced_wire_output_limit(None, wire_digest)?, None);
-        Ok(())
-    }
 }

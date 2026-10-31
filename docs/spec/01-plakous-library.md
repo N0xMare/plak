@@ -3346,6 +3346,19 @@ The production constructor fixes the official origin. Explicit loopback test
 transport uses that same executor and credential-origin authority without
 turning fixture authority into production authority.
 
+OpenAI Platform, xAI Platform and OpenRouter Responses prepare and dispatch
+through one API-key skeleton in `plakous-responses`. Preparation receives the
+route label, admitted descriptor, validated plan, preparation context, attempt
+dialect, canonical dialect, request authority, output-item replay kind,
+optional previous-response replay kind, the route's adapter, projection and
+accounting revisions, cache classification, observation capacity, clock,
+attempt service and operation timeout. Dispatch receives the route origin,
+path, authorization header, extra headers, body, transport limits, generation
+fingerprint, physical binding and response-head guard. The skeleton never
+reads a bearer and never selects an origin. Exact-URL auth holds: each route
+dials its own origin with its own key slot and never falls back to another
+route's.
+
 **API working window unit.** On the three API-key routes (OpenAI, Anthropic,
 xAI) the context envelope maximum is the session's window in **provider input
 tokens**: the provider's input price threshold (Haiku 5.5: 100,000; the
