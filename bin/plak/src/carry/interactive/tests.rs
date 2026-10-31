@@ -285,3 +285,15 @@ fn carry_files_are_private_and_never_overwritten() {
     let read = read_document(&path).unwrap();
     assert_eq!(read.source().0, document.source.session_id);
 }
+
+#[test]
+fn a_failed_carry_probe_names_this_builds_export_version_or_the_route_refusal() {
+    assert_eq!(
+        carry_probe_failure(Some(2), "unknown flag --carry-probe"),
+        format!("destination build too old for v{VERSION} carry: unknown flag --carry-probe")
+    );
+    let refused = carry_probe_failure(Some(1), "no usable login");
+    assert!(refused.starts_with("destination route capacity inspection failed: no usable login"));
+    assert!(refused.ends_with("retry /reload"));
+    assert!(!refused.contains("too old"));
+}

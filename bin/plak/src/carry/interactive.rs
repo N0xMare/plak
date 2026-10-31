@@ -200,14 +200,10 @@ pub(crate) fn reload_target_for_session(
                 .chars()
                 .take(512)
                 .collect::<String>();
-            let cause = safe_terminal_block(&cause);
-            return Err(if output.status.code() == Some(2) {
-                format!("destination build too old for v10 carry: {cause}")
-            } else {
-                format!(
-                    "destination route capacity inspection failed: {cause}; fix configuration/auth and retry /reload"
-                )
-            });
+            return Err(carry_probe_failure(
+                output.status.code(),
+                &safe_terminal_block(&cause),
+            ));
         }
         serde_json::from_slice(&output.stdout)
             .map_err(|_| "destination did not report carry capacity".to_owned())
@@ -219,6 +215,18 @@ pub(crate) fn reload_target_for_session(
         }
     }
     Some(target)
+}
+
+/// A destination that exits 2 does not know the carry probe, so it predates
+/// this build's export version; any other failure is its route's own refusal.
+fn carry_probe_failure(code: Option<i32>, cause: &str) -> String {
+    if code == Some(2) {
+        format!("destination build too old for v{VERSION} carry: {cause}")
+    } else {
+        format!(
+            "destination route capacity inspection failed: {cause}; fix configuration/auth and retry /reload"
+        )
+    }
 }
 
 /// Asks the installed build whether exact reopen of `id` would attach there.

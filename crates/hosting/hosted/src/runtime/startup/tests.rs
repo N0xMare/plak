@@ -517,3 +517,160 @@ fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
     actions.send(UserAction::Quit).unwrap();
     worker.join().unwrap().unwrap();
 }
+
+struct ReopenFixture {
+    root: tempfile::TempDir,
+    workspace: PathBuf,
+    controller: plakous_offline_crash_harness::BoundaryController,
+    executor: plakous::application::ApplicationExecutor,
+}
+
+impl ReopenFixture {
+    fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let controller =
+            plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+                plakous_offline_crash_harness::protocol::CrashBoundary::None,
+                root.path().join("evidence.jsonl"),
+            )
+            .unwrap();
+        Self {
+            root,
+            workspace,
+            controller,
+            executor: plakous::application::ApplicationExecutor::new().unwrap(),
+        }
+    }
+
+    fn sessions(&self, name: &str) -> Arc<plakous::sessions::AgentSessions> {
+        Arc::new(
+            plakous::sessions::AgentSessions::new(
+                plakous::sessions::SessionBackend::sqlite(
+                    self.root.path().join(format!("{name}.sqlite3")),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn runtime(&self, changed: bool) -> SessionRuntimeBinding {
+        if changed {
+            // A smaller admitted input changes the model capability binding.
+            plakous_offline_crash_harness::overflow_runtime_binding(
+                &self.workspace,
+                self.controller.clone(),
+            )
+        } else {
+            plakous_offline_crash_harness::runtime_binding(&self.workspace, self.controller.clone())
+        }
+        .unwrap()
+    }
+
+    fn create(
+        &self,
+        sessions: &plakous::sessions::AgentSessions,
+    ) -> plakous::sessions::SessionLocator {
+        let created = self
+            .executor
+            .block_on(
+                sessions.create(plakous::sessions::CreateSessionRequest::new(
+                    plakous::sessions::SessionOperationId::new("reopen-fixture:create").unwrap(),
+                    self.runtime(false),
+                )),
+            )
+            .unwrap()
+            .unwrap();
+        let plakous::sessions::CreateSessionOutcome::Created { session, .. } = created else {
+            panic!("a fresh create creates its session");
+        };
+        let locator = session.locator();
+        self.executor.block_on(session.release()).unwrap().unwrap();
+        locator
+    }
+
+    /// Both mapping sites: the conversion of a direct open refusal and the
+    /// exact reopen path's own failure.
+    fn refusals(
+        &self,
+        sessions: &Arc<plakous::sessions::AgentSessions>,
+        locator: plakous::sessions::SessionLocator,
+        changed: bool,
+    ) -> (
+        plakous::sessions::AgentSessionsError,
+        crate::agent::CodingSessionOpenFailure,
+    ) {
+        let opened = self
+            .executor
+            .block_on(sessions.open(plakous::sessions::OpenSessionRequest::new(
+                plakous::sessions::SessionOperationId::new("reopen-fixture:open").unwrap(),
+                locator,
+                self.runtime(changed),
+            )))
+            .unwrap();
+        let Err(direct) = opened else {
+            panic!("the open must be refused");
+        };
+        let reopened = self
+            .executor
+            .block_on(crate::agent::build_or_open_bound_session(
+                Arc::clone(sessions),
+                Some(locator),
+                None,
+                plakous::sessions::SessionOperationId::new("reopen-fixture:reopen").unwrap(),
+                self.runtime(changed),
+            ))
+            .unwrap();
+        let Err(reopened) = reopened else {
+            panic!("the exact reopen must be refused");
+        };
+        (direct, reopened)
+    }
+}
+
+/// A reopen refused for a reconstructed frozen binding input is typed as a
+/// binding change on both mapping sites and selects the carry remedy.
+#[test]
+fn a_reconstructed_binding_change_types_the_attach_failure_and_selects_the_carry() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+    let fixture = ReopenFixture::new();
+    let sessions = fixture.sessions("runtime");
+    let locator = fixture.create(&sessions);
+    let (direct, reopened) = fixture.refusals(&sessions, locator, true);
+    let change = plakous::agent::BindingChange::ModelCapabilities;
+    assert_eq!(direct.binding_change(), Some(&change));
+    assert_eq!(reopened.binding_change.as_deref(), Some(&change));
+    for failure in [
+        CliFailure::from(direct).host_failure(),
+        reopened.failure.host_failure(),
+    ] {
+        assert_eq!(failure.cause, AttachFailure::BindingChanged);
+        assert!(matches!(
+            attach_repair_notice(&failure, "claude"),
+            TranscriptRow::Notice(notice)
+                if notice.remedy == Some(NoticeRemedy::RestoreBindingOrCarry { account: AccountTarget::Claude })
+        ));
+    }
+}
+
+/// A refusal that names no binding change is never typed as one.
+#[test]
+fn a_refusal_without_a_binding_change_is_never_typed_as_one() {
+    let fixture = ReopenFixture::new();
+    let sessions = fixture.sessions("runtime");
+    // A locator this store never wrote.
+    let foreign = fixture.create(&fixture.sessions("elsewhere"));
+    let (direct, reopened) = fixture.refusals(&sessions, foreign, false);
+    assert_eq!(direct.binding_change(), None);
+    assert_eq!(reopened.binding_change, None);
+    assert_ne!(
+        CliFailure::from(direct).host_failure().cause,
+        AttachFailure::BindingChanged
+    );
+    assert_ne!(
+        reopened.failure.host_failure().cause,
+        AttachFailure::BindingChanged
+    );
+}

@@ -125,8 +125,8 @@ one cross-build carrier (a build imports its own and the previous version).
   in its current form in this attachment; reads are remembered in memory only,
   so a reopened session reads again. Edit, Write, patch and SDK results name
   each changed path and its action, binary overwrites are refused with a
-  delete-then-create remedy, and unreadable or directory targets fail with a
-  remedy.
+  delete-then-create remedy, and unreadable or directory targets and paths
+  beneath a file fail before any effect with a remedy.
 - A background process whose ownership was explicitly released shows
   `released`: its notice, trailer and write refusal say the process may still
   be running, never that it exited.
@@ -165,7 +165,10 @@ one cross-build carrier (a build imports its own and the previous version).
 - Whole-file overwrites require the last explicit text read of the target in
   the same execution environment; mutations revalidate content or absence in
   backend preflight and consume touched observations. SDK operation indexes
-  stay on ordinary policy refusals.
+  stay on ordinary policy refusals. A linked path component is a pre-effect
+  `SymlinkEscape` on Linux and macOS alike, and a component that is not a
+  directory is the new pre-effect `ExecutionBackendErrorKind::NotADirectory`
+  rather than a missing path.
 - `plakous-host-protocol` carries typed host phases, pauses, failures and the
   closed `NoticeRemedy` vocabulary; tool operations are derived by
   `ToolOperation::classify` rather than stored; hosted launch and startup
@@ -381,7 +384,9 @@ one cross-build carrier (a build imports its own and the previous version).
   descriptions are rewritten, so the eight durable descriptor registry and
   eight projection pins, five Code Mode cell identities, the Python SDK
   identity, four tool-text digests, 48 prompt-render rows, eight
-  compaction-wire rows and the tool-results lifecycle row move.
+  compaction-wire rows, the tool-results lifecycle row, and the epoch-34
+  publication and checkpoint-identity goldens move. The files pack gains the
+  `files.write_parent_not_directory` refusal pin.
 
 - Review windows. The subscription profiles (Codex, Grok, Claude) expire
   exactly 90 days after their review, at 00:00 UTC; Claude moves from 365
