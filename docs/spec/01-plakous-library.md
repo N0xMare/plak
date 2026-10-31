@@ -7003,10 +7003,10 @@ The SDK is an explicit embedding presentation and the root-only `py-sdk` product
 
 The host identity carries the deployment — `rquickjs-host/<digest>` or
 `monty-host/<worker digest>` — and checkpoints do not resume across engines.
-Runtime epoch 32 separated Python cell-worker identities from the epoch-31
-Monty pool deployment: its engine contract, artifact, host and containment
-bindings differ. Carry an earlier session through export/import, not an
-in-place checkpoint reopen; the export document encoding is unchanged.
+Python cell-worker identities (engine contract, artifact, host and containment
+bindings) are part of the frozen binding; a session recorded under another
+worker contract is not reopened in place. Carry it through export/import of an
+importable document version.
 The JavaScript engine contract is the five-part recipe
 `sha256(ExecutionEnvironment, 1, ["plakous.cell-engine-contract.v1", engine,
 engine version, cell protocol revision, adapter revision])`, today

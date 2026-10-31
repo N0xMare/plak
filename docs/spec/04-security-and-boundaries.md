@@ -1560,7 +1560,7 @@ mutation ownership. The Git CLI backend remains independently build-selectable.
 
 The workspace **forbids** unsafe Rust: `unsafe_code = "forbid"` at the
 workspace lint level, restated per crate across tools, model, agent, store,
-http, attempt, auth, code-mode, every provider, and every protocol crate.
+http, attempt, auth, compose, cell, every provider, and every protocol crate.
 
 The JavaScript evaluation crate also forbids unsafe code, including embedded
 builds. Calling rquickjs's safe API does not require weakening the local lint;

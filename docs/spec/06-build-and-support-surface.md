@@ -123,7 +123,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | `crates/core/` | model, tools, agent | core |
 | `crates/common/` | attempt, http, auth | common |
 | `crates/runtimes/` | cell, js-runtime, py-worker | engine |
-| `crates/protocols/` | Responses, its shared dialect, Messages, Chat | protocol |
+| `crates/protocols/` | Responses (with its shared dialect hosts), exchange, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
 | `crates/store/` | session-store implementations | store |
 | `crates/harness/` | prompts, compose, coding tool packs | harness |
@@ -768,7 +768,9 @@ default/maintainer feature builds and the parallel, serial and durability
 offline nextest lanes. It is genuine
 musl build-and-test evidence on a GNU host, not Alpine container qualification.
 Apple Silicon installs run `just platform` natively. Platform-independent
-checks run once on Linux in `just check` and `just full` (chapter 05 §1).
+checks run once per integration batch
+(`just steps static,rustdoc,contracts,tooling,package`) and in `just full`
+(chapter 05 §1).
 
 Before publication, run the full offline musl
 qualification on a Linux x86_64 Docker host:

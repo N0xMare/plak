@@ -450,7 +450,7 @@ Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
 
-Schema 31 holds the intents of §2.6 in `submissions` (keyed by command id),
+Product schema 35 holds the intents of §2.6 in `submissions` (keyed by command id),
 `workflow_requests` (keyed by operation id), `operator_notices` (keyed by notice
 id, unique per `(anchor, ordinal)`; an imported transcript is written there once
 at anchor 0 in document order) and `host_intents` (the `wake_suppression` and
@@ -1050,7 +1050,10 @@ The binding carries `py-sdk` like every other explicit selection. `named_state`
 is a key-ordered JSON map of committed session-owned values (01 §9.8); import
 validates it and seeds it atomically with history. The v10 importer uses the
 same history decoder and preserves named state. Version 9 and older are refused
-with `this build imports versions 10 and 11`.
+with `this build imports versions 10 and 11`. 0.0.2 wrote version 8. There is
+no version-8 importer, so a 0.0.2 session cannot be carried into 0.0.3 by
+`/reload` or export/import. Finish those sessions on 0.0.2, or start new ones.
+0.0.2 state is left untouched for the 0.0.2 binary.
 
 `history` contains `replay_account` (source account reference), `replay_model`
 (model identifier string), and ordered `groups`. Each group contains its
