@@ -85,7 +85,7 @@ Repeated snapshots of the same failed turn refuse to overwrite its existing
 ref and report that ref for inspection. For a non-colocated JJ workspace,
 run the same commands with `git --git-dir=.jj/repo/store/git`.
 
-## `retrying in 4s (2/4): provider busy (HTTP 529)`
+## `retrying 4s` and `plak: retrying in 4s (2/4): ...`
 
 Plak re-sends a turn's model request automatically whenever doing so can only
 cost a duplicate inference:
@@ -139,7 +139,8 @@ keepalives continue. A newly added non-visible item (hidden reasoning or a
 provider-hosted tool) suspends that limit until the next visible output. Before
 output starts or while suspended, keepalives can sustain hidden reasoning and
 hosted tools without that semantic limit. Each actual retry wait is shown: on the TUI status row as
-`retrying in 4s (2/4): <cause>`, on `plak run` as a `plak:` line, in
+`retrying 4s`, with the attempt and cause on the transcript retry row
+(`retry 2/4 · <cause>`), on `plak run` as a `plak:` line, in
 `plak agent` JSONL as a `retry` frame, and in the log under target `plak.retry`
 with session/turn/agent ids, checkout idle age when pooled, transport phase and cause (for a provider refusal, the provider's own
 error message with credentials filtered out). If the broken stream had already

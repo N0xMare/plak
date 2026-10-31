@@ -1325,12 +1325,13 @@ fn credential_wait_names_the_login_on_the_hud_and_cancellation_still_wins() {
     assert!(app.turn_status_label().is_none());
 }
 
-/// A replay announcement names its wait, budget and cause on the HUD
-///, marks the streamed text it discarded, and clears once the replay
-/// streams.
+/// A replay announcement names its wait on the HUD. Attempt and cause stay
+/// on the transcript retry row. Discarded text is marked, and the HUD
+/// clears once the replay streams.
 #[test]
 fn a_model_retry_shows_its_wait_and_marks_the_discarded_text() {
     let mut app = App::new(launch_basic(), true);
+    super::test_support::pin_clock(&mut app);
     app.apply_host_event(HostEvent::SetBusy(true));
     app.apply_host_event(HostEvent::ReasoningDelta {
         location_key: "0:0".into(),
@@ -1351,10 +1352,22 @@ fn a_model_retry_shows_its_wait_and_marks_the_discarded_text() {
         },
     ));
     let label = app.turn_status_label().unwrap_or_default();
-    assert!(
-        label.starts_with("retrying ") && label.ends_with("s (2/4)"),
-        "{label}"
-    );
+    assert_eq!(label, "retrying 3s");
+    super::test_support::pass_time(&mut app, 1_200);
+    assert_eq!(app.turn_status_label().as_deref(), Some("retrying 2s"));
+    super::test_support::pass_time(&mut app, 1_800);
+    assert_eq!(app.turn_status_label().as_deref(), Some("retrying 0s"));
+    app.apply_host_event(HostEvent::ModelRetry(
+        plakous_host_protocol::ModelRetryNotice {
+            next_attempt: 3,
+            max_attempts: 4,
+            delay_ms: 3_000,
+            cause_kind: "stream_interrupted".into(),
+            cause: "response stream interrupted (connection reset)".into(),
+            output_discarded: true,
+        },
+    ));
+    assert_eq!(app.turn_status_label().as_deref(), Some("retrying 3s"));
     assert!(
         app.pane.blocks
             .iter()

@@ -524,8 +524,9 @@ fn hud_priority_and_verbs_never_expose_the_tool_subject() {
             },
         ));
         let label = app.turn_status_label().unwrap();
-        assert!(label.starts_with("retrying ") && label.ends_with("(2/4)"));
+        assert_eq!(label, "retrying 60s");
         assert!(!label.contains("cause"));
+        assert!(!label.contains("(2/4)"));
         app.phase = HostPhase::Compacting;
         assert_eq!(app.turn_status_label().as_deref(), Some("compacting"));
         assert_hud_width_classes(&mut app);

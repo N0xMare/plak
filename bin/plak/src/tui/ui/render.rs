@@ -866,15 +866,12 @@ impl App {
     }
 }
 
-/// The HUD countdown; retry causes belong in the transcript.
+/// The HUD countdown. Attempt and cause stay on the transcript retry row.
 fn retry_status_label(
     retry: &plakous_host_protocol::ModelRetryNotice,
     elapsed: Duration,
 ) -> String {
     let remaining = Duration::from_millis(retry.delay_ms).saturating_sub(elapsed);
     let seconds = remaining.as_millis().div_ceil(1_000);
-    format!(
-        "retrying {seconds}s ({}/{})",
-        retry.next_attempt, retry.max_attempts
-    )
+    format!("retrying {seconds}s")
 }

@@ -4783,7 +4783,7 @@ bottom border is a plain line. HUD vocabulary, highest priority first:
 | Stop in progress | `cancelling…` |
 | Native credential unavailable before send | ``waiting for login: run `plak login <provider>` `` |
 | Compaction | spinner + `compacting` + elapsed |
-| Provider retry | spinner + `retrying Xs (n/N)`; cause in the transcript |
+| Provider retry | spinner + `retrying Xs`; attempt and cause in the transcript |
 | Running tool | spinner + `running command`, `editing`, `reading` (also web fetches), `searching` (also web and X searches), `waiting`, `waiting on agents`, or `calling mcp:<server>` for a tool exposed as `mcp__<server>__<tool>`, plus elapsed |
 | Code cell computing without a live nested action | spinner + `working` + elapsed |
 | Unsealed reasoning | spinner + `thinking` + elapsed |
@@ -7470,8 +7470,9 @@ billing and usage-limit bodies and `x-should-retry: false` are terminal even
 with Retry-After; `true` never widens replay. The kernel announces each
 replay as a typed `ModelEvent::Retry`, and Plak shows it on every face:
 
-- **TUI.** The composer HUD reads `retrying Xs (n/N)`, with the cause in
-  the transcript, counting down, until the replay streams or the turn ends. When the failed request had
+- **TUI.** The composer HUD reads `retrying Xs`, counting down, until the
+  replay streams or the turn ends. The attempt and cause stay on the
+  transcript retry row (`retry n/N · cause`). When the failed request had
   streamed assistant text or reasoning, those trailing blocks are redrawn
   dimmed under the label `discarded -- retrying` (reasoning as
   `discarded thinking -- retrying`, shown only while thinking is shown); the
