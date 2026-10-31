@@ -255,6 +255,9 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     inner: crate::surface_protocol::HostEventSender<P>,
     notices: Arc<std::sync::Mutex<VecDeque<PendingNoticeIntent>>>,
     presentations: Arc<std::sync::Mutex<projection::transcript::Presentations>>,
+    /// Configured tool names from the last prepared request of this attachment.
+    /// Process memory only: a clear, resume, rebind or new process drops them.
+    request_tools: Arc<std::sync::Mutex<Vec<String>>>,
     session_id: Option<Arc<str>>,
     quit_receipt: worker::QuitReceipt,
     /// Unit laws inspect publication order before latest-state coalescing.
@@ -284,6 +287,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             inner,
             notices: Arc::default(),
             presentations: Arc::default(),
+            request_tools: Arc::default(),
             session_id: None,
             quit_receipt: worker::QuitReceipt::default(),
             #[cfg(test)]
@@ -298,6 +302,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             inner: self.inner.clone(),
             notices: Arc::clone(&self.notices),
             presentations: Arc::clone(&self.presentations),
+            request_tools: Arc::clone(&self.request_tools),
             session_id: Some(Arc::from(session_id)),
             quit_receipt: self.quit_receipt.clone(),
             #[cfg(test)]
@@ -343,6 +348,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         let value: HostEvent<P> = value.into();
         if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+            self.request_tools
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clear();

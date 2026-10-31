@@ -15,8 +15,8 @@ use crate::runtime::test_support::*;
 use crate::sessions::SessionRecord;
 use plakous::agent::TurnUsage;
 use plakous::application::ApplicationExecutor;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -411,6 +411,62 @@ fn prepared_request_updates_context_parts_and_splits_tool_names() {
             .as_deref(),
         Some("wait_agent")
     );
+}
+
+#[test]
+fn an_idle_context_projection_names_the_last_prepared_tools() {
+    let body = br#"{"tools":[{"type":"function","name":"code"}],"input":[]}"#;
+    let parts = plakous::model::ContextInputParts::measure_wire(body).unwrap();
+    let projection = ContextProjection::test_fits(
+        crate::context::PreparedInputCount::UpperBound(20_000),
+        200_000,
+        200_000,
+        Some(parts),
+    );
+    let session = SessionRecord::new(std::env::temp_dir());
+    let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(sender);
+    events.remember_request_tools(&["Bash".to_owned(), "wait_agent".to_owned()]);
+    emit_context_projection(&events, &projection, session.context_counters(), 0);
+    let named = usage_breakdown(receiver.try_iter());
+    assert_eq!(info_detail(&named, "Coding tools").as_deref(), Some("Bash"));
+    assert_eq!(
+        info_detail(&named, "Agent tools").as_deref(),
+        Some("wait_agent")
+    );
+
+    assert!(events.send(ContentEvent::ClearView));
+    emit_context_projection(&events, &projection, session.context_counters(), 0);
+    let cleared = usage_breakdown(receiver.try_iter());
+    assert!(
+        cleared.informational.iter().all(|row| {
+            !row.label.starts_with("Coding tools") && !row.label.starts_with("Agent tools")
+        }),
+        "{cleared:?}"
+    );
+}
+
+fn usage_breakdown(
+    events: impl IntoIterator<Item = HostEvent>,
+) -> plakous_host_protocol::views::presentation::ContextBreakdownView {
+    events
+        .into_iter()
+        .find_map(|event| match event {
+            HostEvent::Usage(view) => view.breakdown,
+            _ => None,
+        })
+        .expect("context usage")
+}
+
+fn info_detail(
+    breakdown: &plakous_host_protocol::views::presentation::ContextBreakdownView,
+    label: &str,
+) -> Option<String> {
+    breakdown
+        .informational
+        .iter()
+        .find(|row| row.label.starts_with(label))
+        .and_then(|row| row.detail.clone())
 }
 
 #[test]
@@ -1147,4 +1203,256 @@ fn post_compact_growth_does_not_freeze_at_an_earlier_provider_reading() {
     let breakdown = view.breakdown.unwrap();
     assert_eq!(breakdown.used_tokens, 13_000);
     assert_eq!(breakdown.categories[0].label, "Live turn growth (est.)");
+}
+
+/// Idle context after a completed turn still names the tools the turn prepared,
+/// and a model rebind clears them. The idle projection reads the names the
+/// turn drive remembered; the rebind reports context only after it drops them.
+#[test]
+fn idle_context_names_prepared_tools_until_a_model_rebind() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let workspace = config.cwd.clone();
+    let controller = plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+        plakous_offline_crash_harness::protocol::CrashBoundary::None,
+        root.path().join("rebind-tools-evidence.jsonl"),
+    )
+    .unwrap();
+    let injection = test_kit::scripted_mut(&mut config);
+    injection.rebind_target = plakous_offline_crash_harness::runtime_binding_for_account(
+        &workspace,
+        controller.clone(),
+        b"successor-account",
+    )
+    .unwrap()
+    .target_binding();
+    let primary = injection.runtime.clone();
+    injection.runtime = std::sync::Arc::new(move |role| {
+        if role == RuntimeRole::Rebind {
+            plakous_offline_crash_harness::runtime_binding_for_account(
+                &workspace,
+                controller.clone(),
+                b"successor-account",
+            )
+            .map_err(|error| error.to_string())
+        } else {
+            primary(role)
+        }
+    });
+    config.ready_catalog = plakous_host_protocol::views::ReadyCatalog::new(vec![
+        plakous_host_protocol::views::ProviderSection {
+            account: "codex".into(),
+            label: "Codex".into(),
+            ready: true,
+            entries: vec![plakous_host_protocol::views::ModelEntry {
+                id: "offline-loopback-v2".into(),
+                tag: "offline".into(),
+                reasoning: true,
+                effort_options: vec!["medium".into()],
+                extras: Vec::new(),
+                unavailable_reason: None,
+            }],
+        },
+    ]);
+    let surface = Arc::new(IdleToolFork::default());
+    config.surface = Some(Box::new(Arc::clone(&surface)));
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    send_attached_action(&actions, UserAction::Prompt("hello".into()));
+    let mut seen = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    push_until(&events, &mut seen, deadline, turn_returned_to_idle);
+    let before_idle = seen.len();
+    send_attached_action(&actions, UserAction::Extension(ProbeIntent::InspectUsage));
+    push_until(&events, &mut seen, deadline, |events| {
+        seen_extensions_since(events, before_idle) >= 1
+    });
+    let idle = last_tool_details(&seen[before_idle..]).unwrap_or_else(|| {
+        panic!(
+            "idle context projection missing: {:?}",
+            &seen[before_idle..]
+        )
+    });
+    assert!(
+        !idle.is_empty(),
+        "idle context should name the prepared tools: {idle:?}"
+    );
+
+    surface.fork.store(true, Ordering::SeqCst);
+    let before_rebind = seen.len();
+    send_attached_action(&actions, UserAction::Extension(ProbeIntent::InspectUsage));
+    push_until(&events, &mut seen, deadline, |events| {
+        let outcome = surface.outcome.lock().unwrap().clone();
+        if let Some(outcome) = outcome.as_deref()
+            && outcome != "forked"
+        {
+            panic!("model rebind did not switch: {outcome}");
+        }
+        let Some(at) = rebind_status_at(events, before_rebind) else {
+            return false;
+        };
+        outcome.as_deref() == Some("forked") && first_tool_details(&events[at + 1..]).is_some()
+    });
+    let at = rebind_status_at(&seen, before_rebind)
+        .unwrap_or_else(|| panic!("rebind status missing: {:?}", &seen[before_rebind..]));
+    let cleared = first_tool_details(&seen[at + 1..])
+        .unwrap_or_else(|| panic!("rebind context projection missing: {:?}", &seen[at + 1..]));
+    assert!(
+        cleared.is_empty(),
+        "a model rebind drops the last request's tool names: {cleared:?}"
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+}
+
+fn rebind_status_at(events: &[HostEvent], from: usize) -> Option<usize> {
+    events[from..]
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                HostEvent::Status {
+                    phase: HostPhase::Rebind,
+                    ..
+                }
+            )
+        })
+        .map(|index| from + index)
+}
+
+fn turn_returned_to_idle(events: &[HostEvent]) -> bool {
+    let Some(completed_at) = events.iter().rposition(|event| {
+        matches!(
+            event,
+            HostEvent::TurnLifecycle(lifecycle)
+                if lifecycle.phase == plakous_host_protocol::TurnPhase::Completed
+        )
+    }) else {
+        return false;
+    };
+    events[completed_at..].iter().any(|event| {
+        matches!(
+            event,
+            HostEvent::Status {
+                phase: HostPhase::Idle,
+                ..
+            }
+        )
+    })
+}
+
+fn seen_extensions_since(events: &[HostEvent], from: usize) -> usize {
+    events[from..]
+        .iter()
+        .filter(|event| matches!(event, HostEvent::Extension(ProbeObservation::UsageObserved)))
+        .count()
+}
+
+fn first_tool_details(events: &[HostEvent]) -> Option<Vec<String>> {
+    events.iter().find_map(tool_detail_of)
+}
+
+fn last_tool_details(events: &[HostEvent]) -> Option<Vec<String>> {
+    events.iter().rev().find_map(tool_detail_of)
+}
+
+fn tool_detail_of(event: &HostEvent) -> Option<Vec<String>> {
+    let HostEvent::Usage(view) = event else {
+        return None;
+    };
+    let breakdown = view.breakdown.as_ref()?;
+    Some(
+        breakdown
+            .informational
+            .iter()
+            .filter(|row| {
+                row.label.starts_with("Coding tools") || row.label.starts_with("Agent tools")
+            })
+            .filter_map(|row| row.detail.clone())
+            .collect(),
+    )
+}
+
+fn push_until(
+    events: &crate::surface_protocol::HostEventReceiver<TestExtension>,
+    seen: &mut Vec<HostEvent>,
+    deadline: Instant,
+    mut done: impl FnMut(&[HostEvent]) -> bool,
+) {
+    if done(seen) {
+        return;
+    }
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !left.is_zero(),
+            "host event timed out; last: {:?}",
+            seen.last()
+        );
+        match events.recv_timeout(left) {
+            Ok(event) => seen.push(event),
+            Err(error) => panic!("host event timed out ({error}); last: {:?}", seen.last()),
+        }
+        if done(seen) {
+            return;
+        }
+    }
+}
+
+#[derive(Default)]
+struct IdleToolFork {
+    fork: AtomicBool,
+    outcome: Mutex<Option<String>>,
+}
+
+impl SurfaceHandler<TestExtension> for Arc<IdleToolFork> {
+    fn needs_usage(&self, _intent: &ProbeIntent) -> bool {
+        true
+    }
+
+    fn dispatch(
+        &self,
+        _intent: ProbeIntent,
+        _facts: SurfaceFacts<'_>,
+        events: &Sender,
+    ) -> SurfaceEffect {
+        let _ = events.send(ContentEvent::Extension(ProbeObservation::UsageObserved));
+        if !self.fork.load(Ordering::SeqCst) {
+            return SurfaceEffect::default();
+        }
+        let outcome = Arc::clone(self);
+        SurfaceEffect {
+            profile_fork: Some(SurfaceProfileFork {
+                account: "codex".into(),
+                model: "offline-loopback-v2".into(),
+                effort: Some("medium".into()),
+                extra: None,
+                composition: None,
+                protocol: None,
+                roster: crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                finish: Box::new(move |result| {
+                    let label = match result {
+                        ProfileForkOutcome::Forked => "forked".to_owned(),
+                        ProfileForkOutcome::Bound => "bound".to_owned(),
+                        ProfileForkOutcome::AlreadyActive => "unchanged".to_owned(),
+                        ProfileForkOutcome::Refused(failure) => {
+                            format!("refused: {failure}")
+                        }
+                    };
+                    *outcome.outcome.lock().unwrap() = Some(label);
+                }),
+            }),
+            ..SurfaceEffect::default()
+        }
+    }
+
+    fn publish_template_readiness(
+        &self,
+        _catalog: &[plakous_host_protocol::views::ProviderSection],
+        _events: &Sender,
+    ) {
+    }
+
+    fn readiness_read(&self) -> ReadinessRead {
+        Box::new(|| Ok((Vec::new(), Vec::new())))
+    }
 }

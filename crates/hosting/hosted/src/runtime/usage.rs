@@ -174,11 +174,31 @@ pub(super) fn emit_context_projection<P: plakous_host_protocol::ProtocolExtensio
     counters: sessions::ContextCounters,
     enrolled_source_bytes: u64,
 ) {
-    let _ = events.send(ContentEvent::Usage(context_usage(
-        projection,
-        counters,
-        enrolled_source_bytes,
-    )));
+    let mut usage = context_usage(projection, counters, enrolled_source_bytes);
+    if let Some(breakdown) = usage.breakdown.as_mut() {
+        append_request_tool_names(breakdown, &events.request_tools());
+    }
+    let _ = events.send(ContentEvent::Usage(usage));
+}
+
+impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
+    /// Remember the configured names of the request just prepared. Idle context
+    /// projections keep listing them until the attachment changes.
+    pub(super) fn remember_request_tools(&self, names: &[String]) {
+        let mut slot = self
+            .request_tools
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        slot.clear();
+        slot.extend(names.iter().cloned());
+    }
+
+    pub(super) fn request_tools(&self) -> Vec<String> {
+        self.request_tools
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 /// The Plakous context measure advanced through a running turn.

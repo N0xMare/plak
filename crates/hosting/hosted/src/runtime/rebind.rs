@@ -45,6 +45,7 @@ fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     config: &HostConfig<P>,
 ) {
+    events.remember_request_tools(&[]);
     if let Err(error) = report_context(
         executor,
         opened,

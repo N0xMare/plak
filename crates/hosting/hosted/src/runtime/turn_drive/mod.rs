@@ -313,6 +313,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                                     self.host.context_projection = self.host.context_projection.with_prepared_request(*input_parts, *occupied_tokens, *prepared_input_upper_bound);
                                     self.live_occupancy = self.live_occupancy.next_request(&self.host.context_projection);
                                     self.request_tool_names = tool_names.iter().map(|name| name.as_str().to_owned()).collect();
+                                    self.host.events.remember_request_tools(&self.request_tool_names);
                                     self.compacted_mid_turn = false;
                                     true
                                 }

@@ -5373,7 +5373,10 @@ Provider input usage supersedes that estimate whenever it is available.
 Every prepared request publishes fresh parts, occupancy and its configured
 tool names during the turn. The Context tab labels the exact count as
 "N tools on the last request; tokens est." and lists coding and agent names
-separately. Only provider-limit queries remain rate-limited. After an in-turn compaction, the old request
+separately. The same names stay on the Context tab after the turn, for this
+process and this attachment only, until a clear, resume, rebind or a new
+process drops them. They are not stored. Only provider-limit queries remain
+rate-limited. After an in-turn compaction, the old request
 parts and prepared bound do not constrain live occupancy: the committed
 compaction summary refreshes the meter immediately, then the next positive
 provider input count supplies an unattributed provider-observed reading against

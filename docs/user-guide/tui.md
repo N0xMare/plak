@@ -846,6 +846,10 @@ What you see:
 
 Details:
 
+- The Context tab names the coding tools and the agent tools on the last
+  prepared request, during the turn and afterwards, until you clear the
+  session, switch sessions or models, or quit. A session you just opened has
+  none until the next request.
 - Occupancy is the provider's input-token count for the last answered request
   plus UTF-8 bytes divided by four for what was appended since. Before the
   first answered request, and right after a compaction or branch switch, it is
