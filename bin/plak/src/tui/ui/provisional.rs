@@ -24,6 +24,10 @@ pub(super) struct AcceptedDraft {
     started: bool,
 }
 
+/// Captured steer text kept on the sent row. A few hundred characters is
+/// enough to recognize the steer; the row clips to the pane on top of this.
+const STEER_PREVIEW_CHARS: usize = 300;
+
 /// One provisional row's text: the draft on one line, with its image count.
 fn preview(draft: &Draft) -> String {
     let text = draft.text.trim().replace('\n', " ");
@@ -32,6 +36,10 @@ fn preview(draft: &Draft) -> String {
         1 => format!("{text} [1 image]"),
         n => format!("{text} [{n} images]"),
     }
+}
+
+fn clip_steer_preview(text: &str) -> String {
+    text.chars().take(STEER_PREVIEW_CHARS).collect()
 }
 
 impl App {
@@ -48,17 +56,19 @@ impl App {
         }
     }
 
-    /// The host acknowledged the oldest accepted steer in its own chrome.
-    pub(super) fn retire_accepted_steer(&mut self) -> bool {
-        if let Some(index) = self
+    /// The host acknowledged the oldest accepted steer. The returned text is
+    /// the draft the queue panel shows; `None` means no accepted steer was
+    /// waiting.
+    pub(super) fn retire_accepted_steer(&mut self) -> Option<String> {
+        let index = self
             .accepted_drafts
             .iter()
-            .position(|accepted| matches!(accepted.action, UserAction::Steer(_)))
-        {
-            self.accepted_drafts.remove(index);
-            return true;
-        }
-        false
+            .position(|accepted| matches!(accepted.action, UserAction::Steer(_)))?;
+        let accepted = self.accepted_drafts.remove(index)?;
+        let UserAction::Steer(draft) = accepted.action else {
+            return None;
+        };
+        Some(clip_steer_preview(&preview(&draft)))
     }
 
     /// A user row landed: it is the prompt `PromptStarted` named, or else the

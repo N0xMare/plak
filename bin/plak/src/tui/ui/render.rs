@@ -75,7 +75,7 @@ impl App {
         let block_h = desired_block_height(area.height, content_w, &self.input);
         let queue_n = self.local_queue.len()
             + self.provisional_queue_rows().count()
-            + self.composer_chrome.sent_steers;
+            + self.composer_chrome.sent_steers.len();
         let desired_queue_h = if queue_n == 0 {
             0
         } else {
@@ -581,7 +581,7 @@ impl App {
         let n = self.local_queue.len();
         // Provisional and sent-steer rows sit under the queue's own rows and
         // leave it at least one.
-        let visible = 4 - (provisional + self.composer_chrome.sent_steers).min(3);
+        let visible = 4 - (provisional + self.composer_chrome.sent_steers.len()).min(3);
         let start = self
             .queue_selected
             .saturating_sub(visible - 1)
@@ -677,15 +677,13 @@ impl App {
             .map(|(steer, draft)| self.provisional_queue_line(steer, draft, inner.width))
             .collect();
         lines.extend(provisional_lines);
-        for _ in 0..self
-            .composer_chrome
-            .sent_steers
-            .min(4usize.saturating_sub(lines.len()))
-        {
-            lines.push(Line::from(Span::styled(
-                " sent · waiting for the current reply",
+        let room = 4usize.saturating_sub(lines.len());
+        for text in self.composer_chrome.sent_steers.iter().take(room) {
+            lines.push(super::composer_chrome::sent_steer_line(
+                text.as_deref(),
+                inner.width,
                 self.theme.chrome_dim,
-            )));
+            ));
         }
         frame.render_widget(Paragraph::new(lines), inner);
     }

@@ -1180,7 +1180,7 @@ impl App {
                 self.accepted_drafts.clear();
                 if self.busy && !busy {
                     self.composer_chrome.refresh_pending = true;
-                    self.composer_chrome.sent_steers = 0;
+                    self.composer_chrome.sent_steers.clear();
                 }
                 self.busy = busy;
                 if busy && self.turn_started.is_none() {
@@ -1290,19 +1290,19 @@ impl App {
             HostEvent::SteerAck { state, .. } => {
                 match state.as_str() {
                     "queued" => {
-                        if self.retire_accepted_steer() {
+                        let text = self.retire_accepted_steer();
+                        if text.is_some() {
                             self.queued_steers_retired += 1;
                         }
-                        self.composer_chrome.sent_steers += 1;
+                        self.composer_chrome.sent_steers.push_back(text);
                     }
                     "applied" => {
                         if self.queued_steers_retired == 0 {
-                            self.retire_accepted_steer();
+                            let _ = self.retire_accepted_steer();
                         } else {
                             self.queued_steers_retired -= 1;
                         }
-                        self.composer_chrome.sent_steers =
-                            self.composer_chrome.sent_steers.saturating_sub(1);
+                        let _ = self.composer_chrome.sent_steers.pop_front();
                     }
                     _ => {}
                 }

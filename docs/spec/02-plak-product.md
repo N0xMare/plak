@@ -4890,8 +4890,11 @@ the menu surface. `[now]` and `[drop]` retain their identity/revision-based
 keyboard and click actions and highlight on hover without moving focus. The
 focused title's `Enter send now`, and the unfocused title's
 `Ctrl+S sends now`, live in this panel, not the HUD. A `SteerAck` of `queued`
-keeps an informational `sent · waiting for the current reply` row visible; each
-`applied` acknowledgement retires one row. These are not durable queue items,
+keeps a row visible as `sent · ` plus the steer text retired from the accepted
+draft, with that captured text clipped to a few hundred characters. When
+that acknowledgement arrives before `DraftAccepted`, the row is the
+informational `sent · waiting for the current reply` line. Each `applied`
+acknowledgement retires one row. These are not durable queue items,
 cannot be sent or dropped again, and add no duplicate transcript row. When
 only steers remain, the title advertises neither Tab focus, Enter send now,
 nor Ctrl+S sends now. Turn settlement retires their in-process projection.

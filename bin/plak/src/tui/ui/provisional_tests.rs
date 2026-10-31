@@ -349,9 +349,15 @@ fn a_steer_is_provisional_until_its_steer_row_lands() {
         position: Some(1),
     });
     assert_eq!(showing(&mut app, "sending…"), Vec::<String>::new());
-    assert_eq!(
-        showing(&mut app, "sent · waiting for the current reply").len(),
-        1
+    let sent = showing(&mut app, "look at the logs");
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(
+        sent[0].contains(" sent · look at the logs"),
+        "the sent row leads with the steer text: {sent:?}"
+    );
+    assert!(
+        showing(&mut app, "sent · waiting for the current reply").is_empty(),
+        "the accepted draft's text replaces the waiting sentence"
     );
     app.apply_host_event(HostEvent::SteerAck {
         state: "applied".into(),
@@ -377,6 +383,31 @@ fn a_steer_is_provisional_until_its_steer_row_lands() {
         landed.len() == 1 && !landed[0].contains("sending…"),
         "{landed:?}"
     );
+}
+
+#[test]
+fn a_sent_steer_preview_keeps_only_a_few_hundred_characters() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.set_input("s".repeat(500));
+    let action = app.submit_line(true).expect("steer");
+    dispatch_action(&mut app, &action, Some(&sender));
+    app.apply_host_event(HostEvent::DraftAccepted(action));
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "queued".into(),
+        position: Some(1),
+    });
+    let stored = app
+        .composer_chrome
+        .sent_steers
+        .back()
+        .cloned()
+        .flatten()
+        .expect("captured steer text");
+    assert_eq!(stored.chars().count(), 300);
+    assert!(stored.chars().all(|ch| ch == 's'));
+    assert!(!stored.contains(&"s".repeat(301)));
 }
 
 #[test]

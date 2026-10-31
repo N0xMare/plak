@@ -1632,10 +1632,14 @@ fn queue_chords_select_reorder_edit_steer_and_drop_follow_ups() {
     terminal.wait_absent("❯ queued alpha");
     // Ctrl+S while busy steers.
     terminal.send(b"steer this way\x13");
-    let accepted = terminal.wait_screen("sent · waiting for the current reply");
+    let accepted = terminal.wait_where("the sent steer shows its text", |frame| {
+        frame.contains("steer this way") && !frame.contains("sending…")
+    });
     assert!(
-        !accepted.contains("steer this way"),
-        "acknowledged steering stays in chrome until application:\n{accepted}"
+        !accepted
+            .lines()
+            .any(|line| line.contains('❯') && line.contains("steer this way")),
+        "the steer text stays in the queue panel until application:\n{accepted}"
     );
     // Ctrl+D drops the selected row of the focused queue, and nothing else.
     terminal.send(b"\t");

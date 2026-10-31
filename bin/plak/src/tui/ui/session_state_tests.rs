@@ -29,7 +29,10 @@ fn session_switch_retires_source_usage_waits_queue_and_tree_but_keeps_preference
         app.cancel_pending = true;
         app.tree_restored_paused = true;
         app.tree_live_descendants = 3;
-        app.composer_chrome.sent_steers = 2;
+        app.composer_chrome
+            .sent_steers
+            .push_back(Some("status update".into()));
+        app.composer_chrome.sent_steers.push_back(None);
         app.open_approval = Some("source-approval".into());
         app.phase_started = Some(app.now());
         app.queue_focused = true;
@@ -56,7 +59,7 @@ fn session_switch_retires_source_usage_waits_queue_and_tree_but_keeps_preference
         assert!(!app.cancel_pending);
         assert!(!app.tree_restored_paused);
         assert_eq!(app.tree_live_descendants, 0);
-        assert_eq!(app.composer_chrome.sent_steers, 0);
+        assert!(app.composer_chrome.sent_steers.is_empty());
         assert!(app.open_approval.is_none());
         assert!(app.phase_started.is_none());
         assert!(!app.queue_focused);

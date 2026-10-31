@@ -146,8 +146,10 @@ has saved it: an idle prompt just under the transcript, a follow-up or a
 steer in the queue panel, without a `#` number. The host's own row then
 replaces it; a refused one disappears and its text returns to your draft.
 Queued follow-ups appear above the composer with hover-highlighted `[now]` and
-`[drop]` buttons. A sent steer stays there as `sent · waiting for the current
-reply` until the model receives it; it cannot be sent or dropped again.
+`[drop]` buttons. A sent steer stays there as `sent · ` plus its text,
+until the model receives it. If the acknowledgement arrives before the
+draft is accepted, the row reads
+`sent · waiting for the current reply`. It cannot be sent or dropped again.
 The composer border carries no queue count; this panel is where the queue
 shows. With only steers, the panel has no queue-focus or send-now controls.
 A follow-up you type while a turn runs is sent when the turn ends. Only prompts
@@ -482,10 +484,10 @@ Commands come from the same session-and-branch-scoped registry as Processes,
 with the start row's command as a fallback; when unknown, only the id is shown.
 Resolved approvals and interruption markers (`⊘ interrupted`) remain
 visible when folded. A steer is your prompt band with a small `steer` tag, kept
-on its first line however long the steer is, the same after resume. Prompts
-and steers show when you sent them, dimmed at the right of their first line:
+on its first line however long the steer is, the same after resume. Prompts show when you sent them, dimmed at the right of their first line:
 `14:32` today, `Oct 7 14:32` on an earlier day, in local time, at the offset
-that moment had (a daylight-saving change does not move an older time). A queued prompt
+that moment had (a daylight-saving change does not move an older time). A steer
+has no send time. A queued prompt
 shows when you queued it. On a narrow terminal the time is dropped first;
 prompts carried from an older build have none. Unread child-result rows also survive resume;
 topology-control calls never invent finished-agent counts, and adoption calls

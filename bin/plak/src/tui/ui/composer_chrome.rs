@@ -1,5 +1,7 @@
 //! Border HUD, width-budgeted hints, and composer-region pointer affordances.
 
+use std::collections::VecDeque;
+
 use super::{
     App, Block, BorderType, Borders, Clear, Frame, Line, MouseEvent, Paragraph, Rect, ScrollBlock,
     Span, Style, UserAction, format_context_meter, format_status_elapsed,
@@ -14,7 +16,11 @@ pub(super) struct ComposerChrome {
     pointer: Option<Position>,
     pub(super) profile: Option<ProfileRow>,
     pub(super) profile_hit: Option<Rect>,
-    pub(super) sent_steers: usize,
+    /// Admitted steers still waiting to be applied, oldest first.
+    /// `Some` is the draft text captured when the queued acknowledgement
+    /// retired it; `None` is the count-only row used when that
+    /// acknowledgement arrived before the draft was accepted.
+    pub(super) sent_steers: VecDeque<Option<String>>,
     pub(super) refresh_pending: bool,
 }
 
@@ -24,7 +30,7 @@ impl Default for ComposerChrome {
             pointer: None,
             profile: None,
             profile_hit: None,
-            sent_steers: 0,
+            sent_steers: VecDeque::new(),
             refresh_pending: true,
         }
     }
@@ -38,6 +44,17 @@ pub(super) fn activity_label(name: &str, kind: ActivityKind, subject: Option<&st
         return format!("calling mcp:{}", call.server);
     }
     crate::tui::activity::hud_verb(name, kind, subject).to_owned()
+}
+
+/// One sent-steer row. Known text is the steer; an unknown acknowledgement
+/// keeps the waiting sentence.
+pub(super) fn sent_steer_line(text: Option<&str>, width: u16, style: Style) -> Line<'static> {
+    let width = usize::from(width);
+    let body = match text {
+        Some(text) if !text.is_empty() => format!(" sent · {text}"),
+        _ => " sent · waiting for the current reply".to_owned(),
+    };
+    Line::from(Span::styled(clip_text(&body, width), style))
 }
 
 pub(super) fn clip_text(text: &str, width: usize) -> String {
