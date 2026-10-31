@@ -537,7 +537,6 @@ impl App {
     )]
     pub(super) fn draw_queue_panel(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let paused = self.queue_drain == QueueDrainState::RestoredPaused;
-        let provisional = self.provisional_queue_rows().count();
         let provisional_follow_ups = self
             .provisional_queue_rows()
             .filter(|(steer, _)| !steer)
@@ -578,15 +577,19 @@ impl App {
         let previous = std::mem::take(&mut self.queue_button_hits);
         let mut lines = Vec::new();
         // FIFO display oldest-first with #1 = next to send.
+        // Counts only: the row iterator borrows the drafts, and the host-row
+        // loop below borrows the hit list.
+        let unacked = self.provisional_queue_rows().count();
+        let steer_rows = self.composer_chrome.sent_steers.len();
         let n = self.local_queue.len();
-        // Provisional and sent-steer rows sit under the queue's own rows and
-        // leave it at least one.
-        let visible = 4 - (provisional + self.composer_chrome.sent_steers.len()).min(3);
+        let capacity = 4.min(usize::from(inner.height));
+        let (host_slots, unacked_shown, sent_shown, overflow) =
+            super::provisional::queue_panel_plan(capacity, n, unacked, steer_rows);
         let start = self
             .queue_selected
-            .saturating_sub(visible - 1)
-            .min(n.saturating_sub(visible));
-        let end = (start + visible).min(n);
+            .saturating_sub(host_slots.saturating_sub(1))
+            .min(n.saturating_sub(host_slots));
+        let end = (start + host_slots).min(n);
         for (disp_i, abs_i) in (start..end).enumerate() {
             let item = &self.local_queue[abs_i];
             let budget = usize::from(inner.width).saturating_sub(20);
@@ -671,19 +674,27 @@ impl App {
             ));
             lines.push(Line::from(spans));
         }
-        let provisional_lines: Vec<_> = self
-            .provisional_queue_rows()
-            .take(4usize.saturating_sub(lines.len()))
-            .map(|(steer, draft)| self.provisional_queue_line(steer, draft, inner.width))
-            .collect();
-        lines.extend(provisional_lines);
-        let room = 4usize.saturating_sub(lines.len());
-        for text in self.composer_chrome.sent_steers.iter().take(room) {
+        let pending: Vec<_> = self.provisional_queue_rows().collect();
+        let mut drawn = 0usize;
+        for (steer, draft) in pending {
+            if drawn >= unacked_shown {
+                break;
+            }
+            lines.push(self.provisional_queue_line(steer, draft, inner.width));
+            drawn = drawn.saturating_add(1);
+        }
+        for text in self.composer_chrome.sent_steers.iter().take(sent_shown) {
             lines.push(super::composer_chrome::sent_steer_line(
                 text.as_deref(),
                 inner.width,
                 self.theme.chrome_dim,
             ));
+        }
+        if let Some(hidden) = overflow {
+            lines.push(Line::from(Span::styled(
+                format!("+{hidden} sending"),
+                self.theme.chrome_dim,
+            )));
         }
         frame.render_widget(Paragraph::new(lines), inner);
     }

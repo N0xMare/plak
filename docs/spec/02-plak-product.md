@@ -4903,7 +4903,18 @@ nor Ctrl+S sends now. Turn settlement retires their in-process projection.
 host acknowledges one only after its intent commit (§2.6), which can take a
 slow fsync. So that Enter is never followed by nothing, the TUI draws every
 prompt, follow-up and steer the mailbox took and the host has not yet answered
-with its own row as a dim provisional row ending in `sending…`. An idle prompt
+with its own row as a dim provisional row ending in `sending…`. When more
+idle prompts are waiting than the shelf shows (three rows), the last shelf
+row reads `+N sending`, where N is how many idle prompts are not drawn. The
+queue panel has four content rows. Follow-ups and steers the host has not
+acknowledged share those rows with the host's queue rows; when they do not
+all fit, the last row reads `+N sending`, and N counts only those
+unacknowledged rows that are not drawn. A sent steer uses a remaining row
+after them and is not part of N; sent steers that do not fit are omitted,
+with no second overflow line. A host row that is not drawn has no `[now]`
+or `[drop]` target. The overflow line is reserved before host rows are
+chosen, so it never covers a row whose chips stay live.
+An idle prompt
 is a dimmed user band on a shelf directly under the transcript; a follow-up is
 ` · text · sending…` and a steer ` steer · text · sending…` in the queue
 panel, under the host's rows. Provisional rows carry no `#N` and no chips, and

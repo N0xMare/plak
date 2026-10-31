@@ -14,6 +14,51 @@ pub(super) const SENDING: &str = "sending…";
 /// Rows of the transcript-tail shelf, at most.
 const MAX_SHELF_ROWS: usize = 3;
 
+/// How many of `total` rows fit in `slots`, and how many a trailing
+/// `+N sending` line names when the rest do not.
+pub(super) fn sending_overflow(total: usize, slots: usize) -> (usize, Option<usize>) {
+    if total <= slots {
+        return (total, None);
+    }
+    let shown = slots.saturating_sub(1);
+    (shown, Some(total.saturating_sub(shown)))
+}
+
+/// How the queue panel spends `capacity` content rows.
+///
+/// Returns `(host rows, unacknowledged rows, sent-steer rows, overflow)`.
+/// Host rows keep one row when the panel is taller than one line and anything
+/// sits under them. `+N sending` counts only unacknowledged follow-ups and
+/// steers that are not drawn, and that line is reserved before a host row is
+/// chosen so a hidden host row is not painted and has no chip. Sent steers use
+/// a leftover row; ones that do not fit are omitted and are not part of N.
+pub(super) fn queue_panel_plan(
+    capacity: usize,
+    host_len: usize,
+    unacked: usize,
+    sent: usize,
+) -> (usize, usize, usize, Option<usize>) {
+    if capacity == 0 {
+        return (0, 0, 0, None);
+    }
+    let under = unacked.saturating_add(sent);
+    let yield_cap = if host_len > 0 {
+        capacity.saturating_sub(1).min(3)
+    } else {
+        capacity
+    };
+    let mut under_slots = under.min(yield_cap);
+    let mut host_slots = capacity.saturating_sub(under_slots).min(host_len);
+    if unacked > under_slots && under_slots == 0 && host_slots > 0 {
+        host_slots = host_slots.saturating_sub(1);
+        under_slots = 1;
+    }
+    let (unacked_shown, overflow) = sending_overflow(unacked, under_slots);
+    let used = unacked_shown.saturating_add(usize::from(overflow.is_some()));
+    let sent_shown = sent.min(under_slots.saturating_sub(used));
+    (host_slots, unacked_shown, sent_shown, overflow)
+}
+
 /// A draft the host acknowledged, still drawn until its row, queue entry or
 /// steer acknowledgement takes over visibility.
 pub(super) struct AcceptedDraft {
@@ -173,9 +218,11 @@ impl App {
         let width = usize::from(area.width);
         let marker_width = UnicodeWidthStr::width(SENDING);
         let budget = width.saturating_sub(PROMPT_PREFIX.width() + marker_width + 2);
-        let lines: Vec<Line<'static>> = self
-            .provisional_prompts()
-            .take(usize::from(area.height))
+        let prompts: Vec<_> = self.provisional_prompts().collect();
+        let (shown, overflow) = sending_overflow(prompts.len(), usize::from(area.height));
+        let mut lines: Vec<Line<'static>> = prompts
+            .into_iter()
+            .take(shown)
             .map(|draft| {
                 let text = super::composer_chrome::clip_text(&preview(draft), budget);
                 let used = PROMPT_PREFIX.width() + text.width() + marker_width + 1;
@@ -188,6 +235,15 @@ impl App {
                 .style(Style::default().bg(self.theme.user_bg))
             })
             .collect();
+        if let Some(hidden) = overflow {
+            lines.push(
+                Line::from(Span::styled(
+                    format!("+{hidden} sending"),
+                    self.theme.chrome_dim,
+                ))
+                .style(Style::default().bg(self.theme.user_bg)),
+            );
+        }
         frame.render_widget(ratatui::widgets::Paragraph::new(lines), area);
     }
 

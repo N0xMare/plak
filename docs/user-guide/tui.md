@@ -143,13 +143,19 @@ retried every 60 s, so it resumes without a prompt once the store answers.
 
 What you send shows at once as a dim row ending in `sending…` until the host
 has saved it: an idle prompt just under the transcript, a follow-up or a
-steer in the queue panel, without a `#` number. The host's own row then
-replaces it; a refused one disappears and its text returns to your draft.
+steer in the queue panel, without a `#` number. When more idle prompts are
+waiting than the three-row shelf shows, or more follow-ups and unsent steers
+than the queue panel shows, the last line reads `+N sending`. N counts only
+those unacknowledged rows that are not drawn. A sent steer that does not fit
+is left off the panel and is not part of N. The host's own row then
+replaces a provisional one; a refused one disappears and its text returns to
+your draft.
 Queued follow-ups appear above the composer with hover-highlighted `[now]` and
-`[drop]` buttons. A sent steer stays there as `sent · ` plus its text,
-until the model receives it. If the acknowledgement arrives before the
-draft is accepted, the row reads
-`sent · waiting for the current reply`. It cannot be sent or dropped again.
+`[drop]` buttons. A row that is not drawn has no `[now]` or `[drop]` target.
+A sent steer stays there as `sent · ` plus its text, until the model
+receives it. If the acknowledgement arrives before the draft is accepted, the
+row reads `sent · waiting for the current reply`. It cannot be sent or dropped
+again.
 The composer border carries no queue count; this panel is where the queue
 shows. With only steers, the panel has no queue-focus or send-now controls.
 A follow-up you type while a turn runs is sent when the turn ends. Only prompts

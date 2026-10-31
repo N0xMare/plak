@@ -519,3 +519,180 @@ fn provisional_rows_match_reviewable_goldens() {
         }
     }
 }
+
+/// Four idle prompts share a three-row shelf: the last row names the two
+/// that do not fit, instead of clipping them.
+#[test]
+fn provisional_prompts_past_the_shelf_end_in_an_overflow_line() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    for text in ["one", "two", "three", "four"] {
+        app.set_input(text.into());
+        let action = app.submit_line(false).expect("prompt");
+        dispatch_action(&mut app, &action, Some(&sender));
+    }
+    let shelf = showing(&mut app, "sending");
+    assert!(
+        shelf.iter().any(|row| row.contains("+2 sending")),
+        "{shelf:?}"
+    );
+    assert!(shelf.iter().any(|row| row.contains("one")));
+    assert!(shelf.iter().any(|row| row.contains("two")));
+    assert!(!shelf.iter().any(|row| row.contains("three")));
+    assert!(!shelf.iter().any(|row| row.contains("four")));
+}
+
+/// Follow-ups beyond the queue panel's four content rows end on `+N sending`.
+#[test]
+fn queued_follow_ups_past_the_panel_end_in_an_overflow_line() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    for text in ["one", "two", "three", "four", "five"] {
+        app.set_input(text.into());
+        let action = app.submit_line(false).expect("follow-up");
+        dispatch_action(&mut app, &action, Some(&sender));
+    }
+    let panel = showing(&mut app, "sending");
+    assert!(
+        panel.iter().any(|row| row.contains("+2 sending")),
+        "{panel:?}"
+    );
+    assert!(panel.iter().any(|row| row.contains("one")));
+    assert!(panel.iter().any(|row| row.contains("three")));
+    assert!(!panel.iter().any(|row| row.contains("five")));
+}
+
+/// Three idle prompts fill the shelf. Nothing is hidden, so there is no
+/// overflow line.
+#[test]
+fn three_idle_prompts_fill_the_shelf_without_an_overflow_line() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    for text in ["one", "two", "three"] {
+        app.set_input(text.into());
+        let action = app.submit_line(false).expect("prompt");
+        dispatch_action(&mut app, &action, Some(&sender));
+    }
+    let shelf = showing(&mut app, "sending");
+    assert!(!shelf.iter().any(|row| row.contains('+')), "{shelf:?}");
+    assert!(shelf.iter().any(|row| row.contains("one")));
+    assert!(shelf.iter().any(|row| row.contains("two")));
+    assert!(shelf.iter().any(|row| row.contains("three")));
+}
+
+#[test]
+fn sending_overflow_names_only_the_rows_past_the_last_slot() {
+    let cases = [
+        (0, 0, 0, None),
+        (1, 0, 0, Some(1)),
+        (0, 1, 0, None),
+        (1, 1, 1, None),
+        (2, 1, 0, Some(2)),
+        (2, 3, 2, None),
+        (3, 3, 3, None),
+        (4, 3, 2, Some(2)),
+        (5, 4, 3, Some(2)),
+    ];
+    for (total, slots, shown, hidden) in cases {
+        assert_eq!(
+            super::provisional::sending_overflow(total, slots),
+            (shown, hidden),
+            "total {total} slots {slots}"
+        );
+    }
+}
+
+/// `+N sending` counts unacknowledged rows only. Sent steers that do not fit
+/// are omitted, not folded into N.
+#[test]
+fn sent_steers_that_do_not_fit_are_omitted_from_the_overflow_count() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    for text in ["one", "two"] {
+        app.set_input(text.into());
+        let action = app.submit_line(false).expect("follow-up");
+        dispatch_action(&mut app, &action, Some(&sender));
+    }
+    app.composer_chrome.sent_steers.extend([None, None, None]);
+    let mut terminal = Terminal::new(TestBackend::new(80, 6)).unwrap();
+    terminal
+        .draw(|frame| app.draw_queue_panel(frame, frame.area()))
+        .unwrap();
+    let rows = buffer_rows(&terminal);
+    assert_eq!(
+        rows.iter().filter(|row| row.contains("sending…")).count(),
+        2,
+        "{rows:?}"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.contains("sent · waiting"))
+            .count(),
+        2,
+        "{rows:?}"
+    );
+    assert!(!rows.iter().any(|row| row.contains('+')), "{rows:?}");
+}
+
+/// A one-row panel that cannot show the host row and the overflow line keeps
+/// the overflow line and drops the host row's hit target with it.
+#[test]
+fn a_squeezed_queue_panel_has_no_hit_target_on_a_hidden_row() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.apply_host_event(HostEvent::QueueSnapshot {
+        items: (0..3)
+            .map(|index| queue_item(&format!("q{index}"), index + 1, &format!("host {index}")))
+            .collect(),
+        drain: QueueDrainState::LiveAutoDrain,
+    });
+    for text in ["one", "two"] {
+        app.set_input(text.into());
+        let action = app.submit_line(false).expect("follow-up");
+        dispatch_action(&mut app, &action, Some(&sender));
+    }
+
+    let mut squeezed = Terminal::new(TestBackend::new(80, 3)).unwrap();
+    squeezed
+        .draw(|frame| app.draw_queue_panel(frame, frame.area()))
+        .unwrap();
+    let rows = buffer_rows(&squeezed);
+    assert!(
+        rows.iter().any(|row| row.contains("+2 sending")),
+        "{rows:?}"
+    );
+    assert!(!rows.iter().any(|row| row.contains("host ")), "{rows:?}");
+    assert!(
+        app.queue_button_hits.is_empty(),
+        "hidden host rows kept hits: {:?}",
+        app.queue_button_hits
+    );
+
+    let mut taller = Terminal::new(TestBackend::new(80, 4)).unwrap();
+    taller
+        .draw(|frame| app.draw_queue_panel(frame, frame.area()))
+        .unwrap();
+    assert_eq!(app.queue_button_hits.len(), 1);
+    assert_eq!(app.queue_button_hits[0].abs_idx, 0);
+    let inner_y = taller.backend().buffer().area.y.saturating_add(1);
+    assert_eq!(app.queue_button_hits[0].now.y, inner_y);
+    assert_eq!(app.queue_button_hits[0].drop.y, inner_y);
+    let painted = buffer_rows(&taller);
+    assert!(painted.iter().any(|row| row.contains("#1")));
+    assert!(painted.iter().any(|row| row.contains("+2 sending")));
+    assert!(!painted.iter().any(|row| row.contains("host 1")));
+}
+
+fn buffer_rows(terminal: &Terminal<TestBackend>) -> Vec<String> {
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect()
+}
