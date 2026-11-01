@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from contextlib import ExitStack, closing
 from pathlib import Path
 import queue
@@ -12,6 +13,48 @@ import subprocess
 import tempfile
 import threading
 import time
+
+# Subscription acceptance lives under XDG_STATE_HOME (or $HOME/.local/state),
+# not PLAK_HOME. Every fixture process gets private roots and, when it starts
+# a codex turn, accepts the notice itself.
+_ISOLATED_XDG = (
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_RUNTIME_DIR",
+)
+_API_KEYS = ("OPENAI_API_KEY", "XAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY")
+ACCEPTANCE = "y\n"
+
+
+def _private_dir(path: Path) -> None:
+    path.mkdir(mode=0o700)
+    os.chmod(path, stat.S_IRWXU)
+
+
+def isolated_environment(root: Path, **extra: str) -> tuple[Path, dict[str, str]]:
+    """Product home and environment that cannot see the operator's state."""
+    home = root / "home"
+    _private_dir(home)
+    _private_dir(root / "operator-home")
+    xdg_root = root / "xdg"
+    _private_dir(xdg_root)
+    environment = dict(os.environ)
+    environment["HOME"] = str(root / "operator-home")
+    environment["PLAK_HOME"] = str(home)
+    for name in _ISOLATED_XDG:
+        path = xdg_root / name.removeprefix("XDG_").lower().replace("_", "-")
+        _private_dir(path)
+        environment[name] = str(path)
+    for name in [key for key in environment if key.startswith("XDG_") and key not in _ISOLATED_XDG]:
+        path = xdg_root / name.lower()
+        _private_dir(path)
+        environment[name] = str(path)
+    for name in _API_KEYS:
+        environment.pop(name, None)
+    environment.update(extra)
+    return home, environment
 
 
 def store_bytes(home: Path) -> dict[str, bytes]:
@@ -25,15 +68,11 @@ def check(full_binary: str, reduced_binary: str, server_binary: str, maintainer:
     errors = []
     with tempfile.TemporaryDirectory(prefix="plak-feature-store-") as directory:
         root = Path(directory)
-        home = root / "home"
-        home.mkdir(mode=0o700)
-        (home / "agents").mkdir(mode=0o700)
         script = root / "script.json"
         script.write_text(json.dumps({"version": 1, "steps": [{"output": {"text": "fixture answer"}}]}))
-        environment = dict(os.environ, PLAK_HOME=str(home), PLAK_TEST_MODEL="offline-loopback-v1",
-                           PLAK_TEST_SCRIPT=str(script))
-        for name in ("OPENAI_API_KEY", "XAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
-            environment.pop(name, None)
+        home, environment = isolated_environment(
+            root, PLAK_TEST_MODEL="offline-loopback-v1", PLAK_TEST_SCRIPT=str(script))
+        (home / "agents").mkdir(mode=0o700)
 
         def run(binary, arguments, input=""):
             return subprocess.run([binary, *arguments], cwd=root, env=environment, input=input,
@@ -51,7 +90,8 @@ def check(full_binary: str, reduced_binary: str, server_binary: str, maintainer:
             (home / "config.toml").write_text(config)
             (home / "agents/root-agent.toml").write_text(template)
             created = run(full_binary, ["run", "--account", "codex", "--model", "offline-loopback-v1",
-                                        "--effort", "medium", "--print-session-id", "--", "create fixture"])
+                                        "--effort", "medium", "--print-session-id", "--", "create fixture"],
+                          input=ACCEPTANCE)
             session = next((line.removeprefix("session_id=") for line in created.stdout.splitlines()
                             if line.startswith("session_id=")), None)
             if created.returncode or session is None:
@@ -136,16 +176,13 @@ def check_route(full_binary: str, reduced_binary: str) -> list[str]:
     errors = []
     with tempfile.TemporaryDirectory(prefix="plak-feature-route-") as directory:
         root = Path(directory)
-        home = root / "home"
-        home.mkdir(mode=0o700)
         script = root / "script.json"
         script.write_text(json.dumps({"version": 1, "steps": [{"output": {"text": "route fixture"}}]}))
-        environment = dict(os.environ, PLAK_HOME=str(home), PLAK_TEST_MODEL="offline-loopback-v1", PLAK_TEST_SCRIPT=str(script))
-        for name in ("OPENAI_API_KEY", "XAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
-            environment.pop(name, None)
-        def run(binary, arguments):
-            return subprocess.run([binary, *arguments], cwd=root, env=environment, input="", text=True, capture_output=True, check=False, timeout=30)
-        created = run(full_binary, ["run", "--account", "codex", "--model", "offline-loopback-v1", "--composition", "direct", "--effort", "medium", "--print-session-id", "--", "create route fixture"])
+        home, environment = isolated_environment(
+            root, PLAK_TEST_MODEL="offline-loopback-v1", PLAK_TEST_SCRIPT=str(script))
+        def run(binary, arguments, input=""):
+            return subprocess.run([binary, *arguments], cwd=root, env=environment, input=input, text=True, capture_output=True, check=False, timeout=30)
+        created = run(full_binary, ["run", "--account", "codex", "--model", "offline-loopback-v1", "--composition", "direct", "--effort", "medium", "--print-session-id", "--", "create route fixture"], input=ACCEPTANCE)
         session = next((line.removeprefix("session_id=") for line in created.stdout.splitlines() if line.startswith("session_id=")), None)
         if created.returncode or session is None:
             return [f"uncompiled route fixture creation: {created.stdout}{created.stderr}"]
@@ -175,8 +212,9 @@ def image_diagnostic(binary: str) -> list[str]:
         script = root / "script.json"
         script.write_text(json.dumps({"version": 1, "steps": [{"output": {"text": "same turn finished"}}]}))
         release = root / "release"
-        environment = dict(os.environ, PLAK_HOME=str(root / "home"), PLAK_TEST_MODEL="offline-loopback-v1",
-                           PLAK_TEST_SCRIPT=str(script), PLAK_TEST_PROVIDER_RELEASE=str(release))
+        _home, environment = isolated_environment(
+            root, PLAK_TEST_MODEL="offline-loopback-v1", PLAK_TEST_SCRIPT=str(script),
+            PLAK_TEST_PROVIDER_RELEASE=str(release))
         process = subprocess.Popen([binary, "agent", "--account", "codex", "--model", "offline-loopback-v1",
                                     "--effort", "medium", "--composition", "direct"],
                                    cwd=root, env=environment, stdin=subprocess.PIPE,
