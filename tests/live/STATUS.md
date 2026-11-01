@@ -16,44 +16,79 @@ Raw reports stay private under the ignored `target/live/`.
 - the 0.0.2 live matrix (History, below);
 - a maintainer's review of the `25ea8365` maintainer build in the TUI.
 
-No later revision is qualified.
+`23428930`, the 0.0.3 release candidate, has passed part one: the integrated
+gate on both supported platforms (`just full` on Apple Silicon and on Linux
+x86_64, the native musl tier and the pinned musl container gate), the strict
+crash-point sweep over all twenty-seven shapes with no unclassified, divergent
+or refused cut, and the publish dry run. Its live matrix (History, below) is
+complete except the Linux x86_64 musl smoke on `codex-sol` and `grok` and the
+`deepseek` and `deepseek-messages` cells, which have not run, and the
+maintainer's review of its build in the TUI is pending. It is not yet
+qualified.
 
 ## Live matrix
 
 The rows are the owner's catalog, the `ROUTES` keys in `live.py`, in ladder
-order (spec 05 §3.4). A row whose tuple passed in the 0.0.2 matrix shows that
-result; whether it carries to a later revision is the §3.4 re-confirmation
-rule. A new row, or a row whose model or effort changed, has no result yet.
+order (spec 05 §3.4). A row shows its latest result, from the 0.0.3 candidate
+matrix where it ran there and from the 0.0.2 matrix otherwise; whether it
+carries to a later revision is the §3.4 re-confirmation rule. A new row, or a
+row whose model or effort changed, has no result yet.
 Rung 3 rows are sparing and run only for a targeted confirmation.
 
 | Route | Class | Rung | Last result |
 | --- | --- | --- | --- |
-| `or-nemotron-free` | informational | 1 | smoke pass at `f07e205e` (Apple Silicon) |
-| `or-nemotron-vl-free` | informational | 1 | unqualified: new row |
-| `or-inkling-free` | informational | 1 | unqualified: new row |
-| `or-flint-free` | informational | 1 | unqualified: new row |
+| `or-nemotron-free` | informational | 1 | smoke pass at `bce238af` (Apple Silicon) |
+| `or-nemotron-vl-free` | informational | 1 | smoke pass at `bce238af` (Apple Silicon) |
+| `or-inkling-free` | informational | 1 | provider, recorded at `0df98a47` (Apple Silicon): OpenRouter refuses the model outside agentic harnesses |
+| `or-flint-free` | informational | 1 | provider, recorded at `0df98a47` (Apple Silicon): no upstreams available on both runs |
 | `or-lfm-free` | informational | 1 | unqualified: not planned in 0.0.2 (upstream at about 7 tokens per second with in-band 504s on every 0.0.2 run) |
-| `codex` | light | 1 | smoke pass at `f07e205e` (Apple Silicon) |
-| `claude-haiku55-low` | light | 1 | smoke pass at `f07e205e` (Apple Silicon) |
-| `grok-46` | light | 1 | smoke pass at `f07e205e` (Apple Silicon) |
-| `api-openai` | light | 1 | smoke pass at `f07e205e` (Apple Silicon, Linux x86_64 musl) |
-| `api-anthropic` | light | 1 | unqualified: effort changed to low (0.0.2 ran `claude-haiku-5-5` at medium) |
-| `api-xai` | light | 1 | unqualified: model changed to `grok-4.6` (0.0.2 ran `grok-4.7`) |
-| `codex-sol` | full | 2 | full cell pass (History) |
-| `claude-sonnet55-low` | full | 2 | full cell pass (History) |
-| `grok` | full | 2 | full cell pass (History) |
-| `deepseek` | full; long-session informational | 2 | unqualified: model changed to `deepseek/deepseek-v4-flash-0731` |
-| `deepseek-messages` | full; long-session informational | 2 | unqualified: model changed to `deepseek/deepseek-v4-flash-0731` |
-| `or-glm` | light | 2 | smoke pass at `f07e205e` (Apple Silicon); no longer best-effort |
-| `codex-luna-medium` | light | 2 | smoke pass at `f07e205e` (Apple Silicon) |
-| `claude-haiku55-medium` | light | 2 | smoke pass at `f07e205e` (Apple Silicon) |
-| `claude-sonnet55-medium` | light | 2 | smoke pass at `f07e205e` (Apple Silicon) |
+| `codex` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
+| `claude-haiku55-low` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
+| `grok-46` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
+| `api-openai` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
+| `api-anthropic` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
+| `api-xai` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
+| `codex-sol` | full | 2 | full cell pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke not run |
+| `claude-sonnet55-low` | full | 2 | full cell pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke pass |
+| `grok` | full | 2 | full cell and one-hour headless soak pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke not run |
+| `deepseek` | full; long-session informational | 2 | unqualified: model changed to `deepseek/deepseek-v4-flash-0731`; not run for 0.0.3 |
+| `deepseek-messages` | full; long-session informational | 2 | unqualified: model changed to `deepseek/deepseek-v4-flash-0731`; not run for 0.0.3 |
+| `or-glm` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
+| `codex-luna-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
+| `claude-haiku55-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
+| `claude-sonnet55-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
 | `claude-opus-low` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 | `claude-opus-medium` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 | `codex-astra` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 | `claude-fable` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 
 ## History
+
+### 0.0.3 candidate matrix (`bce238af`)
+
+`plak/test-hooks` release builds of `bce238af` for `aarch64-apple-darwin`
+(`plak` SHA-256 `90d2fc1b…`) and `x86_64-unknown-linux-musl` (`plak` SHA-256
+`9f5a277d…`), composition `plakous-default`. No row's rendered-prompt digests
+or harness footprints change between `bce238af` and `23428930` (the later
+commits change TUI selection painting, tests and tooling), so these results
+carry to the release candidate.
+
+The first rung-one pass, at `0df98a47`, scored `fault_reset` HARNESS on every
+route: the live driver's capture check predated the transport failure
+record's `connect_attempts` field. `bce238af` corrected the driver, and every
+rung-one row then passed on its first attempt.
+
+| Cells | Platform | Outcome |
+| --- | --- | --- |
+| Smoke on `codex`, `claude-haiku55-low`, `grok-46`, `api-openai`, `api-anthropic`, `api-xai`, `or-nemotron-free`, `or-nemotron-vl-free` | Apple Silicon | pass |
+| Smoke on `codex-luna-medium`, `claude-haiku55-medium`, `claude-sonnet55-medium`, `or-glm` | Apple Silicon | pass |
+| Smoke, long-session `--all`, jobs and `crash_jobs` x3 on `codex-sol`, `claude-sonnet55-low`, `grok` | Apple Silicon | pass |
+| Headless soak, one hour, `grok` | Apple Silicon | pass on its second run (131 of 131 tasks); both attempts of the first run were provider (model lookup timeouts during an upstream outage) |
+| Smoke on `claude-sonnet55-low`, `api-openai`, `api-anthropic`, `api-xai` | Linux x86_64 musl | pass |
+| Smoke on `codex-sol`, `grok` | Linux x86_64 musl | not run |
+| Cells on `deepseek`, `deepseek-messages` | — | not run |
+| Smoke on `or-inkling-free` | Apple Silicon | provider, recorded at `0df98a47`: OpenRouter refuses the model outside agentic harnesses |
+| Smoke on `or-flint-free` | Apple Silicon | provider, recorded at `0df98a47`: no upstreams available on both runs |
 
 ### 0.0.2 matrix (`25ea8365`)
 
