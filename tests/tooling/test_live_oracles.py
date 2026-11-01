@@ -585,7 +585,7 @@ class LiveOracleTests(unittest.TestCase):
         def terminal(kind, reset="None", phase="ResponseBody"):
             return (f"Failed(Failure {{ phase: {phase}, transmission: MayHaveTransmitted, "
                     f"kind: {kind}, cause: None, http2_reason: {reset}, os_error: None, tls: None, "
-                    "tls_alert: None, alpn: None, http2_io: false, connection: None, idle_age: None })")
+                    "tls_alert: None, alpn: None, http2_io: false, connection: None, idle_age: None, connect_attempts: None })")
 
         for kind, reset, phase, label in (
                 ("Io", "None", "ResponseBody", "a transport failure (Io) in ResponseBody"),
@@ -1239,15 +1239,17 @@ class LiveOracleTests(unittest.TestCase):
     def test_capture_integrity_accepts_fully_captured_transport_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             segment = Path(directory)
-            for kind in ("Io", "LimitExceeded(ResponseBodyBytes)"):
+            attempts = ("None", "Some(ConnectAttempts { ipv4: 1, ipv6: 1 })")
+            for kind, connect in [(kind, connect) for kind in ("Io", "LimitExceeded(ResponseBodyBytes)")
+                                  for connect in attempts]:
                 terminal = ("Failed(Failure { phase: ResponseBody, "
                             f"transmission: MayHaveTransmitted, kind: {kind}, "
                             "cause: Some(\"unexpected_eof\"), http2_reason: None, "
                             "os_error: None, tls: None, tls_alert: None, alpn: Some(\"h2\"), "
                             "http2_io: true, connection: Some(Fresh), "
-                            "idle_age: Some(1.5s) })")
+                            f"idle_age: Some(1.5s), connect_attempts: {connect} }})")
                 for body in (b"partial response", b""):
-                    with self.subTest(kind=kind, body=body):
+                    with self.subTest(kind=kind, connect=connect, body=body):
                         self.write_capture(segment, body=body, terminal=terminal, status="None")
                         self.assertTrue(live.capture_integrity([segment]))
 

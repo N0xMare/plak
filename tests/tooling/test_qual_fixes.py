@@ -570,7 +570,7 @@ class UnfiredFaultTests(unittest.TestCase):
                            "after 2 of 3 events, before the reset fired"))
         reset = ("Failed(Failure { phase: ResponseBody, transmission: MayHaveTransmitted, "
                  "kind: DeadlineExceeded, cause: None, http2_reason: None, os_error: None, tls: None, "
-                 "tls_alert: None, alpn: None, http2_io: false, connection: None, idle_age: None })")
+                 "tls_alert: None, alpn: None, http2_io: false, connection: None, idle_age: None, connect_attempts: None })")
         failure = self.judge(KEEP_ALIVE, terminal=reset,
                              turn=live.Turn(phase="failed", model_error_kind="Timeout"))
         self.assertEqual(str(failure), "the provider ended the targeted stream (exchange-0002) in "
@@ -589,7 +589,7 @@ class UnfiredFaultTests(unittest.TestCase):
         head = ("Failed(Failure { phase: ResponseHead, transmission: MayHaveTransmitted, "
                 "kind: DeadlineExceeded, cause: None, http2_reason: None, os_error: None, tls: None, "
                 "tls_alert: None, alpn: Some(\"http/1.1\"), http2_io: false, "
-                "connection: Some(Fresh), idle_age: None })")
+                "connection: Some(Fresh), idle_age: None, connect_attempts: None })")
         retried = live.Turn(phase="completed", retries=[{
             "attempt": 2, "cause_kind": "transport_after_send", "max_attempts": 4}])
         failure = self.judge(b"", status="None", terminal=head, turn=retried)
@@ -1027,7 +1027,7 @@ class RunawayOutputTests(unittest.TestCase):
     TERMINAL = ("Failed(Failure { phase: ResponseBody, transmission: MayHaveTransmitted, "
                 "kind: Internal, cause: None, http2_reason: None, os_error: None, tls: None, "
                 "tls_alert: None, alpn: Some(\"http/1.1\"), http2_io: false, "
-                "connection: Some(Fresh), idle_age: None })")
+                "connection: Some(Fresh), idle_age: None, connect_attempts: None })")
 
     def write(self, segment, events, *, recorded=None, terminal=None, incomplete="true"):
         body = b"".join(b"event: x\ndata: " + json.dumps(event).encode() + b"\n\n" for event in events)

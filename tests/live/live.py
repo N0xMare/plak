@@ -1503,7 +1503,8 @@ def terminal_fields(info: Path, body: Path) -> dict[str, str] | None:
                 r'tls: (?:None|Some\("[a-z_0-9]+"\)), tls_alert: (?:None|Some\([0-9]+\)), '
                 r'alpn: (?:None|Some\("(?:h2|http/1\.1)"\)), http2_io: (?:true|false), '
                 r"connection: (?:None|Some\((?:Fresh|Reused|ReplacedStale)\)), "
-                r"idle_age: (?:None|Some\([0-9.]+(?:ns|µs|ms|s)\)) \}\)",
+                r"idle_age: (?:None|Some\([0-9.]+(?:ns|µs|ms|s)\)), "
+                r"connect_attempts: (?:None|Some\(ConnectAttempts \{ ipv4: [0-9]+, ipv6: [0-9]+ \}\)) \}\)",
                 fields["terminal"])
             or fields["incomplete"] != "false"
             or not re.fullmatch(r"[0-9]+", fields["recorded_bytes"])
