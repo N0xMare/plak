@@ -1927,7 +1927,7 @@ consecutive empty Length fails the turn. A successful classified round resets
 the guard. An incomplete local call also uses the existing output-limit path
 and never dispatches, whether it reaches the driver as a call inside a Length
 response or was revoked by the protocol kernel into an empty Length (a Messages `max_tokens` or
-Chat `length` stop with client tool input, §6.1). Neither a wrap-up round nor a response with
+`model_context_window_exceeded` stop, or a Chat `length` stop, with client tool input, §6.1). Neither a wrap-up round nor a response with
 provider-hosted ToolCall/ToolResult blocks may retry: visible tool-free Length
 still commits its answer, while empty Length fails immediately. A completed
 aggregate may be empty for Length so the driver can classify this failure;

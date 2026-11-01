@@ -273,6 +273,14 @@ one cross-build carrier (a build imports its own and the previous version).
 - Messages artifact decoding preserves raw Thinking and RedactedThinking blocks
   instead of refusing their signed or redacted replay payloads.
 
+- A Messages response that stops at `max_tokens` or
+  `model_context_window_exceeded` inside a client tool call, and a Chat
+  Completions `finish_reason: length` with tool calls, no longer fail the turn
+  as a protocol error. The whole response is discarded without running or
+  recording the call; the turn retries once with the output-limit note, and a
+  second consecutive output limit fails as an output limit. A cut after
+  possible hosted effects still requires reconciliation.
+
 - Offline folds require at least a 5 % fresh-input reduction. A summary that
   overruns its output bound selects the Tight instruction for the next permitted
   fold; response-free failures do not reset it. Idle `/compact` and scheduled
