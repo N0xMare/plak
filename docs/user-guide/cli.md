@@ -14,7 +14,7 @@ plak <command> --help             one command's help
 
 A bare command that needs an argument prints that command's help instead of
 failing — `plak run`, `plak login`, `plak key set`, `plak session show` — and
-that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.2 (release; binary 0123456789ab)`.
+that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.3 (release; binary 0123456789ab)`.
 The binary ID identifies the executable in `/reload` and handoffs.
 
 ## Exit codes
@@ -492,7 +492,7 @@ $ plak doctor
 Plak doctor
 
 CHECK              RESULT   DETAIL                                        FIX
-Version            OK       available · 0.0.2                             —
+Version            OK       available · 0.0.3                             —
 Home               OK       available · /home/you/.plak                   —
 Home free space    OK       available · product home volume has at least 5120 MiB available   —
 Config             OK       valid · /home/you/.plak/config.toml           —

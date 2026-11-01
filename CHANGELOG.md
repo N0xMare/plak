@@ -5,7 +5,7 @@ package shares one version. `0.0.x` releases carry no API, wire or
 persisted-format compatibility promise; the session export document is the
 one cross-build carrier (a build imports its own and the previous version).
 
-## Unreleased
+## 0.0.3
 
 ### Plak
 

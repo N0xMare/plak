@@ -9,8 +9,8 @@ constrain them.
 ## 1. Distribution
 
 **Plak and Plakous release as one exact cohort.** Every workspace package has
-the workspace version `0.0.2`; internal dependencies are declared once in the
-root `[workspace.dependencies]` as `{ version = "0.0.2", path = ... }` and
+the workspace version `0.0.3`; internal dependencies are declared once in the
+root `[workspace.dependencies]` as `{ version = "0.0.3", path = ... }` and
 inherited with `.workspace = true`, so each packaged manifest requires exactly
 its siblings' version (Cargo's caret on a `0.0.x` version admits only that
 version). The vendored `plakous-codex-code-mode-protocol` keeps its upstream
@@ -1425,7 +1425,7 @@ Installation:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
-PLAK_VERSION=0.0.2 sh install.sh   # a specific release instead of the latest
+PLAK_VERSION=0.0.3 sh install.sh   # a specific release instead of the latest
 ```
 
 It supports exactly `aarch64-apple-darwin` (including an x86_64 shell under

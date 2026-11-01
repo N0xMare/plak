@@ -122,7 +122,7 @@ binary is large and its cold start is visible in the TUI.
 
 ```sh
 $ plak version
-plak 0.0.2 (release; binary 0123456789ab)
+plak 0.0.3 (release; binary 0123456789ab)
 ```
 
 The binary ID is the executable identity used by `/reload` and handoffs.
@@ -214,7 +214,7 @@ $ plak doctor
 Plak doctor
 
 CHECK              RESULT   DETAIL                                       FIX
-Version            OK       available · 0.0.2                            —
+Version            OK       available · 0.0.3                            —
 Home               OK       available · /home/you/.plak                  —
 Config             OK       valid · /home/you/.plak/config.toml          —
 Product db         OK       available · /home/you/.plak/state/r26.e34.p35.t9/product.sqlite3 —

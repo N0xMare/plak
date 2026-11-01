@@ -171,7 +171,7 @@ fn construction_surface_is_nameable() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(plakous::VERSION, "0.0.2");
+    assert_eq!(plakous::VERSION, "0.0.3");
     composition_surface_is_nameable();
     construction_surface_is_nameable();
     // The durable backend is part of this workflow and needs no patch table.
