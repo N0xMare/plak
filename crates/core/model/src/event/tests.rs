@@ -809,8 +809,11 @@ fn empty_refusal_revokes_complete_provisional_blocks_only() -> Result<(), Box<dy
 {
     for (finish, closed, accepted) in [
         (FinishReason::Refusal, true, true),
+        (FinishReason::Length, true, true),
         (FinishReason::Stop, true, false),
+        (FinishReason::ToolCalls, true, false),
         (FinishReason::Refusal, false, false),
+        (FinishReason::Length, false, false),
     ] {
         let (mut assembler, digest, location) =
             assembler_with_block(BlockStart::Text { phase: None })?;
@@ -843,12 +846,28 @@ fn refusal_can_revoke_unfinished_local_arguments_but_not_remote_inputs()
 -> Result<(), Box<dyn std::error::Error>> {
     for (owner, reason, accepted) in [
         (ToolExecutionOwner::Local, FinishReason::Refusal, true),
+        (ToolExecutionOwner::Local, FinishReason::Length, true),
+        (
+            ToolExecutionOwner::Mcp {
+                server: McpServerId::new("test-server")?,
+            },
+            FinishReason::Length,
+            true,
+        ),
         (ToolExecutionOwner::Local, FinishReason::ToolCalls, false),
+        (ToolExecutionOwner::Local, FinishReason::Stop, false),
         (
             ToolExecutionOwner::ProviderHosted {
                 provider_kind: crate::NamespaceId::new("remote")?,
             },
             FinishReason::Refusal,
+            false,
+        ),
+        (
+            ToolExecutionOwner::ProviderHosted {
+                provider_kind: crate::NamespaceId::new("remote")?,
+            },
+            FinishReason::Length,
             false,
         ),
     ] {
@@ -881,45 +900,48 @@ fn refusal_can_revoke_unfinished_local_arguments_but_not_remote_inputs()
 }
 
 #[test]
-fn refusal_revokes_only_unexecuted_client_proposals() -> Result<(), Box<dyn std::error::Error>> {
-    for owner in [
-        ToolExecutionOwner::Local,
-        ToolExecutionOwner::Mcp {
-            server: McpServerId::new("test-server")?,
-        },
-        ToolExecutionOwner::ProviderHosted {
-            provider_kind: crate::NamespaceId::new("remote")?,
-        },
-    ] {
-        for state in [
-            ToolCallState::Requested,
-            ToolCallState::Pending,
-            ToolCallState::Completed,
-            ToolCallState::Failed,
+fn refusal_and_length_revoke_only_unexecuted_client_proposals()
+-> Result<(), Box<dyn std::error::Error>> {
+    for finish in [FinishReason::Refusal, FinishReason::Length] {
+        for owner in [
+            ToolExecutionOwner::Local,
+            ToolExecutionOwner::Mcp {
+                server: McpServerId::new("test-server")?,
+            },
+            ToolExecutionOwner::ProviderHosted {
+                provider_kind: crate::NamespaceId::new("remote")?,
+            },
         ] {
-            let block = ContentBlock::ToolCall(ToolCallBlock::new(
-                call(1)?,
-                ToolName::new("probe")?,
-                owner.clone(),
-                state,
-                ToolCorrelation::default(),
-                "{}",
-            )?);
-            let (mut assembler, digest, _) = assembler_with_block(BlockStart::Complete(block))?;
-            let response = ModelResponse::new(
-                Vec::new(),
-                FinishDetails::new(FinishReason::Refusal, None),
-                None,
-                None,
-                digest,
-            );
-            let result = assembler.push(ModelEvent::ResponseCompleted(response.clone()));
-            if state == ToolCallState::Requested
-                && !matches!(owner, ToolExecutionOwner::ProviderHosted { .. })
-            {
-                assert_eq!(result?, Some(response));
-            } else {
-                assert_invalid(result);
+            for state in [
+                ToolCallState::Requested,
+                ToolCallState::Pending,
+                ToolCallState::Completed,
+                ToolCallState::Failed,
+            ] {
+                let block = ContentBlock::ToolCall(ToolCallBlock::new(
+                    call(1)?,
+                    ToolName::new("probe")?,
+                    owner.clone(),
+                    state,
+                    ToolCorrelation::default(),
+                    "{}",
+                )?);
+                let (mut assembler, digest, _) = assembler_with_block(BlockStart::Complete(block))?;
+                let response = ModelResponse::new(
+                    Vec::new(),
+                    FinishDetails::new(finish, None),
+                    None,
+                    None,
+                    digest,
+                );
+                let result = assembler.push(ModelEvent::ResponseCompleted(response.clone()));
+                if state == ToolCallState::Requested
+                    && !matches!(owner, ToolExecutionOwner::ProviderHosted { .. })
+                {
+                    assert_eq!(result?, Some(response));
+                } else {
+                    assert_invalid(result);
+                }
             }
         }
     }

@@ -365,6 +365,17 @@ impl MessagesStopReason {
             Self::Fallback => "fallback",
         }
     }
+
+    /// An output-limit stop may cut a client `tool_use` block anywhere in its
+    /// input, so its client proposals are revoked rather than parsed.
+    const fn is_output_limit(self) -> bool {
+        matches!(self, Self::MaxTokens | Self::ModelContextWindowExceeded)
+    }
+
+    /// Whether closed client tool input is revoked unparsed at this terminal.
+    const fn revokes_client_input(self) -> bool {
+        matches!(self, Self::Refusal) || self.is_output_limit()
+    }
 }
 
 /// A known typed `stop_details.type` discriminator.

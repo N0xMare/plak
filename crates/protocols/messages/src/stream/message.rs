@@ -125,7 +125,7 @@ impl MessagesStreamProjector {
         }
         if self
             .stop_reason
-            .is_some_and(|reason| reason != MessagesStopReason::Refusal)
+            .is_some_and(|reason| !reason.revokes_client_input())
         {
             for (index, input) in std::mem::take(&mut self.closed_client_blocks) {
                 let location = OutputLocation::new(0, index);
@@ -261,17 +261,27 @@ impl MessagesStreamProjector {
         let stop_reason = self
             .stop_reason
             .ok_or_else(|| self.fail("message_stop arrived without a terminal stop_reason"))?;
-        if stop_reason != MessagesStopReason::Refusal {
+        // Refusal revokes the entire provisional response. An output limit
+        // revokes it only when it closed client tool input, which may be cut
+        // anywhere and so never becomes a call; the driver classifies the
+        // empty Length as an output-limit failure.
+        let revoked = stop_reason == MessagesStopReason::Refusal
+            || (stop_reason.is_output_limit() && !self.closed_client_blocks.is_empty());
+        if !revoked {
             self.complete_citations(output)?;
             self.retain_empty_skip_marker(output)?;
         }
         self.skipped_diagnostic(output);
         let blocks = self.ordered_blocks()?;
-        if stop_reason == MessagesStopReason::Refusal && self.hosted_effects_possible {
+        if revoked && self.hosted_effects_possible {
             return Err(MessagesStreamError::new(
                 MessagesStreamErrorKind::UnsupportedSemantic,
                 MessagesStreamErrorPhase::Complete,
-                "Messages refusal after possible hosted effects requires reconciliation",
+                if stop_reason == MessagesStopReason::Refusal {
+                    "Messages refusal after possible hosted effects requires reconciliation"
+                } else {
+                    "Messages output limit after possible hosted effects requires reconciliation"
+                },
             ));
         }
         validate_stop_blocks(
@@ -286,9 +296,9 @@ impl MessagesStreamProjector {
             self.stop_details.clone(),
         )?;
         let item_id = self.item_id()?;
-        // Streaming refusal revokes the entire provisional response, including tool
+        // A revoked response drops every provisional block, including tool
         // proposals and signed thinking. Nothing from it is eligible for replay.
-        let items = if stop_reason == MessagesStopReason::Refusal || blocks.is_empty() {
+        let items = if revoked || blocks.is_empty() {
             Vec::new()
         } else {
             vec![

@@ -762,6 +762,95 @@ fn assembles_dense_local_function_calls_with_exact_raw_arguments() {
     );
 }
 
+/// A `length` stop can cut a function call anywhere in its arguments. Neither a
+/// complete nor a cut call becomes canonical output: the terminal is an empty
+/// `Length`, which the driver classifies as OutputLimit.
+#[test]
+fn length_with_tool_calls_revokes_complete_and_truncated_arguments() {
+    for arguments in ["{\"q\":\"x\"}", "{\"q\":\"cut mid-str"] {
+        let binding = binding(ChatStreamLimits::default());
+        let plan = binding.plan();
+        let mut projector = projector_with_binding(binding);
+        let mut events = push_json(&mut projector, role());
+        events.extend(push_json(
+            &mut projector,
+            chunk(json!([{"index": 0, "delta": {"reasoning": "plan", "content": "Looking it up."}, "finish_reason": null}])),
+        ));
+        events.extend(push_json(
+            &mut projector,
+            chunk(json!([{"index": 0, "delta": {"tool_calls": [
+                {"index": 0, "id": "call-a", "type": "function", "function": {"name": "lookup", "arguments": arguments}}
+            ]}, "finish_reason": null}])),
+        ));
+        events.extend(complete(&mut projector, "length"));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            ModelEvent::ToolInputDelta(_)
+        ) || matches!(
+            event,
+            ModelEvent::BlockStarted(started) if matches!(started.block(), BlockStart::ToolCall { .. })
+        )));
+
+        let terminal = projector.finish().expect("length terminal");
+        assert_eq!(terminal.finish().wire(), "length");
+        assert_eq!(terminal.finish().canonical(), FinishReason::Length);
+        let response = terminal.response();
+        assert_eq!(response.output(), []);
+        assert_eq!(response.usage(), Some(Usage::new(11, 7, 4, 3, 0)));
+        assert_eq!(response.response_id(), Some("response-1"));
+        assert!(response.validate_for_commit().is_ok());
+        let mut assembler = ModelResponseAssembler::new(plan).expect("assembler");
+        let mut terminal_response = None;
+        events.push(ModelEvent::ResponseCompleted(response.clone()));
+        for event in events {
+            if let Some(response) = assembler.push(event).expect("revoked lifecycle") {
+                terminal_response = Some(response);
+            }
+        }
+        assert_eq!(terminal_response.as_ref(), Some(response));
+    }
+}
+
+#[test]
+fn non_length_finishes_keep_strict_tool_call_agreement() {
+    for reason in ["stop", "content_filter"] {
+        let mut projector = projector();
+        push_json(&mut projector, role());
+        push_json(
+            &mut projector,
+            chunk(json!([{"index": 0, "delta": {"tool_calls": [
+                {"index": 0, "id": "call-a", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+            ]}, "finish_reason": null}])),
+        );
+        push_json(&mut projector, finish(reason));
+        push_json(&mut projector, usage());
+        let error = projector
+            .push(b"data: [DONE]\n\n")
+            .expect_err("tool calls under a non-tool finish");
+        assert_eq!(error.kind(), ChatStreamErrorKind::InvalidResponse);
+        assert!(
+            error
+                .message()
+                .contains("finish reason disagrees with tool calls")
+        );
+    }
+    let mut projector = projector();
+    push_json(&mut projector, role());
+    push_json(
+        &mut projector,
+        chunk(json!([{"index": 0, "delta": {"content": "no call"}, "finish_reason": null}])),
+    );
+    push_json(&mut projector, finish("tool_calls"));
+    push_json(&mut projector, usage());
+    assert!(
+        projector
+            .push(b"data: [DONE]\n\n")
+            .expect_err("tool_calls without a call")
+            .message()
+            .contains("finish reason disagrees with tool calls")
+    );
+}
+
 #[test]
 fn rejects_choice_identity_object_and_unknown_wire_fields() {
     for (value, kind) in [

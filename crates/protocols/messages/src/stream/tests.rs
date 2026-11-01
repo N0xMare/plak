@@ -14,6 +14,7 @@ use crate::request::ToolOwnership;
 use crate::{MessagesRequestPolicy, MessagesStreamErrorKind};
 
 mod native;
+mod output_limit;
 
 fn projector_with_hosted(hosted: bool) -> MessagesStreamProjector {
     let selected: SelectedProviderConfigurationId = serde_json::from_value(
@@ -203,7 +204,7 @@ fn documented_refusal_shapes_discard_provisional_content_and_preserve_terminal()
 }
 
 #[test]
-fn closed_client_input_is_validated_only_after_non_refusal_terminal() {
+fn closed_client_input_is_validated_only_after_a_non_revoking_terminal() {
     let block = r#"{"type":"tool_use","id":"provisional-call","name":"read_file","input":{}}"#;
     for input in [
         r#"{"path":"#,
@@ -212,7 +213,7 @@ fn closed_client_input_is_validated_only_after_non_refusal_terminal() {
         "[1]",
         "{]",
     ] {
-        for reason in ["refusal", "tool_use"] {
+        for reason in ["refusal", "max_tokens", "tool_use"] {
             let delta = serde_json::json!({
                 "type": "content_block_delta", "index": 0,
                 "delta": {"type": "input_json_delta", "partial_json": input},
@@ -255,8 +256,8 @@ fn closed_client_input_is_validated_only_after_non_refusal_terminal() {
                 continue;
             }
             assert!(!rejected, "revoked input needs no JSON interpretation");
-            projector.finish_eof().expect("closed refusal EOF");
-            assert_eq!(terminal.expect("refusal terminal").output(), []);
+            projector.finish_eof().expect("closed revoked EOF");
+            assert_eq!(terminal.expect("revoked terminal").output(), []);
         }
     }
     let stream = refusal_stream(Some(block), "refusal", None).replace(

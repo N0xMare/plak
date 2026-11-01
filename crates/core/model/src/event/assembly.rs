@@ -210,9 +210,14 @@ fn validate_completed_response(
     response: &ModelResponse,
 ) -> Result<(), ModelError> {
     response.validate_for_commit()?;
-    // Refusal can revoke local proposals before their provisional arguments
-    // become valid canonical tool input. Other open blocks still fail closed.
-    if response.finish.reason() == FinishReason::Refusal && response.output.is_empty() {
+    // Refusal and an output limit can revoke local proposals before their
+    // provisional arguments become valid canonical tool input. Other open
+    // blocks still fail closed.
+    if matches!(
+        response.finish.reason(),
+        FinishReason::Refusal | FinishReason::Length
+    ) && response.output.is_empty()
+    {
         validate_revoked_output(open)?;
     } else if assemble_items(open)? != response.output {
         return Err(invalid_event(
@@ -270,13 +275,13 @@ fn validate_revoked_output(open: &OpenAssembly) -> Result<(), ModelError> {
                     )
                 {
                     return Err(invalid_event(
-                        "refusal cannot discard possible tool effects",
+                        "revoked output cannot discard possible tool effects",
                     ));
                 }
             }
             _ => {
                 return Err(invalid_event(
-                    "refusal arrived with an open non-client block",
+                    "revoked output arrived with an open non-client block",
                 ));
             }
         }

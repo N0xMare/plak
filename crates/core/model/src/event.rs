@@ -1294,9 +1294,10 @@ impl PartialBlock {
 /// This helper is useful for lossless adapter/projector tests. It is not
 /// semantic result authority: runtime consumers must accept and validate the
 /// self-contained [`ModelEvent::ResponseCompleted`] independently because
-/// bounded nonterminal observations may be dropped. An empty refusal terminal
-/// may revoke complete provisional output and unfinished local tool inputs;
-/// identity and usage still agree, and possible tool effects cannot be discarded.
+/// bounded nonterminal observations may be dropped. An empty refusal or length
+/// terminal may revoke complete provisional output and unfinished local tool
+/// inputs; identity and usage still agree, and possible tool effects cannot be
+/// discarded.
 #[derive(Debug)]
 pub struct ModelResponseAssembler {
     state: AssemblyState,

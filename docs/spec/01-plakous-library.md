@@ -1925,7 +1925,9 @@ means typed `OutputLimit`. It reuses `RetryOutputLimit` once at the same admitte
 bound, discarding that response and its reasoning projection; a second
 consecutive empty Length fails the turn. A successful classified round resets
 the guard. An incomplete local call also uses the existing output-limit path
-and never dispatches. Neither a wrap-up round nor a response with
+and never dispatches, whether it reaches the driver as a call inside a Length
+response or was revoked by the protocol kernel into an empty Length (a Messages `max_tokens` or
+Chat `length` stop with client tool input, §6.1). Neither a wrap-up round nor a response with
 provider-hosted ToolCall/ToolResult blocks may retry: visible tool-free Length
 still commits its answer, while empty Length fails immediately. A completed
 aggregate may be empty for Length so the driver can classify this failure;
@@ -2787,15 +2789,36 @@ observations remain provisional; they are not assistant history or replay
 material. No refused proposal executes and no tool result is fabricated.
 The user's admitted input and all earlier committed history remain intact.
 
-The neutral response assembler permits an empty `Refusal` terminal to revoke
-provisional output after validating normal identity, metadata, plan, usage, and
-output ordering. Unfinished local requested-tool input may be revoked without
-JSON interpretation; other open canonical blocks remain invalid. Messages still
-requires physical `content_block_stop` before terminal metadata. It retains
-closed client input under the existing byte/event bounds until the terminal
-reason is known, and parses it only for non-refusal output. Malformed or
-truncated JSON therefore never becomes an executable call. Other output
-mismatches remain invalid.
+Messages `stop_reason: max_tokens` and `model_context_window_exceeded` are the
+documented output-limit stops, and the service may end either inside a client
+`tool_use` block, with its input cut anywhere. When such a stop arrives after
+any closed client-tool input, complete or not, the entire provisional response
+is revoked exactly as for refusal: no client input is parsed, canonical output
+is empty, finish reason is `Length` with detail `stop_reason=<reason>`, and
+usage, response identity, request-plan identity, and provider metadata are
+retained. The driver classifies that empty Length as typed `OutputLimit`
+(§5.5): it discards the response, retries once with the output-limit note, and
+a second consecutive output limit fails the turn. No revoked proposal is
+offered for execution, recorded as a call, or replayed. An output-limit stop
+without client input keeps its output and takes the ordinary Length path. An
+output-limit stop that would revoke client input after possible hosted effects
+is an unsupported terminal requiring reconciliation, as for refusal. Chat
+Completions `finish_reason: length` with any tool-call slot is revoked the same
+way: no slot is parsed or projected, and the terminal is an empty `Length`.
+`tool_calls` without a slot and any other finish with a slot remain invalid.
+Responses already reports an unfinished function call at `max_output_tokens` as
+a definite output-limit failure (§6.5), with the same consequence.
+
+The neutral response assembler permits an empty `Refusal` or `Length` terminal
+to revoke provisional output after validating normal identity, metadata, plan,
+usage, and output ordering. Unfinished local requested-tool input may be
+revoked without JSON interpretation; other open canonical blocks remain
+invalid. Messages still requires physical `content_block_stop` before terminal
+metadata. It retains closed client input under the existing byte/event bounds
+until the terminal reason is known, and parses it only under a terminal that
+neither refuses nor stops at an output limit. Malformed or truncated JSON
+therefore never becomes an executable call. Other output mismatches remain
+invalid.
 Only local and MCP tool calls still in `Requested` are revocable, including
 completed canonical blocks. `Pending`, `Completed`, and `Failed` calls retain
 possible effects and cannot be discarded. Possible provider-hosted effects or streamed tool results cannot be discarded
@@ -2803,14 +2826,19 @@ through this rule. Messages refusal after possible hosted effects remains an
 unsupported terminal requiring the existing reconciliation path.
 
 A refusal block under another stop reason and inconsistent stop details remain
-invalid. A non-refusal terminal tool mismatch reports only the fixed stop reason
-and client/provider proposal counts. Refusal does not authorize fallback, retry,
+invalid. A non-refusal terminal tool mismatch (`tool_use` without a client
+proposal, or client proposals under `end_turn`, `stop_sequence` or
+`pause_turn`) reports only the fixed stop reason and client/provider proposal
+counts. Refusal does not authorize fallback, retry,
 or another model dispatch. A committed client-only refusal is quiescent and can
 be reopened or accept a new explicit turn; no discarded content is replayed.
 The canonical projection identities are `messages.projection.v3` for Claude
 OAuth and `openrouter-messages-canonical-v2` for OpenRouter Messages. Their
 context contracts and prepared records bind these semantics; wire, accounting,
-authentication, and persistence codecs keep their existing revisions.
+authentication, and persistence codecs keep their existing revisions. The
+output-limit revocation keeps these identities and the Chat projection
+identities: it admits only terminals that earlier failed the stream, and an
+empty Length is never committed to history.
 
 This local admission guarantee does not promise that the service will accept
 unchanged context. Anthropic's streaming-refusal guidance calls for resetting or

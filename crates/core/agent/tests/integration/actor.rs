@@ -1349,6 +1349,147 @@ async fn length_stopped_tool_proposal_retries_once_without_dispatch_or_commit() 
     Ok(())
 }
 
+/// The event shape a Messages `max_tokens` (or Chat `length`) stop inside a
+/// client tool call projects: the call started and received cut input but
+/// never completed, and the empty `Length` terminal revokes it. The driver
+/// takes the output-limit path: one retry with the note, and no dispatch.
+#[tokio::test]
+async fn revoked_length_tool_input_retries_once_without_dispatch_or_commit() -> TestResult {
+    for second_revoked in [false, true] {
+        let (descriptor, definition, scenario) = revoked_length_tool_scenario()?;
+        let second = if second_revoked {
+            any_request_scenario(&scenario)
+        } else {
+            any_request_scenario(&text_scenario(
+                &descriptor,
+                request(&descriptor, 5, 7, vec![user_item()?], Vec::new())?,
+                102,
+                "done",
+                plakous_test_support::ScenarioStart::Immediate,
+            )?)
+        };
+        let model = Arc::new(scripted_model(
+            descriptor,
+            [any_request_scenario(&scenario), second],
+        )?);
+        let tool = Arc::new(plakous_test_support::ScriptedTool::from_steps([
+            plakous_test_support::ScriptedToolStep::Complete(Ok(ToolOutcome::success_text(
+                "must-not-run",
+            )?)),
+        ]));
+        let mut registry = ToolRegistryBuilder::default();
+        registry.register(ToolRegistration::new(
+            RegisteredToolId::new("probe.registration")?,
+            ToolExecutorId::new("probe.executor")?,
+            plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"probe.executor"])?,
+            definition,
+            tool.clone(),
+        ))?;
+        let (_directory, workspace) = workspace()?;
+        let (clock, ids) = identity_sources()?;
+        let agent = agent_builder(Arc::clone(&model), registry.freeze(), workspace)?
+            .identity_sources(clock, ids)
+            .build()?;
+
+        let result = agent.prompt(PROMPT).await?.result().await?;
+        assert_eq!(model.captured_plans().len(), 2);
+        assert_eq!(
+            tool.captured(),
+            [] as [plakous_test_support::CapturedToolInvocation; 0]
+        );
+        let items = result.conversation().items();
+        assert_eq!(items[0], user_item()?);
+        assert!(matches!(
+            items[1].blocks(),
+            [ContentBlock::Text(text)]
+                if text.text().contains("response was discarded and no tool call ran")
+        ));
+        assert!(
+            items
+                .iter()
+                .flat_map(ConversationItem::blocks)
+                .all(|block| !matches!(block, ContentBlock::ToolCall(_))),
+            "a revoked call is never committed"
+        );
+        if second_revoked {
+            assert_terminal_error(&result, AgentErrorKind::Model)?;
+            let error = result.error().ok_or("missing output-limit failure")?;
+            assert_eq!(
+                error.model_kind(),
+                Some(plakous_model::ModelErrorKind::OutputLimit)
+            );
+            assert!(
+                error
+                    .message()
+                    .contains("response reached its output bound before completion"),
+                "{}",
+                error.message()
+            );
+            assert_eq!(items.len(), 3);
+            assert_failure_note(&items[2]);
+        } else {
+            assert_completed(&result, "done")?;
+            assert_eq!(items.len(), 3);
+        }
+        agent.shutdown().await?;
+    }
+    Ok(())
+}
+
+fn revoked_length_tool_scenario() -> TestResult<(
+    ResolvedModelDescriptor,
+    ToolDefinition,
+    plakous_test_support::ModelScenario,
+)> {
+    let descriptor = descriptor(true, false)?;
+    let definition = tool_definition(ToolConcurrency::Serial)?;
+    let expected = request(
+        &descriptor,
+        5,
+        7,
+        vec![user_item()?],
+        vec![definition.clone()],
+    )?;
+    let plan = descriptor.validate_request(expected.clone(), ValidationMode::Strict)?;
+    let digest = plan.digest();
+    let location = OutputLocation::new(0, 0);
+    let response = ModelResponse::new(
+        Vec::new(),
+        FinishDetails::new(
+            FinishReason::Length,
+            Some("stop_reason=max_tokens".to_owned()),
+        ),
+        None,
+        None,
+        digest,
+    );
+    let scenario = plakous_test_support::ModelScenario::new(
+        plakous_test_support::ExpectedRequest::ExactBeforeRuntimeHarnessPlan(Box::new(expected)),
+        plakous_test_support::ScenarioStart::Immediate,
+        vec![
+            plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseStarted(
+                ResponseStarted::new(None, digest),
+            )),
+            plakous_test_support::ScenarioStep::Emit(ModelEvent::BlockStarted(BlockStarted::new(
+                id::<EntryId>(100)?,
+                location,
+                BlockStart::ToolCall {
+                    call_id: id::<CallId>(101)?,
+                    tool: definition.name().clone(),
+                    owner: ToolExecutionOwner::Local,
+                    state: ToolCallState::Requested,
+                    correlation: ToolCorrelation::default(),
+                },
+            ))),
+            plakous_test_support::ScenarioStep::Emit(ModelEvent::ToolInputDelta(
+                ToolInputDelta::new(location, br#"{"value":"cut mid-str"#.as_slice()),
+            )),
+            plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseCompleted(response)),
+        ],
+    );
+    Ok((descriptor, definition, scenario))
+}
+
 #[tokio::test]
 async fn atomic_attach_recovers_pending_decisions_and_converges_after_resolution() -> TestResult {
     let (agent, mut turn, _tool, _workspace) = pending_decision_fixture().await?;

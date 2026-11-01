@@ -929,11 +929,27 @@ impl ChatStreamProjector {
                 "[DONE] preceded exact usage",
             )
         })?;
-        if (finish.canonical == FinishReason::ToolCalls) == self.tools.is_empty() {
+        // A length stop can cut tool arguments anywhere, so no slot is parsed or
+        // projected: the whole provisional response is revoked and the driver
+        // classifies the empty Length as an output-limit failure.
+        let revoked = finish.canonical == FinishReason::Length && !self.tools.is_empty();
+        if !revoked && (finish.canonical == FinishReason::ToolCalls) == self.tools.is_empty() {
             return self.fail(
                 ChatStreamErrorKind::InvalidResponse,
                 "finish reason disagrees with tool calls",
             );
+        }
+        if revoked {
+            for location in [self.text_location, self.reasoning_location]
+                .into_iter()
+                .flatten()
+            {
+                output.push(ModelEvent::BlockCompleted(BlockCompleted::new(location)));
+            }
+            let response = self.terminal_response(Vec::new(), &finish, usage);
+            self.terminal = Some(ChatTerminalProjection { response, finish });
+            self.done = true;
+            return Ok(());
         }
 
         let item_id = self.item_id()?;
@@ -1175,21 +1191,7 @@ impl ChatStreamProjector {
                 "invalid canonical assistant item",
             )
         })?;
-        let response = ModelResponse::new(
-            vec![item],
-            FinishDetails::new(finish.canonical, Some(finish.wire.clone())),
-            Some(usage),
-            self.response_id.clone(),
-            self.binding.plan,
-        )
-        .with_metadata({
-            let mut metadata =
-                ModelResponseMetadata::new(self.model.clone(), self.request_id.clone());
-            if let Some(served_by) = self.served_by {
-                metadata = metadata.with_served_by(served_by);
-            }
-            metadata
-        });
+        let response = self.terminal_response(vec![item], &finish, usage);
 
         self.next_block = next_block;
         output.extend(terminal_events);
@@ -1229,6 +1231,25 @@ impl ChatStreamProjector {
         })?;
         self.item_id = Some(id);
         Ok(id)
+    }
+    fn terminal_response(
+        &self,
+        output: Vec<ConversationItem>,
+        finish: &ChatFinishReason,
+        usage: Usage,
+    ) -> ModelResponse {
+        let mut metadata = ModelResponseMetadata::new(self.model.clone(), self.request_id.clone());
+        if let Some(served_by) = self.served_by {
+            metadata = metadata.with_served_by(served_by);
+        }
+        ModelResponse::new(
+            output,
+            FinishDetails::new(finish.canonical, Some(finish.wire.clone())),
+            Some(usage),
+            self.response_id.clone(),
+            self.binding.plan,
+        )
+        .with_metadata(metadata)
     }
     fn open_text(
         &mut self,
