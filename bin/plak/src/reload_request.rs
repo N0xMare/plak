@@ -85,6 +85,20 @@ struct OutcomeFile {
     outcome: ReloadOutcome,
 }
 
+/// The host-authored continuation this process's first attach posts, taken
+/// once so a later re-attach in the same process never posts it again.
+static CONTINUATION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn set_reload_continuation(text: String) {
+    if let Ok(mut slot) = CONTINUATION.lock() {
+        *slot = Some(text);
+    }
+}
+
+pub(crate) fn take_reload_continuation() -> Option<String> {
+    CONTINUATION.lock().ok().and_then(|mut slot| slot.take())
+}
+
 fn directory(paths: &PlakPaths) -> PathBuf {
     paths.run_dir().join("reload-requests")
 }
@@ -460,7 +474,7 @@ pub fn complete(
             "the reload landed on build {binary}, not the requested {}",
             request.expect_binary
         );
-        crate::environment::set_reload_continuation(format!(
+        set_reload_continuation(format!(
             "Plak reloaded this session onto build {binary} {landed}, but the request named build {}; the requested build is not running. Check the installed build before continuing.",
             request.expect_binary
         ));
@@ -471,7 +485,7 @@ pub fn complete(
         );
         return;
     }
-    crate::environment::set_reload_continuation(format!(
+    set_reload_continuation(format!(
         "Plak reloaded this session onto build {binary} {landed}, as requested. Continue the current task, or reply briefly if nothing remains."
     ));
     record(

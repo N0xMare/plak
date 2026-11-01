@@ -1463,7 +1463,7 @@ fn reload_installed_plak(
     std::os::unix::process::CommandExt::arg0(&mut command, build_identity::invocation_argv0());
     let mut carry_file = None;
     let mut unverified = None;
-    let mut handoff = carry::ReloadHandoff::default();
+    let mut handoff = carry::handoff::ReloadHandoff::default();
     handoff.request = target.request.map(|request| *request);
     match plan {
         carry::ReloadPlan::Fresh => {}

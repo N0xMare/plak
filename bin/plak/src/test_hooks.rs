@@ -1137,7 +1137,7 @@ impl OfflineSelection {
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),
             continuation: (face == OfflineFace::Attached)
-                .then(crate::environment::take_reload_continuation)
+                .then(crate::reload_request::take_reload_continuation)
                 .flatten(),
             event_renderer: None,
         })

@@ -533,12 +533,14 @@ pub(crate) fn carry_foreign_session(
                     "{error}; use this workspace's newest carried session from `plak session list`"
                 ))
             })?;
-            commands::session::import_document(services, document, false).map_err(|failure| {
-                CliFailure::new(format!(
-                    "{}; fix the error and retry the same command",
-                    failure.message()
-                ))
-            })
+            commands::session::import_export::import_document(services, document, false).map_err(
+                |failure| {
+                    CliFailure::new(format!(
+                        "{}; fix the error and retry the same command",
+                        failure.message()
+                    ))
+                },
+            )
         });
     let (record, note) = result.map_err(|failure| {
         let cleanup = match fs::remove_file(&out) {
@@ -605,7 +607,7 @@ fn prune_stale_handoffs(dir: &Path) {
     }
 }
 
-impl super::ReloadHandoff {
+impl super::handoff::ReloadHandoff {
     /// Writes the sidecar for `session_id` under the private carry directory
     /// and returns its path.
     pub(crate) fn write(&self, paths: &PlakPaths, session_id: &str) -> Result<PathBuf, String> {
