@@ -4684,11 +4684,16 @@ block's detail rows drop the indent under the bullet (a thought inside a
 group continues that group's rail as `│`), and an open milestone's detail
 rows drop `    │ ` plus two spaces of hanging indent on a wrapped
 continuation. The selection
-highlight paints exactly the cells that copy includes and no others, including
-when the selection starts or ends inside a rail: a dropped indent, rail, or
-marker is not highlighted, a language label the copy omits is not highlighted,
-and a prompt or steer row does not highlight its send time or `steer` tag.
-Cells the copy includes stay highlighted. List markers and table rails are
+highlight paints the cells that copy includes and no others, including when
+the selection starts or ends inside a rail: a dropped indent, rail, or marker
+is not highlighted, a language label the copy omits is not highlighted, and a
+prompt or steer row does not highlight its send time or `steer` tag. Cells the
+copy includes stay highlighted. Two cases differ from the painted cells: a row
+whose whole-row copy substitutes text (a one-line item's full text, a
+thinking lead's `◆` summary, a code row's source line) highlights its painted
+cells, including a caret, `…` or elapsed time the copy leaves out; and a
+selection edge on half of a wide character copies the whole character while
+highlighting only the covered cell. List markers and table rails are
 content and stay. A fenced or indented
 code row selected through its end copies the source line whole, including text
 a narrow pane clipped instead of reflowing. That copy keeps the line's tabs,
