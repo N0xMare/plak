@@ -28,6 +28,10 @@ SPEC.loader.exec_module(NCP)
 
 class CertificateTests(unittest.TestCase):
     def test_serial_stays_inside_dotted_certificate_directory(self):
+        if shutil.which("openssl") is None:
+            self.skipTest(
+                "openssl CLI is not installed; native-compare certificate generation needs it"
+            )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             directory = root / "capture.with.dots" / "certs"
@@ -43,6 +47,12 @@ class CertificateTests(unittest.TestCase):
             self.assertTrue((directory / "ca.srl").is_file())
             self.assertTrue(all(path.is_relative_to(directory)
                                 for path in root.rglob("*") if path.is_file()))
+
+    def test_serial_check_skips_when_the_openssl_cli_is_absent(self):
+        case = CertificateTests("test_serial_stays_inside_dotted_certificate_directory")
+        with patch.object(shutil, "which", return_value=None), self.assertRaises(unittest.SkipTest) as raised:
+            case.test_serial_stays_inside_dotted_certificate_directory()
+        self.assertIn("openssl CLI is not installed", str(raised.exception))
 
 
 class RedactionTests(unittest.TestCase):
