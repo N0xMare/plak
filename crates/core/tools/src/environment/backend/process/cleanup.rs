@@ -390,34 +390,73 @@ mod tests {
         }
     }
 
+    const HELPER_ENV: &str = "PLAKOUS_NON_UTF8_COMM_HELPER";
+
     /// A comm that is not UTF-8 is still a live member. `read_to_string` used
     /// to skip that stat, so the group looked empty while the process lived.
+    ///
+    /// The sleeper is this test binary, not the host `sleep`. A multi-call
+    /// `sleep` (busybox, or coreutils built as one binary) is only a symlink;
+    /// copying it dispatches on `argv[0]`, finds no applet, and exits before
+    /// the scan.
     #[test]
     fn non_utf8_comm_is_counted_as_a_live_member() {
+        if std::env::var_os(HELPER_ENV).is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            return;
+        }
         let directory = tempfile::tempdir().expect("temp dir");
         // Linux truncates comm to 15 bytes, splitting the last character of
         // this valid 16-byte UTF-8 executable name.
         let program = directory.path().join("é".repeat(8));
-        let source = ["/bin/sleep", "/usr/bin/sleep"]
-            .into_iter()
-            .find(|candidate| std::path::Path::new(candidate).is_file())
-            .expect("sleep");
-        std::fs::copy(source, &program).expect("copy sleep");
+        let source = std::env::current_exe().expect("test executable");
+        std::fs::copy(&source, &program).expect("copy test executable");
+        let stdout_path = directory.path().join("helper-stdout");
+        let stderr_path = directory.path().join("helper-stderr");
+        let stdout = std::fs::File::create(&stdout_path).expect("stdout");
+        let stderr = std::fs::File::create(&stderr_path).expect("stderr");
+        let filter = libtest_filter();
         let child = Command::new(&program)
-            .arg("60")
+            .arg("--exact")
+            .arg(&filter)
+            .arg("--test-threads=1")
+            .env(HELPER_ENV, "1")
             .process_group(0)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
             .spawn()
             .expect("spawn");
         let mut reap = Reap(Some(child));
-        let id = reap.0.as_ref().expect("child").id();
+        let child = reap.0.as_mut().expect("child");
+        let id = child.id();
         let pid = i32::try_from(id)
             .ok()
             .and_then(rustix::process::Pid::from_raw)
             .expect("pid");
-        let stat = std::fs::read(format!("/proc/{id}/stat")).expect("stat");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut observed = false;
+        while std::time::Instant::now() < deadline {
+            let status = child.try_wait().expect("wait");
+            assert!(
+                status.is_none(),
+                "helper exited {status:?} before a non-UTF-8 comm was live; filter {filter}; stdout {}; stderr {}",
+                read_text(&stdout_path),
+                read_text(&stderr_path),
+            );
+            if non_utf8_comm(id) && super::live_group_members(pid) == 1 {
+                observed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let stat = std::fs::read(format!("/proc/{id}/stat")).unwrap_or_default();
+        assert!(
+            observed,
+            "non-UTF-8 comm was not a live member; stat {stat:?}; filter {filter}; stdout {}; stderr {}",
+            read_text(&stdout_path),
+            read_text(&stderr_path),
+        );
         let split = stat
             .iter()
             .rposition(|byte| *byte == b')')
@@ -425,11 +464,38 @@ mod tests {
         let comm_at = stat.iter().position(|byte| *byte == b'(').expect("comm");
         assert!(std::str::from_utf8(&stat[comm_at + 1..split]).is_err());
         assert_eq!(super::live_group_members(pid), 1);
-        if let Some(mut child) = reap.0.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        let _ = child.kill();
+        let _ = child.wait();
         assert_eq!(super::live_group_members(pid), 0);
+    }
+
+    /// Libtest's `--exact` filter is the test path without the crate name.
+    fn libtest_filter() -> String {
+        if let Some(name) = std::thread::current().name()
+            && name.ends_with("non_utf8_comm_is_counted_as_a_live_member")
+        {
+            return name.to_owned();
+        }
+        let module = module_path!();
+        let module = module.split_once("::").map_or(module, |(_, rest)| rest);
+        format!("{module}::non_utf8_comm_is_counted_as_a_live_member")
+    }
+
+    fn non_utf8_comm(id: u32) -> bool {
+        let Ok(stat) = std::fs::read(format!("/proc/{id}/stat")) else {
+            return false;
+        };
+        let Some(split) = stat.iter().rposition(|byte| *byte == b')') else {
+            return false;
+        };
+        let Some(comm_at) = stat.iter().position(|byte| *byte == b'(') else {
+            return false;
+        };
+        comm_at < split && std::str::from_utf8(&stat[comm_at + 1..split]).is_err()
+    }
+
+    fn read_text(path: &std::path::Path) -> String {
+        String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned()
     }
 }
 
