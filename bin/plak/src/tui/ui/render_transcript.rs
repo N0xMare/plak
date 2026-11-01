@@ -462,6 +462,7 @@ impl App {
             body_area,
             start,
             &layout.plain,
+            &layout.copy,
             self.theme.transcript_selection,
         );
         let bar = super::scrollbar::Scrollbar {

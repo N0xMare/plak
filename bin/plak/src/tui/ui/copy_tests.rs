@@ -1,10 +1,13 @@
 //! Transcript copy drops code and quote rails and copies a wrapped code row
-//! whole (spec 02 §5.4).
+//! whole (spec 02 §5.4). The selection highlight paints those same cells.
 
 use super::App;
-use super::test_support::{left_mouse, say, transcript_fixture};
+use super::test_support::{left_mouse, say, tool_line, transcript_fixture};
+use crate::tui::presentation::ActivityKind;
+use crate::tui::{HostEvent, user_action_channel};
 use crossterm::event::{MouseButton, MouseEventKind};
-use plakous_host_protocol::views::transcript::TranscriptRow;
+use plakous_host_protocol::views::transcript::{AgentMilestone, MilestoneEvent, TranscriptRow};
+use plakous_host_protocol::views::{CallDetail, CallDetailOutcome, CallDetailSource};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use unicode_width::UnicodeWidthStr as _;
@@ -67,6 +70,37 @@ fn select_cells(app: &mut App, row: usize, first: usize, last_row: usize, last: 
     app.handle_mouse(left_mouse(MouseEventKind::Down(MouseButton::Left), x0, y0));
     app.handle_mouse(left_mouse(MouseEventKind::Drag(MouseButton::Left), x1, y1));
     app.handle_mouse(left_mouse(MouseEventKind::Up(MouseButton::Left), x1, y1));
+}
+
+fn row_highlight(app: &App, buffer: &ratatui::buffer::Buffer, row: usize) -> String {
+    let body = app.transcript_body_area.expect("body");
+    let y = body.y + u16::try_from(row - app.pane.transcript_visible_start).unwrap();
+    let style = app.theme.transcript_selection;
+    let mut text = String::new();
+    for x in body.x..body.right() {
+        let cell = &buffer[(x, y)];
+        if Some(cell.fg) == style.fg && Some(cell.bg) == style.bg {
+            text.push_str(cell.symbol());
+        }
+    }
+    text
+}
+
+fn highlighted_equals_copy(
+    app: &mut App,
+    width: u16,
+    height: u16,
+    row: usize,
+    first: usize,
+    last: usize,
+) -> String {
+    select_cells(app, row, first, row, last);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let highlighted = row_highlight(app, terminal.backend().buffer(), row);
+    let copied = app.take_transcript_selection_text().unwrap_or_default();
+    assert_eq!(highlighted, copied, "plain {:?}", plain(app).get(row));
+    highlighted
 }
 
 fn copy_rows(app: &mut App, width: u16, height: u16, first: usize, last: usize) -> String {
@@ -279,4 +313,467 @@ fn copying_a_makefile_keeps_tabs() {
     );
     let copied = copy_rows(&mut app, WIDTH, HEIGHT, all[0], *eof.last().expect("EOF"));
     assert_eq!(copied, src, "rows {rows:#?}");
+}
+
+#[test]
+fn selection_highlight_matches_copied_transcript_cells() {
+    const WIDTH: u16 = 100;
+    const HEIGHT: u16 = 40;
+    let mut app = transcript_fixture();
+    say(&mut app, &sample());
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let prose = rows_containing(&rows, "Ready.")[0];
+    let quote = rows_containing(&rows, "quoted sentence")[0];
+    let item = rows_containing(&rows, "alpha item")[0];
+    let table = rows_containing(&rows, "plakous/")[0];
+    let code = rows_containing(&rows, "plak logout claude")[0];
+    let lang = code - 1;
+
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, prose, 0, edge),
+        "Ready."
+    );
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, quote, 0, edge),
+        "a quoted sentence"
+    );
+    let listed = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, item, 0, edge);
+    assert!(
+        listed.starts_with("• ") && listed.contains("alpha item"),
+        "{listed:?}"
+    );
+    let tabled = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, table, 0, edge);
+    assert!(
+        tabled.starts_with('│') && tabled.contains("plakous/"),
+        "{tabled:?}"
+    );
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, code, 0, edge),
+        "plak logout claude"
+    );
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, lang, 0, edge),
+        ""
+    );
+
+    let rows = plain(&app);
+    let at = cell_at(&rows[code], "logout");
+    let partial = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, code, 1, at + 5);
+    assert!(
+        partial.ends_with("logout") && !partial.contains('│'),
+        "{partial:?}"
+    );
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, code, 0, 2),
+        ""
+    );
+}
+
+#[test]
+fn wrapped_code_highlight_matches_the_copied_cells() {
+    const WIDTH: u16 = 40;
+    const HEIGHT: u16 = 30;
+    let long = "plak logout claude --local --and-then-remove-the-stored-token-cache";
+    let mut app = transcript_fixture();
+    say(&mut app, &fenced("", &format!("{long}\necho done")));
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let wide = rows_containing(&rows, "plak logout claude")[0];
+    let cont = rows
+        .iter()
+        .position(|row| row.contains('↳'))
+        .expect("continuation");
+    let marker = cell_at(&rows[cont], "↳");
+    select_cells(&mut app, wide, 0, cont, marker + 4);
+    let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let (head, tail) = {
+        let buffer = terminal.backend().buffer();
+        (
+            row_highlight(&app, buffer, wide),
+            row_highlight(&app, buffer, cont),
+        )
+    };
+    let copied = app.take_transcript_selection_text().unwrap_or_default();
+    assert_eq!(format!("{head}{tail}"), copied);
+    assert!(
+        !head.contains('│') && !tail.contains('↳'),
+        "{head:?} {tail:?}"
+    );
+}
+
+#[test]
+fn prompt_highlight_omits_the_send_time_and_steer_tag() {
+    const WIDTH: u16 = 80;
+    const HEIGHT: u16 = 24;
+    let sent = 1_791_383_520_000;
+    let mut app = transcript_fixture();
+    app.apply_host_event(HostEvent::Row(TranscriptRow::User {
+        text: "ship it".into(),
+        sent_at_ms: Some(sent),
+    }));
+    app.apply_host_event(HostEvent::Row(TranscriptRow::Steer {
+        text: "also docs".into(),
+        sent_at_ms: Some(sent),
+    }));
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let prompt = rows_containing(&rows, "ship it")[0];
+    let steer = rows_containing(&rows, "also docs")[0];
+    let prompt_text = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, prompt, 0, edge);
+    assert!(prompt_text.contains("ship it"), "{prompt_text:?}");
+    assert!(!prompt_text.contains("steer"), "{prompt_text:?}");
+    let steer_text = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, steer, 0, edge);
+    assert!(
+        steer_text.contains("also docs") && !steer_text.contains("steer"),
+        "{steer_text:?}"
+    );
+}
+
+#[test]
+fn cell_output_gutter_highlight_matches_copy() {
+    const WIDTH: u16 = 80;
+    const HEIGHT: u16 = 40;
+    let mut app = transcript_fixture();
+    app.render_prefs.reduced_motion = true;
+    super::test_support::compose_cell(
+        &mut app,
+        "cell",
+        "exec_js",
+        "done",
+        "0 tools",
+        "const x = 1;",
+        &[],
+    );
+    say(&mut app, "Done.");
+    app.toggle_tool_expand_at(0);
+    paint(&mut app, WIDTH, HEIGHT);
+    let output = rows_containing(&plain(&app), "output ▸")[0];
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, output, 0, edge),
+        "output ▸"
+    );
+}
+
+fn canonical_detail(call_id: &str, input: &str, output: &str) -> HostEvent {
+    HostEvent::CallDetail(CallDetail {
+        call_id: call_id.to_owned(),
+        agent_id: None,
+        session_id: "s1".to_owned(),
+        outcome: CallDetailOutcome::Detail {
+            input: input.to_owned(),
+            output: output.to_owned(),
+            input_truncated: false,
+            output_truncated: false,
+            source: CallDetailSource::Canonical,
+            sources: Vec::new(),
+        },
+    })
+}
+
+fn open_item(app: &mut App, width: u16, height: u16) {
+    app.render_prefs.reduced_motion = true;
+    paint(app, width, height);
+    app.toggle_tool_expand_at(0);
+    let (tx, _rx) = user_action_channel();
+    app.maybe_request_call_details(Some(&tx));
+}
+
+fn assert_no_rail(copied: &str, plain_row: &str) {
+    assert!(
+        !copied.contains('│') && !copied.contains('├') && !copied.contains('└'),
+        "rail copied {copied:?} from {plain_row:?}"
+    );
+}
+
+#[test]
+fn tool_detail_highlight_drops_the_rail_whole_and_partial() {
+    const WIDTH: u16 = 100;
+    const HEIGHT: u16 = 40;
+    let mut app = transcript_fixture();
+    app.apply_host_event(tool_line(
+        "run",
+        None,
+        None,
+        ActivityKind::Process,
+        "exec_command",
+        "done",
+        Some("cargo test --workspace"),
+    ));
+    say(&mut app, "Done.");
+    open_item(&mut app, WIDTH, HEIGHT);
+    app.apply_host_event(canonical_detail(
+        "run",
+        r#"{"cmd":"cargo test --workspace"}"#,
+        "applied",
+    ));
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let command = rows
+        .iter()
+        .position(|row| row.contains("│ $ cargo test --workspace"))
+        .expect("detail row");
+    let line = rows[command].clone();
+    assert!(line.contains('│'), "detail rail not painted: {line:?}");
+    let dollar = cell_at(&line, "$");
+    assert!(dollar >= 2, "{line:?}");
+
+    let whole = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, command, 0, edge);
+    assert_eq!(whole, "$ cargo test --workspace");
+    assert_no_rail(&whole, &line);
+
+    let from_rail = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, command, 0, dollar + 5);
+    assert_eq!(from_rail, "$ carg");
+    assert_no_rail(&from_rail, &line);
+
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, command, 0, dollar - 1),
+        ""
+    );
+
+    let cargo = cell_at(&line, "cargo");
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, command, cargo, cargo + 4),
+        "cargo"
+    );
+
+    let output = plain(&app)
+        .iter()
+        .position(|row| row.contains("│ applied"))
+        .expect("output row");
+    let output_line = plain(&app)[output].clone();
+    let applied = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, output, 0, edge);
+    assert_eq!(applied, "applied");
+    assert_no_rail(&applied, &output_line);
+}
+
+#[test]
+fn diff_highlight_drops_the_rail_and_keeps_markers() {
+    const WIDTH: u16 = 100;
+    const HEIGHT: u16 = 40;
+    let mut app = transcript_fixture();
+    app.apply_host_event(tool_line(
+        "edit",
+        None,
+        None,
+        ActivityKind::Tool,
+        "edit_file",
+        "done",
+        Some("src/a.rs +1/-1"),
+    ));
+    say(&mut app, "x");
+    open_item(&mut app, WIDTH, HEIGHT);
+    app.apply_host_event(canonical_detail(
+        "edit",
+        r#"{"file_path":"src/a.rs","old_string":"one\ntwo\nthree","new_string":"one\n2\nthree"}"#,
+        "applied",
+    ));
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let removed = rows_containing(&rows, "-two")[0];
+    let line = rows[removed].clone();
+    assert!(line.contains('│'), "diff rail not painted: {line:?}");
+    let marker = cell_at(&line, "-two");
+
+    let whole = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, removed, 0, edge);
+    assert_eq!(whole, "-two");
+    assert_no_rail(&whole, &line);
+
+    let from_rail = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, removed, 0, marker + 1);
+    assert_eq!(from_rail, "-t");
+    assert_no_rail(&from_rail, &line);
+
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, removed, marker, marker + 3),
+        "-two"
+    );
+
+    let context = rows_containing(&rows, " one")[0];
+    let context_line = rows[context].clone();
+    let kept = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, context, 0, edge);
+    assert_eq!(kept, " one");
+    assert_no_rail(&kept, &context_line);
+}
+
+#[test]
+fn wrapped_detail_highlight_drops_the_hanging_indent() {
+    const WIDTH: u16 = 40;
+    const HEIGHT: u16 = 40;
+    let long = "alphaBRAVOcharlieDELTAechoFOXTROTgolfHOTELextraTAIL";
+    let mut app = transcript_fixture();
+    app.apply_host_event(tool_line(
+        "run",
+        None,
+        None,
+        ActivityKind::Process,
+        "exec_command",
+        "done",
+        Some("cargo test"),
+    ));
+    say(&mut app, "Done.");
+    open_item(&mut app, WIDTH, HEIGHT);
+    app.apply_host_event(canonical_detail("run", r#"{"cmd":"cargo test"}"#, long));
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let start = rows_containing(&rows, "alphaBRAVO")[0];
+    let end = rows_containing(&rows, "extraTAIL")[0];
+    assert!(end > start, "the output did not wrap: {rows:?}");
+    let mut joined = String::new();
+    for (offset, plain_row) in rows[start..=end].iter().enumerate() {
+        let row = start + offset;
+        let copied = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, row, 0, edge);
+        assert_no_rail(&copied, plain_row);
+        if row > start {
+            assert!(
+                !copied.starts_with(' '),
+                "hanging indent copied {copied:?} from {plain_row:?}"
+            );
+        }
+        joined.push_str(&copied);
+    }
+    assert_eq!(joined, long, "{rows:?}");
+}
+
+#[test]
+fn thinking_detail_highlight_drops_the_rail_whole_and_partial() {
+    const WIDTH: u16 = 40;
+    const HEIGHT: u16 = 40;
+    let long = "alphaBRAVOcharlieDELTAechoFOXTROTgolfHOTELextraTAIL";
+    let mut app = transcript_fixture();
+    app.render_prefs.reduced_motion = true;
+    app.apply_host_event(HostEvent::ReasoningDelta {
+        location_key: "r1".into(),
+        text: format!("line one\n{long}"),
+    });
+    app.apply_host_event(HostEvent::ReasoningSealed {
+        location_key: "r1".into(),
+    });
+    say(&mut app, "Done.");
+    let idx = app
+        .pane
+        .blocks
+        .iter()
+        .position(|block| matches!(block, crate::tui::blocks::ScrollBlock::Thinking { .. }))
+        .expect("thought");
+    app.toggle_tool_expand_at(idx);
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let head = rows
+        .iter()
+        .position(|row| row.contains("line one") && !row.contains('◆'))
+        .expect("detail");
+    let head_line = rows[head].clone();
+    assert!(
+        head_line.contains('│') || head_line.starts_with("    "),
+        "thought rail not painted: {head_line:?}"
+    );
+    let whole = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, head, 0, edge);
+    assert_eq!(whole, "line one");
+    assert_no_rail(&whole, &head_line);
+
+    let word = cell_at(&head_line, "line");
+    assert!(word >= 2, "{head_line:?}");
+    let partial = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, head, 0, word + 3);
+    assert_eq!(partial, "line");
+    assert_no_rail(&partial, &head_line);
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, head, 0, word - 1),
+        ""
+    );
+
+    let start = rows_containing(&rows, "alphaBRAVO")[0];
+    let end = rows_containing(&rows, "extraTAIL")[0];
+    assert!(end >= start, "body missing: {rows:?}");
+    let mut joined = String::new();
+    for (offset, plain_row) in rows[start..=end].iter().enumerate() {
+        let row = start + offset;
+        let copied = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, row, 0, edge);
+        assert_no_rail(&copied, plain_row);
+        if row > start {
+            assert!(
+                !copied.starts_with(' '),
+                "hanging indent copied {copied:?} from {plain_row:?}"
+            );
+        }
+        joined.push_str(&copied);
+    }
+    assert_eq!(joined, long, "{rows:?}");
+}
+
+#[test]
+fn milestone_detail_highlight_drops_the_rail_whole_and_partial() {
+    const WIDTH: u16 = 40;
+    const HEIGHT: u16 = 40;
+    let long = "alphaBRAVOcharlieDELTAechoFOXTROTgolfHOTELextraTAIL";
+    let mut app = transcript_fixture();
+    app.render_prefs.reduced_motion = true;
+    app.apply_host_event(HostEvent::Row(TranscriptRow::Milestone(AgentMilestone {
+        agent_id: "c23".into(),
+        event: MilestoneEvent::Spawned,
+        template: Some("worker".into()),
+        text: Some(format!("Port the renderer\n{long}")),
+        duration_ms: None,
+        candidate: None,
+        files: None,
+        paths: Vec::new(),
+    })));
+    say(&mut app, "Done.");
+    let idx = app
+        .pane
+        .blocks
+        .iter()
+        .position(|block| matches!(block, crate::tui::blocks::ScrollBlock::Milestone { .. }))
+        .expect("milestone");
+    app.toggle_tool_expand_at(idx);
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let head = rows
+        .iter()
+        .position(|row| row.contains('│') && row.contains("Port the renderer"))
+        .expect("detail");
+    let head_line = rows[head].clone();
+    assert!(
+        head_line.contains('│'),
+        "milestone rail not painted: {head_line:?}"
+    );
+    let whole = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, head, 0, edge);
+    assert_eq!(whole, "Port the renderer");
+    assert_no_rail(&whole, &head_line);
+
+    let word = cell_at(&head_line, "Port");
+    assert!(word >= 2, "{head_line:?}");
+    let partial = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, head, 0, word + 3);
+    assert_eq!(partial, "Port");
+    assert_no_rail(&partial, &head_line);
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, head, word, word + 3),
+        "Port"
+    );
+
+    let start = rows_containing(&rows, "alphaBRAVO")[0];
+    let end = rows_containing(&rows, "extraTAIL")[0];
+    assert!(end >= start, "body missing: {rows:?}");
+    let mut joined = String::new();
+    for (offset, plain_row) in rows[start..=end].iter().enumerate() {
+        let row = start + offset;
+        let copied = highlighted_equals_copy(&mut app, WIDTH, HEIGHT, row, 0, edge);
+        assert_no_rail(&copied, plain_row);
+        if row > start {
+            assert!(
+                !copied.starts_with(' '),
+                "hanging indent copied {copied:?} from {plain_row:?}"
+            );
+        }
+        joined.push_str(&copied);
+    }
+    assert_eq!(joined, long, "{rows:?}");
 }

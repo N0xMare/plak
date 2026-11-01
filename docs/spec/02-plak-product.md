@@ -4675,8 +4675,21 @@ the end of a one-line row from its first cell copies that row's full text
 thinking row copies as `◆ ` plus its full summary line. A prompt or steer row copies its
 text without the send time or the `steer` tag. Assistant text drops its leading
 decoration when the selection starts at or before that decoration: the
-two-space block indent, and a quote rail or a code rail (`│ ` or a fence's
-`┌ `). List markers and table rails are content and stay. A fenced or indented
+two-space block indent, a quote rail or a code rail (`│ ` or a fence's
+`┌ `), and a soft-wrap continuation marker (`↳`) with its rail. An open
+item's detail rows, including a diff, drop their visual rail the same way:
+the item rail continued and `│ `, plus two spaces of hanging indent on a
+wrapped continuation. Diff markers and the line text stay. A thinking
+block's detail rows drop the indent under the bullet (a thought inside a
+group continues that group's rail as `│`), and an open milestone's detail
+rows drop `    │ ` plus two spaces of hanging indent on a wrapped
+continuation. The selection
+highlight paints exactly the cells that copy includes and no others, including
+when the selection starts or ends inside a rail: a dropped indent, rail, or
+marker is not highlighted, a language label the copy omits is not highlighted,
+and a prompt or steer row does not highlight its send time or `steer` tag.
+Cells the copy includes stay highlighted. List markers and table rails are
+content and stay. A fenced or indented
 code row selected through its end copies the source line whole, including text
 a narrow pane clipped instead of reflowing. That copy keeps the line's tabs,
 drops a CR that preceded LF, and replaces every other control character; the

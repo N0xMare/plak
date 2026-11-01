@@ -28,15 +28,15 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;
 
 use crate::tui::blocks::{
-    CellItem, DisplayMode, PROMPT_PREFIX, RenderPrefs, RowPlan, ScrollBlock, discarded_label,
-    format_approval_block, mail_lines, milestone_detail, steer_rows, thinking_detail_rail,
-    thinking_detail_rows, thinking_has_detail, tool_block_closes_with_blank, tool_is_failed,
-    tool_is_running, wrap_cell_items, wrap_plain,
+    CellItem, DisplayMode, PROMPT_PREFIX, RenderPrefs, RowPlan, ScrollBlock, detail_rail,
+    discarded_label, format_approval_block, mail_lines, milestone_detail, steer_rows,
+    thinking_detail_rail, thinking_detail_rows, thinking_has_detail, tool_block_closes_with_blank,
+    tool_is_failed, tool_is_running, wrap_cell_items, wrap_plain,
 };
 use crate::tui::markdown::RowCopy;
 use crate::tui::presentation::ActivityKind;
 use crate::tui::theme::Theme;
-use detail::{ItemFacts, push_item_detail};
+use detail::{ItemFacts, detail_row_copy, push_item_detail};
 use estimate::system_row_is_hidden;
 use lead::cell_footer_rows;
 
@@ -339,6 +339,7 @@ fn block_rows(
     }
     let mut lines = block_content_lines(block, plan, theme, content_width, prefs);
     let mut copy = vec![RowCopy::default(); lines.len()];
+    stamp_block_rails(block, plan, theme, &lines, &mut copy);
     if !plan.group_folded && !plan.cell_tails.is_empty() {
         if lines.last().is_some_and(|row| row.width() == 0) {
             lines.pop();
@@ -355,6 +356,70 @@ fn block_rows(
         }
     }
     (lines, copy)
+}
+
+/// Milestone detail prefix, and the same rail plus the two-space hanging
+/// indent `wrap_styled_line_railed` paints on a continuation.
+const MILESTONE_DETAIL_RAIL: &str = "    │ ";
+const MILESTONE_DETAIL_HANG: &str = "    │   ";
+
+/// Detail rows record the rail actually painted in front of them. Lead rows
+/// stay at zero: a whole lead still copies its rail through the row's full
+/// text. A thinking lead is the exception that copies `◆ ` plus the summary,
+/// which is not a prefix of the painted row, so its indent stays with the lead.
+fn stamp_block_rails(
+    block: &ScrollBlock,
+    plan: &RowPlan,
+    theme: &Theme,
+    lines: &[Line<'static>],
+    copy: &mut [RowCopy],
+) {
+    match block {
+        ScrollBlock::Tool { kind, mode, .. }
+            if !plan.group_folded
+                && *kind != ActivityKind::Compose
+                && *mode == DisplayMode::Expanded =>
+        {
+            let leads = lead_rows(block, plan, theme);
+            let item_rail = leads.last().map_or("  ", |lead| lead.rail);
+            let rail = detail_rail(item_rail);
+            let hanging = format!("{rail}  ");
+            stamp_railed(lines, copy, leads.len(), &rail, &hanging);
+        }
+        ScrollBlock::Thinking { text, mode, .. }
+            if !plan.group_folded && mode.shows_detail() && thinking_has_detail(text) =>
+        {
+            let rail = thinking_detail_rail(plan);
+            let from = lead_rows(block, plan, theme).len();
+            stamp_railed(lines, copy, from, &rail, &rail);
+        }
+        ScrollBlock::Milestone { open: true, .. } => {
+            let from = lead_rows(block, plan, theme).len();
+            stamp_railed(
+                lines,
+                copy,
+                from,
+                MILESTONE_DETAIL_RAIL,
+                MILESTONE_DETAIL_HANG,
+            );
+        }
+        _ => {}
+    }
+}
+
+fn stamp_railed(
+    lines: &[Line<'static>],
+    copy: &mut [RowCopy],
+    from: usize,
+    rail: &str,
+    hanging: &str,
+) {
+    if from >= lines.len() || from >= copy.len() {
+        return;
+    }
+    for (line, meta) in lines[from..].iter().zip(copy[from..].iter_mut()) {
+        *meta = detail_row_copy(line, rail, hanging);
+    }
 }
 
 /// Render one isolated block for tests.
@@ -568,8 +633,8 @@ fn block_content_lines(
             if *open {
                 for row in milestone_detail(milestone) {
                     logical.extend(wrap_styled_line_railed(
-                        "    │ ",
-                        "    │   ",
+                        MILESTONE_DETAIL_RAIL,
+                        MILESTONE_DETAIL_HANG,
                         theme.tool_label,
                         Line::from(Span::styled(row, theme.system)),
                         content_width.max(1),

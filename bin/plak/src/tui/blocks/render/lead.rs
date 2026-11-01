@@ -5,7 +5,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr as _;
 
-use super::detail::{ItemFacts, push_item_detail};
+use super::detail::{ItemFacts, detail_row_copy, push_item_detail};
 use super::item_row::{MIN_SUBJECT_CELLS, command_spans, item_row, truncate_spans};
 use super::{assistant_markdown_theme, cells_u16};
 use crate::tui::blocks::{
@@ -442,7 +442,10 @@ pub(super) fn cell_footer_rows(
             theme,
             width,
         );
-        copy.extend(std::iter::repeat_n(RowCopy::default(), rows.len() - first));
+        let hanging = format!("{rail}  ");
+        for line in &rows[first..] {
+            copy.push(detail_row_copy(line, &rail, &hanging));
+        }
     }
     (rows, copy)
 }

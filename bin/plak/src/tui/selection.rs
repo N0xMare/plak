@@ -242,19 +242,24 @@ impl TranscriptSelection {
         self.restore_projection = None;
     }
 
-    /// Highlight the selected part of the currently visible real transcript
-    /// body. Sticky preview rows are intentionally outside this mapping.
+    /// Highlight the cells [`Self::take_text`] will copy on the visible
+    /// transcript body. Sticky preview rows are intentionally outside this
+    /// mapping. Columns come from the same row bounds as the copy: a leading
+    /// decoration, an omitted language label, and cells past the plain row
+    /// are not painted.
     pub(crate) fn render(
         &self,
         buffer: &mut Buffer,
         area: Rect,
         visible_start: usize,
         lines: &[String],
+        copy: &[RowCopy],
         style: Style,
     ) {
         let Some((start, end)) = self.ordered() else {
             return;
         };
+        let max_column = usize::from(area.width).saturating_sub(1);
         for screen_row in 0..usize::from(area.height) {
             let content_row = visible_start.saturating_add(screen_row);
             if content_row < start.row || content_row > end.row {
@@ -273,7 +278,11 @@ impl TranscriptSelection {
             } else {
                 line.width().saturating_sub(1)
             };
-            for column in first..=last.min(usize::from(area.width).saturating_sub(1)) {
+            let Some((from, to)) = row_bounds(line, copy.get(content_row), first, last).cells
+            else {
+                continue;
+            };
+            for column in from..=to.min(max_column) {
                 let x = area
                     .x
                     .saturating_add(u16::try_from(column).unwrap_or(u16::MAX));
@@ -338,19 +347,14 @@ impl TranscriptSelection {
                 line.width().saturating_sub(1)
             };
             let meta = copy.get(row);
-            let decoration = usize::from(meta.map(|meta| meta.decoration).unwrap_or(0));
-            // Through the end of the visible row, and starting at or before
-            // the decoration, so the whole content is covered. Decoration 0
-            // keeps the old rule: the selection starts at the first cell.
-            let through_end = row != end.row || last.saturating_add(1) >= line.width();
-            let whole = first <= decoration && through_end;
-            if whole && meta.is_some_and(|meta| meta.language) {
+            let bounds = row_bounds(line, meta, first, last);
+            if bounds.omitted {
                 painted_open = false;
                 continue;
             }
             if let Some(source) = meta.and_then(|meta| meta.code.clone()) {
                 let group_end = code_group_end(copy, row);
-                if first <= decoration && selection_reaches(lines, end, group_end) {
+                if first <= bounds.decoration && selection_reaches(lines, end, group_end) {
                     selected.push(source);
                     skip_through = Some(group_end);
                     painted_open = false;
@@ -359,7 +363,7 @@ impl TranscriptSelection {
             }
             let code_visual =
                 meta.is_some_and(|meta| meta.code.is_some() || meta.code_continuation);
-            if whole
+            if bounds.whole
                 && !code_visual
                 && let Some(text) = full(row)
             {
@@ -369,21 +373,19 @@ impl TranscriptSelection {
             }
             // Drop the decoration when the selection starts inside it. A
             // selection that starts in the content copies the cells it covers.
-            let start_cell = if first <= decoration {
-                decoration
-            } else {
-                first
-            };
-            if start_cell > last {
+            if bounds.origin > last {
                 // A blank row, or one whose visible text is only decoration,
                 // still contributes its line when the selection covers it.
-                if whole && line.width() <= decoration {
+                if bounds.whole && line.width() <= bounds.decoration {
                     selected.push(String::new());
                 }
                 painted_open = false;
                 continue;
             }
-            let slice = slice_cells(line, start_cell, last);
+            let slice = match bounds.cells {
+                Some((from, to)) => slice_cells(line, from, to),
+                None => String::new(),
+            };
             let join =
                 painted_open && row > start.row && meta.is_some_and(|meta| meta.code_continuation);
             if join && let Some(last) = selected.last_mut() {
@@ -411,6 +413,55 @@ impl TranscriptSelection {
         } else {
             (head, anchor)
         })
+    }
+}
+
+/// Which cells of one plain row a selection copies, and the flags the
+/// copy string still needs.
+///
+/// `cells` is the inclusive column range of glyphs both the highlight and
+/// the cell-slice copy use. A whole code line or one-line tool row may
+/// substitute its source or full text for that slice; the highlight still
+/// paints these columns, which are the painted form of that text. `None`
+/// means the row contributes no glyphs (omitted language label, a selection
+/// that never leaves the decoration, or columns past the plain row such as
+/// a prompt's send time).
+struct RowBounds {
+    decoration: usize,
+    /// The selection covers this row from its decoration through its last cell.
+    whole: bool,
+    /// A language label covered through its end. Copy skips the row.
+    omitted: bool,
+    /// First cell the slice would read. May sit past `last` or past the line.
+    origin: usize,
+    cells: Option<(usize, usize)>,
+}
+
+fn row_bounds(line: &str, meta: Option<&RowCopy>, first: usize, last: usize) -> RowBounds {
+    let width = line.width();
+    let decoration = usize::from(meta.map(|meta| meta.decoration).unwrap_or(0));
+    // A row that is not the selection's end uses `last == width - 1` (or 0
+    // when the row is empty), so covering that last cell means through the end.
+    let through_end = last.saturating_add(1) >= width;
+    let whole = first <= decoration && through_end;
+    let omitted = whole && meta.is_some_and(|meta| meta.language);
+    let origin = if first <= decoration {
+        decoration
+    } else {
+        first
+    };
+    let cells = if omitted || width == 0 || origin > last || origin >= width {
+        None
+    } else {
+        let end = last.min(width.saturating_sub(1));
+        (origin <= end).then_some((origin, end))
+    };
+    RowBounds {
+        decoration,
+        whole,
+        omitted,
+        origin,
+        cells,
     }
 }
 

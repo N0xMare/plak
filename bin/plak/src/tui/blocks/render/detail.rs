@@ -1,6 +1,7 @@
 //! Expanded item detail: arguments, output, diffs and command listings.
 
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr as _;
 
 use super::item_row::{command_styles, prompted_command};
 use super::wrap_styled_line_railed;
@@ -9,8 +10,33 @@ use crate::tui::blocks::{
     detail_rail, hidden_lines_label, line_diff, mark_hidden_lines, subject_tool_verb,
     tool_is_running,
 };
+use crate::tui::markdown::RowCopy;
 use crate::tui::presentation::ActivityKind;
 use crate::tui::theme::Theme;
+
+/// Copy metadata for one painted detail or diff row.
+///
+/// The first span is the visual rail (`detail_rail`) or that rail plus the
+/// two-space hanging indent of a wrapped continuation. That span is
+/// decoration. Everything after it, including a diff marker, is content.
+pub(super) fn detail_row_copy(line: &Line<'_>, rail: &str, hanging: &str) -> RowCopy {
+    let prefix = line
+        .spans
+        .first()
+        .map(|span| span.content.as_ref())
+        .unwrap_or("");
+    let width = if prefix == hanging {
+        hanging.width()
+    } else if prefix == rail {
+        rail.width()
+    } else {
+        0
+    };
+    RowCopy {
+        decoration: super::cells_u16(width),
+        ..RowCopy::default()
+    }
+}
 
 /// One tool item's fields the detail reads.
 pub(super) struct ItemFacts<'a> {

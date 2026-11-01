@@ -539,7 +539,13 @@ end of the last one. A selection inside one visual row copies only the cells
 it covers, not the rail or the marker. A partial selection across wrapped rows
 copies the covered cells as one line. The language on the fence (`bash`,
 `rust`) is left out when the selection covers that label row. List markers and
-table borders stay. An agent's transcript copies the same way.
+table borders stay. The highlight paints only those copied cells, so a rail,
+indent, or continuation marker that paste leaves out is not shown as selected.
+An opened tool's detail, including a diff, leaves that rail out the same way,
+and a wrapped detail line leaves out the hanging indent. A diff still pastes
+its `+` and `-` markers and the line. An opened thought's detail and an
+opened milestone drop their rail the same way.
+An agent's transcript copies the same way.
 The scrollbar shows where you are; there is no percentage badge. An opened
 call that answered `preview` or was refused while the session was busy
 asks again when you close and reopen it.
