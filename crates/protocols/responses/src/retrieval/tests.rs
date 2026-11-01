@@ -4,12 +4,9 @@
     reason = "fixture builders take owned JSON for readability"
 )]
 
-use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr};
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Wake, Waker};
 
 use plakous_http::{Bytes, HeaderMap, HeaderValue, Limits, Method, Origin};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -801,119 +798,11 @@ impl ResponsesRetrievalTransport for Marked {
     }
 }
 
-/// Wakes from the side-request task. `woke` is the idle probe; `notify` resumes
-/// the test when the retry timer, or later socket IO, becomes ready.
-struct RunWake {
-    woke: AtomicBool,
-    notify: tokio::sync::Notify,
-}
-
-impl Wake for RunWake {
-    fn wake(self: Arc<Self>) {
-        self.woke.store(true, Ordering::SeqCst);
-        self.notify.notify_one();
-    }
-}
-
-/// Polls `run` until the peer has written the 401 and a further poll stays
-/// pending without waking. That quiet poll is the retry sleep.
-async fn drive_until_retry_sleep<F: Future>(
-    run: &mut Pin<Box<F>>,
-    wrote: &mut tokio::sync::oneshot::Receiver<()>,
-    wake: &Arc<RunWake>,
-    waker: &Waker,
-) -> TestResult {
-    let mut wrote_401 = false;
-    loop {
-        wake.woke.store(false, Ordering::SeqCst);
-        if run
-            .as_mut()
-            .poll(&mut Context::from_waker(waker))
-            .is_ready()
-        {
-            return Err("side request finished before its retry sleep".into());
-        }
-        if !wrote_401 {
-            match Pin::new(&mut *wrote).poll(&mut Context::from_waker(waker)) {
-                Poll::Ready(Ok(())) => wrote_401 = true,
-                Poll::Ready(Err(_)) => {
-                    return Err("peer dropped before writing the 401".into());
-                }
-                Poll::Pending => {}
-            }
-        }
+/// Yields so a spawned side request can finish real loopback IO. The paused
+/// clock stays frozen, so this does not spend a connect or exchange budget.
+async fn drain_loopback() {
+    for _ in 0..64 {
         tokio::task::yield_now().await;
-        if !wrote_401 || wake.woke.load(Ordering::SeqCst) {
-            continue;
-        }
-        wake.woke.store(false, Ordering::SeqCst);
-        if run
-            .as_mut()
-            .poll(&mut Context::from_waker(waker))
-            .is_ready()
-        {
-            return Err("side request finished before its retry sleep".into());
-        }
-        if !wake.woke.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-    }
-}
-
-/// Drives socket progress after a wake until `run` parks again.
-async fn poll_until_parked<F: Future>(
-    run: &mut Pin<Box<F>>,
-    wake: &Arc<RunWake>,
-    waker: &Waker,
-) -> TestResult<Option<F::Output>> {
-    loop {
-        wake.woke.store(false, Ordering::SeqCst);
-        if let Poll::Ready(value) = run.as_mut().poll(&mut Context::from_waker(waker)) {
-            return Ok(Some(value));
-        }
-        tokio::task::yield_now().await;
-        if !wake.woke.load(Ordering::SeqCst) {
-            return Ok(None);
-        }
-    }
-}
-
-/// After the clock hold drops, fails if `run` finishes before the 4.999 s mark.
-/// A five-second `Retry-After` completes on the following millisecond.
-async fn watch_five_second_retry<F: Future>(
-    run: &mut Pin<Box<F>>,
-    wake: &Arc<RunWake>,
-    waker: &Waker,
-    marks: &Mutex<Vec<tokio::time::Instant>>,
-    mut early: tokio::task::JoinHandle<()>,
-) -> TestResult<F::Output> {
-    let mut saw_early = false;
-    let mut tail = std::pin::pin!(tokio::time::sleep(Duration::from_millis(1)));
-    let mut tail_done = false;
-    loop {
-        tokio::select! {
-            biased;
-            () = wake.notify.notified() => {
-                if let Some(value) = poll_until_parked(run, wake, waker).await? {
-                    if !saw_early {
-                        return Err("the overload retried before Retry-After elapsed".into());
-                    }
-                    return Ok(value);
-                }
-            }
-            result = &mut early, if !saw_early => {
-                result.map_err(|_| "observation sleep cancelled")?;
-                saw_early = true;
-                assert_eq!(
-                    marks.lock().map_err(|_| "marks lock")?.len(),
-                    1,
-                    "the overload retried before Retry-After elapsed"
-                );
-            }
-            () = &mut tail, if saw_early && !tail_done => {
-                tail_done = true;
-            }
-        }
     }
 }
 
@@ -922,13 +811,15 @@ async fn watch_five_second_retry<F: Future>(
 /// seconds even at the longest sample.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn a_wrapped_overload_waits_out_a_nonzero_retry_after() -> TestResult {
-    // A blocking task freezes auto-advance while the 401 is still real IO.
+    // Freezes auto-advance for both real connects. A paused runtime otherwise
+    // jumps the connect timeout when the loopback socket is not ready in the
+    // zero-timeout park, and the side request dispatches again.
     let (keep_clock, clock_held) = std::sync::mpsc::channel::<()>();
-    let _clock = tokio::task::spawn_blocking(move || {
+    let clock = tokio::task::spawn_blocking(move || {
         let _ = clock_held.recv();
     });
     let document = r#"{"output":"Rust 1.99 shipped."}"#;
-    let (peer, mut wrote) = peer_signaling_first_write(vec![
+    let (peer, wrote) = peer_signaling_first_write(vec![
         http_response(401, "retry-after: 5\r\n", WRAPPED_OVERLOAD_BODY),
         http_response(200, "content-type: application/json\r\n", document),
     ])
@@ -940,43 +831,57 @@ async fn a_wrapped_overload_waits_out_a_nonzero_retry_after() -> TestResult {
     };
     let client = Client::new_http1(Limits::default())?;
     let cancellation = CancellationToken::new();
-    let wake = Arc::new(RunWake {
-        woke: AtomicBool::new(false),
-        notify: tokio::sync::Notify::new(),
+    let run = tokio::spawn(async move {
+        run_responses_json_side_request(
+            &client,
+            &transport,
+            b"{\"q\":\"rust\"}",
+            cost_only,
+            &cancellation,
+            ResponsesRetrievalLimits {
+                exchange_timeout: Duration::from_secs(30),
+                jitter: Some(Jitter::LONGEST),
+            },
+        )
+        .await
     });
-    let waker = Waker::from(Arc::clone(&wake));
-    let mut run = Box::pin(run_responses_json_side_request(
-        &client,
-        &transport,
-        b"{\"q\":\"rust\"}",
-        cost_only,
-        &cancellation,
-        ResponsesRetrievalLimits {
-            exchange_timeout: Duration::from_secs(30),
-            jitter: Some(Jitter::LONGEST),
-        },
-    ));
-    // The peer signals after the 401 is written. Yield until `run` stays
-    // pending across a quiet poll: that is the retry sleep, not a fixed wait.
-    drive_until_retry_sleep(&mut run, &mut wrote, &wake, &waker).await?;
+    // The peer signals after the 401 is on the socket. The spawned request
+    // then reads it and parks on the retry sleep; virtual time stays put.
+    wrote
+        .await
+        .map_err(|_| "peer dropped before writing the 401")?;
+    drain_loopback().await;
+    assert!(
+        !run.is_finished(),
+        "side request finished before its retry sleep"
+    );
     assert_eq!(
         marks.lock().map_err(|_| "marks lock")?.len(),
         1,
         "the overload retried before any logical wait"
     );
     let parked = tokio::time::Instant::now();
-    // Register the observation sleep before releasing the freeze, so auto-advance
-    // fires it before a five-second Retry-After and after a one-second backoff.
-    let early = tokio::spawn(async {
-        tokio::time::sleep(Duration::from_secs(5) - Duration::from_millis(1)).await;
-    });
-    tokio::task::yield_now().await;
-    drop(keep_clock);
-    let returned = watch_five_second_retry(&mut run, &wake, &waker, &marks, early).await??;
+    tokio::time::advance(Duration::from_secs(5) - Duration::from_millis(1)).await;
+    assert!(
+        !run.is_finished(),
+        "the overload retried before Retry-After elapsed"
+    );
+    assert_eq!(
+        marks.lock().map_err(|_| "marks lock")?.len(),
+        1,
+        "the overload retried before Retry-After elapsed"
+    );
+    // A five-second `Retry-After` completes on the following millisecond.
+    tokio::time::advance(Duration::from_millis(1)).await;
+    let returned = run.await??;
     assert_eq!(returned, document.as_bytes());
-    let marks = marks.lock().map_err(|_| "marks lock")?;
-    assert_eq!(marks.len(), 2);
-    assert_eq!(marks[1].duration_since(parked), Duration::from_secs(5));
+    {
+        let marks = marks.lock().map_err(|_| "marks lock")?;
+        assert_eq!(marks.len(), 2);
+        assert_eq!(marks[1].duration_since(parked), Duration::from_secs(5));
+    }
+    drop(keep_clock);
+    clock.await?;
     Ok(())
 }
 
