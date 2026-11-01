@@ -1074,9 +1074,27 @@ def compiler_diagnostics(stdout: str) -> list[str]:
         if not isinstance(message, dict) or message.get("reason") != "compiler-message":
             continue
         diagnostic = message.get("message") or {}
-        if diagnostic.get("level") in {"warning", "error"}:
+        if diagnostic.get("level") in {"warning", "error"} and not macos_unwind_size_note(diagnostic):
             rendered.append(diagnostic.get("rendered") or diagnostic.get("message") or "")
     return rendered
+
+
+def macos_unwind_size_note(diagnostic: dict[str, object]) -> bool:
+    """Whether this warning carries only Apple ld's compact-unwind size note.
+
+    rustc forwards the linker's whole stderr through the `linker_messages`
+    lint, which `-D warnings` does not deny. The note reports an unwind-table
+    encoding limit of a large debug binary, not a defect in the code; a
+    warning holding any other linker line still fails.
+    """
+    code = diagnostic.get("code")
+    lint = code.get("code") if isinstance(code, dict) else None
+    if diagnostic.get("level") != "warning" or lint != "linker_messages":
+        return False
+    text = str(diagnostic.get("message") or "").removeprefix("linker stderr: ")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return bool(lines) and all("__eh_frame section too large" in line and "compact unwind" in line
+                               for line in lines)
 
 
 def check_facade_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT) -> list[str]:

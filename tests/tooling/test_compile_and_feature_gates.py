@@ -188,6 +188,29 @@ class FacadeProfileTests(unittest.TestCase):
         self.assertNotIn("note: ignored", stderr)
         self.assertIn("no matching package", stderr)
 
+    def test_only_the_apple_ld_unwind_size_note_is_not_a_diagnostic(self):
+        def linker(message: str) -> str:
+            return json.dumps({"reason": "compiler-message", "message": {
+                "level": "warning", "code": {"code": "linker_messages", "explanation": None},
+                "message": message, "rendered": f"warning: {message}\n"}})
+
+        unwind = ("linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf "
+                  "unwind offsets in compact unwind table, performance of exception handling "
+                  "might be affected")
+        self.assertEqual(feature_gate.compiler_diagnostics(linker(unwind)), [])
+        other = "linker stderr: ld: warning: duplicate symbol _main"
+        self.assertEqual(feature_gate.compiler_diagnostics(linker(other)), [f"warning: {other}\n"])
+        both = "\n".join(["linker stderr: ld: warning: object file was built for newer macOS",
+                          unwind.removeprefix("linker stderr: ")])
+        self.assertEqual(feature_gate.compiler_diagnostics(linker(both)), [f"warning: {both}\n"])
+        error = json.loads(linker(unwind))
+        error["message"]["level"] = "error"
+        self.assertEqual(len(feature_gate.compiler_diagnostics(json.dumps(error))), 1)
+        lint_named_elsewhere = json.dumps({"reason": "compiler-message", "message": {
+            "level": "warning", "code": {"code": "unused_imports", "explanation": None},
+            "message": unwind, "rendered": "warning: x\n"}})
+        self.assertEqual(feature_gate.compiler_diagnostics(lint_named_elsewhere), ["warning: x\n"])
+
     def test_missing_facade_is_an_error(self):
         self.assertEqual(feature_gate.check_facade_profiles({}, ROOT),
                          ["plakous: package missing from workspace metadata"])
