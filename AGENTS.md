@@ -41,7 +41,7 @@ A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
 sweep, and the publish dry run.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
-offline image `plak-qual-base:2f225fd7`, which is not published (spec 06).
+offline image `plak-qual-base:11162b86`, which is not published (spec 06).
 
 ```text
 just fast [PKG...]        # static checks, then the parallel lane for the diff's packages and dependents
