@@ -16,15 +16,13 @@ Raw reports stay private under the ignored `target/live/`.
 - the 0.0.2 live matrix (History, below);
 - a maintainer's review of the `25ea8365` maintainer build in the TUI.
 
-`23428930`, the 0.0.3 release candidate, has passed part one: the integrated
+`efe23aba`, the 0.0.3 release candidate, has passed part one: the integrated
 gate on both supported platforms (`just full` on Apple Silicon and on Linux
 x86_64, the native musl tier and the pinned musl container gate), the strict
 crash-point sweep over all twenty-seven shapes with no unclassified, divergent
-or refused cut, and the publish dry run. Its live matrix (History, below) is
-complete except the Linux x86_64 musl smoke on `codex-sol` and `grok` and the
-`deepseek` and `deepseek-messages` cells, which have not run, and the
-maintainer's review of its build in the TUI is pending. It is not yet
-qualified.
+or refused cut, and the publish dry run. Its live matrix (History, below) has
+run every non-sparing row. The maintainer's review of its build in the TUI is
+pending, so it is not yet qualified.
 
 ## Live matrix
 
@@ -48,11 +46,11 @@ Rung 3 rows are sparing and run only for a targeted confirmation.
 | `api-openai` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
 | `api-anthropic` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
 | `api-xai` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
-| `codex-sol` | full | 2 | full cell pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke not run |
+| `codex-sol` | full | 2 | full cell pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke pass |
 | `claude-sonnet55-low` | full | 2 | full cell pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke pass |
-| `grok` | full | 2 | full cell and one-hour headless soak pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke not run |
-| `deepseek` | full; long-session informational | 2 | unqualified: model changed to `deepseek/deepseek-v4-flash-0731`; not run for 0.0.3 |
-| `deepseek-messages` | full; long-session informational | 2 | unqualified: model changed to `deepseek/deepseek-v4-flash-0731`; not run for 0.0.3 |
+| `grok` | full | 2 | full cell and one-hour headless soak pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke pass |
+| `deepseek` | full; long-session informational | 2 | full cell pass at `e180b55b` (Apple Silicon; the informational long-session lane passed after its MODEL rerun); Linux x86_64 musl smoke pass |
+| `deepseek-messages` | full; long-session informational | 2 | smoke and `crash_jobs` x3 pass at `e180b55b` (Apple Silicon); jobs model, recorded (`wake_while_idle`: the model kept the root busy while the job ran); informational long-session pass at `b2755c04` after its MODEL rerun; Linux x86_64 musl smoke pass |
 | `or-glm` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
 | `codex-luna-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
 | `claude-haiku55-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
@@ -64,14 +62,16 @@ Rung 3 rows are sparing and run only for a targeted confirmation.
 
 ## History
 
-### 0.0.3 candidate matrix (`bce238af`)
+### 0.0.3 candidate matrix (`bce238af` to `b2755c04`)
 
-`plak/test-hooks` release builds of `bce238af` for `aarch64-apple-darwin`
-(`plak` SHA-256 `90d2fc1b…`) and `x86_64-unknown-linux-musl` (`plak` SHA-256
-`9f5a277d…`), composition `plakous-default`. No row's rendered-prompt digests
-or harness footprints change between `bce238af` and `23428930` (the later
-commits change TUI selection painting, tests and tooling), so these results
-carry to the release candidate.
+`plak/test-hooks` release builds, composition `plakous-default`: `bce238af` for
+`aarch64-apple-darwin` (`plak` SHA-256 `90d2fc1b…`) and
+`x86_64-unknown-linux-musl` (`plak` SHA-256 `9f5a277d…`); `e180b55b`
+(`206773c1…`) and `b2755c04` (`4a5c4a0b…`) for the later Apple Silicon
+DeepSeek cells. No row's rendered-prompt digests or harness footprints change
+between `bce238af` and `efe23aba` (the later commits change TUI selection
+painting, output-limit handling inside a tool call, tests and tooling), so
+these results carry to the release candidate.
 
 The first rung-one pass, at `0df98a47`, scored `fault_reset` HARNESS on every
 route: the live driver's capture check predated the transport failure
@@ -85,8 +85,11 @@ rung-one row then passed on its first attempt.
 | Smoke, long-session `--all`, jobs and `crash_jobs` x3 on `codex-sol`, `claude-sonnet55-low`, `grok` | Apple Silicon | pass |
 | Headless soak, one hour, `grok` | Apple Silicon | pass on its second run (131 of 131 tasks); both attempts of the first run were provider (model lookup timeouts during an upstream outage) |
 | Smoke on `claude-sonnet55-low`, `api-openai`, `api-anthropic`, `api-xai` | Linux x86_64 musl | pass |
-| Smoke on `codex-sol`, `grok` | Linux x86_64 musl | not run |
-| Cells on `deepseek`, `deepseek-messages` | — | not run |
+| Smoke on `codex-sol`, `grok`, `deepseek`, `deepseek-messages` | Linux x86_64 musl | pass |
+| Smoke, jobs and `crash_jobs` x3 on `deepseek`; smoke and `crash_jobs` x3 on `deepseek-messages` | Apple Silicon | pass at `e180b55b` |
+| Jobs on `deepseek-messages` | Apple Silicon | model, recorded at `e180b55b` after its MODEL rerun: `wake_while_idle`, the model kept the root busy while the job ran |
+| Long-session `--all` on `deepseek` (informational) | Apple Silicon | pass at `e180b55b` after its MODEL rerun |
+| Long-session `--all` on `deepseek-messages` (informational) | Apple Silicon | harness at `e180b55b`: a Messages `max_tokens` stop inside a tool call was rejected as a protocol error; fixed in `cbc135f2`, then pass at `b2755c04` after its MODEL rerun |
 | Smoke on `or-inkling-free` | Apple Silicon | provider, recorded at `0df98a47`: OpenRouter refuses the model outside agentic harnesses |
 | Smoke on `or-flint-free` | Apple Silicon | provider, recorded at `0df98a47`: no upstreams available on both runs |
 
