@@ -224,14 +224,14 @@ automatically: they may still contain historical credential copies and must
 not be shared. Rotating/deleting those private historical secrets is an
 operator action, not part of a scored run or this offline test suite.
 
-## 0.0.2 Operator Sequence
+## Operator Sequence
 
 All paths below are absolute private paths outside the repository. Do not put
 credentials, raw requests or campaign files in the tree. Run from a clean
 checkout on one native Docker host (for example an x86_64 Linux host with a native Docker daemon);
-never mix native architectures in a campaign. Worker Rust builds/gates use
-the assigned wtools lane, not the Mac. Python-only adapter tests can use the
-Mac eval venv. None of the preparation commands below sends model requests.
+never mix native architectures in a campaign. Rust builds and gates run on that
+Linux host; Python-only adapter tests can use a local eval venv. None of the
+preparation commands below sends model requests.
 
 First integrate the current GPT-6 Codex prompt and the amp-jobs change, then
 build **that commit**. `plak run --leave-jobs-running` must appear in
@@ -244,7 +244,7 @@ cannot be approved by editing its hash. Rebuild/refetch instead.
 just harbor bootstrap
 PATH="$PWD/eval/.venv/bin:$PATH" just harbor test
 export HARBOR_ARCH=amd64                 # arm64 only on a native arm64 daemon
-just harbor build-agent                  # worker protocol: assigned Linux lane
+just harbor build-agent                  # on the Linux Docker host
 just harbor vendor-clis
 just harbor tools
 # Claude only: pinned clean PMUX_SRC, plus a Linux OAuth file store
