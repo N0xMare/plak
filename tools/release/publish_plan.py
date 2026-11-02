@@ -101,10 +101,14 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.command == "indexed":
         return 0 if indexed(args.index, args.name, args.version) else 1
-    metadata = json.loads(subprocess.run(
-        ["cargo", "metadata", "--format-version", "1", "--no-deps"],
-        capture_output=True, check=True, text=True,
-    ).stdout)
+    metadata = json.loads(
+        subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+    )
     try:
         for name, version in publish_order(metadata):
             print(name, version)

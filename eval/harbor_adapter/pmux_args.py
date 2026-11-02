@@ -19,9 +19,7 @@ class PmuxArgumentError(ValueError):
 
 def require_claude_tuple(model: str, effort: str) -> None:
     if ("claude", model, effort) not in QUALIFIED:
-        raise PmuxArgumentError(
-            f"tuple claude/{model}/{effort} is not a §5.1 bakeoff cell"
-        )
+        raise PmuxArgumentError(f"tuple claude/{model}/{effort} is not a §5.1 bakeoff cell")
 
 
 def pmux_run_arguments(
@@ -39,9 +37,7 @@ def pmux_run_arguments(
         raise PmuxArgumentError("prompt and prompt_file are mutually exclusive")
     if file_path:
         if not file_path.startswith("/"):
-            raise PmuxArgumentError(
-                f"--prompt-file must be absolute; got {prompt_file!r}"
-            )
+            raise PmuxArgumentError(f"--prompt-file must be absolute; got {prompt_file!r}")
     elif not prompt_text.strip():
         raise PmuxArgumentError("prompt is empty")
     if not cwd.startswith("/"):
@@ -49,9 +45,7 @@ def pmux_run_arguments(
     pool = f"{REMOTE_PMUX_RUNTIME}/pool"
     cwd_norm = cwd.rstrip("/") or "/"
     if cwd_norm == pool or cwd_norm.startswith(f"{pool}/"):
-        raise PmuxArgumentError(
-            f"--cwd {cwd!r} is under the pmuxd pool parent {pool}"
-        )
+        raise PmuxArgumentError(f"--cwd {cwd!r} is under the pmuxd pool parent {pool}")
     argv = [
         REMOTE_PMUX,
         "--output",

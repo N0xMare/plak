@@ -61,7 +61,22 @@ ROOT = Path(__file__).resolve().parents[2]
 DIGEST_LAYERS = L0_LAYERS + BELOW_FACADE_LAYERS
 MAX_OPTIONAL_FEATURES = 24
 FACADE = "plakous"
-PRODUCT_FEATURES = ("anthropic", "claude", "clipboard", "codex", "grok", "images", "js", "mcp", "openai", "openrouter", "python", "tui", "web-fetch", "xai-api")
+PRODUCT_FEATURES = (
+    "anthropic",
+    "claude",
+    "clipboard",
+    "codex",
+    "grok",
+    "images",
+    "js",
+    "mcp",
+    "openai",
+    "openrouter",
+    "python",
+    "tui",
+    "web-fetch",
+    "xai-api",
+)
 NAMED_VARIANTS = {
     "default": ("default", ()),
     "headless": ("omit", ("tui", "clipboard")),
@@ -77,7 +92,9 @@ def named_variants(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ..
     profiles = []
     for name, (kind, features) in NAMED_VARIANTS.items():
         selected = set(features) if kind == "only" else defaults - set(features)
-        profiles.append((name, () if kind == "default" else tuple(sorted(selected)), kind == "default"))
+        profiles.append(
+            (name, () if kind == "default" else tuple(sorted(selected)), kind == "default")
+        )
     return profiles
 
 
@@ -86,7 +103,14 @@ def product_feature_sets(manifest: dict[str, object]) -> list[tuple[str, tuple[s
     return feature_sets(optional_features(manifest), "full" in manifest.get("features", {}))
 
 
-def check_product_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT, operation: str = "build", target: str | None = None, fixture_binary: str | None = None, fixture_server: str | None = None) -> list[str]:
+def check_product_profiles(
+    manifests: dict[str, dict[str, object]],
+    root: Path = ROOT,
+    operation: str = "build",
+    target: str | None = None,
+    fixture_binary: str | None = None,
+    fixture_server: str | None = None,
+) -> list[str]:
     """Compile each independent feature-off resolution; warnings fail this gate."""
     if "plak" not in manifests:
         return []
@@ -97,7 +121,11 @@ def check_product_profiles(manifests: dict[str, dict[str, object]], root: Path =
     profiles.append(("admission", tuple(sorted(defaults - ADMISSION_OMISSIONS)), False))
     for name, selected, default in profiles:
         print(f"product {operation}: {name}", flush=True)
-        command = cargo_command(operation, selected, default, "plak") + ["--lib", "--bins", "--message-format=json"]
+        command = cargo_command(operation, selected, default, "plak") + [
+            "--lib",
+            "--bins",
+            "--message-format=json",
+        ]
         if target:
             command.extend(["--target", target])
         result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
@@ -115,7 +143,11 @@ def check_product_profiles(manifests: dict[str, dict[str, object]], root: Path =
                     artifact = json.loads(line)
                 except ValueError:
                     continue
-                if artifact.get("reason") == "compiler-artifact" and artifact.get("target", {}).get("name") == "plak" and artifact.get("executable"):
+                if (
+                    artifact.get("reason") == "compiler-artifact"
+                    and artifact.get("target", {}).get("name") == "plak"
+                    and artifact.get("executable")
+                ):
                     executable = artifact["executable"]
             if executable is None:
                 errors.append(f"plak [{name}]: build reported no executable")
@@ -123,9 +155,13 @@ def check_product_profiles(manifests: dict[str, dict[str, object]], root: Path =
                 errors.extend(product_smoke(executable, selected, name))
                 if name == "admission" and fixture_binary and fixture_server:
                     import product_feature_fixture
-                    errors.extend(product_feature_fixture.check(fixture_binary, executable, fixture_server))
+
+                    errors.extend(
+                        product_feature_fixture.check(fixture_binary, executable, fixture_server)
+                    )
                 if name in {"api", "minimal"} and fixture_binary:
                     import product_feature_fixture
+
                     errors.extend(product_feature_fixture.check_route(fixture_binary, executable))
         command = cargo_command("clippy", selected, default, "plak") + ["--lib", "--bins"]
         if target:
@@ -139,7 +175,11 @@ def check_product_profiles(manifests: dict[str, dict[str, object]], root: Path =
 
 def product_builds(manifest: dict[str, object], target: str | None) -> list[str]:
     """Keep the full test-hooks writer separate from the reduced binaries opening its stores."""
-    command = cargo_command("build", ("test-hooks",), True, "plak") + ["--bin", "plak", "--message-format=json"]
+    command = cargo_command("build", ("test-hooks",), True, "plak") + [
+        "--bin",
+        "plak",
+        "--message-format=json",
+    ]
     if target:
         command.extend(["--target", target])
     result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
@@ -147,13 +187,21 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
     if result.returncode or diagnostics:
         sys.stderr.write("".join(diagnostics) or result.stderr)
         return ["full test-hooks feature fixture writer failed to build"]
-    binaries = [row["executable"] for line in result.stdout.splitlines()
-                if (row := json.loads(line)).get("reason") == "compiler-artifact"
-                and row.get("target", {}).get("name") == "plak" and row.get("executable")]
+    binaries = [
+        row["executable"]
+        for line in result.stdout.splitlines()
+        if (row := json.loads(line)).get("reason") == "compiler-artifact"
+        and row.get("target", {}).get("name") == "plak"
+        and row.get("executable")
+    ]
     if not binaries:
         return ["full test-hooks fixture writer reported no executable"]
     writer_binary = binaries[-1]
-    command = cargo_command("build", (), True, "plakous-mcp-fake-server") + ["--bin", "mcp-fake-server", "--message-format=json"]
+    command = cargo_command("build", (), True, "plakous-mcp-fake-server") + [
+        "--bin",
+        "mcp-fake-server",
+        "--message-format=json",
+    ]
     if target:
         command.extend(["--target", target])
     result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
@@ -161,18 +209,37 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
     if result.returncode or diagnostics:
         sys.stderr.write("".join(diagnostics) or result.stderr)
         return ["MCP fixture server failed to build"]
-    binaries = [row["executable"] for line in result.stdout.splitlines()
-                if (row := json.loads(line)).get("reason") == "compiler-artifact"
-                and row.get("target", {}).get("name") == "mcp-fake-server" and row.get("executable")]
+    binaries = [
+        row["executable"]
+        for line in result.stdout.splitlines()
+        if (row := json.loads(line)).get("reason") == "compiler-artifact"
+        and row.get("target", {}).get("name") == "mcp-fake-server"
+        and row.get("executable")
+    ]
     if not binaries:
         return ["MCP fixture server reported no executable"]
     server_binary = binaries[-1]
     with tempfile.TemporaryDirectory(prefix="plak-feature-writer-") as directory:
         writer = str(Path(directory) / "plak")
         shutil.copy2(writer_binary, writer)
-        errors = check_product_profiles({"plak": manifest}, operation="build", target=target, fixture_binary=writer, fixture_server=server_binary)
-        selected = tuple(sorted(set(manifest["features"]["default"]) - ADMISSION_OMISSIONS | {"maintainer", "test-hooks"}))
-        command = cargo_command("build", selected, False, "plak") + ["--bin", "plak", "--message-format=json"]
+        errors = check_product_profiles(
+            {"plak": manifest},
+            operation="build",
+            target=target,
+            fixture_binary=writer,
+            fixture_server=server_binary,
+        )
+        selected = tuple(
+            sorted(
+                set(manifest["features"]["default"]) - ADMISSION_OMISSIONS
+                | {"maintainer", "test-hooks"}
+            )
+        )
+        command = cargo_command("build", selected, False, "plak") + [
+            "--bin",
+            "plak",
+            "--message-format=json",
+        ]
         if target:
             command.extend(["--target", target])
         result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
@@ -180,13 +247,20 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
         if result.returncode or diagnostics:
             sys.stderr.write("".join(diagnostics) or result.stderr)
             return errors + ["reduced test-hooks/maintainer fixture build failed"]
-        binaries = [row["executable"] for line in result.stdout.splitlines()
-                    if (row := json.loads(line)).get("reason") == "compiler-artifact"
-                    and row.get("target", {}).get("name") == "plak" and row.get("executable")]
+        binaries = [
+            row["executable"]
+            for line in result.stdout.splitlines()
+            if (row := json.loads(line)).get("reason") == "compiler-artifact"
+            and row.get("target", {}).get("name") == "plak"
+            and row.get("executable")
+        ]
         if not binaries:
             return errors + ["reduced test-hooks fixture reported no executable"]
         import product_feature_fixture
-        errors.extend(product_feature_fixture.check(writer, binaries[-1], server_binary, maintainer=True))
+
+        errors.extend(
+            product_feature_fixture.check(writer, binaries[-1], server_binary, maintainer=True)
+        )
         errors.extend(product_feature_fixture.image_diagnostic(binaries[-1]))
         return errors
 
@@ -202,35 +276,156 @@ def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> l
         if "mcp" not in selected:
             cases.append(("mcp", ["mcp", "list"], 2, "feature `mcp`"))
         if "python" not in selected and "codex" in selected:
-            cases.append(("python", ["run", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-ptc", "--", "hello"], 2, "feature `python`"))
-            cases.append(("python-jsonl", ["agent", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-ptc"], 2, "feature `python`"))
-            cases.append(("sdk", ["run", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-sdk", "--", "hello"], 2, "`py-sdk` is not included in this build (compiled without feature `python`)"))
-            cases.append(("sdk-jsonl", ["agent", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-sdk"], 2, "`py-sdk` is not included in this build (compiled without feature `python`)"))
+            cases.append(
+                (
+                    "python",
+                    [
+                        "run",
+                        "--account",
+                        "codex",
+                        "--model",
+                        "gpt-6-astra",
+                        "--composition",
+                        "py-ptc",
+                        "--",
+                        "hello",
+                    ],
+                    2,
+                    "feature `python`",
+                )
+            )
+            cases.append(
+                (
+                    "python-jsonl",
+                    [
+                        "agent",
+                        "--account",
+                        "codex",
+                        "--model",
+                        "gpt-6-astra",
+                        "--composition",
+                        "py-ptc",
+                    ],
+                    2,
+                    "feature `python`",
+                )
+            )
+            cases.append(
+                (
+                    "sdk",
+                    [
+                        "run",
+                        "--account",
+                        "codex",
+                        "--model",
+                        "gpt-6-astra",
+                        "--composition",
+                        "py-sdk",
+                        "--",
+                        "hello",
+                    ],
+                    2,
+                    "`py-sdk` is not included in this build (compiled without feature `python`)",
+                )
+            )
+            cases.append(
+                (
+                    "sdk-jsonl",
+                    [
+                        "agent",
+                        "--account",
+                        "codex",
+                        "--model",
+                        "gpt-6-astra",
+                        "--composition",
+                        "py-sdk",
+                    ],
+                    2,
+                    "`py-sdk` is not included in this build (compiled without feature `python`)",
+                )
+            )
         if "images" not in selected and "codex" in selected:
-            cases.append(("images", ["run", "--account", "codex", "--model", "gpt-6-astra", "--image", "missing.png", "--", "hello"], 2, "feature `images`"))
+            cases.append(
+                (
+                    "images",
+                    [
+                        "run",
+                        "--account",
+                        "codex",
+                        "--model",
+                        "gpt-6-astra",
+                        "--image",
+                        "missing.png",
+                        "--",
+                        "hello",
+                    ],
+                    2,
+                    "feature `images`",
+                )
+            )
         for account in ("codex", "grok", "claude", "openai", "anthropic", "xai-api", "openrouter"):
             if account not in selected:
-                arguments = (["login", account] if account in ("codex", "grok", "claude") else
-                             ["run", "--account", account, "--model", "uncompiled-route", "--composition", "direct", "--", "hello"])
+                arguments = (
+                    ["login", account]
+                    if account in ("codex", "grok", "claude")
+                    else [
+                        "run",
+                        "--account",
+                        account,
+                        "--model",
+                        "uncompiled-route",
+                        "--composition",
+                        "direct",
+                        "--",
+                        "hello",
+                    ]
+                )
                 cases.append((account, arguments, 2, f"feature `{account}`"))
-                cases.append((f"{account}-jsonl", ["agent", "--account", account, "--model", "uncompiled-route"], 2, f"feature `{account}`"))
+                cases.append(
+                    (
+                        f"{account}-jsonl",
+                        ["agent", "--account", account, "--model", "uncompiled-route"],
+                        2,
+                        f"feature `{account}`",
+                    )
+                )
         for kind, arguments, code, expected in cases:
-            completed = subprocess.run([executable, *arguments], cwd=directory, env=environment,
-                                       text=True, capture_output=True, check=False, timeout=30)
+            completed = subprocess.run(
+                [executable, *arguments],
+                cwd=directory,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
             if completed.returncode != code or expected not in completed.stdout + completed.stderr:
-                errors.append(f"plak [{profile}] {kind}: expected exit {code} and {expected!r}; got {completed.returncode}: {completed.stdout}{completed.stderr}")
+                errors.append(
+                    f"plak [{profile}] {kind}: expected exit {code} and {expected!r}; got {completed.returncode}: {completed.stdout}{completed.stderr}"
+                )
             if kind.endswith("-jsonl"):
                 records = [json.loads(line) for line in completed.stdout.splitlines()]
                 if [record.get("kind") for record in records] != ["error", "bye"]:
                     errors.append(f"plak [{profile}] {kind} refusal must terminate with error/bye")
             if kind.startswith("sdk") and (Path(directory) / "state").exists():
                 errors.append(f"plak [{profile}] SDK admission refusal created state")
-        doctor = subprocess.run([executable, "doctor"], cwd=directory, env=environment,
-                                text=True, capture_output=True, check=False, timeout=30)
+        doctor = subprocess.run(
+            [executable, "doctor"],
+            cwd=directory,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
         omitted = sorted(set(PRODUCT_FEATURES) - set(selected))
         expected = f"omitted {', '.join(omitted)}"
-        if not any("Build features" in line and expected in line for line in doctor.stdout.splitlines()):
-            errors.append(f"plak [{profile}] doctor: missing build_features {expected!r}: {doctor.stdout}{doctor.stderr}")
+        if not any(
+            "Build features" in line and expected in line for line in doctor.stdout.splitlines()
+        ):
+            errors.append(
+                f"plak [{profile}] doctor: missing build_features {expected!r}: {doctor.stdout}{doctor.stderr}"
+            )
         for feature in ("python", "mcp"):
             if feature in selected or "codex" not in selected:
                 continue
@@ -246,11 +441,20 @@ def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> l
                 template += 'tools = ["mcp:example"]\n'
             (home / "config.toml").write_text(config)
             (home / "agents/root-agent.toml").write_text(template)
-            completed = subprocess.run([executable, "agent"], cwd=directory,
-                                       env=dict(environment, PLAK_HOME=str(home)), input="",
-                                       text=True, capture_output=True, check=False, timeout=30)
+            completed = subprocess.run(
+                [executable, "agent"],
+                cwd=directory,
+                env=dict(environment, PLAK_HOME=str(home)),
+                input="",
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
             if completed.returncode != 2 or f"feature `{feature}`" not in completed.stderr:
-                errors.append(f"plak [{profile}] configured {feature}: expected typed exit 2; got {completed.returncode}: {completed.stdout}{completed.stderr}")
+                errors.append(
+                    f"plak [{profile}] configured {feature}: expected typed exit 2; got {completed.returncode}: {completed.stdout}{completed.stderr}"
+                )
     return errors
 
 
@@ -263,18 +467,32 @@ def cache_digest(root: Path = ROOT) -> str:
     version = subprocess.check_output(["cargo", "--version"], cwd=root, text=True)
     tracked = "\0".join(vcs_listing.listed_files(root))
     paths = {Path(name) for name in tracked.split("\0") if name and Path(name).name == "Cargo.toml"}
-    paths.update(Path(name) for name in tracked.split("\0")
-                 if Path(name).parent.name == ".cargo" and Path(name).name.startswith("config"))
+    paths.update(
+        Path(name)
+        for name in tracked.split("\0")
+        if Path(name).parent.name == ".cargo" and Path(name).name.startswith("config")
+    )
     paths.update(path.relative_to(root) for path in root.glob(".cargo/config*") if path.is_file())
-    paths.update(map(Path, (
-        "Cargo.lock", "rust-toolchain.toml", "tools/gate/check_features.py",
-        "tools/gate/plakous_policy.py",
-    )))
+    paths.update(
+        map(
+            Path,
+            (
+                "Cargo.lock",
+                "rust-toolchain.toml",
+                "tools/gate/check_features.py",
+                "tools/gate/plakous_policy.py",
+            ),
+        )
+    )
     # Metadata contains absolute manifest paths, so it cannot cross checkouts.
     digest = hashlib.sha256(json.dumps([str(root.resolve()), version]).encode())
     for path in sorted(paths):
         content = (root / path).read_bytes() if (root / path).is_file() else None
-        digest.update(json.dumps([str(path), None if content is None else hashlib.sha256(content).hexdigest()]).encode())
+        digest.update(
+            json.dumps(
+                [str(path), None if content is None else hashlib.sha256(content).hexdigest()]
+            ).encode()
+        )
     return digest.hexdigest()
 
 
@@ -290,9 +508,15 @@ class CargoOutputCache:
         try:
             cached = json.loads(path.read_text())
             outputs = cached["outputs"]
-            if (cached["digest"] == digest and isinstance(outputs, dict)
-                    and all(isinstance(key, str) and isinstance(value, str) for key, value in outputs.items())
-                    and cached["checksum"] == self.checksum(outputs)):
+            if (
+                cached["digest"] == digest
+                and isinstance(outputs, dict)
+                and all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in outputs.items()
+                )
+                and cached["checksum"] == self.checksum(outputs)
+            ):
                 self.outputs = outputs
                 self.hit = True
         except (OSError, ValueError, KeyError, TypeError):
@@ -315,10 +539,18 @@ class CargoOutputCache:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", dir=self.path.parent, delete=False) as stream:
+            with tempfile.NamedTemporaryFile(
+                mode="w", dir=self.path.parent, delete=False
+            ) as stream:
                 temporary = Path(stream.name)
-                json.dump({"digest": self.digest, "outputs": self.outputs,
-                           "checksum": self.checksum(self.outputs)}, stream)
+                json.dump(
+                    {
+                        "digest": self.digest,
+                        "outputs": self.outputs,
+                        "checksum": self.checksum(self.outputs),
+                    },
+                    stream,
+                )
             os.replace(temporary, self.path)
         finally:
             if temporary is not None:
@@ -346,9 +578,12 @@ def cargo_output(command: list[str], root: Path = ROOT, capture: bool = False) -
 
 
 def cached_workspace(root: Path = ROOT) -> Workspace:
-    graph = json.loads(cargo_output(
-        ["cargo", "metadata", "--format-version", "1", "--no-deps", "--locked", "--offline"], root
-    ))
+    graph = json.loads(
+        cargo_output(
+            ["cargo", "metadata", "--format-version", "1", "--no-deps", "--locked", "--offline"],
+            root,
+        )
+    )
     return load_workspace(root, graph)
 
 
@@ -446,9 +681,17 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
 # Native workspace engines are independent build capabilities. Every host edge
 # forwards explicitly; no default-enabled transitive edge may defeat selection.
 REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
-    (package, "jj" if package == "plak" and feature == "jj-lib" else feature, f"{dependency}/{feature}")
+    (
+        package,
+        "jj" if package == "plak" and feature == "jj-lib" else feature,
+        f"{dependency}/{feature}",
+    )
     for package, dependencies in {
-        "plak": ["plakous-hosted", "plakous-recursive-subagents", "plakous-recursive-subagents-store"],
+        "plak": [
+            "plakous-hosted",
+            "plakous-recursive-subagents",
+            "plakous-recursive-subagents-store",
+        ],
         "plakous-hosted": ["plakous-workspace", "plakous-recursive-subagents"],
         "plakous-recursive-subagents": ["plakous-workspace"],
         "plakous-recursive-subagents-store": ["plakous-recursive-subagents"],
@@ -493,12 +736,24 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 # subscription or interpreter machinery for either source language.
 EXCLUDED_CLOSURE_PACKAGES = {
     ("plak", ("git-cli", "images", "python", "mcp")): (
-        "ratatui", "crossterm", "syntect", "arboard", "pulldown-cmark",
+        "ratatui",
+        "crossterm",
+        "syntect",
+        "arboard",
+        "pulldown-cmark",
     ),
     ("plak", ("git-cli", "tui", "python", "mcp")): ("image",),
     ("plak", ("default",)): ("jj-lib", "gix", "pollster", "aws-lc-rs", "aws-lc-sys", "rsa"),
     ("plakous", ("full",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
-    ("plakous", ("codex",)): ("aws-lc-rs", "aws-lc-sys", "rsa", "plakous-xai", "plakous-anthropic", "monty-pool", "htmd"),
+    ("plakous", ("codex",)): (
+        "aws-lc-rs",
+        "aws-lc-sys",
+        "rsa",
+        "plakous-xai",
+        "plakous-anthropic",
+        "monty-pool",
+        "htmd",
+    ),
     ("plakous", ("grok",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
     ("plakous", ("claude",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
     ("plakous-openai", ("native-auth",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
@@ -522,7 +777,10 @@ EXCLUDED_CLOSURE_PACKAGES = {
     ("plakous", ("auth",)): ("jsonwebtoken", "plakous-openai", "plakous-xai"),
     ("plakous", ("openai",)): ("htmd", "jsonwebtoken"),
     ("plakous", ("web-fetch",)): (
-        "plakous-openai", "plakous-xai", "plakous-anthropic", "plakous-openrouter",
+        "plakous-openai",
+        "plakous-xai",
+        "plakous-anthropic",
+        "plakous-openrouter",
     ),
     ("plakous", ("mcp",)): ("jsonwebtoken",),
     ("plakous", ("anthropic",)): ("jsonwebtoken",),
@@ -531,7 +789,18 @@ EXCLUDED_CLOSURE_PACKAGES = {
 NAMED_VARIANT_EXCLUSIONS = {
     "headless": ("ratatui", "crossterm", "syntect", "arboard", "pulldown-cmark"),
     "api": ("jsonwebtoken",),
-    "minimal": ("rmcp", "monty-pool", "tungstenite", "image", "htmd", "html5ever", "jsonwebtoken", "aws-lc-sys", "plakous-js-eval", "plakous-cell"),
+    "minimal": (
+        "rmcp",
+        "monty-pool",
+        "tungstenite",
+        "image",
+        "htmd",
+        "html5ever",
+        "jsonwebtoken",
+        "aws-lc-sys",
+        "plakous-js-eval",
+        "plakous-cell",
+    ),
 }
 
 
@@ -549,9 +818,7 @@ TEST_ONLY_DEPENDENCY_FEATURES = {
         ("plakous-recursive-subagents-store", "commit-trace"),
         ("plakous-hosted", "test-support"),
     ),
-    ("plakous-recursive-subagents-store", "commit-trace"): (
-        ("plakous-store", "commit-trace"),
-    ),
+    ("plakous-recursive-subagents-store", "commit-trace"): (("plakous-store", "commit-trace"),),
 }
 
 
@@ -595,7 +862,9 @@ def validate_test_only_dependency_features() -> list[str]:
     ):
         for profile in ((), ("full",)) if package == "plakous" else ((),):
             if "test-clock" in resolved_dependency_features(package, profile, package):
-                errors.append(f"{package} [{','.join(profile) or 'default'}]: test-clock is test-only")
+                errors.append(
+                    f"{package} [{','.join(profile) or 'default'}]: test-clock is test-only"
+                )
     # The Grok and Claude review-anchored clocks reach only offline test
     # builds (facade dev-dependencies): no plak build, `test-hooks` live
     # smoke builds included, may resolve them.
@@ -610,7 +879,12 @@ def validate_test_only_dependency_features() -> list[str]:
 
 
 ANCHORED_CLOCK_PROVIDERS = ("plakous-anthropic", "plakous-xai")
-PLAK_PROFILES_WITHOUT_ANCHORED_CLOCKS = ((), ("maintainer",), ("test-hooks",), ("test-hooks", "maintainer"))
+PLAK_PROFILES_WITHOUT_ANCHORED_CLOCKS = (
+    (),
+    ("maintainer",),
+    ("test-hooks",),
+    ("test-hooks", "maintainer"),
+)
 
 
 def full_closure(package: str, selected: tuple[str, ...]) -> set[str]:
@@ -618,9 +892,7 @@ def full_closure(package: str, selected: tuple[str, ...]) -> set[str]:
     command = cargo_command("tree", selected, False, package)
     command.extend(["-e", "normal,build", "--prefix", "none", "--format", "{p}"])
     output = cargo_output(command)
-    return {
-        line.split(" ", maxsplit=1)[0] for line in output.splitlines() if line.strip()
-    }
+    return {line.split(" ", maxsplit=1)[0] for line in output.splitlines() if line.strip()}
 
 
 def validate_excluded_closures() -> list[str]:
@@ -646,9 +918,7 @@ def validate_excluded_closures() -> list[str]:
 
 def load_workspace_manifests(root: Path = ROOT) -> dict[str, dict[str, object]]:
     """Load every workspace member manifest by the path Cargo reports."""
-    return {
-        name: package.manifest for name, package in cached_workspace(root).packages.items()
-    }
+    return {name: package.manifest for name, package in cached_workspace(root).packages.items()}
 
 
 def digest_packages(workspace: Workspace) -> set[str]:
@@ -713,18 +983,26 @@ def uuid_feature_findings(
         code = _blank_rust_non_code(source)
         names = {"Uuid"}
         for alias in aliases:
-            names.update(re.findall(
-                rf"\b{re.escape(alias)}\s*::\s*Uuid\s+as\s+(\w+)", code,
-            ))
-        constructors = set(re.findall(
-            rf"\b(?:{'|'.join(map(re.escape, sorted(names)))})\s*::\s*"
-            r"(new_v[1-8]|now_v[167])\b", code,
-        ))
+            names.update(
+                re.findall(
+                    rf"\b{re.escape(alias)}\s*::\s*Uuid\s+as\s+(\w+)",
+                    code,
+                )
+            )
+        constructors = set(
+            re.findall(
+                rf"\b(?:{'|'.join(map(re.escape, sorted(names)))})\s*::\s*"
+                r"(new_v[1-8]|now_v[167])\b",
+                code,
+            )
+        )
         for constructor in sorted(constructors):
             feature = constructor.rsplit("_", 1)[1]
             if feature not in declared:
-                errors.append(f"{path}: UUID constructor {constructor} requires uuid feature "
-                              f"{feature} in this package")
+                errors.append(
+                    f"{path}: UUID constructor {constructor} requires uuid feature "
+                    f"{feature} in this package"
+                )
     return errors
 
 
@@ -734,13 +1012,18 @@ def validate_uuid_features(workspace: Workspace) -> list[str]:
     errors: list[str] = []
     for package in workspace.packages.values():
         root = package.manifest_path.parent
-        paths = {path for directory in ("src", "tests", "benches", "examples")
-                 for path in (root / directory).rglob("*.rs")}
+        paths = {
+            path
+            for directory in ("src", "tests", "benches", "examples")
+            for path in (root / directory).rglob("*.rs")
+        }
         if (root / "build.rs").is_file():
             paths.add(root / "build.rs")
         sources = {path.relative_to(root).as_posix(): path.read_text() for path in paths}
-        errors.extend(f"{package.name}: {finding}" for finding in
-                      uuid_feature_findings(package.manifest, inherited, sources))
+        errors.extend(
+            f"{package.name}: {finding}"
+            for finding in uuid_feature_findings(package.manifest, inherited, sources)
+        )
     return errors
 
 
@@ -874,7 +1157,9 @@ def validate_feature_contracts(
             # The sole repository-only host -> store exception shares the
             # process tracer; the manifest gate is pinned by check_workspace.
             if (package, feature, edge) == (
-                "plakous-recursive-subagents-store", "commit-trace", "plakous-store/commit-trace"
+                "plakous-recursive-subagents-store",
+                "commit-trace",
+                "plakous-store/commit-trace",
             ):
                 continue
             if target != "plakous" and layers.get(target) != "host":
@@ -962,7 +1247,9 @@ def expected_closure(
     only once `pkg` is included. External packages are ignored.
     """
     internal = set(manifests)
-    declarations = {name: _dependency_declarations(manifest) for name, manifest in manifests.items()}
+    declarations = {
+        name: _dependency_declarations(manifest) for name, manifest in manifests.items()
+    }
     feature_tables = {
         name: (manifest.get("features", {}) if isinstance(manifest.get("features"), dict) else {})
         for name, manifest in manifests.items()
@@ -985,7 +1272,10 @@ def expected_closure(
             for other_alias, other in declarations[package].items():
                 if other.get("optional") is not True:
                     include(package, other_alias)
-        if declaration.get("default-features", True) is not False and "default" in feature_tables[package]:
+        if (
+            declaration.get("default-features", True) is not False
+            and "default" in feature_tables[package]
+        ):
             pending.append((package, "default"))
         for feature in declaration.get("features", []) or []:
             pending.append((package, str(feature)))
@@ -1079,7 +1369,9 @@ def compiler_diagnostics(stdout: str) -> list[str]:
         if not isinstance(message, dict) or message.get("reason") != "compiler-message":
             continue
         diagnostic = message.get("message") or {}
-        if diagnostic.get("level") in {"warning", "error"} and not macos_unwind_size_note(diagnostic):
+        if diagnostic.get("level") in {"warning", "error"} and not macos_unwind_size_note(
+            diagnostic
+        ):
             rendered.append(diagnostic.get("rendered") or diagnostic.get("message") or "")
     return rendered
 
@@ -1098,8 +1390,9 @@ def macos_unwind_size_note(diagnostic: dict[str, object]) -> bool:
         return False
     text = str(diagnostic.get("message") or "").removeprefix("linker stderr: ")
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return bool(lines) and all("__eh_frame section too large" in line and "compact unwind" in line
-                               for line in lines)
+    return bool(lines) and all(
+        "__eh_frame section too large" in line and "compact unwind" in line for line in lines
+    )
 
 
 def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
@@ -1123,9 +1416,19 @@ def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
     if package == "plakous-hosted":
         return [
             ("minimal", cargo_command("check", (), False, package) + lib),
-            ("all-features", [
-                "cargo", "check", "--locked", "--offline", "-p", package, "--all-features", *lib,
-            ]),
+            (
+                "all-features",
+                [
+                    "cargo",
+                    "check",
+                    "--locked",
+                    "--offline",
+                    "-p",
+                    package,
+                    "--all-features",
+                    *lib,
+                ],
+            ),
         ]
     return []
 
@@ -1140,7 +1443,9 @@ def check_hosted_profiles(manifests: dict[str, dict[str, object]], root: Path = 
     return check_library_profiles(manifests, "plakous-hosted", root)
 
 
-def check_library_profiles(manifests: dict[str, dict[str, object]], package: str, root: Path = ROOT) -> list[str]:
+def check_library_profiles(
+    manifests: dict[str, dict[str, object]], package: str, root: Path = ROOT
+) -> list[str]:
     """`cargo check` each library profile; any rustc diagnostic fails.
 
     Closures prove dependency edges, not that the code compiles: a facade
@@ -1163,8 +1468,10 @@ def check_library_profiles(manifests: dict[str, dict[str, object]], package: str
             errors.append(f"{package} [{name}]: cargo check failed")
         elif diagnostics:
             errors.append(f"{package} [{name}]: cargo check reported {len(diagnostics)} warning(s)")
-    print(f"checked {len(profiles)} {package} feature profiles in {time.monotonic() - started:.0f}s",
-          flush=True)
+    print(
+        f"checked {len(profiles)} {package} feature profiles in {time.monotonic() - started:.0f}s",
+        flush=True,
+    )
     return errors
 
 
@@ -1186,13 +1493,20 @@ def main() -> int:
     """Check every package's feature closures and optionally compile each profile."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", action="store_true", help="cargo-check every profile")
-    parser.add_argument("--no-cache", action="store_true", help="query Cargo without reading or writing the cache")
-    parser.add_argument("--product-builds", action="store_true", help="build and lint four distinct feature-off product resolutions")
+    parser.add_argument(
+        "--no-cache", action="store_true", help="query Cargo without reading or writing the cache"
+    )
+    parser.add_argument(
+        "--product-builds",
+        action="store_true",
+        help="build and lint four distinct feature-off product resolutions",
+    )
     parser.add_argument("--target", help="Cargo build target for product variants")
     args = parser.parse_args()
 
     if args.product_builds:
         import tomllib
+
         manifest = tomllib.loads((ROOT / "bin/plak/Cargo.toml").read_text())
         errors = product_builds(manifest, args.target)
         for error in errors:
@@ -1230,7 +1544,9 @@ def main() -> int:
         has_full = "full" in (manifests[package].get("features") or {})
         profiles[package] = list(feature_sets(features, has_full))
         if package == "plak":
-            profiles[package].extend(profile for profile in named_variants(manifests[package]) if profile[0] != "default")
+            profiles[package].extend(
+                profile for profile in named_variants(manifests[package]) if profile[0] != "default"
+            )
     # Cache misses query concurrently; Cargo's package-cache lock caps useful
     # concurrency (measured 105 s at four workers, 109 s at ten).
     queries = [

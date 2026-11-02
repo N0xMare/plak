@@ -197,9 +197,13 @@ class Estimate:
     subscription_models: tuple[str, ...]
 
 
-def planned_cells(routes: dict[str, live.Route] | None = None, *,
-                  soak_row: str | None = None, tui_rows: tuple[str, ...] = (),
-                  confirm: tuple[str, ...] = ()) -> list[Cell]:
+def planned_cells(
+    routes: dict[str, live.Route] | None = None,
+    *,
+    soak_row: str | None = None,
+    tui_rows: tuple[str, ...] = (),
+    confirm: tuple[str, ...] = (),
+) -> list[Cell]:
     """Lean pre-release plan; choose the least-used full row from daily use."""
     routes = routes if routes is not None else live.ROUTES
     full = {name for name, route in routes.items() if route.route_class == live.FULL}
@@ -210,7 +214,8 @@ def planned_cells(routes: dict[str, live.Route] | None = None, *,
     if len(set(tui_rows)) != len(tui_rows) or any(name not in full for name in tui_rows):
         raise EstimateError("--tui-rows must name distinct full routes")
     if len(set(confirm)) != len(confirm) or any(
-            name not in routes or not routes[name].sparing for name in confirm):
+        name not in routes or not routes[name].sparing for name in confirm
+    ):
         raise EstimateError("--confirm must name distinct sparing routes")
     cells: list[Cell] = []
     for name, route in routes.items():
@@ -230,13 +235,15 @@ def planned_cells(routes: dict[str, live.Route] | None = None, *,
             cells.append(_cell("linux", "smoke", route))
         elif route.account in LINUX_SMOKE_ACCOUNTS:
             cells.append(_cell("linux", "smoke", route))
-    cells.sort(key=lambda cell: (
-        PLATFORM_ORDER[cell.platform],
-        cell.rung,
-        CLASS_ORDER[cell.route_class],
-        cell.route_name,
-        LANE_ORDER[cell.lane],
-    ))
+    cells.sort(
+        key=lambda cell: (
+            PLATFORM_ORDER[cell.platform],
+            cell.rung,
+            CLASS_ORDER[cell.route_class],
+            cell.route_name,
+            LANE_ORDER[cell.lane],
+        )
+    )
     return cells
 
 
@@ -284,8 +291,10 @@ def input_window(model: str, openrouter_window: int | None = None) -> int:
         return 272_000
     if "/" in model:
         if openrouter_window is None:
-            raise EstimateError(f"{model} long-session needs --openrouter-window, its context "
-                                "length from the OpenRouter model listing")
+            raise EstimateError(
+                f"{model} long-session needs --openrouter-window, its context "
+                "length from the OpenRouter model listing"
+            )
         if openrouter_window <= 0:
             raise EstimateError("--openrouter-window must be positive")
         return openrouter_window
@@ -295,21 +304,42 @@ def input_window(model: str, openrouter_window: int | None = None) -> int:
 def lane_charge(cell: Cell, assumptions: Assumptions | None = None) -> Charge:
     assumptions = assumptions or Assumptions()
     if cell.lane == "smoke":
-        return _from_share(assumptions.smoke_input_tokens, assumptions.smoke_output_tokens,
-                           assumptions.smoke_cache_share, assumptions.smoke_cache_write_tokens)
+        return _from_share(
+            assumptions.smoke_input_tokens,
+            assumptions.smoke_output_tokens,
+            assumptions.smoke_cache_share,
+            assumptions.smoke_cache_write_tokens,
+        )
     if cell.lane == "soak":
-        return _duration(assumptions.soak_input_tokens, assumptions.soak_output_tokens,
-                         assumptions.soak_hours, SOAK_HOURS, assumptions.soak_cache_share)
+        return _duration(
+            assumptions.soak_input_tokens,
+            assumptions.soak_output_tokens,
+            assumptions.soak_hours,
+            SOAK_HOURS,
+            assumptions.soak_cache_share,
+        )
     if cell.lane == "tui-soak":
-        return _duration(assumptions.tui_soak_input_tokens, assumptions.tui_soak_output_tokens,
-                         assumptions.tui_soak_hours, TUI_HOURS, assumptions.tui_cache_share)
+        return _duration(
+            assumptions.tui_soak_input_tokens,
+            assumptions.tui_soak_output_tokens,
+            assumptions.tui_soak_hours,
+            TUI_HOURS,
+            assumptions.tui_cache_share,
+        )
     if cell.lane == "jobs":
-        return _from_share(assumptions.jobs_input_tokens, assumptions.jobs_output_tokens,
-                           assumptions.jobs_cache_share, 0)
+        return _from_share(
+            assumptions.jobs_input_tokens,
+            assumptions.jobs_output_tokens,
+            assumptions.jobs_cache_share,
+            0,
+        )
     if cell.lane == "crash-jobs":
-        return _from_share(_scale_tokens(assumptions.jobs_input_tokens, Decimal(2), Decimal(JOBS_SCENARIOS)),
-                           _scale_tokens(assumptions.jobs_output_tokens, Decimal(2), Decimal(JOBS_SCENARIOS)),
-                           assumptions.jobs_cache_share, 0)
+        return _from_share(
+            _scale_tokens(assumptions.jobs_input_tokens, Decimal(2), Decimal(JOBS_SCENARIOS)),
+            _scale_tokens(assumptions.jobs_output_tokens, Decimal(2), Decimal(JOBS_SCENARIOS)),
+            assumptions.jobs_cache_share,
+            0,
+        )
     if cell.lane == "long-session":
         return _long_session(cell.model, assumptions)
     raise EstimateError(f"unknown lane {cell.lane}")
@@ -327,8 +357,9 @@ def price_charge(charge: Charge, rate: Rate) -> Decimal:
     ) / MILLION
 
 
-def estimate_matrix(cells: list[Cell], rates: dict[str, Rate],
-                    assumptions: Assumptions | None = None) -> Estimate:
+def estimate_matrix(
+    cells: list[Cell], rates: dict[str, Rate], assumptions: Assumptions | None = None
+) -> Estimate:
     assumptions = assumptions or Assumptions()
     if assumptions.contingency < 0:
         raise EstimateError("contingency must be >= 0")
@@ -350,13 +381,16 @@ def estimate_matrix(cells: list[Cell], rates: dict[str, Rate],
     openrouter_with = openrouter * 2 * (Decimal(1) + assumptions.contingency)
     ceiling = assumptions.openrouter_ceiling
     exceeds = ceiling is not None and openrouter_with > ceiling
-    unpriced = tuple(sorted({
-        cell.model for cell in cells
-        if cell.account in API_ACCOUNTS and cell.model not in rates
-    }))
-    subscription = tuple(sorted({
-        cell.model for cell in cells if cell.account not in API_ACCOUNTS
-    }))
+    unpriced = tuple(
+        sorted(
+            {
+                cell.model
+                for cell in cells
+                if cell.account in API_ACCOUNTS and cell.model not in rates
+            }
+        )
+    )
+    subscription = tuple(sorted({cell.model for cell in cells if cell.account not in API_ACCOUNTS}))
     return Estimate(
         tuple(priced),
         assumptions.contingency,
@@ -374,26 +408,42 @@ def estimate_matrix(cells: list[Cell], rates: dict[str, Rate],
 
 
 def render(report: Estimate) -> str:
-    header = ("platform", "rung", "lane", "class", "route", "model", "usd", "rerun_reserve",
-              "with_contingency")
+    header = (
+        "platform",
+        "rung",
+        "lane",
+        "class",
+        "route",
+        "model",
+        "usd",
+        "rerun_reserve",
+        "with_contingency",
+    )
     body = [header]
     for item in report.cells:
         cell = item.cell
-        body.append((
-            cell.platform, str(cell.rung), cell.lane, cell.route_class, cell.route_name,
-            cell.model,
-            _usd(item.usd, item.billing), _usd(item.usd, item.billing),
-            _usd(item.with_contingency(report.contingency), item.billing),
-        ))
+        body.append(
+            (
+                cell.platform,
+                str(cell.rung),
+                cell.lane,
+                cell.route_class,
+                cell.route_name,
+                cell.model,
+                _usd(item.usd, item.billing),
+                _usd(item.usd, item.billing),
+                _usd(item.with_contingency(report.contingency), item.billing),
+            )
+        )
     widths = [max(len(row[index]) for row in body) for index in range(len(header))]
-    lines = ["  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
-             for row in body]
+    lines = [
+        "  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip() for row in body
+    ]
     lines.append(f"subtotal {_usd(report.subtotal)}")
     lines.append(f"rerun_reserve {_usd(report.rerun_reserve)}")
     lines.append("attempts per cell: up to 2 (first MODEL or PROVIDER; no chained reruns)")
     lines.append(f"openrouter_subtotal {_usd(report.openrouter_subtotal)}")
-    lines.append(
-        f"openrouter_with_contingency {_usd(report.openrouter_with_contingency)}")
+    lines.append(f"openrouter_with_contingency {_usd(report.openrouter_with_contingency)}")
     if report.openrouter_ceiling is None:
         lines.append("openrouter_ceiling unset")
     else:
@@ -412,14 +462,23 @@ def render(report: Estimate) -> str:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--rate-card", type=Path, required=True)
-    parser.add_argument("--soak-row", required=True, help="least-used full route; one Mac headless soak")
-    parser.add_argument("--tui-rows", default="", help="comma-separated full routes lacking root use")
-    parser.add_argument("--confirm", default="",
-                        help="comma-separated sparing routes for a targeted confirmation")
+    parser.add_argument(
+        "--soak-row", required=True, help="least-used full route; one Mac headless soak"
+    )
+    parser.add_argument(
+        "--tui-rows", default="", help="comma-separated full routes lacking root use"
+    )
+    parser.add_argument(
+        "--confirm", default="", help="comma-separated sparing routes for a targeted confirmation"
+    )
     parser.add_argument("--contingency", type=Decimal, default=Decimal("0.20"))
     parser.add_argument("--openrouter-ceiling", type=Decimal, default=None)
-    parser.add_argument("--openrouter-window", type=int, default=None,
-                        help="OpenRouter long-session model's context length")
+    parser.add_argument(
+        "--openrouter-window",
+        type=int,
+        default=None,
+        help="OpenRouter long-session model's context length",
+    )
     parser.add_argument("--smoke-input", type=int, default=SMOKE_INPUT)
     parser.add_argument("--smoke-output", type=int, default=SMOKE_OUTPUT)
     parser.add_argument("--smoke-cache-share", type=Decimal, default=SMOKE_CACHE_SHARE)
@@ -434,8 +493,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--tui-cache-share", type=Decimal, default=TUI_CACHE_SHARE)
     parser.add_argument("--long-session-input", type=int, default=LONG_SESSION_INPUT)
     parser.add_argument("--long-session-output", type=int, default=LONG_SESSION_OUTPUT)
-    parser.add_argument("--long-session-cache-share", type=Decimal,
-                        default=LONG_SESSION_CACHE_SHARE)
+    parser.add_argument(
+        "--long-session-cache-share", type=Decimal, default=LONG_SESSION_CACHE_SHARE
+    )
     parser.add_argument("--jobs-input", type=int, default=JOBS_INPUT)
     parser.add_argument("--jobs-output", type=int, default=JOBS_OUTPUT)
     parser.add_argument("--jobs-cache-share", type=Decimal, default=JOBS_CACHE_SHARE)
@@ -468,21 +528,26 @@ def main(argv: list[str]) -> int:
         confirm = tuple(args.confirm.split(",")) if args.confirm else ()
         report = estimate_matrix(
             planned_cells(soak_row=args.soak_row, tui_rows=tui_rows, confirm=confirm),
-            load_rate_card(args.rate_card), assumptions)
+            load_rate_card(args.rate_card),
+            assumptions,
+        )
     except EstimateError as error:
         print(f"estimate: {error}", file=sys.stderr)
         return 2
     if report.exceeds_openrouter_ceiling:
-        print("estimate: openrouter estimate exceeds ceiling "
-              f"{_usd(report.openrouter_with_contingency)} > {_usd(report.openrouter_ceiling)}",
-              file=sys.stderr)
+        print(
+            "estimate: openrouter estimate exceeds ceiling "
+            f"{_usd(report.openrouter_with_contingency)} > {_usd(report.openrouter_ceiling)}",
+            file=sys.stderr,
+        )
     sys.stdout.write(render(report))
     return 0
 
 
 def _cell(platform: str, lane: str, route: live.Route) -> Cell:
-    return Cell(platform, lane, route.name, route.lane_class(lane), route.model, route.account,
-                route.rung)
+    return Cell(
+        platform, lane, route.name, route.lane_class(lane), route.model, route.account, route.rung
+    )
 
 
 def scaled_long_session(total: int, window: int, measured_window: int) -> int:
@@ -496,14 +561,17 @@ def scaled_long_session(total: int, window: int, measured_window: int) -> int:
 def _long_session(model: str, assumptions: Assumptions) -> Charge:
     window = input_window(model, assumptions.openrouter_window)
     total_in = scaled_long_session(
-        assumptions.long_session_input_tokens, window, assumptions.long_session_measured_window)
+        assumptions.long_session_input_tokens, window, assumptions.long_session_measured_window
+    )
     total_out = scaled_long_session(
-        assumptions.long_session_output_tokens, window, assumptions.long_session_measured_window)
+        assumptions.long_session_output_tokens, window, assumptions.long_session_measured_window
+    )
     return _from_share(total_in, total_out, assumptions.long_session_cache_share, 0)
 
 
-def _duration(total_in: int, total_out: int, hours: Decimal, default_hours: Decimal,
-              share: Decimal) -> Charge:
+def _duration(
+    total_in: int, total_out: int, hours: Decimal, default_hours: Decimal, share: Decimal
+) -> Charge:
     if hours < 0:
         raise EstimateError("hours must be >= 0")
     scaled_in = _scale_tokens(total_in, hours, default_hours)

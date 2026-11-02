@@ -21,13 +21,25 @@ def token(account: str) -> str:
     return f"header.{encoded}.signature"
 
 
-def store(account: str = "account-a", *, refresh: str = "refresh-a", expires: int = 100,
-          other: str = "unchanged") -> bytes:
-    return json.dumps({
-        "openai-codex": {"type": "oauth", "access": token(account), "refresh": refresh,
-                         "expires": expires, "accountId": account},
-        "openrouter": {"type": "api_key", "key": other},
-    }).encode()
+def store(
+    account: str = "account-a",
+    *,
+    refresh: str = "refresh-a",
+    expires: int = 100,
+    other: str = "unchanged",
+) -> bytes:
+    return json.dumps(
+        {
+            "openai-codex": {
+                "type": "oauth",
+                "access": token(account),
+                "refresh": refresh,
+                "expires": expires,
+                "accountId": account,
+            },
+            "openrouter": {"type": "api_key", "key": other},
+        }
+    ).encode()
 
 
 class PiAuthRefreshTests(unittest.TestCase):

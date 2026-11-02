@@ -128,14 +128,10 @@ def require_known_cli(cli: str) -> str:
     return cli
 
 
-def load_manifest(
-    root: Path | None = None, arch: str | None = None
-) -> dict[str, object]:
+def load_manifest(root: Path | None = None, arch: str | None = None) -> dict[str, object]:
     path = vendor_root(root, arch) / "manifest.json"
     if not path.is_file():
-        raise VendorArtifactError(
-            f"missing {path}; run `just harbor vendor-clis`"
-        )
+        raise VendorArtifactError(f"missing {path}; run `just harbor vendor-clis`")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -172,16 +168,13 @@ def require_frozen_artifacts(
             )
         if node.get("file") != tarball:
             raise VendorArtifactError(
-                f"vendor node is {node.get('file')!r}, pin for {selected} is "
-                f"{tarball}"
+                f"vendor node is {node.get('file')!r}, pin for {selected} is {tarball}"
             )
         if node.get("sha256") != node_sha256(selected):
             raise VendorArtifactError("vendor node sha256 does not match the pin")
         node_file = base / str(node.get("file") or tarball)
         if not node_file.is_file():
-            raise VendorArtifactError(
-                f"missing {node_file}; run `just harbor vendor-clis`"
-            )
+            raise VendorArtifactError(f"missing {node_file}; run `just harbor vendor-clis`")
 
     clis = manifest.get("clis")
     if not isinstance(clis, dict):
@@ -195,9 +188,7 @@ def require_frozen_artifacts(
         )
     archive = base / str(entry.get("file") or cli_archive_name(cli))
     if not archive.is_file():
-        raise VendorArtifactError(
-            f"missing {archive}; run `just harbor vendor-clis`"
-        )
+        raise VendorArtifactError(f"missing {archive}; run `just harbor vendor-clis`")
     if cli == "grok":
         # The only vendor CLI shipped as a bare native binary; the npm
         # prefixes carry their own platform packages inside the tarball.
@@ -207,10 +198,12 @@ def require_frozen_artifacts(
             raise VendorArtifactError(str(exc)) from exc
     if os.environ.get("HARBOR_CAMPAIGN"):
         pins = load_campaign()["artifact_sha256"]
-        for path in ([node_file, archive] if cli in NODE_CLIS else [archive]):
+        for path in [node_file, archive] if cli in NODE_CLIS else [archive]:
             key = f".plak/installed/{selected}/vendor/{path.name}"
             if pins.get(key) != sha256(path):
-                raise VendorArtifactError("vendor archive does not match the reviewed campaign pin table")
+                raise VendorArtifactError(
+                    "vendor archive does not match the reviewed campaign pin table"
+                )
     return FrozenArtifacts(
         root=base,
         node_tarball=node_file,

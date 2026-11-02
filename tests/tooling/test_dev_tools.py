@@ -17,15 +17,25 @@ class DevToolsTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         (self.root / "tools/gate").mkdir(parents=True)
         shutil.copyfile(ROOT / "tools/gate/dev-tools.sh", self.root / "tools/gate/dev-tools.sh")
-        shutil.copyfile(ROOT / "tools/gate/dev-tools-prefix.sh", self.root / "tools/gate/dev-tools-prefix.sh")
+        shutil.copyfile(
+            ROOT / "tools/gate/dev-tools-prefix.sh", self.root / "tools/gate/dev-tools-prefix.sh"
+        )
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
-        self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
-                        DEV_TOOLS_CALLS=str(self.log), DEV_TOOLS_ROOT=str(self.root),
-                        FAKE_PYTHON_MODE="ok", FAKE_NEXTEST_VERSION="0.9.100",
-                        FAKE_DENY_VERSION="0.19.0", FAKE_RUFF_VERSION="0.17.3")
-        self.executable("python3", r'''import os, sys
+        self.env = dict(
+            os.environ,
+            PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
+            DEV_TOOLS_CALLS=str(self.log),
+            DEV_TOOLS_ROOT=str(self.root),
+            FAKE_PYTHON_MODE="ok",
+            FAKE_NEXTEST_VERSION="0.9.100",
+            FAKE_DENY_VERSION="0.19.0",
+            FAKE_RUFF_VERSION="0.17.3",
+        )
+        self.executable(
+            "python3",
+            r'''import os, sys
 mode = os.environ['FAKE_PYTHON_MODE']
 if mode in {'broken', 'old'}:
     raise SystemExit(1)
@@ -34,8 +44,11 @@ if sys.argv[1:] != ['-c', 'import sys; raise SystemExit(sys.version_info < (3, 1
     with open(os.environ['DEV_TOOLS_CALLS'], 'a') as log:
         log.write(json.dumps(dict(args=sys.argv[1:], env_names=[])) + '\n')
     raise SystemExit(int(os.environ.get('FAKE_FETCH_STATUS', '0')))
-''')
-        self.executable("cargo", r'''import json, os, sys
+''',
+        )
+        self.executable(
+            "cargo",
+            r'''import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
 env_names = sorted(name for name in ('CARGO_TARGET_DIR',) if name in os.environ)
@@ -49,12 +62,16 @@ elif args[:1] == ['install']:
     expected = Path(os.environ['DEV_TOOLS_ROOT']) / '.dev-tools/build'
     if os.environ.get('CARGO_TARGET_DIR') != str(expected):
         raise SystemExit(90)
-''')
-        self.executable("ruff", r'''import os, sys
+''',
+        )
+        self.executable(
+            "ruff",
+            r'''import os, sys
 if "--version" in sys.argv:
     print("ruff " + os.environ["FAKE_RUFF_VERSION"])
 raise SystemExit(0)
-''')
+''',
+        )
 
     def executable(self, name, source, directory=None):
         directory = directory or self.bin
@@ -64,8 +81,13 @@ raise SystemExit(0)
         path.chmod(0o700)
 
     def run_script(self, *args, env=None):
-        return subprocess.run(["/bin/bash", str(self.root / "tools/gate/dev-tools.sh"), *args],
-                              env=env or self.env, text=True, capture_output=True, timeout=15)
+        return subprocess.run(
+            ["/bin/bash", str(self.root / "tools/gate/dev-tools.sh"), *args],
+            env=env or self.env,
+            text=True,
+            capture_output=True,
+            timeout=15,
+        )
 
     def calls(self):
         if not self.log.exists():
@@ -117,24 +139,38 @@ raise SystemExit(0)
     def test_supported_deny_forwards_exact_policy_arguments(self):
         result = self.run_script("deny")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([call["args"] for call in self.calls()], [
-            ["deny", "--version"],
-            ["deny", "--config", str(self.root / ".config/deny.toml"),
-             "check", "advisories", "bans", "licenses", "sources"],
-        ])
+        self.assertEqual(
+            [call["args"] for call in self.calls()],
+            [
+                ["deny", "--version"],
+                [
+                    "deny",
+                    "--config",
+                    str(self.root / ".config/deny.toml"),
+                    "check",
+                    "advisories",
+                    "bans",
+                    "licenses",
+                    "sources",
+                ],
+            ],
+        )
 
     def test_install_uses_exact_pins_and_isolated_directories(self):
         result = self.run_script("install")
         self.assertEqual(result.returncode, 0, result.stderr)
         prefix = str(self.root / ".dev-tools")
         calls = self.calls()
-        self.assertEqual([call["args"] for call in calls], [
-            ["install", "--locked", "--root", prefix, "--version", "0.9.100", "cargo-nextest"],
-            ["install", "--locked", "--root", prefix, "--version", "0.19.0", "cargo-deny"],
-            ["install", "--locked", "--root", prefix, "--version", "0.17.3", "ruff"],
-            ["tools/gate/check_public_compile.py", "--fetch"],
-            ["tools/dev/jj-tools.py", "install", prefix],
-        ])
+        self.assertEqual(
+            [call["args"] for call in calls],
+            [
+                ["install", "--locked", "--root", prefix, "--version", "0.9.100", "cargo-nextest"],
+                ["install", "--locked", "--root", prefix, "--version", "0.19.0", "cargo-deny"],
+                ["install", "--locked", "--root", prefix, "--version", "0.17.3", "ruff"],
+                ["tools/gate/check_public_compile.py", "--fetch"],
+                ["tools/dev/jj-tools.py", "install", prefix],
+            ],
+        )
         self.assertTrue(all(call["env_names"] == ["CARGO_TARGET_DIR"] for call in calls[:3]))
         self.assertEqual(calls[-1]["env_names"], [])
         self.assertNotIn("--force", result.stdout + result.stderr + json.dumps(calls))
@@ -144,8 +180,13 @@ raise SystemExit(0)
         for _ in range(2):
             result = self.run_script("install")
             self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(sum(call["args"] == ["tools/gate/check_public_compile.py", "--fetch"]
-                             for call in self.calls()), 2)
+        self.assertEqual(
+            sum(
+                call["args"] == ["tools/gate/check_public_compile.py", "--fetch"]
+                for call in self.calls()
+            ),
+            2,
+        )
         result = self.run_script("install", env=dict(self.env, FAKE_FETCH_STATUS="71"))
         self.assertEqual(result.returncode, 71)
         self.assertNotIn("Installed verification tools", result.stdout)
@@ -166,10 +207,14 @@ raise SystemExit(0)
     def test_local_prefix_cargo_wins_over_path(self):
         self.env["FAKE_NEXTEST_VERSION"] = "0.9.99"
         local_bin = self.root / ".dev-tools/bin"
-        self.executable("cargo", """import sys
+        self.executable(
+            "cargo",
+            """import sys
 if sys.argv[1:] == ['nextest', '--version']:
     print('cargo-nextest 0.9.100')
-""", local_bin)
+""",
+            local_bin,
+        )
         result = self.run_script("check")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), [])
@@ -179,8 +224,20 @@ if sys.argv[1:] == ['nextest', '--version']:
             copy = self.root / '.plak' / layout / 'copy'
             (copy / '.dev-tools').mkdir(parents=True)
             helper = ROOT / 'tools/gate/dev-tools-prefix.sh'
+
             def prefix():
-                return subprocess.check_output(['bash', '-c', 'source "$1"; plak_dev_tools_prefix "$2"', 'prefix', str(helper), str(copy)], text=True).strip()
+                return subprocess.check_output(
+                    [
+                        'bash',
+                        '-c',
+                        'source "$1"; plak_dev_tools_prefix "$2"',
+                        'prefix',
+                        str(helper),
+                        str(copy),
+                    ],
+                    text=True,
+                ).strip()
+
             self.assertEqual(prefix(), str(self.root / '.dev-tools'))
             (copy / '.dev-tools/bin').mkdir()
             self.assertEqual(prefix(), str(copy / '.dev-tools'))

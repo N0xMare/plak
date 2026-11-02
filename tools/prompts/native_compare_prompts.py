@@ -63,7 +63,9 @@ SECRET_JSON_KEY = re.compile(
     r"oauth[_-]?token|bearer|user_id|session_id|device_id|account_uuid|prompt_id)$"
 )
 EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-UUID_TEXT = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+UUID_TEXT = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
 TOKENISH = re.compile(
     r"\b(?:sk-[A-Za-z0-9_-]{16,}|xai-[A-Za-z0-9_-]{16,}|"
     r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b"
@@ -170,13 +172,19 @@ async def version_text_owned(bin_path: Path, env: dict[str, str] | None = None) 
         with tempfile.TemporaryDirectory(prefix="native-version-") as directory:
             root = Path(directory)
             result = await owned_processes.run_command(
-                [str(bin_path), "--version"], cwd=root, env=env,
-                stdout_path=root / "stdout", stderr_path=root / "stderr", timeout=20,
+                [str(bin_path), "--version"],
+                cwd=root,
+                env=env,
+                stdout_path=root / "stdout",
+                stderr_path=root / "stderr",
+                timeout=20,
             )
             if result["timed_out"] or result["output_limit"] or not result["cleanup"]["joined"]:
                 return "unreadable: bounded version capture failed"
-            text = ((root / "stdout").read_text(errors="replace") or
-                    (root / "stderr").read_text(errors="replace")).strip()
+            text = (
+                (root / "stdout").read_text(errors="replace")
+                or (root / "stderr").read_text(errors="replace")
+            ).strip()
     except OSError:
         return "unreadable: version capture failed"
     return redact_text(text.splitlines()[0]) if text else "unknown"
@@ -273,10 +281,7 @@ def is_inference_payload(path: str, payload: Any | None) -> bool:
     lowered = path.lower().split("?", 1)[0]
     if "analytics" in lowered or lowered.rstrip("/").endswith("/count_tokens"):
         return False
-    path_hit = any(
-        marker in lowered
-        for marker in ("/messages", "/responses", "/chat/completions")
-    )
+    path_hit = any(marker in lowered for marker in ("/messages", "/responses", "/chat/completions"))
     if lowered.rstrip("/").endswith("/completions"):
         path_hit = True
     if path_hit:
@@ -359,8 +364,10 @@ def iter_debug_objects(text: str) -> list[Any]:
 
 
 def looks_like_messages(payload: Any) -> bool:
-    return isinstance(payload, dict) and isinstance(payload.get("model"), str) and (
-        "messages" in payload or "system" in payload
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("model"), str)
+        and ("messages" in payload or "system" in payload)
     )
 
 
@@ -422,23 +429,13 @@ def request_path_from(obj: dict[str, Any]) -> str:
     return "/v1/messages"
 
 
-def claude_capture_kind(
-    headers: list[tuple[str, str]], payload: dict[str, Any]
-) -> str:
+def claude_capture_kind(headers: list[tuple[str, str]], payload: dict[str, Any]) -> str:
     blob = json.dumps(payload, ensure_ascii=False)
     for _, value in headers:
         blob += "\n" + value
-    if (
-        "sdk-cli" in blob
-        or CLAUDE_SDK_IDENTITY in blob
-        or "cc_entrypoint=sdk-cli" in blob
-    ):
+    if "sdk-cli" in blob or CLAUDE_SDK_IDENTITY in blob or "cc_entrypoint=sdk-cli" in blob:
         return "sdk"
-    if (
-        CLAUDE_CLI_IDENTITY in blob
-        or "cc_entrypoint=cli" in blob
-        or "(external, cli)" in blob
-    ):
+    if CLAUDE_CLI_IDENTITY in blob or "cc_entrypoint=cli" in blob or "(external, cli)" in blob:
         return "cli"
     return "unknown"
 
@@ -452,9 +449,7 @@ def ingest_claude_debug(path: Path) -> CapturedRequest:
             payload = messages_payload_from(node)
             if payload is None:
                 continue
-            headers = normalize_logged_headers(
-                node.get("headers") or node.get("request_headers")
-            )
+            headers = normalize_logged_headers(node.get("headers") or node.get("request_headers"))
             kind = claude_capture_kind(headers, payload)
             if kind == "sdk":
                 sdk_seen = True
@@ -462,9 +457,7 @@ def ingest_claude_debug(path: Path) -> CapturedRequest:
             if kind != "cli":
                 continue
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            candidates.append(
-                CapturedRequest("POST", request_path_from(node), headers, body)
-            )
+            candidates.append(CapturedRequest("POST", request_path_from(node), headers, body))
     if not candidates:
         if sdk_seen:
             raise RuntimeError(
@@ -570,9 +563,7 @@ def _sse(events: list[tuple[str, dict[str, Any]]], sequence: bool = False) -> by
         body = dict(payload)
         if sequence:
             body.setdefault("sequence_number", index)
-        chunks.append(
-            f"event: {name}\ndata: {json.dumps(body, separators=(',', ':'))}\n\n"
-        )
+        chunks.append(f"event: {name}\ndata: {json.dumps(body, separators=(',', ':'))}\n\n")
     return "".join(chunks).encode("utf-8")
 
 
@@ -682,38 +673,64 @@ def messages_reply(
 ) -> tuple[str, bytes]:
     if not stream:
         body = {
-            "id": message_id, "type": "message", "role": "assistant",
-            "content": blocks, "model": model, "stop_reason": stop_reason,
-            "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 1},
+            "id": message_id,
+            "type": "message",
+            "role": "assistant",
+            "content": blocks,
+            "model": model,
+            "stop_reason": stop_reason,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
         }
         return "application/json", json.dumps(body).encode("utf-8")
-    events: list[tuple[str, dict[str, Any]]] = [(
-        "message_start",
-        {"type": "message_start", "message": {
-            "id": message_id, "type": "message", "role": "assistant", "content": [],
-            "model": model, "stop_reason": None, "stop_sequence": None,
-            "usage": {"input_tokens": 1, "output_tokens": 0},
-        }},
-    )]
+    events: list[tuple[str, dict[str, Any]]] = [
+        (
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": message_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model,
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 1, "output_tokens": 0},
+                },
+            },
+        )
+    ]
     for index, block in enumerate(blocks):
         if block["type"] == "tool_use":
             start = {**block, "input": {}}
-            delta = {"type": "input_json_delta",
-                     "partial_json": json.dumps(block["input"], separators=(",", ":"))}
+            delta = {
+                "type": "input_json_delta",
+                "partial_json": json.dumps(block["input"], separators=(",", ":")),
+            }
         else:
             start = {"type": "text", "text": ""}
             delta = {"type": "text_delta", "text": block["text"]}
         events += [
-            ("content_block_start",
-             {"type": "content_block_start", "index": index, "content_block": start}),
-            ("content_block_delta",
-             {"type": "content_block_delta", "index": index, "delta": delta}),
+            (
+                "content_block_start",
+                {"type": "content_block_start", "index": index, "content_block": start},
+            ),
+            (
+                "content_block_delta",
+                {"type": "content_block_delta", "index": index, "delta": delta},
+            ),
             ("content_block_stop", {"type": "content_block_stop", "index": index}),
         ]
     events += [
-        ("message_delta", {"type": "message_delta",
-                           "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                           "usage": {"output_tokens": 1}}),
+        (
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                "usage": {"output_tokens": 1},
+            },
+        ),
         ("message_stop", {"type": "message_stop"}),
     ]
     return "text/event-stream", _sse(events)
@@ -760,13 +777,26 @@ class ClaudeScript:
         request_id = f"req_nc{serial:03d}"
         message_id = f"msg_nc{serial:03d}"
         headers = [("request-id", request_id)]
-        summary = {"serial": serial, "main": main, "action": action,
-                   "request_id": request_id, "message_id": None}
+        summary = {
+            "serial": serial,
+            "main": main,
+            "action": action,
+            "request_id": request_id,
+            "message_id": None,
+        }
         if action == "overloaded":
-            body = {"type": "error", "request_id": request_id,
-                    "error": {"type": "overloaded_error", "message": "Overloaded"}}
-            return MockReply(529, "application/json", json.dumps(body).encode("utf-8"),
-                             headers + [("x-should-retry", "true")], summary)
+            body = {
+                "type": "error",
+                "request_id": request_id,
+                "error": {"type": "overloaded_error", "message": "Overloaded"},
+            }
+            return MockReply(
+                529,
+                "application/json",
+                json.dumps(body).encode("utf-8"),
+                headers + [("x-should-retry", "true")],
+                summary,
+            )
         model = echo_model(payload, "native-compare-mock")
         if action.startswith("tool_use:"):
             tool_id, name, tool_input = CLAUDE_TOOL_ROUNDS[int(action[-1]) - 1]
@@ -790,9 +820,7 @@ def forced_function_name(payload: Any | None) -> str | None:
     return None
 
 
-def dummy_responses(
-    model: str, stream: bool, payload: Any | None = None
-) -> tuple[str, bytes]:
+def dummy_responses(model: str, stream: bool, payload: Any | None = None) -> tuple[str, bytes]:
     tool_name = forced_function_name(payload)
     if tool_name == "session_title":
         arguments = json.dumps({"session_title": "Hello"})
@@ -1016,16 +1044,12 @@ def dummy_chat(model: str, stream: bool) -> tuple[str, bytes]:
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
         },
     ]
-    lines = "".join(
-        f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n" for chunk in chunks
-    )
+    lines = "".join(f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n" for chunk in chunks)
     lines += "data: [DONE]\n\n"
     return "text/event-stream", lines.encode("utf-8")
 
 
-def dummy_for_path(
-    path: str, payload: Any | None, stream: bool
-) -> tuple[str, bytes]:
+def dummy_for_path(path: str, payload: Any | None, stream: bool) -> tuple[str, bytes]:
     model = echo_model(payload, "native-compare-mock")
     lowered = path.lower()
     if "/messages" in lowered:
@@ -1131,9 +1155,9 @@ def simulate_codex_capture(argv: list[str]) -> int:
     for url in controls:
         with opener.open(url, timeout=5) as response:
             response.read()
-    body = json.dumps(
-        {"model": SPECS["codex"].model, "input": PROMPT, "stream": True}
-    ).encode("utf-8")
+    body = json.dumps({"model": SPECS["codex"].model, "input": PROMPT, "stream": True}).encode(
+        "utf-8"
+    )
     request = urllib.request.Request(
         inference,
         data=body,
@@ -1151,28 +1175,43 @@ def codex_control_reply(method: str, path: str, payload: Any) -> tuple[int, byte
     status = 200
     if method.upper() == "GET":
         if path.endswith("/accounts/check"):
-            reply = {"accounts": [{"id": "native-compare-account", "workspace_backend_origin": "https://chatgpt.com", "account_routing_override": "NO_CONSTRAINT"}]}
+            reply = {
+                "accounts": [
+                    {
+                        "id": "native-compare-account",
+                        "workspace_backend_origin": "https://chatgpt.com",
+                        "account_routing_override": "NO_CONSTRAINT",
+                    }
+                ]
+            }
         elif path.endswith("/codex/models"):
-            reply = {"models": [{
-                "slug": SPECS["codex"].model,
-                "display_name": "Native compare synthetic model",
-                "description": None,
-                "supported_reasoning_levels": [],
-                "shell_type": "shell_command",
-                "visibility": "list",
-                "supported_in_api": True,
-                "priority": 0,
-                "availability_nux": None,
-                "upgrade": None,
-                "support_verbosity": False,
-                "default_verbosity": None,
-                "apply_patch_tool_type": None,
-                "truncation_policy": {"mode": "tokens", "limit": 10000},
-                "experimental_supported_tools": [],
-            }]}
+            reply = {
+                "models": [
+                    {
+                        "slug": SPECS["codex"].model,
+                        "display_name": "Native compare synthetic model",
+                        "description": None,
+                        "supported_reasoning_levels": [],
+                        "shell_type": "shell_command",
+                        "visibility": "list",
+                        "supported_in_api": True,
+                        "priority": 0,
+                        "availability_nux": None,
+                        "upgrade": None,
+                        "support_verbosity": False,
+                        "default_verbosity": None,
+                        "apply_patch_tool_type": None,
+                        "truncation_policy": {"mode": "tokens", "limit": 10000},
+                        "experimental_supported_tools": [],
+                    }
+                ]
+            }
         elif "/plugins" in path:
-            reply = ({"enabled": False, "plugins": []} if path.endswith("/suggested")
-                     else {"plugins": [], "next_page_token": None})
+            reply = (
+                {"enabled": False, "plugins": []}
+                if path.endswith("/suggested")
+                else {"plugins": [], "next_page_token": None}
+            )
         else:
             return None
     elif method.upper() == "POST" and path == "/backend-api/ps/mcp":
@@ -1181,13 +1220,19 @@ def codex_control_reply(method: str, path: str, payload: Any) -> tuple[int, byte
             return 202, b"{}"
         rpc_method = payload.get("method")
         if rpc_method == "initialize":
-            result = {"protocolVersion": "2024-11-05", "capabilities": {},
-                      "serverInfo": {"name": "native-compare", "version": "1"}}
+            result = {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "serverInfo": {"name": "native-compare", "version": "1"},
+            }
         elif rpc_method == "tools/list":
             result = {"tools": []}
         else:
-            reply = {"jsonrpc": "2.0", "id": payload["id"],
-                     "error": {"code": -32601, "message": "Method not found"}}
+            reply = {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "error": {"code": -32601, "message": "Method not found"},
+            }
             return 200, json.dumps(reply).encode("utf-8")
         reply = {"jsonrpc": "2.0", "id": payload.get("id"), "result": result}
     else:
@@ -1345,10 +1390,7 @@ MITM_HOST_SUFFIXES = (
 
 def mitm_host(host: str) -> bool:
     lowered = host.lower().split(":", 1)[0]
-    return any(
-        lowered == suffix or lowered.endswith("." + suffix)
-        for suffix in MITM_HOST_SUFFIXES
-    )
+    return any(lowered == suffix or lowered.endswith("." + suffix) for suffix in MITM_HOST_SUFFIXES)
 
 
 def generate_mitm_certs(directory: Path) -> tuple[Path, Path, Path]:
@@ -1611,8 +1653,11 @@ def start_mitm(state: CaptureState, cert_dir: Path) -> MitmProxy:
                 scripted = scripted_reply(state, captured, path, payload, stream)
                 if scripted is not None:
                     _send_http_response(
-                        tls, scripted.content_type, scripted.body,
-                        scripted.status, scripted.headers,
+                        tls,
+                        scripted.content_type,
+                        scripted.body,
+                        scripted.status,
+                        scripted.headers,
                     )
                     return
                 content_type, reply = dummy_for_path(path, payload, stream)
@@ -1632,9 +1677,7 @@ def start_mitm(state: CaptureState, cert_dir: Path) -> MitmProxy:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     proxy_url = f"http://127.0.0.1:{server.server_address[1]}"
-    return MitmProxy(
-        server=server, ca_pem=ca_pem, bundle_pem=bundle_pem, proxy_url=proxy_url
-    )
+    return MitmProxy(server=server, ca_pem=ca_pem, bundle_pem=bundle_pem, proxy_url=proxy_url)
 
 
 def git(args: list[str], cwd: Path) -> None:
@@ -1670,16 +1713,17 @@ def prepare_fixture(work_root: Path, vendor: str, origin: str) -> Path:
                         "baseURL": f"{origin}/api/v1",
                         "apiKey": "native-compare-synthetic-key",
                     },
-                    "models": {SPECS["opencode"].model: {
-                        "name": "Ling synthetic capture", "tool_call": True,
-                        "limit": {"context": 128000, "output": 8192},
-                    }},
+                    "models": {
+                        SPECS["opencode"].model: {
+                            "name": "Ling synthetic capture",
+                            "tool_call": True,
+                            "limit": {"context": 128000, "output": 8192},
+                        }
+                    },
                 }
             },
         }
-        (dest / "opencode.json").write_text(
-            json.dumps(config, indent=2) + "\n", encoding="utf-8"
-        )
+        (dest / "opencode.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     git(["init"], dest)
     git(["add", "-A"], dest)
     git(
@@ -1711,50 +1755,92 @@ def capture_env(
     env["HTTPS_PROXY"] = env["HTTP_PROXY"] = origin
     env["https_proxy"] = env["http_proxy"] = origin
     env["NO_PROXY"] = ",".join(
-        part
-        for part in [env.get("NO_PROXY"), "127.0.0.1", "localhost"]
-        if part
+        part for part in [env.get("NO_PROXY"), "127.0.0.1", "localhost"] if part
     )
     env["no_proxy"] = env["NO_PROXY"]
     if home is not None:
         home.mkdir(parents=True, exist_ok=True)
         for name in ("config", "cache", "data", "state", "claude-1", "codex", "grok", "tmp"):
             (home / name).mkdir(exist_ok=True)
-        env.update({
-            "HOME": str(home), "XDG_CONFIG_HOME": str(home / "config"),
-            "XDG_CACHE_HOME": str(home / "cache"), "XDG_DATA_HOME": str(home / "data"),
-            "XDG_STATE_HOME": str(home / "state"), "TMPDIR": str(home / "tmp"),
-            "CLAUDE_CONFIG_DIR": str(home / "claude-1"),
-            "CODEX_HOME": str(home / "codex"), "GROK_HOME": str(home / "grok"),
-        })
-        claims = {"exp": int(time.time()) + 86400, "email": "capture@invalid.local",
-                  "https://api.openai.com/auth": {"chatgpt_account_id": "native-compare-account",
-                      "chatgpt_user_id": "native-compare-user", "chatgpt_plan_type": "pro"}}
-        token = ".".join(base64.urlsafe_b64encode(json.dumps(part).encode()).decode().rstrip("=")
-                         for part in ({"alg": "none"}, claims)) + ".synthetic"
-        (home / "codex" / "auth.json").write_text(json.dumps({
-            "auth_mode": "chatgpt", "tokens": {"id_token": token, "access_token": token,
-                "refresh_token": "native-compare-synthetic-refresh", "account_id": "native-compare-account"},
-            "last_refresh": utc_now(),
-        }))
+        env.update(
+            {
+                "HOME": str(home),
+                "XDG_CONFIG_HOME": str(home / "config"),
+                "XDG_CACHE_HOME": str(home / "cache"),
+                "XDG_DATA_HOME": str(home / "data"),
+                "XDG_STATE_HOME": str(home / "state"),
+                "TMPDIR": str(home / "tmp"),
+                "CLAUDE_CONFIG_DIR": str(home / "claude-1"),
+                "CODEX_HOME": str(home / "codex"),
+                "GROK_HOME": str(home / "grok"),
+            }
+        )
+        claims = {
+            "exp": int(time.time()) + 86400,
+            "email": "capture@invalid.local",
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "native-compare-account",
+                "chatgpt_user_id": "native-compare-user",
+                "chatgpt_plan_type": "pro",
+            },
+        }
+        token = (
+            ".".join(
+                base64.urlsafe_b64encode(json.dumps(part).encode()).decode().rstrip("=")
+                for part in ({"alg": "none"}, claims)
+            )
+            + ".synthetic"
+        )
+        (home / "codex" / "auth.json").write_text(
+            json.dumps(
+                {
+                    "auth_mode": "chatgpt",
+                    "tokens": {
+                        "id_token": token,
+                        "access_token": token,
+                        "refresh_token": "native-compare-synthetic-refresh",
+                        "account_id": "native-compare-account",
+                    },
+                    "last_refresh": utc_now(),
+                }
+            )
+        )
         # Native Grok indexes OIDC logins by the public issuer/client pair.
         issuer = "https://auth.x.ai"
         client_id = "b1a00492-073a-47ea-816f-4c329264a828"
         expires = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
-        (home / "grok" / "auth.json").write_text(json.dumps({f"{issuer}::{client_id}": {
-            "key": "native-compare-synthetic-key", "auth_mode": "oidc",
-            "create_time": utc_now(), "expires_at": expires,
-            "user_id": "native-compare-user", "email": "capture@invalid.local",
-            "first_name": "Synthetic", "profile_image_asset_id": "",
-            "principal_type": "User", "principal_id": "native-compare-user",
-            "team_id": "native-compare-team", "coding_data_retention_opt_out": True,
-            "refresh_token": "native-compare-synthetic-refresh",
-            "oidc_issuer": issuer, "oidc_client_id": client_id,
-        }}))
-        (home / "claude-1" / ".claude.json").write_text(json.dumps({
-            "hasCompletedOnboarding": True, "theme": "dark",
-            "bypassPermissionsModeAccepted": True,
-        }))
+        (home / "grok" / "auth.json").write_text(
+            json.dumps(
+                {
+                    f"{issuer}::{client_id}": {
+                        "key": "native-compare-synthetic-key",
+                        "auth_mode": "oidc",
+                        "create_time": utc_now(),
+                        "expires_at": expires,
+                        "user_id": "native-compare-user",
+                        "email": "capture@invalid.local",
+                        "first_name": "Synthetic",
+                        "profile_image_asset_id": "",
+                        "principal_type": "User",
+                        "principal_id": "native-compare-user",
+                        "team_id": "native-compare-team",
+                        "coding_data_retention_opt_out": True,
+                        "refresh_token": "native-compare-synthetic-refresh",
+                        "oidc_issuer": issuer,
+                        "oidc_client_id": client_id,
+                    }
+                }
+            )
+        )
+        (home / "claude-1" / ".claude.json").write_text(
+            json.dumps(
+                {
+                    "hasCompletedOnboarding": True,
+                    "theme": "dark",
+                    "bypassPermissionsModeAccepted": True,
+                }
+            )
+        )
     env["ANTHROPIC_API_KEY"] = "native-compare-synthetic-key"
     env["OPENROUTER_API_KEY"] = "native-compare-synthetic-key"
     env["GROK_XAI_API_BASE_URL"] = f"{origin}/v1"
@@ -1817,8 +1903,7 @@ def _synthetic_claude_config_dir(config_dir: Path) -> Path:
     real_config = (home / ".claude.json").resolve()
     if resolved == home or destination == real_config or destination == home:
         raise RuntimeError(
-            "refusing to seed Claude workspace trust outside the capture "
-            "script's synthetic config"
+            "refusing to seed Claude workspace trust outside the capture script's synthetic config"
         )
     for block in blocked:
         if (
@@ -1883,7 +1968,9 @@ def seed_claude_workspace_trust(config_dir: Path, project: Path) -> list[str]:
     return keys
 
 
-def claude_tui_command(spec: VendorSpec, bin_path: Path, fixture: Path, debug_file: Path) -> list[str]:
+def claude_tui_command(
+    spec: VendorSpec, bin_path: Path, fixture: Path, debug_file: Path
+) -> list[str]:
     return [
         str(bin_path),
         "--debug",
@@ -1906,9 +1993,7 @@ def claude_tui_command(spec: VendorSpec, bin_path: Path, fixture: Path, debug_fi
     ]
 
 
-def vendor_command(
-    spec: VendorSpec, bin_path: Path, fixture: Path, origin: str
-) -> list[str]:
+def vendor_command(spec: VendorSpec, bin_path: Path, fixture: Path, origin: str) -> list[str]:
     if spec.name == "claude":
         raise RuntimeError(CLAUDE_TUI_BLOCKER)
     if spec.name == "codex":
@@ -2002,19 +2087,30 @@ def write_capture(
         "prompt": PROMPT,
         "captured_at": utc_now(),
         "notes": spec.notes,
-        "credential_source": "external debug import; unknown" if imported else "synthetic isolated config; no existing login read",
+        "credential_source": "external debug import; unknown"
+        if imported
+        else "synthetic isolated config; no existing login read",
         "capture_status": "captured",
         "client_status": client_status,
         "privacy": "private local request: contains full prompt/tool content; never commit or share",
         "cli_exit_code": cli_exit_code,
-        "authentication": ("unknown external import" if imported else
-                           {"claude": "synthetic OAuth bearer", "codex": "synthetic ChatGPT tokens",
-                            "grok": "synthetic OIDC tokens", "opencode": "synthetic API key"}[spec.name]),
+        "authentication": (
+            "unknown external import"
+            if imported
+            else {
+                "claude": "synthetic OAuth bearer",
+                "codex": "synthetic ChatGPT tokens",
+                "grok": "synthetic OIDC tokens",
+                "opencode": "synthetic API key",
+            }[spec.name]
+        ),
         "evidence_limits": "Native request construction only; no provider acceptance or paid inference",
         "account_reference": "claude-1" if spec.name == "claude" else None,
         "capture_entrypoint": "interactive-cli" if spec.name == "claude" else "headless-cli",
         "mock_origin": origin,
-        "request_origin": "https://api.anthropic.com" if spec.name == "claude" and not imported else origin,
+        "request_origin": "https://api.anthropic.com"
+        if spec.name == "claude" and not imported
+        else origin,
         "request_method": captured.method,
         "request_path": captured.path,
         "probe_paths": [f"{method} {path}" for method, path in probes],
@@ -2037,9 +2133,7 @@ def write_capture(
         json.dumps(redacted_body, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     jsonc = pretty_jsonc(redacted_body)
-    header_rows = "\n".join(
-        f"| {row['name']} | {row['value']} |" for row in redacted_headers
-    )
+    header_rows = "\n".join(f"| {row['name']} | {row['value']} |" for row in redacted_headers)
     markdown = (
         f"# `{spec.name}`\n"
         f"\n"
@@ -2086,8 +2180,14 @@ def run_vendor(
     claude_from: Path | None = None,
     claude_scenario: str = "single",
 ) -> str | None:
-    for name in ("pin.json", "hello.headers.json", "hello.request.json", "hello.md",
-                 "multiturn.json", "multiturn.facts.json"):
+    for name in (
+        "pin.json",
+        "hello.headers.json",
+        "hello.request.json",
+        "hello.md",
+        "multiturn.json",
+        "multiturn.facts.json",
+    ):
         (out_dir / spec.name / name).unlink(missing_ok=True)
     if spec.name == "claude":
         if claude_from is not None:
@@ -2119,12 +2219,19 @@ def run_vendor(
         version = version_text(bin_path, env)
         print(f"capturing {spec.name}: {' '.join(command)}", flush=True)
         stdout_path, stderr_path = home / "stdout", home / "stderr"
-        execution = asyncio.run(owned_processes.run_command(
-            command, cwd=fixture, env=env, stdout_path=stdout_path,
-            stderr_path=stderr_path, timeout=timeout,
-        ))
+        execution = asyncio.run(
+            owned_processes.run_command(
+                command,
+                cwd=fixture,
+                env=env,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                timeout=timeout,
+            )
+        )
         result = subprocess.CompletedProcess(
-            command, execution["returncode"],
+            command,
+            execution["returncode"],
             stdout_path.read_text(encoding="utf-8", errors="replace"),
             stderr_path.read_text(encoding="utf-8", errors="replace"),
         )
@@ -2218,9 +2325,7 @@ def pty_write(fd: int, data: bytes) -> bool:
         return False
 
 
-def wait_claude_cli_inference(
-    state: CaptureState, deadline: float
-) -> CapturedRequest | None:
+def wait_claude_cli_inference(state: CaptureState, deadline: float) -> CapturedRequest | None:
     while time.monotonic() < deadline:
         with state.lock:
             items = list(state.inferences)
@@ -2258,7 +2363,10 @@ def run_claude_tui(
 
 
 async def run_claude_tui_owned(
-    spec: VendorSpec, out_dir: Path, work_root: Path, timeout: int,
+    spec: VendorSpec,
+    out_dir: Path,
+    work_root: Path,
+    timeout: int,
 ) -> str | None:
     bin_path = which(spec.bin)
     if bin_path is None:
@@ -2331,7 +2439,13 @@ async def run_claude_tui_owned(
         # Persist the synthetic request before stopping the TUI. A client that
         # does not join promptly must not erase an already observed wire shape.
         write_capture(
-            out_dir, spec, bin_path, version, captured, origin, state.requests,
+            out_dir,
+            spec,
+            bin_path,
+            version,
+            captured,
+            origin,
+            state.requests,
             client_status="captured-before-cleanup",
         )
         # Closing the master hangs up the TUI; an undrained PTY could
@@ -2345,8 +2459,15 @@ async def run_claude_tui_owned(
         owned = None
         pid = None
         write_capture(
-            out_dir, spec, bin_path, version, captured, origin, state.requests,
-            cli_exit_code=exit_code, client_status="stopped-after-capture",
+            out_dir,
+            spec,
+            bin_path,
+            version,
+            captured,
+            origin,
+            state.requests,
+            cli_exit_code=exit_code,
+            client_status="stopped-after-capture",
         )
         rel = out_dir / spec.name
         print(
@@ -2375,13 +2496,17 @@ async def run_claude_tui_owned(
 def main_text_replies(state: CaptureState) -> int:
     with state.lock:
         return sum(
-            1 for item in state.inferences
+            1
+            for item in state.inferences
             if item.reply and item.reply["main"] and item.reply["action"] == "text"
         )
 
 
 async def wait_claude_ready(
-    fd: int, collected: bytearray, process: Any, timeout: int,
+    fd: int,
+    collected: bytearray,
+    process: Any,
+    timeout: int,
 ) -> str | None:
     deadline = time.monotonic() + timeout
     accepted_bypass = False
@@ -2393,8 +2518,12 @@ async def wait_claude_ready(
         # Newer interactive clients ask separately even when workspace trust
         # and the old bypass acceptance flag are seeded. This is the isolated
         # capture home, behind the destination-denying recorder, not a user TUI.
-        if (not accepted_bypass and "claudecoderunninginbypasspermissionsmode" in folded
-                and "noexit" in folded and "yesiaccept" in folded):
+        if (
+            not accepted_bypass
+            and "claudecoderunninginbypasspermissionsmode" in folded
+            and "noexit" in folded
+            and "yesiaccept" in folded
+        ):
             if not pty_write(fd, b"\x1b[B\r"):
                 return "claude: PTY closed while accepting synthetic bypass mode"
             accepted_bypass = True
@@ -2406,7 +2535,11 @@ async def wait_claude_ready(
 
 
 async def claude_turn(
-    fd: int, collected: bytearray, state: CaptureState, prompt: str, timeout: int,
+    fd: int,
+    collected: bytearray,
+    state: CaptureState,
+    prompt: str,
+    timeout: int,
 ) -> str | None:
     before = main_text_replies(state)
     if not pty_write(fd, (prompt + "\r").encode("utf-8")):
@@ -2447,25 +2580,30 @@ def multiturn_facts(items: list[CapturedRequest]) -> list[dict[str, Any]]:
             if text.startswith("x-anthropic-billing-header:"):
                 billing = UUID_LABEL.sub(label, text)
         messages = payload.get("messages") or []
-        facts.append({
-            "reply": item.reply,
-            "model": payload.get("model"),
-            "tools": len(payload.get("tools") or []),
-            "messages": len(messages),
-            "last_user": [b.get("type") for b in last_user_blocks(payload)],
-            "diagnostics": payload.get("diagnostics", "absent"),
-            "billing": billing,
-            "max_tokens": payload.get("max_tokens"),
-            "thinking": payload.get("thinking"),
-            "context_management": payload.get("context_management"),
-            "betas": next((v for k, v in item.headers if k.lower() == "anthropic-beta"), None),
-            "user_agent": next((v for k, v in item.headers if k.lower() == "user-agent"), None),
-        })
+        facts.append(
+            {
+                "reply": item.reply,
+                "model": payload.get("model"),
+                "tools": len(payload.get("tools") or []),
+                "messages": len(messages),
+                "last_user": [b.get("type") for b in last_user_blocks(payload)],
+                "diagnostics": payload.get("diagnostics", "absent"),
+                "billing": billing,
+                "max_tokens": payload.get("max_tokens"),
+                "thinking": payload.get("thinking"),
+                "context_management": payload.get("context_management"),
+                "betas": next((v for k, v in item.headers if k.lower() == "anthropic-beta"), None),
+                "user_agent": next((v for k, v in item.headers if k.lower() == "user-agent"), None),
+            }
+        )
     return facts
 
 
 async def run_claude_multiturn_owned(
-    spec: VendorSpec, out_dir: Path, work_root: Path, timeout: int,
+    spec: VendorSpec,
+    out_dir: Path,
+    work_root: Path,
+    timeout: int,
 ) -> str | None:
     """Three human turns (one with two tool rounds, one retried after 529),
     then a `--continue` reopen and a fourth turn, in one isolated home."""
@@ -2510,7 +2648,8 @@ async def run_claude_multiturn_owned(
                         break
             finally:
                 (log_dir / f"claude.multiturn.{index + 1}.log").write_text(
-                    redact_text(visible_pty_text(bytes(collected))), encoding="utf-8",
+                    redact_text(visible_pty_text(bytes(collected))),
+                    encoding="utf-8",
                 )
                 # Closing the master hangs up the TUI; an undrained PTY could
                 # otherwise block its shutdown writes.
@@ -2526,18 +2665,31 @@ async def run_claude_multiturn_owned(
         if not main:
             return "claude: no main-thread inference captured"
         write_capture(
-            out_dir, spec, bin_path, version, main[0], origin, state.requests,
+            out_dir,
+            spec,
+            bin_path,
+            version,
+            main[0],
+            origin,
+            state.requests,
             client_status="stopped-after-capture",
         )
         dest = out_dir / spec.name
         snapshots = [
-            {"path": item.path, "reply": item.reply, "headers": redact_headers(item.headers),
-             "body": redact_json(parse_json_body(item.body))}
+            {
+                "path": item.path,
+                "reply": item.reply,
+                "headers": redact_headers(item.headers),
+                "body": redact_json(parse_json_body(item.body)),
+            }
             for item in items
         ]
-        (dest / "multiturn.json").write_text(json.dumps(snapshots, indent=2) + "\n", encoding="utf-8")
+        (dest / "multiturn.json").write_text(
+            json.dumps(snapshots, indent=2) + "\n", encoding="utf-8"
+        )
         (dest / "multiturn.facts.json").write_text(
-            json.dumps(multiturn_facts(items), indent=2) + "\n", encoding="utf-8",
+            json.dumps(multiturn_facts(items), indent=2) + "\n",
+            encoding="utf-8",
         )
         print(f"wrote {dest} ({len(items)} inference POSTs, {len(main)} main-thread)", flush=True)
         return None
@@ -2669,9 +2821,7 @@ def main(argv: list[str] | None = None) -> int:
         print(error, file=sys.stderr)
         return 2
     out_dir = args.output if args.output.is_absolute() else ROOT / args.output
-    work_root = (
-        args.workspace if args.workspace.is_absolute() else ROOT / args.workspace
-    )
+    work_root = args.workspace if args.workspace.is_absolute() else ROOT / args.workspace
     out_dir.mkdir(parents=True, exist_ok=True)
     work_root.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []

@@ -52,9 +52,7 @@ class ArchError(RuntimeError):
 def require_arch(value: str) -> str:
     """Validate an explicit HARBOR_ARCH value. Aliases are not accepted."""
     if value not in ARCHES:
-        raise ArchError(
-            f"HARBOR_ARCH must be one of {' | '.join(ARCHES)}; got {value!r}"
-        )
+        raise ArchError(f"HARBOR_ARCH must be one of {' | '.join(ARCHES)}; got {value!r}")
     return value
 
 
@@ -93,8 +91,7 @@ def resolve_arch(value: str | None = None, *, env: dict[str, str] | None = None)
     if host is not None:
         return host
     raise ArchError(
-        "cannot determine the eval cell architecture; set HARBOR_ARCH to "
-        f"{' or '.join(ARCHES)}"
+        f"cannot determine the eval cell architecture; set HARBOR_ARCH to {' or '.join(ARCHES)}"
     )
 
 
@@ -141,9 +138,7 @@ def require_elf_arch(path: Path, arch: str, label: str) -> None:
             f"linux/{arch}, so do not upload a Darwin build"
         ) from exc
     if got != want:
-        other = next(
-            (name for name, value in ELF_MACHINES.items() if value == got), None
-        )
+        other = next((name for name, value in ELF_MACHINES.items() if value == got), None)
         built = f"linux/{other}" if other else f"e_machine 0x{got:x}"
         raise ArchError(
             f"{label} at {path} is {built}, but the eval plane is linux/{arch}; "
@@ -154,9 +149,7 @@ def require_elf_arch(path: Path, arch: str, label: str) -> None:
 REMOTE_PLATFORM_RECORD = "/logs/agent/platform.txt"
 
 
-def platform_record_command(
-    arch: str, path: str = REMOTE_PLATFORM_RECORD
-) -> str:
+def platform_record_command(arch: str, path: str = REMOTE_PLATFORM_RECORD) -> str:
     """Write the cell's resolved platform next to the other agent logs.
 
     Harbor uploads `/logs/agent` with the trial, so a result record says for

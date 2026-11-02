@@ -219,16 +219,12 @@ def extract_efforts(text: str) -> list[str] | None:
     lines = text.splitlines()
     chunks: list[str] = []
     for index, line in enumerate(lines):
-        if re.search(r"reasoning[._ ]efforts?", line, re.I) and re.search(
-            r"support", line, re.I
-        ):
+        if re.search(r"reasoning[._ ]efforts?", line, re.I) and re.search(r"support", line, re.I):
             blob = line
             if index + 1 < len(lines) and re.match(r"\s*`[a-z]+`", lines[index + 1]):
                 blob = f"{blob} {lines[index + 1]}"
             chunks.append(blob)
-        elif re.search(r"not supported", line, re.I) and re.search(
-            r"effort", line, re.I
-        ):
+        elif re.search(r"not supported", line, re.I) and re.search(r"effort", line, re.I):
             chunks.append(line)
     if not chunks:
         return None
@@ -588,7 +584,12 @@ def parse_probe_message(text: str) -> dict[str, Any] | None:
     generic = re.search(r"supported values are:\s*([^.]+)", text, re.I)
     if not generic:
         return None
-    return {"scope": "global", "rejected": None, "model": None, "efforts": _named_efforts(generic.group(1))}
+    return {
+        "scope": "global",
+        "rejected": None,
+        "model": None,
+        "efforts": _named_efforts(generic.group(1)),
+    }
 
 
 def effort_probe_body(model_id: str, effort: str) -> dict[str, Any]:
@@ -717,9 +718,7 @@ class Change:
         return f"  {self.kind} {self.model_id} {self.detail}".rstrip()
 
 
-def _field_changes(
-    old: dict[str, Any], new: dict[str, Any], fields: tuple[str, ...]
-) -> list[str]:
+def _field_changes(old: dict[str, Any], new: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
     changes = []
     for field in fields:
         if old.get(field) != new.get(field):
@@ -757,9 +756,7 @@ def regenerate(
     reviewed_on: str | None,
 ) -> tuple[dict[str, Any], list[Change]]:
     """Refresh factual fields. Never newly admits a model unless promoted."""
-    fields = {"openai": OPENAI_FIELDS, "anthropic": ANTHROPIC_FIELDS, "xai": XAI_FIELDS}[
-        provider
-    ]
+    fields = {"openai": OPENAI_FIELDS, "anthropic": ANTHROPIC_FIELDS, "xai": XAI_FIELDS}[provider]
     changes: list[Change] = []
     models: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -784,9 +781,7 @@ def regenerate(
                     Change(
                         "blocked",
                         model_id,
-                        "new facts would admit it; pass --promote "
-                        + model_id
-                        + " to write them",
+                        "new facts would admit it; pass --promote " + model_id + " to write them",
                     )
                 )
                 models.append(row)
@@ -814,9 +809,7 @@ def regenerate(
                             "new",
                             model_id,
                             "needs-review (not written: the family rules would admit it; "
-                            "pass --promote "
-                            + model_id
-                            + ")",
+                            "pass --promote " + model_id + ")",
                         )
                     )
                     continue
@@ -973,17 +966,23 @@ def observe_xai(
         efforts, effort_conflict = _agree(effort_sources)
         facts: dict[str, Any] = {"id": model_id}
         if context_conflict:
-            conflicts.append(Change("conflict", model_id, "context_length sources disagree; kept reviewed"))
+            conflicts.append(
+                Change("conflict", model_id, "context_length sources disagree; kept reviewed")
+            )
         elif context is not None:
             facts["context_length"] = context
         if threshold_conflict:
             conflicts.append(
-                Change("conflict", model_id, "long_context_threshold sources disagree; kept reviewed")
+                Change(
+                    "conflict", model_id, "long_context_threshold sources disagree; kept reviewed"
+                )
             )
         elif threshold is not None:
             facts["long_context_threshold"] = threshold
         if effort_conflict:
-            conflicts.append(Change("conflict", model_id, "efforts sources disagree; kept reviewed"))
+            conflicts.append(
+                Change("conflict", model_id, "efforts sources disagree; kept reviewed")
+            )
         elif efforts is not None:
             facts["efforts"] = efforts
         elif any("efforts" in row and row.get("efforts") is None for row in sources):
@@ -1099,7 +1098,9 @@ def fetch(
     except Exception as exc:  # noqa: BLE001 - the message is sanitized before it leaves
         raise CensusError(sanitize(str(exc))[:300]) from None
     if len(payload) > limit:
-        raise CensusError(f"response from {urllib.parse.urlparse(url).netloc} exceeds {limit} bytes")
+        raise CensusError(
+            f"response from {urllib.parse.urlparse(url).netloc} exceeds {limit} bytes"
+        )
     return status, payload
 
 
@@ -1129,9 +1130,9 @@ def _json_bytes(payload: bytes) -> Any:
         raise CensusError("response was not JSON") from None
 
 
-def live_openai(key: str, table: dict[str, Any], *, doc_limit: int, probe: int) -> tuple[
-    list[str], dict[str, dict[str, Any]], list[Change]
-]:
+def live_openai(
+    key: str, table: dict[str, Any], *, doc_limit: int, probe: int
+) -> tuple[list[str], dict[str, dict[str, Any]], list[Change]]:
     status, body = fetch(
         "https://api.openai.com/v1/models",
         auth_headers("openai", key),
@@ -1286,9 +1287,9 @@ def live_anthropic(key: str) -> tuple[list[str], dict[str, dict[str, Any]]]:
     return [row["id"] for row in rows], observed
 
 
-def live_xai(key: str, table: dict[str, Any], *, doc_limit: int) -> tuple[
-    list[str], dict[str, dict[str, Any]], list[Change]
-]:
+def live_xai(
+    key: str, table: dict[str, Any], *, doc_limit: int
+) -> tuple[list[str], dict[str, dict[str, Any]], list[Change]]:
     headers = auth_headers("xai", key)
     _, models_body = fetch("https://api.x.ai/v1/models", headers)
     models_payload = _json_bytes(models_body)
@@ -1454,9 +1455,7 @@ def run_census(
         else:
             key = load_key(provider)
             if provider == "openai":
-                listed, observed, notes = live_openai(
-                    key, table, doc_limit=doc_limit, probe=probe
-                )
+                listed, observed, notes = live_openai(key, table, doc_limit=doc_limit, probe=probe)
                 extra = bundle.get("_codex")
                 if isinstance(extra, dict):
                     for model_id, facts in observed.items():
@@ -1495,7 +1494,8 @@ def run_census(
             shown = path.relative_to(root) if path.is_relative_to(root) else path
             changes.append(Change("wrote", provider, str(shown)))
     sections = [
-        (provider, revision, changes) for provider, _path, revision, _rendered, changes, _differs in prepared
+        (provider, revision, changes)
+        for provider, _path, revision, _rendered, changes, _differs in prepared
     ]
     return render_report(sections), wrote
 

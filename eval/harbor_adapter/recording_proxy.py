@@ -3,6 +3,7 @@
 Never use this for Plak's exact-URL subscription routes. CA/private key and
 raw buffers stay in the cell, outside /logs. Upstream TLS is always verified.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,8 +24,17 @@ from urllib.parse import urlsplit
 from harbor_adapter.observed_config import json_records, request_config, response_config
 
 LIMIT = 32 * 1024 * 1024
-HOP_HEADERS = {"connection", "proxy-connection", "proxy-authorization", "transfer-encoding",
-               "keep-alive", "upgrade", "te", "trailer", "content-length"}
+HOP_HEADERS = {
+    "connection",
+    "proxy-connection",
+    "proxy-authorization",
+    "transfer-encoding",
+    "keep-alive",
+    "upgrade",
+    "te",
+    "trailer",
+    "content-length",
+}
 
 
 def require_hosts(hosts: list[str]) -> list[str]:
@@ -37,14 +47,33 @@ def make_certificate(directory: Path, hosts: list[str]) -> None:
     hosts = require_hosts(hosts)
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     config = directory / "openssl.cnf"
-    config.write_text("[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n"
-                      "[dn]\nCN=Harbor cell recorder\n[ext]\nbasicConstraints=critical,CA:TRUE\n"
-                      "keyUsage=critical,digitalSignature,keyCertSign\n"
-                      "subjectAltName=" + ",".join("DNS:" + h for h in hosts) + "\n")
-    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-                    "-keyout", str(directory / "key.pem"), "-out", str(directory / "ca.pem"),
-                    "-config", str(config)], check=True, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL)
+    config.write_text(
+        "[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n"
+        "[dn]\nCN=Harbor cell recorder\n[ext]\nbasicConstraints=critical,CA:TRUE\n"
+        "keyUsage=critical,digitalSignature,keyCertSign\n"
+        "subjectAltName=" + ",".join("DNS:" + h for h in hosts) + "\n"
+    )
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-keyout",
+            str(directory / "key.pem"),
+            "-out",
+            str(directory / "ca.pem"),
+            "-config",
+            str(config),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     (directory / "key.pem").chmod(0o600)
 
 
@@ -66,15 +95,32 @@ class Recorder:
             return None
         with self.lock:
             index = len(self.requests)
-            self.requests.append({"request": request_config(value), "response": {},
-                                  "request_sha256": hashlib.sha256(body).hexdigest()})
+            self.requests.append(
+                {
+                    "request": request_config(value),
+                    "response": {},
+                    "request_sha256": hashlib.sha256(body).hexdigest(),
+                }
+            )
             self._write()
             return index
 
-    def finish(self, index: int | None, body: bytes, *, status_code=200, transport_error=False, client_cancelled=False) -> None:
+    def finish(
+        self,
+        index: int | None,
+        body: bytes,
+        *,
+        status_code=200,
+        transport_error=False,
+        client_cancelled=False,
+    ) -> None:
         if index is None:
             return
-        served = {"status_code": status_code, "transport_error": transport_error, "client_cancelled": client_cancelled}
+        served = {
+            "status_code": status_code,
+            "transport_error": transport_error,
+            "client_cancelled": client_cancelled,
+        }
         for value in json_records(body.decode("utf-8", errors="replace")):
             served.update({k: v for k, v in response_config(value).items() if v is not None})
         with self.lock:
@@ -82,10 +128,14 @@ class Recorder:
             self._write()
 
     def _write(self) -> None:
-        value = {"schemaVersion": 1, "source": "exchange", "wire_verified": bool(self.requests) and not self.incomplete,
-                 "capture_incomplete": self.incomplete,
-                 "first_request": self.requests[0]["request"] if self.requests else None,
-                 "requests": self.requests}
+        value = {
+            "schemaVersion": 1,
+            "source": "exchange",
+            "wire_verified": bool(self.requests) and not self.incomplete,
+            "capture_incomplete": self.incomplete,
+            "first_request": self.requests[0]["request"] if self.requests else None,
+            "requests": self.requests,
+        }
         temporary = self.output.with_suffix(".tmp")
         with open(temporary, "w", opener=lambda p, f: os.open(p, f, 0o600)) as stream:
             json.dump(value, stream, sort_keys=True)
@@ -123,8 +173,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
         connection = self.server.tls.wrap_socket(self.connection, server_side=True)
         try:
-            ProxyHandler(connection, self.client_address, self.server,
-                         tunnel_host=self.path.removesuffix(":443"))
+            ProxyHandler(
+                connection,
+                self.client_address,
+                self.server,
+                tunnel_host=self.path.removesuffix(":443"),
+            )
         finally:
             connection.close()
             self.close_connection = True
@@ -133,7 +187,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         """Non-provider tool traffic stays opaque; no model-content observation."""
         target = urlsplit("//" + self.path)
         try:
-            if not target.hostname or target.username or target.password or target.path or target.query or target.fragment:
+            if (
+                not target.hostname
+                or target.username
+                or target.password
+                or target.path
+                or target.query
+                or target.fragment
+            ):
                 raise ValueError
             port = target.port or 443
             upstream = socket.create_connection((target.hostname, port), timeout=15)
@@ -168,9 +229,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def _forward(self):
         host = self.headers.get("Host", "").removesuffix(":443")
-        if (not isinstance(self.connection, ssl.SSLSocket) or host not in self.server.hosts or host != self.tunnel_host
-                or urlsplit(self.path).scheme or not self.path.startswith("/")
-                or self.headers.get("Transfer-Encoding")):
+        if (
+            not isinstance(self.connection, ssl.SSLSocket)
+            or host not in self.server.hosts
+            or host != self.tunnel_host
+            or urlsplit(self.path).scheme
+            or not self.path.startswith("/")
+            or self.headers.get("Transfer-Encoding")
+        ):
             self.send_error(403)
             return
         index = None
@@ -187,15 +253,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.server.recorder.fail()
                 raise ValueError
             try:
-                index = (self.server.recorder.begin(body) if body and self.command == "POST"
-                         and urlsplit(self.path).path.endswith(("/responses", "/chat/completions", "/messages"))
-                         else None)
+                index = (
+                    self.server.recorder.begin(body)
+                    if body
+                    and self.command == "POST"
+                    and urlsplit(self.path).path.endswith(
+                        ("/responses", "/chat/completions", "/messages")
+                    )
+                    else None
+                )
             except (ValueError, TypeError):
                 self.server.recorder.fail()
                 index = None
             headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS}
             headers["Accept-Encoding"] = "identity"
-            upstream = http.client.HTTPSConnection(host, timeout=300, context=ssl.create_default_context())
+            upstream = http.client.HTTPSConnection(
+                host, timeout=300, context=ssl.create_default_context()
+            )
             try:
                 upstream.request(self.command, self.path, body, headers)
                 response = upstream.getresponse()
@@ -224,8 +298,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
             finally:
                 upstream.close()
         except Exception:
-            self.server.recorder.finish(index, bytes(captured), status_code=response_status,
-                                        transport_error=not sending, client_cancelled=sending)
+            self.server.recorder.finish(
+                index,
+                bytes(captured),
+                status_code=response_status,
+                transport_error=not sending,
+                client_cancelled=sending,
+            )
             self.close_connection = True
 
 
@@ -234,8 +313,11 @@ def main() -> None:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--host", action="append", required=True)
     parser.add_argument("--port", type=int, default=18080)
-    parser.add_argument("--passthrough", action="store_true",
-                        help="blind-tunnel non-provider HTTPS so native tools keep their network authority")
+    parser.add_argument(
+        "--passthrough",
+        action="store_true",
+        help="blind-tunnel non-provider HTTPS so native tools keep their network authority",
+    )
     args = parser.parse_args()
     hosts = require_hosts(args.host)
     directory = args.directory.resolve()

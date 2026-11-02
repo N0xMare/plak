@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/gate"))
 import vcs_listing  # noqa: E402
+
 PLAK_MANIFEST = Path("bin/plak/Cargo.toml")
 HARNESS = "plakous-offline-crash-harness"
 
@@ -74,7 +75,9 @@ def stage(root: Path, destination: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / relative, target)
     manifest = destination / PLAK_MANIFEST
-    manifest.write_text(published_plak_manifest(manifest.read_text(encoding="utf-8")), encoding="utf-8")
+    manifest.write_text(
+        published_plak_manifest(manifest.read_text(encoding="utf-8")), encoding="utf-8"
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -86,7 +89,9 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "manifest":
-            sys.stdout.write(published_plak_manifest((ROOT / PLAK_MANIFEST).read_text(encoding="utf-8")))
+            sys.stdout.write(
+                published_plak_manifest((ROOT / PLAK_MANIFEST).read_text(encoding="utf-8"))
+            )
         else:
             stage(ROOT, args.destination)
     except ShapeError as error:

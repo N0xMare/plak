@@ -79,7 +79,9 @@ class ConfigurationPlacementTests(unittest.TestCase):
         for entry in ("x::CAPABILITY", "CAPABILITY"):
             source = f'static CAPS: &[&dyn Capability] = &[#[cfg(feature = "x")] &{entry},];'
             self.assertFalse(any(self.debt(source, "src/registry.rs").values()))
-            self.assertFalse(any(self.debt(source, rule={"feature-sites": ["src/logic.rs"]}).values()))
+            self.assertFalse(
+                any(self.debt(source, rule={"feature-sites": ["src/logic.rs"]}).values())
+            )
 
     def test_registry_file_does_not_allow_gated_function_bodies(self):
         source = 'fn branch() { #[cfg(feature = "x")] &x::CAPABILITY; }'
@@ -105,9 +107,13 @@ class ConfigurationPlacementTests(unittest.TestCase):
             self.assertFalse(any(self.debt(source, path).values()))
 
     def test_new_packages_default_to_zero_debt(self):
-        errors = checker.validate_configuration_rules("new", {
-            "src/logic.rs": '#[cfg(feature = "x")] fn a() {}',
-        }, {})
+        errors = checker.validate_configuration_rules(
+            "new",
+            {
+                "src/logic.rs": '#[cfg(feature = "x")] fn a() {}',
+            },
+            {},
+        )
         self.assertIn("exceeds ceiling 0", errors[0])
 
     def test_ceiling_requires_reason_and_reductions_lower_it(self):
@@ -119,9 +125,15 @@ class ConfigurationPlacementTests(unittest.TestCase):
         self.assertIn("lower env-ceiling", errors[0])
 
     def test_invalid_metadata_fails_closed(self):
-        for rule in ({"env-ceiling": True}, {"env-ceiling": -1},
-                     {"env-sites": "src/x.rs"}, {"feature-sites": ["src/../x.rs"]},
-                     {"env-ceilling": 1}, {"reason": 42}, []):
+        for rule in (
+            {"env-ceiling": True},
+            {"env-ceiling": -1},
+            {"env-sites": "src/x.rs"},
+            {"feature-sites": ["src/../x.rs"]},
+            {"env-ceilling": 1},
+            {"reason": 42},
+            [],
+        ):
             with self.subTest(rule=rule):
                 self.assertTrue(checker.validate_configuration_rules("x", {}, rule))
 

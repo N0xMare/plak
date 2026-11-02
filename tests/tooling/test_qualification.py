@@ -33,11 +33,24 @@ class QualificationTests(unittest.TestCase):
             outcome = outcomes[len(reports)]
             report = {
                 "capture_complete": True,
-                "binary_sha256_start": "build", "binary_sha256_end": "build",
-                "evidence": {"recall": {"capture_complete": True, "segments": ["capture"], "captured_exchanges": 1}},
-                "results": [{"scenario": "recall", "outcome": outcome,
-                             "detail": "capture proves fact was in input" if outcome == live.MODEL
-                             else "synthetic " + outcome}],
+                "binary_sha256_start": "build",
+                "binary_sha256_end": "build",
+                "evidence": {
+                    "recall": {
+                        "capture_complete": True,
+                        "segments": ["capture"],
+                        "captured_exchanges": 1,
+                    }
+                },
+                "results": [
+                    {
+                        "scenario": "recall",
+                        "outcome": outcome,
+                        "detail": "capture proves fact was in input"
+                        if outcome == live.MODEL
+                        else "synthetic " + outcome,
+                    }
+                ],
             }
             reports.append(report)
             return (0 if outcome == live.PASS else 1), report
@@ -91,15 +104,20 @@ class QualificationTests(unittest.TestCase):
 
     def test_missing_capture_or_changed_build_is_harness(self):
         for changes in ({"capture_complete": False}, {"binary_sha256_end": "other"}):
-            report = {"capture_complete": True, "binary_sha256_start": "build",
-                      "binary_sha256_end": "build", "results": [
-                          {"outcome": live.MODEL, "detail": "cannot recall"}], **changes}
+            report = {
+                "capture_complete": True,
+                "binary_sha256_start": "build",
+                "binary_sha256_end": "build",
+                "results": [{"outcome": live.MODEL, "detail": "cannot recall"}],
+                **changes,
+            }
             self.assertEqual(qualification.score_report(1, report)[0], live.HARNESS)
 
     def test_dry_run_prints_same_command_and_extra_attempt_without_running(self):
         with patch("qualification.execute") as execute, patch("builtins.print") as output:
-            self.assertEqual(qualification.main(["smoke", "codex", "--dry-run",
-                                                  "--only", "compaction"]), 0)
+            self.assertEqual(
+                qualification.main(["smoke", "codex", "--dry-run", "--only", "compaction"]), 0
+            )
         execute.assert_not_called()
         text = "\n".join(str(call.args) for call in output.call_args_list)
         self.assertIn("2 attempts", text)
@@ -110,8 +128,9 @@ class QualificationTests(unittest.TestCase):
     def test_estimate_reserves_one_extra_attempt_explicitly(self):
         cell = estimate.Cell("mac", "smoke", "api", live.LIGHT, "model", "openai", live.FIRST)
         rate = estimate.Rate(Decimal(1), Decimal(0), Decimal(1), Decimal(0))
-        assumptions = estimate.Assumptions(smoke_input_tokens=1_000_000,
-                                          smoke_output_tokens=0, contingency=Decimal(0))
+        assumptions = estimate.Assumptions(
+            smoke_input_tokens=1_000_000, smoke_output_tokens=0, contingency=Decimal(0)
+        )
         report = estimate.estimate_matrix([cell], {"model": rate}, assumptions)
         self.assertEqual(report.subtotal, Decimal(1))
         self.assertEqual(report.rerun_reserve, Decimal(1))
@@ -126,21 +145,29 @@ class QualificationTests(unittest.TestCase):
             segment.mkdir(parents=True)
             (segment / "exchange.info").write_text("synthetic")
             runner.env.capture_segments.append(segment)
-            seen.append((runner.route, runner.env.binary, runner.env.home,
-                         runner.env.fixture_seed, name))
+            seen.append(
+                (runner.route, runner.env.binary, runner.env.home, runner.env.fixture_seed, name)
+            )
             if len(seen) == 1:
                 raise live.ScenarioFailure(live.MODEL, "capture proves lost fact")
             return "fact recalled"
 
-        with tempfile.TemporaryDirectory() as directory, \
-                patch("smoke.selected_scenarios", return_value=(("compaction", "jsonl"),)), \
-                patch("smoke.run_named", side_effect=scenario), \
-                patch("smoke.capture_complete", return_value=True), \
-                patch("live.write_home"), patch("live.binary_sha256", return_value="build"), \
-                patch("live.capture_root_mismatch", return_value=None):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("smoke.selected_scenarios", return_value=(("compaction", "jsonl"),)),
+            patch("smoke.run_named", side_effect=scenario),
+            patch("smoke.capture_complete", return_value=True),
+            patch("live.write_home"),
+            patch("live.binary_sha256", return_value="build"),
+            patch("live.capture_root_mismatch", return_value=None),
+        ):
             binary = Path(directory) / "plak"
-            result = qualification.run_cell(Path(directory) / "cell", lambda path:
-                qualification.execute("smoke", "codex", binary, ["--only", "compaction"], 17, path))
+            result = qualification.run_cell(
+                Path(directory) / "cell",
+                lambda path: qualification.execute(
+                    "smoke", "codex", binary, ["--only", "compaction"], 17, path
+                ),
+            )
         self.assertEqual(result["status"], "PASS after MODEL rerun")
         self.assertEqual(seen[0][:2], seen[1][:2])
         self.assertEqual(seen[0][3:], seen[1][3:])
@@ -154,10 +181,14 @@ class QualificationTests(unittest.TestCase):
         first = long_session.LongSession(route, env)
         second = long_session.LongSession(route, env)
         self.assertEqual(first.random_bytes(4), second.random_bytes(4))
-        self.assertEqual(long_session.base64_line(first.random_bytes),
-                         long_session.base64_line(second.random_bytes))
-        self.assertEqual(long_session.digit_line(first.random_bytes),
-                         long_session.digit_line(second.random_bytes))
+        self.assertEqual(
+            long_session.base64_line(first.random_bytes),
+            long_session.base64_line(second.random_bytes),
+        )
+        self.assertEqual(
+            long_session.digit_line(first.random_bytes),
+            long_session.digit_line(second.random_bytes),
+        )
         first_jobs = jobs.Jobs(route, env)
         second_jobs = jobs.Jobs(route, env)
         self.assertEqual(first_jobs.fresh_token("job"), second_jobs.fresh_token("job"))
@@ -172,13 +203,25 @@ class QualificationTests(unittest.TestCase):
 
     def test_driver_error_during_rerun_is_recorded_harness(self):
         with tempfile.TemporaryDirectory() as directory:
-            report = {"capture_complete": True, "binary_sha256_start": "build",
-                      "binary_sha256_end": "build", "results": [
-                          {"outcome": live.MODEL, "task": "recall", "segment": "capture",
-                           "captured_exchanges": 1, "evidence_status": "response",
-                           "detail": "capture proves lost fact"}]}
-            with patch("builtins.print"), patch("qualification.score_report",
-                                                wraps=qualification.score_report):
+            report = {
+                "capture_complete": True,
+                "binary_sha256_start": "build",
+                "binary_sha256_end": "build",
+                "results": [
+                    {
+                        "outcome": live.MODEL,
+                        "task": "recall",
+                        "segment": "capture",
+                        "captured_exchanges": 1,
+                        "evidence_status": "response",
+                        "detail": "capture proves lost fact",
+                    }
+                ],
+            }
+            with (
+                patch("builtins.print"),
+                patch("qualification.score_report", wraps=qualification.score_report),
+            ):
                 calls = []
 
                 def attempt(path):
@@ -207,45 +250,86 @@ class QualificationTests(unittest.TestCase):
                 used_binary.write_bytes(b"intentional rebuild")
                 outcome = live.MODEL if len(starts) == 1 else live.PASS
                 return (1 if outcome == live.MODEL else 0), {
-                    "summary": {"capture_complete": True, "rebuild": "changed",
-                                "binary_sha256_start": start,
-                                "binary_sha256_end": live.binary_sha256(used_binary),
-                                "binary_sha256_rebuilt": live.binary_sha256(used_binary)},
-                    "records": [{"outcome": outcome, "task": "recall", "segment": "capture",
-                                 "captured_exchanges": 1, "evidence_status": "response",
-                                 "errors": ["capture proves lost fact"]}],
+                    "summary": {
+                        "capture_complete": True,
+                        "rebuild": "changed",
+                        "binary_sha256_start": start,
+                        "binary_sha256_end": live.binary_sha256(used_binary),
+                        "binary_sha256_rebuilt": live.binary_sha256(used_binary),
+                    },
+                    "records": [
+                        {
+                            "outcome": outcome,
+                            "task": "recall",
+                            "segment": "capture",
+                            "captured_exchanges": 1,
+                            "evidence_status": "response",
+                            "errors": ["capture proves lost fact"],
+                        }
+                    ],
                 }
 
-            with patch.object(live, "ROOT", root), \
-                    patch("qualification.execute", side_effect=execute), patch("builtins.print"):
+            with (
+                patch.object(live, "ROOT", root),
+                patch("qualification.execute", side_effect=execute),
+                patch("builtins.print"),
+            ):
                 code = qualification.main(["soak", "codex", "--binary", str(binary)])
             self.assertEqual(code, 0)
             self.assertEqual(starts, [b"original build", b"original build"])
 
     def test_aborted_soak_keeps_model_or_provider_score_before_rebuild(self):
         for outcome in (live.MODEL, live.PROVIDER):
-            report = {"summary": {"capture_complete": True, "rebuild": "failed",
-                                  "rebuild_attempted": False,
-                                  "binary_sha256_start": "build", "binary_sha256_end": "build"},
-                      "records": [{"outcome": outcome, "task": "recall", "segment": "capture",
-                                   "captured_exchanges": 1, "evidence_status": "response",
-                                   "errors": ["capture-proven failure"]}]}
+            report = {
+                "summary": {
+                    "capture_complete": True,
+                    "rebuild": "failed",
+                    "rebuild_attempted": False,
+                    "binary_sha256_start": "build",
+                    "binary_sha256_end": "build",
+                },
+                "records": [
+                    {
+                        "outcome": outcome,
+                        "task": "recall",
+                        "segment": "capture",
+                        "captured_exchanges": 1,
+                        "evidence_status": "response",
+                        "errors": ["capture-proven failure"],
+                    }
+                ],
+            }
             self.assertEqual(qualification.score_report(1, report)[0], outcome)
             report["summary"]["rebuild_attempted"] = True
             self.assertEqual(qualification.score_report(1, report)[0], live.HARNESS)
 
-class QualificationReviewTests(unittest.TestCase):
 
+class QualificationReviewTests(unittest.TestCase):
     def report(self, outcome=live.PASS):
-        return {"summary": {"capture_complete": True, "binary_sha256_start": "start",
-                            "binary_sha256_end": "start"},
-                "records": [{"task": "repair", "outcome": outcome, "segment": "segment-001",
-                             "captured_exchanges": 2, "evidence_status": "response",
-                             "errors": ["answer oracle failed"]}]}
+        return {
+            "summary": {
+                "capture_complete": True,
+                "binary_sha256_start": "start",
+                "binary_sha256_end": "start",
+            },
+            "records": [
+                {
+                    "task": "repair",
+                    "outcome": outcome,
+                    "segment": "segment-001",
+                    "captured_exchanges": 2,
+                    "evidence_status": "response",
+                    "errors": ["answer oracle failed"],
+                }
+            ],
+        }
 
     def test_dead_end_is_harness_without_rerun(self):
-        for changes in ({"dead_end": True}, {"outcome": "dead-end after stream:reset"},
-                        {"dead_ends": 1}):
+        for changes in (
+            {"dead_end": True},
+            {"outcome": "dead-end after stream:reset"},
+            {"dead_ends": 1},
+        ):
             with self.subTest(changes=changes), tempfile.TemporaryDirectory() as directory:
                 report = self.report(live.MODEL)
                 if "dead_ends" in changes:
@@ -293,26 +377,31 @@ class QualificationReviewTests(unittest.TestCase):
             env._capture_root = root
             runner = soak.Soak(live.ROUTES["codex"], env, root)
             turn = live.Turn(phase="completed", text="wrong answer")
-            agent = Mock(capture_dir=root / "segment-001", proc=Mock(pid=1),
-                         prompt=Mock(return_value=turn))
+            agent = Mock(
+                capture_dir=root / "segment-001", proc=Mock(pid=1), prompt=Mock(return_value=turn)
+            )
 
             def open_agent(faults):
                 runner.segment += 1
                 return agent
 
-            with patch.object(runner, "open", side_effect=open_agent), \
-                    patch("soak.check", return_value=False), \
-                    patch("soak.segment_evidence", return_value=(2, [], "response")):
+            with (
+                patch.object(runner, "open", side_effect=open_agent),
+                patch("soak.check", return_value=False),
+                patch("soak.segment_evidence", return_value=(2, [], "response")),
+            ):
                 record = runner.run_task(soak.Task("repair", "fix the bug"), 1, None, False)
             self.assertEqual(record.outcome, live.MODEL)
             self.assertEqual(record.segment, str(agent.capture_dir))
 
     def test_scenario_model_reason_names_capture(self):
         report = self.report()
-        report["results"] = [{"scenario": "recall", "outcome": live.MODEL,
-                              "detail": "forgot captured fact"}]
-        report["evidence"] = {"recall": {"capture_complete": True, "segments": ["capture"],
-                                           "captured_exchanges": 3}}
+        report["results"] = [
+            {"scenario": "recall", "outcome": live.MODEL, "detail": "forgot captured fact"}
+        ]
+        report["evidence"] = {
+            "recall": {"capture_complete": True, "segments": ["capture"], "captured_exchanges": 3}
+        }
         outcome, reason = qualification.score_report(1, report)
         self.assertEqual(outcome, live.MODEL)
         for witness in ("recall", "3", "capture", "forgot captured fact"):
@@ -333,13 +422,21 @@ class QualificationReviewTests(unittest.TestCase):
                 raise live.ScenarioFailure(live.MODEL, "forgot captured fact")
             return "recalled"
 
-        with tempfile.TemporaryDirectory() as directory, patch("builtins.print"), \
-                patch("long_session.selected_catalog", return_value=(("compaction", "jsonl"),)), \
-                patch("long_session.play", side_effect=play), patch("live.write_home"), \
-                patch("live.binary_sha256", return_value="build"), \
-                patch("smoke.capture_complete", return_value=True):
-            result = qualification.run_cell(Path(directory) / "cell", lambda path:
-                qualification.execute("long-session", "codex", Path("plak"), ["--all"], 17, path))
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("builtins.print"),
+            patch("long_session.selected_catalog", return_value=(("compaction", "jsonl"),)),
+            patch("long_session.play", side_effect=play),
+            patch("live.write_home"),
+            patch("live.binary_sha256", return_value="build"),
+            patch("smoke.capture_complete", return_value=True),
+        ):
+            result = qualification.run_cell(
+                Path(directory) / "cell",
+                lambda path: qualification.execute(
+                    "long-session", "codex", Path("plak"), ["--all"], 17, path
+                ),
+            )
         self.assertEqual(result["status"], "PASS after MODEL rerun")
         self.assertEqual([seed for seed, _ in seen], [17, 17])
         self.assertNotEqual(seen[0][1], seen[1][1])
@@ -347,45 +444,60 @@ class QualificationReviewTests(unittest.TestCase):
 
     def test_score_harness_triggers_and_precedence(self):
         changes = [
-            {"capture_complete": False}, {"binary_sha256_start": None},
-            {"binary_sha256_end": None}, {"binary_sha256_end": "operator"},
-            {"rebuild": "changed", "binary_sha256_end": "operator",
-             "binary_sha256_rebuilt": "owned"},
+            {"capture_complete": False},
+            {"binary_sha256_start": None},
+            {"binary_sha256_end": None},
+            {"binary_sha256_end": "operator"},
+            {
+                "rebuild": "changed",
+                "binary_sha256_end": "operator",
+                "binary_sha256_rebuilt": "owned",
+            },
             {"rebuild": "changed", "binary_sha256_end": "owned"},
-            {"evidence_gaps": 1}, {"diagnostics_available": False},
-            {"clean_quit": False}, {"rebuild": "failed", "rebuild_attempted": True},
-            {"turn_failures": 1}, {"dead_ends": 1},
+            {"evidence_gaps": 1},
+            {"diagnostics_available": False},
+            {"clean_quit": False},
+            {"rebuild": "failed", "rebuild_attempted": True},
+            {"turn_failures": 1},
+            {"dead_ends": 1},
         ]
         for change in changes:
             with self.subTest(change=change):
                 report = self.report(live.MODEL)
                 report["summary"].update(change)
                 self.assertEqual(qualification.score_report(0, report)[0], live.HARNESS)
-        for top in ({"driver_error": "oops"},
-                    {"evidence": {"repair": {"capture_complete": False}}},
-                    {"records": []}):
+        for top in (
+            {"driver_error": "oops"},
+            {"evidence": {"repair": {"capture_complete": False}}},
+            {"records": []},
+        ):
             with self.subTest(top=top):
-                self.assertEqual(qualification.score_report(0, {**self.report(), **top})[0],
-                                 live.HARNESS)
+                self.assertEqual(
+                    qualification.score_report(0, {**self.report(), **top})[0], live.HARNESS
+                )
         self.assertEqual(qualification.score_report(1, self.report())[0], live.HARNESS)
         precedence = [live.HARNESS, live.PENDING, live.PROVIDER, live.MODEL]
         for index, expected in enumerate(precedence):
             with self.subTest(expected=expected):
                 report = self.report()
-                report["records"] = [self.report(o)["records"][0]
-                                     for o in reversed(precedence[index:])]
+                report["records"] = [
+                    self.report(o)["records"][0] for o in reversed(precedence[index:])
+                ]
                 self.assertEqual(qualification.score_report(1, report)[0], expected)
         report = self.report()
         report["summary"]["failure"] = {"outcome": live.PENDING, "detail": "pending"}
         self.assertEqual(qualification.score_report(1, report)[0], live.PENDING)
 
     def test_informational_waiver_never_waives_harness_or_pending(self):
-        route = next(route for route in live.ROUTES.values()
-                     if route.route_class == live.INFORMATIONAL)
+        route = next(
+            route for route in live.ROUTES.values() if route.route_class == live.INFORMATIONAL
+        )
         for outcome in (live.PASS, live.MODEL, live.PROVIDER, live.HARNESS, live.PENDING):
             with self.subTest(outcome=outcome):
-                self.assertEqual(qualification.qualifies(route, {"outcome": outcome}, "smoke"),
-                                 outcome in (live.PASS, live.MODEL, live.PROVIDER))
+                self.assertEqual(
+                    qualification.qualifies(route, {"outcome": outcome}, "smoke"),
+                    outcome in (live.PASS, live.MODEL, live.PROVIDER),
+                )
 
     def test_deepseek_long_session_is_informational_and_other_lanes_block(self):
         for outcome in (live.PASS, live.MODEL, live.PROVIDER, live.HARNESS, live.PENDING):
@@ -393,35 +505,56 @@ class QualificationReviewTests(unittest.TestCase):
             for name in ("deepseek-messages", "deepseek"):
                 with self.subTest(outcome=outcome, route=name):
                     route = live.ROUTES[name]
-                    self.assertEqual(qualification.qualifies(route, result, "long-session"),
-                                     outcome in (live.PASS, live.MODEL, live.PROVIDER))
+                    self.assertEqual(
+                        qualification.qualifies(route, result, "long-session"),
+                        outcome in (live.PASS, live.MODEL, live.PROVIDER),
+                    )
                     for lane in ("smoke", "jobs", "soak"):
-                        self.assertEqual(qualification.qualifies(route, result, lane),
-                                         outcome == live.PASS, lane)
-            self.assertEqual(qualification.qualifies(live.ROUTES["grok"], result, "long-session"),
-                             outcome == live.PASS)
+                        self.assertEqual(
+                            qualification.qualifies(route, result, lane), outcome == live.PASS, lane
+                        )
+            self.assertEqual(
+                qualification.qualifies(live.ROUTES["grok"], result, "long-session"),
+                outcome == live.PASS,
+            )
 
     def test_deepseek_long_session_cell_records_its_lane_class(self):
         def execute(lane, route, used_binary, argv, seed, path):
             path.mkdir()
-            return 1, {"capture_complete": True,
-                       "binary_sha256_start": "build", "binary_sha256_end": "build",
-                       "evidence": {"growth": {"capture_complete": True, "segments": ["capture"],
-                                               "captured_exchanges": 1}},
-                       "results": [{"scenario": "growth", "outcome": live.MODEL,
-                                    "detail": "reads omitted offset"}]}
+            return 1, {
+                "capture_complete": True,
+                "binary_sha256_start": "build",
+                "binary_sha256_end": "build",
+                "evidence": {
+                    "growth": {
+                        "capture_complete": True,
+                        "segments": ["capture"],
+                        "captured_exchanges": 1,
+                    }
+                },
+                "results": [
+                    {"scenario": "growth", "outcome": live.MODEL, "detail": "reads omitted offset"}
+                ],
+            }
 
-        for route, expected_code, lane_class in (("deepseek-messages", 0, live.INFORMATIONAL),
-                                                 ("deepseek", 0, live.INFORMATIONAL),
-                                                 ("grok", 1, live.FULL)):
+        for route, expected_code, lane_class in (
+            ("deepseek-messages", 0, live.INFORMATIONAL),
+            ("deepseek", 0, live.INFORMATIONAL),
+            ("grok", 1, live.FULL),
+        ):
             with self.subTest(route=route), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 binary = root / "plak"
                 binary.write_bytes(b"build")
-                with patch.object(live, "ROOT", root), patch("builtins.print"), \
-                        patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232"}, clear=True), \
-                        patch("qualification.execute", side_effect=execute) as launched:
-                    code = qualification.main(["long-session", route, "--binary", str(binary), "--all"])
+                with (
+                    patch.object(live, "ROOT", root),
+                    patch("builtins.print"),
+                    patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232"}, clear=True),
+                    patch("qualification.execute", side_effect=execute) as launched,
+                ):
+                    code = qualification.main(
+                        ["long-session", route, "--binary", str(binary), "--all"]
+                    )
                 report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
                 self.assertEqual(code, expected_code)
                 self.assertEqual(launched.call_count, 2)
@@ -430,12 +563,17 @@ class QualificationReviewTests(unittest.TestCase):
                 self.assertEqual(report["binding"]["lane_class"], lane_class)
 
     def test_openrouter_contingency_includes_shared_rerun_reserve(self):
-        cells = [estimate.Cell("mac", "smoke", "or", live.LIGHT, "model", "openrouter", live.FIRST),
-                 estimate.Cell("mac", "smoke", "api", live.LIGHT, "model", "openai", live.FIRST)]
+        cells = [
+            estimate.Cell("mac", "smoke", "or", live.LIGHT, "model", "openrouter", live.FIRST),
+            estimate.Cell("mac", "smoke", "api", live.LIGHT, "model", "openai", live.FIRST),
+        ]
         rate = estimate.Rate(Decimal(1), Decimal(0), Decimal(1), Decimal(0))
-        assumptions = estimate.Assumptions(smoke_input_tokens=1_000_000,
-                                          smoke_output_tokens=0, contingency=Decimal("0.25"),
-                                          openrouter_ceiling=Decimal("2.49"))
+        assumptions = estimate.Assumptions(
+            smoke_input_tokens=1_000_000,
+            smoke_output_tokens=0,
+            contingency=Decimal("0.25"),
+            openrouter_ceiling=Decimal("2.49"),
+        )
         report = estimate.estimate_matrix(cells, {"model": rate}, assumptions)
         self.assertEqual(report.openrouter_with_contingency, Decimal("2.5"))
         self.assertTrue(report.exceeds_openrouter_ceiling)
@@ -447,23 +585,37 @@ class QualificationReviewTests(unittest.TestCase):
                 driver = sys.modules[qualification.LANES[lane]]
 
                 def main(argv):
-                    self.assertEqual(argv, ["codex", "--binary", "plak", "--artifacts",
-                                            str(path), "--only", "compaction",
-                                            "--fixture-seed", "17"])
+                    self.assertEqual(
+                        argv,
+                        [
+                            "codex",
+                            "--binary",
+                            "plak",
+                            "--artifacts",
+                            str(path),
+                            "--only",
+                            "compaction",
+                            "--fixture-seed",
+                            "17",
+                        ],
+                    )
                     (path / "report.json").write_text("{}")
                     return 0
 
                 with patch.object(driver, "main", side_effect=main):
-                    qualification.execute(lane, "codex", Path("plak"),
-                                          ["--only", "compaction"], 17, path)
+                    qualification.execute(
+                        lane, "codex", Path("plak"), ["--only", "compaction"], 17, path
+                    )
 
     def test_each_lane_main_assigns_fixture_seed(self):
         class Observed(Exception):
             pass
 
-        for driver, entry, options in ((smoke, "Smoke", []),
-                                       (long_session, "play", ["--all"]),
-                                       (jobs, "Jobs", [])):
+        for driver, entry, options in (
+            (smoke, "Smoke", []),
+            (long_session, "play", ["--all"]),
+            (jobs, "Jobs", []),
+        ):
             with self.subTest(driver=driver.__name__), tempfile.TemporaryDirectory() as directory:
                 binary = Path(directory) / "plak"
                 binary.write_bytes(b"not executed")
@@ -472,10 +624,21 @@ class QualificationReviewTests(unittest.TestCase):
                     self.assertEqual(env.fixture_seed, 123)
                     raise Observed
 
-                with patch("live.write_home"), patch.object(driver, entry, side_effect=observe), \
-                        patch("live.capture_root_mismatch", return_value=None):
-                    argv = ["codex", "--binary", str(binary), "--artifacts", directory,
-                            "--fixture-seed", "123", *options]
+                with (
+                    patch("live.write_home"),
+                    patch.object(driver, entry, side_effect=observe),
+                    patch("live.capture_root_mismatch", return_value=None),
+                ):
+                    argv = [
+                        "codex",
+                        "--binary",
+                        str(binary),
+                        "--artifacts",
+                        directory,
+                        "--fixture-seed",
+                        "123",
+                        *options,
+                    ]
                     if driver is long_session:
                         # play's exception is recorded by main, so inspect that report too.
                         driver.main(argv)
@@ -485,8 +648,9 @@ class QualificationReviewTests(unittest.TestCase):
                         with self.assertRaises(Observed):
                             driver.main(argv)
 
-    def cell_with_builds(self, lane="soak", *, before_first=False,
-                         after_first=b"owned", corrupt=None, options=()):
+    def cell_with_builds(
+        self, lane="soak", *, before_first=False, after_first=b"owned", corrupt=None, options=()
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / "plak"
@@ -528,10 +692,13 @@ class QualificationReviewTests(unittest.TestCase):
                     binary.write_bytes(b"operator")
                 return next(seed_values)
 
-            with patch.object(live, "ROOT", root), patch("builtins.print"), \
-                    patch("qualification.execute", side_effect=execute), \
-                    patch("qualification.shutil.copy2", side_effect=copy), \
-                    patch("qualification.secrets.randbits", side_effect=seed):
+            with (
+                patch.object(live, "ROOT", root),
+                patch("builtins.print"),
+                patch("qualification.execute", side_effect=execute),
+                patch("qualification.shutil.copy2", side_effect=copy),
+                patch("qualification.secrets.randbits", side_effect=seed),
+            ):
                 code = qualification.main([lane, "codex", "--binary", str(binary), *options])
             saved = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
             return code, saved, starts, seeds, binary.read_bytes(), original_sha, owned_sha
@@ -541,8 +708,9 @@ class QualificationReviewTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(starts, [])
         self.assertEqual(current, b"operator")
-        self.assertEqual(report["attempts"][0]["reason"],
-                         "binary changed before attempt; no paid attempt")
+        self.assertEqual(
+            report["attempts"][0]["reason"], "binary changed before attempt; no paid attempt"
+        )
 
     def test_operator_build_after_soak_rebuild_is_never_restored(self):
         code, report, starts, _, current, _, _ = self.cell_with_builds(after_first=b"operator")
@@ -579,7 +747,9 @@ class QualificationReviewTests(unittest.TestCase):
         for index, attempt in enumerate(report["attempts"]):
             metadata = attempt["report"]
             self.assertEqual(metadata["starting_build_restored"], bool(index))
-            self.assertEqual(metadata["binary_sha256_current"], owned_sha if index else original_sha)
+            self.assertEqual(
+                metadata["binary_sha256_current"], owned_sha if index else original_sha
+            )
             self.assertEqual(metadata["binary_sha256_restored"], original_sha if index else None)
             self.assertEqual(metadata["binary_sha256_intentional"], owned_sha if index else None)
 
@@ -602,10 +772,14 @@ class QualificationReviewTests(unittest.TestCase):
     def test_forwarded_options_are_exact_and_dry_run_validates(self):
         for lane in qualification.LANES:
             for option in ("--art", "--binar", "--unknown", "--fixture-s"):
-                with self.subTest(lane=lane, option=option), \
-                        patch("qualification.execute") as execute, patch("builtins.print"):
-                    self.assertEqual(qualification.main([lane, "codex", "--dry-run",
-                                                          option, "value"]), 2)
+                with (
+                    self.subTest(lane=lane, option=option),
+                    patch("qualification.execute") as execute,
+                    patch("builtins.print"),
+                ):
+                    self.assertEqual(
+                        qualification.main([lane, "codex", "--dry-run", option, "value"]), 2
+                    )
                     execute.assert_not_called()
         for lane in qualification.LANES:
             driver = sys.modules[qualification.LANES[lane]]
@@ -625,10 +799,17 @@ class QualificationReviewTests(unittest.TestCase):
                 root = Path(directory)
                 binary = root / "plak"
                 binary.write_bytes(b"never executed")
-                with patch.object(live, "ROOT", root), patch("builtins.print"), \
-                        patch("live.write_home") as launch:
-                    self.assertEqual(qualification.main([lane, "codex", "--binary", str(binary),
-                                                          "--art", "override"]), 1)
+                with (
+                    patch.object(live, "ROOT", root),
+                    patch("builtins.print"),
+                    patch("live.write_home") as launch,
+                ):
+                    self.assertEqual(
+                        qualification.main(
+                            [lane, "codex", "--binary", str(binary), "--art", "override"]
+                        ),
+                        1,
+                    )
                 launch.assert_not_called()
                 report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
                 self.assertEqual(report["outcome"], live.HARNESS)
@@ -672,20 +853,36 @@ class QualificationReviewTests(unittest.TestCase):
                     (segment / "1.body").write_text("synthetic")
                     return Mock(pid=1, capture_dir=segment, quit=Mock(return_value=0))
 
-                with patch.object(live, "ROOT", root), patch("live.write_home", side_effect=write_home), \
-                        patch("live.git_repo", side_effect=repo), patch("live.Tui", side_effect=tui), \
-                        patch("live.capture_integrity", return_value=True), \
-                        patch("tui_soak.discover_session", return_value="session"), \
-                        patch("tui_soak.time.monotonic", side_effect=lambda: next(clock)), \
-                        patch("tui_soak.send_and_wait", side_effect=phases), \
-                        patch("tui_soak.check_task", return_value=True), \
-                        patch("tui_soak.raise_if_provider_terminal"), patch("builtins.print"):
-                    code = tui_soak.main(["codex", "--binary", str(binary), "--artifacts",
-                                          str(root / "attempt"), "--hours", "1"])
+                with (
+                    patch.object(live, "ROOT", root),
+                    patch("live.write_home", side_effect=write_home),
+                    patch("live.git_repo", side_effect=repo),
+                    patch("live.Tui", side_effect=tui),
+                    patch("live.capture_integrity", return_value=True),
+                    patch("tui_soak.discover_session", return_value="session"),
+                    patch("tui_soak.time.monotonic", side_effect=lambda: next(clock)),
+                    patch("tui_soak.send_and_wait", side_effect=phases),
+                    patch("tui_soak.check_task", return_value=True),
+                    patch("tui_soak.raise_if_provider_terminal"),
+                    patch("builtins.print"),
+                ):
+                    code = tui_soak.main(
+                        [
+                            "codex",
+                            "--binary",
+                            str(binary),
+                            "--artifacts",
+                            str(root / "attempt"),
+                            "--hours",
+                            "1",
+                        ]
+                    )
                 report = json.loads((root / "attempt/report.json").read_text())
                 self.assertEqual(report["summary"]["turn_failures"], 0 if recovered else 2)
-                self.assertEqual(qualification.score_report(code, report)[0],
-                                 live.PASS if recovered else live.HARNESS)
+                self.assertEqual(
+                    qualification.score_report(code, report)[0],
+                    live.PASS if recovered else live.HARNESS,
+                )
 
     def test_soak_records_digest_immediately_after_own_rebuild(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -716,17 +913,30 @@ class QualificationReviewTests(unittest.TestCase):
                 result = Mock(session=None)
                 result.run_task.return_value = soak.Record("repair", 1, None, outcome="pass")
                 return result
+
             clock = iter(range(0, 10000, 1000))
-            with patch.object(live, "ROOT", root), patch("live.write_home"), \
-                    patch("live.binary_sha256", side_effect=digest), \
-                    patch("soak.prepare_repo", return_value=root), \
-                    patch("soak.Soak", side_effect=runner), \
-                    patch("soak.rebuild", side_effect=rebuild), \
-                    patch("live.capture_integrity", return_value=True), \
-                    patch("soak.time.monotonic", side_effect=lambda: next(clock)), \
-                    patch("builtins.print"):
-                code = soak.main(["codex", "--binary", str(binary), "--artifacts",
-                                  str(root / "attempt"), "--hours", "1"])
+            with (
+                patch.object(live, "ROOT", root),
+                patch("live.write_home"),
+                patch("live.binary_sha256", side_effect=digest),
+                patch("soak.prepare_repo", return_value=root),
+                patch("soak.Soak", side_effect=runner),
+                patch("soak.rebuild", side_effect=rebuild),
+                patch("live.capture_integrity", return_value=True),
+                patch("soak.time.monotonic", side_effect=lambda: next(clock)),
+                patch("builtins.print"),
+            ):
+                code = soak.main(
+                    [
+                        "codex",
+                        "--binary",
+                        str(binary),
+                        "--artifacts",
+                        str(root / "attempt"),
+                        "--hours",
+                        "1",
+                    ]
+                )
             summary = json.loads((root / "attempt/report.json").read_text())["summary"]
             self.assertEqual(len(digests), 3)
             self.assertEqual(summary["binary_sha256_rebuilt"], digests[1])
@@ -744,17 +954,23 @@ class QualificationReviewTests(unittest.TestCase):
                 binary = root / "plak"
                 binary.write_bytes(b"never executed")
                 environ = {} if ceiling is None else {"PLAK_LIVE_INPUT_CEILING": ceiling}
-                with patch.object(live, "ROOT", root), patch("builtins.print"), \
-                        patch.dict(os.environ, environ, clear=True), \
-                        patch("qualification.execute", side_effect=execute) as launched:
-                    code = qualification.main(["long-session", "deepseek", "--binary",
-                                               str(binary), "--all"])
+                with (
+                    patch.object(live, "ROOT", root),
+                    patch("builtins.print"),
+                    patch.dict(os.environ, environ, clear=True),
+                    patch("qualification.execute", side_effect=execute) as launched,
+                ):
+                    code = qualification.main(
+                        ["long-session", "deepseek", "--binary", str(binary), "--all"]
+                    )
                 report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
                 if ceiling == "967232":
                     self.assertEqual(code, 0)
                     self.assertEqual(launched.call_count, 1)
-                    self.assertEqual(report["binding"]["input_ceiling"],
-                                     {"tokens": 967_232, "source": "PLAK_LIVE_INPUT_CEILING"})
+                    self.assertEqual(
+                        report["binding"]["input_ceiling"],
+                        {"tokens": 967_232, "source": "PLAK_LIVE_INPUT_CEILING"},
+                    )
                     continue
                 self.assertEqual(code, 1)
                 launched.assert_not_called()
@@ -765,11 +981,15 @@ class QualificationReviewTests(unittest.TestCase):
                 self.assertIn("`plak usage --session <id>`", reason)
                 self.assertTrue(reason.endswith("no paid attempt"), reason)
                 self.assertNotIn("raw exchange evidence", reason)
-                self.assertEqual(report["binding"]["input_ceiling"], {"tokens": None, "source": None})
+                self.assertEqual(
+                    report["binding"]["input_ceiling"], {"tokens": None, "source": None}
+                )
         # A route whose window the driver knows needs no operator input.
         self.assertIsNone(long_session.input_ceiling_error(live.ROUTES["grok"]))
-        self.assertEqual(long_session.input_ceiling(live.ROUTES["grok"]),
-                         {"tokens": 256_000, "source": "driver catalog"})
+        self.assertEqual(
+            long_session.input_ceiling(live.ROUTES["grok"]),
+            {"tokens": 256_000, "source": "driver catalog"},
+        )
 
 
 if __name__ == "__main__":

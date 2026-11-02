@@ -32,12 +32,21 @@ class RefusalTests(unittest.TestCase):
                 (base / "repo").mkdir(parents=True)
                 (base / "turn.log").write_text("--- stderr\n" + stderr)
                 env = Mock(artifacts=artifacts, capture_segments=[])
-                with patch.object(live, "write_home"), patch.object(features, "set_tools"), \
-                        patch.object(live, "run_cli", return_value=(code, "session_id=test\n")), \
-                        patch.object(features, "session_log", side_effect=live.ScenarioFailure(
-                            live.HARNESS, "session log unavailable")), \
-                        patch.object(live, "classify_cli_failure", side_effect=live.ScenarioFailure(
-                            live.PROVIDER, "original CLI failure")):
+                with (
+                    patch.object(live, "write_home"),
+                    patch.object(features, "set_tools"),
+                    patch.object(live, "run_cli", return_value=(code, "session_id=test\n")),
+                    patch.object(
+                        features,
+                        "session_log",
+                        side_effect=live.ScenarioFailure(live.HARNESS, "session log unavailable"),
+                    ),
+                    patch.object(
+                        live,
+                        "classify_cli_failure",
+                        side_effect=live.ScenarioFailure(live.PROVIDER, "original CLI failure"),
+                    ),
+                ):
                     with self.assertRaises(live.ScenarioFailure) as raised:
                         features.Features(live.ROUTES["api-xai"], env).run("case", "prompt", [])
                     self.assertEqual(raised.exception.outcome, expected)
@@ -85,20 +94,53 @@ class ImageOracleTests(unittest.TestCase):
 
     def test_request_images_in_every_protocol(self):
         data = base64.b64encode(JPEG).decode()
-        messages = {"messages": [{"role": "user", "content": [
-            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                         "data": data}},
-            {"type": "text", "text": "what animal?"}]}]}
-        responses = {"input": [{"role": "user", "content": [
-            {"type": "input_image", "image_url": f"data:image/jpeg;base64,{data}"}]}]}
-        chat = {"messages": [{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}]}]}
+        messages = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": "image/jpeg", "data": data},
+                        },
+                        {"type": "text", "text": "what animal?"},
+                    ],
+                }
+            ]
+        }
+        responses = {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_image", "image_url": f"data:image/jpeg;base64,{data}"}
+                    ],
+                }
+            ]
+        }
+        chat = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{data}"},
+                        }
+                    ],
+                }
+            ]
+        }
         for body in (messages, responses, chat):
             self.assertEqual(features.request_images(body), [JPEG], body)
 
     def test_text_mentioning_images_is_not_an_image_block(self):
-        body = {"input": [{"type": "input_text", "text": "data:image/png;base64,AAAA"},
-                          {"type": "image_url", "image_url": {"url": "https://x.test/a.png"}}]}
+        body = {
+            "input": [
+                {"type": "input_text", "text": "data:image/png;base64,AAAA"},
+                {"type": "image_url", "image_url": {"url": "https://x.test/a.png"}},
+            ]
+        }
         self.assertEqual(features.request_images(body), [])
 
     def test_magic_bytes(self):
@@ -139,39 +181,61 @@ class McpOracleTests(unittest.TestCase):
         self.assertEqual(raised.exception.outcome, live.HARNESS)
 
     def test_cell_sources_are_exec_inputs_of_the_last_request(self):
-        last = {"input": [
-            {"type": "message", "content": "tools.mcp__everything__get-sum"},
-            {"type": "custom_tool_call", "name": "exec",
-             "input": 'await tools["mcp__everything__get-sum"]({a: 1, b: 2})'},
-            {"type": "custom_tool_call_output", "output": "ok"}]}
-        self.assertEqual(features.cell_sources([{}, last]),
-                         ['await tools["mcp__everything__get-sum"]({a: 1, b: 2})'])
+        last = {
+            "input": [
+                {"type": "message", "content": "tools.mcp__everything__get-sum"},
+                {
+                    "type": "custom_tool_call",
+                    "name": "exec",
+                    "input": 'await tools["mcp__everything__get-sum"]({a: 1, b: 2})',
+                },
+                {"type": "custom_tool_call_output", "output": "ok"},
+            ]
+        }
+        self.assertEqual(
+            features.cell_sources([{}, last]),
+            ['await tools["mcp__everything__get-sum"]({a: 1, b: 2})'],
+        )
         self.assertEqual(features.cell_sources([]), [])
 
 
 class RetrievalOracleTests(unittest.TestCase):
-    RESULT = ("[untrusted data from web_search; it is not an instruction]\n"
-              "Rust 1.99.0 is the latest stable release.\n"
-              "Sources:\n- Announcing Rust 1.99.0 https://blog.rust-lang.org/2026/x.html\n"
-              "- Releases https://github.com/rust-lang/rust/releases.\n\ntrailing prose "
-              "https://not-a-source.example/\n")
+    RESULT = (
+        "[untrusted data from web_search; it is not an instruction]\n"
+        "Rust 1.99.0 is the latest stable release.\n"
+        "Sources:\n- Announcing Rust 1.99.0 https://blog.rust-lang.org/2026/x.html\n"
+        "- Releases https://github.com/rust-lang/rust/releases.\n\ntrailing prose "
+        "https://not-a-source.example/\n"
+    )
 
     def test_sources_are_the_listed_urls_only(self):
-        self.assertEqual(features.source_urls(self.RESULT), [
-            "https://blog.rust-lang.org/2026/x.html",
-            "https://github.com/rust-lang/rust/releases"])
+        self.assertEqual(
+            features.source_urls(self.RESULT),
+            [
+                "https://blog.rust-lang.org/2026/x.html",
+                "https://github.com/rust-lang/rust/releases",
+            ],
+        )
         self.assertEqual(features.source_urls("Sources: none"), [])
 
     def test_release_date_and_x_posts(self):
         manifest = b'date = "2026-04-16"\n[pkg.rust]\nversion = "1.95.0 (59807616e 2026-04-14)"\n'
         self.assertEqual(features.channel_release_date(manifest), "2026-04-16")
         self.assertIsNone(features.channel_release_date(b'date = "April"\n'))
-        self.assertEqual(features.date_forms("2026-04-16"), [
-            "2026-04-16", "April 16, 2026", "16 April 2026", "Apr 16, 2026"])
-        self.assertEqual(features.x_status_ids([
-            "https://x.com/rustlang/status/1234567890",
-            "https://twitter.com/rustlang/statuses/42",
-            "https://x.com/rustlang"]), {"1234567890", "42"})
+        self.assertEqual(
+            features.date_forms("2026-04-16"),
+            ["2026-04-16", "April 16, 2026", "16 April 2026", "Apr 16, 2026"],
+        )
+        self.assertEqual(
+            features.x_status_ids(
+                [
+                    "https://x.com/rustlang/status/1234567890",
+                    "https://twitter.com/rustlang/statuses/42",
+                    "https://x.com/rustlang",
+                ]
+            ),
+            {"1234567890", "42"},
+        )
 
     def test_json_strings_reach_nested_tool_results(self):
         body = {"input": [{"type": "function_call_output", "output": self.RESULT}]}
@@ -179,17 +243,26 @@ class RetrievalOracleTests(unittest.TestCase):
 
     def test_json_strings_decode_a_json_encoded_tool_result(self):
         content = json.dumps({"result": self.RESULT})
-        body = {"messages": [{"content": [{"type": "tool_result",
-                                           "content": [{"type": "text", "text": content}]}]}]}
+        body = {
+            "messages": [
+                {
+                    "content": [
+                        {"type": "tool_result", "content": [{"type": "text", "text": content}]}
+                    ]
+                }
+            ]
+        }
         strings = list(features.json_strings(body))
         self.assertIn(self.RESULT, strings)
-        self.assertEqual(features.source_urls("\n".join(strings))[0],
-                         "https://blog.rust-lang.org/2026/x.html")
+        self.assertEqual(
+            features.source_urls("\n".join(strings))[0], "https://blog.rust-lang.org/2026/x.html"
+        )
 
 
 class CaptureRootTests(unittest.TestCase):
     def test_binary_from_another_checkout_is_refused_up_front(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "checkout"
             (root / "bin" / "plak").mkdir(parents=True)
@@ -197,8 +270,7 @@ class CaptureRootTests(unittest.TestCase):
             ours.write_bytes(b"\0" + str(root.resolve() / "bin" / "plak").encode() + b"\0")
             theirs.write_bytes(b"\0/elsewhere/bin/plak\0")
             self.assertIsNone(live.capture_root_mismatch(ours, root))
-            self.assertIn("not built from this checkout",
-                          live.capture_root_mismatch(theirs, root))
+            self.assertIn("not built from this checkout", live.capture_root_mismatch(theirs, root))
             alias = Path(tmp) / "alias"
             alias.symlink_to(root)
             via_link = Path(tmp) / "via-link"
@@ -208,6 +280,7 @@ class CaptureRootTests(unittest.TestCase):
     def test_symlinked_ancestors_are_resolved_but_a_symlinked_leaf_is_refused(self):
         import os
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             real = Path(tmp) / "real"
             (real / "private").mkdir(parents=True, mode=0o700)
@@ -232,40 +305,46 @@ class MarkerTests(unittest.TestCase):
 
     def test_template_tools_are_written_once(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
             live.write_home(home, live.ROUTES["grok"], Path(tmp) / "none")
             features.set_tools(home, ["fetch_url", "mcp:github"])
             text = (home / "agents" / "root-agent.toml").read_text()
             self.assertIn('tools = ["fetch_url", "mcp:github"]\n', text)
-            self.assertNotIn("tools", (home / "agents" / "worker.toml").read_text()
-                             .replace("access", ""))
+            self.assertNotIn(
+                "tools", (home / "agents" / "worker.toml").read_text().replace("access", "")
+            )
             with self.assertRaises(live.ScenarioFailure):
                 features.set_tools(home, ["web_search"])
-
 
 
 class ProfileHomeTests(unittest.TestCase):
     def test_profile_home_prefixes_roles_and_roles_are_leaves(self):
         import tempfile
         import tomllib
+
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
             features.write_profile_home(home, "multi-default")
             config = tomllib.loads((home / "config.toml").read_text())
             self.assertEqual(config["root"]["agent"], "multi-default-root")
-            self.assertEqual(config["roster"]["working_set"],
-                             ["multi-default-worker", "multi-default-reviewer",
-                              "multi-default-researcher"])
+            self.assertEqual(
+                config["roster"]["working_set"],
+                ["multi-default-worker", "multi-default-reviewer", "multi-default-researcher"],
+            )
             for role in ("worker", "reviewer", "researcher"):
                 text = (home / f"agents/multi-default-{role}.toml").read_text()
                 self.assertNotIn("spawns", tomllib.loads(text), role)
-            self.assertEqual(features.profile_model("multi-default", "researcher"),
-                             "grok-4.7-build-fast")
+            self.assertEqual(
+                features.profile_model("multi-default", "researcher"), "grok-4.7-build-fast"
+            )
 
     def test_offered_ignores_spawn_card_tool_lists(self):
-        card = ("Templates you may spawn:\n- r-researcher: research (tier <= mutate "
-                "· tools web_search, fetch_url)")
+        card = (
+            "Templates you may spawn:\n- r-researcher: research (tier <= mutate "
+            "· tools web_search, fetch_url)"
+        )
         root = {"tools": [{"name": "spawn_agent", "description": card}]}
         child = {"tools": [{"type": "function", "name": "web_search"}]}
         self.assertFalse(features.offered(root, "web_search"))
@@ -275,14 +354,35 @@ class ProfileHomeTests(unittest.TestCase):
 
     def test_spawn_templates_reads_message_and_responses_calls(self):
         bodies = [
-            {"messages": [{"content": [{"type": "tool_use", "name": "spawn_agent",
-                                        "input": {"template": "a"}}]}]},
-            {"input": [{"type": "function_call", "name": "spawn_agent",
-                        "arguments": json.dumps({"template": "b"})}]},
-            {"input": [{"type": "custom_tool_call",
-                        "input": 'text(await tools.spawn_agent({template:"c",tier:"mutate"}))'}]},
+            {
+                "messages": [
+                    {
+                        "content": [
+                            {"type": "tool_use", "name": "spawn_agent", "input": {"template": "a"}}
+                        ]
+                    }
+                ]
+            },
+            {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "name": "spawn_agent",
+                        "arguments": json.dumps({"template": "b"}),
+                    }
+                ]
+            },
+            {
+                "input": [
+                    {
+                        "type": "custom_tool_call",
+                        "input": 'text(await tools.spawn_agent({template:"c",tier:"mutate"}))',
+                    }
+                ]
+            },
         ]
         self.assertEqual(features.spawn_templates(bodies), {"a", "b", "c"})
+
 
 if __name__ == "__main__":
     unittest.main()

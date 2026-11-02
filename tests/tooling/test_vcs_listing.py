@@ -1,4 +1,5 @@
 """Git/JJ tooling cannot silently inspect a containing checkout."""
+
 from __future__ import annotations
 
 import os
@@ -27,7 +28,10 @@ class ListingTests(unittest.TestCase):
                     operation(child)
 
     def test_jj_without_cli_refuses_secondary_and_checks_colocated_git(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.object(shutil, 'which', return_value=None):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(shutil, 'which', return_value=None),
+        ):
             root = Path(temporary)
             (root / '.jj').mkdir()
             with self.assertRaisesRegex(RuntimeError, 'jj is not installed'):
@@ -49,12 +53,30 @@ class ListingTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('jj'), 'jj is not installed')
     def test_jj_secondary_listing_and_changed_stack_are_copy_local(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {'JJ_CONFIG': '/dev/null'}):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {'JJ_CONFIG': '/dev/null'}),
+        ):
             os.environ.pop('PLAK_FAST_BASE', None)
             root = Path(temporary)
             env = os.environ | {'JJ_CONFIG': '/dev/null'}
+
             def jj(cwd, *args):
-                return subprocess.check_output(['jj', '--no-pager', '--config', 'user.name=test', '--config', 'user.email=test@example.invalid', *args], cwd=cwd, env=env, text=True)
+                return subprocess.check_output(
+                    [
+                        'jj',
+                        '--no-pager',
+                        '--config',
+                        'user.name=test',
+                        '--config',
+                        'user.email=test@example.invalid',
+                        *args,
+                    ],
+                    cwd=cwd,
+                    env=env,
+                    text=True,
+                )
+
             jj(root, 'git', 'init', '--colocate')
             (root / '.gitignore').write_text('.plak/\n')
             (root / 'seed').write_text('seed')
@@ -86,18 +108,44 @@ class ListingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / '.git').mkdir()
-            with patch.object(vcs, 'kind', return_value='jj'), patch.object(vcs, 'jj', return_value='true'):
+            with (
+                patch.object(vcs, 'kind', return_value='jj'),
+                patch.object(vcs, 'jj', return_value='true'),
+            ):
                 with self.assertRaisesRegex(RuntimeError, 'conflicted @'):
                     vcs.evidence_tree(root)
 
     def test_git_ignored_regressions_outside_crates_are_inputs(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
-            'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
-            'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
-        }, clear=True):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(
+                os.environ,
+                {
+                    'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+                    'GIT_CONFIG_GLOBAL': os.devnull,
+                    'GIT_CONFIG_NOSYSTEM': '1',
+                },
+                clear=True,
+            ),
+        ):
             root = Path(temporary)
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
-            subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-C', str(root), 'commit', '--allow-empty', '-qm', 'base'], check=True)
+            subprocess.run(
+                [
+                    'git',
+                    '-c',
+                    'user.name=t',
+                    '-c',
+                    'user.email=t@example.invalid',
+                    '-C',
+                    str(root),
+                    'commit',
+                    '--allow-empty',
+                    '-qm',
+                    'base',
+                ],
+                check=True,
+            )
             (root / '.gitignore').write_text('proptest-regressions/\n')
             seed = root / 'bin/plak/proptest-regressions/seed.txt'
             seed.parent.mkdir(parents=True)
@@ -106,10 +154,27 @@ class ListingTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('jj'), 'jj is not installed')
     def test_jj_renames_include_both_package_paths_and_newlines(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {'JJ_CONFIG': '/dev/null'}):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {'JJ_CONFIG': '/dev/null'}),
+        ):
             root = Path(temporary)
+
             def jj(*args):
-                return subprocess.check_output(['jj', '--no-pager', '--config', 'user.name=t', '--config', 'user.email=t@example.invalid', *args], cwd=root, text=True)
+                return subprocess.check_output(
+                    [
+                        'jj',
+                        '--no-pager',
+                        '--config',
+                        'user.name=t',
+                        '--config',
+                        'user.email=t@example.invalid',
+                        *args,
+                    ],
+                    cwd=root,
+                    text=True,
+                )
+
             jj('git', 'init')
             old = root / 'old\npackage/source.rs'
             old.parent.mkdir()
@@ -118,4 +183,6 @@ class ListingTests(unittest.TestCase):
             new = root / 'new\npackage/source.rs'
             new.parent.mkdir()
             old.rename(new)
-            self.assertEqual(vcs.changed_paths(root, '@-'), ['new\npackage/source.rs', 'old\npackage/source.rs'])
+            self.assertEqual(
+                vcs.changed_paths(root, '@-'), ['new\npackage/source.rs', 'old\npackage/source.rs']
+            )

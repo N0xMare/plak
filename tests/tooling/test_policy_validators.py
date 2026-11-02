@@ -37,35 +37,51 @@ density_policy = load_module("check_prod_loc", ROOT / "tools/perf/check_prod_loc
 
 class WorkspaceExclusionTests(unittest.TestCase):
     def test_operator_state_must_be_excluded(self):
-        self.assertEqual(workspace_policy.validate_workspace_excludes({'exclude': []}, set()),
-                         ['workspace must exclude .plak operator state and fork worktrees'])
+        self.assertEqual(
+            workspace_policy.validate_workspace_excludes({'exclude': []}, set()),
+            ['workspace must exclude .plak operator state and fork worktrees'],
+        )
 
     def test_operator_state_and_reviewed_packages_are_allowed(self):
         manifest = {'exclude': ['.plak', 'vendor/monty-typeshed', 'tests/fixtures/example']}
-        self.assertEqual(workspace_policy.validate_workspace_excludes(
-            manifest, {'tests/fixtures/example'}), [])
+        self.assertEqual(
+            workspace_policy.validate_workspace_excludes(manifest, {'tests/fixtures/example'}), []
+        )
 
     def test_other_nested_packages_remain_forbidden(self):
         findings = workspace_policy.validate_workspace_excludes(
-            {'exclude': ['.plak', 'hidden-package']}, set())
-        self.assertEqual(findings, [
-            "workspace excludes unsupported nested packages: ['hidden-package']",
-        ])
+            {'exclude': ['.plak', 'hidden-package']}, set()
+        )
+        self.assertEqual(
+            findings,
+            [
+                "workspace excludes unsupported nested packages: ['hidden-package']",
+            ],
+        )
 
 
 class PackageLocalIncludeTests(unittest.TestCase):
     def test_paths_inside_the_package_pass(self):
-        self.assertEqual(workspace_policy.validate_package_local_includes('demo', {
-            'src/a/b.rs': 'const A: &str = include_str!("../../presets/x.toml");',
-            'tests/t.rs': 'const B: &[u8] = include_bytes!("fixtures/y.sse");',
-            'src/c.rs': 'include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/help/z.txt"))',
-        }), [])
+        self.assertEqual(
+            workspace_policy.validate_package_local_includes(
+                'demo',
+                {
+                    'src/a/b.rs': 'const A: &str = include_str!("../../presets/x.toml");',
+                    'tests/t.rs': 'const B: &[u8] = include_bytes!("fixtures/y.sse");',
+                    'src/c.rs': 'include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/help/z.txt"))',
+                },
+            ),
+            [],
+        )
 
     def test_paths_that_climb_out_are_reported(self):
-        findings = workspace_policy.validate_package_local_includes('demo', {
-            'src/profiles.rs': 'x\nconst A: &str = include_str!(\n    "../../../configs/a.toml");',
-            'src/c.rs': 'include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../vendor/z.md"))',
-        })
+        findings = workspace_policy.validate_package_local_includes(
+            'demo',
+            {
+                'src/profiles.rs': 'x\nconst A: &str = include_str!(\n    "../../../configs/a.toml");',
+                'src/c.rs': 'include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../vendor/z.md"))',
+            },
+        )
         self.assertEqual(len(findings), 2)
         self.assertIn('src/c.rs:1', findings[0])
         self.assertIn("src/profiles.rs:2 includes '../../../configs/a.toml'", findings[1])
@@ -119,35 +135,51 @@ class PackagedDependencyTests(unittest.TestCase):
 
     def test_dev_only_path_edges_and_the_published_plak_shape_pass(self):
         manifests = {
-            'plak': {'dependencies': {'harness': {'path': 'h', 'version': '0.1.0', 'optional': True}}},
+            'plak': {
+                'dependencies': {'harness': {'path': 'h', 'version': '0.1.0', 'optional': True}}
+            },
             'lib': {'dev-dependencies': {'harness': {'path': 'h'}}},
             'harness': {'dependencies': {'lib': {'path': 'l', 'version': '0.1.0'}}},
         }
-        self.assertEqual(workspace_policy.validate_packaged_dependencies(
-            manifests, self.CLASSES, {'dependencies': {}}), [])
+        self.assertEqual(
+            workspace_policy.validate_packaged_dependencies(
+                manifests, self.CLASSES, {'dependencies': {}}
+            ),
+            [],
+        )
 
     def test_regular_and_versioned_dev_edges_are_reported(self):
         manifests = {
             'plak': {},
             'lib': {
-                'target': {'cfg(unix)': {'dependencies': {'h2': {'package': 'harness', 'path': 'h'}}}},
+                'target': {
+                    'cfg(unix)': {'dependencies': {'h2': {'package': 'harness', 'path': 'h'}}}
+                },
                 'dev-dependencies': {'harness': {'path': 'h', 'version': '0.1.0'}},
             },
         }
         findings = workspace_policy.validate_packaged_dependencies(
-            manifests, self.CLASSES, {'dependencies': {'harness': {'path': 'h'}}})
-        self.assertEqual(findings, [
-            'lib: packaged manifest depends on repository-only harness',
-            'lib: dev-dependency on repository-only harness must be path-only',
-            'plak: packaged manifest depends on repository-only harness',
-        ])
+            manifests, self.CLASSES, {'dependencies': {'harness': {'path': 'h'}}}
+        )
+        self.assertEqual(
+            findings,
+            [
+                'lib: packaged manifest depends on repository-only harness',
+                'lib: dev-dependency on repository-only harness must be path-only',
+                'plak: packaged manifest depends on repository-only harness',
+            ],
+        )
 
 
 class WorkspaceInheritanceTests(unittest.TestCase):
     def test_inherited_edges_resolve_as_cargo_does(self):
         shared = {
-            'lib': {'version': '0.0.2', 'path': 'crates/lib', 'default-features': False,
-                    'features': ['a']},
+            'lib': {
+                'version': '0.0.2',
+                'path': 'crates/lib',
+                'default-features': False,
+                'features': ['a'],
+            },
             'serde': '1',
         }
         manifest = {
@@ -157,27 +189,41 @@ class WorkspaceInheritanceTests(unittest.TestCase):
                 'serde': {'workspace': True},
                 'local': {'path': 'l'},
             },
-            'target': {'cfg(unix)': {'dev-dependencies': {
-                'lib': {'workspace': True, 'default-features': True},
-            }}},
+            'target': {
+                'cfg(unix)': {
+                    'dev-dependencies': {
+                        'lib': {'workspace': True, 'default-features': True},
+                    }
+                }
+            },
         }
         resolved = policy_module.inherit_workspace_dependencies(manifest, shared)
-        self.assertEqual(resolved['dependencies']['lib'], {
-            'version': '0.0.2', 'path': 'crates/lib', 'default-features': False,
-            'features': ['a', 'b'], 'optional': True,
-        })
+        self.assertEqual(
+            resolved['dependencies']['lib'],
+            {
+                'version': '0.0.2',
+                'path': 'crates/lib',
+                'default-features': False,
+                'features': ['a', 'b'],
+                'optional': True,
+            },
+        )
         self.assertEqual(resolved['dependencies']['serde'], {'version': '1'})
         self.assertEqual(resolved['dependencies']['local'], {'path': 'l'})
         self.assertIs(
-            resolved['target']['cfg(unix)']['dev-dependencies']['lib']['default-features'], True)
+            resolved['target']['cfg(unix)']['dev-dependencies']['lib']['default-features'], True
+        )
         self.assertEqual(resolved['package'], manifest['package'])
-        self.assertEqual(manifest['dependencies']['lib'], {
-            'workspace': True, 'features': ['b'], 'optional': True})
+        self.assertEqual(
+            manifest['dependencies']['lib'],
+            {'workspace': True, 'features': ['b'], 'optional': True},
+        )
 
     def test_an_edge_the_workspace_lacks_is_refused(self):
         with self.assertRaisesRegex(ValueError, 'missing'):
             policy_module.inherit_workspace_dependencies(
-                {'dependencies': {'missing': {'workspace': True}}}, {})
+                {'dependencies': {'missing': {'workspace': True}}}, {}
+            )
 
 
 class PublicationTests(unittest.TestCase):
@@ -204,8 +250,8 @@ class PublicationTests(unittest.TestCase):
     def validate(self, directory: Path, metadata, manifest=None, license_text=LICENSE):  # type: ignore[no-untyped-def]
         manifest = {'package': {'exclude': {'workspace': True}}} if manifest is None else manifest
         return workspace_policy.validate_publication(
-            'plakous-demo', 'published-internal', metadata, manifest, directory, 'MIT',
-            license_text)
+            'plakous-demo', 'published-internal', metadata, manifest, directory, 'MIT', license_text
+        )
 
     def test_a_complete_published_package_passes(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -216,37 +262,53 @@ class PublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             metadata = self.published(
-                directory, description='', homepage=None, documentation='https://example.com',
-                keywords=['LLM', 'a', 'b', 'c', 'd', 'e'], categories=['ai'], readme=None,
+                directory,
+                description='',
+                homepage=None,
+                documentation='https://example.com',
+                keywords=['LLM', 'a', 'b', 'c', 'd', 'e'],
+                categories=['ai'],
+                readme=None,
             )
             (directory / 'LICENSE').write_text('Apache\n')
             findings = self.validate(directory, metadata, {'package': {}})
-        self.assertEqual(findings, [
-            'plakous-demo: published packages need a description',
-            f'plakous-demo: homepage must be {workspace_policy.WORKSPACE_REPOSITORY}',
-            'plakous-demo: a library\'s documentation is https://docs.rs/plakous-demo',
-            'plakous-demo: published packages need a readme file',
-            'plakous-demo: keywords must list 1 to 5 entries',
-            "plakous-demo: keyword 'LLM' is not a crates.io keyword",
-            "plakous-demo: category 'ai' is not a reviewed crates.io slug",
-            'plakous-demo: LICENSE differs from the repository LICENSE',
-            'plakous-demo: published members inherit the workspace exclude list',
-        ])
+        self.assertEqual(
+            findings,
+            [
+                'plakous-demo: published packages need a description',
+                f'plakous-demo: homepage must be {workspace_policy.WORKSPACE_REPOSITORY}',
+                'plakous-demo: a library\'s documentation is https://docs.rs/plakous-demo',
+                'plakous-demo: published packages need a readme file',
+                'plakous-demo: keywords must list 1 to 5 entries',
+                "plakous-demo: keyword 'LLM' is not a crates.io keyword",
+                "plakous-demo: category 'ai' is not a reviewed crates.io slug",
+                'plakous-demo: LICENSE differs from the repository LICENSE',
+                'plakous-demo: published members inherit the workspace exclude list',
+            ],
+        )
 
     def test_a_published_class_with_publish_false_is_reported(self):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             findings = self.validate(directory, self.published(directory, publish=[]))
-        self.assertEqual(findings, [
-            'plakous-demo: published-internal packages are published (no publish key)'])
+        self.assertEqual(
+            findings, ['plakous-demo: published-internal packages are published (no publish key)']
+        )
 
     def test_repository_only_packages_stay_unpublished(self):
         with tempfile.TemporaryDirectory() as raw:
             findings = workspace_policy.validate_publication(
-                'plakous-test-support', 'repository-only', {'publish': None}, {}, Path(raw),
-                'MIT', self.LICENSE)
-        self.assertEqual(findings, [
-            'plakous-test-support: repository-only packages must have publish = false'])
+                'plakous-test-support',
+                'repository-only',
+                {'publish': None},
+                {},
+                Path(raw),
+                'MIT',
+                self.LICENSE,
+            )
+        self.assertEqual(
+            findings, ['plakous-test-support: repository-only packages must have publish = false']
+        )
 
 
 class TrackedHygieneTests(unittest.TestCase):
@@ -261,7 +323,12 @@ class TrackedHygieneTests(unittest.TestCase):
         return workspace_policy.hygiene_findings("doc.md", text.encode(), self.PRIVATE)
 
     def test_absolute_home_paths_are_refused(self):
-        for text in ("see /Use" "rs/alice/dev/plak", "cd /ho" "me/alice/src", "`/ho" "me/alice`"):
+        # Split so this file does not itself contain an absolute home path.
+        for text in (
+            "see /Use" + "rs/alice/dev/plak",
+            "cd /ho" + "me/alice/src",
+            "`/ho" + "me/alice`",
+        ):
             with self.subTest(text=text):
                 findings = self.findings(text)
                 self.assertEqual(len(findings), 1)
@@ -290,13 +357,23 @@ class TrackedHygieneTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(self.findings(text))
         findings = self.findings(f"{self.TOOL} x1 {self.HOST}")
-        self.assertEqual(findings, [
-            f"doc.md:1: private host or tool name {self.TOOL!r}",
-            f"doc.md:1: private host or tool name {self.HOST!r}",
-        ])
+        self.assertEqual(
+            findings,
+            [
+                f"doc.md:1: private host or tool name {self.TOOL!r}",
+                f"doc.md:1: private host or tool name {self.HOST!r}",
+            ],
+        )
 
     def test_lookalike_words_and_binary_files_pass(self):
-        for text in ("aprivhost1", f"{self.HOST}x", "redeploy.sh", "my-deploy.sh", "privhost3", "privhost1-b"):
+        for text in (
+            "aprivhost1",
+            f"{self.HOST}x",
+            "redeploy.sh",
+            "my-deploy.sh",
+            "privhost3",
+            "privhost1-b",
+        ):
             with self.subTest(text=text):
                 self.assertEqual(self.findings(text), [])
         binary = b"\0" + self.HOST.encode()
@@ -314,7 +391,9 @@ class TrackedHygieneTests(unittest.TestCase):
                 frozenset({self.HOST.encode(), self.TOOL.encode()}),
             )
             (root / "leak.md").write_text(f"run {self.TOOL}\n")
-            with patch.object(workspace_policy, "hygiene_candidate_files", return_value=["leak.md"]):
+            with patch.object(
+                workspace_policy, "hygiene_candidate_files", return_value=["leak.md"]
+            ):
                 errors = workspace_policy.validate_tracked_hygiene(root)
         self.assertEqual(len(errors), 1)
         self.assertTrue(errors[0].startswith("leak.md:1: private host or tool name"))
@@ -322,7 +401,7 @@ class TrackedHygieneTests(unittest.TestCase):
     def test_without_local_names_file_only_home_paths_are_checked(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "doc.md").write_text(f"{self.HOST}\ncd /ho" "me/alice\n")
+            (root / "doc.md").write_text(f"{self.HOST}\ncd /ho" + "me/alice\n")
             with patch.object(workspace_policy, "hygiene_candidate_files", return_value=["doc.md"]):
                 errors = workspace_policy.validate_tracked_hygiene(root)
         self.assertEqual(len(errors), 1)
@@ -355,7 +434,11 @@ class CommitTraceEdgeTests(unittest.TestCase):
         for package, prefix in workspace_policy.COMMIT_TRACE_SOURCE_PREFIXES.items():
             with self.subTest(package=package):
                 errors = workspace_policy.validate_commit_trace_sql(
-                    package, {prefix + "database.rs": 'fn write() { let sql = r#"INSERT INTO rows DEFAULT VALUES rEtUrNiNg id"#; }'}
+                    package,
+                    {
+                        prefix
+                        + "database.rs": 'fn write() { let sql = r#"INSERT INTO rows DEFAULT VALUES rEtUrNiNg id"#; }'
+                    },
                 )
                 self.assertEqual(len(errors), 1)
                 self.assertIn("Commit trace contract", errors[0])
@@ -369,7 +452,10 @@ class CommitTraceEdgeTests(unittest.TestCase):
         #[cfg(test)]
         mod tests { const SQL: &str = "INSERT INTO rows DEFAULT VALUES RETURNING id"; }
         '''
-        self.assertEqual(workspace_policy.validate_commit_trace_sql("plakous-store", {"src/sqlite.rs": source}), [])
+        self.assertEqual(
+            workspace_policy.validate_commit_trace_sql("plakous-store", {"src/sqlite.rs": source}),
+            [],
+        )
 
     def test_tree_trace_edge_requires_optional_dependency_and_exact_gate(self):
         tree = {
@@ -393,10 +479,12 @@ class RustLexCacheTests(unittest.TestCase):
             first.write_text('fn first() {}')
             second.write_text('fn second() {}')
             with workspace_policy.source_scan():
-                self.assertEqual(workspace_policy.discover_rust_files(root, [(first, True)]),
-                                 ([first], []))
-                self.assertEqual(workspace_policy.discover_rust_files(root, [(second, True)]),
-                                 ([second], []))
+                self.assertEqual(
+                    workspace_policy.discover_rust_files(root, [(first, True)]), ([first], [])
+                )
+                self.assertEqual(
+                    workspace_policy.discover_rust_files(root, [(second, True)]), ([second], [])
+                )
 
     def test_text_snapshot_distinguishes_same_basename_in_different_directories(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -418,8 +506,10 @@ class RustLexCacheTests(unittest.TestCase):
 
     def test_scan_exit_clears_every_content_cache_even_after_failure(self):
         caches = (
-            workspace_policy._blank_rust_non_code, workspace_policy.production_rust_source,
-            workspace_policy._cached_rust_tokens, workspace_policy._cached_test_module_targets,
+            workspace_policy._blank_rust_non_code,
+            workspace_policy.production_rust_source,
+            workspace_policy._cached_rust_tokens,
+            workspace_policy._cached_test_module_targets,
             workspace_policy._cached_test_module_files,
         )
         with self.assertRaisesRegex(RuntimeError, 'scan failed'):
@@ -440,8 +530,9 @@ class RustLexCacheTests(unittest.TestCase):
             with workspace_policy.source_scan():
                 self.assertEqual(workspace_policy._read_rust_bytes(source), source.read_bytes())
                 with patch.object(Path, 'read_bytes', side_effect=AssertionError('reread')):
-                    self.assertEqual(workspace_policy.read_rust_source(source),
-                                     'fn first() {}\nfn second() {}\n')
+                    self.assertEqual(
+                        workspace_policy.read_rust_source(source), 'fn first() {}\nfn second() {}\n'
+                    )
 
     def test_lexing_keeps_sources_across_a_workspace_sized_scan(self):
         workspace_policy._blank_rust_non_code.cache_clear()
@@ -450,10 +541,13 @@ class RustLexCacheTests(unittest.TestCase):
         for source in sources:
             workspace_policy._blank_rust_non_code(source)
             workspace_policy.rust_tokens(source)
-        with patch.object(workspace_policy, 'production_rust_source', side_effect=AssertionError('rescanned')):
+        with patch.object(
+            workspace_policy, 'production_rust_source', side_effect=AssertionError('rescanned')
+        ):
             for source in sources:
-                self.assertEqual(workspace_policy.rust_tokens(source)[1].value,
-                                 source.split('(')[0].split()[1])
+                self.assertEqual(
+                    workspace_policy.rust_tokens(source)[1].value, source.split('(')[0].split()[1]
+                )
         before = workspace_policy._blank_rust_non_code.cache_info().misses
         for source in sources:
             workspace_policy._blank_rust_non_code(source)
@@ -478,7 +572,9 @@ class RustLexCacheTests(unittest.TestCase):
             (root / 'second.rs').write_text('fn second() {}')
             with workspace_policy.source_scan():
                 self.assertEqual(workspace_policy.read_rust_source(source), 'mod second;')
-                self.assertIn(root / 'second.rs', workspace_policy.discover_rust_files(root, targets)[0])
+                self.assertIn(
+                    root / 'second.rs', workspace_policy.discover_rust_files(root, targets)[0]
+                )
 
     def test_cached_tokens_are_independent_and_keyed_by_exact_source(self):
         source = 'use plakous::Agent; // not code\n'
@@ -497,7 +593,10 @@ class RustLexCacheTests(unittest.TestCase):
         self.assertEqual(blank, workspace_policy._blank_rust_non_code.__wrapped__(source))
         self.assertEqual(blank, workspace_policy._blank_rust_non_code(source))
         self.assertEqual(workspace_policy._blank_rust_non_code.cache_info().hits, 1)
-        self.assertNotEqual(workspace_policy._blank_rust_non_code(source + '\nfn added() {}'), blank)
+        self.assertNotEqual(
+            workspace_policy._blank_rust_non_code(source + '\nfn added() {}'), blank
+        )
+
 
 Package = policy_module.Package
 Policy = policy_module.Policy
@@ -663,9 +762,7 @@ class LayerPolicyTests(unittest.TestCase):
                 "dependencies": [{"name": "plak", "kind": "dev"}],
             },
         )
-        self.assertEqual(
-            workspace_policy.validate_layer_edges(synthetic_workspace(*packages)), []
-        )
+        self.assertEqual(workspace_policy.validate_layer_edges(synthetic_workspace(*packages)), [])
 
     def test_edge_exception_admits_the_edge_and_stale_exceptions_fail(self) -> None:
         packages = small_tree()
@@ -747,19 +844,21 @@ class LayerPolicyTests(unittest.TestCase):
             ("tests/**", False),
         ):
             with self.subTest(template=template):
-                policy = synthetic_policy(
-                    layout={**synthetic_policy().layout, "bin": (template,)}
-                )
+                policy = synthetic_policy(layout={**synthetic_policy().layout, "bin": (template,)})
                 self.assertEqual(policy_module.layout_matches(policy, package), expected)
         facade = synthetic_package("plakous", "facade", "crates/plakous")
         self.assertEqual(facade.short, "plakous")
-        policy = synthetic_policy(layout={**synthetic_policy().layout, "facade": ("crates/plakous",)})
+        policy = synthetic_policy(
+            layout={**synthetic_policy().layout, "facade": ("crates/plakous",)}
+        )
         self.assertTrue(policy_module.layout_matches(policy, facade))
 
     def test_classification_is_derived_and_illegal_classes_fail(self) -> None:
         workspace = synthetic_workspace(*small_tree())
         classes = workspace_policy.package_classifications(workspace)
-        self.assertEqual(classes["supported"], {"plakous-model", "plakous-agent", "plakous", "plak"})
+        self.assertEqual(
+            classes["supported"], {"plakous-model", "plakous-agent", "plakous", "plak"}
+        )
         self.assertEqual(classes["published-internal"], {"plakous-http", "plakous-hosted"})
         self.assertEqual(classes["repository-only"], set())
         packages = small_tree()
@@ -808,7 +907,9 @@ class LayerPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             errors,
-            ["production-dependencies row for 'plakous-http' (layer 'common') is not a host/bin package"],
+            [
+                "production-dependencies row for 'plakous-http' (layer 'common') is not a host/bin package"
+            ],
         )
         missing = synthetic_policy(production_dependencies={"plak": ("plakous",)})
         errors = workspace_policy.validate_production_dependencies(
@@ -833,7 +934,9 @@ class LayerPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             errors,
-            ["plak must enable exactly plakous/{sessions-sqlite} with dependency defaults disabled"],
+            [
+                "plak must enable exactly plakous/{sessions-sqlite} with dependency defaults disabled"
+            ],
         )
         errors = workspace_policy.validate_facade_features(
             synthetic_workspace(*packages, policy=synthetic_policy())
@@ -933,7 +1036,9 @@ class LayerPolicyTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            workspace_policy.validate_module_rules(package, {"src/main.rs": sources["src/main.rs"]}, rules),
+            workspace_policy.validate_module_rules(
+                package, {"src/main.rs": sources["src/main.rs"]}, rules
+            ),
             [],
         )
 
@@ -988,9 +1093,51 @@ class LayerPolicyTests(unittest.TestCase):
     def test_policy_loader_rejects_malformed_tables(self) -> None:
         for manifest, message in (
             ({}, "lacks"),
-            ({"workspace": {"metadata": {"plakous": {"layers": ["a"], "edges": {"b": []}, "layout": {"a": []}, "classes": {"a": []}}}}}, "unknown layers"),
-            ({"workspace": {"metadata": {"plakous": {"layers": ["a"], "edges": {"a": ["zzz"]}, "layout": {"a": []}, "classes": {"a": []}}}}}, "unknown layer 'zzz'"),
-            ({"workspace": {"metadata": {"plakous": {"layers": ["a"], "edges": {"a": []}, "layout": {"a": []}, "classes": {"a": ["mystery"]}}}}}, "unknown classes"),
+            (
+                {
+                    "workspace": {
+                        "metadata": {
+                            "plakous": {
+                                "layers": ["a"],
+                                "edges": {"b": []},
+                                "layout": {"a": []},
+                                "classes": {"a": []},
+                            }
+                        }
+                    }
+                },
+                "unknown layers",
+            ),
+            (
+                {
+                    "workspace": {
+                        "metadata": {
+                            "plakous": {
+                                "layers": ["a"],
+                                "edges": {"a": ["zzz"]},
+                                "layout": {"a": []},
+                                "classes": {"a": []},
+                            }
+                        }
+                    }
+                },
+                "unknown layer 'zzz'",
+            ),
+            (
+                {
+                    "workspace": {
+                        "metadata": {
+                            "plakous": {
+                                "layers": ["a"],
+                                "edges": {"a": []},
+                                "layout": {"a": []},
+                                "classes": {"a": ["mystery"]},
+                            }
+                        }
+                    }
+                },
+                "unknown classes",
+            ),
         ):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
@@ -999,15 +1146,20 @@ class LayerPolicyTests(unittest.TestCase):
             policy_module.package_metadata({"package": {}}, "x")
         with self.assertRaisesRegex(ValueError, "unknown"):
             policy_module.package_metadata(
-                {"package": {"metadata": {"plakous": {"layer": "core", "class": "supported", "tier": 1}}}},
+                {
+                    "package": {
+                        "metadata": {"plakous": {"layer": "core", "class": "supported", "tier": 1}}
+                    }
+                },
                 "x",
             )
 
 
 class CargoTreeDiagnosticsTests(unittest.TestCase):
     def test_rquickjs_checks_report_cargo_failures_not_missing_linkage(self):
-        failed = subprocess.CompletedProcess([], 101, '',
-                                             'error: monty-pool =1.1.0 unavailable offline\n')
+        failed = subprocess.CompletedProcess(
+            [], 101, '', 'error: monty-pool =1.1.0 unavailable offline\n'
+        )
         with patch.object(workspace_policy.subprocess, 'run', return_value=failed):
             errors = workspace_policy.rquickjs_linkage_errors(ROOT)
         self.assertEqual(len(errors), 4)
@@ -1020,15 +1172,17 @@ class CargoTreeDiagnosticsTests(unittest.TestCase):
     def test_rquickjs_success_uses_stdout_not_diagnostics(self):
         absent = subprocess.CompletedProcess([], 0, '', 'warning: rquickjs not reachable')
         worker = subprocess.CompletedProcess([], 0, 'rquickjs v0.11.0\n', '')
-        with patch.object(workspace_policy.subprocess, 'run',
-                          side_effect=[absent, absent, worker, worker]):
+        with patch.object(
+            workspace_policy.subprocess, 'run', side_effect=[absent, absent, worker, worker]
+        ):
             self.assertEqual(workspace_policy.rquickjs_linkage_errors(ROOT), [])
 
     def test_selected_package_linkage_uses_forward_graphs(self):
         absent = subprocess.CompletedProcess([], 0, 'not-rquickjs v0.11.0\n', '')
         worker = subprocess.CompletedProcess([], 0, 'rquickjs v0.11.0\n', '')
-        with patch.object(workspace_policy.subprocess, 'run',
-                          side_effect=[absent, absent, worker, worker]) as run:
+        with patch.object(
+            workspace_policy.subprocess, 'run', side_effect=[absent, absent, worker, worker]
+        ) as run:
             self.assertEqual(workspace_policy.rquickjs_linkage_errors(ROOT), [])
         for call in run.call_args_list[:3]:
             self.assertNotIn('-i', call.args[0])
@@ -1038,8 +1192,9 @@ class CargoTreeDiagnosticsTests(unittest.TestCase):
         linked = subprocess.CompletedProcess([], 0, 'rquickjs v0.11.0\n', '')
         absent = subprocess.CompletedProcess([], 0, '', '')
         joint = subprocess.CompletedProcess([], 0, 'rquickjs v0.11.0\n  plak v0.1.0\n', '')
-        with patch.object(workspace_policy.subprocess, 'run',
-                          side_effect=[linked, linked, absent, joint]):
+        with patch.object(
+            workspace_policy.subprocess, 'run', side_effect=[linked, linked, absent, joint]
+        ):
             errors = workspace_policy.rquickjs_linkage_errors(ROOT)
         self.assertEqual(len(errors), 4)
         self.assertIn('plakous must not link', errors[0])
@@ -1075,7 +1230,9 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_atomic_polyfill_exception_fails_closed_for_reachability_or_tool_failure(self):
         reachable = subprocess.CompletedProcess([], 0, "atomic-polyfill v1.0.3\n", "")
-        failed = subprocess.CompletedProcess([], 101, "", "error: monty-pool =1.1.0 unavailable offline")
+        failed = subprocess.CompletedProcess(
+            [], 101, "", "error: monty-pool =1.1.0 unavailable offline"
+        )
         with patch.object(workspace_policy.subprocess, "run", side_effect=[reachable, failed]):
             errors = workspace_policy.supported_target_atomic_polyfill_errors()
         self.assertEqual(len(errors), 2)
@@ -1113,13 +1270,17 @@ class RepositoryPolicyTests(unittest.TestCase):
         for provider in ("openai", "anthropic", "xai"):
             with self.subTest(provider=provider):
                 metadata = copy.deepcopy(product.metadata)
-                edge = next(dependency for dependency in metadata["dependencies"]
-                            if dependency["name"] == "plakous" and dependency.get("kind") is None)
+                edge = next(
+                    dependency
+                    for dependency in metadata["dependencies"]
+                    if dependency["name"] == "plakous" and dependency.get("kind") is None
+                )
                 edge["features"].append(provider)
                 packages = dict(self.workspace.packages)
                 packages["plak"] = replace(product, metadata=metadata)
                 errors = workspace_policy.validate_facade_features(
-                    replace(self.workspace, packages=packages))
+                    replace(self.workspace, packages=packages)
+                )
                 self.assertEqual(len(errors), 1)
                 self.assertTrue(errors[0].startswith("plak must enable exactly plakous/"), errors)
 
@@ -1134,13 +1295,10 @@ class RepositoryPolicyTests(unittest.TestCase):
         harness_dependencies = {
             name
             for name in prompts.production_dependency_names()
-            if name in self.workspace.packages
-            and self.workspace.packages[name].layer == "harness"
+            if name in self.workspace.packages and self.workspace.packages[name].layer == "harness"
         }
         self.assertEqual(harness_dependencies, set())
-        self.assertEqual(
-            workspace_policy.validate_harness_pack_independence(self.workspace), []
-        )
+        self.assertEqual(workspace_policy.validate_harness_pack_independence(self.workspace), [])
 
     def test_all_current_packages_have_one_accepted_classification(self) -> None:
         expected = {
@@ -1273,9 +1431,24 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_hosted_dependency_closure_has_no_terminal_ui(self) -> None:
         closure = subprocess.run(
-            ["cargo", "tree", "--locked", "--offline", "-p", "plakous-hosted",
-             "--edges", "normal", "--prefix", "none", "--format", "{p}"],
-            cwd=ROOT, check=True, capture_output=True, text=True,
+            [
+                "cargo",
+                "tree",
+                "--locked",
+                "--offline",
+                "-p",
+                "plakous-hosted",
+                "--edges",
+                "normal",
+                "--prefix",
+                "none",
+                "--format",
+                "{p}",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout
         names = {line.split()[0] for line in closure.splitlines() if line.strip()}
         self.assertNotIn("ratatui", names)
@@ -1344,7 +1517,10 @@ class RepositoryPolicyTests(unittest.TestCase):
                     "plakous-host-protocol",
                     "plakous-workspace",
                 ),
-                "plakous-recursive-subagents-store": ("plakous-recursive-subagents", "plakous-store"),
+                "plakous-recursive-subagents-store": (
+                    "plakous-recursive-subagents",
+                    "plakous-store",
+                ),
             },
         )
 
@@ -1372,24 +1548,18 @@ class RepositoryPolicyTests(unittest.TestCase):
     def test_local_production_lint_policy_rejects_manifest_mutations(self) -> None:
         workspace_manifests = workspace_policy.workspace_manifest_tables(self.workspace)
         self.assertEqual(
-            workspace_policy.validate_local_production_lints(
-                workspace_manifests
-            ),
+            workspace_policy.validate_local_production_lints(workspace_manifests),
             [],
         )
 
         missing_inheritance = copy.deepcopy(workspace_manifests)
         missing_inheritance["plakous-compose"].pop("lints")
-        errors = workspace_policy.validate_local_production_lints(
-            missing_inheritance
-        )
+        errors = workspace_policy.validate_local_production_lints(missing_inheritance)
         self.assertTrue(any("plakous-compose" in error for error in errors), errors)
 
         weakened_js = copy.deepcopy(workspace_manifests)
         weakened_js["plakous-cell"]["lints"]["rust"]["unsafe_code"] = "allow"
-        errors = workspace_policy.validate_local_production_lints(
-            weakened_js
-        )
+        errors = workspace_policy.validate_local_production_lints(weakened_js)
         self.assertTrue(any("plakous-cell" in error for error in errors), errors)
 
     def test_supported_compile_fixture_inventory_and_dependencies_are_exact(self) -> None:
@@ -1491,9 +1661,7 @@ class RepositoryPolicyTests(unittest.TestCase):
             replacement.write_text("fn main() {}", encoding="utf-8")
             (fixture_root / "src/main.rs").symlink_to(replacement)
 
-            files, inventory_errors = workspace_policy.non_target_file_inventory(
-                fixture_root
-            )
+            files, inventory_errors = workspace_policy.non_target_file_inventory(fixture_root)
             errors = workspace_policy.validate_supported_compile_fixture(
                 "model-consumer",
                 contract["manifest"],
@@ -1515,9 +1683,7 @@ class RepositoryPolicyTests(unittest.TestCase):
             (fixture_root / "Cargo.toml").write_text("manifest", encoding="utf-8")
             (fixture_root / "Cargo.lock").write_text("lock", encoding="utf-8")
 
-            files, inventory_errors = workspace_policy.non_target_file_inventory(
-                fixture_root
-            )
+            files, inventory_errors = workspace_policy.non_target_file_inventory(fixture_root)
             errors = workspace_policy.validate_supported_compile_fixture(
                 "model-consumer",
                 contract["manifest"],
@@ -1616,14 +1782,29 @@ fn production() {}
         production = workspace_policy.production_rust_source(source)
         self.assertNotIn("vars_os", production)
         self.assertIn("fn production()", production)
-        self.assertIn(Path("src/perf_gate.rs"),
-                      {target.path for target in workspace_policy.test_module_targets(
-                          Path("src/lib.rs"), source, True,
-                      ) if target.test_only})
+        self.assertIn(
+            Path("src/perf_gate.rs"),
+            {
+                target.path
+                for target in workspace_policy.test_module_targets(
+                    Path("src/lib.rs"),
+                    source,
+                    True,
+                )
+                if target.test_only
+            },
+        )
 
     def test_test_only_const_function_does_not_hide_production(self) -> None:
-        for qualifier in ("const", "pub const", "pub(crate) const", "const unsafe",
-                          'const extern "C"', 'pub const unsafe extern "C"', "const extern"):
+        for qualifier in (
+            "const",
+            "pub const",
+            "pub(crate) const",
+            "const unsafe",
+            'const extern "C"',
+            'pub const unsafe extern "C"',
+            "const extern",
+        ):
             for gate in ("test", 'all(feature = "x", test)'):
                 with self.subTest(qualifier=qualifier, gate=gate):
                     source = f"#[cfg({gate})] {qualifier} fn t() -> u8 {{ 1 }}\n"
@@ -1635,14 +1816,23 @@ fn production() {}
 
     def test_cfg_predicate_implication_for_block_and_semicolon_items(self) -> None:
         hidden = [
-            "test", "all(test, unix)", 'all(feature = "x", test)',
-            "all(test, any(unix, windows))", 'all(test, not(feature = "x"))',
-            "all(\n unix,\n test,\n)", "any(all(test, unix), all(test, windows))",
+            "test",
+            "all(test, unix)",
+            'all(feature = "x", test)',
+            "all(test, any(unix, windows))",
+            'all(test, not(feature = "x"))',
+            "all(\n unix,\n test,\n)",
+            "any(all(test, unix), all(test, windows))",
         ]
         kept = [
-            'any(test, feature = "x")', "not(test)", "all(unix, not(test))",
-            'not(any(test, feature = "x"))', 'feature = "test"', "all(test_utils)",
-            "not(not(test))", "any()",
+            'any(test, feature = "x")',
+            "not(test)",
+            "all(unix, not(test))",
+            'not(any(test, feature = "x"))',
+            'feature = "test"',
+            "all(test_utils)",
+            "not(not(test))",
+            "any()",
         ]
         for predicate in hidden + kept:
             for item in ("fn marker() {}", "use marker;", "mod marker;", "const marker: u8 = 1;"):
@@ -1821,9 +2011,11 @@ fn fixtures() {
         sources = self.cli_security_fixture()
         path = "src/commands/support.rs"
         sources["plak"][path] = sources["plak"][path].replace(
-            "Command::new(program)", 'Command::new("/bin/sh")')
-        self.assertTrue(any("process command constructors" in error
-                            for error in self.validate_fixture(sources)))
+            "Command::new(program)", 'Command::new("/bin/sh")'
+        )
+        self.assertTrue(
+            any("process command constructors" in error for error in self.validate_fixture(sources))
+        )
 
     def test_keyword_before_bang_is_not_a_macro(self) -> None:
         sources = self.cli_security_fixture(
@@ -1856,17 +2048,36 @@ fn fixtures() {
 
     def test_transient_probe_bridge_and_gate_macros_are_source_specific(self) -> None:
         cases = [
-            ("src/agent/build/session.rs", "fn x() { plakous::sessions::internal::reachability_probe(&runtime); }"),
-            ("src/driver/transient.rs", "fn x() { debug_assert!(valid); tokio::pin!(ready); tokio::select! { value = ready => value } }"),
+            (
+                "src/agent/build/session.rs",
+                "fn x() { plakous::sessions::internal::reachability_probe(&runtime); }",
+            ),
+            (
+                "src/driver/transient.rs",
+                "fn x() { debug_assert!(valid); tokio::pin!(ready); tokio::select! { value = ready => value } }",
+            ),
         ]
         for path, source in cases:
             with self.subTest(path=path):
-                self.assertEqual(workspace_policy.validate_cli_security_sources("plakous-hosted", {path: source}), [])
-                self.assertTrue(workspace_policy.validate_cli_security_sources("plakous-hosted", {"src/x.rs": source}))
-                self.assertTrue(workspace_policy.validate_cli_security_sources("plak", {path: source}))
-        self.assertTrue(workspace_policy.validate_cli_security_sources(
-            "plakous-hosted", {"src/agent/children/waiter.rs": cases[1][1]}
-        ))
+                self.assertEqual(
+                    workspace_policy.validate_cli_security_sources(
+                        "plakous-hosted", {path: source}
+                    ),
+                    [],
+                )
+                self.assertTrue(
+                    workspace_policy.validate_cli_security_sources(
+                        "plakous-hosted", {"src/x.rs": source}
+                    )
+                )
+                self.assertTrue(
+                    workspace_policy.validate_cli_security_sources("plak", {path: source})
+                )
+        self.assertTrue(
+            workspace_policy.validate_cli_security_sources(
+                "plakous-hosted", {"src/agent/children/waiter.rs": cases[1][1]}
+            )
+        )
 
     def test_observation_vocabulary_macro_is_source_specific(self) -> None:
         vocabulary = """
@@ -1878,20 +2089,22 @@ define_observations!();
             "src/observation/vocabulary.rs": vocabulary,
             "src/observation.rs": consumer,
         }
-        self.assertEqual(workspace_policy.validate_cli_security_sources(
-            "plakous-host-protocol", sources
-        ), [])
+        self.assertEqual(
+            workspace_policy.validate_cli_security_sources("plakous-host-protocol", sources), []
+        )
         for source in (vocabulary, consumer):
-            self.assertTrue(workspace_policy.validate_cli_security_sources(
-                "plakous-host-protocol", {"src/other.rs": source}
-            ))
-        self.assertTrue(workspace_policy.validate_cli_security_sources(
-            "plak", {"src/observation.rs": consumer}
-        ))
+            self.assertTrue(
+                workspace_policy.validate_cli_security_sources(
+                    "plakous-host-protocol", {"src/other.rs": source}
+                )
+            )
+        self.assertTrue(
+            workspace_policy.validate_cli_security_sources("plak", {"src/observation.rs": consumer})
+        )
         sources["src/observation/vocabulary.rs"] += "fn x() { std::env::vars(); }"
-        self.assertTrue(workspace_policy.validate_cli_security_sources(
-            "plakous-host-protocol", sources
-        ))
+        self.assertTrue(
+            workspace_policy.validate_cli_security_sources("plakous-host-protocol", sources)
+        )
 
     def test_neutral_carry_codec_is_source_specific(self) -> None:
         codec = """
@@ -1903,7 +2116,9 @@ fn decode() { tags!(); }
         fixture["plak"]["src/carry/history.rs"] = codec
         self.assertEqual(self.validate_fixture(fixture), [])
         errors = workspace_policy.validate_cli_security_sources("plak", {"src/other.rs": codec})
-        self.assertTrue(any("unapproved plakous facade symbols" in error for error in errors), errors)
+        self.assertTrue(
+            any("unapproved plakous facade symbols" in error for error in errors), errors
+        )
         self.assertTrue(any("source-generation macros" in error for error in errors), errors)
 
     def test_plakous_symbol_allowlist_is_per_package(self) -> None:
@@ -1921,14 +2136,18 @@ fn decode() { tags!(); }
         self.assertEqual(
             workspace_policy.validate_cli_security_sources(
                 "plakous-hosted",
-                {"src/x.rs": 'let _ = plakous::anthropic::claude_max_output_tokens("claude-sonnet-5");'},
+                {
+                    "src/x.rs": 'let _ = plakous::anthropic::claude_max_output_tokens("claude-sonnet-5");'
+                },
             ),
             [],
         )
         self.assertEqual(
             workspace_policy.validate_cli_security_sources(
                 "plakous-hosted",
-                {"src/x.rs": "use plakous::agent::{AbandonedTurnClaim, AbandonedTurnReport, AbandonmentCause};\nuse plakous::tools::plan_restoration_note;\nlet _ = plakous::xai::grok_max_output_tokens(\"grok-4.6\");"},
+                {
+                    "src/x.rs": "use plakous::agent::{AbandonedTurnClaim, AbandonedTurnReport, AbandonmentCause};\nuse plakous::tools::plan_restoration_note;\nlet _ = plakous::xai::grok_max_output_tokens(\"grok-4.6\");"
+                },
             ),
             [],
         )
@@ -1971,7 +2190,9 @@ fn decode() { tags!(); }
             "plak",
             {"src/commands/reload_rehearsal.rs": "use plakous::sessions::OfflineReopenInspection;"},
         )
-        self.assertTrue(any("unapproved plakous facade symbols" in error for error in errors), errors)
+        self.assertTrue(
+            any("unapproved plakous facade symbols" in error for error in errors), errors
+        )
 
     def test_preview_facade_bridge_is_enrolled_only_for_hosted(self) -> None:
         for source in (
@@ -1989,7 +2210,9 @@ fn decode() { tags!(); }
                     errors = workspace_policy.validate_cli_security_sources(
                         package, {"src/x.rs": source}
                     )
-                    self.assertTrue(any("unapproved plakous facade symbols" in e for e in errors), errors)
+                    self.assertTrue(
+                        any("unapproved plakous facade symbols" in e for e in errors), errors
+                    )
         errors = workspace_policy.validate_cli_security_sources(
             "plakous-hosted", {"src/x.rs": "use plakous::tools::other_redactor;"}
         )
@@ -2092,9 +2315,7 @@ fn render_transcript() {}
             workspace_policy.validate_product_session_authority_sources("plak", harmless), []
         )
 
-        for identifier in sorted(
-            workspace_policy.FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS
-        ):
+        for identifier in sorted(workspace_policy.FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS):
             with self.subTest(identifier=identifier):
                 sources = {"src/authority.rs": f"fn {identifier}() {{}}"}
                 errors = workspace_policy.validate_product_session_authority_sources(
@@ -2135,16 +2356,12 @@ fn render_transcript() {}
                 encoding="utf-8",
             )
             (source / "tests.rs").write_text("pub fn production() {}\n", encoding="utf-8")
-            (source / "foo_tests.rs").write_text(
-                "pub fn also_production() {}\n", encoding="utf-8"
-            )
+            (source / "foo_tests.rs").write_text("pub fn also_production() {}\n", encoding="utf-8")
             (root / "package/shared.rs").write_text("pub fn shared() {}\n", encoding="utf-8")
             (root / "package/cfg_shared.inc").write_text(
                 "pub fn cfg_shared() {}\n", encoding="utf-8"
             )
-            (root / "package/included.inc").write_text(
-                "pub fn included() {}\n", encoding="utf-8"
-            )
+            (root / "package/included.inc").write_text("pub fn included() {}\n", encoding="utf-8")
             custom = build / "custom.rs"
             custom.write_text("mod helper;\nfn main() {}\n", encoding="utf-8")
             (build / "helper.rs").write_text("pub fn helper() {}\n", encoding="utf-8")
@@ -2159,9 +2376,7 @@ fn render_transcript() {}
             (outside_directory / "hidden.rs").write_text(
                 "pub fn hidden_too() {}\n", encoding="utf-8"
             )
-            (source / "linked-directory").symlink_to(
-                outside_directory, target_is_directory=True
-            )
+            (source / "linked-directory").symlink_to(outside_directory, target_is_directory=True)
             (root / "package/linked.inc").symlink_to(outside)
             package = {
                 "targets": [
@@ -2187,9 +2402,7 @@ fn render_transcript() {}
                 "package/src/tests.rs",
             },
         )
-        self.assertGreaterEqual(
-            sum("symbolic link" in error for error in errors), 3, errors
-        )
+        self.assertGreaterEqual(sum("symbolic link" in error for error in errors), 3, errors)
 
     def test_out_of_line_cfg_test_module_file_is_not_production(self) -> None:
         """A `#[cfg(test)] mod x;` file is a whole-file test body, not shipping code."""
@@ -2204,19 +2417,12 @@ fn render_transcript() {}
                     "mod mail;\n" + declaration + "mod test_support;\n",
                     encoding="utf-8",
                 )
-                (source / "agent_tree/mail.rs").write_text(
-                    "pub fn mail() {}\n", encoding="utf-8"
-                )
+                (source / "agent_tree/mail.rs").write_text("pub fn mail() {}\n", encoding="utf-8")
                 (source / "agent_tree/test_support.rs").write_text(
-                    'use std::process::Command;\n'
-                    'pub fn git() {\n    Command::new("git");\n}\n',
+                    'use std::process::Command;\npub fn git() {\n    Command::new("git");\n}\n',
                     encoding="utf-8",
                 )
-                package = {
-                    "targets": [
-                        {"kind": ["lib"], "src_path": str(source / "lib.rs")}
-                    ]
-                }
+                package = {"targets": [{"kind": ["lib"], "src_path": str(source / "lib.rs")}]}
                 files, errors = workspace_policy.production_rust_sources(package, root)
                 self.assertEqual(errors, [])
                 return {path.relative_to(root).as_posix() for path in files}
@@ -2244,17 +2450,13 @@ fn render_transcript() {}
             root = Path(directory)
             source = root / "package/src"
             (source / "fixtures").mkdir(parents=True)
-            (source / "lib.rs").write_text(
-                "#[cfg(test)]\nmod fixtures;\n", encoding="utf-8"
-            )
+            (source / "lib.rs").write_text("#[cfg(test)]\nmod fixtures;\n", encoding="utf-8")
             (source / "fixtures/mod.rs").write_text("mod inner;\n", encoding="utf-8")
             (source / "fixtures/inner.rs").write_text(
                 'pub fn inner() { std::process::Command::new("jj"); }\n',
                 encoding="utf-8",
             )
-            package = {
-                "targets": [{"kind": ["lib"], "src_path": str(source / "lib.rs")}]
-            }
+            package = {"targets": [{"kind": ["lib"], "src_path": str(source / "lib.rs")}]}
             files, errors = workspace_policy.production_rust_sources(package, root)
 
         self.assertEqual(errors, [])
@@ -2266,30 +2468,59 @@ fn render_transcript() {}
     def test_test_module_resolution_preserves_ancestry_and_production(self) -> None:
         cases = [
             # File-form and directory-form parents, two inline ancestors.
-            (parent, '#[cfg(feature = "x")] mod outer { mod inner { '
-             '#[cfg(all(unix, test))] mod suite; } }',
-             {f"{base}/outer/inner/suite.rs", f"{base}/outer/inner/suite/child.rs"},
-             {f"{base}/suite.rs", f"{base}/outer/suite.rs"})
+            (
+                parent,
+                '#[cfg(feature = "x")] mod outer { mod inner { '
+                '#[cfg(all(unix, test))] mod suite; } }',
+                {f"{base}/outer/inner/suite.rs", f"{base}/outer/inner/suite/child.rs"},
+                {f"{base}/suite.rs", f"{base}/outer/suite.rs"},
+            )
             for parent, base in (("src/foo.rs", "src/foo"), ("src/foo/mod.rs", "src/foo"))
         ] + [
-            ("src/foo.rs", "mod nested { #[cfg(test)] mod tests; } mod tests;",
-             {"src/foo/nested/tests.rs"}, {"src/foo/tests.rs"}),
-            ("src/foo.rs", "#[cfg(test)] mod tests;",
-             {"src/foo/tests.rs"}, {"src/tests.rs"}),
-            ("src/lib.rs", "#[cfg(any(test, feature = \"x\"))] mod suite;\n"
-             "#[cfg(not(test))] mod other;", set(), {"src/suite.rs", "src/other.rs"}),
-            ("src/lib.rs", "#[cfg(test)] mod suite;",
-             {"src/suite.rs", "src/suite/child.rs", "src/suite/nested/grandchild.rs"}, set()),
-            ("src/foo.rs", "#[cfg(all(test, unix))] mod tests { mod a; }",
-             {"src/foo/tests/a.rs", "src/foo/tests/a/child.rs"}, {"src/foo/a.rs"}),
-            ("src/foo.rs", '#[cfg(test)] #[path = "model_tests.rs"] mod suite;',
-             {"src/model_tests.rs"}, {"src/foo/suite.rs", "src/model_tests/real.rs"}),
-            ("src/foo.rs", '#[path = r"model_tests.rs"] #[cfg(test)] mod suite;',
-             {"src/model_tests.rs"}, {"src/foo/suite.rs"}),
-            ("src/foo.rs", 'mod inner { #[cfg(test)] #[path = "suite.rs"] mod suite; }',
-             set(), {"src/suite.rs", "src/foo/inner/suite.rs"}),
-            ("src/foo.rs", '// #[cfg(test)] mod suite;\nmod suite;',
-             set(), {"src/foo/suite.rs"}),
+            (
+                "src/foo.rs",
+                "mod nested { #[cfg(test)] mod tests; } mod tests;",
+                {"src/foo/nested/tests.rs"},
+                {"src/foo/tests.rs"},
+            ),
+            ("src/foo.rs", "#[cfg(test)] mod tests;", {"src/foo/tests.rs"}, {"src/tests.rs"}),
+            (
+                "src/lib.rs",
+                "#[cfg(any(test, feature = \"x\"))] mod suite;\n#[cfg(not(test))] mod other;",
+                set(),
+                {"src/suite.rs", "src/other.rs"},
+            ),
+            (
+                "src/lib.rs",
+                "#[cfg(test)] mod suite;",
+                {"src/suite.rs", "src/suite/child.rs", "src/suite/nested/grandchild.rs"},
+                set(),
+            ),
+            (
+                "src/foo.rs",
+                "#[cfg(all(test, unix))] mod tests { mod a; }",
+                {"src/foo/tests/a.rs", "src/foo/tests/a/child.rs"},
+                {"src/foo/a.rs"},
+            ),
+            (
+                "src/foo.rs",
+                '#[cfg(test)] #[path = "model_tests.rs"] mod suite;',
+                {"src/model_tests.rs"},
+                {"src/foo/suite.rs", "src/model_tests/real.rs"},
+            ),
+            (
+                "src/foo.rs",
+                '#[path = r"model_tests.rs"] #[cfg(test)] mod suite;',
+                {"src/model_tests.rs"},
+                {"src/foo/suite.rs"},
+            ),
+            (
+                "src/foo.rs",
+                'mod inner { #[cfg(test)] #[path = "suite.rs"] mod suite; }',
+                set(),
+                {"src/suite.rs", "src/foo/inner/suite.rs"},
+            ),
+            ("src/foo.rs", '// #[cfg(test)] mod suite;\nmod suite;', set(), {"src/foo/suite.rs"}),
         ]
         for parent, declaration, hidden, kept in cases:
             with self.subTest(parent=parent, declaration=declaration):
@@ -2302,7 +2533,9 @@ fn render_transcript() {}
                     contents["src/model_tests/child.rs"] = "fn body() {}"
                     hidden = hidden | {"src/model_tests/child.rs"}
                 roots = {"src/lib.rs"}
-                self.assertEqual(workspace_policy.declared_test_module_paths(contents, roots), hidden)
+                self.assertEqual(
+                    workspace_policy.declared_test_module_paths(contents, roots), hidden
+                )
                 with tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
                     for path, body in contents.items():
@@ -2312,14 +2545,20 @@ fn render_transcript() {}
                     package = {"targets": [{"kind": ["lib"], "src_path": str(root / "src/lib.rs")}]}
                     sources, errors = workspace_policy.production_rust_sources(package, root)
                     self.assertEqual(errors, [])
-                    self.assertEqual({path.relative_to(root).as_posix() for path in sources},
-                                     set(contents) - hidden)
+                    self.assertEqual(
+                        {path.relative_to(root).as_posix() for path in sources},
+                        set(contents) - hidden,
+                    )
 
     def test_nonstandard_target_root_resolves_modules_from_its_parent(self) -> None:
-        files = {"src/entry.rs": "#[cfg(test)] mod suite;", "src/suite.rs": "fn test() {}",
-                 "src/entry/suite.rs": "fn production() {}"}
-        self.assertEqual(workspace_policy.declared_test_module_paths(files, {"src/entry.rs"}),
-                         {"src/suite.rs"})
+        files = {
+            "src/entry.rs": "#[cfg(test)] mod suite;",
+            "src/suite.rs": "fn test() {}",
+            "src/entry/suite.rs": "fn production() {}",
+        }
+        self.assertEqual(
+            workspace_policy.declared_test_module_paths(files, {"src/entry.rs"}), {"src/suite.rs"}
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for path, source in files.items():
@@ -2329,8 +2568,10 @@ fn render_transcript() {}
             package = {"targets": [{"kind": ["lib"], "src_path": str(root / "src/entry.rs")}]}
             sources, errors = workspace_policy.production_rust_sources(package, root)
             self.assertEqual(errors, [])
-            self.assertEqual({path.relative_to(root).as_posix() for path in sources},
-                             {"src/entry.rs", "src/entry/suite.rs"})
+            self.assertEqual(
+                {path.relative_to(root).as_posix() for path in sources},
+                {"src/entry.rs", "src/entry/suite.rs"},
+            )
 
     def assert_module_files(self, contents, roots, hidden) -> None:
         self.assertEqual(workspace_policy.declared_test_module_paths(contents, roots), hidden)
@@ -2340,12 +2581,16 @@ fn render_transcript() {}
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(source, encoding="utf-8")
-            package = {"targets": [{"kind": ["lib"], "src_path": str(root / path)}
-                                   for path in sorted(roots)]}
+            package = {
+                "targets": [
+                    {"kind": ["lib"], "src_path": str(root / path)} for path in sorted(roots)
+                ]
+            }
             sources, errors = workspace_policy.production_rust_sources(package, root)
             self.assertEqual(errors, [])
-            self.assertEqual({path.relative_to(root).as_posix() for path in sources},
-                             set(contents) - hidden)
+            self.assertEqual(
+                {path.relative_to(root).as_posix() for path in sources}, set(contents) - hidden
+            )
 
     def test_production_references_override_test_directory_exclusion(self) -> None:
         for reference in (
@@ -2355,62 +2600,86 @@ fn render_transcript() {}
             '#[cfg_attr(feature = "x", path = "tests/shared.rs")] pub mod shared;',
         ):
             with self.subTest(reference=reference):
-                self.assert_module_files({
-                    "src/lib.rs": '#[cfg(test)] mod tests;\n' + reference,
-                    "src/tests.rs": "mod hidden;",
-                    "src/tests/hidden.rs": "fn hidden() {}",
-                    "src/tests/shared.rs": 'include!("shared/child.rs");',
-                    "src/tests/shared/child.rs": "fn production() {}",
-                }, {"src/lib.rs"}, {"src/tests.rs", "src/tests/hidden.rs"})
+                self.assert_module_files(
+                    {
+                        "src/lib.rs": '#[cfg(test)] mod tests;\n' + reference,
+                        "src/tests.rs": "mod hidden;",
+                        "src/tests/hidden.rs": "fn hidden() {}",
+                        "src/tests/shared.rs": 'include!("shared/child.rs");',
+                        "src/tests/shared/child.rs": "fn production() {}",
+                    },
+                    {"src/lib.rs"},
+                    {"src/tests.rs", "src/tests/hidden.rs"},
+                )
 
     def test_path_loaded_test_files_follow_declared_children_not_stem_directories(self) -> None:
-        self.assert_module_files({
-            "src/lib.rs": '#[cfg(test)] #[path = "gen_tests.rs"] mod t;\n'
-                          '#[path = "gen_tests/real.rs"] pub mod real;',
-            "src/gen_tests.rs": 'mod sibling; #[path = "gen_tests/nested.rs"] mod nested;',
-            "src/sibling.rs": "fn test() {}",
-            "src/gen_tests/nested.rs": "fn test() {}",
-            "src/gen_tests/real.rs": "fn production() {}",
-            "src/gen_tests/orphan.rs": "fn production() {}",
-        }, {"src/lib.rs"}, {"src/gen_tests.rs", "src/sibling.rs", "src/gen_tests/nested.rs"})
+        self.assert_module_files(
+            {
+                "src/lib.rs": '#[cfg(test)] #[path = "gen_tests.rs"] mod t;\n'
+                '#[path = "gen_tests/real.rs"] pub mod real;',
+                "src/gen_tests.rs": 'mod sibling; #[path = "gen_tests/nested.rs"] mod nested;',
+                "src/sibling.rs": "fn test() {}",
+                "src/gen_tests/nested.rs": "fn test() {}",
+                "src/gen_tests/real.rs": "fn production() {}",
+                "src/gen_tests/orphan.rs": "fn production() {}",
+            },
+            {"src/lib.rs"},
+            {"src/gen_tests.rs", "src/sibling.rs", "src/gen_tests/nested.rs"},
+        )
 
     def test_path_overridden_inline_ancestors_stay_counted(self) -> None:
-        self.assert_module_files({
-            "src/lib.rs": '#[path = "alt"] mod outer { #[cfg(test)] mod helpers; }',
-            "src/outer/helpers.rs": "fn production() {}",
-            "src/alt/helpers.rs": "fn helper() {}",
-        }, {"src/lib.rs"}, set())
+        self.assert_module_files(
+            {
+                "src/lib.rs": '#[path = "alt"] mod outer { #[cfg(test)] mod helpers; }',
+                "src/outer/helpers.rs": "fn production() {}",
+                "src/alt/helpers.rs": "fn helper() {}",
+            },
+            {"src/lib.rs"},
+            set(),
+        )
 
     def test_macro_module_declarations_do_not_define_ancestors_or_test_targets(self) -> None:
         for left, right in (("{", "}"), ("(", ")"), ("[", "]")):
             with self.subTest(delimiter=left):
-                self.assert_module_files({
-                    "src/lib.rs": f'macro_rules! declare {left} () => {{ mod outer {{ '
-                                  '#[cfg(test)] mod helpers; } }; ' + right + ';\n'
-                                  'macro_rules! direct { () => { #[cfg(test)] mod suite; }; }',
-                    "src/outer/helpers.rs": "fn production() {}",
-                    "src/suite.rs": "fn production() {}",
-                }, {"src/lib.rs"}, set())
+                self.assert_module_files(
+                    {
+                        "src/lib.rs": f'macro_rules! declare {left} () => {{ mod outer {{ '
+                        '#[cfg(test)] mod helpers; } }; ' + right + ';\n'
+                        'macro_rules! direct { () => { #[cfg(test)] mod suite; }; }',
+                        "src/outer/helpers.rs": "fn production() {}",
+                        "src/suite.rs": "fn production() {}",
+                    },
+                    {"src/lib.rs"},
+                    set(),
+                )
 
     def test_a_file_shared_with_a_production_root_stays_counted_transitively(self) -> None:
-        self.assert_module_files({
-            "src/lib.rs": "#[cfg(test)] mod shared;",
-            "src/main.rs": "mod shared; fn main() {}",
-            "src/shared.rs": "mod child; #[cfg(test)] mod only_test;",
-            "src/shared/child.rs": "fn production() {}",
-            "src/shared/only_test.rs": "fn test() {}",
-        }, {"src/lib.rs", "src/main.rs"}, {"src/shared/only_test.rs"})
+        self.assert_module_files(
+            {
+                "src/lib.rs": "#[cfg(test)] mod shared;",
+                "src/main.rs": "mod shared; fn main() {}",
+                "src/shared.rs": "mod child; #[cfg(test)] mod only_test;",
+                "src/shared/child.rs": "fn production() {}",
+                "src/shared/only_test.rs": "fn test() {}",
+            },
+            {"src/lib.rs", "src/main.rs"},
+            {"src/shared/only_test.rs"},
+        )
 
     def test_non_root_lib_and_main_files_use_their_stem_directory(self) -> None:
         for stem in ("lib", "main", "build"):
             with self.subTest(stem=stem):
-                self.assert_module_files({
-                    "src/lib.rs": "mod net;",
-                    "src/net/mod.rs": f"mod {stem}; mod suite;",
-                    f"src/net/{stem}.rs": "#[cfg(test)] mod suite;",
-                    f"src/net/{stem}/suite.rs": "fn test() {}",
-                    "src/net/suite.rs": "fn production() {}",
-                }, {"src/lib.rs"}, {f"src/net/{stem}/suite.rs"})
+                self.assert_module_files(
+                    {
+                        "src/lib.rs": "mod net;",
+                        "src/net/mod.rs": f"mod {stem}; mod suite;",
+                        f"src/net/{stem}.rs": "#[cfg(test)] mod suite;",
+                        f"src/net/{stem}/suite.rs": "fn test() {}",
+                        "src/net/suite.rs": "fn production() {}",
+                    },
+                    {"src/lib.rs"},
+                    {f"src/net/{stem}/suite.rs"},
+                )
 
     def test_nonliteral_include_target_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2420,9 +2689,7 @@ fn render_transcript() {}
             main = source / "lib.rs"
             main.write_text('include!(concat!("hidden", ".inc"));\n', encoding="utf-8")
 
-            _files, errors = workspace_policy.discover_rust_files(
-                root, [(main, False)]
-            )
+            _files, errors = workspace_policy.discover_rust_files(root, [(main, False)])
 
         self.assertTrue(any("direct string literal" in error for error in errors), errors)
 
@@ -2433,9 +2700,7 @@ class FeaturePolicyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workspace = policy_module.load_workspace(ROOT)
-        cls.manifests = {
-            name: package.manifest for name, package in cls.workspace.packages.items()
-        }
+        cls.manifests = {name: package.manifest for name, package in cls.workspace.packages.items()}
         cls.layers = {name: package.layer for name, package in cls.workspace.packages.items()}
         cls.digests = feature_policy.digest_packages(cls.workspace)
 
@@ -2446,11 +2711,7 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(self.contracts(self.manifests), [])
         self.assertEqual(
             self.digests,
-            {
-                name
-                for name, layer in self.layers.items()
-                if layer in feature_policy.DIGEST_LAYERS
-            },
+            {name for name, layer in self.layers.items() if layer in feature_policy.DIGEST_LAYERS},
         )
         self.assertEqual(set(feature_policy.EXPECTED_SECURITY_SURFACE_DIGESTS), self.digests)
 
@@ -2479,7 +2740,10 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertIn("plakous-codex-code-mode-protocol", edges["plakous-compose"])
         self.assertEqual(edges["plakous-codex-code-mode-protocol"], set())
         self.assertNotIn("plakous-dispatch", edges)
-        self.assertEqual(self.workspace.policy.edge_exceptions.get("plakous-compose"), ("plakous-codex-code-mode-protocol",))
+        self.assertEqual(
+            self.workspace.policy.edge_exceptions.get("plakous-compose"),
+            ("plakous-codex-code-mode-protocol",),
+        )
         self.assertIn(
             ("plakous", "sessions-sqlite", "plakous-store/sqlite"),
             feature_policy.REQUIRED_DEPENDENCY_FEATURE_EDGES,
@@ -2489,7 +2753,9 @@ class FeaturePolicyTests(unittest.TestCase):
         manifests = copy.deepcopy(self.manifests)
         manifests["plakous-openai"]["dependencies"]["plakous-http"]["optional"] = True
         errors = self.contracts(manifests)
-        self.assertTrue(any("plakous-openai" in e and "security surface changed" in e for e in errors))
+        self.assertTrue(
+            any("plakous-openai" in e and "security surface changed" in e for e in errors)
+        )
 
     def test_dependency_feature_forwarding_drift_is_rejected(self) -> None:
         manifests = copy.deepcopy(self.manifests)
@@ -2547,14 +2813,14 @@ class FeaturePolicyTests(unittest.TestCase):
     def test_dependency_capability_and_external_edge_drift_are_rejected(self) -> None:
         mutations = []
         requested_feature = copy.deepcopy(self.manifests)
-        requested_feature["plakous-openai"]["dependencies"]["plakous-auth"][
-            "features"
-        ] = ["external-compat"]
+        requested_feature["plakous-openai"]["dependencies"]["plakous-auth"]["features"] = [
+            "external-compat"
+        ]
         mutations.append(requested_feature)
         default_features = copy.deepcopy(self.manifests)
-        default_features["plakous-openai"]["dependencies"]["plakous-auth"][
-            "default-features"
-        ] = True
+        default_features["plakous-openai"]["dependencies"]["plakous-auth"]["default-features"] = (
+            True
+        )
         mutations.append(default_features)
         external_dependency = copy.deepcopy(self.manifests)
         external_dependency["plakous-model"]["dependencies"]["reqwest"] = "0.12"
@@ -2565,7 +2831,9 @@ class FeaturePolicyTests(unittest.TestCase):
         for manifests in mutations:
             with self.subTest(digest=feature_policy.security_surface_digest(manifests["plakous"])):
                 errors = self.contracts(manifests)
-                self.assertTrue(any("security surface changed" in error for error in errors), errors)
+                self.assertTrue(
+                    any("security surface changed" in error for error in errors), errors
+                )
 
     def test_closure_inventory_is_per_package_never_a_cross_product(self) -> None:
         packages = feature_policy.closure_packages(self.manifests)
@@ -2618,17 +2886,28 @@ class FeaturePolicyTests(unittest.TestCase):
         )
         self.assertNotIn("plakous-cell", minimal)
         native = feature_policy.expected_closure(
-            "plakous", ("codex", "grok", "claude",), False, manifests
+            "plakous",
+            (
+                "codex",
+                "grok",
+                "claude",
+            ),
+            False,
+            manifests,
         )
         self.assertIn("plakous-codex-code-mode-protocol", native)
         self.assertNotIn("plakous-cell", native)
         self.assertIn("plakous-auth", native)
         self.assertNotIn("plakous-openrouter", native)
         store = feature_policy.expected_closure("plakous-store", ("sqlite",), False, manifests)
-        self.assertEqual(store, {"plakous-store", "plakous-agent", "plakous-model", "plakous-tools"})
+        self.assertEqual(
+            store, {"plakous-store", "plakous-agent", "plakous-model", "plakous-tools"}
+        )
         cell = feature_policy.expected_closure("plakous-cell", (), False, manifests)
         self.assertEqual(cell, {"plakous-cell"})
-        self.assertIn("plakous-hosted", feature_policy.expected_closure("plak", (), True, manifests))
+        self.assertIn(
+            "plakous-hosted", feature_policy.expected_closure("plak", (), True, manifests)
+        )
 
 
 class DensityScopeTests(unittest.TestCase):
@@ -2642,7 +2921,9 @@ class DensityScopeTests(unittest.TestCase):
         for package in self.workspace.packages.values():
             with self.subTest(package=package.name):
                 self.assertIsNotNone(density_policy.scope_of(package))
-        scoped_layers = [layer for layers in density_policy.SCOPE_LAYERS.values() for layer in layers]
+        scoped_layers = [
+            layer for layers in density_policy.SCOPE_LAYERS.values() for layer in layers
+        ]
         self.assertEqual(len(scoped_layers), len(set(scoped_layers)))
         self.assertEqual(set(scoped_layers), set(self.workspace.policy.layers))
 

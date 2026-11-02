@@ -57,18 +57,22 @@ def task(cycle: int, slot: int) -> Task:
 
 
 def check_task(repo: Path, item: Task) -> bool:
-    suite = subprocess.run(["python3", "-m", "unittest", "-q"], cwd=repo,
-                           capture_output=True, text=True, timeout=120)
-    oracle = subprocess.run(["python3", "-c", item.check], cwd=repo,
-                            capture_output=True, text=True, timeout=30)
+    suite = subprocess.run(
+        ["python3", "-m", "unittest", "-q"], cwd=repo, capture_output=True, text=True, timeout=120
+    )
+    oracle = subprocess.run(
+        ["python3", "-c", item.check], cwd=repo, capture_output=True, text=True, timeout=30
+    )
     tests = (repo / "test_arithmetic.py").read_text()
     return suite.returncode == 0 and oracle.returncode == 0 and tests.count(item.name) >= 2
 
 
 def terminal_records(home: Path, session: str) -> list[dict]:
-    return [record for record in live.with_failure_messages(live.session_records(home, session))
-            if record.get("kind") == "turn.lifecycle"
-            and record.get("phase") not in (None, "admitted")]
+    return [
+        record
+        for record in live.with_failure_messages(live.session_records(home, session))
+        if record.get("kind") == "turn.lifecycle" and record.get("phase") not in (None, "admitted")
+    ]
 
 
 def terminals(home: Path, session: str) -> list[str]:
@@ -78,8 +82,11 @@ def terminals(home: Path, session: str) -> list[str]:
 def output_limit_terminal(home: Path, session: str, index: int) -> bool:
     """The terminal failed with the typed OutputLimit diagnostic: a model miss."""
     records = terminal_records(home, session)
-    return (0 <= index < len(records) and records[index].get("phase") == "failed"
-            and live.output_limit_failure(None, str(records[index].get("message") or "")))
+    return (
+        0 <= index < len(records)
+        and records[index].get("phase") == "failed"
+        and live.output_limit_failure(None, str(records[index].get("message") or ""))
+    )
 
 
 def raise_if_provider_terminal(home: Path, session: str, index: int, what: str) -> None:
@@ -98,7 +105,9 @@ def raise_if_provider_terminal(home: Path, session: str, index: int, what: str) 
     )
     if turn.completed:
         return
-    reason = live.provider_reason_from(turn.model_error_kind, turn.http_status, " ".join(turn.errors))
+    reason = live.provider_reason_from(
+        turn.model_error_kind, turn.http_status, " ".join(turn.errors)
+    )
     if reason:
         raise live.ScenarioFailure(live.PROVIDER, f"{what}: {reason}")
     if turn.refusals:
@@ -106,8 +115,10 @@ def raise_if_provider_terminal(home: Path, session: str, index: int, what: str) 
 
 
 def admissions(home: Path, session: str) -> int:
-    return sum(record.get("kind") == "turn.lifecycle" and record.get("phase") == "admitted"
-               for record in live.session_records(home, session))
+    return sum(
+        record.get("kind") == "turn.lifecycle" and record.get("phase") == "admitted"
+        for record in live.session_records(home, session)
+    )
 
 
 def discover_session(home: Path, timeout: float = 30) -> str:
@@ -127,8 +138,14 @@ def usage_since(home: Path, before: live.TokenUsage) -> dict[str, int]:
     return live.usage_delta(live.session_usage(home), before).as_dict()
 
 
-def send_and_wait(tui: live.Tui, home: Path, session: str, prompt: str,
-                  timeout: float = 900, sleep_once: bool = False) -> str:
+def send_and_wait(
+    tui: live.Tui,
+    home: Path,
+    session: str,
+    prompt: str,
+    timeout: float = 900,
+    sleep_once: bool = False,
+) -> str:
     before = len(terminals(home, session))
     admitted_before = admissions(home, session)
     tui.type(prompt)
@@ -155,8 +172,11 @@ def send_and_wait(tui: live.Tui, home: Path, session: str, prompt: str,
 
 def task_evidence(segment: Path) -> dict:
     exchanges = len(list(segment.glob("*.info")))
-    return {"segment": str(segment), "captured_exchanges": exchanges,
-            "evidence_status": "response" if exchanges else "unexplained_no_response"}
+    return {
+        "segment": str(segment),
+        "captured_exchanges": exchanges,
+        "evidence_status": "response" if exchanges else "unexplained_no_response",
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -206,67 +226,106 @@ def main(argv: list[str]) -> int:
             phase = send_and_wait(tui, env.home, session, item.prompt, sleep_once=not slept)
             slept = True
             passed = phase == "completed" and check_task(repo, item)
-            records.append({"task": item.name, "phase": phase, "oracle": passed,
-                            "seconds": round(time.monotonic() - began, 1),
-                            **task_evidence(tui.capture_dir),
-                            **usage_since(env.home, usage_before)})
+            records.append(
+                {
+                    "task": item.name,
+                    "phase": phase,
+                    "oracle": passed,
+                    "seconds": round(time.monotonic() - began, 1),
+                    **task_evidence(tui.capture_dir),
+                    **usage_since(env.home, usage_before),
+                }
+            )
             print(f"{'pass' if passed else 'FAIL':5} {item.name} terminal={phase}", flush=True)
             if phase != "completed":
                 raise_if_provider_terminal(
-                    env.home, session, len(terminal_records(env.home, session)) - 1, item.name)
+                    env.home, session, len(terminal_records(env.home, session)) - 1, item.name
+                )
                 if phase != "failed":
                     raise live.ScenarioFailure(live.HARNESS, f"{item.name}: terminal={phase}")
-                if output_limit_terminal(env.home, session, len(terminal_records(env.home, session)) - 1):
+                if output_limit_terminal(
+                    env.home, session, len(terminal_records(env.home, session)) - 1
+                ):
                     records[-1].update(outcome=live.MODEL, detail=live.OUTPUT_LIMIT_MISS)
                 # A provider request can fail after transmission without being
                 # safe to replay. The next prompt must still be able to finish
                 # the work on this same attached TUI session.
                 recovery_before = live.session_usage(env.home)
                 followup = send_and_wait(
-                    tui, env.home, session,
+                    tui,
+                    env.home,
+                    session,
                     f"The previous request failed. Finish the task for {item.name}, "
-                    "run python3 -m unittest -q, then finish the turn.")
+                    "run python3 -m unittest -q, then finish the turn.",
+                )
                 recovered = followup == "completed" and check_task(repo, item)
                 records[-1]["recovered"] = followup == "completed"
-                records.append({"task": f"{item.name}_recovery", "phase": followup,
-                                "oracle": recovered,
-                                **task_evidence(tui.capture_dir),
-                                **usage_since(env.home, recovery_before)})
+                records.append(
+                    {
+                        "task": f"{item.name}_recovery",
+                        "phase": followup,
+                        "oracle": recovered,
+                        **task_evidence(tui.capture_dir),
+                        **usage_since(env.home, recovery_before),
+                    }
+                )
                 if followup != "completed":
                     raise_if_provider_terminal(
-                        env.home, session, len(terminal_records(env.home, session)) - 1,
-                        f"{item.name} follow-up")
+                        env.home,
+                        session,
+                        len(terminal_records(env.home, session)) - 1,
+                        f"{item.name} follow-up",
+                    )
                     raise live.ScenarioFailure(
-                        live.HARNESS, f"{item.name}: follow-up terminal={followup}")
-                print(f"{'pass' if recovered else 'MISS':5} {item.name} recovery={followup}",
-                      flush=True)
+                        live.HARNESS, f"{item.name}: follow-up terminal={followup}"
+                    )
+                print(
+                    f"{'pass' if recovered else 'MISS':5} {item.name} recovery={followup}",
+                    flush=True,
+                )
             if not reopened:
                 if tui.quit() != 0:
                     raise live.ScenarioFailure(live.HARNESS, "first TUI did not quit cleanly")
                 second_capture = capture_root / "segment-002"
                 second_capture.mkdir(mode=0o700)
-                tui = live.Tui(env, repo, artifacts / "segment-002.pty",
-                               args=["--resume", session], capture_dir=second_capture)
+                tui = live.Tui(
+                    env,
+                    repo,
+                    artifacts / "segment-002.pty",
+                    args=["--resume", session],
+                    capture_dir=second_capture,
+                )
                 process_ids.append(tui.pid)
                 tui.pump(3)
                 if discover_session(env.home) != session:
                     raise live.ScenarioFailure(live.HARNESS, "reopen changed the session")
                 reopen_before = live.session_usage(env.home)
                 phase = send_and_wait(
-                    tui, env.home, session,
+                    tui,
+                    env.home,
+                    session,
                     "After the simulated sleep and reopen, create followup.txt containing "
-                    "exactly `sleep and reopen verified` (plus a final newline), then finish.")
+                    "exactly `sleep and reopen verified` (plus a final newline), then finish.",
+                )
                 followup = repo / "followup.txt"
                 if phase != "completed":
                     raise_if_provider_terminal(
-                        env.home, session, len(terminal_records(env.home, session)) - 1,
-                        "post-sleep/reopen")
+                        env.home,
+                        session,
+                        len(terminal_records(env.home, session)) - 1,
+                        "post-sleep/reopen",
+                    )
                     raise live.ScenarioFailure(live.HARNESS, "post-sleep/reopen turn failed")
-                records.append({"task": "reopen_followup", "phase": phase,
-                                "oracle": followup.is_file() and
-                                followup.read_text() == "sleep and reopen verified\n",
-                                **task_evidence(tui.capture_dir),
-                                **usage_since(env.home, reopen_before)})
+                records.append(
+                    {
+                        "task": "reopen_followup",
+                        "phase": phase,
+                        "oracle": followup.is_file()
+                        and followup.read_text() == "sleep and reopen verified\n",
+                        **task_evidence(tui.capture_dir),
+                        **usage_since(env.home, reopen_before),
+                    }
+                )
                 reopened = True
             slot += 1
             if slot == 3:
@@ -279,40 +338,62 @@ def main(argv: list[str]) -> int:
         except OSError:
             quit_code = None
 
-    summary = {**live.route_report(route), "session": session,
-               "binary_sha256_start": binary_start,
-               "binary_sha256_end": live.binary_sha256(env.binary),
-               "hours": round((time.monotonic() - started) / 3600, 2),
-               "tasks": len(records), "reopened": reopened, "slept": slept,
-               "model_misses": sum(record["phase"] == "completed" and not record["oracle"]
-                                   for record in records),
-               "turn_failures": sum(record["phase"] == "failed" and not record.get("recovered")
-                                    and record.get("outcome") != live.MODEL
-                                    for record in records),
-               "clean_quit": quit_code == 0, "failure": failure,
-               "token_telemetry": live.session_usage(env.home).as_dict()}
+    summary = {
+        **live.route_report(route),
+        "session": session,
+        "binary_sha256_start": binary_start,
+        "binary_sha256_end": live.binary_sha256(env.binary),
+        "hours": round((time.monotonic() - started) / 3600, 2),
+        "tasks": len(records),
+        "reopened": reopened,
+        "slept": slept,
+        "model_misses": sum(
+            record["phase"] == "completed" and not record["oracle"] for record in records
+        ),
+        "turn_failures": sum(
+            record["phase"] == "failed"
+            and not record.get("recovered")
+            and record.get("outcome") != live.MODEL
+            for record in records
+        ),
+        "clean_quit": quit_code == 0,
+        "failure": failure,
+        "token_telemetry": live.session_usage(env.home).as_dict(),
+    }
     bodies = list(capture_root.glob("segment-*/*.body"))
     info = list(capture_root.glob("segment-*/*.info"))
     diagnostics = env.home / "logs/plak.log"
     diagnostic_stat = diagnostics.lstat() if diagnostics.exists() else None
-    summary["diagnostics_available"] = (diagnostic_stat is not None
-                                        and stat.S_ISREG(diagnostic_stat.st_mode)
-                                        and stat.S_IMODE(diagnostic_stat.st_mode) == 0o600)
+    summary["diagnostics_available"] = (
+        diagnostic_stat is not None
+        and stat.S_ISREG(diagnostic_stat.st_mode)
+        and stat.S_IMODE(diagnostic_stat.st_mode) == 0o600
+    )
     summary["process_ids"] = process_ids
     segments = env.capture_segments
     summary["capture_segments"] = [str(segment) for segment in segments]
     summary["captured_exchanges"] = len(info)
-    summary["capture_complete"] = (bool(segments)
-                                   and all(any(segment.glob("*.info")) for segment in segments)
-                                   and len(bodies) == len(info)
-                                   and live.capture_integrity(segments))
-    (artifacts / "report.json").write_text(json.dumps(
-        {"summary": summary, "records": records}, indent=2) + "\n")
+    summary["capture_complete"] = (
+        bool(segments)
+        and all(any(segment.glob("*.info")) for segment in segments)
+        and len(bodies) == len(info)
+        and live.capture_integrity(segments)
+    )
+    (artifacts / "report.json").write_text(
+        json.dumps({"summary": summary, "records": records}, indent=2) + "\n"
+    )
     print(json.dumps(summary, indent=2) + f"\nartifacts: {artifacts}")
-    return 0 if (failure is None and quit_code == 0
-                 and binary_start == summary["binary_sha256_end"]
-                 and summary["capture_complete"]
-                 and summary["diagnostics_available"]) else 1
+    return (
+        0
+        if (
+            failure is None
+            and quit_code == 0
+            and binary_start == summary["binary_sha256_end"]
+            and summary["capture_complete"]
+            and summary["diagnostics_available"]
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

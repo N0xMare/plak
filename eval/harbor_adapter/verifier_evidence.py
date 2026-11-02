@@ -87,17 +87,32 @@ def _count(value: Any) -> int | None:
 
 
 def inspect_verifier(
-    trial: Path, *, dataset: str | None, slice_name: str | None,
-    task: str, task_ref: str | None, task_checksum: str | None,
+    trial: Path,
+    *,
+    dataset: str | None,
+    slice_name: str | None,
+    task: str,
+    task_ref: str | None,
+    task_checksum: str | None,
 ) -> dict[str, Any]:
     """Require asserted CTRF tests only for the exact pinned Rung A TB 2.1 slices."""
     if dataset != DATASET or slice_name not in {"ab", "expanded"} or task not in TASKS:
-        return {"contract": None, "status": "not_required", "path": None,
-                "sha256": None, "counts": None}
+        return {
+            "contract": None,
+            "status": "not_required",
+            "path": None,
+            "sha256": None,
+            "counts": None,
+        }
     source = trial / "verifier/ctrf.json"
     count = 8 if slice_name == "ab" else 16
-    evidence = {"contract": f"rung-a-tb21-selected{count}-ctrf", "status": None,
-                "path": str(source), "sha256": None, "counts": None}
+    evidence = {
+        "contract": f"rung-a-tb21-selected{count}-ctrf",
+        "status": None,
+        "path": str(source),
+        "sha256": None,
+        "counts": None,
+    }
     if TASKS.get(task) != (task_ref, task_checksum):
         evidence["status"] = "task_binding_mismatch"
         return evidence
@@ -115,21 +130,28 @@ def inspect_verifier(
         results = document["results"]
         summary = results["summary"]
         tests = results["tests"]
-        counts = {key: _count(summary.get(key)) for key in
-                  ("tests", "passed", "failed", "skipped", "pending", "other")}
+        counts = {
+            key: _count(summary.get(key))
+            for key in ("tests", "passed", "failed", "skipped", "pending", "other")
+        }
         statuses = Counter(test["status"] for test in tests)
-        valid = (isinstance(tests, list) and all(isinstance(t, dict) for t in tests)
-                 and all(isinstance(t.get("name"), str) and t["name"].strip() for t in tests)
-                 and all(value is not None for value in counts.values())
-                 and len(tests) == counts["tests"]
-                 and sum(counts[key] for key in counts if key != "tests") == counts["tests"]
-                 and all(statuses.get(key, 0) == counts[key] for key in counts if key != "tests")
-                 and set(statuses).issubset({"passed", "failed", "skipped", "pending", "other"}))
+        valid = (
+            isinstance(tests, list)
+            and all(isinstance(t, dict) for t in tests)
+            and all(isinstance(t.get("name"), str) and t["name"].strip() for t in tests)
+            and all(value is not None for value in counts.values())
+            and len(tests) == counts["tests"]
+            and sum(counts[key] for key in counts if key != "tests") == counts["tests"]
+            and all(statuses.get(key, 0) == counts[key] for key in counts if key != "tests")
+            and set(statuses).issubset({"passed", "failed", "skipped", "pending", "other"})
+        )
     except (TypeError, ValueError, KeyError, AttributeError):
         valid = False
     if not valid:
         evidence["status"] = "invalid_ctrf"
         return evidence
     evidence["counts"] = counts
-    evidence["status"] = "assertions_recorded" if counts["passed"] + counts["failed"] > 0 else "no_assertions"
+    evidence["status"] = (
+        "assertions_recorded" if counts["passed"] + counts["failed"] > 0 else "no_assertions"
+    )
     return evidence

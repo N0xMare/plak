@@ -38,9 +38,7 @@ class RegressionRuleTests(unittest.TestCase):
         )
 
     def test_a_higher_throughput_is_never_a_regression(self):
-        self.assertIsNone(
-            CHECKER.regression("jsonl_bulk_throughput_mb_per_s", 4.0, 1.0, 0.5)
-        )
+        self.assertIsNone(CHECKER.regression("jsonl_bulk_throughput_mb_per_s", 4.0, 1.0, 0.5))
 
 
 class BaselineTests(unittest.TestCase):
@@ -62,9 +60,13 @@ class BaselineTests(unittest.TestCase):
             for profile in ("debug", None):
                 with self.subTest(metric=metric, profile=profile):
                     code = self.run_check(
-                        machine="aaaaaaaaaaaa", metric=metric,
-                        seeded={"aaaaaaaaaaaa": {metric: {
-                            "value": 1.0, "unit": "mb", "profile": profile}}},
+                        machine="aaaaaaaaaaaa",
+                        metric=metric,
+                        seeded={
+                            "aaaaaaaaaaaa": {
+                                metric: {"value": 1.0, "unit": "mb", "profile": profile}
+                            }
+                        },
                     )
                     self.assertEqual(code, 1)
                     self.assertIn("profile mismatch", self.printed)
@@ -174,8 +176,16 @@ class BaselineTests(unittest.TestCase):
                         "tolerance": 0.5,
                         "machines": {
                             "aaaaaaaaaaaa": {
-                                "cold_start_to_ready_ms": {"value": 100.0, "unit": "ms", "profile": "release"},
-                                "growth_turn_peak_rss_mb": {"value": 50.0, "unit": "mb", "profile": "release"},
+                                "cold_start_to_ready_ms": {
+                                    "value": 100.0,
+                                    "unit": "ms",
+                                    "profile": "release",
+                                },
+                                "growth_turn_peak_rss_mb": {
+                                    "value": 50.0,
+                                    "unit": "mb",
+                                    "profile": "release",
+                                },
                             }
                         },
                     }
@@ -199,8 +209,14 @@ class BaselineTests(unittest.TestCase):
         self.assertNotIn("regression", printed)
 
     def run_check(
-        self, machine, seeded, value=1.0, metric="growth_turn_peak_rss_mb", unit="mb",
-        profile="release", seed=False,
+        self,
+        machine,
+        seeded,
+        value=1.0,
+        metric="growth_turn_peak_rss_mb",
+        unit="mb",
+        profile="release",
+        seed=False,
     ):
         """Run the checker over one measurement and return its exit code."""
         with tempfile.TemporaryDirectory() as directory:
@@ -219,9 +235,19 @@ class BaselineTests(unittest.TestCase):
             )
             baseline = Path(directory) / "baseline.json"
             baseline.write_text(
-                json.dumps({"version": 1, "tolerance": 0.5, "machines": {
-                    name: {metric: {"profile": "release", **row} for metric, row in metrics.items()}
-                    for name, metrics in seeded.items()}})
+                json.dumps(
+                    {
+                        "version": 1,
+                        "tolerance": 0.5,
+                        "machines": {
+                            name: {
+                                metric: {"profile": "release", **row}
+                                for metric, row in metrics.items()
+                            }
+                            for name, metrics in seeded.items()
+                        },
+                    }
+                )
             )
             argv = sys.argv
             stdout = sys.stdout

@@ -14,7 +14,8 @@ def read_rows(path):
             continue
         row = json.loads(line)
         if not isinstance(row, dict) or not all(
-                key in row for key in ("shape", "store", "store_ordinal", "outcome")):
+            key in row for key in ("shape", "store", "store_ordinal", "outcome")
+        ):
             raise ValueError(f"{path}:{number}: missing cut identity or outcome")
         rows.append(row)
     return rows
@@ -31,15 +32,22 @@ def inputs(row):
         stores = defaultdict(list)
         for commit in row["global_order"]:
             if commit.get("indexed", True):
-                stores[commit["store"]].append((commit["store_ordinal"],
-                                               commit["label"], commit["tables"]))
+                stores[commit["store"]].append(
+                    (commit["store_ordinal"], commit["label"], commit["tables"])
+                )
         result["prefix"] = {store: sorted(commits) for store, commits in stores.items()}
     before = row.get("before", {})
     if "ledger" in before:
         # Ledger facts use stable operation ordinals, kinds and states, not UUIDs.
         result["ledger"] = before["ledger"]
-        for name in ("phase", "runtime_verdict", "revision", "obligations",
-                     "root_turn_count", "tool_call_count"):
+        for name in (
+            "phase",
+            "runtime_verdict",
+            "revision",
+            "obligations",
+            "root_turn_count",
+            "tool_call_count",
+        ):
             if name in before:
                 result[name] = before[name]
     return json.dumps(result, sort_keys=True, separators=(",", ":")) if result else None
@@ -50,19 +58,35 @@ def outcome(row):
 
 
 def failed(row):
-    return (row.get("invariants") is not True
-            or row["outcome"] in ("DIVERGENT", "UNCLASSIFIED")
-            or row["outcome"].startswith("REFUSED"))
+    return (
+        row.get("invariants") is not True
+        or row["outcome"] in ("DIVERGENT", "UNCLASSIFIED")
+        or row["outcome"].startswith("REFUSED")
+    )
 
 
 def reference(row):
-    return {key: row[key] for key in ("shape", "store", "store_ordinal", "repeat",
-                                    "outcome", "invariants") if key in row}
+    return {
+        key: row[key]
+        for key in ("shape", "store", "store_ordinal", "repeat", "outcome", "invariants")
+        if key in row
+    }
 
 
 def compare(left, right):
-    report = {name: [] for name in ("matching", "floating", "changed", "only_left",
-                                  "only_right", "unpaired", "uncomparable", "regressed")}
+    report = {
+        name: []
+        for name in (
+            "matching",
+            "floating",
+            "changed",
+            "only_left",
+            "only_right",
+            "unpaired",
+            "uncomparable",
+            "regressed",
+        )
+    }
     groups = [defaultdict(list), defaultdict(list)]
     for rows, grouped in zip((left, right), groups):
         for row in rows:
@@ -90,8 +114,9 @@ def compare(left, right):
             for row in rows:
                 fingerprint = inputs(row)
                 if fingerprint is None:
-                    report["uncomparable"].append({"side": ("left", "right")[side],
-                                                  "cut": reference(row)})
+                    report["uncomparable"].append(
+                        {"side": ("left", "right")[side], "cut": reference(row)}
+                    )
                 else:
                     indexed[side][fingerprint].append(row)
         for fingerprint in sorted(indexed[0].keys() & indexed[1].keys()):
@@ -105,18 +130,26 @@ def compare(left, right):
                     a.remove(row)
                     b.remove(peer)
             while a and b:
-                report["changed"].append({"left": reference(a.pop(0)),
-                                           "right": reference(b.pop(0)),
-                                           "inputs": json.loads(fingerprint)})
+                report["changed"].append(
+                    {
+                        "left": reference(a.pop(0)),
+                        "right": reference(b.pop(0)),
+                        "inputs": json.loads(fingerprint),
+                    }
+                )
         # A different prefix at the same ordinal floats. Unequal sample counts
         # under an otherwise equal prefix are neither floating nor regressions.
         for side, grouped in enumerate(indexed):
             for fingerprint, rows in sorted(grouped.items()):
                 category = "unpaired" if fingerprint in indexed[1 - side] else "floating"
                 for row in rows:
-                    report[category].append({"side": ("left", "right")[side],
-                                             "cut": reference(row),
-                                             "inputs": json.loads(fingerprint)})
+                    report[category].append(
+                        {
+                            "side": ("left", "right")[side],
+                            "cut": reference(row),
+                            "inputs": json.loads(fingerprint),
+                        }
+                    )
     report["counts"] = {name: len(rows) for name, rows in report.items()}
     return report
 
@@ -139,8 +172,9 @@ def main():
             print(json.dumps(change, sort_keys=True))
         for regression in report["regressed"]:
             print(json.dumps(regression, sort_keys=True))
-    return int(bool(report["changed"]) or any(
-        not row["baseline_failed"] for row in report["regressed"]))
+    return int(
+        bool(report["changed"]) or any(not row["baseline_failed"] for row in report["regressed"])
+    )
 
 
 if __name__ == "__main__":

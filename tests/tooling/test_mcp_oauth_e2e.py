@@ -16,15 +16,11 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(lane.authorize_url("header\n" + good + "\nfooter"), good)
         self.assertIsNone(lane.authorize_url(good.replace("S256", "plain")))
         self.assertIsNone(lane.authorize_url(good.replace("127.0.0.1", "evil.invalid")))
-        self.assertIsNone(
-            lane.authorize_url("http://127.0.0.1:18083/callback?code=secret")
-        )
+        self.assertIsNone(lane.authorize_url("http://127.0.0.1:18083/callback?code=secret"))
 
     def test_device_prompt_waits_for_both_fields(self):
         text = "  1. Open:        http://127.0.0.1:18083/device\n  2. Enter code:  ABCD-EFGH\n"
-        self.assertEqual(
-            lane.device_prompt(text), ("http://127.0.0.1:18083/device", "ABCD-EFGH")
-        )
+        self.assertEqual(lane.device_prompt(text), ("http://127.0.0.1:18083/device", "ABCD-EFGH"))
         self.assertIsNone(lane.device_prompt(text.splitlines()[0]))
 
     def test_redacts_queries_clipboard_and_device_codes(self):
@@ -49,20 +45,14 @@ class ParsingTests(unittest.TestCase):
 
     def test_step_up_scope_union_ignores_order_and_retains_offline_access(self):
         self.assertEqual(
-            lane.remedy_scopes(
-                "remedy: plak mcp login srv --scope 'offline_access read write'"
-            ),
+            lane.remedy_scopes("remedy: plak mcp login srv --scope 'offline_access read write'"),
             {"read", "write", "offline_access"},
         )
         self.assertEqual(
-            lane.remedy_scopes(
-                "remedy: plak mcp login srv --scope 'write read offline_access'"
-            ),
+            lane.remedy_scopes("remedy: plak mcp login srv --scope 'write read offline_access'"),
             {"read", "write", "offline_access"},
         )
-        self.assertEqual(
-            lane.remedy_scopes("remedy: plak mcp login srv --scope '$(id)'"), set()
-        )
+        self.assertEqual(lane.remedy_scopes("remedy: plak mcp login srv --scope '$(id)'"), set())
 
     def test_session_id_comes_from_cli_marker(self):
         sid = "12345678-1234-1234-1234-123456789abc"

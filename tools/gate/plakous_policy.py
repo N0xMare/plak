@@ -239,7 +239,8 @@ DEPENDENCY_SECTIONS = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
 def inherit_workspace_dependencies(
-    manifest: dict[str, Any], workspace_dependencies: dict[str, Any],
+    manifest: dict[str, Any],
+    workspace_dependencies: dict[str, Any],
 ) -> dict[str, Any]:
     """Return the manifest with each `workspace = true` dependency resolved.
 

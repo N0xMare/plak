@@ -16,18 +16,32 @@ from perf_long_session import write_home
 def measure(binary: str, root: Path, machine: str, profile: str, prompts: int) -> None:
     home = write_home(str(root))
     script = root / "script.json"
-    script.write_text(json.dumps({
-        "version": 1,
-        "steps": [{"output": {"text": "ok"}}] * prompts
-                 + [{"output": "history_report"}],
-    }))
-    env = {"PATH": os.environ["PATH"], "HOME": str(root / "fake-home"),
-           "TMPDIR": str(root / "tmp"), "PLAK_HOME": home,
-           "PLAK_TEST_MODEL": "offline-loopback-v1", "PLAK_TEST_SCRIPT": str(script)}
+    script.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "steps": [{"output": {"text": "ok"}}] * prompts + [{"output": "history_report"}],
+            }
+        )
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(root / "fake-home"),
+        "TMPDIR": str(root / "tmp"),
+        "PLAK_HOME": home,
+        "PLAK_TEST_MODEL": "offline-loopback-v1",
+        "PLAK_TEST_SCRIPT": str(script),
+    }
     with (root / "stderr.log").open("w") as stderr:
-        child = subprocess.Popen([binary, "agent"], env=env, cwd=root / "ws",
-                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=stderr, text=True)
+        child = subprocess.Popen(
+            [binary, "agent"],
+            env=env,
+            cwd=root / "ws",
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            text=True,
+        )
         # Bound a missing stdout record too, not just a successful child.wait.
         watchdog = threading.Timer(600, child.kill)
         watchdog.start()
@@ -39,8 +53,10 @@ def measure(binary: str, root: Path, machine: str, profile: str, prompts: int) -
             history = ""
             for ordinal in range(prompts + 1):
                 began = time.monotonic()
-                child.stdin.write(json.dumps({"v": 1, "kind": "prompt",
-                                              "text": f"lineage-prompt-{ordinal:04}"}) + "\n")
+                child.stdin.write(
+                    json.dumps({"v": 1, "kind": "prompt", "text": f"lineage-prompt-{ordinal:04}"})
+                    + "\n"
+                )
                 child.stdin.flush()
                 for line in child.stdout:
                     event = json.loads(line)
@@ -66,14 +82,32 @@ def measure(binary: str, root: Path, machine: str, profile: str, prompts: int) -
             if child.poll() is None:
                 child.kill()
             child.wait()
-    for label, value in (("total", sum(samples)),
-                         ("first_20_median", statistics.median(samples[:20])),
-                         ("last_20_median", statistics.median(samples[-21:-1]))):
-        print(json.dumps({"metric": f"lineage_{prompts}_{label}_ms", "value": round(value, 3),
-                          "unit": "ms", "machine": machine, "profile": profile}, sort_keys=True), flush=True)
+    for label, value in (
+        ("total", sum(samples)),
+        ("first_20_median", statistics.median(samples[:20])),
+        ("last_20_median", statistics.median(samples[-21:-1])),
+    ):
+        print(
+            json.dumps(
+                {
+                    "metric": f"lineage_{prompts}_{label}_ms",
+                    "value": round(value, 3),
+                    "unit": "ms",
+                    "machine": machine,
+                    "profile": profile,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
 
 if __name__ == "__main__":
     for size in (400, 1000):
-        measure(str(Path(sys.argv[1]).resolve()), Path(sys.argv[2]) / str(size),
-                sys.argv[3], sys.argv[4], size)
+        measure(
+            str(Path(sys.argv[1]).resolve()),
+            Path(sys.argv[2]) / str(size),
+            sys.argv[3],
+            sys.argv[4],
+            size,
+        )

@@ -59,21 +59,37 @@ def load_metadata(triple: str, path: Path | None) -> dict:
         return json.loads(path.read_text())
     # Online: a fresh release runner's cache holds only what the two release
     # builds fetched, and workspace metadata needs every member's graph.
-    command = ["cargo", "metadata", "--locked", "--format-version", "1",
-               "--filter-platform", triple]
-    return json.loads(subprocess.run(command, cwd=ROOT, check=True, text=True,
-                                     stdout=subprocess.PIPE).stdout)
+    command = [
+        "cargo",
+        "metadata",
+        "--locked",
+        "--format-version",
+        "1",
+        "--filter-platform",
+        triple,
+    ]
+    return json.loads(
+        subprocess.run(command, cwd=ROOT, check=True, text=True, stdout=subprocess.PIPE).stdout
+    )
 
 
 def release_tree_command(triple: str, packages: tuple[str, ...]) -> list[str]:
     """`cargo tree` for one release resolution: normal edges, that target, default features."""
     command = [
-        "cargo", "tree", "--locked", "--offline",
-        "-e", "normal",
-        "--target", triple,
-        "--prefix", "none",
-        "--charset", "ascii",
-        "-f", "{p}",
+        "cargo",
+        "tree",
+        "--locked",
+        "--offline",
+        "-e",
+        "normal",
+        "--target",
+        triple,
+        "--prefix",
+        "none",
+        "--charset",
+        "ascii",
+        "-f",
+        "{p}",
     ]
     for package in packages:
         command.extend(["-p", package])
@@ -108,8 +124,14 @@ def release_closure(triple: str) -> set[tuple[str, str]]:
     for packages in RELEASE_RESOLUTIONS:
         command = release_tree_command(triple, packages)
         try:
-            result = subprocess.run(command, cwd=ROOT, check=True, text=True,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
         except subprocess.CalledProcessError as error:
             detail = (error.stderr or "").strip()
             raise ReleaseError(detail or f"cargo tree failed for {', '.join(packages)}") from error
@@ -152,7 +174,9 @@ def third_party(metadata: dict, linked: set[tuple[str, str]] | None = None) -> l
                 # `kind` null is a normal edge. Build and dev edges are not linked.
                 if any(kind["kind"] is None for kind in dep["dep_kinds"]):
                     pending.append(dep["pkg"])
-        found = [packages[id_] for id_ in seen if _outside_repository(packages[id_], members, vendor)]
+        found = [
+            packages[id_] for id_ in seen if _outside_repository(packages[id_], members, vendor)
+        ]
     else:
         chosen: dict[tuple[str, str], dict] = {}
         for package in metadata["packages"]:
@@ -166,15 +190,17 @@ def third_party(metadata: dict, linked: set[tuple[str, str]] | None = None) -> l
         if missing:
             sample = ", ".join(f"{name} {version}" for name, version in missing[:5])
             raise ReleaseError(f"cargo tree package not in metadata: {sample}")
-        found = [package for package in chosen.values()
-                 if _outside_repository(package, members, vendor)]
+        found = [
+            package for package in chosen.values() if _outside_repository(package, members, vendor)
+        ]
     return sorted(found, key=lambda package: (package["name"], package["version"]))
 
 
 def license_files(package: dict) -> list[Path]:
     directory = Path(package["manifest_path"]).parent
-    return sorted(path for path in directory.iterdir()
-                  if path.is_file() and LICENSE_FILE.search(path.name))
+    return sorted(
+        path for path in directory.iterdir() if path.is_file() and LICENSE_FILE.search(path.name)
+    )
 
 
 def third_party_text(triple: str, packages: list[dict]) -> str:
@@ -196,10 +222,10 @@ def require_static(path: Path) -> None:
         return
     if data[4] != 2 or data[5] != 1:
         raise ReleaseError(f"{path.name}: expected a 64-bit little-endian ELF")
-    phoff, = struct.unpack_from("<Q", data, 0x20)
+    (phoff,) = struct.unpack_from("<Q", data, 0x20)
     phentsize, phnum = struct.unpack_from("<HH", data, 0x36)
     for index in range(phnum):
-        kind, = struct.unpack_from("<I", data, phoff + index * phentsize)
+        (kind,) = struct.unpack_from("<I", data, phoff + index * phentsize)
         if kind == 3:  # PT_INTERP
             raise ReleaseError(f"{path.name}: dynamically linked (has a program interpreter)")
 
@@ -208,8 +234,16 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def pack(version: str, triple: str, artifacts: Path, out: Path, mtime: int,
-         metadata: dict, static: bool, linked: set[tuple[str, str]] | None = None) -> Path:
+def pack(
+    version: str,
+    triple: str,
+    artifacts: Path,
+    out: Path,
+    mtime: int,
+    metadata: dict,
+    static: bool,
+    linked: set[tuple[str, str]] | None = None,
+) -> Path:
     for name in EXECUTABLES:
         path = artifacts / name
         if not path.is_file():
@@ -226,9 +260,15 @@ def pack(version: str, triple: str, artifacts: Path, out: Path, mtime: int,
     for package in packages:
         for path in license_files(package):
             files[f"licenses/{package['name']}-{package['version']}/{path.name}"] = (
-                path.read_bytes(), 0o644)
-    directories = {stem} | {f"{stem}/{parent}" for name in files
-                            for parent in map(str, Path(name).parents) if parent != "."}
+                path.read_bytes(),
+                0o644,
+            )
+    directories = {stem} | {
+        f"{stem}/{parent}"
+        for name in files
+        for parent in map(str, Path(name).parents)
+        if parent != "."
+    }
 
     def info(name: str, kind: bytes, mode: int, size: int = 0) -> tarfile.TarInfo:
         entry = tarfile.TarInfo(name)
@@ -244,8 +284,9 @@ def pack(version: str, triple: str, artifacts: Path, out: Path, mtime: int,
                 archive.addfile(info(directory, tarfile.DIRTYPE, 0o755))
             for name in sorted(files):
                 data, mode = files[name]
-                archive.addfile(info(f"{stem}/{name}", tarfile.REGTYPE, mode, len(data)),
-                                io.BytesIO(data))
+                archive.addfile(
+                    info(f"{stem}/{name}", tarfile.REGTYPE, mode, len(data)), io.BytesIO(data)
+                )
     out.mkdir(parents=True, exist_ok=True)
     tarball = out / f"{stem}.tar.gz"
     tarball.write_bytes(buffer.getvalue())
@@ -265,9 +306,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--artifacts", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--mtime", type=int, required=True)
-    parser.add_argument("--metadata", type=Path,
-                        help="cargo metadata JSON; its normal edges are the closure "
-                             "(default: metadata for licenses, cargo tree for the release closure)")
+    parser.add_argument(
+        "--metadata",
+        type=Path,
+        help="cargo metadata JSON; its normal edges are the closure "
+        "(default: metadata for licenses, cargo tree for the release closure)",
+    )
     parser.add_argument("--require-static", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -275,8 +319,16 @@ def main(argv: list[str]) -> int:
         # A supplied graph is trusted (fixtures). The release build's closure is
         # cargo tree, so workspace-unified metadata cannot widen THIRD-PARTY.
         linked = None if args.metadata is not None else release_closure(args.triple)
-        tarball = pack(args.version, args.triple, args.artifacts, args.out, args.mtime,
-                       metadata, args.require_static, linked)
+        tarball = pack(
+            args.version,
+            args.triple,
+            args.artifacts,
+            args.out,
+            args.mtime,
+            metadata,
+            args.require_static,
+            linked,
+        )
     except (ReleaseError, OSError, subprocess.CalledProcessError) as error:
         print(f"release-tarball: {error}", file=sys.stderr)
         return 1

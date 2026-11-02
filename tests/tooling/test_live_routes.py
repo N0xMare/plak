@@ -23,10 +23,18 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(route.host and route.path.startswith("/"), route.name)
 
     def test_only_the_deepseek_long_sessions_are_informational_lanes(self):
-        lanes = {name: route.informational_lanes for name, route in live.ROUTES.items()
-                 if route.informational_lanes}
-        self.assertEqual(lanes, {"deepseek": frozenset({"long-session"}),
-                                 "deepseek-messages": frozenset({"long-session"})})
+        lanes = {
+            name: route.informational_lanes
+            for name, route in live.ROUTES.items()
+            if route.informational_lanes
+        }
+        self.assertEqual(
+            lanes,
+            {
+                "deepseek": frozenset({"long-session"}),
+                "deepseek-messages": frozenset({"long-session"}),
+            },
+        )
         for name in ("deepseek", "deepseek-messages"):
             route = live.ROUTES[name]
             self.assertEqual(route.route_class, live.FULL)
@@ -40,63 +48,117 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(live.ROUTES["grok"].lane_class("long-session"), live.FULL)
 
     def test_routes_are_the_owner_catalog(self):
-        tuples = {name: (route.account, route.model, route.effort, route.protocol)
-                  for name, route in live.ROUTES.items()}
-        self.assertEqual(tuples, {
-            "codex": ("codex", "gpt-6-luna", "low", None),
-            "codex-luna-medium": ("codex", "gpt-6-luna", "medium", None),
-            "codex-sol": ("codex", "gpt-6.1-sol", "low", None),
-            "codex-astra": ("codex", "gpt-6-astra", "low", None),
-            "grok-46": ("grok", "grok-4.6", "low", None),
-            "grok": ("grok", "grok-4.7", "low", None),
-            "claude-haiku55-low": ("claude", "claude-haiku-5-5", "low", None),
-            "claude-haiku55-medium": ("claude", "claude-haiku-5-5", "medium", None),
-            "claude-sonnet55-low": ("claude", "claude-sonnet-5-5", "low", None),
-            "claude-sonnet55-medium": ("claude", "claude-sonnet-5-5", "medium", None),
-            "claude-opus-low": ("claude", "claude-opus-5-5", "low", None),
-            "claude-opus-medium": ("claude", "claude-opus-5-5", "medium", None),
-            "claude-fable": ("claude", "claude-fable-5-1", "low", None),
-            "or-nemotron-free": ("openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free", None, None),
-            "or-nemotron-vl-free": ("openrouter", "nvidia/nemotron-3.5-super-vl:free", None, None),
-            "or-inkling-free": ("openrouter", "thinkingmachines/inkling:free", None, None),
-            "or-flint-free": ("openrouter", "recursive/flint-v1.0:free", None, None),
-            "or-lfm-free": ("openrouter", "liquid/lfm-2.5-2.6b:free", None, None),
-            "deepseek": ("openrouter", "deepseek/deepseek-v4-flash-0731", None, None),
-            "deepseek-messages": ("openrouter", "deepseek/deepseek-v4-flash-0731", None,
-                                  "messages"),
-            "or-glm": ("openrouter", "z-ai/glm-5.3-flash", None, None),
-            "api-openai": ("openai", "gpt-6-luna", "low", None),
-            "api-anthropic": ("anthropic", "claude-haiku-5-5", "low", None),
-            "api-xai": ("xai-api", "grok-4.6", "low", None),
-        })
+        tuples = {
+            name: (route.account, route.model, route.effort, route.protocol)
+            for name, route in live.ROUTES.items()
+        }
+        self.assertEqual(
+            tuples,
+            {
+                "codex": ("codex", "gpt-6-luna", "low", None),
+                "codex-luna-medium": ("codex", "gpt-6-luna", "medium", None),
+                "codex-sol": ("codex", "gpt-6.1-sol", "low", None),
+                "codex-astra": ("codex", "gpt-6-astra", "low", None),
+                "grok-46": ("grok", "grok-4.6", "low", None),
+                "grok": ("grok", "grok-4.7", "low", None),
+                "claude-haiku55-low": ("claude", "claude-haiku-5-5", "low", None),
+                "claude-haiku55-medium": ("claude", "claude-haiku-5-5", "medium", None),
+                "claude-sonnet55-low": ("claude", "claude-sonnet-5-5", "low", None),
+                "claude-sonnet55-medium": ("claude", "claude-sonnet-5-5", "medium", None),
+                "claude-opus-low": ("claude", "claude-opus-5-5", "low", None),
+                "claude-opus-medium": ("claude", "claude-opus-5-5", "medium", None),
+                "claude-fable": ("claude", "claude-fable-5-1", "low", None),
+                "or-nemotron-free": (
+                    "openrouter",
+                    "nvidia/nemotron-3-ultra-550b-a55b:free",
+                    None,
+                    None,
+                ),
+                "or-nemotron-vl-free": (
+                    "openrouter",
+                    "nvidia/nemotron-3.5-super-vl:free",
+                    None,
+                    None,
+                ),
+                "or-inkling-free": ("openrouter", "thinkingmachines/inkling:free", None, None),
+                "or-flint-free": ("openrouter", "recursive/flint-v1.0:free", None, None),
+                "or-lfm-free": ("openrouter", "liquid/lfm-2.5-2.6b:free", None, None),
+                "deepseek": ("openrouter", "deepseek/deepseek-v4-flash-0731", None, None),
+                "deepseek-messages": (
+                    "openrouter",
+                    "deepseek/deepseek-v4-flash-0731",
+                    None,
+                    "messages",
+                ),
+                "or-glm": ("openrouter", "z-ai/glm-5.3-flash", None, None),
+                "api-openai": ("openai", "gpt-6-luna", "low", None),
+                "api-anthropic": ("anthropic", "claude-haiku-5-5", "low", None),
+                "api-xai": ("xai-api", "grok-4.6", "low", None),
+            },
+        )
         for name, route in live.ROUTES.items():
             self.assertEqual(route.name, name)
-            self.assertEqual(route.account == "openrouter" and route.model.endswith(":free"),
-                             route.route_class == live.INFORMATIONAL, name)
+            self.assertEqual(
+                route.account == "openrouter" and route.model.endswith(":free"),
+                route.route_class == live.INFORMATIONAL,
+                name,
+            )
 
     def test_the_ladder_puts_cheap_rows_first_and_spares_the_expensive_ones(self):
-        rungs = {rung: sorted(name for name, route in live.ROUTES.items() if route.rung == rung)
-                 for rung in live.RUNGS}
-        self.assertEqual(rungs[live.FIRST], [
-            "api-anthropic", "api-openai", "api-xai", "claude-haiku55-low", "codex", "grok-46",
-            "or-flint-free", "or-inkling-free", "or-lfm-free", "or-nemotron-free",
-            "or-nemotron-vl-free"])
-        self.assertEqual(rungs[live.THEN], [
-            "claude-haiku55-medium", "claude-sonnet55-low", "claude-sonnet55-medium",
-            "codex-luna-medium", "codex-sol", "deepseek", "deepseek-messages", "grok", "or-glm"])
-        self.assertEqual(rungs[live.CONFIRM], [
-            "claude-fable", "claude-opus-low", "claude-opus-medium", "codex-astra"])
-        self.assertEqual(sorted(name for name, route in live.ROUTES.items() if route.sparing),
-                         rungs[live.CONFIRM])
-        self.assertTrue(all(route.route_class != live.FULL for route in live.ROUTES.values()
-                            if route.sparing))
+        rungs = {
+            rung: sorted(name for name, route in live.ROUTES.items() if route.rung == rung)
+            for rung in live.RUNGS
+        }
+        self.assertEqual(
+            rungs[live.FIRST],
+            [
+                "api-anthropic",
+                "api-openai",
+                "api-xai",
+                "claude-haiku55-low",
+                "codex",
+                "grok-46",
+                "or-flint-free",
+                "or-inkling-free",
+                "or-lfm-free",
+                "or-nemotron-free",
+                "or-nemotron-vl-free",
+            ],
+        )
+        self.assertEqual(
+            rungs[live.THEN],
+            [
+                "claude-haiku55-medium",
+                "claude-sonnet55-low",
+                "claude-sonnet55-medium",
+                "codex-luna-medium",
+                "codex-sol",
+                "deepseek",
+                "deepseek-messages",
+                "grok",
+                "or-glm",
+            ],
+        )
+        self.assertEqual(
+            rungs[live.CONFIRM],
+            ["claude-fable", "claude-opus-low", "claude-opus-medium", "codex-astra"],
+        )
+        self.assertEqual(
+            sorted(name for name, route in live.ROUTES.items() if route.sparing),
+            rungs[live.CONFIRM],
+        )
+        self.assertTrue(
+            all(route.route_class != live.FULL for route in live.ROUTES.values() if route.sparing)
+        )
 
     def test_depth_follows_the_account(self):
         accounts = {route.account for route in live.ROUTES.values()}
         self.assertEqual(accounts, live.DEEP_ACCOUNTS | live.VERY_LIGHT_ACCOUNTS)
         self.assertFalse(live.DEEP_ACCOUNTS & live.VERY_LIGHT_ACCOUNTS)
-        self.assertEqual({route.account for route in live.ROUTES.values()
-                          if route.route_class == live.FULL}, live.DEEP_ACCOUNTS)
+        self.assertEqual(
+            {route.account for route in live.ROUTES.values() if route.route_class == live.FULL},
+            live.DEEP_ACCOUNTS,
+        )
         for account in live.VERY_LIGHT_ACCOUNTS:
             rows = [route for route in live.ROUTES.values() if route.account == account]
             self.assertEqual(len(rows), 1, account)
@@ -121,28 +183,52 @@ class CatalogTests(unittest.TestCase):
             self.assertIn('model = "grok-4.6"', agent)
             self.assertIn('effort = "low"', agent)
 
+
 class TelemetryTests(unittest.TestCase):
     def test_session_usage_sums_turn_usage_only(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             log = home / "state" / "r1" / "sessions" / "abc.events.jsonl"
             log.parent.mkdir(parents=True)
-            log.write_text("\n".join(json.dumps(record) for record in (
-                {"kind": "turn.lifecycle", "phase": "completed",
-                 "input_tokens": 9, "output_tokens": 9},
-                {"kind": "turn.usage", "input_tokens": 100, "output_tokens": 7,
-                 "reasoning_tokens": 3, "cached_input_tokens": 40},
-                {"kind": "turn.usage", "input_tokens": 5, "output_tokens": "nope"},
-            )) + "\nnot json\n\"just a string\"\n")
+            log.write_text(
+                "\n".join(
+                    json.dumps(record)
+                    for record in (
+                        {
+                            "kind": "turn.lifecycle",
+                            "phase": "completed",
+                            "input_tokens": 9,
+                            "output_tokens": 9,
+                        },
+                        {
+                            "kind": "turn.usage",
+                            "input_tokens": 100,
+                            "output_tokens": 7,
+                            "reasoning_tokens": 3,
+                            "cached_input_tokens": 40,
+                        },
+                        {"kind": "turn.usage", "input_tokens": 5, "output_tokens": "nope"},
+                    )
+                )
+                + "\nnot json\n\"just a string\"\n"
+            )
             usage = live.session_usage(home)
             self.assertEqual(usage, live.TokenUsage(105, 7, 40, 3))
             self.assertEqual(live.session_usage(home / "missing"), live.TokenUsage())
 
     def test_jsonl_turn_event_keeps_cached_and_reasoning(self):
         turn = live.Turn()
-        live.apply_usage_event(turn, {"kind": "turn", "input_tokens": 10, "output_tokens": 4,
-                                      "cached_input_tokens": 6, "reasoning_tokens": 2,
-                                      "cache_write_tokens": 99})
+        live.apply_usage_event(
+            turn,
+            {
+                "kind": "turn",
+                "input_tokens": 10,
+                "output_tokens": 4,
+                "cached_input_tokens": 6,
+                "reasoning_tokens": 2,
+                "cache_write_tokens": 99,
+            },
+        )
         live.apply_usage_event(turn, {"kind": "assistant", "input_tokens": 100})
         live.apply_usage_event(turn, {"kind": "turn", "input_tokens": True, "output_tokens": -1})
         self.assertEqual(turn.usage(), live.TokenUsage(10, 4, 6, 2))
@@ -150,10 +236,15 @@ class TelemetryTests(unittest.TestCase):
     def test_usage_delta_is_what_one_scenario_added(self):
         before = live.TokenUsage(10, 1, 4, 0)
         after = live.TokenUsage(25, 3, 4, 2)
-        self.assertEqual(live.usage_delta(after, before).as_dict(), {
-            "input_tokens": 15, "output_tokens": 2,
-            "cached_input_tokens": 0, "reasoning_tokens": 2,
-        })
+        self.assertEqual(
+            live.usage_delta(after, before).as_dict(),
+            {
+                "input_tokens": 15,
+                "output_tokens": 2,
+                "cached_input_tokens": 0,
+                "reasoning_tokens": 2,
+            },
+        )
 
 
 class EstimateTests(unittest.TestCase):
@@ -166,15 +257,21 @@ class EstimateTests(unittest.TestCase):
             contingency=Decimal("0.25"),
         )
 
-    def cell(self, name: str, model: str, route_class: str = live.LIGHT,
-             account: str = "openrouter", lane: str = "smoke") -> estimate.Cell:
+    def cell(
+        self,
+        name: str,
+        model: str,
+        route_class: str = live.LIGHT,
+        account: str = "openrouter",
+        lane: str = "smoke",
+    ) -> estimate.Cell:
         return estimate.Cell("mac", lane, name, route_class, model, account, live.FIRST)
 
     def test_price_splits_cached_input_and_applies_contingency_once(self):
         rates = {"priced": estimate.Rate(Decimal(2), Decimal(4), Decimal("0.5"), Decimal(1))}
         report = estimate.estimate_matrix(
-            [self.cell("a", "priced"), self.cell("b", "missing")],
-            rates, self.assumptions())
+            [self.cell("a", "priced"), self.cell("b", "missing")], rates, self.assumptions()
+        )
         self.assertEqual(report.subtotal, Decimal("3.725"))
         self.assertEqual(report.rerun_reserve, Decimal("3.725"))
         self.assertEqual(report.contingency_usd, Decimal("1.86250"))
@@ -196,35 +293,51 @@ class EstimateTests(unittest.TestCase):
             estimate.estimate_matrix(
                 [self.cell("a", "priced")],
                 {"priced": estimate.Rate(Decimal(1), Decimal(1), Decimal(1), Decimal(0))},
-                assumptions)
+                assumptions,
+            )
 
     def test_subscription_stays_quota_when_the_card_names_the_model(self):
         rate = estimate.Rate(Decimal(1), Decimal(2), Decimal(0), Decimal(0))
         rates = {"grok-4.7": rate, "gpt-6-luna": rate, "claude-haiku-5-5": rate}
-        assumptions = estimate.Assumptions(smoke_input_tokens=1_000_000, smoke_output_tokens=0,
-                                          smoke_cache_share=Decimal(0), contingency=Decimal(0))
-        report = estimate.estimate_matrix([
-            self.cell("grok", "grok-4.7", account="grok"),
-            self.cell("api-xai", "grok-4.7", account="xai-api"),
-            self.cell("api-openai", "gpt-6-luna", account="openai"),
-            self.cell("api-anthropic", "claude-haiku-5-5", account="anthropic"),
-        ], rates, assumptions)
+        assumptions = estimate.Assumptions(
+            smoke_input_tokens=1_000_000,
+            smoke_output_tokens=0,
+            smoke_cache_share=Decimal(0),
+            contingency=Decimal(0),
+        )
+        report = estimate.estimate_matrix(
+            [
+                self.cell("grok", "grok-4.7", account="grok"),
+                self.cell("api-xai", "grok-4.7", account="xai-api"),
+                self.cell("api-openai", "gpt-6-luna", account="openai"),
+                self.cell("api-anthropic", "claude-haiku-5-5", account="anthropic"),
+            ],
+            rates,
+            assumptions,
+        )
         self.assertEqual(report.cells[0].billing, "quota")
         self.assertIsNone(report.cells[0].usd)
-        self.assertEqual([item.usd for item in report.cells[1:]],
-                         [Decimal(1), Decimal(1), Decimal(1)])
+        self.assertEqual(
+            [item.usd for item in report.cells[1:]], [Decimal(1), Decimal(1), Decimal(1)]
+        )
         self.assertEqual(report.subtotal, Decimal(3))
         self.assertEqual(report.openrouter_subtotal, Decimal(0))
         self.assertIn("grok-4.7", report.subscription_models)
         self.assertNotIn("grok-4.7", report.unpriced_models)
 
     def test_openrouter_ceiling_warns_without_dropping_cells(self):
-        rates = {"deepseek/deepseek-v4-flash-0731": estimate.Rate(
-            Decimal(1), Decimal(0), Decimal(0), Decimal(0))}
+        rates = {
+            "deepseek/deepseek-v4-flash-0731": estimate.Rate(
+                Decimal(1), Decimal(0), Decimal(0), Decimal(0)
+            )
+        }
         assumptions = estimate.Assumptions(
-            smoke_input_tokens=1_000_000, smoke_output_tokens=0,
-            smoke_cache_share=Decimal(0), contingency=Decimal(0),
-            openrouter_ceiling=Decimal("0.5"))
+            smoke_input_tokens=1_000_000,
+            smoke_output_tokens=0,
+            smoke_cache_share=Decimal(0),
+            contingency=Decimal(0),
+            openrouter_ceiling=Decimal("0.5"),
+        )
         cells = [
             self.cell("deepseek", "deepseek/deepseek-v4-flash-0731"),
             self.cell("codex", "gpt-6-luna", account="codex"),
@@ -242,19 +355,24 @@ class EstimateTests(unittest.TestCase):
             with self.assertRaises(estimate.EstimateError):
                 estimate.planned_cells(soak_row=invalid)
         cells = estimate.planned_cells(soak_row="grok")
-        self.assertEqual([(c.platform, c.route_name) for c in cells if c.lane == "soak"],
-                         [("mac", "grok")])
+        self.assertEqual(
+            [(c.platform, c.route_name) for c in cells if c.lane == "soak"], [("mac", "grok")]
+        )
         self.assertFalse(any(c.lane == "tui-soak" for c in cells))
         crashes = [c for c in cells if c.lane == "crash-jobs"]
         self.assertEqual(len(crashes), 5)
         for c in crashes:
-            self.assertEqual(estimate.lane_charge(c).input_tokens,
-                             (estimate.JOBS_INPUT * 2 + 5) // 11)
+            self.assertEqual(
+                estimate.lane_charge(c).input_tokens, (estimate.JOBS_INPUT * 2 + 5) // 11
+            )
         optional = estimate.planned_cells(soak_row="grok", tui_rows=("codex-sol", "deepseek"))
-        self.assertEqual([c.route_name for c in optional if c.lane == "tui-soak"],
-                         ["codex-sol", "deepseek"])
-        self.assertEqual(estimate.lane_charge(next(c for c in optional if c.lane == "tui-soak")).input_tokens,
-                         estimate.TUI_INPUT // 4)
+        self.assertEqual(
+            [c.route_name for c in optional if c.lane == "tui-soak"], ["codex-sol", "deepseek"]
+        )
+        self.assertEqual(
+            estimate.lane_charge(next(c for c in optional if c.lane == "tui-soak")).input_tokens,
+            estimate.TUI_INPUT // 4,
+        )
         for rows in (("nope",), ("grok", "grok"), ("api-openai",), ("codex",)):
             with self.assertRaises(estimate.EstimateError):
                 estimate.planned_cells(soak_row="grok", tui_rows=rows)
@@ -266,16 +384,36 @@ class EstimateTests(unittest.TestCase):
         mac = [c for c in cells if c.platform == "mac"]
         self.assertEqual([c.rung for c in mac], sorted(c.rung for c in mac))
         self.assertEqual(mac[0].rung, live.FIRST)
-        self.assertEqual({c.route_name for c in cells if c.platform == "linux"},
-                         {"api-openai", "api-anthropic", "api-xai", "claude-sonnet55-low",
-                          "codex-sol", "deepseek", "deepseek-messages", "grok"})
+        self.assertEqual(
+            {c.route_name for c in cells if c.platform == "linux"},
+            {
+                "api-openai",
+                "api-anthropic",
+                "api-xai",
+                "claude-sonnet55-low",
+                "codex-sol",
+                "deepseek",
+                "deepseek-messages",
+                "grok",
+            },
+        )
         confirmed = estimate.planned_cells(soak_row="grok", confirm=("claude-fable", "codex-astra"))
-        extra = [(c.platform, c.lane, c.route_name, c.rung)
-                 for c in confirmed if c.route_name not in names]
-        self.assertEqual(extra, [("mac", "smoke", "claude-fable", live.CONFIRM),
-                                 ("mac", "smoke", "codex-astra", live.CONFIRM)])
-        self.assertEqual([c.route_name for c in confirmed if c.platform == "mac"][-2:],
-                         ["claude-fable", "codex-astra"])
+        extra = [
+            (c.platform, c.lane, c.route_name, c.rung)
+            for c in confirmed
+            if c.route_name not in names
+        ]
+        self.assertEqual(
+            extra,
+            [
+                ("mac", "smoke", "claude-fable", live.CONFIRM),
+                ("mac", "smoke", "codex-astra", live.CONFIRM),
+            ],
+        )
+        self.assertEqual(
+            [c.route_name for c in confirmed if c.platform == "mac"][-2:],
+            ["claude-fable", "codex-astra"],
+        )
         for rows in (("codex",), ("nope",), ("codex-astra", "codex-astra")):
             with self.assertRaisesRegex(estimate.EstimateError, "--confirm"):
                 estimate.planned_cells(soak_row="grok", confirm=rows)
@@ -283,21 +421,25 @@ class EstimateTests(unittest.TestCase):
         self.assertTrue(header.startswith("platform  rung  lane"), header)
 
     def test_codex_sol_is_the_full_codex_row(self):
-        full = sorted(name for name, route in live.ROUTES.items()
-                      if route.route_class == live.FULL)
-        self.assertEqual(full, ["claude-sonnet55-low", "codex-sol", "deepseek",
-                                "deepseek-messages", "grok"])
+        full = sorted(name for name, route in live.ROUTES.items() if route.route_class == live.FULL)
+        self.assertEqual(
+            full, ["claude-sonnet55-low", "codex-sol", "deepseek", "deepseek-messages", "grok"]
+        )
         for name in ("codex", "codex-luna-medium", "codex-astra"):
             self.assertEqual(live.ROUTES[name].route_class, live.LIGHT, name)
-        cells = {(c.platform, c.lane, c.route_name) for c in estimate.planned_cells(soak_row="grok")}
+        cells = {
+            (c.platform, c.lane, c.route_name) for c in estimate.planned_cells(soak_row="grok")
+        }
         self.assertIn(("linux", "smoke", "codex-sol"), cells)
         self.assertIn(("mac", "long-session", "codex-sol"), cells)
         self.assertNotIn(("linux", "smoke", "codex"), cells)
         self.assertNotIn(("mac", "long-session", "codex"), cells)
 
     def test_deepseek_long_session_cells_are_priced_as_informational(self):
-        cells = {(c.platform, c.lane, c.route_name): c.route_class
-                 for c in estimate.planned_cells(soak_row="grok")}
+        cells = {
+            (c.platform, c.lane, c.route_name): c.route_class
+            for c in estimate.planned_cells(soak_row="grok")
+        }
         for name in ("deepseek", "deepseek-messages"):
             self.assertEqual(cells[("mac", "long-session", name)], live.INFORMATIONAL)
             for lane in ("smoke", "jobs", "crash-jobs"):
@@ -310,34 +452,48 @@ class EstimateTests(unittest.TestCase):
         assumptions = estimate.Assumptions(openrouter_window=1_048_576)
 
         def charge(route: str) -> estimate.Charge:
-            cell = next(item for item in estimate.planned_cells(soak_row="deepseek")
-                        if item.route_name == route and item.lane == "long-session")
+            cell = next(
+                item
+                for item in estimate.planned_cells(soak_row="deepseek")
+                if item.route_name == route and item.lane == "long-session"
+            )
             return estimate.lane_charge(cell, assumptions)
 
         def scaled(total: int, model: str) -> int:
             return estimate.scaled_long_session(
-                total, estimate.input_window(model), assumptions.long_session_measured_window)
+                total, estimate.input_window(model), assumptions.long_session_measured_window
+            )
 
         self.assertEqual(charge("deepseek").input_tokens, 750_415)
         self.assertEqual(charge("deepseek").output_tokens, 4_673)
-        self.assertEqual(charge("deepseek").cached_input_tokens,
-                         int((Decimal(750_415) * Decimal("0.22")).to_integral_value()))
+        self.assertEqual(
+            charge("deepseek").cached_input_tokens,
+            int((Decimal(750_415) * Decimal("0.22")).to_integral_value()),
+        )
         self.assertEqual(charge("deepseek-messages").input_tokens, charge("deepseek").input_tokens)
         self.assertEqual(charge("grok").input_tokens, scaled(750_415, "grok-4.7"))
         self.assertEqual(charge("codex-sol").input_tokens, scaled(750_415, "gpt-6.1-sol"))
         self.assertEqual(estimate.input_window("gpt-6.1-sol"), 500_000)
         self.assertEqual(estimate.input_window("gpt-6-luna"), 272_000)
-        self.assertEqual(charge("claude-sonnet55-low").input_tokens,
-                         scaled(750_415, "claude-sonnet-5-5"))
+        self.assertEqual(
+            charge("claude-sonnet55-low").input_tokens, scaled(750_415, "claude-sonnet-5-5")
+        )
         self.assertLess(charge("grok").input_tokens, charge("deepseek").input_tokens)
         # The tree pins no OpenRouter window: the operator supplies it.
-        cell = next(item for item in estimate.planned_cells(soak_row="deepseek")
-                    if item.route_name == "deepseek" and item.lane == "long-session")
+        cell = next(
+            item
+            for item in estimate.planned_cells(soak_row="deepseek")
+            if item.route_name == "deepseek" and item.lane == "long-session"
+        )
         for window in (None, 0):
             with self.assertRaisesRegex(estimate.EstimateError, "openrouter-window"):
                 estimate.lane_charge(cell, estimate.Assumptions(openrouter_window=window))
-        self.assertEqual(estimate.lane_charge(cell, estimate.Assumptions(openrouter_window=524_288))
-                         .input_tokens, 375_208)
+        self.assertEqual(
+            estimate.lane_charge(
+                cell, estimate.Assumptions(openrouter_window=524_288)
+            ).input_tokens,
+            375_208,
+        )
         jobs = estimate.lane_charge(self.cell("codex", "gpt-6-luna", account="codex", lane="jobs"))
         self.assertEqual(jobs.input_tokens, estimate.JOBS_INPUT)
         self.assertEqual(jobs.output_tokens, estimate.JOBS_OUTPUT)
@@ -346,14 +502,23 @@ class EstimateTests(unittest.TestCase):
     def test_rate_card_is_read_from_a_local_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rates.json"
-            path.write_text(json.dumps({
-                "source": "https://openrouter.ai/api/v1/models",
-                "unit": "USD per million tokens",
-                "models": {"not-a-route": {
-                    "input": 1, "output": 2, "cache_read": 0, "cache_write": 0,
-                    "context_length": 99,
-                }},
-            }))
+            path.write_text(
+                json.dumps(
+                    {
+                        "source": "https://openrouter.ai/api/v1/models",
+                        "unit": "USD per million tokens",
+                        "models": {
+                            "not-a-route": {
+                                "input": 1,
+                                "output": 2,
+                                "cache_read": 0,
+                                "cache_write": 0,
+                                "context_length": 99,
+                            }
+                        },
+                    }
+                )
+            )
             rates = estimate.load_rate_card(path)
             self.assertEqual(rates["not-a-route"].input, Decimal(1))
             path.write_text(json.dumps({"unit": "USD", "models": {}}))
@@ -361,20 +526,43 @@ class EstimateTests(unittest.TestCase):
                 estimate.load_rate_card(path)
             buffer = StringIO()
             with redirect_stdout(buffer), redirect_stderr(StringIO()):
-                code = estimate.main(["--rate-card", str(path.parent / "missing.json"), "--soak-row", "deepseek"])
+                code = estimate.main(
+                    ["--rate-card", str(path.parent / "missing.json"), "--soak-row", "deepseek"]
+                )
             self.assertEqual(code, 2)
-            path.write_text(json.dumps({
-                "unit": "USD per million tokens",
-                "models": {"not-a-route": {
-                    "input": 1, "output": 1, "cache_read": 0, "cache_write": 0,
-                }},
-            }))
+            path.write_text(
+                json.dumps(
+                    {
+                        "unit": "USD per million tokens",
+                        "models": {
+                            "not-a-route": {
+                                "input": 1,
+                                "output": 1,
+                                "cache_read": 0,
+                                "cache_write": 0,
+                            }
+                        },
+                    }
+                )
+            )
             buffer = StringIO()
             with redirect_stdout(buffer):
-                code = estimate.main([
-                    "--rate-card", str(path), "--soak-row", "deepseek", "--contingency", "0",
-                    "--smoke-input", "0", "--smoke-output", "0", "--openrouter-window", "1048576",
-                ])
+                code = estimate.main(
+                    [
+                        "--rate-card",
+                        str(path),
+                        "--soak-row",
+                        "deepseek",
+                        "--contingency",
+                        "0",
+                        "--smoke-input",
+                        "0",
+                        "--smoke-output",
+                        "0",
+                        "--openrouter-window",
+                        "1048576",
+                    ]
+                )
             self.assertEqual(code, 0)
             text = buffer.getvalue()
             self.assertIn("total 0.000000", text)

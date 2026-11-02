@@ -89,9 +89,7 @@ def _force_pin(cli: str, kwargs: dict[str, Any]) -> None:
         kwargs["version"] = pinned
         return
     if str(incoming) != pinned:
-        raise VendorArtifactError(
-            f"{cli} version {incoming!r} is not the bakeoff pin {pinned}"
-        )
+        raise VendorArtifactError(f"{cli} version {incoming!r} is not the bakeoff pin {pinned}")
 
 
 def _reject_host_overlays(cli: str, kwargs: dict[str, Any]) -> None:
@@ -110,19 +108,21 @@ async def _install_node_cli(
     artifacts: FrozenArtifacts,
 ) -> None:
     cli = artifacts.cli
-    await agent.exec_as_root(
-        environment, command=f"mkdir -p {shlex.quote(REMOTE_VENDOR)}"
-    )
+    await agent.exec_as_root(environment, command=f"mkdir -p {shlex.quote(REMOTE_VENDOR)}")
     await environment.upload_file(
         str(artifacts.node_tarball.resolve()), f"{REMOTE_VENDOR}/node.tar.gz"
     )
     await environment.upload_file(
         str(artifacts.cli_archive.resolve()), f"{REMOTE_VENDOR}/{cli}.tar.gz"
     )
-    for path, remote in ((artifacts.node_tarball, f"{REMOTE_VENDOR}/node.tar.gz"),
-                         (artifacts.cli_archive, f"{REMOTE_VENDOR}/{cli}.tar.gz")):
+    for path, remote in (
+        (artifacts.node_tarball, f"{REMOTE_VENDOR}/node.tar.gz"),
+        (artifacts.cli_archive, f"{REMOTE_VENDOR}/{cli}.tar.gz"),
+    ):
         line = shlex.quote(sha256(path) + "  " + remote)
-        await agent.exec_as_root(environment, command=f"printf '%s\\n' {line} | sha256sum -c - >/dev/null")
+        await agent.exec_as_root(
+            environment, command=f"printf '%s\\n' {line} | sha256sum -c - >/dev/null"
+        )
     await agent.exec_as_root(environment, command=node_cli_install_command(cli))
 
 
@@ -138,9 +138,7 @@ async def _assert_version(
     # matching manifest cannot establish loader/libc compatibility there.
     try:
         result = await asyncio.wait_for(
-            environment.exec(
-                command=f"timeout -k 2s 15s sh -c {shlex.quote(command)}"
-            ),
+            environment.exec(command=f"timeout -k 2s 15s sh -c {shlex.quote(command)}"),
             20,
         )
     except Exception:
@@ -151,18 +149,23 @@ async def _assert_version(
         )
     installed = agent.parse_version(result.stdout or "")
     if installed != pinned and pinned not in installed:
-        raise VendorArtifactError(
-            f"frozen CLI reported {installed!r}, pin is {pinned}"
-        )
+        raise VendorArtifactError(f"frozen CLI reported {installed!r}, pin is {pinned}")
 
 
 async def _record_executable_identity(
-    agent: BaseInstalledAgent, environment: BaseEnvironment, cli: str, arch: str,
-    *, prerequisites: dict[str, Any] | None = None,
+    agent: BaseInstalledAgent,
+    environment: BaseEnvironment,
+    cli: str,
+    arch: str,
+    *,
+    prerequisites: dict[str, Any] | None = None,
 ) -> None:
     """Record actual in-cell executable bytes after extraction and version probe."""
     names = [cli, f"{cli}-archive"]
-    paths = [f"/usr/local/bin/{cli}", f"{REMOTE_VENDOR}/{cli}" + ("" if cli == "grok" else ".tar.gz")]
+    paths = [
+        f"/usr/local/bin/{cli}",
+        f"{REMOTE_VENDOR}/{cli}" + ("" if cli == "grok" else ".tar.gz"),
+    ]
     if cli != "grok":
         names.extend(("node", "node-archive"))
         paths.extend((f"{REMOTE_VENDOR}/node/bin/node", f"{REMOTE_VENDOR}/node.tar.gz"))
@@ -170,7 +173,9 @@ async def _record_executable_identity(
     for name, path in zip(names, paths, strict=True):
         try:
             result = await asyncio.wait_for(
-                environment.exec(command=f"sha256sum {shlex.quote(path)} && wc -c < {shlex.quote(path)}"),
+                environment.exec(
+                    command=f"sha256sum {shlex.quote(path)} && wc -c < {shlex.quote(path)}"
+                ),
                 10,
             )
             lines = (result.stdout or "").splitlines()
@@ -178,10 +183,17 @@ async def _record_executable_identity(
             size = int(lines[1]) if len(lines) > 1 else 0
         except Exception:
             raise VendorArtifactError(f"frozen {cli} cell identity probe failed") from None
-        if result.return_code != 0 or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha) or size <= 0:
+        if (
+            result.return_code != 0
+            or len(sha) != 64
+            or any(c not in "0123456789abcdef" for c in sha)
+            or size <= 0
+        ):
             raise VendorArtifactError(f"frozen {cli} cell identity probe is incomplete")
         binaries[name] = {"sha256": sha, "bytes": size}
-    record = artifact_record(harness="grok-build" if cli == "grok" else cli, binaries=binaries, arch=arch)
+    record = artifact_record(
+        harness="grok-build" if cli == "grok" else cli, binaries=binaries, arch=arch
+    )
     record["version"] = CLI_PINS[cli]
     if prerequisites:
         record["prerequisites"] = prerequisites
@@ -194,7 +206,8 @@ _CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 
 async def _ensure_codex_ca_bundle(
-    agent: BaseInstalledAgent, environment: BaseEnvironment,
+    agent: BaseInstalledAgent,
+    environment: BaseEnvironment,
 ) -> dict[str, Any]:
     """Ensure and bind the trust store seen by the native Codex process."""
     command = (
@@ -210,8 +223,12 @@ async def _ensure_codex_ca_bundle(
             size = int(lines[1]) if len(lines) > 1 else 0
         except Exception:
             return None
-        if (result.return_code != 0 or len(sha) != 64 or
-                any(c not in "0123456789abcdef" for c in sha) or size <= 0):
+        if (
+            result.return_code != 0
+            or len(sha) != 64
+            or any(c not in "0123456789abcdef" for c in sha)
+            or size <= 0
+        ):
             return None
         return sha, size
 
@@ -235,7 +252,9 @@ class _CanonicalNativeUsage(WireAgent):
             super().populate_context_post_run(context)
         finally:
             observed = archived_config(Path(self.logs_dir), self._native_harness)
-            (Path(self.logs_dir) / "observed-config.json").write_text(json.dumps(observed, indent=2) + "\n")
+            (Path(self.logs_dir) / "observed-config.json").write_text(
+                json.dumps(observed, indent=2) + "\n"
+            )
             usage = extract_agent_usage(Path(self.logs_dir), self._native_harness)
             record = usage.as_dict()
             (Path(self.logs_dir) / "native-usage.json").write_text(
@@ -256,6 +275,7 @@ class _CanonicalNativeUsage(WireAgent):
 
 class FrozenCodex(_CanonicalNativeUsage, Codex):
     _native_harness = "codex"
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._arch, self._vendor_root = _vendor_selection(kwargs)
         _reject_host_overlays("codex", kwargs)
@@ -279,8 +299,13 @@ class FrozenCodex(_CanonicalNativeUsage, Codex):
             if self._codex_writeback_error or self._codex_harvest_error:
                 try:
                     (self.logs_dir / "adapter-validity.json").write_text(
-                        json.dumps({"codex_writeback_failed": self._codex_writeback_error,
-                                    "codex_harvest_failed": self._codex_harvest_error}) + "\n"
+                        json.dumps(
+                            {
+                                "codex_writeback_failed": self._codex_writeback_error,
+                                "codex_harvest_failed": self._codex_harvest_error,
+                            }
+                        )
+                        + "\n"
                     )
                 except OSError:
                     if primary_error is None:
@@ -306,11 +331,12 @@ class FrozenCodex(_CanonicalNativeUsage, Codex):
 
     async def _persist_codex_auth(self, environment):
         from harbor_adapter.credentials import replace_codex_auth
+
         path = self._codex_auth_path
         remote = "/tmp/codex-refresh-candidate.json"
-        await self.exec_as_root(environment, command=(
-            "umask 077; cp -- /tmp/codex-home/auth.json " + remote
-        ))
+        await self.exec_as_root(
+            environment, command=("umask 077; cp -- /tmp/codex-home/auth.json " + remote)
+        )
         with tempfile.TemporaryDirectory(prefix=".codex-cell-", dir=path.parent) as directory:
             candidate = Path(directory) / "auth.json"
             await environment.download_file(remote, str(candidate))
@@ -322,18 +348,20 @@ class FrozenCodex(_CanonicalNativeUsage, Codex):
         artifacts = require_frozen_artifacts("codex", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
         ca_bundle = await _ensure_codex_ca_bundle(self, environment)
-        await self.exec_as_root(
-            environment, command=platform_record_command(self._arch)
-        )
+        await self.exec_as_root(environment, command=platform_record_command(self._arch))
         await _assert_version(self, environment, artifacts.version)
         await _record_executable_identity(
-            self, environment, "codex", self._arch,
+            self,
+            environment,
+            "codex",
+            self._arch,
             prerequisites={"ca_bundle": ca_bundle},
         )
 
 
 class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
     _native_harness = "grok-build"
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._arch, self._vendor_root = _vendor_selection(kwargs)
         _reject_host_overlays("grok", kwargs)
@@ -344,16 +372,10 @@ class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
     async def install(self, environment: BaseEnvironment) -> None:
         await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("grok", self._vendor_root, self._arch)
-        await self.exec_as_root(
-            environment, command=f"mkdir -p {shlex.quote(REMOTE_VENDOR)}"
-        )
-        await environment.upload_file(
-            str(artifacts.cli_archive.resolve()), f"{REMOTE_VENDOR}/grok"
-        )
+        await self.exec_as_root(environment, command=f"mkdir -p {shlex.quote(REMOTE_VENDOR)}")
+        await environment.upload_file(str(artifacts.cli_archive.resolve()), f"{REMOTE_VENDOR}/grok")
         await self.exec_as_root(environment, command=grok_install_command())
-        await self.exec_as_root(
-            environment, command=platform_record_command(self._arch)
-        )
+        await self.exec_as_root(environment, command=platform_record_command(self._arch))
         await _assert_version(self, environment, artifacts.version)
         await _record_executable_identity(self, environment, "grok", self._arch)
 
@@ -369,13 +391,11 @@ class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
     ) -> None:
         if self._get_env("XAI_API_KEY"):
             raise VendorArtifactError(
-                "grok-build native-home must use SuperGrok OAuth auth.json, "
-                "not XAI_API_KEY"
+                "grok-build native-home must use SuperGrok OAuth auth.json, not XAI_API_KEY"
             )
         if self._provider:
             raise VendorArtifactError(
-                "FrozenGrokBuild is SuperGrok OAuth only; non-xAI model routes "
-                "are refused"
+                "FrozenGrokBuild is SuperGrok OAuth only; non-xAI model routes are refused"
             )
 
         auth_json = require_ready_grok_auth()
@@ -398,9 +418,7 @@ class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
             raise CredentialError("Grok OAuth host credential changed during upload")
         await self.exec_as_root(
             environment,
-            command=remote_grok_auth_acl_command(
-                agent_uid, remote_auth
-            ),
+            command=remote_grok_auth_acl_command(agent_uid, remote_auth),
         )
         await self.exec_as_agent(
             environment,
@@ -414,16 +432,12 @@ class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
 
         env = {
             "GROK_DISABLE_AUTOUPDATER": "1",
-            "GROK_LOG_FILE": (
-                EnvironmentPaths.agent_dir / self._CLI_LOG_FILENAME
-            ).as_posix(),
+            "GROK_LOG_FILE": (EnvironmentPaths.agent_dir / self._CLI_LOG_FILENAME).as_posix(),
             # The pinned CLI's WARN refresh diagnostic prints a token prefix.
             "RUST_LOG": "error",
         }
 
-        await self.exec_as_agent(
-            environment, command=self._build_write_config_command()
-        )
+        await self.exec_as_agent(environment, command=self._build_write_config_command())
 
         try:
             await self.exec_as_agent(
@@ -435,9 +449,7 @@ class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
             primary_error = sys.exc_info()[0]
             writeback_error: Exception | None = None
             try:
-                await self._persist_refreshed_auth(
-                    environment, auth_json, auth_snapshot
-                )
+                await self._persist_refreshed_auth(environment, auth_json, auth_snapshot)
             except Exception as exc:
                 if primary_error is None:
                     writeback_error = exc
@@ -501,9 +513,7 @@ class FrozenPi(_CanonicalNativeUsage, Pi):
         await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("pi", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
-        await self.exec_as_root(
-            environment, command=platform_record_command(self._arch)
-        )
+        await self.exec_as_root(environment, command=platform_record_command(self._arch))
         await _assert_version(self, environment, artifacts.version)
         await _record_executable_identity(self, environment, "pi", self._arch)
 
@@ -514,8 +524,10 @@ class FrozenPi(_CanonicalNativeUsage, Pi):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        if self._get_env("OPENAI_API_KEY") or self._get_env("XAI_API_KEY") or self._get_env(
-            "OPENROUTER_API_KEY"
+        if (
+            self._get_env("OPENAI_API_KEY")
+            or self._get_env("XAI_API_KEY")
+            or self._get_env("OPENROUTER_API_KEY")
         ):
             raise VendorArtifactError(
                 "pi native-home must use host auth.json, not provider API keys"
@@ -534,9 +546,7 @@ class FrozenPi(_CanonicalNativeUsage, Pi):
             raise CredentialError("Pi OAuth host credential changed during upload")
         await self.exec_as_root(
             environment,
-            command=remote_uploaded_auth_acl_command(
-                environment.default_user, remote_auth
-            ),
+            command=remote_uploaded_auth_acl_command(environment.default_user, remote_auth),
         )
         await self.exec_as_agent(
             environment,
@@ -556,9 +566,7 @@ class FrozenPi(_CanonicalNativeUsage, Pi):
             if provider == "openai-codex":
                 primary_error = sys.exc_info()[0]
                 try:
-                    await self._persist_refreshed_codex_auth(
-                        environment, auth_json, auth_snapshot
-                    )
+                    await self._persist_refreshed_codex_auth(environment, auth_json, auth_snapshot)
                 except Exception as exc:
                     if primary_error is None:
                         raise
@@ -608,9 +616,7 @@ class FrozenOpenCode(_CanonicalNativeUsage, OpenCode):
         await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("opencode", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
-        await self.exec_as_root(
-            environment, command=platform_record_command(self._arch)
-        )
+        await self.exec_as_root(environment, command=platform_record_command(self._arch))
         await _assert_version(self, environment, artifacts.version)
         await _record_executable_identity(self, environment, "opencode", self._arch)
 
@@ -621,8 +627,10 @@ class FrozenOpenCode(_CanonicalNativeUsage, OpenCode):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        if self._get_env("OPENAI_API_KEY") or self._get_env("XAI_API_KEY") or self._get_env(
-            "OPENROUTER_API_KEY"
+        if (
+            self._get_env("OPENAI_API_KEY")
+            or self._get_env("XAI_API_KEY")
+            or self._get_env("OPENROUTER_API_KEY")
         ):
             raise VendorArtifactError(
                 "opencode native-home must use host auth.json, not provider API keys"
@@ -638,9 +646,7 @@ class FrozenOpenCode(_CanonicalNativeUsage, OpenCode):
         await environment.upload_file(str(auth_json), remote_auth)
         await self.exec_as_root(
             environment,
-            command=remote_uploaded_auth_acl_command(
-                environment.default_user, remote_auth
-            ),
+            command=remote_uploaded_auth_acl_command(environment.default_user, remote_auth),
         )
         await self.exec_as_agent(
             environment,
@@ -671,9 +677,7 @@ class FrozenOpenCode(_CanonicalNativeUsage, OpenCode):
             )
             raise
         else:
-            self._record_attempt(
-                attempt=1, started=started, outcome="ok", error=None
-            )
+            self._record_attempt(attempt=1, started=started, outcome="ok", error=None)
 
     def _record_attempt(
         self,

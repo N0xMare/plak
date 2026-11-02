@@ -85,9 +85,9 @@ def authorize_url(output):
         if value.startswith("http://127.0.0.1:") and "code_challenge=" in value:
             parsed = urllib.parse.urlsplit(value)
             query = urllib.parse.parse_qs(parsed.query)
-            if query.get("response_type") == ["code"] and query.get(
-                "code_challenge_method"
-            ) == ["S256"]:
+            if query.get("response_type") == ["code"] and query.get("code_challenge_method") == [
+                "S256"
+            ]:
                 return value
     return None
 
@@ -99,13 +99,10 @@ def device_prompt(output):
 
 
 def redact(output):
-    output = re.sub(
-        r"\x1b\]52;[^\x07\x1b]*(?:\x07|\x1b\\)", "[clipboard omitted]", output
-    )
+    output = re.sub(r"\x1b\]52;[^\x07\x1b]*(?:\x07|\x1b\\)", "[clipboard omitted]", output)
     output = re.sub(
         r"https?://[^\s<>]+",
-        lambda m: m.group(0).split("?")[0]
-        + ("?[query omitted]" if "?" in m.group(0) else ""),
+        lambda m: m.group(0).split("?")[0] + ("?[query omitted]" if "?" in m.group(0) else ""),
         output,
     )
     output = re.sub(r"(Enter code:\s+)\S+", r"\1[omitted]", output)
@@ -123,9 +120,7 @@ def session_id(output):
 
 
 def refresh_count(events, issuer="strict"):
-    return sum(
-        e.get("as") == issuer and e.get("grant") == "refresh_token" for e in events
-    )
+    return sum(e.get("as") == issuer and e.get("grant") == "refresh_token" for e in events)
 
 
 def require(condition, message):
@@ -195,9 +190,7 @@ class Harness:
                     proc.communicate()
                 raise
             if proc.returncode:
-                raise subprocess.CalledProcessError(
-                    proc.returncode, command, stdout, stderr
-                )
+                raise subprocess.CalledProcessError(proc.returncode, command, stdout, stderr)
             return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
     def start(self):
@@ -254,10 +247,7 @@ class Harness:
         )
         require(
             status == 201,
-            "Keycloak anonymous DCR policy setup failed: "
-            + str(status)
-            + " "
-            + str(policy_result),
+            "Keycloak anonymous DCR policy setup failed: " + str(status) + " " + str(policy_result),
         )
         # Every dynamically registered client is forced to S256 and consent.
         status, policy_result = request(
@@ -274,10 +264,7 @@ class Harness:
         )
         require(
             status == 201,
-            "Keycloak consent policy setup failed: "
-            + str(status)
-            + " "
-            + str(policy_result),
+            "Keycloak consent policy setup failed: " + str(status) + " " + str(policy_result),
         )
 
     def wait_url(self, url):
@@ -315,9 +302,7 @@ class Harness:
         self.workspace = self.root / name / "workspace"
         self.workspace.mkdir()
         self.script = self.root / name / "script.json"
-        self.script.write_text(
-            json.dumps({"version": 1, "steps": [{"output": {"text": "done"}}]})
-        )
+        self.script.write_text(json.dumps({"version": 1, "steps": [{"output": {"text": "done"}}]}))
         (self.home / "agents" / "lead.toml").write_text(
             'account = "codex"\nmodel = "offline-loopback-v1"\neffort = "medium"\ncomposition = "direct"\ntools = ["mcp:srv"]\n'
         )
@@ -406,9 +391,7 @@ class Harness:
                 "browser",
                 "node",
                 "browser.mjs",
-                input=(
-                    json.dumps({"url": url, "paste": paste, "code": code}) + "\n"
-                ).encode(),
+                input=(json.dumps({"url": url, "paste": paste, "code": code}) + "\n").encode(),
                 timeout=90,
             )
         except subprocess.CalledProcessError as error:
@@ -417,7 +400,9 @@ class Harness:
             ) from None
         return json.loads(result.stdout)
 
-    def login(self, remote=False, expect_device=False, scope=None, tamper=False, callback_mode=None):
+    def login(
+        self, remote=False, expect_device=False, scope=None, tamper=False, callback_mode=None
+    ):
         args = [str(self.binary), "mcp", "login", "srv"]
         if remote:
             args.append("--remote")
@@ -467,9 +452,7 @@ class Harness:
                         )
                     browser_result = self.browser(url, paste=remote)
                     callback = browser_result["callback"]
-                    self.output.append(
-                        {"browser_callback": browser_result["safe_callback"]}
-                    )
+                    self.output.append({"browser_callback": browser_result["safe_callback"]})
                     if remote:
                         if tamper:
                             p = urllib.parse.urlsplit(callback)
@@ -484,8 +467,15 @@ class Harness:
                             if callback_mode == "duplicate":
                                 q.append(("state", dict(q)["state"]))
                             else:
-                                q.extend([("session_state", "fixture-extension"), ("extra_extension", "ignored")])
-                            callback = urllib.parse.urlunsplit(p._replace(query=urllib.parse.urlencode(q)))
+                                q.extend(
+                                    [
+                                        ("session_state", "fixture-extension"),
+                                        ("extra_extension", "ignored"),
+                                    ]
+                                )
+                            callback = urllib.parse.urlunsplit(
+                                p._replace(query=urllib.parse.urlencode(q))
+                            )
                             self.output.append({"submitted_callback_keys": [k for k, _ in q]})
                         proc.stdin.write(callback + "\n")
                         proc.stdin.flush()
@@ -500,11 +490,15 @@ class Harness:
                 {"args": args[1:], "exit": proc.returncode, "output": redact(output)}
             )
             if callback_mode:
-                require(any("submitted_callback_keys" in item for item in self.output),
-                        "callback scenario did not submit a browser response")
+                require(
+                    any("submitted_callback_keys" in item for item in self.output),
+                    "callback scenario did not submit a browser response",
+                )
             if callback_mode == "duplicate":
-                require(proc.returncode != 0 and "callback is invalid" in output,
-                        "duplicate state not refused")
+                require(
+                    proc.returncode != 0 and "callback is invalid" in output,
+                    "duplicate state not refused",
+                )
             elif tamper:
                 require(
                     proc.returncode != 0 and "expected authorization server" in output,
@@ -609,34 +603,64 @@ class Harness:
         )
         if name in ("split_origin_token_revocation", "split_origin_device", "unverified_endpoint"):
             self.control(splitEndpoints=True)
-            self.login(remote=name == "split_origin_device", expect_device=name == "split_origin_device")
+            self.login(
+                remote=name == "split_origin_device", expect_device=name == "split_origin_device"
+            )
             self.test()
-            dispatched = [e for e in self.delta() if e.get("event") == "http" and
-                          (e.get("issued") or "/auth/device" in e.get("path", ""))]
-            require(dispatched and all(e.get("destination_port") == 18085 and
-                    e.get("client_secret_matches") for e in dispatched),
-                    "verified split-origin endpoint did not receive client secret")
+            dispatched = [
+                e
+                for e in self.delta()
+                if e.get("event") == "http"
+                and (e.get("issued") or "/auth/device" in e.get("path", ""))
+            ]
+            require(
+                dispatched
+                and all(
+                    e.get("destination_port") == 18085 and e.get("client_secret_matches")
+                    for e in dispatched
+                ),
+                "verified split-origin endpoint did not receive client secret",
+            )
             if name == "unverified_endpoint":
                 self.control(splitEndpoints=False)
                 mark = len(self.events())
                 result = self.command("mcp", "logout", "srv")
                 require(result.returncode != 0, "unverified stored revocation endpoint accepted")
-                require(not any(e.get("revoked") or e.get("client_secret_matches")
-                                for e in self.events()[mark:]),
-                        "secret sent to endpoint no longer in verified metadata")
-                require(self.command("mcp", "logout", "srv", "--local").returncode == 0,
-                        "local logout after refusal failed")
+                require(
+                    not any(
+                        e.get("revoked") or e.get("client_secret_matches")
+                        for e in self.events()[mark:]
+                    ),
+                    "secret sent to endpoint no longer in verified metadata",
+                )
+                require(
+                    self.command("mcp", "logout", "srv", "--local").returncode == 0,
+                    "local logout after refusal failed",
+                )
             else:
-                require(self.command("mcp", "logout", "srv").returncode == 0, "split-origin logout failed")
+                require(
+                    self.command("mcp", "logout", "srv").returncode == 0,
+                    "split-origin logout failed",
+                )
                 revokes = [e for e in self.delta() if e.get("revoked")]
-                require(len(revokes) == 1 and revokes[0].get("destination_port") == 18085 and
-                        revokes[0].get("client_secret_matches"), "split-origin revocation missing secret")
+                require(
+                    len(revokes) == 1
+                    and revokes[0].get("destination_port") == 18085
+                    and revokes[0].get("client_secret_matches"),
+                    "split-origin revocation missing secret",
+                )
             return "PASS", "verified metadata controls split-origin secret dispatch"
         if name in ("callback_extensions", "callback_duplicate_state"):
             self.control(hideDevice=True)
-            self.login(remote=True, callback_mode="duplicate" if name == "callback_duplicate_state" else "extensions")
+            self.login(
+                remote=True,
+                callback_mode="duplicate" if name == "callback_duplicate_state" else "extensions",
+            )
             if name == "callback_duplicate_state":
-                require(not any(e.get("issued") for e in self.delta()), "duplicate state reached token issuance")
+                require(
+                    not any(e.get("issued") for e in self.delta()),
+                    "duplicate state reached token issuance",
+                )
             else:
                 self.test()
             return "PASS", "callback extension/duplicate policy witnessed before token dispatch"
@@ -651,9 +675,7 @@ class Harness:
                 "test-hooks" in self.command("version", binary=previous).stdout,
                 "previous binary must have test-hooks",
             )
-            oldkey = self.command(
-                "version", "--state-key", binary=previous
-            ).stdout.strip()
+            oldkey = self.command("version", "--state-key", binary=previous).stdout.strip()
             newkey = self.command("version", "--state-key").stdout.strip()
             require(oldkey != newkey, "carry binaries must have different state keys")
             self.login()
@@ -661,18 +683,12 @@ class Harness:
             self.binary = previous
             template = self.home / "agents/lead.toml"
             new_template = template.read_text()
-            template.write_text(
-                new_template.replace('tools = ["mcp:srv"]', "tools = []")
-            )
-            (self.home / "config.toml").write_text(
-                self.config.split("[mcp_servers.srv]")[0]
-            )
+            template.write_text(new_template.replace('tools = ["mcp:srv"]', "tools = []"))
+            (self.home / "config.toml").write_text(self.config.split("[mcp_servers.srv]")[0])
             carry = self.home.parent / "carry.json"
             try:
                 result, sid = self.tool(name=None)
-                require(
-                    result.returncode == 0 and sid, "old-build session creation failed"
-                )
+                require(result.returncode == 0 and sid, "old-build session creation failed")
                 exported = self.command(
                     "session", "export", sid, "--out", str(carry), binary=previous
                 )
@@ -688,8 +704,7 @@ class Harness:
             require(imported_id is not None, "imported session id absent")
             result, _ = self.tool(session=imported_id.group(1))
             require(
-                result.returncode == 0
-                and any(e.get("event") == "effect" for e in self.delta()),
+                result.returncode == 0 and any(e.get("event") == "effect" for e in self.delta()),
                 "carried session did not use stored login",
             )
             return "PASS", "state-key move retained home-scoped login"
@@ -698,8 +713,10 @@ class Harness:
         elif name == "dcr_paste":
             self.control(hideDevice=True)
             self.login(remote=True)
-            require(any("browser_callback" in item for item in self.output),
-                    "paste-back row did not receive a browser callback")
+            require(
+                any("browser_callback" in item for item in self.output),
+                "paste-back row did not receive a browser callback",
+            )
         elif name == "device_confidential":
             self.login(remote=True, expect_device=True)
         elif name == "issuer_mismatch":
@@ -736,9 +753,7 @@ class Harness:
             if name == "concurrent_refresh":
                 self.control(refreshDelayMs=500)
                 with concurrent.futures.ThreadPoolExecutor(2) as pool:
-                    results = list(
-                        pool.map(lambda _: self.command("mcp", "test", "srv"), range(2))
-                    )
+                    results = list(pool.map(lambda _: self.command("mcp", "test", "srv"), range(2)))
                 require(
                     refresh_count(self.delta()) == 1,
                     "concurrent processes did not collapse refresh",
@@ -783,9 +798,7 @@ class Harness:
                 self.tool()
                 calibration = [e for e in self.delta() if e.get("event") == "mcp"]
                 call_index = next(
-                    i + 1
-                    for i, e in enumerate(calibration)
-                    if e.get("method") == "tools/call"
+                    i + 1 for i, e in enumerate(calibration) if e.get("method") == "tools/call"
                 )
                 self.before = len(self.events())
                 result, _ = self.tool(
@@ -798,9 +811,7 @@ class Harness:
                 == (1 if name == "forced_401" else 0),
                 "401 call was resent",
             )
-            require(
-                not any(e.get("event") == "effect" for e in events), "rejected tool ran"
-            )
+            require(not any(e.get("event") == "effect" for e in events), "rejected tool ran")
             require(
                 "call again" in result.stdout or "renewed" in result.stdout,
                 "missing renewed-login remedy",
@@ -849,9 +860,7 @@ class Harness:
                 method="DELETE",
             )
             require(status == 204, "Keycloak offline-grant revocation failed")
-            client = request(base + "/clients?clientId=confidential", headers=headers)[
-                1
-            ][0]
+            client = request(base + "/clients?clientId=confidential", headers=headers)[1][0]
             status, remaining = request(
                 base + f"/users/{user['id']}/offline-sessions/{client['id']}",
                 headers=headers,
@@ -876,8 +885,7 @@ class Harness:
                 "revocation did not produce exactly one refresh",
             )
             require(
-                "invalid_grant" in output
-                and output.count("remedy: plak mcp login srv") == 1,
+                "invalid_grant" in output and output.count("remedy: plak mcp login srv") == 1,
                 "missing single invalid_grant remedy",
             )
             mark = len(self.events())
@@ -889,9 +897,7 @@ class Harness:
                 if name == "logout_503"
                 else ""
             )
-            args = ["mcp", "logout", "srv"] + (
-                ["--local"] if name == "logout_local" else []
-            )
+            args = ["mcp", "logout", "srv"] + (["--local"] if name == "logout_local" else [])
             result = self.command(*args, faults=faults)
             if name == "logout_503":
                 require(result.returncode != 0, "503 logout succeeded")
@@ -953,9 +959,7 @@ class Harness:
             require(result.returncode == 0, "session did not resume after AS restart")
             time.sleep(32)
             result, _ = self.tool(session=sid)
-            require(
-                result.returncode == 0, "session could not refresh after AS restart"
-            )
+            require(result.returncode == 0, "session could not refresh after AS restart")
             require(
                 sum(e.get("event") == "effect" for e in self.delta()) == 3,
                 "restarted session missed or repeated a tool call",
@@ -993,17 +997,18 @@ def main(argv=None):
     parser.add_argument("--binary", default=str(ROOT / "target/release/plak"))
     parser.add_argument("--previous-binary")
     parser.add_argument("--only", help="comma-separated scenario names")
-    parser.add_argument(
-        "--report", default=str(ROOT / "target/live/mcp-oauth/report.json")
-    )
+    parser.add_argument("--report", default=str(ROOT / "target/live/mcp-oauth/report.json"))
     parser.add_argument("--resource-rules", default=str(HERE / "resource-rules.json"))
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
     if args.list:
         print("\n".join(SCENARIOS))
         return 0
-    os.environ.update(json.loads(subprocess.check_output(
-        [str(ROOT / "tools/gate/test-env.sh"), "--json"], text=True)))
+    os.environ.update(
+        json.loads(
+            subprocess.check_output([str(ROOT / "tools/gate/test-env.sh"), "--json"], text=True)
+        )
+    )
     rules = json.loads(Path(args.resource_rules).read_text())
     if set(rules) != {"tenant_metadata"} or rules["tenant_metadata"] not in (
         "accept",
@@ -1030,9 +1035,7 @@ def main(argv=None):
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
         ).strip(),
         "source_dirty": bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=ROOT, text=True
-            ).strip()
+            subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()
         ),
         "package_lock_sha256": hashlib.sha256(
             (HERE / "package-lock.json").read_bytes()
@@ -1103,9 +1106,7 @@ def main(argv=None):
         )
         if args.previous_binary:
             report["previous_binary_unchanged"] = (
-                hashlib.sha256(
-                    Path(args.previous_binary).resolve().read_bytes()
-                ).hexdigest()
+                hashlib.sha256(Path(args.previous_binary).resolve().read_bytes()).hexdigest()
                 == report["previous_binary_sha256"]
             )
         path = Path(args.report)

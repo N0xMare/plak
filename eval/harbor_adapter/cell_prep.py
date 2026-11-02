@@ -23,12 +23,16 @@ from harbor_adapter.preflight import PreflightError, task_budgets
 RG_VERSION = "15.1.0"
 # Official BurntSushi/ripgrep release assets; do not repackage them.
 RG_PINS = {
-    "amd64": ("x86_64-unknown-linux-musl",
-              "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599",
-              "ebeaf56f8a25e102e9419933423738b3a2a613a444fd749d695e15eba53f71f2"),
-    "arm64": ("aarch64-unknown-linux-gnu",
-              "2b661c6ef508e902f388e9098d9c4c5aca72c87b55922d94abdba830b4dc885e",
-              "968cabe8efed72fd8fd482cb76b6084fcb695fc5293af7fb62296b02f487fb69"),
+    "amd64": (
+        "x86_64-unknown-linux-musl",
+        "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599",
+        "ebeaf56f8a25e102e9419933423738b3a2a613a444fd749d695e15eba53f71f2",
+    ),
+    "arm64": (
+        "aarch64-unknown-linux-gnu",
+        "2b661c6ef508e902f388e9098d9c4c5aca72c87b55922d94abdba830b4dc885e",
+        "968cabe8efed72fd8fd482cb76b6084fcb695fc5293af7fb62296b02f487fb69",
+    ),
 }
 
 
@@ -54,18 +58,28 @@ async def record_cell(agent: Any, environment: Any) -> None:
         raise PreflightError("HARBOR_ARM must name a frozen campaign arm")
     if hasattr(agent, "_composition") and agent._composition != arm.get("composition"):
         raise PreflightError("Plak composition differs from the declared campaign arm")
-    remotes = {"claude-policy-launcher": "/installed-agent/claude-no-web", "plak": "/installed-agent/plak", "plakous-js-host": "/installed-agent/plakous-js-host", "plakous-py-host": "/installed-agent/plakous-py-host",
-               "node": "/installed-agent/vendor/node/bin/node", "node-archive": "/installed-agent/vendor/node.tar.gz"}
+    remotes = {
+        "claude-policy-launcher": "/installed-agent/claude-no-web",
+        "plak": "/installed-agent/plak",
+        "plakous-js-host": "/installed-agent/plakous-js-host",
+        "plakous-py-host": "/installed-agent/plakous-py-host",
+        "node": "/installed-agent/vendor/node/bin/node",
+        "node-archive": "/installed-agent/vendor/node.tar.gz",
+    }
     for cli in ("codex", "grok", "pi", "opencode", "claude"):
         remotes[cli] = "/usr/local/bin/" + cli
-        remotes[cli + "-archive"] = "/installed-agent/vendor/" + cli + ("" if cli == "grok" else ".tar.gz")
+        remotes[cli + "-archive"] = (
+            "/installed-agent/vendor/" + cli + ("" if cli == "grok" else ".tar.gz")
+        )
     for name in ("pmux", "pmuxd", "pmux-rmuxd", "pmux-launcher", "pmux-hook"):
         remotes[name] = "/installed-agent/" + name
     for name, digest in arm["binaries"].items():
         if name not in remotes:
             raise PreflightError("unknown executed binary pin")
         line = shlex.quote(digest + "  " + remotes[name])
-        checked = await environment.exec(command=f"printf '%s\\n' {line} | sha256sum -c - >/dev/null")
+        checked = await environment.exec(
+            command=f"printf '%s\\n' {line} | sha256sum -c - >/dev/null"
+        )
         if checked.return_code:
             raise PreflightError("executed binary differs from frozen campaign pin")
     command = CELL_PROBE
@@ -85,13 +99,16 @@ async def record_cell(agent: Any, environment: Any) -> None:
         "schemaVersion": 1,
         "cell_manifest_sha256": hashlib.sha256((result.stdout or "").encode()).hexdigest(),
         "image": environment.task_env_config.docker_image,
-        "agent_timeout": agent_timeout, "verifier_timeout": verifier_timeout,
+        "agent_timeout": agent_timeout,
+        "verifier_timeout": verifier_timeout,
     }
     (agent.logs_dir / "cell-preflight.json").write_text(json.dumps(record, indent=2) + "\n")
     task = environment.environment_dir.parent.name
     matches = [value for key, value in plan["tasks"].items() if key.rsplit("/", 1)[-1] == task]
-    if len(matches) != 1 or any(matches[0].get(k) != record[k] for k in
-                              ("cell_manifest_sha256", "image", "agent_timeout", "verifier_timeout")):
+    if len(matches) != 1 or any(
+        matches[0].get(k) != record[k]
+        for k in ("cell_manifest_sha256", "image", "agent_timeout", "verifier_timeout")
+    ):
         raise PreflightError("actual cell differs from campaign image, policy, or timeout manifest")
 
 
@@ -108,10 +125,13 @@ async def prepare_cell(agent: Any, environment: Any, arch: str) -> None:
     require_elf_arch(path, arch, "cell rg")
     await environment.upload_file(str(path), "/usr/local/bin/rg")
     expected = shlex.quote(RG_PINS[arch][2] + "  /usr/local/bin/rg")
-    await agent.exec_as_root(environment, command=(
-        f"printf '%s\\n' {expected} | sha256sum -c - >/dev/null && "
-        "chmod 0755 /usr/local/bin/rg && timeout -k 2s 15s /usr/local/bin/rg --version >/dev/null"
-    ))
+    await agent.exec_as_root(
+        environment,
+        command=(
+            f"printf '%s\\n' {expected} | sha256sum -c - >/dev/null && "
+            "chmod 0755 /usr/local/bin/rg && timeout -k 2s 15s /usr/local/bin/rg --version >/dev/null"
+        ),
+    )
 
 
 def fetch_tools(arch: str, directory: Path) -> None:

@@ -27,6 +27,7 @@ def _import_harbor_module(name: str):
     except ImportError as exc:  # pragma: no cover - depends on eval extras
         raise unittest.SkipTest(f"{name} needs Harbor installed: {exc}") from exc
 
+
 @contextlib.contextmanager
 def _isolated_adapter_probes(module):
     """Run-loop unit fixtures isolate the separately tested campaign probes."""
@@ -36,10 +37,18 @@ def _isolated_adapter_probes(module):
                 stack.enter_context(mock.patch.object(module, name, new_callable=mock.AsyncMock))
         if hasattr(module, "task_budgets"):
             stack.enter_context(mock.patch.object(module, "task_budgets", return_value=(900, 600)))
-        stack.enter_context(mock.patch("harbor_adapter.cell_prep.record_cell", new_callable=mock.AsyncMock))
-        stack.enter_context(mock.patch("harbor_adapter.preflight.task_budgets", return_value=(900, 600)))
-        stack.enter_context(mock.patch("harbor_adapter.wire.start_recording", new_callable=mock.AsyncMock))
-        stack.enter_context(mock.patch("harbor_adapter.wire.harvest_recording", new_callable=mock.AsyncMock))
+        stack.enter_context(
+            mock.patch("harbor_adapter.cell_prep.record_cell", new_callable=mock.AsyncMock)
+        )
+        stack.enter_context(
+            mock.patch("harbor_adapter.preflight.task_budgets", return_value=(900, 600))
+        )
+        stack.enter_context(
+            mock.patch("harbor_adapter.wire.start_recording", new_callable=mock.AsyncMock)
+        )
+        stack.enter_context(
+            mock.patch("harbor_adapter.wire.harvest_recording", new_callable=mock.AsyncMock)
+        )
         yield
 
 
@@ -95,10 +104,17 @@ def _installed_agent_with_harbor_stub(module_name="pmux_agent"):
         base.BaseInstalledAgent = _BaseInstalledAgent
         base.NonZeroAgentExitCodeError = _NonZeroAgentExitCodeError
         base.with_prompt_template = lambda method: method
-        for name, class_name in (("codex", "Codex"), ("grok_build", "GrokBuild"),
-                                 ("opencode", "OpenCode"), ("pi", "Pi")):
-            setattr(sys.modules[f"harbor.agents.installed.{name}"], class_name,
-                    type(class_name, (_BaseInstalledAgent,), {}))
+        for name, class_name in (
+            ("codex", "Codex"),
+            ("grok_build", "GrokBuild"),
+            ("opencode", "OpenCode"),
+            ("pi", "Pi"),
+        ):
+            setattr(
+                sys.modules[f"harbor.agents.installed.{name}"],
+                class_name,
+                type(class_name, (_BaseInstalledAgent,), {}),
+            )
         sys.modules["harbor.models.trial.paths"].EnvironmentPaths = types.SimpleNamespace(
             agent_dir=pathlib.Path("/logs/agent")
         )
@@ -107,9 +123,7 @@ def _installed_agent_with_harbor_stub(module_name="pmux_agent"):
         try:
             module = importlib.import_module(adapter_module)
         except ImportError as exc:  # pragma: no cover - needs more extras
-            raise unittest.SkipTest(
-                f"{module_name} needs Harbor installed: {exc}"
-            ) from exc
+            raise unittest.SkipTest(f"{module_name} needs Harbor installed: {exc}") from exc
         with _isolated_adapter_probes(module):
             yield module
     finally:
@@ -354,8 +368,12 @@ class ArgumentContractTests(unittest.TestCase):
 
     def test_openrouter_effort_none_omits_effort_flag(self) -> None:
         with self.assertRaises(ArgumentError):
-            run_arguments(account="openrouter", model=OPENROUTER_MODEL,
-                          effort=OPENROUTER_EFFORT, prompt="wire check")
+            run_arguments(
+                account="openrouter",
+                model=OPENROUTER_MODEL,
+                effort=OPENROUTER_EFFORT,
+                prompt="wire check",
+            )
 
     def test_api_keys_are_stripped_from_extra_env(self) -> None:
         env = sanitize_extra_env(
@@ -382,9 +400,7 @@ class UsageContractTests(unittest.TestCase):
             "0f2cabc",
         )
         self.assertEqual(
-            parse_session_id_lines(
-                "session_id=aaa\nhello\nsession_id=bbb\n"
-            ),
+            parse_session_id_lines("session_id=aaa\nhello\nsession_id=bbb\n"),
             ("aaa", "bbb"),
         )
         with self.assertRaises(ValueError):
@@ -397,9 +413,7 @@ class UsageContractTests(unittest.TestCase):
         self.assertIsNone(totals.cost_usd)
 
     def test_cli_json_arrays_of_strings(self) -> None:
-        totals = parse_telemetry_json(
-            '[["10","2","5","1","2500000","reported"]]\n'
-        )
+        totals = parse_telemetry_json('[["10","2","5","1","2500000","reported"]]\n')
         self.assertFalse(totals.resolved)
         self.assertEqual(totals.n_input_tokens, 10)
         self.assertEqual(totals.n_cache_tokens, 2)
@@ -429,40 +443,61 @@ class UsageContractTests(unittest.TestCase):
 class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
     async def test_plak_usage_capture_preserves_compaction_fields_through_merge(self) -> None:
         with _installed_agent_with_harbor_stub("agent") as module:
+
             def payload(*, cost_micros: int, compaction_cost_missing: bool) -> str:
-                return json.dumps([{
-                    "input_tokens": 107, "cached_input_tokens": 22,
-                    "cache_write_tokens": 30, "output_tokens": 13,
-                    "reasoning_tokens": 3, "cost_micros": cost_micros,
-                    "cost_status": "partial" if compaction_cost_missing else "reported",
-                    "row_count": 2, "missing_input_rows": 0, "missing_cache_rows": 0,
-                    "missing_output_rows": 0, "missing_cost_rows": int(compaction_cost_missing),
-                    "missing_cache_write_rows": 0, "compaction_rows": 1,
-                    "observed_turn_cost_micros": 1000,
-                    "missing_compaction_cost_rows": int(compaction_cost_missing),
-                    "compaction_coverage_mismatches": 0, "missing_turn_cost_rows": 0,
-                    "endpoint_compact_workflows": 0,
-                }])
+                return json.dumps(
+                    [
+                        {
+                            "input_tokens": 107,
+                            "cached_input_tokens": 22,
+                            "cache_write_tokens": 30,
+                            "output_tokens": 13,
+                            "reasoning_tokens": 3,
+                            "cost_micros": cost_micros,
+                            "cost_status": "partial" if compaction_cost_missing else "reported",
+                            "row_count": 2,
+                            "missing_input_rows": 0,
+                            "missing_cache_rows": 0,
+                            "missing_output_rows": 0,
+                            "missing_cost_rows": int(compaction_cost_missing),
+                            "missing_cache_write_rows": 0,
+                            "compaction_rows": 1,
+                            "observed_turn_cost_micros": 1000,
+                            "missing_compaction_cost_rows": int(compaction_cost_missing),
+                            "compaction_coverage_mismatches": 0,
+                            "missing_turn_cost_rows": 0,
+                            "endpoint_compact_workflows": 0,
+                        }
+                    ]
+                )
 
             for sessions in (1, 2):
                 with self.subTest(sessions=sessions), tempfile.TemporaryDirectory() as tmp:
                     agent = module.PlakAgent(
-                        pathlib.Path(tmp), account="grok",
-                        model="grok-4.6", effort="low",
+                        pathlib.Path(tmp),
+                        account="grok",
+                        model="grok-4.6",
+                        effort="low",
                     )
-                    responses = [types.SimpleNamespace(
-                        stdout="".join(f"session_id=s{i}\n" for i in range(sessions)),
-                        return_code=0,
-                    )]
-                    responses.append(types.SimpleNamespace(
-                        stdout=payload(cost_micros=1200, compaction_cost_missing=False),
-                        return_code=0,
-                    ))
-                    if sessions == 2:
-                        responses.append(types.SimpleNamespace(
-                            stdout=payload(cost_micros=1000, compaction_cost_missing=True),
+                    responses = [
+                        types.SimpleNamespace(
+                            stdout="".join(f"session_id=s{i}\n" for i in range(sessions)),
                             return_code=0,
-                        ))
+                        )
+                    ]
+                    responses.append(
+                        types.SimpleNamespace(
+                            stdout=payload(cost_micros=1200, compaction_cost_missing=False),
+                            return_code=0,
+                        )
+                    )
+                    if sessions == 2:
+                        responses.append(
+                            types.SimpleNamespace(
+                                stdout=payload(cost_micros=1000, compaction_cost_missing=True),
+                                return_code=0,
+                            )
+                        )
                     agent.exec_as_agent = mock.AsyncMock(side_effect=responses)
                     context = types.SimpleNamespace()
                     await agent._capture_usage(object(), context)
@@ -470,25 +505,29 @@ class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(context.metadata["compaction_rows"], sessions)
                     self.assertEqual(context.metadata["usage_scope"], "turns_plus_compactions_v1")
                     self.assertEqual(context.n_input_tokens, 107 * sessions)
-                    self.assertEqual(context.metadata["observed_turn_cost_usd"], .001 * sessions)
+                    self.assertEqual(context.metadata["observed_turn_cost_usd"], 0.001 * sessions)
                     self.assertEqual(context.metadata["missing_compaction_cost_rows"], sessions - 1)
-                    self.assertEqual(context.cost_usd, .0012 if sessions == 1 else None)
+                    self.assertEqual(context.cost_usd, 0.0012 if sessions == 1 else None)
                     evidence = json.loads((pathlib.Path(tmp) / "plak-usage.json").read_text())
                     self.assertEqual(evidence["compaction_rows"], sessions)
 
     async def test_plak_overload_preserves_failure_after_one_task_run(self) -> None:
         with _installed_agent_with_harbor_stub("agent") as module:
+
             class ProviderFailure(Exception):
                 pass
 
             failure = ProviderFailure("server_is_overloaded")
             with tempfile.TemporaryDirectory() as tmp:
                 agent = module.PlakAgent(
-                    pathlib.Path(tmp), account="grok",
-                    model="grok-4.6", effort="low",
+                    pathlib.Path(tmp),
+                    account="grok",
+                    model="grok-4.6",
+                    effort="low",
                 )
                 agent.exec_as_agent = mock.AsyncMock(side_effect=failure)
                 agent._read_session_events = mock.AsyncMock(return_value=([], ()))
+
                 async def read_agent_file(_environment, _env, path):
                     if path.endswith("plak-exit.txt"):
                         return "5\n"
@@ -510,6 +549,7 @@ class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_opencode_failure_preserves_one_underlying_task_and_attempt(self) -> None:
         with _installed_agent_with_harbor_stub("vendor_agents") as module:
+
             class ProviderFailure(Exception):
                 pass
 
@@ -522,17 +562,30 @@ class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
                     agent.exec_as_root = mock.AsyncMock()
                     agent.exec_as_agent = mock.AsyncMock()
                     agent._error_messages = mock.Mock(return_value=[detail])
-                    environment = types.SimpleNamespace(default_user="root", upload_file=mock.AsyncMock())
+                    environment = types.SimpleNamespace(
+                        default_user="root", upload_file=mock.AsyncMock()
+                    )
                     failure = ProviderFailure(detail)
                     run = mock.AsyncMock(side_effect=failure)
-                    with mock.patch.object(module, "NonZeroAgentExitCodeError", ProviderFailure), \
-                         mock.patch.object(module.OpenCode, "run", run, create=True), \
-                         mock.patch.object(module, "require_ready_opencode_auth", return_value=pathlib.Path("/private/test-auth.json")):
+                    with (
+                        mock.patch.object(module, "NonZeroAgentExitCodeError", ProviderFailure),
+                        mock.patch.object(module.OpenCode, "run", run, create=True),
+                        mock.patch.object(
+                            module,
+                            "require_ready_opencode_auth",
+                            return_value=pathlib.Path("/private/test-auth.json"),
+                        ),
+                    ):
                         with self.assertRaises(ProviderFailure) as caught:
                             await agent.run("Perform the task once.", environment, object())
                     self.assertIs(caught.exception, failure)
                     run.assert_awaited_once()
-                    rows = [json.loads(line) for line in (pathlib.Path(tmp) / "opencode-attempts.jsonl").read_text().splitlines()]
+                    rows = [
+                        json.loads(line)
+                        for line in (pathlib.Path(tmp) / "opencode-attempts.jsonl")
+                        .read_text()
+                        .splitlines()
+                    ]
                     self.assertEqual(len(rows), 1)
                     self.assertEqual(rows[0]["attempt"], 1)
                     self.assertEqual(rows[0]["outcome"], "failed")
@@ -543,9 +596,7 @@ class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
 class ComposeRetryContractTests(unittest.TestCase):
     def test_retry_only_on_hub_timeout(self) -> None:
         self.assertTrue(
-            should_retry_compose(
-                "Docker compose command failed: context deadline exceeded"
-            )
+            should_retry_compose("Docker compose command failed: context deadline exceeded")
         )
         self.assertFalse(should_retry_compose("NonZeroAgentExitCodeError: exit 1"))
         source = (ROOT / "eval" / "harbor_adapter" / "docker_retry.py").read_text()
@@ -620,9 +671,7 @@ class TelemetryRemainderTests(unittest.TestCase):
         self.assertEqual(totals.cost_status, "unverified_aggregate")
 
     def test_unknown_cost_with_tokens_is_resolved_without_dollars(self) -> None:
-        totals = parse_telemetry_json(
-            '[["10","0","4","1","","unknown"]]'
-        )
+        totals = parse_telemetry_json('[["10","0","4","1","","unknown"]]')
         self.assertFalse(totals.resolved)
         self.assertEqual(totals.n_input_tokens, 10)
         self.assertIsNone(totals.cost_usd)
@@ -640,20 +689,34 @@ class TelemetryRemainderTests(unittest.TestCase):
 
 class CredentialContractTests(unittest.TestCase):
     @staticmethod
-    def _grok_auth(*, key: str = "access-a", refresh: str = "refresh-a",
-                   principal: str = "principal-a", client: str = "client-a") -> bytes:
-        return json.dumps({f"https://auth.x.ai::{client}": {
-            "auth_mode": "oidc", "key": key, "refresh_token": refresh,
-            "expires_at": "2027-01-01T00:00:00Z",
-            "create_time": "2026-01-01T00:00:00Z", "principal_id": principal,
-            "user_id": "user-a", "oidc_issuer": "https://auth.x.ai",
-            "oidc_client_id": client,
-        }}).encode()
+    def _grok_auth(
+        *,
+        key: str = "access-a",
+        refresh: str = "refresh-a",
+        principal: str = "principal-a",
+        client: str = "client-a",
+    ) -> bytes:
+        return json.dumps(
+            {
+                f"https://auth.x.ai::{client}": {
+                    "auth_mode": "oidc",
+                    "key": key,
+                    "refresh_token": refresh,
+                    "expires_at": "2027-01-01T00:00:00Z",
+                    "create_time": "2026-01-01T00:00:00Z",
+                    "principal_id": principal,
+                    "user_id": "user-a",
+                    "oidc_issuer": "https://auth.x.ai",
+                    "oidc_client_id": client,
+                }
+            }
+        ).encode()
 
     def test_grok_auth_requires_one_complete_oidc_account(self) -> None:
         validate_grok_auth(self._grok_auth())
         invalid = (
-            b"{}", b"not-json",
+            b"{}",
+            b"not-json",
             self._grok_auth(refresh=""),
             self._grok_auth(client="client-a").replace(
                 b"auth.x.ai::client-a", b"auth.x.ai::client-b"
@@ -696,9 +759,7 @@ class CredentialContractTests(unittest.TestCase):
                 self._grok_auth(refresh=""),
                 self._grok_auth(principal="different"),
                 self._grok_auth(client="different"),
-                self._grok_auth().replace(
-                    b"2027-01-01T00:00:00Z", b"2025-01-01T00:00:00Z"
-                ),
+                self._grok_auth().replace(b"2027-01-01T00:00:00Z", b"2025-01-01T00:00:00Z"),
             ):
                 host.write_bytes(original)
                 candidate.write_bytes(invalid)
@@ -813,7 +874,8 @@ class CredentialContractTests(unittest.TestCase):
                         asyncio.run(agent.run("task", environment, object()))
                 agent._persist_refreshed_auth.assert_awaited_once()
                 run_call = next(
-                    call for call in agent.exec_as_agent.await_args_list
+                    call
+                    for call in agent.exec_as_agent.await_args_list
                     if call.kwargs["command"] == "RUN"
                 )
                 self.assertEqual(run_call.kwargs["env"]["RUST_LOG"], "error")
@@ -849,9 +911,7 @@ class CredentialContractTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "primary agent failure"):
                         asyncio.run(agent.run("task", environment, object()))
                 agent._persist_refreshed_auth.assert_awaited_once()
-                commands = [
-                    call.kwargs["command"] for call in agent.exec_as_agent.await_args_list
-                ]
+                commands = [call.kwargs["command"] for call in agent.exec_as_agent.await_args_list]
                 self.assertTrue(any(".grok/sessions" in command for command in commands))
                 self.assertEqual(host.read_bytes(), self._grok_auth())
 
@@ -902,17 +962,23 @@ class CredentialContractTests(unittest.TestCase):
             root = pathlib.Path(directory)
             key, auth = root / "key", root / "auth.json"
             key.write_text("watched-secret\n")
-            with mock.patch.dict(os.environ, {
-                "DOCKER_HOST": "", "PLAK_OPENROUTER_KEY_PATH": str(key),
-                "PI_AUTH_JSON_PATH": str(auth), "OPENCODE_AUTH_JSON_PATH": str(auth),
-            }):
-                for arm, kind in (("pi-openrouter", "api_key"),
-                                  ("opencode-openrouter", "api")):
-                    auth.write_text(json.dumps({"openrouter": {
-                        "type": kind, "key": "watched-secret"}}))
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "DOCKER_HOST": "",
+                    "PLAK_OPENROUTER_KEY_PATH": str(key),
+                    "PI_AUTH_JSON_PATH": str(auth),
+                    "OPENCODE_AUTH_JSON_PATH": str(auth),
+                },
+            ):
+                for arm, kind in (("pi-openrouter", "api_key"), ("opencode-openrouter", "api")):
+                    auth.write_text(
+                        json.dumps({"openrouter": {"type": kind, "key": "watched-secret"}})
+                    )
                     self.assertEqual(require_watched_openrouter_key(arm), key)
-                    auth.write_text(json.dumps({"openrouter": {
-                        "type": kind, "key": "unwatched-secret"}}))
+                    auth.write_text(
+                        json.dumps({"openrouter": {"type": kind, "key": "unwatched-secret"}})
+                    )
                     with self.assertRaises(CredentialError) as failure:
                         require_watched_openrouter_key(arm)
                     self.assertNotIn("secret", str(failure.exception))
@@ -1025,9 +1091,7 @@ class CredentialContractTests(unittest.TestCase):
     def test_missing_opencode_auth_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             previous = os.environ.get("OPENCODE_AUTH_JSON_PATH")
-            os.environ["OPENCODE_AUTH_JSON_PATH"] = str(
-                pathlib.Path(tmp) / "missing.json"
-            )
+            os.environ["OPENCODE_AUTH_JSON_PATH"] = str(pathlib.Path(tmp) / "missing.json")
             try:
                 with self.assertRaises(CredentialError):
                     require_ready_opencode_auth("openai")
@@ -1281,7 +1345,9 @@ class ConfigurationContractTests(unittest.TestCase):
         text = (ROOT / "eval" / "terminal-bench.yaml").read_text()
         self.assertIn("terminal-bench/terminal-bench@4.0.0", text)
         self.assertIn("harbor_adapter.agent:PlakAgent", text)
-        self.assertIn("environment:\n  import_path: harbor_adapter.docker_retry:RetryingDocker", text)
+        self.assertIn(
+            "environment:\n  import_path: harbor_adapter.docker_retry:RetryingDocker", text
+        )
         self.assertIn("n_concurrent_trials: 1", text)
         self.assertIn("model_name: gpt-5.6-luna", text)
 
@@ -1384,16 +1450,27 @@ class ConfigurationContractTests(unittest.TestCase):
             root = pathlib.Path(directory)
             for name in ("docker", "uv"):
                 executable = root / name
-                executable.write_text("#!/bin/sh\n" + ("exit 0\n" if name == "docker" else
-                    'touch "$STUB_DISPATCH"\nexit 37\n'))
+                executable.write_text(
+                    "#!/bin/sh\n"
+                    + ("exit 0\n" if name == "docker" else 'touch "$STUB_DISPATCH"\nexit 37\n')
+                )
                 executable.chmod(0o700)
-            env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}", HARBOR_ARCH="arm64",
-                       STUB_DISPATCH=str(root / "dispatch"))
+            env = dict(
+                os.environ,
+                PATH=f"{root}:{os.environ['PATH']}",
+                HARBOR_ARCH="arm64",
+                STUB_DISPATCH=str(root / "dispatch"),
+            )
             env.pop("HARBOR_CAMPAIGN", None)
             env.pop("HARBOR_CAMPAIGN_SHA256", None)
             for sweep in ("all", "ablation"):
-                completed = subprocess.run(["bash", str(ROOT / "eval/scripts/rung-a.sh"), "plumbing", sweep],
-                                           env=env, capture_output=True, text=True, timeout=30)
+                completed = subprocess.run(
+                    ["bash", str(ROOT / "eval/scripts/rung-a.sh"), "plumbing", sweep],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn("HARBOR_CAMPAIGN", completed.stderr)
                 self.assertFalse((root / "dispatch").exists())
@@ -1410,9 +1487,19 @@ class ConfigurationContractTests(unittest.TestCase):
                     (root / "eval" / child.name).symlink_to(child)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
             subprocess.run(
-                ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                 "commit", "--allow-empty", "-qm", "Fixture source"],
-                cwd=root, check=True,
+                [
+                    "git",
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "Fixture source",
+                ],
+                cwd=root,
+                check=True,
             )
             stub_bin = root / "stub-bin"
             stub_bin.mkdir()
@@ -1422,9 +1509,10 @@ class ConfigurationContractTests(unittest.TestCase):
                 executable.chmod(0o700)
             result = subprocess.run(
                 ["bash", str(scripts / "rung-a.sh"), "plumbing", "plak-codex"],
-                env=dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}",
-                         HARBOR_ARCH="arm64"),
-                capture_output=True, text=True, timeout=30,
+                env=dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}", HARBOR_ARCH="arm64"),
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn("no job directories found", result.stderr)
@@ -1439,9 +1527,13 @@ class ConfigurationContractTests(unittest.TestCase):
             docker.write_text("#!/bin/sh\nexit 0\n")
             docker.chmod(0o700)
             for arm in ("plak-openrouter", "pi-openrouter", "opencode-openrouter"):
-                result = subprocess.run(["bash", str(ROOT / "eval/scripts/rung-a.sh"), "plumbing", arm],
+                result = subprocess.run(
+                    ["bash", str(ROOT / "eval/scripts/rung-a.sh"), "plumbing", arm],
                     env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}", HARBOR_ARCH="arm64"),
-                    capture_output=True, text=True, timeout=30)
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("OpenRouter comparisons disabled", result.stderr)
 
@@ -1574,15 +1666,13 @@ class VendorCliContractTests(unittest.TestCase):
         self.assertIn("pi-secrets", agents)
         self.assertIn("opencode-secrets", agents)
         self.assertIn("pi_cli_model_name", agents)
-        self.assertIn("openai-codex", (ROOT / "eval" / "harbor_adapter" / "credentials.py").read_text())
-        frozen_grok = agents.split("class FrozenGrokBuild", 1)[1].split(
-            "class FrozenPi", 1
-        )[0]
+        self.assertIn(
+            "openai-codex", (ROOT / "eval" / "harbor_adapter" / "credentials.py").read_text()
+        )
+        frozen_grok = agents.split("class FrozenGrokBuild", 1)[1].split("class FrozenPi", 1)[0]
         self.assertNotIn("grok_config", frozen_grok)
         self.assertNotIn("config.toml", frozen_grok)
-        frozen_pi = agents.split("class FrozenPi", 1)[1].split(
-            "class FrozenOpenCode", 1
-        )[0]
+        frozen_pi = agents.split("class FrozenPi", 1)[1].split("class FrozenOpenCode", 1)[0]
         self.assertNotIn("enabledModels", frozen_pi)
         self.assertNotIn("upload_dir", frozen_pi)
         frozen_opencode = agents.split("class FrozenOpenCode", 1)[1]
@@ -1652,12 +1742,8 @@ class CodexCaPrerequisiteTests(unittest.IsolatedAsyncioTestCase):
                 return_code=0,
                 stdout=f"{'a' * 64}  /etc/ssl/certs/ca-certificates.crt\n12345\n",
             )
-            environment = types.SimpleNamespace(
-                exec=mock.AsyncMock(side_effect=(missing, present))
-            )
-            agent = types.SimpleNamespace(
-                ensure_system_dependencies=mock.AsyncMock()
-            )
+            environment = types.SimpleNamespace(exec=mock.AsyncMock(side_effect=(missing, present)))
+            agent = types.SimpleNamespace(ensure_system_dependencies=mock.AsyncMock())
             record = await module._ensure_codex_ca_bundle(agent, environment)
             agent.ensure_system_dependencies.assert_awaited_once_with(
                 environment, ("ca_certificates",)
@@ -1705,14 +1791,21 @@ class CodexCaPrerequisiteTests(unittest.IsolatedAsyncioTestCase):
             with (
                 mock.patch.object(module, "require_frozen_artifacts", return_value=artifacts),
                 mock.patch.object(module, "_install_node_cli", new_callable=mock.AsyncMock),
-                mock.patch.object(module, "_ensure_codex_ca_bundle", new_callable=mock.AsyncMock, return_value=ca),
+                mock.patch.object(
+                    module, "_ensure_codex_ca_bundle", new_callable=mock.AsyncMock, return_value=ca
+                ),
                 mock.patch.object(module, "_assert_version", new_callable=mock.AsyncMock),
-                mock.patch.object(module, "_record_executable_identity", new_callable=mock.AsyncMock) as identity,
+                mock.patch.object(
+                    module, "_record_executable_identity", new_callable=mock.AsyncMock
+                ) as identity,
             ):
                 await agent.install(environment)
             agent.ensure_system_dependencies.assert_not_awaited()
             identity.assert_awaited_once_with(
-                agent, environment, "codex", "amd64",
+                agent,
+                environment,
+                "codex",
+                "amd64",
                 prerequisites={"ca_bundle": ca},
             )
 
@@ -1721,18 +1814,21 @@ class CodexCaPrerequisiteTests(unittest.IsolatedAsyncioTestCase):
             with tempfile.TemporaryDirectory() as directory:
                 agent = types.SimpleNamespace(logs_dir=pathlib.Path(directory))
                 environment = types.SimpleNamespace(
-                    exec=mock.AsyncMock(return_value=types.SimpleNamespace(
-                        return_code=0, stdout=f"{'d' * 64}  binary\n99\n"
-                    ))
+                    exec=mock.AsyncMock(
+                        return_value=types.SimpleNamespace(
+                            return_code=0, stdout=f"{'d' * 64}  binary\n99\n"
+                        )
+                    )
                 )
                 ca = {"path": module._CA_BUNDLE, "sha256": "e" * 64, "bytes": 42}
                 await module._record_executable_identity(
-                    agent, environment, "codex", "amd64",
+                    agent,
+                    environment,
+                    "codex",
+                    "amd64",
                     prerequisites={"ca_bundle": ca},
                 )
-                artifact = json.loads(
-                    (agent.logs_dir / "vendor-artifact.json").read_text()
-                )
+                artifact = json.loads((agent.logs_dir / "vendor-artifact.json").read_text())
                 self.assertEqual(artifact["prerequisites"]["ca_bundle"], ca)
                 self.assertEqual(artifact["harness"], "codex")
 
@@ -1741,9 +1837,7 @@ class EffortControlTests(unittest.TestCase):
     def test_smoke_effort_maps_on_every_vendor(self) -> None:
         self.assertEqual(SMOKE_EFFORT, "low")
         self.assertEqual(vendor_effort_ak("codex", "low"), ("reasoning_effort=low",))
-        self.assertEqual(
-            vendor_effort_ak("grok-build", "low"), ("reasoning_effort=low",)
-        )
+        self.assertEqual(vendor_effort_ak("grok-build", "low"), ("reasoning_effort=low",))
         self.assertEqual(vendor_effort_ak("pi", "low"), ("thinking=low",))
         self.assertEqual(vendor_effort_ak("opencode", "low"), ("variant=low",))
 
@@ -1778,7 +1872,9 @@ class ImpliedCostTests(unittest.TestCase):
         self.assertIn("grok-4.6", card["models"])
 
     def test_new_rung_a_models_use_public_list_rates(self) -> None:
-        usage = CanonicalUsage(input_tokens=1_000_000, output_tokens=1_000_000, cache_read=0, cache_write=0)
+        usage = CanonicalUsage(
+            input_tokens=1_000_000, output_tokens=1_000_000, cache_read=0, cache_write=0
+        )
         self.assertAlmostEqual(implied_usd("openai/gpt-6-luna", usage).usd, 0.60)
         self.assertAlmostEqual(implied_usd("anthropic/claude-opus-5-5", usage).usd, 24.0)
         self.assertAlmostEqual(
@@ -1789,7 +1885,9 @@ class ImpliedCostTests(unittest.TestCase):
     def test_uncached_and_cache_are_not_double_counted(self) -> None:
         cost = implied_usd(
             "openai/gpt-5.6-luna",
-            CanonicalUsage(input_tokens=1_000_000, cache_read=500_000, cache_write=0, output_tokens=0),
+            CanonicalUsage(
+                input_tokens=1_000_000, cache_read=500_000, cache_write=0, output_tokens=0
+            ),
         )
         self.assertEqual(cost.status, "implied")
         # 0.5M uncached at $0.20 + 0.5M cache-read at $0.02
@@ -1815,7 +1913,10 @@ class ImpliedCostTests(unittest.TestCase):
         self.assertEqual(cost.status, "unresolved_usage")
 
     def test_unknown_model_is_unpriced(self) -> None:
-        cost = implied_usd("mystery-model", CanonicalUsage(input_tokens=10, output_tokens=1, cache_read=0, cache_write=0))
+        cost = implied_usd(
+            "mystery-model",
+            CanonicalUsage(input_tokens=10, output_tokens=1, cache_read=0, cache_write=0),
+        )
         self.assertIsNone(cost.usd)
         self.assertEqual(cost.status, "unpriced_model")
 
@@ -1909,6 +2010,7 @@ class FrozenPmuxContractTests(unittest.TestCase):
 
     def test_pmux_does_not_mutate_packages_users_or_acls(self):
         from harbor_adapter.pmux_trial import pmux_trial_command
+
         command = pmux_trial_command("true", "/logs/out", "/logs/err", 1800000)
         for mutation in ("apt-get", "useradd", "setfacl", "chown", "sudo"):
             self.assertNotIn(mutation, command)
@@ -2321,7 +2423,9 @@ class FrozenPmuxContractTests(unittest.TestCase):
         self.assertIn("replace_claude_code_store", agent)
         self.assertNotIn("ulimit -n 8192", trial)
         self.assertIn("prompt_file=", agent)
-        self.assertIn("--prompt-file", (ROOT / "eval" / "harbor_adapter" / "pmux_args.py").read_text())
+        self.assertIn(
+            "--prompt-file", (ROOT / "eval" / "harbor_adapter" / "pmux_args.py").read_text()
+        )
         self.assertNotIn("pmux ask", agent)
         self.assertNotIn("claude --print", agent)
         self.assertIn("unset ANTHROPIC_API_KEY", trial)
@@ -2418,12 +2522,8 @@ class HarnessTerminationRecordTests(unittest.TestCase):
             agent._persist_refreshed_pin = _ok
             agent._capture_usage = _ok
             with (
-                mock.patch.object(
-                    pmux_agent, "refuse_stripped_env", lambda _env: None
-                ),
-                mock.patch.object(
-                    pmux_agent, "require_ready_claude_code_store", lambda: store
-                ),
+                mock.patch.object(pmux_agent, "refuse_stripped_env", lambda _env: None),
+                mock.patch.object(pmux_agent, "require_ready_claude_code_store", lambda: store),
             ):
                 with self.assertRaises(_HarnessGone):
                     asyncio.run(agent.run("fix the tests", _Environment(), _Context()))
@@ -2472,18 +2572,12 @@ class ArchSwitchTests(unittest.TestCase):
         self.assertEqual(NODE_ARCH_SUFFIXES["arm64"], "linux-arm64")
         self.assertEqual(ELF_MACHINES["amd64"], 0x3E)
         self.assertEqual(ELF_MACHINES["arm64"], 0xB7)
-        self.assertEqual(
-            node_tarball_name("arm64"), f"node-v{NODE_VERSION}-linux-arm64.tar.gz"
-        )
+        self.assertEqual(node_tarball_name("arm64"), f"node-v{NODE_VERSION}-linux-arm64.tar.gz")
         self.assertEqual(node_sha256("arm64"), NODE_SHA256["arm64"])
 
     def test_artifact_roots_are_per_arch_with_no_flat_fallback(self) -> None:
-        self.assertEqual(
-            installed_root("amd64"), pathlib.Path(".plak/installed/amd64")
-        )
-        self.assertEqual(
-            installed_root("arm64"), pathlib.Path(".plak/installed/arm64")
-        )
+        self.assertEqual(installed_root("amd64"), pathlib.Path(".plak/installed/amd64"))
+        self.assertEqual(installed_root("arm64"), pathlib.Path(".plak/installed/arm64"))
         for name in ("rung-a.sh", "rung-b.sh", "smoke.sh", "harbor.sh"):
             script = (ROOT / "eval" / "scripts" / name).read_text()
             with self.subTest(script=name):
@@ -2592,12 +2686,8 @@ class VendorManifestArchTests(unittest.TestCase):
                 self._write(root, arch)
                 artifacts = require_frozen_artifacts("codex", root, arch)
                 self.assertEqual(artifacts.arch, arch)
-                self.assertEqual(
-                    artifacts.node_tarball.name, node_tarball_name(arch)
-                )
-                self.assertEqual(
-                    require_frozen_artifacts("grok", root, arch).arch, arch
-                )
+                self.assertEqual(artifacts.node_tarball.name, node_tarball_name(arch))
+                self.assertEqual(require_frozen_artifacts("grok", root, arch).arch, arch)
 
     def test_manifest_from_the_other_arch_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2640,12 +2730,8 @@ class ArchShellHelperTests(unittest.TestCase):
         return result.stdout.strip(), result.returncode
 
     def test_env_value_is_honoured_and_anything_else_is_refused(self) -> None:
-        self.assertEqual(
-            self._helper("harbor_arch", {"HARBOR_ARCH": "arm64"}), ("arm64", 0)
-        )
-        self.assertEqual(
-            self._helper("harbor_arch", {"HARBOR_ARCH": "amd64"}), ("amd64", 0)
-        )
+        self.assertEqual(self._helper("harbor_arch", {"HARBOR_ARCH": "arm64"}), ("arm64", 0))
+        self.assertEqual(self._helper("harbor_arch", {"HARBOR_ARCH": "amd64"}), ("amd64", 0))
         _, code = self._helper("harbor_arch", {"HARBOR_ARCH": "x86_64"})
         self.assertEqual(code, 2)
 
@@ -2658,9 +2744,7 @@ class ArchShellHelperTests(unittest.TestCase):
             self._helper("harbor_installed_root /repo arm64"),
             ("/repo/.plak/installed/arm64", 0),
         )
-        self.assertEqual(
-            self._helper("harbor_platform arm64"), ("linux/arm64", 0)
-        )
+        self.assertEqual(self._helper("harbor_platform arm64"), ("linux/arm64", 0))
 
 
 JOBS = ROOT / ".plak" / "harbor" / "jobs"
@@ -2750,9 +2834,7 @@ class PlakTerminationTests(unittest.TestCase):
             "input and output reservation exceed context capacity\n"
         )
         record = classify_plak(exit_code=5, stderr=stderr, events=_events())
-        self.assertEqual(
-            record.termination_class, f"turn_failed:{KIND_CONTEXT_CAPACITY}"
-        )
+        self.assertEqual(record.termination_class, f"turn_failed:{KIND_CONTEXT_CAPACITY}")
         self.assertIn("context admission denied", record.detail)
 
     def test_session_turn_failure_beats_stderr(self) -> None:
@@ -2763,12 +2845,8 @@ class PlakTerminationTests(unittest.TestCase):
                 "msg": "the provider returned a rate-limit response; HTTP 429",
             }
         )
-        record = classify_plak(
-            exit_code=5, stderr="plak: turn failed definitively", events=events
-        )
-        self.assertEqual(
-            record.termination_class, f"turn_failed:{KIND_PROVIDER_RATE_LIMIT}"
-        )
+        record = classify_plak(exit_code=5, stderr="plak: turn failed definitively", events=events)
+        self.assertEqual(record.termination_class, f"turn_failed:{KIND_PROVIDER_RATE_LIMIT}")
         self.assertEqual(record.disposition, "definite")
 
     def test_recovery_required_is_a_tool_failure(self) -> None:
@@ -2805,9 +2883,7 @@ class PlakTerminationTests(unittest.TestCase):
             exception_type="ApiRateLimitError",
             exception_message="rate limit exceeded",
         )
-        self.assertEqual(
-            record.termination_class, "harness_exception:ApiRateLimitError"
-        )
+        self.assertEqual(record.termination_class, "harness_exception:ApiRateLimitError")
 
     def test_no_evidence_at_all_is_unknown_not_completed(self) -> None:
         record = classify_plak(exit_code=None, stderr="", events=[])
@@ -2846,9 +2922,7 @@ class VendorTerminationTests(unittest.TestCase):
             '(Connection failed: error sending request)"}\n'
         )
         record = classify_vendor(harness="codex", log_text=log)
-        self.assertEqual(
-            record.termination_class, f"turn_failed:{KIND_PROVIDER_REJECTION}"
-        )
+        self.assertEqual(record.termination_class, f"turn_failed:{KIND_PROVIDER_REJECTION}")
 
     def test_nonzero_exit_without_typed_evidence_stays_agent_exit_nonzero(self) -> None:
         record = classify_vendor(
@@ -2866,9 +2940,7 @@ class VendorTerminationTests(unittest.TestCase):
             exception_type="AgentTimeoutError",
             exception_message="Agent execution timed out after 900.0 seconds",
         )
-        self.assertEqual(
-            record.termination_class, "harness_exception:AgentTimeoutError"
-        )
+        self.assertEqual(record.termination_class, "harness_exception:AgentTimeoutError")
 
 
 class ArchivedJobTreeTests(unittest.TestCase):
@@ -2886,18 +2958,14 @@ class ArchivedJobTreeTests(unittest.TestCase):
         by_task = {trial.task: trial for trial in summary.trials}
         trial = by_task["terminal-bench/sqlite-db-truncate"]
         self.assertEqual(trial.reward, 0.0)
-        self.assertEqual(
-            trial.record.termination_class, f"turn_failed:{KIND_CONTEXT_CAPACITY}"
-        )
+        self.assertEqual(trial.record.termination_class, f"turn_failed:{KIND_CONTEXT_CAPACITY}")
         self.assertEqual(summary.harness_terminated, 1)
         self.assertEqual(len(summary.trials), 8)
 
     def test_grok_credential_run_names_six_harness_deaths(self) -> None:
         job = self._job("ab-plak-grok/2026-09-15__23-22-54")
         summary = summarize_job(job)
-        self.assertEqual(
-            summary.class_counts.get(f"turn_failed:{KIND_CREDENTIAL}"), 6
-        )
+        self.assertEqual(summary.class_counts.get(f"turn_failed:{KIND_CREDENTIAL}"), 6)
 
     def test_clean_grok_plumbing_run_has_no_harness_deaths(self) -> None:
         job = self._job("plumbing-grok-build/2026-09-15__18-24-18")
@@ -2908,9 +2976,7 @@ class ArchivedJobTreeTests(unittest.TestCase):
     def test_openrouter_arm64_rate_limit_run(self) -> None:
         job = self._job("plumbing-plak-openrouter-arm64/2026-09-17__13-16-04")
         summary = summarize_job(job)
-        self.assertEqual(
-            summary.class_counts, {f"turn_failed:{KIND_PROVIDER_RATE_LIMIT}": 3}
-        )
+        self.assertEqual(summary.class_counts, {f"turn_failed:{KIND_PROVIDER_RATE_LIMIT}": 3})
         self.assertEqual(summary.rewarded, 0)
 
     def test_a_job_parent_is_not_mistaken_for_a_one_trial_job(self) -> None:
@@ -2941,7 +3007,9 @@ class ArchivedJobTreeTests(unittest.TestCase):
                 record = classify_trial_dir(result.parent)
                 with self.subTest(trial=str(result.parent)):
                     self.assertNotEqual(record.termination_class, CLASS_UNKNOWN)
-                    self.assertIn(record.harness, ("plak", "codex", "grok-build", "pi", "opencode", "pmux"))
+                    self.assertIn(
+                        record.harness, ("plak", "codex", "grok-build", "pi", "opencode", "pmux")
+                    )
 
 
 class PromptVariantTests(unittest.TestCase):
@@ -2992,7 +3060,7 @@ class PromptVariantTests(unittest.TestCase):
         # The job name carries the variant, so the arms never share a tree.
         self.assertIn('${slice}-${named}${job_suffix}', rung_a)
         # Vendor arms must not learn about the switch.
-        vendor = rung_a[rung_a.index("run_vendor() {"):]
+        vendor = rung_a[rung_a.index("run_vendor() {") :]
         vendor = vendor[: vendor.index("\n}\n")]
         self.assertNotIn("prompt_variant", vendor)
 
@@ -3018,9 +3086,7 @@ class PromptVariantTests(unittest.TestCase):
                 validate_plan(plan, require_jobs=False)
                 self.assertEqual(tuple(sorted(plan["arms"])), tuple(sorted(arms)))
                 self.assertEqual(plan["dataset"], "terminal-bench/terminal-bench-2-1@6")
-                self.assertEqual(
-                    [task["name"] for task in plan["tasks"]], list(RUNG_A_AB_TASKS)
-                )
+                self.assertEqual([task["name"] for task in plan["tasks"]], list(RUNG_A_AB_TASKS))
                 with self.assertRaises(PlanError):
                     validate_plan(plan, require_jobs=True)
 
@@ -3078,17 +3144,27 @@ class TerminationSurfaceTests(unittest.TestCase):
                 "plak: native subscription credential is unavailable\n"
             )
             (events_dir / "session.events.jsonl").write_text(
-                json.dumps({"kind": "tool.rejected", "name": "list_dir", "reason": "InvalidArguments"}) + "\n"
+                json.dumps(
+                    {"kind": "tool.rejected", "name": "list_dir", "reason": "InvalidArguments"}
+                )
+                + "\n"
             )
-            (job / "trial__one" / "result.json").write_text(json.dumps({
-                "task_name": "trial", "verifier_result": {"rewards": {"reward": 0}},
-            }))
+            (job / "trial__one" / "result.json").write_text(
+                json.dumps(
+                    {
+                        "task_name": "trial",
+                        "verifier_result": {"rewards": {"reward": 0}},
+                    }
+                )
+            )
             summary = summarize_job(job)
             self.assertEqual(summary.class_counts, {f"turn_failed:{KIND_CREDENTIAL}": 1})
             self.assertEqual(summary.rejection_counts, {"list_dir:InvalidArguments": 1})
             result = subprocess.run(
                 [sys.executable, str(ROOT / "eval" / "scripts" / "summarize.py"), str(job)],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("turn_failed:credential", result.stdout)
@@ -3102,8 +3178,13 @@ class TerminationSurfaceTests(unittest.TestCase):
             result_path = trial / "result.json"
             result_path.write_text("{invalid")
             command = [
-                sys.executable, str(ROOT / "eval" / "scripts" / "summarize.py"),
-                "--require-readable", "--write", "--expect-trials", "1", str(job),
+                sys.executable,
+                str(ROOT / "eval" / "scripts" / "summarize.py"),
+                "--require-readable",
+                "--write",
+                "--expect-trials",
+                "1",
+                str(job),
             ]
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
@@ -3111,7 +3192,8 @@ class TerminationSurfaceTests(unittest.TestCase):
             result_path.write_text("{}")
             result = subprocess.run(
                 command[:4] + ["--expect-trials", "2", str(job)],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn("expected 2 trials, found 1", result.stderr)
@@ -3138,9 +3220,7 @@ class ScrubbedResultTests(unittest.TestCase):
     def _trial(self, tmp: str, result_text: str) -> pathlib.Path:
         trial = pathlib.Path(tmp) / "fix-typo__abc"
         (trial / "agent").mkdir(parents=True)
-        (trial / "agent" / "codex.txt").write_text(
-            '{"type":"turn.completed","usage":{}}\n'
-        )
+        (trial / "agent" / "codex.txt").write_text('{"type":"turn.completed","usage":{}}\n')
         (trial / "result.json").write_text(result_text)
         return trial
 
@@ -3283,7 +3363,7 @@ class PmuxConcurrencyTests(unittest.TestCase):
         rung_a = (ROOT / "eval" / "scripts" / "rung-a.sh").read_text()
         self.assertIn("concurrent=1", rung_a)
         # run_pmux must not inherit the slice default.
-        body = rung_a[rung_a.index("run_pmux() {"):]
+        body = rung_a[rung_a.index("run_pmux() {") :]
         body = body[: body.index("\n}\n")]
         self.assertNotIn('concurrent="$(default_concurrent)"', body)
         self.assertIn("--n-concurrent 1", body)
@@ -3559,9 +3639,7 @@ class AgentInitFailureTests(unittest.TestCase):
                 )
             )
             summary = summarize_job(trial.parent)
-            self.assertEqual(
-                summary.class_counts, {"agent_init_failed:Revalidation": 1}
-            )
+            self.assertEqual(summary.class_counts, {"agent_init_failed:Revalidation": 1})
             self.assertEqual(summary.harness_terminated, 1)
             self.assertIn("agent_init_failed:Revalidation", render_table(summary))
 
@@ -3649,7 +3727,9 @@ class ArtifactIdentityTests(unittest.TestCase):
             (root / "py").write_bytes(b"py")
             record = plak_artifact_record(root / "plak", root / "js", root / "py", arch="amd64")
             self.assertEqual(record["harness"], "plak")
-            self.assertEqual(sorted(record["binaries"]), ["plak", "plakous-js-host", "plakous-py-host"])
+            self.assertEqual(
+                sorted(record["binaries"]), ["plak", "plakous-js-host", "plakous-py-host"]
+            )
             self.assertNotIn("source", record)
 
     def test_helpers_read_the_record_back(self) -> None:
@@ -3743,9 +3823,7 @@ class ArtifactInSummaryTests(unittest.TestCase):
             self._trial(job, "write-hello__aaa", self.SHA_A)
             self._trial(job, "sum-file__bbb", self.SHA_B)
             summary = summarize_job(job)
-            self.assertEqual(
-                summary.artifact_digests("pmuxd"), {self.SHA_B: 1, self.SHA_A: 1}
-            )
+            self.assertEqual(summary.artifact_digests("pmuxd"), {self.SHA_B: 1, self.SHA_A: 1})
             self.assertIn("MORE THAN ONE", render_table(summary))
 
     def test_a_job_with_no_artifact_record_prints_nothing_extra(self) -> None:
@@ -3778,6 +3856,7 @@ class ArtifactInSummaryTests(unittest.TestCase):
                 payload["rows"][0]["artifact"]["binaries"]["pmuxd"]["sha256"],
                 self.SHA_A,
             )
+
 
 if __name__ == "__main__":
     unittest.main()

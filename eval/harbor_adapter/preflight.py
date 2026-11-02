@@ -15,6 +15,7 @@ class PreflightError(RuntimeError):
 def task_budgets(environment: Any) -> tuple[float, float]:
     """Read the same pinned task timeout source Harbor uses (no CLI override)."""
     import tomllib
+
     try:
         task = tomllib.loads((Path(environment.environment_dir).parent / "task.toml").read_text())
         agent = float(task.get("agent", {}).get("timeout_sec", 600))
@@ -48,9 +49,7 @@ async def probe_executable(
     except Exception:
         raise PreflightError(f"{path} cell startability probe failed") from None
     if result.return_code != 0:
-        raise PreflightError(
-            f"{path} cell startability probe returned {result.return_code}"
-        )
+        raise PreflightError(f"{path} cell startability probe returned {result.return_code}")
     if version_argument is not None and not (result.stdout or "").startswith("plak "):
         raise PreflightError(f"{path} cell version probe returned no Plak version")
 
@@ -65,4 +64,6 @@ async def probe_run_capabilities(environment: Any, path: str) -> None:
     except Exception:
         raise PreflightError("Plak run capability probe failed") from None
     if result.return_code or "--leave-jobs-running" not in (result.stdout or ""):
-        raise PreflightError("Plak build lacks --leave-jobs-running; integrate amp-jobs and rebuild")
+        raise PreflightError(
+            "Plak build lacks --leave-jobs-running; integrate amp-jobs and rebuild"
+        )

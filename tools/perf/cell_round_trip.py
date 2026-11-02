@@ -39,7 +39,7 @@ def read_frame(child):
             chunks.extend(chunk)
         return chunks
 
-    length, = struct.unpack(">I", exact(4))
+    (length,) = struct.unpack(">I", exact(4))
     if length > MAX_FRAME:
         raise ValueError("over-bound worker frame")
     return json.loads(exact(length))
@@ -48,24 +48,50 @@ def read_frame(child):
 def run_cell(child, engine, cell):
     if engine == "quickjs":
         source = "text(await tools.noop({}))"
-        prelude = {"engine": "quickjs", "stored": {}, "tools": [
-            {"name": "noop", "tool_name": "noop", "kind": "function", "description": "noop"}]}
+        prelude = {
+            "engine": "quickjs",
+            "stored": {},
+            "tools": [
+                {"name": "noop", "tool_name": "noop", "kind": "function", "description": "noop"}
+            ],
+        }
         window = 10_000
     else:
         source, window = "await noop({})", None
-        bootstrap = {"source": "", "bindings": [
-            {"function": "noop", "tool": "noop", "input": "dictionary"}]} if cell == 1 else None
+        bootstrap = (
+            {
+                "source": "",
+                "bindings": [{"function": "noop", "tool": "noop", "input": "dictionary"}],
+            }
+            if cell == 1
+            else None
+        )
         prelude = {"engine": "monty", "bootstrap": bootstrap}
-    write_frame(child, {"frame": "start_cell", "cell": cell, "source": source,
-                        "prelude": prelude, "window": window})
+    write_frame(
+        child,
+        {
+            "frame": "start_cell",
+            "cell": cell,
+            "source": source,
+            "prelude": prelude,
+            "window": window,
+        },
+    )
     calls = accepted = 0
     while True:
         event = read_frame(child)
         kind = event["frame"]
         if kind == "nested_call":
             calls += 1
-            write_frame(child, {"frame": "nested_result", "cell": cell, "call": event["call"],
-                                "outcome": {"Ok": {"type": "int", "value": 7}}})
+            write_frame(
+                child,
+                {
+                    "frame": "nested_result",
+                    "cell": cell,
+                    "call": event["call"],
+                    "outcome": {"Ok": {"type": "int", "value": 7}},
+                },
+            )
         elif kind == "delivery":
             if event["verdict"]["verdict"] != "accepted":
                 raise RuntimeError(f"unaccepted nested result: {event}")
@@ -81,12 +107,20 @@ def run_cell(child, engine, cell):
 def measure(worker, engine):
     cold, warm = [], []
     config = {"engine": engine}
-    config.update({"heap_bytes": 64 * 1024 * 1024, "stack_bytes": 512 * 1024}
-                  if engine == "quickjs" else {"memory_bytes": 256 * 1024 * 1024})
+    config.update(
+        {"heap_bytes": 64 * 1024 * 1024, "stack_bytes": 512 * 1024}
+        if engine == "quickjs"
+        else {"memory_bytes": 256 * 1024 * 1024}
+    )
     for _ in range(5):
         began = time.monotonic()
-        child = subprocess.Popen([str(worker)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 env={"PATH": "/usr/bin:/bin"}, bufsize=0)
+        child = subprocess.Popen(
+            [str(worker)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin"},
+            bufsize=0,
+        )
         try:
             hello = read_frame(child)
             if hello.get("revision") != REVISION or hello.get("engine") != engine:
@@ -119,9 +153,18 @@ def main():
     for engine, binary in [("quickjs", "plakous-js-host"), ("monty", "plakous-py-host")]:
         cold, warm = measure((args.directory / binary).resolve(strict=True), engine)
         for phase, value in [("spawn_round_trip", cold), ("per_cell", warm)]:
-            print(json.dumps({"metric": f"cell_{engine}_{phase}_ms", "value": value,
-                              "unit": "ms", "machine": args.machine,
-                              "profile": args.profile}, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "metric": f"cell_{engine}_{phase}_ms",
+                        "value": value,
+                        "unit": "ms",
+                        "machine": args.machine,
+                        "profile": args.profile,
+                    },
+                    sort_keys=True,
+                )
+            )
 
 
 if __name__ == "__main__":

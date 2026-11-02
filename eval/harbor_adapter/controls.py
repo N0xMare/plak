@@ -73,9 +73,7 @@ def vendor_effort_ak(agent: str, effort: str) -> tuple[str, ...]:
         return (f"thinking={effort}",)
     if agent == "opencode":
         if effort not in OPENCODE_VARIANT:
-            raise ControlError(
-                f"OpenCode --variant has no documented {effort} on bakeoff models"
-            )
+            raise ControlError(f"OpenCode --variant has no documented {effort} on bakeoff models")
         return (f"variant={effort}",)
     raise ControlError(f"unknown vendor agent {agent!r}")
 

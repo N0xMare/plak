@@ -19,8 +19,12 @@ from harbor_adapter.pricing import RATE_CARD_PATH, from_harbor_context, resolve_
 from harbor_adapter.native_usage import extract_agent_usage
 from harbor_adapter.usage import read_archived_plak_usage
 from harbor_adapter.termination import (
-    CLASS_COMPLETED, RESULT_OK, find_job_dirs, load_json,
-    is_trial_dir, summarize_trial,
+    CLASS_COMPLETED,
+    RESULT_OK,
+    find_job_dirs,
+    load_json,
+    is_trial_dir,
+    summarize_trial,
 )
 from harbor_adapter.timing import trial_phases
 from harbor_adapter.verifier_evidence import inspect_verifier
@@ -56,8 +60,10 @@ def _quantile(values: list[float], fraction: float) -> float | None:
 
 def _distribution(values: list[float]) -> dict[str, float | int | None]:
     return {
-        "n": len(values), "median": _quantile(values, .5),
-        "p10": _quantile(values, .1), "p90": _quantile(values, .9),
+        "n": len(values),
+        "median": _quantile(values, 0.5),
+        "p10": _quantile(values, 0.1),
+        "p90": _quantile(values, 0.9),
         "min": min(values) if values else None,
         "max": max(values) if values else None,
     }
@@ -91,7 +97,11 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     kwargs = agent_config.get("kwargs") if isinstance(agent_config.get("kwargs"), dict) else {}
     task_config = config.get("task") if isinstance(config.get("task"), dict) else {}
     source = _safe_part(result.get("source")) or _safe_part(task_config.get("source"))
-    task_ref = _safe_part((result.get("task_id") or {}).get("ref")) if isinstance(result.get("task_id"), dict) else None
+    task_ref = (
+        _safe_part((result.get("task_id") or {}).get("ref"))
+        if isinstance(result.get("task_id"), dict)
+        else None
+    )
     task_ref = task_ref or _safe_part(task_config.get("ref"))
     task_checksum = _safe_part(result.get("task_checksum"))
     usage = result.get("agent_result") if isinstance(result.get("agent_result"), dict) else {}
@@ -109,13 +119,19 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         "cache_write": cache_write,
         "output": _integer(usage.get("n_output_tokens")),
         "reasoning": _integer(metadata.get("reasoning_tokens"))
-        if metadata.get("reasoning_tokens") is not None else _integer(usage.get("n_reasoning_tokens")),
+        if metadata.get("reasoning_tokens") is not None
+        else _integer(usage.get("n_reasoning_tokens")),
     }
-    harbor_tokens = {"input": raw_tokens["input"], "cache_read": raw_tokens["cache_read"],
-                     "output": raw_tokens["output"]}
+    harbor_tokens = {
+        "input": raw_tokens["input"],
+        "cache_read": raw_tokens["cache_read"],
+        "output": raw_tokens["output"],
+    }
     native_usage = extract_agent_usage(path / "agent", summary.record.harness)
     native_counts = native_usage.as_dict()
-    archived_plak = read_archived_plak_usage(path / "agent") if summary.record.harness == "plak" else None
+    archived_plak = (
+        read_archived_plak_usage(path / "agent") if summary.record.harness == "plak" else None
+    )
     if native_usage.usage_records:
         raw_tokens = {
             "input": native_usage.input_tokens,
@@ -134,7 +150,8 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
             "reasoning": measured.n_reasoning_tokens,
         }
     implied = from_harbor_context(
-        model or "", n_input_tokens=raw_tokens["input"],
+        model or "",
+        n_input_tokens=raw_tokens["input"],
         n_cache_tokens=raw_tokens["cache_read"],
         n_cache_write_tokens=raw_tokens["cache_write"],
         n_output_tokens=raw_tokens["output"],
@@ -144,10 +161,14 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     # Harbor's cost_usd can be an estimate. Its provenance is not billed money.
     status = _safe_part(metadata.get("cost_status")) or "unattributed"
     metadata_compactions = _integer(metadata.get("compaction_rows")) or 0
-    scope_unverified = any(
-        reason in metadata.get("missing_usage_buckets", ())
-        for reason in ("compaction_coverage", "endpoint_compaction_scope_unverified")
-    ) if isinstance(metadata.get("missing_usage_buckets"), (list, tuple)) else False
+    scope_unverified = (
+        any(
+            reason in metadata.get("missing_usage_buckets", ())
+            for reason in ("compaction_coverage", "endpoint_compaction_scope_unverified")
+        )
+        if isinstance(metadata.get("missing_usage_buckets"), (list, tuple))
+        else False
+    )
     if scope_unverified:
         reported = _number(metadata.get("observed_cost_subtotal_usd"))
         status = "observed_subtotal_unverified_compaction_scope"
@@ -155,9 +176,11 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         reported = _number(metadata.get("observed_cost_subtotal_usd"))
         missing_compaction_cost = _integer(metadata.get("missing_compaction_cost_rows"))
         missing_turn_cost = _integer(metadata.get("missing_turn_cost_rows"))
-        status = ("turn_subtotal_excludes_compactions"
-                  if missing_compaction_cost == metadata_compactions and missing_turn_cost == 0
-                  else "observed_subtotal_incomplete_reported_cost")
+        status = (
+            "turn_subtotal_excludes_compactions"
+            if missing_compaction_cost == metadata_compactions and missing_turn_cost == 0
+            else "observed_subtotal_incomplete_reported_cost"
+        )
     if archived_plak is not None and archived_plak.usage is not None:
         archive_scope_unverified = any(
             reason in archived_plak.usage.missing_buckets
@@ -171,13 +194,26 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
             status = archived_plak.usage.cost_status
         elif archived_plak.usage.compaction_rows:
             reported = archived_plak.usage.observed_cost_usd
-            status = ("turn_subtotal_excludes_compactions"
-                      if (archived_plak.usage.missing_compaction_cost_rows == archived_plak.usage.compaction_rows
-                          and archived_plak.usage.missing_turn_cost_rows == 0)
-                      else "observed_subtotal_incomplete_reported_cost")
-    usage_status = native_usage.status if native_usage.usage_records else _safe_part(metadata.get("usage_status")) or "unknown"
-    if summary.record.harness == "plak" and archived_plak is not None and archived_plak.usage is None \
-            and metadata.get("usage_scope") != "turns_plus_compactions_v1":
+            status = (
+                "turn_subtotal_excludes_compactions"
+                if (
+                    archived_plak.usage.missing_compaction_cost_rows
+                    == archived_plak.usage.compaction_rows
+                    and archived_plak.usage.missing_turn_cost_rows == 0
+                )
+                else "observed_subtotal_incomplete_reported_cost"
+            )
+    usage_status = (
+        native_usage.status
+        if native_usage.usage_records
+        else _safe_part(metadata.get("usage_status")) or "unknown"
+    )
+    if (
+        summary.record.harness == "plak"
+        and archived_plak is not None
+        and archived_plak.usage is None
+        and metadata.get("usage_scope") != "turns_plus_compactions_v1"
+    ):
         usage_status = "partial"
     if archived_plak is not None:
         if archived_plak.status == "complete":
@@ -191,7 +227,10 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         missing_buckets = list(native_usage.missing_buckets)
     if archived_plak is not None and archived_plak.usage is not None:
         missing_buckets = list(archived_plak.usage.missing_buckets)
-    elif summary.record.harness == "plak" and metadata.get("usage_scope") != "turns_plus_compactions_v1":
+    elif (
+        summary.record.harness == "plak"
+        and metadata.get("usage_scope") != "turns_plus_compactions_v1"
+    ):
         missing_buckets.append("compaction_scope_unverified")
     harbor_input = harbor_tokens["input"]
     harbor_cache = harbor_tokens["cache_read"]
@@ -199,7 +238,8 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     expected_harbor_input = raw_tokens["input"]
     native_marker = metadata.get("native_usage")
     normalized_result = (
-        isinstance(native_marker, dict) and native_marker.get("schemaVersion") == 1
+        isinstance(native_marker, dict)
+        and native_marker.get("schemaVersion") == 1
         and native_marker.get("harness") == summary.record.harness
         and native_marker.get("source_sha256") == native_usage.source_sha256
         and native_usage.source_sha256 is not None
@@ -209,57 +249,88 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         "opencode.step_finish.part.tokens.text_plus_reasoning",
     )
     opencode_marker_valid = (
-        normalized_result and isinstance(native_marker, dict)
+        normalized_result
+        and isinstance(native_marker, dict)
         and native_marker.get("source_schema") in opencode_schemas
     )
-    if (summary.record.harness == "opencode" and "native_usage" in metadata
-            and not opencode_marker_valid):
+    if (
+        summary.record.harness == "opencode"
+        and "native_usage" in metadata
+        and not opencode_marker_valid
+    ):
         usage_status = "partial"
         missing_buckets.append("native_usage_contract_unverified")
-    if (summary.record.harness == "pmux" and metadata.get("usage_status") == "complete"
-            and _integer(metadata.get("cache_write_tokens")) is not None):
+    if (
+        summary.record.harness == "pmux"
+        and metadata.get("usage_status") == "complete"
+        and _integer(metadata.get("cache_write_tokens")) is not None
+    ):
         normalized_result = True
     # Older pmux adapters existed on both sides of the prompt-total fix.
     # The structured result binds the full total, so the raw Harbor input
     # itself distinguishes the two archived conventions when metadata does not.
-    if (summary.record.harness == "pmux" and not normalized_result
-            and harbor_input is not None and raw_tokens["input"] is not None
-            and harbor_input == raw_tokens["input"]):
+    if (
+        summary.record.harness == "pmux"
+        and not normalized_result
+        and harbor_input is not None
+        and raw_tokens["input"] is not None
+        and harbor_input == raw_tokens["input"]
+    ):
         normalized_result = True
-    if (summary.record.harness in ("pi", "opencode") and not normalized_result
-            and expected_harbor_input is not None and raw_tokens["cache_write"] is not None):
+    if (
+        summary.record.harness in ("pi", "opencode")
+        and not normalized_result
+        and expected_harbor_input is not None
+        and raw_tokens["cache_write"] is not None
+    ):
         expected_harbor_input -= raw_tokens["cache_write"]
-    if (summary.record.harness == "pmux" and not normalized_result
-            and expected_harbor_input is not None and raw_tokens["cache_read"] is not None
-            and raw_tokens["cache_write"] is not None):
+    if (
+        summary.record.harness == "pmux"
+        and not normalized_result
+        and expected_harbor_input is not None
+        and raw_tokens["cache_read"] is not None
+        and raw_tokens["cache_write"] is not None
+    ):
         expected_harbor_input -= raw_tokens["cache_read"] + raw_tokens["cache_write"]
     expected_harbor_output = raw_tokens["output"]
     # OpenCode 1.18.30 stores visible output and reasoning separately. Older
     # Harbor rows (including our old normalized adapter rows) recorded only
     # visible output. The new bound adapter marker records their sum.
     canonical_opencode_output = (
-        summary.record.harness == "opencode" and opencode_marker_valid
-        and native_marker.get("source_schema") ==
-        "opencode.step_finish.part.tokens.text_plus_reasoning"
+        summary.record.harness == "opencode"
+        and opencode_marker_valid
+        and native_marker.get("source_schema")
+        == "opencode.step_finish.part.tokens.text_plus_reasoning"
     )
-    if (summary.record.harness == "opencode" and not canonical_opencode_output
-            and expected_harbor_output is not None and raw_tokens["reasoning"] is not None):
+    if (
+        summary.record.harness == "opencode"
+        and not canonical_opencode_output
+        and expected_harbor_output is not None
+        and raw_tokens["reasoning"] is not None
+    ):
         expected_harbor_output -= raw_tokens["reasoning"]
     native_disagreement = native_usage.usage_records > 0 and any(
         actual is not None and expected is not None and actual != expected
-        for actual, expected in ((harbor_input, expected_harbor_input),
-                                 (harbor_cache, raw_tokens["cache_read"]),
-                                 (harbor_output, expected_harbor_output))
+        for actual, expected in (
+            (harbor_input, expected_harbor_input),
+            (harbor_cache, raw_tokens["cache_read"]),
+            (harbor_output, expected_harbor_output),
+        )
     )
     archived_expected = None
     if archived_plak is not None:
-        archived_expected = (archived_plak.usage if metadata.get("usage_scope") == "turns_plus_compactions_v1"
-                             else archived_plak.turn_usage)
+        archived_expected = (
+            archived_plak.usage
+            if metadata.get("usage_scope") == "turns_plus_compactions_v1"
+            else archived_plak.turn_usage
+        )
     archived_plak_disagreement = archived_expected is not None and any(
         actual is not None and expected is not None and actual != expected
-        for actual, expected in ((harbor_input, archived_expected.n_input_tokens),
-                                 (harbor_cache, archived_expected.n_cache_tokens),
-                                 (harbor_output, archived_expected.n_output_tokens))
+        for actual, expected in (
+            (harbor_input, archived_expected.n_input_tokens),
+            (harbor_cache, archived_expected.n_cache_tokens),
+            (harbor_output, archived_expected.n_output_tokens),
+        )
     )
     if native_disagreement or archived_plak_disagreement:
         usage_status = "partial"
@@ -271,12 +342,18 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
             missing_buckets.append("request_completion_unverified")
     incomplete_usage = usage_status != "complete" or bool(missing_buckets)
     if incomplete_usage:
-        implied = type(implied)(None, "unresolved_usage", implied.card_id, implied.model_key, implied.basis)
+        implied = type(implied)(
+            None, "unresolved_usage", implied.card_id, implied.model_key, implied.basis
+        )
     phases = trial_phases(result)
     reward = summary.reward if loaded.ok else None
     verifier_evidence = inspect_verifier(
-        path, dataset=context.get("dataset"), slice_name=context.get("slice"),
-        task=task_name, task_ref=task_ref, task_checksum=task_checksum,
+        path,
+        dataset=context.get("dataset"),
+        slice_name=context.get("slice"),
+        task=task_name,
+        task_ref=task_ref,
+        task_checksum=task_checksum,
     )
     assertions_verified = verifier_evidence["status"] in ("not_required", "assertions_recorded")
     termination = summary.record.termination_class
@@ -292,13 +369,34 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     else:
         outcome = "verifier_pass" if reward > 0 else "verifier_fail"
     eligible = loaded.status == RESULT_OK and outcome in ("verifier_pass", "verifier_fail")
-    context_bindings = {key: context.get(key) for key in (
-        "arm", "slice", "account", "model", "effort", "arch", "cohort",
-        "repeat_block", "eval_source_commit", "eval_source_dirty",
-        "planned_trials", "attempts_per_task", "concurrency", "dataset",
-        "timeout_policy", "adapter_task_retries", "native_internal_retries",
-        "effort_semantics", "prompt_variant",
-    )} if context else None
+    context_bindings = (
+        {
+            key: context.get(key)
+            for key in (
+                "arm",
+                "slice",
+                "account",
+                "model",
+                "effort",
+                "arch",
+                "cohort",
+                "repeat_block",
+                "eval_source_commit",
+                "eval_source_dirty",
+                "planned_trials",
+                "attempts_per_task",
+                "concurrency",
+                "dataset",
+                "timeout_policy",
+                "adapter_task_retries",
+                "native_internal_retries",
+                "effort_semantics",
+                "prompt_variant",
+            )
+        }
+        if context
+        else None
+    )
     if context_bindings is not None:
         context_bindings["input_sha256"] = context.get("input_sha256")
         context_bindings["campaign_sha256"] = context.get("campaign_sha256")
@@ -308,12 +406,15 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         if card_pin and card_pin != _sha(RATE_CARD_PATH):
             context_mismatches.append("rate_card")
         if context.get("model"):
-            if model is None or (
-                resolve_model_key(context["model"]) or context["model"]
-            ) != (resolve_model_key(model) or model):
+            if model is None or (resolve_model_key(context["model"]) or context["model"]) != (
+                resolve_model_key(model) or model
+            ):
                 context_mismatches.append("model")
-        result_effort = (_safe_part(kwargs.get("reasoning_effort"))
-                         or _safe_part(kwargs.get("thinking")) or _safe_part(kwargs.get("effort")))
+        result_effort = (
+            _safe_part(kwargs.get("reasoning_effort"))
+            or _safe_part(kwargs.get("thinking"))
+            or _safe_part(kwargs.get("effort"))
+        )
         expected_effort = context.get("effort")
         if expected_effort is not None:
             actual_effort = result_effort or "none"
@@ -321,10 +422,17 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
                 context_mismatches.append("effort")
         expected_account = context.get("account")
         actual_account = _safe_part(kwargs.get("account")) or {
-            "codex": "codex", "grok-build": "grok", "pi": (
-                "codex" if model and model.startswith("openai/") else
-                "openrouter" if model and model.startswith("openrouter/") else None),
-            "opencode": "codex" if model and model.startswith("openai/") else "openrouter", "pmux": "claude",
+            "codex": "codex",
+            "grok-build": "grok",
+            "pi": (
+                "codex"
+                if model and model.startswith("openai/")
+                else "openrouter"
+                if model and model.startswith("openrouter/")
+                else None
+            ),
+            "opencode": "codex" if model and model.startswith("openai/") else "openrouter",
+            "pmux": "claude",
         }.get(summary.record.harness)
         if expected_account is not None and actual_account != expected_account:
             context_mismatches.append("account_or_route")
@@ -336,85 +444,143 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     evidence = load_json(path / "agent/cell-preflight.json").data
     evidence.update(load_json(path / "agent/harvest.json").data)
     adapter_validity = load_json(path / "agent/adapter-validity.json").data
-    if (evidence.get("generic_secret_pattern_hits")
-            or adapter_validity.get("codex_writeback_failed")
-            or adapter_validity.get("codex_harvest_failed")):
+    if (
+        evidence.get("generic_secret_pattern_hits")
+        or adapter_validity.get("codex_writeback_failed")
+        or adapter_validity.get("codex_harvest_failed")
+    ):
         attribution, outcome, eligible = "unknown", "unknown", False
-    evidence.update({"observed_config": observed, "checksum": task_checksum, "artifact": summary.artifact,
-                     "resolved_composition": resolved_composition(
-                         (path / "agent/plak-stderr.log").read_text(errors="replace")
-                         if (path / "agent/plak-stderr.log").is_file() else "")})
+    evidence.update(
+        {
+            "observed_config": observed,
+            "checksum": task_checksum,
+            "artifact": summary.artifact,
+            "resolved_composition": resolved_composition(
+                (path / "agent/plak-stderr.log").read_text(errors="replace")
+                if (path / "agent/plak-stderr.log").is_file()
+                else ""
+            ),
+        }
+    )
     plan = context.get("campaign")
-    validity = trial_gate(plan, context.get("arm"), task_name, evidence) if plan else ["campaign_missing"]
+    validity = (
+        trial_gate(plan, context.get("arm"), task_name, evidence) if plan else ["campaign_missing"]
+    )
     if plan:
         validity.extend("campaign:" + reason for reason in validate_campaign(plan))
-        canonical = hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        canonical = hashlib.sha256(
+            json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         if canonical != context.get("campaign_canonical_sha256"):
             validity.append("campaign_binding_mismatch")
     return {
-        "arm": context.get("arm") or job.parent.name, "job": str(job), "trial": summary.trial,
+        "arm": context.get("arm") or job.parent.name,
+        "job": str(job),
+        "trial": summary.trial,
         "slice": context.get("slice") if context else None,
         "cohort": context.get("cohort") if context else None,
         "repeat_block": context.get("repeat_block") if context else None,
         "comparison_context": context_bindings,
         "context_mismatches": context_mismatches,
-        "observed_config": observed, "validity_failures": validity,
+        "observed_config": observed,
+        "validity_failures": validity,
         "provider_retries": retry_telemetry(observed),
         "argv": load_json(path / "agent/argv.json").data,
         "campaign_sha256": context.get("campaign_sha256"),
         "comparison_context_sha256": _sha(context_path) if context else None,
-        "task": task_name, "source": source, "task_ref": task_ref,
+        "task": task_name,
+        "source": source,
+        "task_ref": task_ref,
         "task_checksum": task_checksum,
         "repair_of": _safe_part(config.get("source_trial")),
-        "harness": summary.record.harness, "model": model,
-        "effort": (_safe_part(kwargs.get("reasoning_effort"))
-                   or _safe_part(kwargs.get("thinking")) or _safe_part(kwargs.get("effort"))),
+        "harness": summary.record.harness,
+        "model": model,
+        "effort": (
+            _safe_part(kwargs.get("reasoning_effort"))
+            or _safe_part(kwargs.get("thinking"))
+            or _safe_part(kwargs.get("effort"))
+        ),
         "comparison_effort": context.get("effort") if context else None,
         "agent_version": _safe_part(kwargs.get("version")),
         "reported_agent_version": _safe_part(agent_info.get("version")),
-        "pinned_agent_version": (_safe_part(metadata.get("claude_pin"))
-                                 if summary.record.harness == "pmux" else None),
+        "pinned_agent_version": (
+            _safe_part(metadata.get("claude_pin")) if summary.record.harness == "pmux" else None
+        ),
         "environment_image_digest": evidence.get("image"),
         "artifact": summary.artifact,
-        "result_status": loaded.status, "result_sha256": _sha(path / "result.json"),
-        "outcome": outcome, "termination": termination, "failure_class": attribution,
+        "result_status": loaded.status,
+        "result_sha256": _sha(path / "result.json"),
+        "outcome": outcome,
+        "termination": termination,
+        "failure_class": attribution,
         "eligible_pass_rate": eligible,
-        "pass": (reward > 0 if loaded.status == RESULT_OK and reward is not None
-                 and eligible else None),
-        "reward": reward if eligible else None, "raw_reward": summary.reward,
+        "pass": (
+            reward > 0 if loaded.status == RESULT_OK and reward is not None and eligible else None
+        ),
+        "reward": reward if eligible else None,
+        "raw_reward": summary.reward,
         "verifier_evidence": verifier_evidence,
         "exception_type": exception,
         "tokens": raw_tokens,
-        "harbor_tokens": {"input": harbor_input, "cache_read": harbor_cache, "output": harbor_output},
+        "harbor_tokens": {
+            "input": harbor_input,
+            "cache_read": harbor_cache,
+            "output": harbor_output,
+        },
         "native_usage": native_counts,
-        "archived_plak_usage": ({"status": archived_plak.status,
-                                 "source_sha256": archived_plak.source_sha256,
-                                 "product_session_id": archived_plak.product_session_id,
-                                 "runtime_session_id": archived_plak.runtime_session_id,
-                                 "compaction_rows": archived_plak.usage.compaction_rows if archived_plak.usage else None}
-                                if archived_plak is not None else None),
+        "archived_plak_usage": (
+            {
+                "status": archived_plak.status,
+                "source_sha256": archived_plak.source_sha256,
+                "product_session_id": archived_plak.product_session_id,
+                "runtime_session_id": archived_plak.runtime_session_id,
+                "compaction_rows": archived_plak.usage.compaction_rows
+                if archived_plak.usage
+                else None,
+            }
+            if archived_plak is not None
+            else None
+        ),
         "harbor_usage_normalized": normalized_result,
         "native_harbor_disagreement": native_disagreement,
         "archived_plak_harbor_disagreement": archived_plak_disagreement,
-        "tokens_complete": not incomplete_usage and raw_tokens["input"] is not None and raw_tokens["output"] is not None,
+        "tokens_complete": not incomplete_usage
+        and raw_tokens["input"] is not None
+        and raw_tokens["output"] is not None,
         "usage_status": usage_status,
         "missing_usage_buckets": missing_buckets,
-        "cost": {"implied_usd": implied.usd, "implied_status": implied.status,
-                 "rate_card_id": implied.card_id, "model_key": implied.model_key,
-                 "basis": implied.basis,
-                 "reported_usd": reported, "reported_status": status},
-        "phases_sec": {key: phases[key] for key in ("agent_setup_sec", "agent_execution_sec", "verifier_sec")},
-        "evidence": {"result": str(path / "result.json"),
-                     "agent": str(path / "agent") if (path / "agent").is_dir() else None},
+        "cost": {
+            "implied_usd": implied.usd,
+            "implied_status": implied.status,
+            "rate_card_id": implied.card_id,
+            "model_key": implied.model_key,
+            "basis": implied.basis,
+            "reported_usd": reported,
+            "reported_status": status,
+        },
+        "phases_sec": {
+            key: phases[key] for key in ("agent_setup_sec", "agent_execution_sec", "verifier_sec")
+        },
+        "evidence": {
+            "result": str(path / "result.json"),
+            "agent": str(path / "agent") if (path / "agent").is_dir() else None,
+        },
     }
 
 
-def _complete_total(rows: list[dict[str, Any]], getter, complete=lambda row: True) -> dict[str, Any]:
+def _complete_total(
+    rows: list[dict[str, Any]], getter, complete=lambda row: True
+) -> dict[str, Any]:
     values = [getter(row) for row in rows]
     observed = [value for value in values if value is not None]
-    return {"observed_total": sum(observed) if observed else None,
-            "complete_total": sum(observed) if len(observed) == len(rows) and all(complete(r) for r in rows) else None,
-            "covered": len(observed), "attempts": len(rows)}
+    return {
+        "observed_total": sum(observed) if observed else None,
+        "complete_total": sum(observed)
+        if len(observed) == len(rows) and all(complete(r) for r in rows)
+        else None,
+        "covered": len(observed),
+        "attempts": len(rows),
+    }
 
 
 def _arm(name: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -423,63 +589,115 @@ def _arm(name: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     eligible_passed = [r for r in eligible if r["pass"] is True]
     passed = [r for r in rows if r["pass"] is True]
     cost = _complete_total(rows, lambda r: r["cost"]["implied_usd"])
-    reported_cost = _complete_total(rows, lambda r: r["cost"]["reported_usd"],
-                                    lambda r: r["usage_status"] == "complete" and
-                                    r["cost"]["reported_status"] in
-                                    ("known", "reported", "mixed_reported"))
-    input_tokens = _complete_total(rows, lambda r: r["tokens"]["input"], lambda r: r["tokens_complete"])
-    output_tokens = _complete_total(rows, lambda r: r["tokens"]["output"], lambda r: r["tokens_complete"])
+    reported_cost = _complete_total(
+        rows,
+        lambda r: r["cost"]["reported_usd"],
+        lambda r: (
+            r["usage_status"] == "complete"
+            and r["cost"]["reported_status"] in ("known", "reported", "mixed_reported")
+        ),
+    )
+    input_tokens = _complete_total(
+        rows, lambda r: r["tokens"]["input"], lambda r: r["tokens_complete"]
+    )
+    output_tokens = _complete_total(
+        rows, lambda r: r["tokens"]["output"], lambda r: r["tokens_complete"]
+    )
     times = [r["phases_sec"]["agent_execution_sec"] for r in rows]
     times = [x for x in times if x is not None]
     total_time = _complete_total(rows, lambda r: r["phases_sec"]["agent_execution_sec"])
+
     def per_attempt(total):
-        return total["complete_total"] / len(rows) if rows and total["complete_total"] is not None else None
+        return (
+            total["complete_total"] / len(rows)
+            if rows and total["complete_total"] is not None
+            else None
+        )
+
     successful_cost = _complete_total(passed, lambda r: r["cost"]["implied_usd"])
-    successful_input = _complete_total(passed, lambda r: r["tokens"]["input"], lambda r: r["tokens_complete"])
-    successful_output = _complete_total(passed, lambda r: r["tokens"]["output"], lambda r: r["tokens_complete"])
+    successful_input = _complete_total(
+        passed, lambda r: r["tokens"]["input"], lambda r: r["tokens_complete"]
+    )
+    successful_output = _complete_total(
+        passed, lambda r: r["tokens"]["output"], lambda r: r["tokens_complete"]
+    )
+
     def per_success(total):
-        return total["complete_total"] / len(passed) if passed and total["complete_total"] is not None else None
+        return (
+            total["complete_total"] / len(passed)
+            if passed and total["complete_total"] is not None
+            else None
+        )
+
     return {
-        "arm": name, "attempts": len(rows), "eligible": len(eligible),
+        "arm": name,
+        "attempts": len(rows),
+        "eligible": len(eligible),
         "eligible_passes": len(eligible_passed),
-        "passes": len(passed), "outcomes": dict(sorted(Counter(r["outcome"] for r in rows).items())),
+        "passes": len(passed),
+        "outcomes": dict(sorted(Counter(r["outcome"] for r in rows).items())),
         "pass_at_1": len(eligible_passed) / len(eligible) if eligible else None,
         "pass_at_1_ci95_wilson": _wilson(len(eligible_passed), len(eligible)),
         "primary_scored_attempts": len(scored),
-        "primary_pass_rate": sum(r["pass"] is True for r in scored) / len(scored) if scored else None,
-        "infra_rate": sum(r["failure_class"] == "infra" for r in rows) / len(rows) if rows else None,
-        "unknown_rate": sum(r["failure_class"] == "unknown" for r in rows) / len(rows) if rows else None,
+        "primary_pass_rate": sum(r["pass"] is True for r in scored) / len(scored)
+        if scored
+        else None,
+        "infra_rate": sum(r["failure_class"] == "infra" for r in rows) / len(rows)
+        if rows
+        else None,
+        "unknown_rate": sum(r["failure_class"] == "unknown" for r in rows) / len(rows)
+        if rows
+        else None,
         "operational_pass_per_attempt": len(passed) / len(rows) if rows else None,
         "operational_pass_per_attempt_ci95_wilson": _wilson(len(passed), len(rows)),
-        "implied_cost_usd": cost, "implied_cost_per_attempt_usd": per_attempt(cost),
+        "implied_cost_usd": cost,
+        "implied_cost_per_attempt_usd": per_attempt(cost),
         "reported_cost_usd": reported_cost,
         "implied_cost_per_successful_attempt_usd": per_success(successful_cost),
         "total_attempt_cost_per_pass_usd": cost["complete_total"] / len(passed)
-        if passed and cost["complete_total"] is not None else None,
-        "input_tokens": input_tokens, "output_tokens": output_tokens,
+        if passed and cost["complete_total"] is not None
+        else None,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
         "input_tokens_per_attempt": per_attempt(input_tokens),
         "output_tokens_per_attempt": per_attempt(output_tokens),
         "input_tokens_per_successful_attempt": per_success(successful_input),
         "output_tokens_per_successful_attempt": per_success(successful_output),
         "total_attempt_input_tokens_per_pass": input_tokens["complete_total"] / len(passed)
-        if passed and input_tokens["complete_total"] is not None else None,
+        if passed and input_tokens["complete_total"] is not None
+        else None,
         "total_attempt_output_tokens_per_pass": output_tokens["complete_total"] / len(passed)
-        if passed and output_tokens["complete_total"] is not None else None,
+        if passed and output_tokens["complete_total"] is not None
+        else None,
         "agent_execution_sec": _distribution(times),
         "agent_execution_per_attempt_sec": per_attempt(total_time),
         "total_attempt_execution_per_pass_sec": total_time["complete_total"] / len(passed)
-        if passed and total_time["complete_total"] is not None else None,
-        "agent_execution_per_successful_attempt_sec": _distribution([
-            r["phases_sec"]["agent_execution_sec"] for r in passed
-            if r["phases_sec"]["agent_execution_sec"] is not None]),
+        if passed and total_time["complete_total"] is not None
+        else None,
+        "agent_execution_per_successful_attempt_sec": _distribution(
+            [
+                r["phases_sec"]["agent_execution_sec"]
+                for r in passed
+                if r["phases_sec"]["agent_execution_sec"] is not None
+            ]
+        ),
         "agent_execution_coverage": {"covered": len(times), "attempts": len(rows)},
     }
 
 
-def build_report(jobs: list[Path], selection: Path | None = None,
-                 roots: list[Path] | None = None, *, prompt_ablation: bool = False) -> dict[str, Any]:
-    rows = [_trial(job, trial) for job in sorted(set(jobs))
-            for trial in sorted(job.iterdir()) if is_trial_dir(trial)]
+def build_report(
+    jobs: list[Path],
+    selection: Path | None = None,
+    roots: list[Path] | None = None,
+    *,
+    prompt_ablation: bool = False,
+) -> dict[str, Any]:
+    rows = [
+        _trial(job, trial)
+        for job in sorted(set(jobs))
+        for trial in sorted(job.iterdir())
+        if is_trial_dir(trial)
+    ]
     selection_binding = None
     if selection is not None:
         index = json.loads(selection.read_text(encoding="utf-8"))
@@ -518,35 +736,59 @@ def build_report(jobs: list[Path], selection: Path | None = None,
             row["selection_record_path"] = record.get("result_json_path")
             selected.append(row)
         rows = selected
-        selection_binding = {"path": str(selection), "sha256": _sha(selection),
-                             "records": len(records), "schema": index.get("schema")}
+        selection_binding = {
+            "path": str(selection),
+            "sha256": _sha(selection),
+            "records": len(records),
+            "schema": index.get("schema"),
+        }
     arms = defaultdict(list)
     by_task = defaultdict(lambda: defaultdict(list))
     for row in rows:
         context = row["comparison_context"] or {}
-        canonical_model = resolve_model_key(context.get("model") or row["model"] or "") or context.get("model") or row["model"]
+        canonical_model = (
+            resolve_model_key(context.get("model") or row["model"] or "")
+            or context.get("model")
+            or row["model"]
+        )
         canonical_effort = context.get("effort") if context else row["effort"]
         arm_key = (row["arm"], row["slice"], canonical_model, canonical_effort, row["cohort"])
         arms[arm_key].append(row)
-        family = (row["slice"], row["cohort"], row["repeat_block"],
-                  context.get("account"), canonical_model,
-                  canonical_effort, row["task"])
+        family = (
+            row["slice"],
+            row["cohort"],
+            row["repeat_block"],
+            context.get("account"),
+            canonical_model,
+            canonical_effort,
+            row["task"],
+        )
         by_task[family][row["arm"]].append(row)
+
     def artifact_signature(row: dict[str, Any]) -> str:
         artifact = row["artifact"]
-        return json.dumps({"binaries": artifact.get("binaries"),
-                           "arch": artifact.get("arch"),
-                           "version": artifact.get("version"),
-                           "source": artifact.get("source")}, sort_keys=True)
+        return json.dumps(
+            {
+                "binaries": artifact.get("binaries"),
+                "arch": artifact.get("arch"),
+                "version": artifact.get("version"),
+                "source": artifact.get("source"),
+            },
+            sort_keys=True,
+        )
 
     arm_artifact_consistent = {}
     for key, entries in arms.items():
         originals = [row for row in entries if not row["repair_of"]]
-        arm_artifact_consistent[key] = (bool(originals) and
-            all(row["artifact"].get("binaries") for row in originals) and
-            len({artifact_signature(row) for row in originals}) == 1)
+        arm_artifact_consistent[key] = (
+            bool(originals)
+            and all(row["artifact"].get("binaries") for row in originals)
+            and len({artifact_signature(row) for row in originals}) == 1
+        )
     pairs = []
-    for (slice_name, cohort, repeat_block, account, model_key, effort, task), groups in sorted(by_task.items(), key=lambda item: str(item[0])):
+    for (slice_name, cohort, repeat_block, account, model_key, effort, task), groups in sorted(
+        by_task.items(), key=lambda item: str(item[0])
+    ):
         if prompt_ablation:
             variant_arms = set(groups)
             if len(variant_arms) != 2 or not any(
@@ -557,37 +799,55 @@ def build_report(jobs: list[Path], selection: Path | None = None,
             if any(
                 row["harness"] != "plak"
                 or (row["comparison_context"] or {}).get("prompt_variant") != arm.rsplit("-", 1)[1]
-                for arm, entries in groups.items() for row in entries
+                for arm, entries in groups.items()
+                for row in entries
             ):
                 raise ValueError("prompt ablation arm and executed variant differ")
         signatures = {
-            arm: sorted({((r["comparison_context"] or {}).get("dataset") or r["source"],
-                         r["task_ref"], r["task_checksum"]) for r in entries}, key=str)
+            arm: sorted(
+                {
+                    (
+                        (r["comparison_context"] or {}).get("dataset") or r["source"],
+                        r["task_ref"],
+                        r["task_checksum"],
+                    )
+                    for r in entries
+                },
+                key=str,
+            )
             for arm, entries in groups.items()
         }
         uniform = len({str(value) for value in signatures.values()}) == 1
-        provenance_complete = all(all(all(part is not None for part in signature)
-                                      for signature in values)
-                                  for values in signatures.values())
+        provenance_complete = all(
+            all(all(part is not None for part in signature) for signature in values)
+            for values in signatures.values()
+        )
         complete = len(groups) >= 2
-        originals = {arm: [r for r in entries if not r["repair_of"]] for arm, entries in groups.items()}
+        originals = {
+            arm: [r for r in entries if not r["repair_of"]] for arm, entries in groups.items()
+        }
         repeats_match = len({len(v) for v in originals.values()}) == 1 and all(originals.values())
         slot_sets = {
-            arm: [r.get("selection_slot") for r in entries]
-            for arm, entries in originals.items()
+            arm: [r.get("selection_slot") for r in entries] for arm, entries in originals.items()
         }
         # Harbor's trial suffix is random, not a repeat index. One attempt per
         # task has an unambiguous slot; repeated attempts require a selection
         # index with explicit shared slot identities.
         single_attempt = repeats_match and all(len(entries) == 1 for entries in originals.values())
-        repeat_slots_verified = single_attempt or (repeats_match and
-            all(all(slot is not None for slot in slots) for slots in slot_sets.values()))
-        repeat_slots_match = (
-            single_attempt or (repeat_slots_verified and
-            all(len(slots) == len(set(slots)) for slots in slot_sets.values()) and
-            len({json.dumps(sorted(slots, key=str)) for slots in slot_sets.values()}) == 1)
+        repeat_slots_verified = single_attempt or (
+            repeats_match
+            and all(all(slot is not None for slot in slots) for slots in slot_sets.values())
         )
-        status = "matched" if uniform and provenance_complete and complete and repeat_slots_match else "mismatched"
+        repeat_slots_match = single_attempt or (
+            repeat_slots_verified
+            and all(len(slots) == len(set(slots)) for slots in slot_sets.values())
+            and len({json.dumps(sorted(slots, key=str)) for slots in slot_sets.values()}) == 1
+        )
+        status = (
+            "matched"
+            if uniform and provenance_complete and complete and repeat_slots_match
+            else "mismatched"
+        )
         reasons = []
         if not complete:
             reasons.append("no_comparison_arm")
@@ -605,54 +865,110 @@ def build_report(jobs: list[Path], selection: Path | None = None,
             reasons.append("repairs_present")
         controls = {arm: entries[0]["comparison_context"] for arm, entries in groups.items()}
         artifact_complete = all(
-            arm_artifact_consistent.get((arm, slice_name, model_key, effort, cohort), False) and
-            all(r["artifact"].get("binaries")
+            arm_artifact_consistent.get((arm, slice_name, model_key, effort, cohort), False)
+            and all(
+                r["artifact"].get("binaries")
                 and r["artifact"].get("harness") == r["harness"]
                 and r["artifact"].get("arch") == (r["comparison_context"] or {}).get("arch")
-                and (bool(r["pinned_agent_version"] and
-                          r["reported_agent_version"] == f'{r["pinned_agent_version"]} (Claude Code)' and
-                          r["artifact"].get("version") == r["pinned_agent_version"] and
-                          {"pmux", "pmuxd", "pmux-rmuxd", "pmux-launcher", "pmux-hook",
-                           "claude-archive", "node-archive"}.issubset(r["artifact"]["binaries"]) and
-                          (r["artifact"].get("source") or {}).get("commit") and
-                          (r["artifact"].get("source") or {}).get("dirty") is False)
-                     if r["harness"] == "pmux" else
-                     (r["harness"] == "plak"
-                      or not (r["agent_version"] or r["reported_agent_version"])
-                      or r["artifact"].get("version") ==
-                      (r["agent_version"] or r["reported_agent_version"])))
-                for r in entries)
+                and (
+                    bool(
+                        r["pinned_agent_version"]
+                        and r["reported_agent_version"]
+                        == f'{r["pinned_agent_version"]} (Claude Code)'
+                        and r["artifact"].get("version") == r["pinned_agent_version"]
+                        and {
+                            "pmux",
+                            "pmuxd",
+                            "pmux-rmuxd",
+                            "pmux-launcher",
+                            "pmux-hook",
+                            "claude-archive",
+                            "node-archive",
+                        }.issubset(r["artifact"]["binaries"])
+                        and (r["artifact"].get("source") or {}).get("commit")
+                        and (r["artifact"].get("source") or {}).get("dirty") is False
+                    )
+                    if r["harness"] == "pmux"
+                    else (
+                        r["harness"] == "plak"
+                        or not (r["agent_version"] or r["reported_agent_version"])
+                        or r["artifact"].get("version")
+                        == (r["agent_version"] or r["reported_agent_version"])
+                    )
+                )
+                for r in entries
+            )
             for arm, entries in originals.items()
         )
-        if prompt_ablation and len({artifact_signature(row) for entries in originals.values()
-                                    for row in entries}) != 1:
+        if (
+            prompt_ablation
+            and len({artifact_signature(row) for entries in originals.values() for row in entries})
+            != 1
+        ):
             artifact_complete = False
         known_controls = all(control is not None for control in controls.values())
         commits = {control["eval_source_commit"] for control in controls.values() if control}
-        clean = known_controls and all(not control["eval_source_dirty"] for control in controls.values())
-        context_consistent = not any(r["context_mismatches"] for entries in groups.values() for r in entries)
-        equal_control_keys = ("arch", "dataset", "concurrency", "attempts_per_task", "input_sha256",
-                              "timeout_policy", "adapter_task_retries",
-                              "native_internal_retries", "effort_semantics", "campaign_sha256")
+        clean = known_controls and all(
+            not control["eval_source_dirty"] for control in controls.values()
+        )
+        context_consistent = not any(
+            r["context_mismatches"] for entries in groups.values() for r in entries
+        )
+        equal_control_keys = (
+            "arch",
+            "dataset",
+            "concurrency",
+            "attempts_per_task",
+            "input_sha256",
+            "timeout_policy",
+            "adapter_task_retries",
+            "native_internal_retries",
+            "effort_semantics",
+            "campaign_sha256",
+        )
         if not prompt_ablation:
             equal_control_keys += ("prompt_variant",)
-        control_mismatches = [key for key in equal_control_keys if known_controls and
-                              (any(control.get(key) is None for control in controls.values()) or
-                               len({json.dumps(control.get(key), sort_keys=True) for control in controls.values()}) != 1)]
+        control_mismatches = [
+            key
+            for key in equal_control_keys
+            if known_controls
+            and (
+                any(control.get(key) is None for control in controls.values())
+                or len(
+                    {json.dumps(control.get(key), sort_keys=True) for control in controls.values()}
+                )
+                != 1
+            )
+        ]
         if known_controls and any(
             len(originals[arm]) != control.get("attempts_per_task")
             for arm, control in controls.items()
         ):
             control_mismatches.append("planned_original_attempts")
-        validity_failures = sorted({reason for entries in originals.values() for r in entries
-                                    for reason in r.get("validity_failures", [])})
-        if known_controls and any(control.get("effort_semantics") == "omit effort override"
-                                  for control in controls.values()):
+        validity_failures = sorted(
+            {
+                reason
+                for entries in originals.values()
+                for r in entries
+                for reason in r.get("validity_failures", [])
+            }
+        )
+        if known_controls and any(
+            control.get("effort_semantics") == "omit effort override"
+            for control in controls.values()
+        ):
             validity_failures.append("omitted_effort")
         reasons.extend("validity:" + reason for reason in validity_failures)
-        comparison_eligible = (status == "matched" and known_controls and clean and
-                               len(commits) == 1 and context_consistent and not control_mismatches
-                               and artifact_complete and not validity_failures)
+        comparison_eligible = (
+            status == "matched"
+            and known_controls
+            and clean
+            and len(commits) == 1
+            and context_consistent
+            and not control_mismatches
+            and artifact_complete
+            and not validity_failures
+        )
         if not known_controls:
             reasons.append("comparison_context_missing")
         elif not clean:
@@ -668,8 +984,11 @@ def build_report(jobs: list[Path], selection: Path | None = None,
             status = "unverified"
         latency = {}
         for arm, entries in originals.items():
-            values = [v["phases_sec"]["agent_execution_sec"] for v in entries
-                      if v["phases_sec"]["agent_execution_sec"] is not None]
+            values = [
+                v["phases_sec"]["agent_execution_sec"]
+                for v in entries
+                if v["phases_sec"]["agent_execution_sec"] is not None
+            ]
             if values:
                 latency[arm] = statistics.mean(values)
         diff = None
@@ -679,48 +998,88 @@ def build_report(jobs: list[Path], selection: Path | None = None,
         )
         if status in ("matched", "unverified") and complete_timing and len(latency) >= 2:
             labels = sorted(latency)
-            diff = [{"arms": [left, right], "seconds": latency[left] - latency[right]}
-                    for index, left in enumerate(labels) for right in labels[index + 1:]]
-        pairs.append({"task": task, "slice": slice_name, "cohort": cohort,
-                      "repeat_block": repeat_block, "account": account,
-                      "model_key": model_key, "effort": effort,
-                      "status": status, "comparison_eligible": comparison_eligible,
-                      "reasons": reasons, "controls": controls,
-                      "signatures": {arm: [list(v) for v in values] for arm, values in signatures.items()},
-                      "original_attempts": {arm: len(v) for arm, v in originals.items()},
-                      "repair_attempts": {arm: len(groups[arm]) - len(v) for arm, v in originals.items()},
-                      "paired_agent_execution_difference": diff})
-    original_arms = {name: [r for r in group if not r["repair_of"]]
-                     for name, group in arms.items()}
-    repair_arms = {name: [r for r in group if r["repair_of"]]
-                   for name, group in arms.items()}
+            diff = [
+                {"arms": [left, right], "seconds": latency[left] - latency[right]}
+                for index, left in enumerate(labels)
+                for right in labels[index + 1 :]
+            ]
+        pairs.append(
+            {
+                "task": task,
+                "slice": slice_name,
+                "cohort": cohort,
+                "repeat_block": repeat_block,
+                "account": account,
+                "model_key": model_key,
+                "effort": effort,
+                "status": status,
+                "comparison_eligible": comparison_eligible,
+                "reasons": reasons,
+                "controls": controls,
+                "signatures": {
+                    arm: [list(v) for v in values] for arm, values in signatures.items()
+                },
+                "original_attempts": {arm: len(v) for arm, v in originals.items()},
+                "repair_attempts": {arm: len(groups[arm]) - len(v) for arm, v in originals.items()},
+                "paired_agent_execution_difference": diff,
+            }
+        )
+    original_arms = {name: [r for r in group if not r["repair_of"]] for name, group in arms.items()}
+    repair_arms = {name: [r for r in group if r["repair_of"]] for name, group in arms.items()}
+
     def arm_label(key):
         name, slice_name, model, effort, cohort = key
         same_name = sum(other[0] == name for other in arms) > 1
         return "/".join(str(part or "unknown") for part in key) if same_name else name
+
     contexts = []
     for root in sorted(set(roots or [])):
         context_path = root / "comparison-context.json"
         if context_path.is_file():
             loaded = load_json(context_path)
-            contexts.append({"path": str(context_path), "sha256": _sha(context_path),
-                             "status": loaded.status, "binding": loaded.data})
-    planned = sum(binding["binding"].get("planned_trials", 0)
-                  for binding in contexts if isinstance(binding["binding"].get("planned_trials"), int))
+            contexts.append(
+                {
+                    "path": str(context_path),
+                    "sha256": _sha(context_path),
+                    "status": loaded.status,
+                    "binding": loaded.data,
+                }
+            )
+    planned = sum(
+        binding["binding"].get("planned_trials", 0)
+        for binding in contexts
+        if isinstance(binding["binding"].get("planned_trials"), int)
+    )
     method = "offline observed original attempts; repairs and historical unverified campaigns are diagnostic only; selected Rung A A/B verifier rates require asserted CTRF tests; primary paired estimates require campaign and trial validity gates and at least three aligned scored trials per task/arm; diagnostic per-arm Wilson intervals assume independent attempts; no broad coding population or causal ranking claim"
     if prompt_ablation:
         method += "; prompt ablation admits only an executed legacy/parity variant delta on the same Plak artifact"
-    return {"schemaVersion": 1, "method": method,
-            "selection": selection_binding,
-            "invocations": contexts, "planned_trials": planned if contexts else None,
-            "planned_unattempted": max(0, planned - len(rows)) if contexts else None,
-            "rate_card_sha256": _sha(RATE_CARD_PATH), "trials": rows,
-            "arms": [_arm(arm_label(name), group) for name, group in sorted(original_arms.items(), key=lambda item: str(item[0]))],
-            "repair_arms": [_arm(arm_label(name), group) for name, group in sorted(repair_arms.items(), key=lambda item: str(item[0])) if group],
-            "pairs": pairs, "paired_estimates": paired_reports(rows, pairs),
-            "campaign_blockers": campaign_health(rows),
-            "warnings": (["Task/source/repeat mismatches make paired comparisons incomplete."]
-                         if any(p["status"] != "matched" for p in pairs) else [])}
+    return {
+        "schemaVersion": 1,
+        "method": method,
+        "selection": selection_binding,
+        "invocations": contexts,
+        "planned_trials": planned if contexts else None,
+        "planned_unattempted": max(0, planned - len(rows)) if contexts else None,
+        "rate_card_sha256": _sha(RATE_CARD_PATH),
+        "trials": rows,
+        "arms": [
+            _arm(arm_label(name), group)
+            for name, group in sorted(original_arms.items(), key=lambda item: str(item[0]))
+        ],
+        "repair_arms": [
+            _arm(arm_label(name), group)
+            for name, group in sorted(repair_arms.items(), key=lambda item: str(item[0]))
+            if group
+        ],
+        "pairs": pairs,
+        "paired_estimates": paired_reports(rows, pairs),
+        "campaign_blockers": campaign_health(rows),
+        "warnings": (
+            ["Task/source/repeat mismatches make paired comparisons incomplete."]
+            if any(p["status"] != "matched" for p in pairs)
+            else []
+        ),
+    }
 
 
 def discover(roots: list[Path]) -> list[Path]:
@@ -728,52 +1087,120 @@ def discover(roots: list[Path]) -> list[Path]:
 
 
 def render_markdown(report: dict[str, Any], output_dir: Path) -> str:
-    lines = ["# Offline eval report", "", report["method"], "",
-             "| Arm | Attempts | Eligible | Eligible passes | Operational passes | Operational pass/attempt | Conditional pass@1 (95% Wilson CI) | Cost coverage | Implied $/attempt | Total attempt $/pass | Token coverage | Input tokens/attempt | Execution coverage | Execution median s |",
-             "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---: | --- | ---: | --- | ---: |"]
+    lines = [
+        "# Offline eval report",
+        "",
+        report["method"],
+        "",
+        "| Arm | Attempts | Eligible | Eligible passes | Operational passes | Operational pass/attempt | Conditional pass@1 (95% Wilson CI) | Cost coverage | Implied $/attempt | Total attempt $/pass | Token coverage | Input tokens/attempt | Execution coverage | Execution median s |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---: | --- | ---: | --- | ---: |",
+    ]
     if report["planned_trials"] is not None:
-        lines[3:3] = [f"Planned trials: {report['planned_trials']}; observed attempts: {len(report['trials'])}; not started or not archived: {report['planned_unattempted']}.", ""]
+        lines[3:3] = [
+            f"Planned trials: {report['planned_trials']}; observed attempts: {len(report['trials'])}; not started or not archived: {report['planned_unattempted']}.",
+            "",
+        ]
+
     def shown(value: Any, digits: int = 3) -> str:
-        return "—" if value is None else f"{value:.{digits}f}" if isinstance(value, float) else str(value)
+        return (
+            "—"
+            if value is None
+            else f"{value:.{digits}f}"
+            if isinstance(value, float)
+            else str(value)
+        )
+
     for arm in report["arms"]:
         ci = arm["pass_at_1_ci95_wilson"]
         rate = shown(arm["pass_at_1"]) + (f" [{ci[0]:.3f}, {ci[1]:.3f}]" if ci else "")
         cost_coverage = arm["implied_cost_usd"]
         token_coverage = arm["input_tokens"]
         time_coverage = arm["agent_execution_coverage"]
-        lines.append("| " + " | ".join((arm["arm"], str(arm["attempts"]), str(arm["eligible"]),
-            str(arm["eligible_passes"]), str(arm["passes"]),
-            shown(arm["operational_pass_per_attempt"]), rate,
-            f"{cost_coverage['covered']}/{cost_coverage['attempts']}",
-            shown(arm["implied_cost_per_attempt_usd"], 6),
-            shown(arm["total_attempt_cost_per_pass_usd"], 6),
-            f"{token_coverage['covered']}/{token_coverage['attempts']}",
-            shown(arm["input_tokens_per_attempt"]),
-            f"{time_coverage['covered']}/{time_coverage['attempts']}",
-            shown(arm["agent_execution_sec"]["median"]))) + " |")
-    lines += ["", "Missing cost or usage leaves full-attempt totals unresolved. Reported Harbor dollars are recorded separately from frozen-card implied dollars.",
-              "", "## Pair coverage", "", "| Task | Status | Reasons | Execution difference s |", "| --- | --- | --- | ---: |"]
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    arm["arm"],
+                    str(arm["attempts"]),
+                    str(arm["eligible"]),
+                    str(arm["eligible_passes"]),
+                    str(arm["passes"]),
+                    shown(arm["operational_pass_per_attempt"]),
+                    rate,
+                    f"{cost_coverage['covered']}/{cost_coverage['attempts']}",
+                    shown(arm["implied_cost_per_attempt_usd"], 6),
+                    shown(arm["total_attempt_cost_per_pass_usd"], 6),
+                    f"{token_coverage['covered']}/{token_coverage['attempts']}",
+                    shown(arm["input_tokens_per_attempt"]),
+                    f"{time_coverage['covered']}/{time_coverage['attempts']}",
+                    shown(arm["agent_execution_sec"]["median"]),
+                )
+            )
+            + " |"
+        )
+    lines += [
+        "",
+        "Missing cost or usage leaves full-attempt totals unresolved. Reported Harbor dollars are recorded separately from frozen-card implied dollars.",
+        "",
+        "## Pair coverage",
+        "",
+        "| Task | Status | Reasons | Execution difference s |",
+        "| --- | --- | --- | ---: |",
+    ]
     for pair in report["pairs"]:
         diff = pair["paired_agent_execution_difference"]
-        differences = ", ".join(f"{item['arms'][0]}−{item['arms'][1]}: {shown(item['seconds'])}"
-                                for item in diff) if diff else "—"
-        lines.append(f"| {pair['task']} | {pair['status']} | {', '.join(pair['reasons']) or '—'} | {differences} |")
-    lines += ["", "## Paired Estimates", "",
-              "Task-weighted scored pass-rate differences; two-stage and fixed-task percentile bootstrap intervals. At least three aligned scored trials per task and arm. No multiplicity-adjusted claim."]
+        differences = (
+            ", ".join(
+                f"{item['arms'][0]}−{item['arms'][1]}: {shown(item['seconds'])}" for item in diff
+            )
+            if diff
+            else "—"
+        )
+        lines.append(
+            f"| {pair['task']} | {pair['status']} | {', '.join(pair['reasons']) or '—'} | {differences} |"
+        )
+    lines += [
+        "",
+        "## Paired Estimates",
+        "",
+        "Task-weighted scored pass-rate differences; two-stage and fixed-task percentile bootstrap intervals. At least three aligned scored trials per task and arm. No multiplicity-adjusted claim.",
+    ]
     for paired in report.get("paired_estimates", []):
         result = paired["primary"]
-        lines.append(f"{paired['arms'][0]} - {paired['arms'][1]}: {shown(result['difference'])}; tasks={result['tasks']}; task-population CI={result['task_population_ci95']}; fixed-task CI={result['fixed_tasks_ci95']}")
-    lines += ["", "## Trial drilldown", "", "| Arm | Task | Trial | Outcome | Verifier evidence | Termination | Raw reward | Qualified reward | Implied USD | Reported USD | Agent s | Result |",
-              "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |"]
+        lines.append(
+            f"{paired['arms'][0]} - {paired['arms'][1]}: {shown(result['difference'])}; tasks={result['tasks']}; task-population CI={result['task_population_ci95']}; fixed-task CI={result['fixed_tasks_ci95']}"
+        )
+    lines += [
+        "",
+        "## Trial drilldown",
+        "",
+        "| Arm | Task | Trial | Outcome | Verifier evidence | Termination | Raw reward | Qualified reward | Implied USD | Reported USD | Agent s | Result |",
+        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
     for trial in report["trials"]:
         result_path = Path(trial["evidence"]["result"])
         try:
             link = result_path.relative_to(output_dir)
         except ValueError:
             link = Path(__import__("os").path.relpath(result_path, output_dir))
-        lines.append("| " + " | ".join((trial["arm"], trial["task"], trial["trial"],
-            trial["outcome"], trial["verifier_evidence"]["status"], trial["termination"],
-            shown(trial["raw_reward"]), shown(trial["reward"]),
-            shown(trial["cost"]["implied_usd"], 6), shown(trial["cost"]["reported_usd"], 6),
-            shown(trial["phases_sec"]["agent_execution_sec"]), f"[result]({link.as_posix()})")) + " |")
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    trial["arm"],
+                    trial["task"],
+                    trial["trial"],
+                    trial["outcome"],
+                    trial["verifier_evidence"]["status"],
+                    trial["termination"],
+                    shown(trial["raw_reward"]),
+                    shown(trial["reward"]),
+                    shown(trial["cost"]["implied_usd"], 6),
+                    shown(trial["cost"]["reported_usd"], 6),
+                    shown(trial["phases_sec"]["agent_execution_sec"]),
+                    f"[result]({link.as_posix()})",
+                )
+            )
+            + " |"
+        )
     return "\n".join(lines) + "\n"

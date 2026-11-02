@@ -40,9 +40,10 @@ def sha(data: bytes) -> str:
 
 def executable_bytes(name: str, tag: str = "one") -> bytes:
     # The snapshot install runs `plak version --state-key`.
-    return (f"#!/bin/sh\n# {name} {tag}\n"
-            'case "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) if [ -n "$REJECT_BINARY_MANIFEST" ]; then echo partial >"$3/binary-id"; exit 2; fi; echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\n'
-            ).encode()
+    return (
+        f"#!/bin/sh\n# {name} {tag}\n"
+        'case "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) if [ -n "$REJECT_BINARY_MANIFEST" ]; then echo partial >"$3/binary-id"; exit 2; fi; echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\n'
+    ).encode()
 
 
 def write_executables(directory: pathlib.Path, tag: str = "one") -> None:
@@ -57,25 +58,43 @@ def fake_metadata(base: pathlib.Path) -> dict:
 
     `testonly` is a dev edge and `buildonly` is a build edge; neither is linked.
     """
-    def package(name: str, directory: pathlib.Path, source: str | None, license_: str,
-                files: dict[str, str]) -> dict:
+
+    def package(
+        name: str, directory: pathlib.Path, source: str | None, license_: str, files: dict[str, str]
+    ) -> dict:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "Cargo.toml").write_text("")
         for file, text in files.items():
             (directory / file).write_text(text)
-        return {"id": f"{name}-id", "name": name, "version": "1.0.0", "source": source,
-                "license": license_, "repository": f"https://example.invalid/{name}",
-                "manifest_path": str(directory / "Cargo.toml")}
+        return {
+            "id": f"{name}-id",
+            "name": name,
+            "version": "1.0.0",
+            "source": source,
+            "license": license_,
+            "repository": f"https://example.invalid/{name}",
+            "manifest_path": str(directory / "Cargo.toml"),
+        }
 
     registry = "registry+https://github.com/rust-lang/crates.io-index"
     packages = [
         package("plak", base / "ws/bin/plak", None, "MIT", {"LICENSE": "ours"}),
         package("plakous-js-runtime", base / "ws/crates/js", None, "MIT", {"LICENSE": "ours"}),
         package("plakous-py-worker", base / "ws/crates/py", None, "MIT", {"LICENSE": "ours"}),
-        package("vendored-protocol", base / "ws/vendor/protocol", None, "Apache-2.0",
-                {"LICENSE": "apache", "NOTICE": "notice text", "README.md": "no"}),
-        package("left", base / "registry/left", registry, "MIT OR Apache-2.0",
-                {"LICENSE-MIT": "mit", "LICENSE-APACHE": "apache", "src.rs": ""}),
+        package(
+            "vendored-protocol",
+            base / "ws/vendor/protocol",
+            None,
+            "Apache-2.0",
+            {"LICENSE": "apache", "NOTICE": "notice text", "README.md": "no"},
+        ),
+        package(
+            "left",
+            base / "registry/left",
+            registry,
+            "MIT OR Apache-2.0",
+            {"LICENSE-MIT": "mit", "LICENSE-APACHE": "apache", "src.rs": ""},
+        ),
         package("deep", base / "registry/deep", registry, "BSD-3-Clause", {"COPYING": "bsd"}),
         package("testonly", base / "registry/testonly", registry, "MIT", {"LICENSE": "x"}),
         package("buildonly", base / "registry/buildonly", registry, "MIT", {"LICENSE": "x"}),
@@ -86,16 +105,28 @@ def fake_metadata(base: pathlib.Path) -> dict:
         return {"id": id_, "deps": [{"pkg": dep, "dep_kinds": kinds} for dep, kinds in deps]}
 
     nodes = [
-        node("plak-id", ("vendored-protocol-id", normal), ("left-id", normal),
-             ("testonly-id", [{"kind": "dev", "target": None}]),
-             ("buildonly-id", [{"kind": "build", "target": None}])),
-        node("plakous-js-runtime-id"), node("plakous-py-worker-id", ("left-id", normal)),
-        node("vendored-protocol-id"), node("left-id", ("deep-id", normal)),
-        node("deep-id"), node("testonly-id"), node("buildonly-id"),
+        node(
+            "plak-id",
+            ("vendored-protocol-id", normal),
+            ("left-id", normal),
+            ("testonly-id", [{"kind": "dev", "target": None}]),
+            ("buildonly-id", [{"kind": "build", "target": None}]),
+        ),
+        node("plakous-js-runtime-id"),
+        node("plakous-py-worker-id", ("left-id", normal)),
+        node("vendored-protocol-id"),
+        node("left-id", ("deep-id", normal)),
+        node("deep-id"),
+        node("testonly-id"),
+        node("buildonly-id"),
     ]
     members = ["plak-id", "plakous-js-runtime-id", "plakous-py-worker-id", "vendored-protocol-id"]
-    return {"packages": packages, "resolve": {"nodes": nodes}, "workspace_members": members,
-            "workspace_root": str(base / "ws")}
+    return {
+        "packages": packages,
+        "resolve": {"nodes": nodes},
+        "workspace_members": members,
+        "workspace_root": str(base / "ws"),
+    }
 
 
 def make_release(base: pathlib.Path, triple: str = LINUX, tag: str = "one") -> pathlib.Path:
@@ -103,8 +134,9 @@ def make_release(base: pathlib.Path, triple: str = LINUX, tag: str = "one") -> p
     artifacts = base / f"artifacts-{triple}-{tag}"
     write_executables(artifacts, tag)
     out = base / "site/releases/download" / f"v{VERSION}"
-    release_tarball.pack(VERSION, triple, artifacts, out, 1_700_000_000,
-                         fake_metadata(base / "meta"), static=False)
+    release_tarball.pack(
+        VERSION, triple, artifacts, out, 1_700_000_000, fake_metadata(base / "meta"), static=False
+    )
     return out
 
 
@@ -155,37 +187,55 @@ class ReleaseTarballTests(unittest.TestCase):
         stem = f"plak-{VERSION}-{LINUX}"
         with tarfile.open(tarball) as archive:
             members = {member.name: member for member in archive.getmembers()}
-            self.assertEqual(sorted(members), sorted([
-                stem, f"{stem}/LICENSE", f"{stem}/THIRD-PARTY", f"{stem}/plakous-py-host", f"{stem}/plak",
-                f"{stem}/plakous-js-host", f"{stem}/licenses",
-                f"{stem}/licenses/deep-1.0.0", f"{stem}/licenses/deep-1.0.0/COPYING",
-                f"{stem}/licenses/left-1.0.0", f"{stem}/licenses/left-1.0.0/LICENSE-APACHE",
-                f"{stem}/licenses/left-1.0.0/LICENSE-MIT",
-                f"{stem}/licenses/vendored-protocol-1.0.0",
-                f"{stem}/licenses/vendored-protocol-1.0.0/LICENSE",
-                f"{stem}/licenses/vendored-protocol-1.0.0/NOTICE",
-            ]))
+            self.assertEqual(
+                sorted(members),
+                sorted(
+                    [
+                        stem,
+                        f"{stem}/LICENSE",
+                        f"{stem}/THIRD-PARTY",
+                        f"{stem}/plakous-py-host",
+                        f"{stem}/plak",
+                        f"{stem}/plakous-js-host",
+                        f"{stem}/licenses",
+                        f"{stem}/licenses/deep-1.0.0",
+                        f"{stem}/licenses/deep-1.0.0/COPYING",
+                        f"{stem}/licenses/left-1.0.0",
+                        f"{stem}/licenses/left-1.0.0/LICENSE-APACHE",
+                        f"{stem}/licenses/left-1.0.0/LICENSE-MIT",
+                        f"{stem}/licenses/vendored-protocol-1.0.0",
+                        f"{stem}/licenses/vendored-protocol-1.0.0/LICENSE",
+                        f"{stem}/licenses/vendored-protocol-1.0.0/NOTICE",
+                    ]
+                ),
+            )
             for name in EXECUTABLES:
                 self.assertEqual(members[f"{stem}/{name}"].mode, 0o755)
-                self.assertEqual(archive.extractfile(f"{stem}/{name}").read(),
-                                 executable_bytes(name))
-            self.assertEqual({(m.uid, m.gid, m.uname, m.mtime) for m in members.values()},
-                             {(0, 0, "", 1_700_000_000)})
+                self.assertEqual(
+                    archive.extractfile(f"{stem}/{name}").read(), executable_bytes(name)
+                )
+            self.assertEqual(
+                {(m.uid, m.gid, m.uname, m.mtime) for m in members.values()},
+                {(0, 0, "", 1_700_000_000)},
+            )
             third_party = archive.extractfile(f"{stem}/THIRD-PARTY").read().decode()
-            self.assertEqual(archive.extractfile(f"{stem}/LICENSE").read(),
-                             (ROOT / "LICENSE").read_bytes())
+            self.assertEqual(
+                archive.extractfile(f"{stem}/LICENSE").read(), (ROOT / "LICENSE").read_bytes()
+            )
         listed = [line.split()[0] for line in third_party.splitlines()[3:]]
         self.assertEqual(listed, ["deep", "left", "vendored-protocol"])
         self.assertIn("left 1.0.0  MIT OR Apache-2.0  https://example.invalid/left", third_party)
-        self.assertEqual((out / "SHA256SUMS").read_text(),
-                         f"{sha(first)}  plak-{VERSION}-{LINUX}.tar.gz\n")
+        self.assertEqual(
+            (out / "SHA256SUMS").read_text(), f"{sha(first)}  plak-{VERSION}-{LINUX}.tar.gz\n"
+        )
 
     def test_sums_cover_every_tarball_in_the_directory(self) -> None:
         make_release(self.base)
         out = make_release(self.base, "aarch64-apple-darwin")
         names = [line.split()[1] for line in (out / "SHA256SUMS").read_text().splitlines()]
-        self.assertEqual(names, [f"plak-{VERSION}-aarch64-apple-darwin.tar.gz",
-                                 f"plak-{VERSION}-{LINUX}.tar.gz"])
+        self.assertEqual(
+            names, [f"plak-{VERSION}-aarch64-apple-darwin.tar.gz", f"plak-{VERSION}-{LINUX}.tar.gz"]
+        )
 
     def test_require_static_refuses_an_elf_with_a_program_interpreter(self) -> None:
         def elf(interp: bool) -> bytes:
@@ -202,25 +252,36 @@ class ReleaseTarballTests(unittest.TestCase):
         (artifacts / "plakous-py-host").write_bytes(elf(False))
         release_tarball.pack(VERSION, LINUX, artifacts, self.base / "ok", 0, metadata, static=True)
         (artifacts / "plakous-py-host").write_bytes(elf(True))
-        with self.assertRaisesRegex(release_tarball.ReleaseError, "plakous-py-host: dynamically linked"):
-            release_tarball.pack(VERSION, LINUX, artifacts, self.base / "no", 0, metadata,
-                                 static=True)
+        with self.assertRaisesRegex(
+            release_tarball.ReleaseError, "plakous-py-host: dynamically linked"
+        ):
+            release_tarball.pack(
+                VERSION, LINUX, artifacts, self.base / "no", 0, metadata, static=True
+            )
         self.assertFalse((self.base / "no").exists())
 
     def test_tree_lines_keep_name_and_version_and_drop_suffixes(self) -> None:
-        text = "\n".join([
-            "plak v0.0.2 (/tmp/plak)",
-            "serde v1.0.229",
-            "serde v1.0.229 (*)",
-            "clap_derive v4.6.7 (proc-macro)",
-            "toml v1.1.8+spec-1.1.0",
-            "left v1.0.0 (/tmp/left) (*)",
-            "",
-        ])
-        self.assertEqual(release_tarball.parse_tree_packages(text), {
-            ("plak", "0.0.2"), ("serde", "1.0.229"), ("clap_derive", "4.6.7"),
-            ("toml", "1.1.8+spec-1.1.0"), ("left", "1.0.0"),
-        })
+        text = "\n".join(
+            [
+                "plak v0.0.2 (/tmp/plak)",
+                "serde v1.0.229",
+                "serde v1.0.229 (*)",
+                "clap_derive v4.6.7 (proc-macro)",
+                "toml v1.1.8+spec-1.1.0",
+                "left v1.0.0 (/tmp/left) (*)",
+                "",
+            ]
+        )
+        self.assertEqual(
+            release_tarball.parse_tree_packages(text),
+            {
+                ("plak", "0.0.2"),
+                ("serde", "1.0.229"),
+                ("clap_derive", "4.6.7"),
+                ("toml", "1.1.8+spec-1.1.0"),
+                ("left", "1.0.0"),
+            },
+        )
         with self.assertRaisesRegex(release_tarball.ReleaseError, "unparsed"):
             release_tarball.parse_tree_package("not a package")
 
@@ -232,20 +293,32 @@ class ReleaseTarballTests(unittest.TestCase):
             directory.mkdir(parents=True)
             (directory / "Cargo.toml").write_text("")
             (directory / "LICENSE").write_text(name)
-            metadata["packages"].append({
-                "id": f"{name}-id", "name": name, "version": "1.0.0", "source": registry,
-                "license": "Apache-2.0", "repository": f"https://example.invalid/{name}",
-                "manifest_path": str(directory / "Cargo.toml"),
-            })
+            metadata["packages"].append(
+                {
+                    "id": f"{name}-id",
+                    "name": name,
+                    "version": "1.0.0",
+                    "source": registry,
+                    "license": "Apache-2.0",
+                    "repository": f"https://example.invalid/{name}",
+                    "manifest_path": str(directory / "Cargo.toml"),
+                }
+            )
             metadata["resolve"]["nodes"].append({"id": f"{name}-id", "deps": []})
             for node in metadata["resolve"]["nodes"]:
                 if node["id"] == "plak-id":
-                    node["deps"].append({"pkg": f"{name}-id", "dep_kinds": [{"kind": None, "target": None}]})
+                    node["deps"].append(
+                        {"pkg": f"{name}-id", "dep_kinds": [{"kind": None, "target": None}]}
+                    )
         unified = [package["name"] for package in release_tarball.third_party(metadata)]
         self.assertEqual(unified, ["deep", "gix", "jj-lib", "left", "vendored-protocol"])
         linked = {
-            ("plak", "1.0.0"), ("plakous-js-runtime", "1.0.0"), ("plakous-py-worker", "1.0.0"),
-            ("vendored-protocol", "1.0.0"), ("left", "1.0.0"), ("deep", "1.0.0"),
+            ("plak", "1.0.0"),
+            ("plakous-js-runtime", "1.0.0"),
+            ("plakous-py-worker", "1.0.0"),
+            ("vendored-protocol", "1.0.0"),
+            ("left", "1.0.0"),
+            ("deep", "1.0.0"),
         }
         exact = [package["name"] for package in release_tarball.third_party(metadata, linked)]
         self.assertEqual(exact, ["deep", "left", "vendored-protocol"])
@@ -260,13 +333,49 @@ class ReleaseTarballTests(unittest.TestCase):
             release_tarball.release_tree_command(DARWIN, packages)
             for packages in release_tarball.RELEASE_RESOLUTIONS
         ]
-        self.assertEqual(commands, [
-            ["cargo", "tree", "--locked", "--offline", "-e", "normal", "--target", DARWIN,
-             "--prefix", "none", "--charset", "ascii", "-f", "{p}", "-p", "plak"],
-            ["cargo", "tree", "--locked", "--offline", "-e", "normal", "--target", DARWIN,
-             "--prefix", "none", "--charset", "ascii", "-f", "{p}",
-             "-p", "plakous-js-runtime", "-p", "plakous-py-worker"],
-        ])
+        self.assertEqual(
+            commands,
+            [
+                [
+                    "cargo",
+                    "tree",
+                    "--locked",
+                    "--offline",
+                    "-e",
+                    "normal",
+                    "--target",
+                    DARWIN,
+                    "--prefix",
+                    "none",
+                    "--charset",
+                    "ascii",
+                    "-f",
+                    "{p}",
+                    "-p",
+                    "plak",
+                ],
+                [
+                    "cargo",
+                    "tree",
+                    "--locked",
+                    "--offline",
+                    "-e",
+                    "normal",
+                    "--target",
+                    DARWIN,
+                    "--prefix",
+                    "none",
+                    "--charset",
+                    "ascii",
+                    "-f",
+                    "{p}",
+                    "-p",
+                    "plakous-js-runtime",
+                    "-p",
+                    "plakous-py-worker",
+                ],
+            ],
+        )
         for command in commands:
             self.assertNotIn("--features", command)
             self.assertNotIn("--all-features", command)
@@ -300,8 +409,10 @@ class ReleaseClosureTests(unittest.TestCase):
                 )
                 members = set(metadata["workspace_members"])
                 vendor = pathlib.Path(metadata["workspace_root"]) / "vendor"
-                by_key = {(package["name"], package["version"]): package
-                          for package in metadata["packages"]}
+                by_key = {
+                    (package["name"], package["version"]): package
+                    for package in metadata["packages"]
+                }
                 expected = set()
                 for key in linked:
                     package = by_key[key]
@@ -309,7 +420,9 @@ class ReleaseClosureTests(unittest.TestCase):
                     ours = package["id"] in members and vendor not in directory.parents
                     if not ours:
                         expected.add(key)
-                self.assertEqual({(package["name"], package["version"]) for package in listed}, expected)
+                self.assertEqual(
+                    {(package["name"], package["version"]) for package in listed}, expected
+                )
                 self.assertIn("monty-typeshed", names)
 
 
@@ -325,15 +438,23 @@ class InstallScriptTests(unittest.TestCase):
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         self.gh_log = self.base / "gh.log"
-        self.stub("uname", 'case "$1" in -s) echo "${FAKE_OS:-Linux}" ;; '
-                           '-m) echo "${FAKE_ARCH:-x86_64}" ;; esac')
+        self.stub(
+            "uname",
+            'case "$1" in -s) echo "${FAKE_OS:-Linux}" ;; -m) echo "${FAKE_ARCH:-x86_64}" ;; esac',
+        )
         # Not signed in unless FAKE_GH is set; `verify` exits FAKE_GH_VERIFY.
-        self.stub("gh", f'echo "$*" >>{self.gh_log}\n[ -n "${{FAKE_GH:-}}" ] || exit 1\n'
-                        'case "$1" in attestation) exit "${FAKE_GH_VERIFY:-0}" ;; esac')
-        self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith("PLAK_")}
-        self.env.update(HOME=str(self.home), PLAK_RELEASE_BASE=self.server.url,
-                        TMPDIR=str(self.base), PATH=f"{self.stubs}{os.pathsep}{os.environ['PATH']}")
+        self.stub(
+            "gh",
+            f'echo "$*" >>{self.gh_log}\n[ -n "${{FAKE_GH:-}}" ] || exit 1\n'
+            'case "$1" in attestation) exit "${FAKE_GH_VERIFY:-0}" ;; esac',
+        )
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("PLAK_")}
+        self.env.update(
+            HOME=str(self.home),
+            PLAK_RELEASE_BASE=self.server.url,
+            TMPDIR=str(self.base),
+            PATH=f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
+        )
         self.lib = self.home / ".local/lib/plak"
 
     def stub(self, name: str, body: str) -> None:
@@ -342,8 +463,14 @@ class InstallScriptTests(unittest.TestCase):
         path.chmod(0o755)
 
     def install(self, **env: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["/bin/sh", str(ROOT / "install.sh")], env={**self.env, **env},
-                              capture_output=True, text=True, timeout=60, check=False)
+        return subprocess.run(
+            ["/bin/sh", str(ROOT / "install.sh")],
+            env={**self.env, **env},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
 
     def expected_snapshot(self, tag: str = "one") -> pathlib.Path:
         digests = {name: sha(executable_bytes(name, tag)) for name in EXECUTABLES}
@@ -387,11 +514,18 @@ class InstallScriptTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
         artifacts = self.base / "built"
         write_executables(artifacts)
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=release; '
-                  + block + '\nprintf "%s\\n" "$bin" "$js_host" "$py_host"')
-        built = subprocess.run(["bash", "-c", script, "snapshot",
-                                *(str(artifacts / name) for name in EXECUTABLES)],
-                               env=self.env, capture_output=True, text=True, check=False)
+        script = (
+            'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=release; '
+            + block
+            + '\nprintf "%s\\n" "$bin" "$js_host" "$py_host"'
+        )
+        built = subprocess.run(
+            ["bash", "-c", script, "snapshot", *(str(artifacts / name) for name in EXECUTABLES)],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         self.assertEqual(built.returncode, 0, built.stderr)
         result = self.install(PLAK_VERSION=VERSION)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -446,8 +580,9 @@ class InstallScriptTests(unittest.TestCase):
         self.stub("sysctl", "echo 1")  # an x86_64 shell under Rosetta
         result = self.install(FAKE_OS="Darwin", FAKE_ARCH="x86_64")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(os.readlink(self.home / ".local/bin/plak"),
-                         str(self.expected_snapshot("mac") / "plak"))
+        self.assertEqual(
+            os.readlink(self.home / ".local/bin/plak"), str(self.expected_snapshot("mac") / "plak")
+        )
 
     def test_foreign_links_and_unsafe_directories_are_refused(self) -> None:
         bin_dir = self.home / ".local/bin"
@@ -476,12 +611,19 @@ class PackageReleaseTests(unittest.TestCase):
         self.base = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.base)
         self.repo = self.base / "repo"
-        for path in ("tools/release/package-release.sh", "tools/release/release_tarball.py",
-                     "tools/build/build-plak.sh", "tools/musl/musl-toolchain.sh", "LICENSE"):
+        for path in (
+            "tools/release/package-release.sh",
+            "tools/release/release_tarball.py",
+            "tools/build/build-plak.sh",
+            "tools/musl/musl-toolchain.sh",
+            "LICENSE",
+        ):
             (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / path, self.repo / path)
         # The real check prints a report; stdout must stay the output directory.
-        (self.repo / "tools/build/check-artifact-linkage.py").write_text("print('artifact linkage checked')\n")
+        (self.repo / "tools/build/check-artifact-linkage.py").write_text(
+            "print('artifact linkage checked')\n"
+        )
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         self.log = self.base / "calls.log"
@@ -493,29 +635,43 @@ class PackageReleaseTests(unittest.TestCase):
         directory.mkdir(parents=True)
         (directory / "Cargo.toml").write_text("")
         (directory / "LICENSE").write_text("jj")
-        metadata["packages"].append({
-            "id": "jj-lib-id", "name": "jj-lib", "version": "1.0.0",
-            "source": "registry+https://github.com/rust-lang/crates.io-index",
-            "license": "Apache-2.0", "repository": "https://example.invalid/jj-lib",
-            "manifest_path": str(directory / "Cargo.toml"),
-        })
+        metadata["packages"].append(
+            {
+                "id": "jj-lib-id",
+                "name": "jj-lib",
+                "version": "1.0.0",
+                "source": "registry+https://github.com/rust-lang/crates.io-index",
+                "license": "Apache-2.0",
+                "repository": "https://example.invalid/jj-lib",
+                "manifest_path": str(directory / "Cargo.toml"),
+            }
+        )
         metadata["resolve"]["nodes"].append({"id": "jj-lib-id", "deps": []})
         for node in metadata["resolve"]["nodes"]:
             if node["id"] == "plak-id":
                 node["deps"].append(
-                    {"pkg": "jj-lib-id", "dep_kinds": [{"kind": None, "target": None}]})
+                    {"pkg": "jj-lib-id", "dep_kinds": [{"kind": None, "target": None}]}
+                )
         self.metadata.write_text(json.dumps(metadata))
-        self.stub("uname", 'case "$1" in -s) echo "${FAKE_OS:-Linux}" ;; '
-                           '-m) echo "${FAKE_ARCH:-x86_64}" ;; esac')
+        self.stub(
+            "uname",
+            'case "$1" in -s) echo "${FAKE_OS:-Linux}" ;; -m) echo "${FAKE_ARCH:-x86_64}" ;; esac',
+        )
         self.stub("rustup", "echo x86_64-unknown-linux-musl")
         self.stub("musl-gcc", "true")
         self.stub("strip", "true")  # Cargo writes shell-script executables in this fixture.
-        self.stub("git", 'case "$1" in status) printf "%s" "${FAKE_DIRTY:-}" ;; '
-                         'tag) echo "${FAKE_TAG:-}" ;; log) echo 1700000000 ;; esac')
+        self.stub(
+            "git",
+            'case "$1" in status) printf "%s" "${FAKE_DIRTY:-}" ;; '
+            'tag) echo "${FAKE_TAG:-}" ;; log) echo 1700000000 ;; esac',
+        )
         writer = "".join(
             f"printf '#!/bin/sh\\n# {name}\\n' >\"$out/{name}\"; chmod 755 \"$out/{name}\"; "
-            for name in EXECUTABLES)
-        self.stub("cargo", f"""cflags="CFLAGS_${{CARGO_BUILD_TARGET//-/_}}"
+            for name in EXECUTABLES
+        )
+        self.stub(
+            "cargo",
+            f"""cflags="CFLAGS_${{CARGO_BUILD_TARGET//-/_}}"
 printf 'cargo %s target=%s flags=%s cflags=%s\\n' "$*" "$CARGO_BUILD_TARGET" \
 "$(printf '%s' "${{CARGO_ENCODED_RUSTFLAGS:-}}" | tr '\\037' ' ')" "${{!cflags:-}}" >>{self.log}
 case "$1" in
@@ -526,21 +682,33 @@ case "$1" in
     printf '%s\\n' 'plak v1.0.0' 'plakous-js-runtime v1.0.0' 'plakous-py-worker v1.0.0' \\
       'vendored-protocol v1.0.0' 'left v1.0.0' 'deep v1.0.0' ;;
   build) out="$CARGO_TARGET_DIR/$CARGO_BUILD_TARGET/release"; mkdir -p "$out"; {writer};;
-esac""")
-        self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith(("CARGO_", "RUSTFLAGS", "CC_"))}
-        self.env.update(PATH=f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
-                        CARGO_TARGET_DIR=str(self.base / "target"),
-                        CARGO_HOME=str(self.base), HOME=str(self.base / "home"))
+esac""",
+        )
+        self.env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("CARGO_", "RUSTFLAGS", "CC_"))
+        }
+        self.env.update(
+            PATH=f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
+            CARGO_TARGET_DIR=str(self.base / "target"),
+            CARGO_HOME=str(self.base),
+            HOME=str(self.base / "home"),
+        )
 
     def stub(self, name: str, body: str) -> None:
         (self.stubs / name).write_text(f"#!/bin/bash\n{body}\n")
         (self.stubs / name).chmod(0o755)
 
     def run_script(self, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["bash", str(self.repo / "tools/release/package-release.sh"), *args],
-                              env={**self.env, **env}, capture_output=True, text=True,
-                              timeout=60, check=False)
+        return subprocess.run(
+            ["bash", str(self.repo / "tools/release/package-release.sh"), *args],
+            env={**self.env, **env},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
 
     def test_refuses_a_dirty_tree_a_missing_tag_and_unsupported_hosts(self) -> None:
         result = self.run_script("--untagged", FAKE_DIRTY=" M Cargo.toml")
@@ -558,8 +726,10 @@ esac""")
         self.assertFalse((self.base / "target").exists())
 
     def test_tagged_linux_and_darwin_builds_pack_with_remapped_paths(self) -> None:
-        for os_name, arch, triple in (("Linux", "x86_64", LINUX),
-                                      ("Darwin", "arm64", "aarch64-apple-darwin")):
+        for os_name, arch, triple in (
+            ("Linux", "x86_64", LINUX),
+            ("Darwin", "arm64", "aarch64-apple-darwin"),
+        ):
             with self.subTest(triple=triple):
                 self.log.write_text("")
                 result = self.run_script(FAKE_TAG=f"v{VERSION}", FAKE_OS=os_name, FAKE_ARCH=arch)
@@ -568,20 +738,25 @@ esac""")
                 tarball = dist / f"plak-{VERSION}-{triple}.tar.gz"
                 self.assertEqual(result.stdout.strip(), str(tarball))
                 with tarfile.open(tarball) as archive:
-                    third_party = archive.extractfile(
-                        f"plak-{VERSION}-{triple}/THIRD-PARTY").read().decode()
+                    third_party = (
+                        archive.extractfile(f"plak-{VERSION}-{triple}/THIRD-PARTY").read().decode()
+                    )
                 listed = [line.split()[0] for line in third_party.splitlines()[3:]]
                 self.assertEqual(listed, ["deep", "left", "vendored-protocol"])
                 self.assertNotIn("jj-lib", third_party)
-                builds = [line for line in self.log.read_text().splitlines()
-                          if line.startswith("cargo build")]
+                builds = [
+                    line
+                    for line in self.log.read_text().splitlines()
+                    if line.startswith("cargo build")
+                ]
                 self.assertEqual(len(builds), 2)
                 maps = (f"{self.base}=/cargo", f"{self.repo}=/plak", f"{self.base}/target=/target")
                 rust = " ".join(f"--remap-path-prefix={m}" for m in maps)
                 c = " ".join(f"-ffile-prefix-map={m}" for m in maps)
                 for line in builds:
-                    self.assertIn(f"--profile release target={triple} flags={rust} cflags={c}",
-                                  line)
+                    self.assertIn(
+                        f"--profile release target={triple} flags={rust} cflags={c}", line
+                    )
                     self.assertNotIn("maintainer", line)
         sums = (self.base / "target/release-dist/SHA256SUMS").read_text().splitlines()
         self.assertEqual(len(sums), 2)
@@ -590,12 +765,19 @@ esac""")
         env = {key: value for key, value in self.env.items() if key != "CARGO_HOME"}
         home = self.base / "fresh-home"
         env["HOME"] = str(home)
-        result = subprocess.run(["bash", str(self.repo / "tools/release/package-release.sh")],
-                                env={**env, "FAKE_TAG": f"v{VERSION}"}, capture_output=True,
-                                text=True, timeout=60, check=False)
+        result = subprocess.run(
+            ["bash", str(self.repo / "tools/release/package-release.sh")],
+            env={**env, "FAKE_TAG": f"v{VERSION}"},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((home / ".cargo").is_dir())
-        builds = [line for line in self.log.read_text().splitlines() if line.startswith("cargo build")]
+        builds = [
+            line for line in self.log.read_text().splitlines() if line.startswith("cargo build")
+        ]
         self.assertTrue(builds)
         for line in builds:
             self.assertIn(f"--remap-path-prefix={(home / '.cargo').resolve()}=/cargo", line)
@@ -603,13 +785,16 @@ esac""")
     def test_a_release_candidate_tag_names_the_tarball_and_other_tags_are_refused(self) -> None:
         result = self.run_script("--tag", f"v{VERSION}-rc.2", FAKE_TAG=f"v{VERSION}-rc.2")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), str(
-            self.base / f"target/release-dist/plak-{VERSION}-rc.2-{LINUX}.tar.gz"))
+        self.assertEqual(
+            result.stdout.strip(),
+            str(self.base / f"target/release-dist/plak-{VERSION}-rc.2-{LINUX}.tar.gz"),
+        )
         for tag, head_tag, message in (
-                (f"v{VERSION}-rc.0", f"v{VERSION}-rc.0", "is neither"),
-                (f"v{VERSION}-beta.1", f"v{VERSION}-beta.1", "is neither"),
-                ("v9.9.9", "v9.9.9", "is neither"),
-                (f"v{VERSION}-rc.3", f"v{VERSION}-rc.2", f"not tagged v{VERSION}-rc.3")):
+            (f"v{VERSION}-rc.0", f"v{VERSION}-rc.0", "is neither"),
+            (f"v{VERSION}-beta.1", f"v{VERSION}-beta.1", "is neither"),
+            ("v9.9.9", "v9.9.9", "is neither"),
+            (f"v{VERSION}-rc.3", f"v{VERSION}-rc.2", f"not tagged v{VERSION}-rc.3"),
+        ):
             with self.subTest(tag=tag):
                 result = self.run_script("--tag", tag, FAKE_TAG=head_tag)
                 self.assertEqual(result.returncode, 2)
@@ -620,14 +805,19 @@ esac""")
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
-    def test_the_only_workflow_runs_on_v_tags_with_pinned_actions_and_never_publishes_crates(self) -> None:
+    def test_the_only_workflow_runs_on_v_tags_with_pinned_actions_and_never_publishes_crates(
+        self,
+    ) -> None:
         import re
+
         workflows = ROOT / ".github/workflows"
         self.assertEqual(sorted(path.name for path in workflows.iterdir()), ["release.yml"])
         text = (workflows / "release.yml").read_text()
         trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
-        self.assertEqual([line for line in trigger.splitlines() if not line.startswith("    ")],
-                         ["  push:", "  workflow_dispatch:"])
+        self.assertEqual(
+            [line for line in trigger.splitlines() if not line.startswith("    ")],
+            ["  push:", "  workflow_dispatch:"],
+        )
         self.assertIn('    tags: ["v*"]', trigger)
         # A manual run is the pre-tag dry run: it packages untagged and never releases.
         release_job = text.split("\n  release:\n", 1)[1]

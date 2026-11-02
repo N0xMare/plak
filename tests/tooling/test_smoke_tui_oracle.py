@@ -21,16 +21,21 @@ class SmokeTuiOracleTests(unittest.TestCase):
             {"kind": "tool.completed", "state": "succeeded"},
             {"kind": "turn.lifecycle", "phase": "completed", "turn_id": "one"},
             {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "two"},
-            {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "two",
-             "model_error_kind": "RateLimited", "http_status": 429},
+            {
+                "kind": "turn.lifecycle",
+                "phase": "failed",
+                "turn_id": "two",
+                "model_error_kind": "RateLimited",
+                "http_status": 429,
+            },
             {"kind": "turn.assistant", "text": "late second answer"},
         ]
-        self.assertEqual([record["turn_id"] for record in smoke.durable_terminals(records)],
-                         ["one", "two"])
+        self.assertEqual(
+            [record["turn_id"] for record in smoke.durable_terminals(records)], ["one", "two"]
+        )
 
     def test_failed_provider_terminal_is_not_classified_as_model(self):
-        terminal = {"phase": "failed", "model_error_kind": "RateLimited",
-                    "http_status": 429}
+        terminal = {"phase": "failed", "model_error_kind": "RateLimited", "http_status": 429}
         with self.assertRaises(live.ScenarioFailure) as raised:
             smoke.require_durable_completed(terminal, "TUI turn")
         self.assertEqual(raised.exception.outcome, live.PROVIDER)
@@ -40,25 +45,30 @@ class SmokeTuiOracleTests(unittest.TestCase):
 
     def test_unavailable_and_rejected_before_acceptance_are_provider(self):
         for kind, status, text in (
-                ("Unavailable", None, "server_is_overloaded"),
-                (None, 429, ""),
-                ("RateLimited", 429, "OpenRouter Chat HTTP 429 (rejected-before-acceptance)"),
-                (None, None, "OpenRouter Chat HTTP 429 (rejected-before-acceptance)"),
+            ("Unavailable", None, "server_is_overloaded"),
+            (None, 429, ""),
+            ("RateLimited", 429, "OpenRouter Chat HTTP 429 (rejected-before-acceptance)"),
+            (None, None, "OpenRouter Chat HTTP 429 (rejected-before-acceptance)"),
         ):
-            turn = live.Turn(phase="failed", model_error_kind=kind, http_status=status,
-                             errors=[text])
+            turn = live.Turn(
+                phase="failed", model_error_kind=kind, http_status=status, errors=[text]
+            )
             with self.subTest(kind=kind, status=status):
                 with self.assertRaises(live.ScenarioFailure) as raised:
                     live.classify_incomplete(turn, "turn")
                 self.assertEqual(raised.exception.outcome, live.PROVIDER)
 
     def test_a_typed_model_refusal_is_provider_and_keeps_no_provider_prose(self):
-        event = {"kind": "model_refusal", "message": "model refused the request",
-                 "detail": "stop_reason=refusal;stop_details.type=refusal;"
-                           "category=reasoning_extraction;explanation=private-sentinel prose"}
+        event = {
+            "kind": "model_refusal",
+            "message": "model refused the request",
+            "detail": "stop_reason=refusal;stop_details.type=refusal;"
+            "category=reasoning_extraction;explanation=private-sentinel prose",
+        }
         summary = live.refusal_summary(event)
-        self.assertEqual(summary, "stop_reason=refusal;stop_details.type=refusal;"
-                                  "category=reasoning_extraction")
+        self.assertEqual(
+            summary, "stop_reason=refusal;stop_details.type=refusal;category=reasoning_extraction"
+        )
         self.assertNotIn("private-sentinel", summary)
         self.assertEqual(live.refusal_summary({"kind": "model_refusal"}), "model refusal")
         refused = live.Turn(phase="refused", refusals=[summary])
@@ -103,13 +113,21 @@ class SmokeTuiOracleTests(unittest.TestCase):
 
     def test_real_429s_after_the_single_injected_429_are_provider(self):
         rate_limit = {"cause_kind": "http_status", "cause": "provider rate limited (HTTP 429)"}
-        absorbed_once = live.Turn(phase="failed", model_error_kind="RateLimited", http_status=429,
-                                  retries=[dict(rate_limit)])
+        absorbed_once = live.Turn(
+            phase="failed",
+            model_error_kind="RateLimited",
+            http_status=429,
+            retries=[dict(rate_limit)],
+        )
         with self.assertRaises(live.ScenarioFailure) as raised:
             smoke.require_completed(absorbed_once, "fault", injected=True, injected_fault="429")
         self.assertEqual(raised.exception.outcome, live.HARNESS)
-        exhausted = live.Turn(phase="failed", model_error_kind="RateLimited", http_status=429,
-                              retries=[dict(rate_limit) for _ in range(3)])
+        exhausted = live.Turn(
+            phase="failed",
+            model_error_kind="RateLimited",
+            http_status=429,
+            retries=[dict(rate_limit) for _ in range(3)],
+        )
         with self.assertRaises(live.ScenarioFailure) as raised:
             smoke.require_completed(exhausted, "fault", injected=True, injected_fault="429")
         self.assertEqual(raised.exception.outcome, live.PROVIDER)
@@ -119,7 +137,8 @@ class SmokeTuiOracleTests(unittest.TestCase):
         self.addCleanup(hello_dir.cleanup)
         hello = Path(hello_dir.name) / "hello.txt"
         observed = live.Turn(
-            phase="failed", errors=["stream interrupted"],
+            phase="failed",
+            errors=["stream interrupted"],
             retries=[{"cause_kind": "stream_interrupted", "output_discarded": False}],
         )
         self.assertIn("declined", smoke.judge_fault_reset(observed, hello, None))
@@ -130,7 +149,9 @@ class SmokeTuiOracleTests(unittest.TestCase):
         )
         self.assertIn("discarded", smoke.judge_fault_reset(replayed, hello, None))
         limited = live.Turn(
-            phase="failed", model_error_kind="RateLimited", http_status=429,
+            phase="failed",
+            model_error_kind="RateLimited",
+            http_status=429,
             retries=[{"cause_kind": "stream_interrupted", "output_discarded": False}],
         )
         with self.assertRaises(live.ScenarioFailure) as raised:
@@ -148,8 +169,13 @@ class SmokeTuiOracleTests(unittest.TestCase):
         hello.write_text("hello\n")
         throttled = live.Turn(
             phase="completed",
-            retries=[{"cause_kind": "http_status", "cause": "provider rate limited (HTTP 429)",
-                      "output_discarded": False}],
+            retries=[
+                {
+                    "cause_kind": "http_status",
+                    "cause": "provider rate limited (HTTP 429)",
+                    "output_discarded": False,
+                }
+            ],
         )
         with self.assertRaises(live.ScenarioFailure) as raised:
             smoke.judge_fault_reset(throttled, hello, None)
@@ -168,17 +194,23 @@ class SmokeTuiOracleTests(unittest.TestCase):
         """Exit 5 with `turn_failed:output-limit` is a completed, truncated turn."""
         truncated = "plak: turn_failed:output-limit\n"
         for answer, outcome in (("MAGENTA\n", live.PASS), ("I do not recall\n", live.MODEL)):
-            runs = iter([Mock(returncode=0, stdout="session_id=abc\nok\n", stderr=""),
-                         Mock(returncode=5, stdout=answer, stderr=truncated)])
+            runs = iter(
+                [
+                    Mock(returncode=0, stdout="session_id=abc\nok\n", stderr=""),
+                    Mock(returncode=5, stdout=answer, stderr=truncated),
+                ]
+            )
             with self.subTest(answer=answer), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory).resolve()
                 (base / "tests").mkdir()
                 (base / "cli_resume").mkdir()
                 env = live.Env(base / "plak", base / "home", base)
                 runner = smoke.Smoke(live.ROUTES["grok"], env)
-                with patch.object(live, "ROOT", base), \
-                        patch.object(live.subprocess, "run", side_effect=lambda *a, **k: next(runs)), \
-                        patch.object(smoke.Smoke, "repo", return_value=base):
+                with (
+                    patch.object(live, "ROOT", base),
+                    patch.object(live.subprocess, "run", side_effect=lambda *a, **k: next(runs)),
+                    patch.object(smoke.Smoke, "repo", return_value=base),
+                ):
                     if outcome == live.PASS:
                         self.assertIn("continued", runner.cli_resume())
                     else:

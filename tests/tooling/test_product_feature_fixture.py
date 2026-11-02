@@ -53,9 +53,10 @@ class FixtureIsolationTests(unittest.TestCase):
             self.assertEqual(kwargs["input"], FIXTURE.ACCEPTANCE)
             return subprocess.CompletedProcess([], 1, "", "refused")
 
-        with mock.patch.dict(os.environ, OPERATOR, clear=False), mock.patch.object(
-            FIXTURE.subprocess, "run", side_effect=run
-        ) as calls:
+        with (
+            mock.patch.dict(os.environ, OPERATOR, clear=False),
+            mock.patch.object(FIXTURE.subprocess, "run", side_effect=run) as calls,
+        ):
             errors = FIXTURE.check_route("writer", "reduced")
         self.assertEqual(calls.call_count, 1)
         self.assertTrue(any("uncompiled route fixture creation" in error for error in errors))
@@ -67,13 +68,12 @@ class FixtureIsolationTests(unittest.TestCase):
             _assert_isolated(self, kwargs["env"])
             return subprocess.CompletedProcess([], 1, "", "refused")
 
-        with mock.patch.dict(os.environ, OPERATOR, clear=False), mock.patch.object(
-            FIXTURE.subprocess, "run", side_effect=run
-        ) as calls:
+        with (
+            mock.patch.dict(os.environ, OPERATOR, clear=False),
+            mock.patch.object(FIXTURE.subprocess, "run", side_effect=run) as calls,
+        ):
             errors = FIXTURE.check("writer", "reduced", "server")
-        creations = [
-            call for call in calls.call_args_list if "create fixture" in call.args[0]
-        ]
+        creations = [call for call in calls.call_args_list if "create fixture" in call.args[0]]
         self.assertEqual(len(creations), 2)
         for call in creations:
             self.assertEqual(call.kwargs["input"], FIXTURE.ACCEPTANCE)
@@ -89,8 +89,9 @@ class FixtureIsolationTests(unittest.TestCase):
             _assert_isolated(self, kwargs["env"])
             raise RuntimeError("stop after capturing the environment")
 
-        with mock.patch.dict(os.environ, OPERATOR, clear=False), mock.patch.object(
-            FIXTURE.subprocess, "Popen", side_effect=popen
+        with (
+            mock.patch.dict(os.environ, OPERATOR, clear=False),
+            mock.patch.object(FIXTURE.subprocess, "Popen", side_effect=popen),
         ):
             with self.assertRaises(RuntimeError):
                 FIXTURE.image_diagnostic("binary")

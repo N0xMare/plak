@@ -33,9 +33,13 @@ class UninstallTests(unittest.TestCase):
         (self.home / ".local/state/plak/subscriptions/keep").write_text("fixture only")
 
     def uninstall(self, *args):
-        return subprocess.run(["sh", str(ROOT / "install.sh"), "uninstall", *args],
-                              env={**self.environment, "HOME": str(self.home)},
-                              capture_output=True, text=True, timeout=10)
+        return subprocess.run(
+            ["sh", str(ROOT / "install.sh"), "uninstall", *args],
+            env={**self.environment, "HOME": str(self.home)},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
 
     def test_removes_installed_artifacts_but_preserves_product_home(self):
         result = self.uninstall()

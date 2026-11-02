@@ -15,14 +15,17 @@ from harbor_adapter.hygiene import harvest_command, native_state_harvest
 
 def observe_run(run):
     """Identical non-mutating process samples, even on timeout or failure."""
+
     @functools.wraps(run)
     async def observed(self, instruction, environment, context):
         from harbor_adapter.cell_prep import record_cell
         from harbor_adapter.preflight import task_budgets
+
         self._eval_instruction = instruction
         self._eval_deadline = time.monotonic() + task_budgets(environment)[0] - 10
         await record_cell(self, environment)
         from harbor_adapter.wire import start_recording, harvest_recording
+
         samples = []
         recording_error = None
         try:
@@ -53,6 +56,7 @@ def observe_run(run):
                         raise
             if primary_error is None and recording_error is not None:
                 raise recording_error
+
     return observed
 
 
@@ -91,9 +95,11 @@ def parse_sample(raw: str, phase: str) -> dict[str, Any]:
                 result["resources"]["memory_peak_bytes"] = int(parts[0])
             elif len(parts) == 2 and parts[1].isdigit():
                 key = (metric, parts[0])
-                name = {("memory.events", "oom_kill"): "oom_kill",
-                        ("memory.events", "oom"): "oom",
-                        ("cpu.stat", "usage_usec"): "cpu_usage_usec"}.get(key)
+                name = {
+                    ("memory.events", "oom_kill"): "oom_kill",
+                    ("memory.events", "oom"): "oom",
+                    ("cpu.stat", "usage_usec"): "cpu_usage_usec",
+                }.get(key)
                 if name:
                     result["resources"][name] = int(parts[1])
             continue
@@ -126,5 +132,8 @@ async def sample_cell(environment: Any, phase: str) -> dict[str, Any]:
             return parse_sample(output.stdout or "", phase)
     except Exception:
         pass
-    return {"phase": phase, "observed_at_utc": datetime.now(timezone.utc).isoformat(),
-            "unavailable": True}
+    return {
+        "phase": phase,
+        "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "unavailable": True,
+    }

@@ -29,8 +29,11 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
         failures.append("campaign_schema")
     if not re.fullmatch(r"[0-9a-f]{40}", str(plan.get("source_commit", ""))):
         failures.append("source_commit")
-    if (plan.get("arch") not in ("amd64", "arm64") or type(plan.get("concurrency")) is not int
-            or plan.get("concurrency") != 1):
+    if (
+        plan.get("arch") not in ("amd64", "arm64")
+        or type(plan.get("concurrency")) is not int
+        or plan.get("concurrency") != 1
+    ):
         failures.append("platform_or_concurrency")
     phase = plan.get("phase", "scored")
     calibration = phase == "calibration"
@@ -41,10 +44,16 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
         failures.append("tasks_missing")
     else:
         for task in tasks.values():
-            if (not isinstance(task, dict) or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(task.get("image", "")))
-                    or not task.get("checksum") or not task.get("cell_manifest_sha256")
-                    or not all(type(task.get(k)) in (int, float) and task[k] > 0
-                               for k in ("agent_timeout", "verifier_timeout"))):
+            if (
+                not isinstance(task, dict)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(task.get("image", "")))
+                or not task.get("checksum")
+                or not task.get("cell_manifest_sha256")
+                or not all(
+                    type(task.get(k)) in (int, float) and task[k] > 0
+                    for k in ("agent_timeout", "verifier_timeout")
+                )
+            ):
                 failures.append("task_binding_incomplete")
     if not calibration and isinstance(arms, dict) and "opencode-codex-oauth" in arms:
         failures.append("calibration_only_arm")
@@ -58,61 +67,114 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
                 continue
             observed = arm.get("observed_config")
             observed = observed if isinstance(observed, dict) else {}
-            if not calibration and (not observed.get("model") or observed.get("effort") in (None, "none", "omit")
-                    or not all(k in observed for k in ("thinking", "max_output", "temperature",
-                                                       "requested_service_tier", "tool_names",
-                                                       "tool_schema_sha256", "instructions_sha256"))):
+            if not calibration and (
+                not observed.get("model")
+                or observed.get("effort") in (None, "none", "omit")
+                or not all(
+                    k in observed
+                    for k in (
+                        "thinking",
+                        "max_output",
+                        "temperature",
+                        "requested_service_tier",
+                        "tool_names",
+                        "tool_schema_sha256",
+                        "instructions_sha256",
+                    )
+                )
+            ):
                 failures.append("explicit_observed_config_required")
-            if not calibration and not re.fullmatch(r"[0-9a-f]{64}", str(arm.get("calibration_sha256", ""))):
+            if not calibration and not re.fullmatch(
+                r"[0-9a-f]{64}", str(arm.get("calibration_sha256", ""))
+            ):
                 failures.append("wire_calibration_required")
             binaries = arm.get("binaries")
-            if not isinstance(binaries, dict) or not binaries or any(
-                not re.fullmatch(r"[0-9a-f]{64}", str(digest)) for digest in binaries.values()
+            if (
+                not isinstance(binaries, dict)
+                or not binaries
+                or any(
+                    not re.fullmatch(r"[0-9a-f]{64}", str(digest)) for digest in binaries.values()
+                )
             ):
                 failures.append("executed_binary_pins_required")
-            if name.startswith("plak-") and (not isinstance(binaries, dict) or
-                    not {"plak", "plakous-js-host", "plakous-py-host"} <= binaries.keys()):
+            if name.startswith("plak-") and (
+                not isinstance(binaries, dict)
+                or not {"plak", "plakous-js-host", "plakous-py-host"} <= binaries.keys()
+            ):
                 failures.append("plak_worker_cohort_required")
             composition = arm.get("composition")
             resolved = arm.get("resolved_composition")
-            if (name.startswith("plak-") and resolved in ("py-ptc", "py-sdk")
-                    and composition != resolved):
+            if (
+                name.startswith("plak-")
+                and resolved in ("py-ptc", "py-sdk")
+                and composition != resolved
+            ):
                 failures.append("undeclared_python_composition")
-            if (not calibration and name.startswith("plak-")
-                    and resolved not in ("direct", "native-ptc", "py-ptc", "py-sdk")):
+            if (
+                not calibration
+                and name.startswith("plak-")
+                and resolved not in ("direct", "native-ptc", "py-ptc", "py-sdk")
+            ):
                 failures.append("shipped_composition_unverified")
             if composition is not None:
-                if (not name.startswith("plak-") or len(arms) < 2 or
-                        composition not in ("py-ptc", "py-sdk")):
+                if (
+                    not name.startswith("plak-")
+                    or len(arms) < 2
+                    or composition not in ("py-ptc", "py-sdk")
+                ):
                     failures.append("composition_override_not_declared_ab")
                 if not calibration and arm.get("resolved_composition") != composition:
                     failures.append("declared_composition_unverified")
             policy = arm.get("policy")
             policy = policy if isinstance(policy, dict) else {}
-            if not all(k in policy for k in ("user", "web_tools", "leftover_processes", "cell_prep")):
+            if not all(
+                k in policy for k in ("user", "web_tools", "leftover_processes", "cell_prep")
+            ):
                 failures.append("policy_unverified")
             web_available = any(
-                str(name).rsplit(".", 1)[-1].lower().replace("_", "").startswith(("websearch", "webfetch"))
+                str(name)
+                .rsplit(".", 1)[-1]
+                .lower()
+                .replace("_", "")
+                .startswith(("websearch", "webfetch"))
                 for name in observed.get("tool_names", [])
             )
             if not calibration and policy.get("web_tools") is not web_available:
                 failures.append("web_tool_policy_mismatch")
-            controls.append(json.dumps({"model": observed.get("model"),
-                                        "effort": observed.get("effort"), "thinking": observed.get("thinking"),
-                                        "thinking_budget": observed.get("thinking_budget"),
-                                        "temperature": observed.get("temperature"),
-                                        "tier": observed.get("requested_service_tier"), "policy": policy}, sort_keys=True))
+            controls.append(
+                json.dumps(
+                    {
+                        "model": observed.get("model"),
+                        "effort": observed.get("effort"),
+                        "thinking": observed.get("thinking"),
+                        "thinking_budget": observed.get("thinking_budget"),
+                        "temperature": observed.get("temperature"),
+                        "tier": observed.get("requested_service_tier"),
+                        "policy": policy,
+                    },
+                    sort_keys=True,
+                )
+            )
         if not calibration and len(set(controls)) != 1:
             failures.append("policy_or_wire_parity")
-        declared = [arm for arm in arms.values() if isinstance(arm, dict) and arm.get("composition") is not None]
-        if declared and (len(arms) != 2 or len(declared) != 2
-                or {arm.get("composition") for arm in declared} != {"py-ptc", "py-sdk"}
-                or len({arm.get("account") for arm in declared}) != 1
-                or declared[0].get("binaries") != declared[1].get("binaries")):
+        declared = [
+            arm
+            for arm in arms.values()
+            if isinstance(arm, dict) and arm.get("composition") is not None
+        ]
+        if declared and (
+            len(arms) != 2
+            or len(declared) != 2
+            or {arm.get("composition") for arm in declared} != {"py-ptc", "py-sdk"}
+            or len({arm.get("account") for arm in declared}) != 1
+            or declared[0].get("binaries") != declared[1].get("binaries")
+        ):
             failures.append("python_ab_requires_same_build_account_and_two_compositions")
     pins = plan.get("artifact_sha256")
-    if not isinstance(pins, dict) or not pins or any(
-        not re.fullmatch(r"[0-9a-f]{64}", str(value)) for value in pins.values()
+    if (
+        not isinstance(pins, dict)
+        or not pins
+        or any(not re.fullmatch(r"[0-9a-f]{64}", str(value)) for value in pins.values())
     ):
         failures.append("artifact_pins_missing")
     if type(plan.get("blocks")) is not int or plan["blocks"] < (1 if calibration else 3):
@@ -121,8 +183,12 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
         failures.append("calibration_is_one_trial_per_arm")
     if phase == "null":
         from harbor_adapter.tuples import RUNG_A_AB_TASKS
-        if (set(tasks or {}) != set(RUNG_A_AB_TASKS) or plan.get("blocks") != 3
-                or set(arms or {}) != {"plak-codex", "plak-codex-aa"}):
+
+        if (
+            set(tasks or {}) != set(RUNG_A_AB_TASKS)
+            or plan.get("blocks") != 3
+            or set(arms or {}) != {"plak-codex", "plak-codex-aa"}
+        ):
             failures.append("null_design")
         elif arms["plak-codex"] != arms["plak-codex-aa"]:
             failures.append("null_requires_identical_arms")
@@ -149,22 +215,40 @@ def load_campaign() -> dict[str, Any]:
 def campaign_gate(root: Path) -> dict[str, Any]:
     plan = load_campaign()
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal",
-                                     "--", "eval", "Justfile", "eval/harbor.just"], cwd=root)
+    dirty = subprocess.check_output(
+        [
+            "git",
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+            "--",
+            "eval",
+            "Justfile",
+            "eval/harbor.just",
+        ],
+        cwd=root,
+    )
     if dirty or commit != plan["source_commit"]:
         raise PreflightError("campaign requires clean recorded eval sources")
     if os.environ.get("HARBOR_ARCH") != plan["arch"]:
         raise PreflightError("campaign architecture mismatch")
     from harbor_adapter.arch import docker_daemon_arch
+
     if docker_daemon_arch() != plan["arch"]:
         raise PreflightError("campaign requires the Docker daemon's native architecture")
-    if os.environ.get("HARBOR_N_CONCURRENT", "1") != "1" or os.environ.get("HARBOR_N_ATTEMPTS", "1") != "1":
-        raise PreflightError("campaign uses serial single-attempt slots; increase blocks, not concurrency or attempts")
+    if (
+        os.environ.get("HARBOR_N_CONCURRENT", "1") != "1"
+        or os.environ.get("HARBOR_N_ATTEMPTS", "1") != "1"
+    ):
+        raise PreflightError(
+            "campaign uses serial single-attempt slots; increase blocks, not concurrency or attempts"
+        )
     for relative, expected in plan["artifact_sha256"].items():
         path = (root / relative).resolve()
         if not path.is_relative_to((root / ".plak/installed" / plan["arch"]).resolve()):
             raise PreflightError("campaign artifact is outside the selected frozen prefix")
         from harbor_adapter.vendor_pins import node_sha256, node_tarball_name
+
         if path.name == node_tarball_name(plan["arch"]) and expected != node_sha256(plan["arch"]):
             raise PreflightError("Node archive differs from its compiled official pin")
         if not path.is_file() or sha256(path) != expected:
@@ -176,16 +260,28 @@ def campaign_gate(root: Path) -> dict[str, Any]:
         if not calibration.is_file() or sha256(calibration) != arm["calibration_sha256"]:
             raise PreflightError("campaign wire calibration missing or mismatched")
         reduced = json.loads(calibration.read_text())
-        if (reduced.get("source") != "exchange" or not reduced.get("wire_verified")
-                or reduced.get("first_request") != arm["observed_config"]
-                or reduced.get("calibration_binding") != {"source_commit": plan["source_commit"],
-                    "arch": plan["arch"], "binaries": arm["binaries"]}):
+        if (
+            reduced.get("source") != "exchange"
+            or not reduced.get("wire_verified")
+            or reduced.get("first_request") != arm["observed_config"]
+            or reduced.get("calibration_binding")
+            != {
+                "source_commit": plan["source_commit"],
+                "arch": plan["arch"],
+                "binaries": arm["binaries"],
+            }
+        ):
             raise PreflightError("campaign calibration is not the pinned first wire request")
     for task in plan["tasks"].values():
         try:
-            info = json.loads(subprocess.check_output(
-                ["docker", "image", "inspect", task["image"]], text=True, stderr=subprocess.DEVNULL,
-                timeout=15))[0]
+            info = json.loads(
+                subprocess.check_output(
+                    ["docker", "image", "inspect", task["image"]],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                    timeout=15,
+                )
+            )[0]
         except (OSError, ValueError, IndexError, subprocess.SubprocessError):
             raise PreflightError("campaign image is not frozen in the local daemon") from None
         if info.get("Id") != task["image"] or info.get("Architecture") != plan["arch"]:
@@ -201,41 +297,59 @@ def trial_gate(plan: dict[str, Any], arm: str, task: str, evidence: dict[str, An
     target = plan.get("tasks", {}).get(task)
     if not expected or not target:
         return ["unplanned_arm_or_task"]
-    for key, value in (("image", target["image"]), ("checksum", target["checksum"]),
-                       ("cell_manifest_sha256", target["cell_manifest_sha256"]),
-                       ("agent_timeout", target["agent_timeout"]),
-                       ("verifier_timeout", target["verifier_timeout"])):
+    for key, value in (
+        ("image", target["image"]),
+        ("checksum", target["checksum"]),
+        ("cell_manifest_sha256", target["cell_manifest_sha256"]),
+        ("agent_timeout", target["agent_timeout"]),
+        ("verifier_timeout", target["verifier_timeout"]),
+    ):
         if evidence.get(key) != value:
             failures.append("trial_binding:" + key)
     if evidence.get("secrets_harvested") is not False:
         failures.append("harvest_unverified")
     observed = evidence.get("observed_config") or {}
     from harbor_adapter.observed_config import first_request_matches
+
     if not observed.get("wire_verified") or not first_request_matches(
         observed.get("first_request") or {}, expected["observed_config"], expected["account"]
     ):
         failures.append("first_request_unverified_or_mismatched")
     requests = observed.get("requests") or []
-    if not requests or any(not (r.get("response", {}).get("served_model") or
-                               r.get("response", {}).get("system_fingerprint") or
-                               r.get("response", {}).get("transport_error") is True or
-                               r.get("response", {}).get("client_cancelled") is True or
-                               (isinstance(r.get("response", {}).get("status_code"), int) and
-                                r["response"]["status_code"] >= 400)) for r in requests):
+    if not requests or any(
+        not (
+            r.get("response", {}).get("served_model")
+            or r.get("response", {}).get("system_fingerprint")
+            or r.get("response", {}).get("transport_error") is True
+            or r.get("response", {}).get("client_cancelled") is True
+            or (
+                isinstance(r.get("response", {}).get("status_code"), int)
+                and r["response"]["status_code"] >= 400
+            )
+        )
+        for r in requests
+    ):
         failures.append("served_identity_missing")
     if expected.get("account") == "openrouter" and any(
         not r.get("response", {}).get("upstream_provider") for r in requests
     ):
         failures.append("upstream_missing")
-    if arm.startswith("plak-") and (not evidence.get("resolved_composition") or
-                                  evidence.get("resolved_composition") != expected.get("resolved_composition")):
+    if arm.startswith("plak-") and (
+        not evidence.get("resolved_composition")
+        or evidence.get("resolved_composition") != expected.get("resolved_composition")
+    ):
         failures.append("shipped_composition_unverified")
-    if expected.get("composition") is not None and evidence.get("resolved_composition") != expected["composition"]:
+    if (
+        expected.get("composition") is not None
+        and evidence.get("resolved_composition") != expected["composition"]
+    ):
         failures.append("declared_composition_unverified")
     binaries = evidence.get("artifact", {}).get("binaries") or {}
     pins = expected.get("binaries") or {}
-    if not pins or set(pins) != set(binaries) or any(
-        binaries.get(name, {}).get("sha256") != digest for name, digest in pins.items()
+    if (
+        not pins
+        or set(pins) != set(binaries)
+        or any(binaries.get(name, {}).get("sha256") != digest for name, digest in pins.items())
     ):
         failures.append("executed_artifact_mismatch")
     return failures
@@ -245,16 +359,19 @@ def schedule(arms: list[str], tasks: list[str], blocks: int) -> list[dict[str, A
     """AB, BA, AB, BA blocks, with one explicit shared slot per task/block."""
     if blocks < 1 or len(arms) < 1 or not tasks or len(set(arms)) != len(arms):
         raise ValueError("invalid paired schedule")
-    return [{"block": block, "slot": f"{block}:{task}", "task": task, "arm": arm}
-            for block in range(blocks)
-            for arm in (arms if block % 2 == 0 else list(reversed(arms))) for task in tasks]
+    return [
+        {"block": block, "slot": f"{block}:{task}", "task": task, "arm": arm}
+        for block in range(blocks)
+        for arm in (arms if block % 2 == 0 else list(reversed(arms)))
+        for task in tasks
+    ]
 
 
 def campaign_health(rows: list[dict[str, Any]]) -> list[str]:
     failures = []
     for arm in sorted({r["arm"] for r in rows}):
         group = [r for r in rows if r["arm"] == arm]
-        for kind, limit in (("infra", .10), ("unknown", .02)):
+        for kind, limit in (("infra", 0.10), ("unknown", 0.02)):
             if sum(r.get("failure_class") == kind for r in group) / len(group) > limit:
                 failures.append(arm + ":" + kind + "_threshold")
     return failures
@@ -262,6 +379,7 @@ def campaign_health(rows: list[dict[str, Any]]) -> list[str]:
 
 if __name__ == "__main__":
     import sys
+
     try:
         campaign_gate(Path(__file__).resolve().parents[2])
     except PreflightError as error:

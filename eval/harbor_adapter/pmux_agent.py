@@ -107,12 +107,8 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
             extra_env.pop(key.upper(), None)
         self._arch = resolve_arch(kwargs.pop("arch", None))
         root = installed_root(self._arch)
-        self._vendor_root = Path(
-            kwargs.pop("vendor_root", None) or root / "vendor"
-        )
-        self._pmux_root = Path(
-            kwargs.pop("pmux_root", None) or root / "pmux"
-        )
+        self._vendor_root = Path(kwargs.pop("vendor_root", None) or root / "vendor")
+        self._pmux_root = Path(kwargs.pop("pmux_root", None) or root / "pmux")
         self._model = str(kwargs.pop("model", "claude-sonnet-5"))
         self._effort = str(kwargs.pop("effort", "low"))
         if "turn_timeout_ms" in kwargs:
@@ -127,18 +123,20 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
 
     async def install(self, environment: BaseEnvironment) -> None:
         await prepare_cell(self, environment, self._arch)
-        artifacts = require_frozen_artifacts(
-            "claude", self._vendor_root, self._arch
-        )
+        artifacts = require_frozen_artifacts("claude", self._vendor_root, self._arch)
         bins = require_frozen_pmux(self._pmux_root, self._arch)
         # Record which bytes this trial uploads, before it uploads them. A
         # trial that passes in the morning and times out at night must be
         # answerable on "did the artifact change" from its own record.
         self._artifact = pmux_artifact_record(bins, arch=self._arch)
-        self._artifact["binaries"].update(digest_all((
-            ("claude-archive", artifacts.cli_archive),
-            ("node-archive", artifacts.node_tarball),
-        )))
+        self._artifact["binaries"].update(
+            digest_all(
+                (
+                    ("claude-archive", artifacts.cli_archive),
+                    ("node-archive", artifacts.node_tarball),
+                )
+            )
+        )
         self._artifact["version"] = artifacts.version
         await self._install_claude_prefix(environment, artifacts)
         remotes = (
@@ -155,16 +153,19 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
             environment,
             command=f"chmod 0755 {quoted}",
         )
-        await self.exec_as_root(
-            environment, command=platform_record_command(self._arch)
-        )
+        await self.exec_as_root(environment, command=platform_record_command(self._arch))
         await self._assert_claude_pin(environment, artifacts.version)
         policy = Path(__file__).with_name("claude-no-web.sh")
         from harbor_adapter.campaign import sha256
-        self._artifact["binaries"]["claude-policy-launcher"] = {"sha256": sha256(policy), "bytes": policy.stat().st_size}
+
+        self._artifact["binaries"]["claude-policy-launcher"] = {
+            "sha256": sha256(policy),
+            "bytes": policy.stat().st_size,
+        }
         await environment.upload_file(str(policy), "/installed-agent/claude-no-web")
         await self.exec_as_root(environment, command="chmod 0755 /installed-agent/claude-no-web")
         from harbor_adapter.vendor_agents import _record_executable_identity
+
         await _record_executable_identity(self, environment, "claude", self._arch)
         identity = json.loads((self.logs_dir / "vendor-artifact.json").read_text())
         self._artifact["binaries"].update(identity["binaries"])
@@ -172,32 +173,22 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
     async def _install_claude_prefix(
         self, environment: BaseEnvironment, artifacts: FrozenArtifacts
     ) -> None:
-        await self.exec_as_root(
-            environment, command=f"mkdir -p {shlex.quote(REMOTE_VENDOR)}"
-        )
+        await self.exec_as_root(environment, command=f"mkdir -p {shlex.quote(REMOTE_VENDOR)}")
         await environment.upload_file(
             str(artifacts.node_tarball.resolve()), f"{REMOTE_VENDOR}/node.tar.gz"
         )
         await environment.upload_file(
             str(artifacts.cli_archive.resolve()), f"{REMOTE_VENDOR}/claude.tar.gz"
         )
-        await self.exec_as_root(
-            environment, command=node_cli_install_command("claude")
-        )
+        await self.exec_as_root(environment, command=node_cli_install_command("claude"))
 
-    async def _assert_claude_pin(
-        self, environment: BaseEnvironment, pinned: str
-    ) -> None:
+    async def _assert_claude_pin(self, environment: BaseEnvironment, pinned: str) -> None:
         result = await environment.exec(command="claude --version")
         if result.return_code != 0:
-            raise VendorArtifactError(
-                f"claude --version failed: {result.stderr or result.stdout}"
-            )
+            raise VendorArtifactError(f"claude --version failed: {result.stderr or result.stdout}")
         reported = (result.stdout or "").strip()
         if pinned not in reported:
-            raise VendorArtifactError(
-                f"frozen Claude Code reported {reported!r}, pin is {pinned}"
-            )
+            raise VendorArtifactError(f"frozen Claude Code reported {reported!r}, pin is {pinned}")
 
     @observe_run
     async def run(
@@ -234,6 +225,7 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
             cwd=REMOTE_WORKSPACE,
         )
         from harbor_adapter.argv import write_argv
+
         write_argv(self.logs_dir, argv)
         quoted = " ".join(shlex.quote(part) for part in argv)
         stdout_path = "/logs/agent/pmux-stdout.txt"
@@ -255,26 +247,20 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
             except BaseException as error:
                 # Any other harness death names itself in the trial record
                 # rather than leaving the run indistinguishable from not-run.
-                self._harness_termination = (
-                    f"{TERMINATION_ERROR}:{type(error).__name__}"
-                )
+                self._harness_termination = f"{TERMINATION_ERROR}:{type(error).__name__}"
                 raise
         finally:
             await self._persist_refreshed_pin(environment, store)
             await self._capture_usage(environment, context)
 
-    async def _read_agent_file(
-        self, environment: BaseEnvironment, path: str
-    ) -> str:
+    async def _read_agent_file(self, environment: BaseEnvironment, path: str) -> str:
         result = await self.exec_as_agent(
             environment,
             command=f"cat {shlex.quote(path)} 2>/dev/null || true",
         )
         return result.stdout or ""
 
-    async def _persist_refreshed_pin(
-        self, environment: BaseEnvironment, store: Path
-    ) -> None:
+    async def _persist_refreshed_pin(self, environment: BaseEnvironment, store: Path) -> None:
         """Copy the in-cell pin back so the next trial is not NeedsLogin."""
         remote_cred = f"{REMOTE_CLAUDE_SECURESTORAGE}/.credentials.json"
         candidate = store / ".credentials.json.cell"
@@ -285,9 +271,7 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
             if candidate.is_file():
                 candidate.unlink()
 
-    async def _capture_usage(
-        self, environment: BaseEnvironment, context: AgentContext
-    ) -> None:
+    async def _capture_usage(self, environment: BaseEnvironment, context: AgentContext) -> None:
         result = await self.exec_as_agent(
             environment,
             command="cat /logs/agent/pmux-stdout.txt 2>/dev/null || true",
@@ -299,10 +283,7 @@ class FrozenPmux(WireAgent, BaseInstalledAgent):
         if not self._last_usage.resolved:
             jsonl = await self.exec_as_agent(
                 environment,
-                command=(
-                    "cat /logs/agent/claude-transcripts/*.jsonl "
-                    "2>/dev/null || true"
-                ),
+                command=("cat /logs/agent/claude-transcripts/*.jsonl 2>/dev/null || true"),
             )
             fallback = parse_pmux_jsonl(jsonl.stdout or "")
             if fallback.resolved:

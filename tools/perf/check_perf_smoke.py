@@ -102,8 +102,12 @@ def main() -> int:
 
     if arguments.seed:
         document.setdefault("machines", {})[machine] = {
-            str(row["metric"]): {"value": row["value"], "unit": row["unit"],
-                                 "profile": row["profile"]} for row in rows
+            str(row["metric"]): {
+                "value": row["value"],
+                "unit": row["unit"],
+                "profile": row["profile"],
+            }
+            for row in rows
         }
         arguments.baseline.parent.mkdir(parents=True, exist_ok=True)
         arguments.baseline.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
@@ -129,16 +133,15 @@ def main() -> int:
             print(f"  {metric}: {row['value']} {row['unit']} (no seed)")
             continue
         if seed.get("profile") != row["profile"]:
-            incompatible.append(f"{metric}: profile mismatch (measurement {row['profile']}, "
-                                f"seed {seed.get('profile')!r})")
+            incompatible.append(
+                f"{metric}: profile mismatch (measurement {row['profile']}, "
+                f"seed {seed.get('profile')!r})"
+            )
             continue
         if metric not in GATED_METRICS:
             # Printed, never judged. The word "regression" is deliberately
             # absent: nothing here can tell a slowdown from a busy neighbour.
-            print(
-                f"  {metric}: {row['value']} {row['unit']} "
-                f"(informational, seed {seed['value']})"
-            )
+            print(f"  {metric}: {row['value']} {row['unit']} (informational, seed {seed['value']})")
             continue
         message = regression(metric, float(row["value"]), float(seed["value"]), tolerance)
         if message:

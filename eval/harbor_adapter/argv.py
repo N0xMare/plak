@@ -1,4 +1,5 @@
 """Record the actual CLI invocation, excluding the task instruction and shell IO."""
+
 import json
 from pathlib import Path
 import shlex
@@ -17,12 +18,21 @@ def native_argv(command: str, instruction: str, harness: str) -> list[str] | Non
     for index, token in enumerate(tokens):
         if token != cli or index + 1 == len(tokens):
             continue
-        expected = {"codex": "exec", "grok": "--no-auto-update", "pi": "--print", "opencode": "run"}[cli]
-        if tokens[index + 1] != expected and not (cli == "opencode" and tokens[index + 1].startswith("--model=")):
+        expected = {
+            "codex": "exec",
+            "grok": "--no-auto-update",
+            "pi": "--print",
+            "opencode": "run",
+        }[cli]
+        if tokens[index + 1] != expected and not (
+            cli == "opencode" and tokens[index + 1].startswith("--model=")
+        ):
             continue
         if cli == "pi" and instruction not in tokens[index:]:
             return None
-        prompt_index = max((i for i, value in enumerate(tokens) if value == instruction), default=-1)
+        prompt_index = max(
+            (i for i, value in enumerate(tokens) if value == instruction), default=-1
+        )
         result = []
         skip_prompt = False
         for offset in range(index, len(tokens)):

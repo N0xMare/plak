@@ -41,7 +41,7 @@ def call_arguments(text: str, start: int) -> str:
     while index < len(text) and depth:
         depth += {"(": 1, ")": -1}.get(text[index], 0)
         index += 1
-    return text[start:index - 1]
+    return text[start : index - 1]
 
 
 def pinned_port_binds(text: str) -> list[str]:

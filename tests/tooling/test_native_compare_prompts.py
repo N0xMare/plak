@@ -38,19 +38,29 @@ class CertificateTests(unittest.TestCase):
             directory.mkdir(parents=True)
             # Run in an isolated cwd so an escaped serial is observable and harmless.
             subprocess.run(
-                [sys.executable, "-c",
-                 "import runpy, pathlib, sys; "
-                 "runpy.run_path(sys.argv[1])['generate_mitm_certs'](pathlib.Path(sys.argv[2]))",
-                 str(ROOT / "tools/prompts/native_compare_prompts.py"), str(directory)],
-                cwd=root, check=True, capture_output=True,
+                [
+                    sys.executable,
+                    "-c",
+                    "import runpy, pathlib, sys; "
+                    "runpy.run_path(sys.argv[1])['generate_mitm_certs'](pathlib.Path(sys.argv[2]))",
+                    str(ROOT / "tools/prompts/native_compare_prompts.py"),
+                    str(directory),
+                ],
+                cwd=root,
+                check=True,
+                capture_output=True,
             )
             self.assertTrue((directory / "ca.srl").is_file())
-            self.assertTrue(all(path.is_relative_to(directory)
-                                for path in root.rglob("*") if path.is_file()))
+            self.assertTrue(
+                all(path.is_relative_to(directory) for path in root.rglob("*") if path.is_file())
+            )
 
     def test_serial_check_skips_when_the_openssl_cli_is_absent(self):
         case = CertificateTests("test_serial_stays_inside_dotted_certificate_directory")
-        with patch.object(shutil, "which", return_value=None), self.assertRaises(unittest.SkipTest) as raised:
+        with (
+            patch.object(shutil, "which", return_value=None),
+            self.assertRaises(unittest.SkipTest) as raised,
+        ):
             case.test_serial_stays_inside_dotted_certificate_directory()
         self.assertIn("openssl CLI is not installed", str(raised.exception))
 
@@ -104,20 +114,21 @@ class JsoncTests(unittest.TestCase):
 
 class InferenceDetectionTests(unittest.TestCase):
     def test_messages_path_with_json_is_inference(self):
-        self.assertTrue(
-            NCP.is_inference_payload("/v1/messages", {"model": "claude-sonnet-5"})
-        )
+        self.assertTrue(NCP.is_inference_payload("/v1/messages", {"model": "claude-sonnet-5"}))
 
     def test_token_count_control_request_is_not_inference(self):
-        self.assertFalse(NCP.is_inference_payload("/v1/messages/count_tokens?beta=true", {"model": "claude-sonnet-5", "tools": [{"name": "Bash"}]}))
+        self.assertFalse(
+            NCP.is_inference_payload(
+                "/v1/messages/count_tokens?beta=true",
+                {"model": "claude-sonnet-5", "tools": [{"name": "Bash"}]},
+            )
+        )
 
     def test_models_list_is_not_inference(self):
         self.assertFalse(NCP.is_inference_payload("/v1/models", {"object": "list"}))
         self.assertTrue(NCP.is_models_path("/api/v1/models?limit=10"))
         self.assertFalse(
-            NCP.is_inference_payload(
-                "/backend-api/codex/analytics-events/events", {"model": "x"}
-            )
+            NCP.is_inference_payload("/backend-api/codex/analytics-events/events", {"model": "x"})
         )
 
 
@@ -165,8 +176,11 @@ class DummyResponseTests(unittest.TestCase):
         tools = [{"name": "Bash"}]
 
         def main(*content):
-            return {"model": "claude-sonnet-5", "tools": tools,
-                    "messages": [{"role": "user", "content": list(content)}]}
+            return {
+                "model": "claude-sonnet-5",
+                "tools": tools,
+                "messages": [{"role": "user", "content": list(content)}],
+            }
 
         def ask(text):
             return main({"type": "text", "text": text})
@@ -184,8 +198,9 @@ class DummyResponseTests(unittest.TestCase):
             script.reply("/v1/messages", {"model": "claude-haiku-5-5", "messages": []}, False),
         ]
         actions = [reply.summary["action"] for reply in replies]
-        self.assertEqual(actions, ["text", "tool_use:1", "tool_use:2", "text",
-                                   "overloaded", "text", "text"])
+        self.assertEqual(
+            actions, ["text", "tool_use:1", "tool_use:2", "text", "overloaded", "text", "text"]
+        )
         self.assertEqual(replies[4].status, 529)
         self.assertIn(("x-should-retry", "true"), replies[4].headers)
         self.assertIsNone(replies[4].summary["message_id"])
@@ -198,27 +213,52 @@ class DummyResponseTests(unittest.TestCase):
 
     def test_multiturn_facts_label_prompt_ids_without_leaking_them(self):
         uuid = "0b2f6a52-1111-4222-8333-944455556666"
-        body = {"model": "claude-sonnet-5", "tools": [{"name": "Bash"}],
-                "system": [{"type": "text", "text": (
-                    "x-anthropic-billing-header: cc_version=2.1.295.05c; cc_entrypoint=cli; "
-                    f"cch=00000; cc_prompt_id={uuid}; cc_turn_origin=human; "
-                    "cc_prompt_index=1; cc_turn_index=1;")}],
-                "messages": [{"role": "user", "content": "hello"}],
-                "diagnostics": {"previous_message_id": None}}
-        item = NCP.CapturedRequest("POST", "/v1/messages", [], json.dumps(body).encode(),
-                                   {"serial": 1, "main": True, "action": "text"})
+        body = {
+            "model": "claude-sonnet-5",
+            "tools": [{"name": "Bash"}],
+            "system": [
+                {
+                    "type": "text",
+                    "text": (
+                        "x-anthropic-billing-header: cc_version=2.1.295.05c; cc_entrypoint=cli; "
+                        f"cch=00000; cc_prompt_id={uuid}; cc_turn_origin=human; "
+                        "cc_prompt_index=1; cc_turn_index=1;"
+                    ),
+                }
+            ],
+            "messages": [{"role": "user", "content": "hello"}],
+            "diagnostics": {"previous_message_id": None},
+        }
+        item = NCP.CapturedRequest(
+            "POST",
+            "/v1/messages",
+            [],
+            json.dumps(body).encode(),
+            {"serial": 1, "main": True, "action": "text"},
+        )
         [facts] = NCP.multiturn_facts([item, item][:1])
         self.assertIn("cc_prompt_id=p1;", facts["billing"])
         self.assertNotIn(uuid, json.dumps(facts))
         self.assertEqual(facts["diagnostics"], {"previous_message_id": None})
 
     def test_claude_overrides_select_binary_model_and_effort(self):
-        args = NCP.parse_args(["claude", "--claude-bin", "/x/claude", "--claude-model",
-                               "claude-haiku-5-5", "--claude-effort", "max",
-                               "--claude-scenario", "multiturn"])
+        args = NCP.parse_args(
+            [
+                "claude",
+                "--claude-bin",
+                "/x/claude",
+                "--claude-model",
+                "claude-haiku-5-5",
+                "--claude-effort",
+                "max",
+                "--claude-scenario",
+                "multiturn",
+            ]
+        )
         spec = NCP.claude_spec(args)
-        self.assertEqual((spec.bin, spec.model, spec.effort),
-                         ("/x/claude", "claude-haiku-5-5", "max"))
+        self.assertEqual(
+            (spec.bin, spec.model, spec.effort), ("/x/claude", "claude-haiku-5-5", "max")
+        )
         self.assertEqual(args.claude_scenario, "multiturn")
 
     def test_chat_sse_sends_done(self):
@@ -252,15 +292,56 @@ class DummyResponseTests(unittest.TestCase):
 class MockServerTests(unittest.TestCase):
     def test_codex_discovery_and_mcp_on_plain_and_mitm(self):
         cases = [
-            ("GET", "/backend-api/wham/accounts/check", None, 200,
-             {"accounts": [{"id": "native-compare-account", "workspace_backend_origin": "https://chatgpt.com", "account_routing_override": "NO_CONSTRAINT"}]}),
+            (
+                "GET",
+                "/backend-api/wham/accounts/check",
+                None,
+                200,
+                {
+                    "accounts": [
+                        {
+                            "id": "native-compare-account",
+                            "workspace_backend_origin": "https://chatgpt.com",
+                            "account_routing_override": "NO_CONSTRAINT",
+                        }
+                    ]
+                },
+            ),
             ("GET", "/backend-api/codex/models?client_version=0.160.0", None, 200, None),
             ("GET", "/backend-api/plugins", None, 200, {"plugins": [], "next_page_token": None}),
             ("GET", "/backend-api/plugins/suggested", None, 200, {"enabled": False, "plugins": []}),
-            ("POST", "/backend-api/ps/mcp", {"jsonrpc": "2.0", "id": 7, "method": "initialize"}, 200, None),
-            ("POST", "/backend-api/ps/mcp", {"jsonrpc": "2.0", "method": "notifications/initialized"}, 202, {}),
-            ("POST", "/backend-api/ps/mcp", {"jsonrpc": "2.0", "id": 8, "method": "tools/list"}, 200, {"jsonrpc": "2.0", "id": 8, "result": {"tools": []}}),
-            ("POST", "/backend-api/ps/mcp", {"jsonrpc": "2.0", "id": 9, "method": "unknown"}, 200, {"jsonrpc": "2.0", "id": 9, "error": {"code": -32601, "message": "Method not found"}}),
+            (
+                "POST",
+                "/backend-api/ps/mcp",
+                {"jsonrpc": "2.0", "id": 7, "method": "initialize"},
+                200,
+                None,
+            ),
+            (
+                "POST",
+                "/backend-api/ps/mcp",
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                202,
+                {},
+            ),
+            (
+                "POST",
+                "/backend-api/ps/mcp",
+                {"jsonrpc": "2.0", "id": 8, "method": "tools/list"},
+                200,
+                {"jsonrpc": "2.0", "id": 8, "result": {"tools": []}},
+            ),
+            (
+                "POST",
+                "/backend-api/ps/mcp",
+                {"jsonrpc": "2.0", "id": 9, "method": "unknown"},
+                200,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "error": {"code": -32601, "message": "Method not found"},
+                },
+            ),
         ]
         with tempfile.TemporaryDirectory() as directory:
             for mitm in (False, True):
@@ -274,15 +355,23 @@ class MockServerTests(unittest.TestCase):
                         server, _, _ = NCP.start_mock(state)
                     try:
                         for method, path, payload, status, expected in cases:
-                            address = server.server.server_address if mitm else server.server_address
+                            address = (
+                                server.server.server_address if mitm else server.server_address
+                            )
                             connection = HTTPConnection(*address, timeout=5)
                             if mitm:
                                 connection.set_tunnel("chatgpt.com", 443)
                                 connection.connect()
                                 context = ssl.create_default_context(cafile=str(server.ca_pem))
-                                connection.sock = context.wrap_socket(connection.sock, server_hostname="chatgpt.com")
-                            connection.request(method, path, body=json.dumps(payload) if payload else None,
-                                               headers={"Content-Type": "application/json"})
+                                connection.sock = context.wrap_socket(
+                                    connection.sock, server_hostname="chatgpt.com"
+                                )
+                            connection.request(
+                                method,
+                                path,
+                                body=json.dumps(payload) if payload else None,
+                                headers={"Content-Type": "application/json"},
+                            )
                             response = connection.getresponse()
                             body = json.loads(response.read())
                             connection.close()
@@ -291,12 +380,31 @@ class MockServerTests(unittest.TestCase):
                                 self.assertEqual(body, expected, path)
                             elif method == "GET":
                                 model = body["models"][0]
-                                required = {"slug", "display_name", "description", "supported_reasoning_levels", "shell_type", "visibility", "supported_in_api", "priority", "availability_nux", "upgrade", "support_verbosity", "default_verbosity", "apply_patch_tool_type", "truncation_policy", "experimental_supported_tools"}
+                                required = {
+                                    "slug",
+                                    "display_name",
+                                    "description",
+                                    "supported_reasoning_levels",
+                                    "shell_type",
+                                    "visibility",
+                                    "supported_in_api",
+                                    "priority",
+                                    "availability_nux",
+                                    "upgrade",
+                                    "support_verbosity",
+                                    "default_verbosity",
+                                    "apply_patch_tool_type",
+                                    "truncation_policy",
+                                    "experimental_supported_tools",
+                                }
                                 self.assertTrue(required <= model.keys())
                             else:
                                 self.assertEqual(body["id"], 7)
                                 self.assertEqual(body["jsonrpc"], "2.0")
-                                self.assertEqual(set(body["result"]), {"protocolVersion", "capabilities", "serverInfo"})
+                                self.assertEqual(
+                                    set(body["result"]),
+                                    {"protocolVersion", "capabilities", "serverInfo"},
+                                )
                         self.assertFalse(state.inferences)
                     finally:
                         if mitm:
@@ -375,12 +483,21 @@ class MockServerTests(unittest.TestCase):
                 env = os.environ.copy()
                 env["PATH"] = "/usr/bin:/bin"
                 for name in (
-                    "HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy",
-                    "ALL_PROXY", "all_proxy",
+                    "HTTPS_PROXY",
+                    "HTTP_PROXY",
+                    "https_proxy",
+                    "http_proxy",
+                    "ALL_PROXY",
+                    "all_proxy",
                 ):
                     env.pop(name, None)
                 result = subprocess.run(
-                    command, cwd=fixture, env=env, text=True, capture_output=True, timeout=10,
+                    command,
+                    cwd=fixture,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    timeout=10,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(state.inferences, state.requests)
@@ -400,9 +517,7 @@ class MockServerTests(unittest.TestCase):
 class FixtureTests(unittest.TestCase):
     def test_opencode_fixture_pins_mock_base_url(self):
         with tempfile.TemporaryDirectory() as directory:
-            fixture = NCP.prepare_fixture(
-                Path(directory), "opencode", "http://127.0.0.1:9"
-            )
+            fixture = NCP.prepare_fixture(Path(directory), "opencode", "http://127.0.0.1:9")
             config = json.loads((fixture / "opencode.json").read_text())
             self.assertEqual(
                 config["provider"]["openrouter"]["options"]["baseURL"],
@@ -412,9 +527,7 @@ class FixtureTests(unittest.TestCase):
 
     def test_claude_fixture_ships_empty_mcp_config(self):
         with tempfile.TemporaryDirectory() as directory:
-            fixture = NCP.prepare_fixture(
-                Path(directory), "claude", "http://127.0.0.1:9"
-            )
+            fixture = NCP.prepare_fixture(Path(directory), "claude", "http://127.0.0.1:9")
             self.assertEqual(
                 json.loads((fixture / "mcp.json").read_text()),
                 {"mcpServers": {}},
@@ -470,9 +583,7 @@ class ClaudeIngestTests(unittest.TestCase):
             NCP.resolve_vendors(args)
 
     def test_leading_double_dash_from_just_is_stripped(self):
-        args = NCP.parse_args(
-            ["--", "claude", "--from", "/tmp/claude-native.log"]
-        )
+        args = NCP.parse_args(["--", "claude", "--from", "/tmp/claude-native.log"])
         self.assertEqual(args.vendors, ["claude"])
         self.assertEqual(args.from_path, Path("/tmp/claude-native.log"))
         self.assertEqual(NCP.resolve_vendors(args), ["claude"])
@@ -484,9 +595,7 @@ class ClaudeIngestTests(unittest.TestCase):
                 json.dumps(
                     {
                         "url": "https://api.anthropic.com/v1/messages?beta=true",
-                        "headers": {
-                            "user-agent": "claude-cli/2.1.263 (external, cli)"
-                        },
+                        "headers": {"user-agent": "claude-cli/2.1.263 (external, cli)"},
                         "body": self.CLI_PAYLOAD,
                     }
                 )
@@ -510,9 +619,7 @@ class ClaudeIngestTests(unittest.TestCase):
             self.assertIn("sdk-cli", str(raised.exception))
 
     def test_visible_pty_text_strips_cursor_moves(self):
-        raw = (
-            b"\x1b[2GYes,\x1b[9GI\x1b[11Gtrust\x1b[17Gthis\x1b[22Gfolder"
-        )
+        raw = b"\x1b[2GYes,\x1b[9GI\x1b[11Gtrust\x1b[17Gthis\x1b[22Gfolder"
         self.assertEqual(NCP.folded_pty_text(raw), "yesitrustthisfolder")
         command = NCP.claude_tui_command(
             NCP.SPECS["claude"],
@@ -541,7 +648,10 @@ class ClaudeIngestTests(unittest.TestCase):
         class Process:
             returncode = None
 
-        with patch.object(NCP, "drain_pty", drain), patch.object(NCP, "pty_write", return_value=True) as write:
+        with (
+            patch.object(NCP, "drain_pty", drain),
+            patch.object(NCP, "pty_write", return_value=True) as write,
+        ):
             self.assertIsNone(asyncio.run(NCP.wait_claude_ready(7, collected, Process(), 1)))
         write.assert_called_once_with(7, b"\x1b[B\r")
 
@@ -561,9 +671,12 @@ class ClaudeIngestTests(unittest.TestCase):
 class CaptureIsolationTests(unittest.TestCase):
     def test_environment_does_not_inherit_credentials_or_native_config(self):
         inherited = {
-            "ANTHROPIC_API_KEY": "private-user-key", "OPENAI_API_KEY": "private-key",
-            "CLAUDE_CONFIG_DIR": "/private/account", "GROK_AUTH": "private-login",
-            "HTTPS_PROXY": "https://private-proxy", "NODE_OPTIONS": "--require private.js",
+            "ANTHROPIC_API_KEY": "private-user-key",
+            "OPENAI_API_KEY": "private-key",
+            "CLAUDE_CONFIG_DIR": "/private/account",
+            "GROK_AUTH": "private-login",
+            "HTTPS_PROXY": "https://private-proxy",
+            "NODE_OPTIONS": "--require private.js",
         }
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, inherited):
             home = Path(directory) / "home"
@@ -612,8 +725,9 @@ class CaptureIsolationTests(unittest.TestCase):
             (operator / ".claude").mkdir()
             real_config = root / "real-claude-config"
             real_config.mkdir()
-            with patch.object(Path, "home", return_value=operator), patch.dict(
-                os.environ, {"CLAUDE_CONFIG_DIR": str(real_config)}
+            with (
+                patch.object(Path, "home", return_value=operator),
+                patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(real_config)}),
             ):
                 for blocked in (operator, operator / ".claude", real_config):
                     with self.assertRaisesRegex(RuntimeError, "synthetic config"):
@@ -629,7 +743,10 @@ class CaptureIsolationTests(unittest.TestCase):
             self.assertFalse((real_config / ".claude.json").exists())
 
     def test_missing_client_clears_only_managed_previous_artifacts(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(NCP, "which", return_value=None):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(NCP, "which", return_value=None),
+        ):
             out = Path(directory)
             dest = out / "opencode"
             dest.mkdir()
@@ -642,9 +759,19 @@ class CaptureIsolationTests(unittest.TestCase):
     def test_invalid_body_never_writes_raw_headers_or_body(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            request = NCP.CapturedRequest("POST", "/v1/messages", [("Authorization", "private")], b"private-body")
+            request = NCP.CapturedRequest(
+                "POST", "/v1/messages", [("Authorization", "private")], b"private-body"
+            )
             with patch.object(NCP, "ROOT", root), self.assertRaises(RuntimeError) as raised:
-                NCP.write_capture(root / "out", NCP.SPECS["claude"], Path("/bin/claude"), "v", request, "local", [])
+                NCP.write_capture(
+                    root / "out",
+                    NCP.SPECS["claude"],
+                    Path("/bin/claude"),
+                    "v",
+                    request,
+                    "local",
+                    [],
+                )
             self.assertNotIn("private", str(raised.exception))
             self.assertFalse(any(p.is_file() for p in root.rglob("*")))
 
@@ -656,8 +783,17 @@ class CaptureIsolationTests(unittest.TestCase):
             try:
                 address = proxy.server.server_address
                 connection = socket.create_connection(address, timeout=2)
-                with connection, patch.object(socket, "create_connection", side_effect=AssertionError("external forwarding")):
-                    connection.sendall(b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n\r\n")
+                with (
+                    connection,
+                    patch.object(
+                        socket,
+                        "create_connection",
+                        side_effect=AssertionError("external forwarding"),
+                    ),
+                ):
+                    connection.sendall(
+                        b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n\r\n"
+                    )
                     self.assertIn(b"403 Forbidden", connection.recv(1024))
             finally:
                 proxy.shutdown()
@@ -677,7 +813,10 @@ class CaptureIsolationTests(unittest.TestCase):
             executable.chmod(0o700)
             work = root / "work"
             work.mkdir()
-            with patch.object(NCP, "ROOT", root), patch.object(NCP, "which", return_value=executable):
+            with (
+                patch.object(NCP, "ROOT", root),
+                patch.object(NCP, "which", return_value=executable),
+            ):
                 error = NCP.run_vendor(NCP.SPECS["opencode"], root / "out", work, 5)
             self.assertIsNone(error)
             pin = json.loads((root / "out/opencode/pin.json").read_text())
@@ -692,7 +831,11 @@ class CaptureIsolationTests(unittest.TestCase):
             cleanup = await NCP.owned_processes.Owned(process).close()
             self.assertIsNone(process.returncode)
             self.assertFalse(cleanup["joined"])
-        with patch.object(NCP.owned_processes, "processes", return_value={}), patch.object(NCP.os, "waitpid", side_effect=ChildProcessError):
+
+        with (
+            patch.object(NCP.owned_processes, "processes", return_value={}),
+            patch.object(NCP.os, "waitpid", side_effect=ChildProcessError),
+        ):
             asyncio.run(check())
 
     def test_pty_output_bound_rejects_before_retaining_excess(self):
@@ -708,6 +851,7 @@ class CaptureIsolationTests(unittest.TestCase):
             finally:
                 os.close(read)
                 os.close(write)
+
         asyncio.run(check())
 
     def test_pty_owner_reaps_real_finite_child(self):
@@ -724,6 +868,7 @@ class CaptureIsolationTests(unittest.TestCase):
                     os.waitpid(pid, os.WNOHANG)
             finally:
                 os.close(fd)
+
         asyncio.run(check())
 
     def test_headless_output_overflow_refuses_capture_and_joins(self):
@@ -752,7 +897,12 @@ class CaptureIsolationTests(unittest.TestCase):
                 executions.append(result)
                 return result
 
-            with patch.object(NCP, "ROOT", root), patch.object(NCP, "which", return_value=executable), patch.object(NCP.owned_processes, "capture_stream", bounded), patch.object(NCP.owned_processes, "run_command", recorded):
+            with (
+                patch.object(NCP, "ROOT", root),
+                patch.object(NCP, "which", return_value=executable),
+                patch.object(NCP.owned_processes, "capture_stream", bounded),
+                patch.object(NCP.owned_processes, "run_command", recorded),
+            ):
                 error = NCP.run_vendor(NCP.SPECS["opencode"], root / "out", work, 5)
             self.assertIn("output limit exceeded", error)
             self.assertTrue(executions[-1]["cleanup"]["joined"])

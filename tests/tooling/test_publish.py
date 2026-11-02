@@ -120,27 +120,40 @@ class PublishScriptTests(unittest.TestCase):
         self.target = base / "target"
         self.index = base / "index"
         self.log = base / "cargo.jsonl"
-        for relative in ("tools/release/publish.sh", "tools/release/publish_retry.py", "tools/release/publish_plan.py",
-                         "tools/release/publish_shape.py", "tools/release/review_expiry.py",
-                         "tools/release/prefetch_packages.py", "tools/release/gate_evidence.py",
-                         "tools/release/offline_first.py",
-                         "tools/gate/vcs_listing.py", "tools/gate/check_workspace.py",
-                         "tools/gate/plakous_policy.py"):
+        for relative in (
+            "tools/release/publish.sh",
+            "tools/release/publish_retry.py",
+            "tools/release/publish_plan.py",
+            "tools/release/publish_shape.py",
+            "tools/release/review_expiry.py",
+            "tools/release/prefetch_packages.py",
+            "tools/release/gate_evidence.py",
+            "tools/release/offline_first.py",
+            "tools/gate/vcs_listing.py",
+            "tools/gate/check_workspace.py",
+            "tools/gate/plakous_policy.py",
+        ):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.repo / relative)
         # Freeze only this copied fixture's invocation, never the maintainer CLI.
         checker = self.repo / "tools/release/review_expiry.py"
         source = checker.read_text()
         assert source.count("sys.exit(main(note=args.note))") == 1
-        checker.write_text(source.replace("sys.exit(main(note=args.note))", "sys.exit(main(now=100 * 86_400, note=args.note))"))
+        checker.write_text(
+            source.replace(
+                "sys.exit(main(note=args.note))", "sys.exit(main(now=100 * 86_400, note=args.note))"
+            )
+        )
         window = self.repo / review_expiry.WINDOW_CONSTANTS
         window.parent.mkdir(parents=True, exist_ok=True)
         window.write_text("pub const SUBSCRIPTION_REVIEW_WINDOW_SECONDS: u64 = 90 * 86_400;\n")
         for _, relative, reviewed, deadline, _ in review_expiry.SURFACES:
             source = self.repo / "crates/providers" / relative
             source.parent.mkdir(parents=True, exist_ok=True)
-            source.write_text(f"const {reviewed}: u64 = 100 * 86_400;\n"
-                              f"const {deadline}: u64 = {reviewed} + SUBSCRIPTION_REVIEW_WINDOW_SECONDS;\n")
+            source.write_text(
+                f"const {reviewed}: u64 = 100 * 86_400;\n"
+                f"const {deadline}: u64 = {reviewed} + SUBSCRIPTION_REVIEW_WINDOW_SECONDS;\n"
+            )
         files = {
             "Cargo.toml": (
                 "[workspace]\nresolver = \"2\"\nmembers = [\"crates/zeta\", \"crates/mid\", "
@@ -151,10 +164,14 @@ class PublishScriptTests(unittest.TestCase):
                 "plakous-mid", 'plakous-zeta = { version = "0.0.2", path = "../zeta" }\n'
             ),
             "bin/plak/Cargo.toml": (
-                library("plak", 'plakous-mid = { version = "0.0.2", path = "../../crates/mid" }\n'
-                        + publish_shape.HARNESS_DEPENDENCY)
+                library(
+                    "plak",
+                    'plakous-mid = { version = "0.0.2", path = "../../crates/mid" }\n'
+                    + publish_shape.HARNESS_DEPENDENCY,
+                )
                 + '\n[dev-dependencies]\nplakous-zeta = { version = "0.0.2", path = "../../crates/zeta" }\n'
-                + "\n[features]\n" + publish_shape.TEST_HOOKS_FEATURE
+                + "\n[features]\n"
+                + publish_shape.TEST_HOOKS_FEATURE
             ),
             "tests/harnesses/offline-crash/Cargo.toml": library(
                 publish_shape.HARNESS, publish=False
@@ -174,7 +191,11 @@ class PublishScriptTests(unittest.TestCase):
         shim.write_text("#!" + sys.executable + "\n" + CARGO_SHIM)
         shim.chmod(0o700)
         sleep = bin_dir / "sleep"
-        sleep.write_text("#!" + sys.executable + "\nimport os, sys\nfrom pathlib import Path\np = Path(os.environ['FAKE_SLEEP_LOG'])\nwith p.open('a') as log: log.write(sys.argv[1] + '\\n')\n")
+        sleep.write_text(
+            "#!"
+            + sys.executable
+            + "\nimport os, sys\nfrom pathlib import Path\np = Path(os.environ['FAKE_SLEEP_LOG'])\nwith p.open('a') as log: log.write(sys.argv[1] + '\\n')\n"
+        )
         sleep.chmod(0o700)
         self.sleeps = base / "sleeps"
         self.git("init", "-q")
@@ -183,23 +204,29 @@ class PublishScriptTests(unittest.TestCase):
         self.tree = self.git("rev-parse", "HEAD^{tree}")
         (base / "tmp").mkdir()
         self.env = {
-            key: value for key, value in os.environ.items()
+            key: value
+            for key, value in os.environ.items()
             if key not in {"CARGO_REGISTRY_TOKEN", "CARGO_NET_OFFLINE", "PLAK_PUBLISH_TIMEOUT"}
         }
         self.env.update(
-            PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}", REAL_CARGO=real_cargo,
-            FAKE_CARGO_LOG=str(self.log), FAKE_INDEX=str(self.index),
+            PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            REAL_CARGO=real_cargo,
+            FAKE_CARGO_LOG=str(self.log),
+            FAKE_INDEX=str(self.index),
             FAKE_SLEEP_LOG=str(self.sleeps),
             FAKE_NAMES=",".join(ORDER),
             FAKE_INDEX_PATHS=",".join(publish_plan.index_path(name) for name in ORDER),
-            CARGO_TARGET_DIR=str(self.target), TMPDIR=str(base / "tmp"),
+            CARGO_TARGET_DIR=str(self.target),
+            TMPDIR=str(base / "tmp"),
             PLAK_PUBLISH_INDEX=self.index.as_uri(),
         )
 
     def git(self, *args: str) -> str:
         return subprocess.run(
             ["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
 
     def record_evidence(self, tree: str | None = None) -> None:
@@ -210,13 +237,21 @@ class PublishScriptTests(unittest.TestCase):
     def publish(self, *args: str) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
         result = subprocess.run(
             ["bash", str(self.repo / "tools/release/publish.sh"), *args],
-            cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=60,
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         lines = self.log.read_text().splitlines() if self.log.exists() else []
         self.log.unlink(missing_ok=True)
         all_calls = [json.loads(line) for line in lines]
-        self.prefetch_calls = [call for call in all_calls if call["args"][0] in ("fetch", "info")
-                               or (call["args"][0] == "package" and "--no-verify" in call["args"])]
+        self.prefetch_calls = [
+            call
+            for call in all_calls
+            if call["args"][0] in ("fetch", "info")
+            or (call["args"][0] == "package" and "--no-verify" in call["args"])
+        ]
         Path(str(self.log) + ".refreshed").unlink(missing_ok=True)
         return result, [call for call in all_calls if call not in self.prefetch_calls]
 
@@ -249,7 +284,9 @@ class PublishScriptTests(unittest.TestCase):
                     self.record_evidence(evidence)
                 result, calls = self.publish()
                 self.assertEqual(result.returncode, 1)
-                self.assertIn(f"no passing `just full` evidence for tree {self.tree}", result.stderr)
+                self.assertIn(
+                    f"no passing `just full` evidence for tree {self.tree}", result.stderr
+                )
                 self.assertEqual(calls, [])
 
     def commit(self, files: dict[str, str]) -> str:
@@ -263,19 +300,27 @@ class PublishScriptTests(unittest.TestCase):
 
     def test_documentation_only_delta_keeps_full_evidence_and_is_audited(self) -> None:
         self.record_evidence()
-        head = self.commit({
-            "docs/spec/01-plakous-library.md": "spec\n",
-            "docs/user-guide/cli.md": "guide\n",
-            "CHANGELOG.md": "changes\n",
-            "tests/live/STATUS.md": "status\n",
-        })
+        head = self.commit(
+            {
+                "docs/spec/01-plakous-library.md": "spec\n",
+                "docs/user-guide/cli.md": "guide\n",
+                "CHANGELOG.md": "changes\n",
+                "tests/live/STATUS.md": "status\n",
+            }
+        )
         result, calls = self.publish()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(calls), 1)
-        self.assertIn(f"publish: evidence: `just full` passed on tree {self.tree}; HEAD tree {head}",
-                      result.stdout)
-        for path in ("CHANGELOG.md", "docs/spec/01-plakous-library.md", "docs/user-guide/cli.md",
-                     "tests/live/STATUS.md"):
+        self.assertIn(
+            f"publish: evidence: `just full` passed on tree {self.tree}; HEAD tree {head}",
+            result.stdout,
+        )
+        for path in (
+            "CHANGELOG.md",
+            "docs/spec/01-plakous-library.md",
+            "docs/user-guide/cli.md",
+            "tests/live/STATUS.md",
+        ):
             self.assertIn(f"publish:   delta docs: {path}", result.stdout)
         self.assertIn("the delta is documentation only", result.stdout)
 
@@ -298,10 +343,12 @@ class PublishScriptTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_any_other_delta_or_an_excluded_spec_invalidates_full_evidence(self) -> None:
-        for files in ({"crates/zeta/src/lib.rs": "// changed\n"},
-                      {"docs/spec/07-config-reference.md": "keys\n"},
-                      {"docs/local/notes.md": "private\n"},
-                      {"docs/spec/05.md": "spec\n", "scripts/extra.sh": "true\n"}):
+        for files in (
+            {"crates/zeta/src/lib.rs": "// changed\n"},
+            {"docs/spec/07-config-reference.md": "keys\n"},
+            {"docs/local/notes.md": "private\n"},
+            {"docs/spec/05.md": "spec\n", "scripts/extra.sh": "true\n"},
+        ):
             with self.subTest(files=files):
                 self.record_evidence()
                 self.commit(files)
@@ -341,8 +388,10 @@ class PublishScriptTests(unittest.TestCase):
     def test_publication_refuses_expiring_pins_before_packaging(self) -> None:
         # Exactly a third of the 90-day window remains at the frozen time.
         source = self.repo / "crates/providers/openai/src/oauth_pins.rs"
-        source.write_text("const reviewed_at_unix: u64 = 40 * 86_400;\n"
-                          "const expires_at_unix: u64 = 130 * 86_400;\n")
+        source.write_text(
+            "const reviewed_at_unix: u64 = 40 * 86_400;\n"
+            "const expires_at_unix: u64 = 130 * 86_400;\n"
+        )
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "expiry boundary")
         self.record_evidence(self.git("rev-parse", "HEAD^{tree}"))
@@ -352,19 +401,27 @@ class PublishScriptTests(unittest.TestCase):
                 result, calls = self.publish(*mode)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("Codex OAuth review expires", result.stderr)
-                self.assertIn("more than 30 days (a third of the 90-day window) remaining", result.stderr)
+                self.assertIn(
+                    "more than 30 days (a third of the 90-day window) remaining", result.stderr
+                )
                 self.assertEqual(calls, [])
         result, calls = self.publish("--gate")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("30 days remaining; publication requires more than 30 (informational)", result.stdout)
+        self.assertIn(
+            "30 days remaining; publication requires more than 30 (informational)", result.stdout
+        )
         self.assertEqual(len(calls), 1)
 
     def test_verification_graph_prefetch_is_offline_first(self) -> None:
         result, calls = self.publish("--gate")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(self.prefetch_calls), 4)
-        self.assertTrue(all("--offline" in call["args"] or call["offline"] == "true"
-                            for call in self.prefetch_calls))
+        self.assertTrue(
+            all(
+                "--offline" in call["args"] or call["offline"] == "true"
+                for call in self.prefetch_calls
+            )
+        )
         self.assertEqual(calls[0]["offline"], "true")
 
     def test_cold_archive_graph_fetches_online_then_verifies_offline(self) -> None:
@@ -392,8 +449,13 @@ class PublishScriptTests(unittest.TestCase):
                 self.assertFalse(info[0]["cwd"].startswith(str(self.repo)))
                 self.assertNotIn("plak-publish", info[0]["cwd"])
                 self.assertTrue(all("--offline" in call["args"] for call in stale[:2]))
-                self.assertTrue(all("--offline" in call["args"] or call["offline"] == "true"
-                                    for call in self.prefetch_calls if call["args"][0] != "info"))
+                self.assertTrue(
+                    all(
+                        "--offline" in call["args"] or call["offline"] == "true"
+                        for call in self.prefetch_calls
+                        if call["args"][0] != "info"
+                    )
+                )
                 self.assertIn("refreshing monty-typeshed", result.stderr)
                 self.assertIn("offline retry succeeded after the index refresh", result.stderr)
                 self.assertEqual(calls[0]["offline"], "true")
@@ -460,8 +522,11 @@ class PublishScriptTests(unittest.TestCase):
 
     def test_execute_stops_before_dependents_of_a_crate_that_never_appears(self) -> None:
         self.record_evidence()
-        self.env.update(CARGO_REGISTRY_TOKEN="fake-token", FAKE_UNINDEXED="plakous-mid",
-                        PLAK_PUBLISH_TIMEOUT="0")
+        self.env.update(
+            CARGO_REGISTRY_TOKEN="fake-token",
+            FAKE_UNINDEXED="plakous-mid",
+            PLAK_PUBLISH_TIMEOUT="0",
+        )
         result, calls = self.publish("--execute")
         self.assertEqual(result.returncode, 1)
         self.assertIn("plakous-mid 0.0.2 did not appear", result.stderr)
@@ -472,13 +537,18 @@ class PublishScriptTests(unittest.TestCase):
 
     def test_publish_retries_only_429_and_honors_retry_after(self) -> None:
         self.record_evidence()
-        self.env.update(CARGO_REGISTRY_TOKEN="fixture-token", FAKE_PUBLISH_FAILURES="2",
-                        FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 429 Too Many Requests\nRetry-After: 7")
+        self.env.update(
+            CARGO_REGISTRY_TOKEN="fixture-token",
+            FAKE_PUBLISH_FAILURES="2",
+            FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 429 Too Many Requests\nRetry-After: 7",
+        )
         result, calls = self.publish("--execute")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.sleeps.read_text().splitlines(), ["7", "7"])
-        self.assertEqual([c["args"][-1] for c in calls if c["args"][0] == "publish"],
-                         [ORDER[0], ORDER[0], *ORDER])
+        self.assertEqual(
+            [c["args"][-1] for c in calls if c["args"][0] == "publish"],
+            [ORDER[0], ORDER[0], *ORDER],
+        )
 
     def test_publish_429_retries_are_bounded_with_capped_backoff(self) -> None:
         self.record_evidence()
@@ -486,12 +556,17 @@ class PublishScriptTests(unittest.TestCase):
         result, calls = self.publish("--execute")
         self.assertEqual(result.returncode, 101, result.stderr)
         self.assertEqual(self.sleeps.read_text().splitlines(), ["5", "10", "20", "30"])
-        self.assertEqual([c["args"][-1] for c in calls if c["args"][0] == "publish"], [ORDER[0]] * 5)
+        self.assertEqual(
+            [c["args"][-1] for c in calls if c["args"][0] == "publish"], [ORDER[0]] * 5
+        )
 
     def test_publish_does_not_retry_other_failures(self) -> None:
         self.record_evidence()
-        self.env.update(CARGO_REGISTRY_TOKEN="fixture-token", FAKE_PUBLISH_FAILURES="1",
-                        FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 403 Forbidden\nBody: a previous 429 response is unrelated")
+        self.env.update(
+            CARGO_REGISTRY_TOKEN="fixture-token",
+            FAKE_PUBLISH_FAILURES="1",
+            FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 403 Forbidden\nBody: a previous 429 response is unrelated",
+        )
         result, calls = self.publish("--execute")
         self.assertEqual(result.returncode, 101, result.stderr)
         self.assertFalse(self.sleeps.exists())
@@ -499,8 +574,11 @@ class PublishScriptTests(unittest.TestCase):
 
     def test_publish_refuses_excessive_retry_after_without_sleeping(self) -> None:
         self.record_evidence()
-        self.env.update(CARGO_REGISTRY_TOKEN="fixture-token", FAKE_PUBLISH_FAILURES="1",
-                        FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 429 Too Many Requests\nRetry-After: 901")
+        self.env.update(
+            CARGO_REGISTRY_TOKEN="fixture-token",
+            FAKE_PUBLISH_FAILURES="1",
+            FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 429 Too Many Requests\nRetry-After: 901",
+        )
         result, calls = self.publish("--execute")
         self.assertEqual(result.returncode, 101, result.stderr)
         self.assertIn("exceeds the 900s maximum", result.stderr)
@@ -511,9 +589,12 @@ class PublishScriptTests(unittest.TestCase):
 class PublishRetryTests(unittest.TestCase):
     def test_cargo_new_crate_limit_body_honors_ten_minute_deadline(self):
         from datetime import datetime, timezone
+
         diagnostic = (ROOT / "tests/tooling/fixtures/cargo-publish-429.txt").read_text()
-        self.assertEqual(publish_retry.retry_delay(
-            diagnostic, 1, datetime(2026, 10, 24, tzinfo=timezone.utc)), 600)
+        self.assertEqual(
+            publish_retry.retry_delay(diagnostic, 1, datetime(2026, 10, 24, tzinfo=timezone.utc)),
+            600,
+        )
 
     def test_honored_delay_has_a_hard_maximum(self):
         self.assertEqual(publish_retry.retry_delay("status: 429\nRetry-After: 900", 1), 900)
@@ -521,14 +602,22 @@ class PublishRetryTests(unittest.TestCase):
             publish_retry.retry_delay("status: 429\nRetry-After: 901", 1)
 
     def test_non_429_body_cannot_trigger_a_retry(self):
-        for diagnostic in ["HTTP/2 403 Forbidden\n429 response", "status: 503\nBody: status 429 Too Many Requests"]:
+        for diagnostic in [
+            "HTTP/2 403 Forbidden\n429 response",
+            "status: 503\nBody: status 429 Too Many Requests",
+        ]:
             self.assertIsNone(publish_retry.retry_delay(diagnostic, 1))
 
     def test_retry_after_http_date_and_invalid_header(self):
         from datetime import datetime, timezone
+
         now = datetime(2026, 10, 24, tzinfo=timezone.utc)
-        self.assertEqual(publish_retry.retry_delay(
-            "status: 429\nRetry-After: Sat, 24 Oct 2026 00:00:09 GMT", 1, now), 9)
+        self.assertEqual(
+            publish_retry.retry_delay(
+                "status: 429\nRetry-After: Sat, 24 Oct 2026 00:00:09 GMT", 1, now
+            ),
+            9,
+        )
         self.assertEqual(publish_retry.retry_delay("status code: 429\nRetry-After: bad", 2), 10)
         self.assertIsNone(publish_retry.retry_delay("connection reset; version 429", 1))
 
@@ -544,15 +633,24 @@ class PublishOrderTests(unittest.TestCase):
 
     def test_path_only_dev_dependencies_do_not_order_and_cycles_fail(self) -> None:
         stripped = dict(name="b", kind="dev", req="*")
-        order = publish_plan.publish_order(self.metadata({
-            "a": [stripped], "b": [dict(name="a", kind=None, req="^0.0.2")],
-        }))
+        order = publish_plan.publish_order(
+            self.metadata(
+                {
+                    "a": [stripped],
+                    "b": [dict(name="a", kind=None, req="^0.0.2")],
+                }
+            )
+        )
         self.assertEqual(order, [("a", "0.0.2"), ("b", "0.0.2")])
         with self.assertRaises(publish_plan.PlanError):
-            publish_plan.publish_order(self.metadata({
-                "a": [dict(stripped, req="^0.0.2")],
-                "b": [dict(name="a", kind=None, req="^0.0.2")],
-            }))
+            publish_plan.publish_order(
+                self.metadata(
+                    {
+                        "a": [dict(stripped, req="^0.0.2")],
+                        "b": [dict(name="a", kind=None, req="^0.0.2")],
+                    }
+                )
+            )
 
     def test_index_paths_follow_the_registry_layout(self) -> None:
         self.assertEqual(

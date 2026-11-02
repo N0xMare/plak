@@ -58,27 +58,34 @@ CHILD_WAIT_S = 120.0
 # Quiet window is 2 s (spec 02). Leave room for the stop and the admission.
 WAKE_AFTER_STOP_S = 30.0
 # model_retries.cause_kind values that mean the provider, not the harness.
-PROVIDER_RETRY_CAUSES = frozenset({
-    "http_status", "connect", "record_rejected_in_transit",
-    "transport_after_send", "stream_interrupted",
-})
+PROVIDER_RETRY_CAUSES = frozenset(
+    {
+        "http_status",
+        "connect",
+        "record_rejected_in_transit",
+        "transport_after_send",
+        "stream_interrupted",
+    }
+)
 AGENT_BADGE = "1 agent"
 PROCESS_BADGE = "1 process"
 # Session-log names for a shell start. Wait and poll tools are absent on
 # purpose: an open poll must not look like a foreground command.
-SHELL_STARTS = frozenset({
-    "run_terminal_command",
-    "Bash",
-    "bash",
-    "exec_command",
-    "shell",
-    "Shell",
-    "process_session_start",
-    "process-session-start",
-    "plakous.process-session-start.v2",
-    "plakous.process-session-start.v3",
-    "run_process",
-})
+SHELL_STARTS = frozenset(
+    {
+        "run_terminal_command",
+        "Bash",
+        "bash",
+        "exec_command",
+        "shell",
+        "Shell",
+        "process_session_start",
+        "process-session-start",
+        "plakous.process-session-start.v2",
+        "plakous.process-session-start.v3",
+        "run_process",
+    }
+)
 # Composer border segment: middle dot, a glyph, then "1 agent" / "1 process".
 # A transcript quote has no glyph between the dot and the count.
 _HUD_PAINT = re.compile(
@@ -336,8 +343,10 @@ def promotion_prompt(route: live.Route, command: str) -> str:
     Code Mode prompt names the one argument the call may carry.
     """
     if code_mode(route):
-        how = ("Call exec_command with only the cmd argument: do not pass yield_time_ms "
-               "or any other argument.")
+        how = (
+            "Call exec_command with only the cmd argument: do not pass yield_time_ms "
+            "or any other argument."
+        )
     else:
         how = "Do not pass a timeout, yield, block_until, or background flag."
     return (
@@ -348,8 +357,9 @@ def promotion_prompt(route: live.Route, command: str) -> str:
     )
 
 
-def judge_nested_steer(*, promoted: bool, steered: bool, acked: bool,
-                       finished: bool, still_running: bool) -> str:
+def judge_nested_steer(
+    *, promoted: bool, steered: bool, acked: bool, finished: bool, still_running: bool
+) -> str:
     """Hint promotion, then a steer after the cell. Not preemption.
 
     `acked` is a `steer_ack` that reported `applied`; a steer that was only
@@ -367,10 +377,18 @@ def judge_nested_steer(*, promoted: bool, steered: bool, acked: bool,
     return "hint promoted the nested command; steer applied with the job still running"
 
 
-def judge_nested_await(*, promoted: bool, steered: bool, applied: bool,
-                       latency: float | None, running: bool, finished: bool,
-                       cell_wait: bool, yielded_first: bool = False,
-                       hold_left: float | None = None) -> str:
+def judge_nested_await(
+    *,
+    promoted: bool,
+    steered: bool,
+    applied: bool,
+    latency: float | None,
+    running: bool,
+    finished: bool,
+    cell_wait: bool,
+    yielded_first: bool = False,
+    hold_left: float | None = None,
+) -> str:
     """A steer sent while a nested wait is in flight inside the outer cell.
 
     The forwarded Notice yields the nested wait, the outer cell yields after
@@ -391,33 +409,48 @@ def judge_nested_await(*, promoted: bool, steered: bool, applied: bool,
     if not promoted:
         raise ScenarioFailure(MODEL, "nested command was not promoted by its hint")
     if not steered:
-        raise ScenarioFailure(MODEL, "no nested wait was in flight inside the cell while the job ran")
+        raise ScenarioFailure(
+            MODEL, "no nested wait was in flight inside the cell while the job ran"
+        )
     if not applied or latency is None:
         raise ScenarioFailure(HARNESS, "steer was not applied at the outer-cell boundary")
     if latency > STEER_LIMIT_S:
-        raise ScenarioFailure(HARNESS, f"steer was applied {latency:.1f} s after it was sent, "
-                                       f"past {STEER_LIMIT_S:.0f} s")
+        raise ScenarioFailure(
+            HARNESS,
+            f"steer was applied {latency:.1f} s after it was sent, past {STEER_LIMIT_S:.0f} s",
+        )
     if finished and yielded_first:
-        raise ScenarioFailure(MODEL, f"job finished within {latency:.1f} s of the steer, after the "
-                                     "nested wait yielded: the nested wait began too late")
+        raise ScenarioFailure(
+            MODEL,
+            f"job finished within {latency:.1f} s of the steer, after the "
+            "nested wait yielded: the nested wait began too late",
+        )
     if finished and hold_left is not None and hold_left < STEER_LIMIT_S:
-        raise ScenarioFailure(MODEL, f"the steer went out with {hold_left:.1f} s of the hold left, "
-                                     f"under the {STEER_LIMIT_S:.0f} s bar: the nested wait began "
-                                     "too late")
+        raise ScenarioFailure(
+            MODEL,
+            f"the steer went out with {hold_left:.1f} s of the hold left, "
+            f"under the {STEER_LIMIT_S:.0f} s bar: the nested wait began "
+            "too late",
+        )
     if finished:
-        raise ScenarioFailure(HARNESS, "the nested wait returned only when the job finished: it "
-                                       "was not yielded on the steer")
+        raise ScenarioFailure(
+            HARNESS,
+            "the nested wait returned only when the job finished: it was not yielded on the steer",
+        )
     if not running:
         raise ScenarioFailure(HARNESS, "outer-cell steer stopped the nested job")
     if cell_wait:
-        raise ScenarioFailure(MODEL, "model waited on the cell after the steer was applied "
-                                     "instead of following the steer")
-    return (f"nested wait yielded on the steer; applied at the outer-cell boundary in "
-            f"{latency:.1f} s; job still running")
+        raise ScenarioFailure(
+            MODEL,
+            "model waited on the cell after the steer was applied instead of following the steer",
+        )
+    return (
+        f"nested wait yielded on the steer; applied at the outer-cell boundary in "
+        f"{latency:.1f} s; job still running"
+    )
 
 
-def judge_nested_ctrl_b(*, promoted: bool, sent: bool, finished: bool,
-                        still_running: bool) -> str:
+def judge_nested_ctrl_b(*, promoted: bool, sent: bool, finished: bool, still_running: bool) -> str:
     """Ctrl+B at the outer cell does not preempt or kill a hint-promoted job.
 
     `promoted` is session or telemetry evidence that the hint promoted the
@@ -442,7 +475,10 @@ def command_lines() -> list[str]:
     try:
         result = subprocess.run(
             ["ps", "-ax", "-o", "command="],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ScenarioFailure(HARNESS, f"ps failed: {error}") from error
@@ -456,8 +492,7 @@ def matching(lines: list[str], token: str) -> list[str]:
     name is matched case-insensitively.
     """
     return [
-        line for line in lines
-        if token in line and "hold.py" in line and "python" in line.lower()
+        line for line in lines if token in line and "hold.py" in line and "python" in line.lower()
     ]
 
 
@@ -469,7 +504,9 @@ def stop_token(token: str) -> None:
     """
     subprocess.run(
         ["pkill", "-f", token],
-        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
 
@@ -510,8 +547,14 @@ def promotion_of(rows: list[dict]) -> dict | None:
     return promoted[-1] if promoted else None
 
 
-def judge_budget(*, delta: float | None, finished: bool, promoted: bool,
-                 hint_source: str | None, hint_ms: int | None) -> str:
+def judge_budget(
+    *,
+    delta: float | None,
+    finished: bool,
+    promoted: bool,
+    hint_source: str | None,
+    hint_ms: int | None,
+) -> str:
     """Promotion at the configured default budget, while the script is still running.
 
     A flushed telemetry row names the hint the command carried. The wall-clock
@@ -524,7 +567,9 @@ def judge_budget(*, delta: float | None, finished: bool, promoted: bool,
         raise ScenarioFailure(HARNESS, f"default hint was {hint_ms} ms, not {BUDGET_MS}")
     if hint_source == "background" or hint_ms in (0, 250):
         raise ScenarioFailure(MODEL, "command carried an immediate background hint")
-    if hint_source == "model_hint" or (hint_source is not None and hint_ms not in (None, BUDGET_MS)):
+    if hint_source == "model_hint" or (
+        hint_source is not None and hint_ms not in (None, BUDGET_MS)
+    ):
         raise ScenarioFailure(MODEL, f"command carried hint {hint_source} {hint_ms} ms")
     if not promoted or finished:
         raise ScenarioFailure(HARNESS, "command was not promoted before it finished")
@@ -541,8 +586,9 @@ def judge_budget(*, delta: float | None, finished: bool, promoted: bool,
     return f"promoted {delta:.1f} s after start; telemetry row not flushed"
 
 
-def judge_steer(*, latency: float | None, steered: bool, finished: bool,
-                still_running: bool, acked: bool) -> str:
+def judge_steer(
+    *, latency: float | None, steered: bool, finished: bool, still_running: bool, acked: bool
+) -> str:
     """A steer returns the foreground command without waiting for it or killing it."""
     if not steered:
         raise ScenarioFailure(MODEL, "no foreground command was running to steer")
@@ -555,20 +601,24 @@ def judge_steer(*, latency: float | None, steered: bool, finished: bool,
     return f"steer preempted in {latency:.1f} s; job still running"
 
 
-def judge_await(*, latency: float | None, steered: bool, finished: bool,
-                still_running: bool, acked: bool) -> str:
+def judge_await(
+    *, latency: float | None, steered: bool, finished: bool, still_running: bool, acked: bool
+) -> str:
     """A steer returns a wait on an already promoted job and leaves that job running."""
     if not steered:
         raise ScenarioFailure(MODEL, "no await started after the job was promoted")
     if not acked or latency is None or latency > STEER_LIMIT_S:
-        raise ScenarioFailure(HARNESS, f"steer did not return the await within {STEER_LIMIT_S:.0f} s")
+        raise ScenarioFailure(
+            HARNESS, f"steer did not return the await within {STEER_LIMIT_S:.0f} s"
+        )
     if not still_running or finished:
         raise ScenarioFailure(HARNESS, "steer stopped the awaited job")
     return f"await yielded to steer in {latency:.1f} s; job still running"
 
 
-def judge_ctrl_b(*, latency: float | None, finished: bool, still_running: bool,
-                 returned: bool) -> str:
+def judge_ctrl_b(
+    *, latency: float | None, finished: bool, still_running: bool, returned: bool
+) -> str:
     """Ctrl+B promotes the running foreground command and does not stop it."""
     if finished and not still_running:
         raise ScenarioFailure(MODEL, "command finished instead of staying in the foreground")
@@ -579,8 +629,9 @@ def judge_ctrl_b(*, latency: float | None, finished: bool, still_running: bool,
     return f"Ctrl+B promoted in {latency:.1f} s; job still running"
 
 
-def judge_stop(*, confirmed: bool, still_running: bool, finished: bool,
-               woke: bool, origin: str | None) -> str:
+def judge_stop(
+    *, confirmed: bool, still_running: bool, finished: bool, woke: bool, origin: str | None
+) -> str:
     """Processes `S` stops a live job, and that stop wakes the idle root.
 
     `try_child_wake_with_jobs` treats every job that is not `Running` as a
@@ -603,9 +654,16 @@ def judge_stop(*, confirmed: bool, still_running: bool, finished: bool,
     return "Processes S stopped the live job and woke the idle root"
 
 
-def judge_notice(*, both_started: bool, short_finished: bool, during_turn: bool,
-                 notice_seen: bool, delivery: str | None, steered: bool,
-                 notice_in_turn: bool = False) -> str:
+def judge_notice(
+    *,
+    both_started: bool,
+    short_finished: bool,
+    during_turn: bool,
+    notice_seen: bool,
+    delivery: str | None,
+    steered: bool,
+    notice_in_turn: bool = False,
+) -> str:
     """A busy notice is delivered inside the turn that was busy, never by a wake.
 
     Spec 01 §8.5: when the short job exits, Notice makes the open wait on the
@@ -627,7 +685,9 @@ def judge_notice(*, both_started: bool, short_finished: bool, during_turn: bool,
     if notice_in_turn:
         return "completion notice was delivered at a Notice yield inside the turn"
     if not steered:
-        raise ScenarioFailure(HARNESS, "no steering boundary was created after the short job finished")
+        raise ScenarioFailure(
+            HARNESS, "no steering boundary was created after the short job finished"
+        )
     raise ScenarioFailure(HARNESS, "no request of the turn included the process notice")
 
 
@@ -641,9 +701,16 @@ def judge_run(*, code: int, stderr: str, finished: bool) -> str:
         live.classify_cli_failure(code, stderr, "plak run")
     if "waiting for p" not in stderr:
         if finished:
-            raise ScenarioFailure(MODEL, "model waited for the command instead of leaving it promoted")
+            raise ScenarioFailure(
+                MODEL, "model waited for the command instead of leaving it promoted"
+            )
         raise ScenarioFailure(HARNESS, "run did not wait for the promoted job")
-    if "stopped p" in stderr or not finished or "continuing" not in stderr or "exited" not in stderr:
+    if (
+        "stopped p" in stderr
+        or not finished
+        or "continuing" not in stderr
+        or "exited" not in stderr
+    ):
         raise ScenarioFailure(HARNESS, "run did not continue after the promoted job exited")
     return "plak run waited for the promoted job and continued"
 
@@ -651,15 +718,32 @@ def judge_run(*, code: int, stderr: str, finished: bool) -> str:
 # submit_result accepted the output. `submitted` is not settled (spec 03 §5).
 SUBMITTED_ATTEMPTS = frozenset({"submitted", "completed", "adopted"})
 # Running and submitted are the only non-terminal attempt statuses.
-SETTLED_ATTEMPTS = frozenset({
-    "completed", "completed_without_submission", "failed", "cancelled",
-    "closed", "adopted", "blocked", "recovery_required",
-})
+SETTLED_ATTEMPTS = frozenset(
+    {
+        "completed",
+        "completed_without_submission",
+        "failed",
+        "cancelled",
+        "closed",
+        "adopted",
+        "blocked",
+        "recovery_required",
+    }
+)
 
 
-def judge_child(*, started: bool, owner: str | None, first_code: str | None,
-                submitted: bool, settled: bool, terminal: bool, still_running: bool,
-                stop_reason: str | None, detail: str = "") -> str:
+def judge_child(
+    *,
+    started: bool,
+    owner: str | None,
+    first_code: str | None,
+    submitted: bool,
+    settled: bool,
+    terminal: bool,
+    still_running: bool,
+    stop_reason: str | None,
+    detail: str = "",
+) -> str:
     """The first submit while the job is live is `live_work`; then it settles.
 
     Spec 03 §4.6 refuses `submit_result` while the caller's own job is running.
@@ -692,9 +776,17 @@ def judge_child(*, started: bool, owner: str | None, first_code: str | None,
     return f"{owner} submit was refused while p was live, then the job was terminal"
 
 
-def judge_close(*, started: bool, finished_early: bool, stop_reason: str | None,
-                still_running: bool, detail: str = "", promoted: bool = True,
-                sent: bool = True, target_problem: str | None = None) -> str:
+def judge_close(
+    *,
+    started: bool,
+    finished_early: bool,
+    stop_reason: str | None,
+    still_running: bool,
+    detail: str = "",
+    promoted: bool = True,
+    sent: bool = True,
+    target_problem: str | None = None,
+) -> str:
     """`close_agent` stops the child's live job with `attempt ended`.
 
     Interrupt does not. Spec 01 §8.5: retiring an interrupted child whose
@@ -713,13 +805,19 @@ def judge_close(*, started: bool, finished_early: bool, stop_reason: str | None,
     if not started:
         raise ScenarioFailure(MODEL, "the child did not start the command")
     if finished_early and not promoted:
-        raise ScenarioFailure(MODEL, "the child ran the command in the foreground instead of "
-                                     "leaving a promoted job for close")
+        raise ScenarioFailure(
+            MODEL,
+            "the child ran the command in the foreground instead of "
+            "leaving a promoted job for close",
+        )
     if finished_early and not sent:
         raise ScenarioFailure(HARNESS, "the driver did not close the child while its job ran")
     if finished_early:
-        raise ScenarioFailure(HARNESS, "close was sent while the job ran, but the job finished "
-                                       "instead of stopping at attempt end")
+        raise ScenarioFailure(
+            HARNESS,
+            "close was sent while the job ran, but the job finished "
+            "instead of stopping at attempt end",
+        )
     if stop_reason == "model":
         raise ScenarioFailure(MODEL, "the model stopped the job instead of leaving it for close")
     if stop_reason != "attempt_ended" or still_running:
@@ -736,8 +834,9 @@ def judge_crash(*, unknown: bool, warned: bool) -> str:
     return "reopen reported outcome unknown for the live job"
 
 
-def judge_wake(*, idle_with_job: bool, hud: bool, second_admission: bool,
-               origin: str | None, finished: bool) -> str:
+def judge_wake(
+    *, idle_with_job: bool, hud: bool, second_admission: bool, origin: str | None, finished: bool
+) -> str:
     """An idle interactive root wakes when a promoted job exits, without a new prompt."""
     if not idle_with_job:
         raise ScenarioFailure(MODEL, "root was not idle with the job still running")
@@ -752,8 +851,9 @@ def judge_wake(*, idle_with_job: bool, hud: bool, second_admission: bool,
     return "idle root woke from the job completion"
 
 
-def judge_badge(*, root_idle: bool, child_alive: bool, agent: bool, process: bool,
-                promoted: bool | None) -> str:
+def judge_badge(
+    *, root_idle: bool, child_alive: bool, agent: bool, process: bool, promoted: bool | None
+) -> str:
     """The idle HUD counts a live child and that child's promoted running job.
 
     A command still in the foreground never promotes, so a missing process
@@ -774,15 +874,20 @@ def exit_before_turn_terminal(events: list[dict], job_id: str) -> bool:
     """True when `job_id` exits before this turn publishes a terminal phase."""
     exited = False
     for event in events:
-        if (event.get("kind") == "job_terminal" and event.get("job_id") == job_id
-                and event.get("status") == "exited"):
+        if (
+            event.get("kind") == "job_terminal"
+            and event.get("job_id") == job_id
+            and event.get("status") == "exited"
+        ):
             exited = True
         elif event.get("kind") == "turn_lifecycle" and event.get("phase") not in (None, "admitted"):
             return exited
     return False
 
 
-def latency_until(observed: list[tuple[float, dict]], start: float | None, predicate) -> float | None:
+def latency_until(
+    observed: list[tuple[float, dict]], start: float | None, predicate
+) -> float | None:
     if start is None:
         return None
     for at, event in observed:
@@ -809,14 +914,19 @@ def owner_for(events: list[dict], token: str) -> str | None:
 def terminal_for(events: list[dict], job_id: str | None, owner: str | None = None) -> dict | None:
     found = None
     for event in events:
-        if job_id and event.get("kind") == "job_terminal" and event.get("job_id") == job_id \
-                and (owner is None or event.get("owner") == owner):
+        if (
+            job_id
+            and event.get("kind") == "job_terminal"
+            and event.get("job_id") == job_id
+            and (owner is None or event.get("owner") == owner)
+        ):
             found = event
     return found
 
 
-def close_target(events: list[dict], root: str, before: set[str],
-                 token: str) -> tuple[str | None, str | None]:
+def close_target(
+    events: list[dict], root: str, before: set[str], token: str
+) -> tuple[str | None, str | None]:
     """The worker to close for the job naming `token`, or why there is none to close.
 
     A job's `owner` is not a tree `agent_id` (the tree names children `cN`),
@@ -849,8 +959,12 @@ def node_prompt(events: list[dict], agent_id: str) -> str | None:
 
 
 def promoted_for(events: list[dict], job_id: str | None, owner: str | None) -> bool:
-    return any(event.get("kind") == "job_promoted" and event.get("job_id") == job_id
-               and (owner is None or event.get("owner") == owner) for event in events)
+    return any(
+        event.get("kind") == "job_promoted"
+        and event.get("job_id") == job_id
+        and (owner is None or event.get("owner") == owner)
+        for event in events
+    )
 
 
 def screen_after(data: bytes, mark: int) -> str:
@@ -875,13 +989,17 @@ def last_hud_paint(text: str) -> str:
     last = found[-1]
     line_start = text.rfind("\n", 0, last.start()) + 1
     on_line = [match for match in found if match.start() >= line_start]
-    if len(on_line) > 1 and text[on_line[0].end():on_line[-1].start()].strip() == "":
-        return text[on_line[0].start():on_line[-1].end()]
+    if len(on_line) > 1 and text[on_line[0].end() : on_line[-1].start()].strip() == "":
+        return text[on_line[0].start() : on_line[-1].end()]
     start = last.start()
     # Agent and process can be two writes a few cells apart. A later row is not.
-    if len(found) > 1 and last.start() - found[-2].end() <= 8 and "\n" not in text[found[-2].end():last.start()]:
+    if (
+        len(found) > 1
+        and last.start() - found[-2].end() <= 8
+        and "\n" not in text[found[-2].end() : last.start()]
+    ):
         start = found[-2].start()
-    return text[start:last.end()]
+    return text[start : last.end()]
 
 
 def render_frame(data: bytes) -> str:
@@ -1045,11 +1163,7 @@ def command_promoted(records: list[dict], token: str) -> bool | None:
             for record in records
         )
         return True if completed else None
-    done = {
-        record.get("call_id")
-        for record in records
-        if record.get("kind") == "tool.completed"
-    }
+    done = {record.get("call_id") for record in records if record.get("kind") == "tool.completed"}
     if any(call_id in done for call_id in starts):
         return True
     return False
@@ -1158,8 +1272,10 @@ def notice_on_steer(segments: list[Path], job_id: str | None) -> bool:
 
 # The product's idle wake prompt (`WAKE_PROMPT` in the hosted runtime's
 # `host_loop/wake.rs`); a request carrying it belongs to a wake turn.
-WAKE_PROMPT = ("Background processes finished or sub-agent results arrived while you were "
-               "idle; continue the current task, or reply briefly if nothing remains.")
+WAKE_PROMPT = (
+    "Background processes finished or sub-agent results arrived while you were "
+    "idle; continue the current task, or reply briefly if nothing remains."
+)
 
 
 def notice_in_turn(segments: list[Path], job_id: str | None, terminal_wall: float | None) -> bool:
@@ -1183,8 +1299,11 @@ def notice_in_turn(segments: list[Path], job_id: str | None, terminal_wall: floa
         except OSError:
             continue
         texts = capture_texts(path)
-        if (persisted <= terminal_wall and any(needle in text for text in texts)
-                and WAKE_PROMPT not in newest_user_input(path)):
+        if (
+            persisted <= terminal_wall
+            and any(needle in text for text in texts)
+            and WAKE_PROMPT not in newest_user_input(path)
+        ):
             return True
     return False
 
@@ -1405,8 +1524,13 @@ def root_is_idle(records: list[dict]) -> bool:
     return phase == "completed" and turn_id is not None and turn_id == admitted[-1]
 
 
-def classify_turn(turn: live.Turn, what: str, segments: list[Path] | None = None, *,
-                  lookup_faults: str | None = None) -> None:
+def classify_turn(
+    turn: live.Turn,
+    what: str,
+    segments: list[Path] | None = None,
+    *,
+    lookup_faults: str | None = None,
+) -> None:
     live.classify_incomplete(turn, what, segments=segments, lookup_faults=lookup_faults)
 
 
@@ -1441,9 +1565,11 @@ def drain(agent: live.Agent, seconds: float) -> None:
 
 
 def terminals(home: Path, session: str) -> list[str]:
-    return [record.get("phase", "") for record in live.session_records(home, session)
-            if record.get("kind") == "turn.lifecycle"
-            and record.get("phase") not in (None, "admitted")]
+    return [
+        record.get("phase", "")
+        for record in live.session_records(home, session)
+        if record.get("kind") == "turn.lifecycle" and record.get("phase") not in (None, "admitted")
+    ]
 
 
 def last_retry(home: Path, turn_id: str) -> tuple[str, int, int, str | None] | None:
@@ -1500,8 +1626,9 @@ def retry_budget_exhausted(retry: tuple[str, int, int, str | None] | None) -> bo
     return declined == "budget" and nxt == limit + 1
 
 
-def classify_tui_turn(home: Path, session: str, index: int, what: str, *,
-                      lookup_faults: str | None = None) -> None:
+def classify_tui_turn(
+    home: Path, session: str, index: int, what: str, *, lookup_faults: str | None = None
+) -> None:
     """Classify a TUI turn from the session log, then from retry telemetry.
 
     `emit_turn_lifecycle` (`crates/hosting/hosted/src/runtime/turn.rs` lines
@@ -1513,9 +1640,11 @@ def classify_tui_turn(home: Path, session: str, index: int, what: str, *,
     attempt stays harness. The turn's `turn.failed` text stands in for the
     row's missing message, so a typed OutputLimit diagnostic is model.
     """
-    records = [record for record in live.with_failure_messages(live.session_records(home, session))
-               if record.get("kind") == "turn.lifecycle"
-               and record.get("phase") not in (None, "admitted")]
+    records = [
+        record
+        for record in live.with_failure_messages(live.session_records(home, session))
+        if record.get("kind") == "turn.lifecycle" and record.get("phase") not in (None, "admitted")
+    ]
     if index >= len(records):
         raise ScenarioFailure(HARNESS, f"{what}: no logged turn terminal")
     record = records[index]
@@ -1540,8 +1669,11 @@ def classify_tui_turn(home: Path, session: str, index: int, what: str, *,
 
 
 def admitted_ids(home: Path, session: str) -> list[str]:
-    return [str(record.get("turn_id", "")) for record in live.session_records(home, session)
-            if record.get("kind") == "turn.lifecycle" and record.get("phase") == "admitted"]
+    return [
+        str(record.get("turn_id", ""))
+        for record in live.session_records(home, session)
+        if record.get("kind") == "turn.lifecycle" and record.get("phase") == "admitted"
+    ]
 
 
 def child_has_settled(home: Path, root: str) -> bool:
@@ -1581,8 +1713,9 @@ def child_attempt(events: list[dict], agent_id: str | None) -> str | None:
 
 
 def tool_completed_count(home: Path, session: str) -> int:
-    return sum(record.get("kind") == "tool.completed"
-               for record in live.session_records(home, session))
+    return sum(
+        record.get("kind") == "tool.completed" for record in live.session_records(home, session)
+    )
 
 
 @contextmanager
@@ -1607,9 +1740,13 @@ def run_turn(agent: live.Agent, text: str, timeout: float, tick, accept_eof) -> 
     while True:
         remaining = timeout - (time.monotonic() - started)
         if remaining <= 0:
-            raise live.timeout_failure(getattr(agent, "env", None), getattr(agent, "capture_dir", None),
-                                       f"no turn terminal within {timeout:.0f}s",
-                                       getattr(agent, "lookup_faults", None), timeout=timeout)
+            raise live.timeout_failure(
+                getattr(agent, "env", None),
+                getattr(agent, "capture_dir", None),
+                f"no turn terminal within {timeout:.0f}s",
+                getattr(agent, "lookup_faults", None),
+                timeout=timeout,
+            )
         try:
             event = agent.events.get(timeout=min(0.25, remaining))
         except queue.Empty:
@@ -1669,13 +1806,16 @@ class Jobs:
         import random
 
         self.route, self.env = route, env
-        self.random_bytes = (os.urandom if env.fixture_seed is None
-                             else random.Random(env.fixture_seed).randbytes)
+        self.random_bytes = (
+            os.urandom if env.fixture_seed is None else random.Random(env.fixture_seed).randbytes
+        )
 
     def fresh_token(self, prefix: str) -> str:
         return fresh_token(prefix, self.random_bytes)
 
-    def prepare(self, name: str, foreground: int, extra: dict[str, str] | None = None) -> tuple[Path, Path]:
+    def prepare(
+        self, name: str, foreground: int, extra: dict[str, str] | None = None
+    ) -> tuple[Path, Path]:
         files = {"hold.py": HOLD_PY, "README.md": "job fixture\n"}
         if extra:
             files.update(extra)
@@ -1685,7 +1825,9 @@ class Jobs:
         pin_jobs(home, foreground)
         return repo, home
 
-    def open_agent(self, name: str, repo: Path, home: Path, args: list[str] | None = None) -> live.Agent:
+    def open_agent(
+        self, name: str, repo: Path, home: Path, args: list[str] | None = None
+    ) -> live.Agent:
         with launch_home(self.env, home):
             return live.Agent(self.env, repo, f"{name}/agent", args=args or [], observe=True)
 
@@ -1710,13 +1852,20 @@ class Jobs:
                 state["at"] = time.monotonic()
                 state["finished"] = marker(repo, "job-finished")
 
-            turn = run_turn(agent, promotion_prompt(self.route, hold_command(8, token)),
-                            180, tick, lambda: False)
+            turn = run_turn(
+                agent,
+                promotion_prompt(self.route, hold_command(8, token)),
+                180,
+                tick,
+                lambda: False,
+            )
             classify_turn(turn, "promotion")
             require_script(repo, "hold.py", HOLD_PY)
             events = [event for _, event in agent.observed]
-            if any(event.get("kind") == "job_promoted" for event in events) \
-                    and job_id_for(events, token) is None:
+            if (
+                any(event.get("kind") == "job_promoted" for event in events)
+                and job_id_for(events, token) is None
+            ):
                 raise ScenarioFailure(MODEL, "promoted command was not the fixture script")
             began = started_wall(repo)
             delta = None
@@ -1724,7 +1873,9 @@ class Jobs:
                 delta = (time.time() - (time.monotonic() - state["at"])) - began
             row = promotion_of(read_telemetry(home)[0])
             return judge_budget(
-                delta=delta, finished=state["finished"], promoted=state["at"] is not None,
+                delta=delta,
+                finished=state["finished"],
+                promoted=state["at"] is not None,
                 hint_source=None if row is None else row.get("hint_source"),
                 hint_ms=None if row is None else row.get("hint_ms"),
             )
@@ -1744,7 +1895,11 @@ class Jobs:
             def tick(_turn, event) -> None:
                 # The running line can beat the script's marker. Poll on the
                 # empty reads too, or the steer waits until the 45 s promotion.
-                if event is not None and event.get("kind") == "tool" and event.get("state") == "running":
+                if (
+                    event is not None
+                    and event.get("kind") == "tool"
+                    and event.get("state") == "running"
+                ):
                     state["tool"] = True
                 if nested:
                     if event is not None and event.get("kind") == "job_promoted":
@@ -1753,27 +1908,43 @@ class Jobs:
                             state["promoted"] = True
                     # The job's state is the one the steer found when it was
                     # applied, not the one at turn end.
-                    if event is not None and event.get("kind") == "steer_ack" \
-                            and event.get("state") == "applied" and state["at"] is not None \
-                            and not state["snap"]:
+                    if (
+                        event is not None
+                        and event.get("kind") == "steer_ack"
+                        and event.get("state") == "applied"
+                        and state["at"] is not None
+                        and not state["snap"]
+                    ):
                         state["running"] = bool(matching(command_lines(), token))
                         state["finished"] = marker(repo, "job-finished")
                         state["snap"] = True
-                    if state["at"] is None and state["promoted"] and matching(command_lines(), token) \
-                            and not marker(repo, "job-finished"):
+                    if (
+                        state["at"] is None
+                        and state["promoted"]
+                        and matching(command_lines(), token)
+                        and not marker(repo, "job-finished")
+                    ):
                         state["at"] = time.monotonic()
                         state["running"] = True
                         state["finished"] = False
                         agent.send("prompt", text=STEER_TEXT, steer=True)
                     return
-                if state["at"] is None and state.get("tool") and marker(repo, "job-started") \
-                        and matching(command_lines(), token):
+                if (
+                    state["at"] is None
+                    and state.get("tool")
+                    and marker(repo, "job-started")
+                    and matching(command_lines(), token)
+                ):
                     state["at"] = time.monotonic()
                     agent.send("prompt", text=STEER_TEXT, steer=True)
                     return
                 if event is None:
                     return
-                if state["at"] is not None and not state["snap"] and event.get("kind") == "job_promoted":
+                if (
+                    state["at"] is not None
+                    and not state["snap"]
+                    and event.get("kind") == "job_promoted"
+                ):
                     state["running"] = bool(matching(command_lines(), token))
                     state["finished"] = marker(repo, "job-finished")
                     state["snap"] = True
@@ -1798,17 +1969,23 @@ class Jobs:
             acked = any(event.get("kind") == "steer_ack" for event in events)
             if nested:
                 return judge_nested_steer(
-                    promoted=state["promoted"], steered=state["at"] is not None,
-                    acked=state["snap"], finished=state["finished"],
+                    promoted=state["promoted"],
+                    steered=state["at"] is not None,
+                    acked=state["snap"],
+                    finished=state["finished"],
                     still_running=state["running"],
                 )
             latency = latency_until(
-                agent.observed, state["at"],
+                agent.observed,
+                state["at"],
                 lambda event: event.get("kind") == "job_promoted",
             )
             return judge_steer(
-                latency=latency, steered=state["at"] is not None,
-                finished=state["finished"], still_running=state["running"], acked=acked,
+                latency=latency,
+                steered=state["at"] is not None,
+                finished=state["finished"],
+                still_running=state["running"],
+                acked=acked,
             )
         finally:
             close_agent(agent)
@@ -1819,10 +1996,23 @@ class Jobs:
         nested = code_mode(self.route)
         repo, home = self.prepare("steer_await", FOREGROUND_BUDGET)
         agent = None
-        state = {"at": None, "promoted": False, "before": [], "await": None,
-                 "running": False, "finished": False, "snap": False, "cells": set(),
-                 "in_flight": set(), "waits": set(), "cell_wait": False, "latency": None,
-                 "steered_waits": set(), "yielded_first": None, "hold_left": None}
+        state = {
+            "at": None,
+            "promoted": False,
+            "before": [],
+            "await": None,
+            "running": False,
+            "finished": False,
+            "snap": False,
+            "cells": set(),
+            "in_flight": set(),
+            "waits": set(),
+            "cell_wait": False,
+            "latency": None,
+            "steered_waits": set(),
+            "yielded_first": None,
+            "hold_left": None,
+        }
         try:
             agent = self.open_agent("steer_await", repo, home)
 
@@ -1831,7 +2021,11 @@ class Jobs:
                 # inside the outer cell; the job state is the one the steer
                 # found when it was applied at the outer-cell boundary.
                 if event is not None and event.get("kind") == "tool":
-                    call, parent, name = event.get("call_id"), event.get("parent_call_id"), event.get("name")
+                    call, parent, name = (
+                        event.get("call_id"),
+                        event.get("parent_call_id"),
+                        event.get("name"),
+                    )
                     if name == "exec" and not parent:
                         state["cells"].add(call)
                     elif parent in state["cells"] and name in NESTED_WAITS:
@@ -1849,15 +2043,24 @@ class Jobs:
                     events = [item for _, item in agent.observed]
                     if job_id_for(events, token) == event.get("job_id"):
                         state["promoted"] = True
-                if event is not None and event.get("kind") == "steer_ack" \
-                        and event.get("state") == "applied" and state["at"] is not None \
-                        and not state["snap"]:
+                if (
+                    event is not None
+                    and event.get("kind") == "steer_ack"
+                    and event.get("state") == "applied"
+                    and state["at"] is not None
+                    and not state["snap"]
+                ):
                     state["latency"] = time.monotonic() - state["at"]
                     state["running"] = bool(matching(command_lines(), token))
                     state["finished"] = marker(repo, "job-finished")
                     state["snap"] = True
-                if state["at"] is None and state["promoted"] and state["in_flight"] \
-                        and matching(command_lines(), token) and not marker(repo, "job-finished"):
+                if (
+                    state["at"] is None
+                    and state["promoted"]
+                    and state["in_flight"]
+                    and matching(command_lines(), token)
+                    and not marker(repo, "job-finished")
+                ):
                     state["at"] = time.monotonic()
                     state["steered_waits"] = set(state["in_flight"])
                     began = started_wall(repo)
@@ -1872,8 +2075,12 @@ class Jobs:
                 if event is None:
                     return
                 if state["at"] is not None:
-                    if not state["snap"] and event.get("kind") == "tool" \
-                            and event.get("call_id") == state["await"] and event.get("state") != "running":
+                    if (
+                        not state["snap"]
+                        and event.get("kind") == "tool"
+                        and event.get("call_id") == state["await"]
+                        and event.get("state") != "running"
+                    ):
                         state["running"] = bool(matching(command_lines(), token))
                         state["finished"] = marker(repo, "job-finished")
                         state["snap"] = True
@@ -1927,20 +2134,32 @@ class Jobs:
             acked = any(event.get("kind") == "steer_ack" for event in events)
             if nested:
                 return judge_nested_await(
-                    promoted=state["promoted"], steered=state["at"] is not None,
-                    applied=state["snap"], latency=state["latency"], running=state["running"],
-                    finished=state["finished"], cell_wait=state["cell_wait"],
-                    yielded_first=bool(state["yielded_first"]), hold_left=state["hold_left"],
+                    promoted=state["promoted"],
+                    steered=state["at"] is not None,
+                    applied=state["snap"],
+                    latency=state["latency"],
+                    running=state["running"],
+                    finished=state["finished"],
+                    cell_wait=state["cell_wait"],
+                    yielded_first=bool(state["yielded_first"]),
+                    hold_left=state["hold_left"],
                 )
             await_id = state["await"]
             latency = latency_until(
-                agent.observed, state["at"],
-                lambda event: event.get("kind") == "tool" and event.get("call_id") == await_id
-                and event.get("state") != "running",
+                agent.observed,
+                state["at"],
+                lambda event: (
+                    event.get("kind") == "tool"
+                    and event.get("call_id") == await_id
+                    and event.get("state") != "running"
+                ),
             )
             return judge_await(
-                latency=latency, steered=state["at"] is not None,
-                finished=state["finished"], still_running=state["running"], acked=acked,
+                latency=latency,
+                steered=state["at"] is not None,
+                finished=state["finished"],
+                still_running=state["running"],
+                acked=acked,
             )
         finally:
             close_agent(agent)
@@ -1961,38 +2180,54 @@ class Jobs:
                 # after the short job has finished and while the later command
                 # is still the open turn. Poll on the empty reads too; the
                 # marker is a file, not an event.
-                if (event and state["terminal_wall"] is None
-                        and event.get("kind") == "turn_lifecycle"
-                        and event.get("phase") not in (None, "admitted")):
+                if (
+                    event
+                    and state["terminal_wall"] is None
+                    and event.get("kind") == "turn_lifecycle"
+                    and event.get("phase") not in (None, "admitted")
+                ):
                     state["terminal_wall"] = time.time()
                 if state["steered"]:
                     return
-                if marker(repo, "short-finished") and matching(command_lines(), hold) \
-                        and not marker(repo, "job-finished"):
+                if (
+                    marker(repo, "short-finished")
+                    and matching(command_lines(), hold)
+                    and not marker(repo, "job-finished")
+                ):
                     agent.send("prompt", text=STEER_TEXT, steer=True)
                     state["steered"] = True
 
-            turn = run_turn(agent, (
-                "Run exactly these two shell commands, in this order, and no others.\n"
-                f"First: python3 short.py {short}\n"
-                f"{immediate_hint(self.route)} "
-                "When it returns while still running, immediately run:\n"
-                f"{hold_command(12, hold)}\n"
-                "Wait for that second command. Do not wait on the first and do not stop either."
-            ), 240, tick, lambda: False)
+            turn = run_turn(
+                agent,
+                (
+                    "Run exactly these two shell commands, in this order, and no others.\n"
+                    f"First: python3 short.py {short}\n"
+                    f"{immediate_hint(self.route)} "
+                    "When it returns while still running, immediately run:\n"
+                    f"{hold_command(12, hold)}\n"
+                    "Wait for that second command. Do not wait on the first and do not stop either."
+                ),
+                240,
+                tick,
+                lambda: False,
+            )
             classify_turn(turn, "notice", [agent.capture_dir])
             require_script(repo, "hold.py", HOLD_PY)
             require_script(repo, "short.py", SHORT_PY)
             events = [event for _, event in agent.observed]
             short_id = job_id_for(events, short)
             rows, _turns = read_telemetry(home)
-            delivery = next((row.get("delivery_point") for row in rows
-                             if row.get("kind") == "notices"), None)
+            delivery = next(
+                (row.get("delivery_point") for row in rows if row.get("kind") == "notices"), None
+            )
             segments = self.env.capture_segments[segment:]
             noticed = notice_for(segments, short_id) and notice_on_steer(segments, short_id)
-            mentioned = any(event.get("kind") == "tool" and hold in json.dumps(event) for event in events)
+            mentioned = any(
+                event.get("kind") == "tool" and hold in json.dumps(event) for event in events
+            )
             return judge_notice(
-                both_started=short_id is not None and (job_id_for(events, hold) is not None or mentioned),
+                both_started=short_id is not None
+                and (job_id_for(events, hold) is not None or mentioned),
                 short_finished=marker(repo, "short-finished"),
                 during_turn=bool(short_id) and exit_before_turn_terminal(events, short_id),
                 notice_seen=bool(noticed),
@@ -2011,17 +2246,25 @@ class Jobs:
         log = self.env.artifacts / "run_promoted" / "run.log"
         try:
             code, _out = live.run_cli(
-                self.env, repo,
-                [*self.route.flags(), "--print-session-id", "--", (
-                    "Run exactly this shell command and no other tool:\n"
-                    f"{hold_command(5, token)}\n"
-                    f"{immediate_hint(self.route)}\n"
-                    "When that call returns while the command is still running, end your turn. "
-                    "Do not wait for the command, do not poll it, do not stop it, and do not "
-                    "start another tool.\n"
-                    "Reply with the single word done."
-                )],
-                log, timeout=240, home=home,
+                self.env,
+                repo,
+                [
+                    *self.route.flags(),
+                    "--print-session-id",
+                    "--",
+                    (
+                        "Run exactly this shell command and no other tool:\n"
+                        f"{hold_command(5, token)}\n"
+                        f"{immediate_hint(self.route)}\n"
+                        "When that call returns while the command is still running, end your turn. "
+                        "Do not wait for the command, do not poll it, do not stop it, and do not "
+                        "start another tool.\n"
+                        "Reply with the single word done."
+                    ),
+                ],
+                log,
+                timeout=240,
+                home=home,
             )
             require_script(repo, "hold.py", HOLD_PY)
             stderr = ""
@@ -2057,13 +2300,19 @@ class Jobs:
                     agent.signal(signal.SIGKILL)
                     state["killed"] = True
 
-            run_turn(agent, (
-                "Run exactly this shell command and no other tool:\n"
-                f"{hold_command(40, token)}\n"
-                f"{immediate_hint(self.route)}\n"
-                "When that call returns while the command is still running, reply done. "
-                "Do not wait for the command, do not poll it, and do not stop it."
-            ), 180, tick, lambda: state["killed"])
+            run_turn(
+                agent,
+                (
+                    "Run exactly this shell command and no other tool:\n"
+                    f"{hold_command(40, token)}\n"
+                    f"{immediate_hint(self.route)}\n"
+                    "When that call returns while the command is still running, reply done. "
+                    "Do not wait for the command, do not poll it, and do not stop it."
+                ),
+                180,
+                tick,
+                lambda: state["killed"],
+            )
             if not state["killed"]:
                 raise ScenarioFailure(MODEL, "no promoted job was live to crash")
             session = agent.session_id
@@ -2074,7 +2323,11 @@ class Jobs:
             segment = len(self.env.capture_segments)
             agent = crash_triage.reopen(
                 lambda: self.open_agent("crash_jobs", repo, home, args=["--session", session]),
-                self.env.binary, repo, home, session)
+                self.env.binary,
+                repo,
+                home,
+                session,
+            )
             if agent.session_id != session:
                 raise ScenarioFailure(HARNESS, "reopen attached a different session")
             follow = agent.prompt("Reply with the single word continued.", timeout=180)
@@ -2099,8 +2352,11 @@ class Jobs:
         try:
             agent = self.open_agent("child_settle", repo, home)
             turn = run_turn(
-                agent, settle_child_task(self.route, hold_command(30, token)),
-                240, None, lambda: False,
+                agent,
+                settle_child_task(self.route, hold_command(30, token)),
+                240,
+                None,
+                lambda: False,
             )
             classify_turn(turn, "child")
             require_script(repo, "hold.py", HOLD_PY)
@@ -2172,21 +2428,31 @@ class Jobs:
                     closing["problem"] = problem
                     return
                 job_id = job_id_for(seen, close_token)
-                if target and promoted_for(seen, job_id, owner_for(seen, close_token)) \
-                        and matching(command_lines(), close_token) \
-                        and not marker(repo, "job-finished"):
+                if (
+                    target
+                    and promoted_for(seen, job_id, owner_for(seen, close_token))
+                    and matching(command_lines(), close_token)
+                    and not marker(repo, "job-finished")
+                ):
                     closing["child"] = target
                     agent.send("close_node", agent_id=target)
 
             follow = run_turn(
-                agent, close_child_task(self.route, hold_command(40, close_token)),
-                180, close_while_busy, lambda: False,
+                agent,
+                close_child_task(self.route, hold_command(40, close_token)),
+                180,
+                close_while_busy,
+                lambda: False,
             )
             classify_turn(follow, "close")
             deadline = time.monotonic() + CHILD_WAIT_S
             # A root that ended its turn first: close after the turn.
-            while time.monotonic() < deadline and closing["child"] is None \
-                    and closing["problem"] is None and not marker(repo, "job-finished"):
+            while (
+                time.monotonic() < deadline
+                and closing["child"] is None
+                and closing["problem"] is None
+                and not marker(repo, "job-finished")
+            ):
                 drain(agent, 0.5)
                 close_while_busy(None, None)
             close_id = job_id_for([event for _, event in agent.observed], close_token)
@@ -2195,7 +2461,9 @@ class Jobs:
                 deadline = time.monotonic() + 30
                 while time.monotonic() < deadline:
                     drain(agent, 0.5)
-                    closed = terminal_for([event for _, event in agent.observed], close_id, close_owner)
+                    closed = terminal_for(
+                        [event for _, event in agent.observed], close_id, close_owner
+                    )
                     if closed is not None and not matching(command_lines(), close_token):
                         break
             events = [event for _, event in agent.observed]
@@ -2204,9 +2472,8 @@ class Jobs:
             closed = terminal_for(events, close_id, close_owner)
             ended = judge_close(
                 started=close_id is not None,
-                finished_early=marker(repo, "job-finished") and (
-                    closed is None or closed.get("stop_reason") != "attempt_ended"
-                ),
+                finished_early=marker(repo, "job-finished")
+                and (closed is None or closed.get("stop_reason") != "attempt_ended"),
                 stop_reason=None if closed is None else closed.get("stop_reason"),
                 still_running=bool(matching(command_lines(), close_token)),
                 detail="" if closed is None else str(closed.get("output") or ""),
@@ -2247,8 +2514,11 @@ class Jobs:
             def running_foreground() -> bool:
                 if sent["at"] is not None:
                     return True
-                live_job = marker(repo, "job-started") and matching(command_lines(), token) \
+                live_job = (
+                    marker(repo, "job-started")
+                    and matching(command_lines(), token)
                     and not marker(repo, "job-finished")
+                )
                 # Direct tools are still in the foreground when the tool has not
                 # completed. Nested Code Mode may already have returned the
                 # hint-promoted call; Ctrl+B is the outer-cell boundary.
@@ -2261,7 +2531,13 @@ class Jobs:
 
             if not tui.wait_until(running_foreground, 120):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "ctrl+b", lookup_faults=tui.lookup_faults)
+                    classify_tui_turn(
+                        home,
+                        session,
+                        len(terminals(home, session)) - 1,
+                        "ctrl+b",
+                        lookup_faults=tui.lookup_faults,
+                    )
                 raise ScenarioFailure(MODEL, "no foreground command was running for Ctrl+B")
             if nested:
                 # The outer cell is not required to preempt the nested call.
@@ -2271,17 +2547,22 @@ class Jobs:
                 still_running = bool(matching(command_lines(), token))
                 require_script(repo, "hold.py", HOLD_PY)
                 return judge_nested_ctrl_b(
-                    promoted=self.nested_promoted(tui, home, token), sent=sent["at"] is not None,
-                    finished=finished, still_running=still_running,
+                    promoted=self.nested_promoted(tui, home, token),
+                    sent=sent["at"] is not None,
+                    finished=finished,
+                    still_running=still_running,
                 )
             returned = tui.wait_until(
-                lambda: tool_completed_count(home, session) > 0, STEER_LIMIT_S,
+                lambda: tool_completed_count(home, session) > 0,
+                STEER_LIMIT_S,
             )
             latency = None if sent["at"] is None else time.monotonic() - sent["at"]
             require_script(repo, "hold.py", HOLD_PY)
             return judge_ctrl_b(
-                latency=latency, finished=marker(repo, "job-finished"),
-                still_running=bool(matching(command_lines(), token)), returned=returned,
+                latency=latency,
+                finished=marker(repo, "job-finished"),
+                still_running=bool(matching(command_lines(), token)),
+                returned=returned,
             )
         finally:
             if tui is not None:
@@ -2316,9 +2597,20 @@ class Jobs:
             tui.key(b"\r")
             if not tui.wait_until(lambda: len(terminals(home, session)) > before, 180):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "stop", lookup_faults=tui.lookup_faults)
-                raise live.timeout_failure(self.env, tui.capture_dir, "root turn did not finish",
-                                          tui.lookup_faults, timeout=180)
+                    classify_tui_turn(
+                        home,
+                        session,
+                        len(terminals(home, session)) - 1,
+                        "stop",
+                        lookup_faults=tui.lookup_faults,
+                    )
+                raise live.timeout_failure(
+                    self.env,
+                    tui.capture_dir,
+                    "root turn did not finish",
+                    tui.lookup_faults,
+                    timeout=180,
+                )
             classify_tui_turn(home, session, before, "stop", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             if marker(repo, "job-finished"):
@@ -2345,17 +2637,27 @@ class Jobs:
                     gone = True
                     break
             woke = tui.wait_until(
-                lambda: len(admitted_ids(home, session)) > admitted, WAKE_AFTER_STOP_S,
+                lambda: len(admitted_ids(home, session)) > admitted,
+                WAKE_AFTER_STOP_S,
             )
             origin = None
             admitted_now = admitted_ids(home, session)
             if len(admitted_now) > admitted:
                 _rows, turns = read_telemetry(home)
-                origin = next((row.get("origin") for row in turns
-                               if row.get("turn_id") == admitted_now[admitted]), None)
+                origin = next(
+                    (
+                        row.get("origin")
+                        for row in turns
+                        if row.get("turn_id") == admitted_now[admitted]
+                    ),
+                    None,
+                )
             return judge_stop(
-                confirmed=confirmed, still_running=not gone,
-                finished=marker(repo, "job-finished"), woke=woke, origin=origin,
+                confirmed=confirmed,
+                still_running=not gone,
+                finished=marker(repo, "job-finished"),
+                woke=woke,
+                origin=origin,
             )
         finally:
             if tui is not None:
@@ -2389,9 +2691,20 @@ class Jobs:
 
             if not tui.wait_until(root_finished, 180):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "wake", lookup_faults=tui.lookup_faults)
-                raise live.timeout_failure(self.env, tui.capture_dir, "root turn did not finish",
-                                          tui.lookup_faults, timeout=180)
+                    classify_tui_turn(
+                        home,
+                        session,
+                        len(terminals(home, session)) - 1,
+                        "wake",
+                        lookup_faults=tui.lookup_faults,
+                    )
+                raise live.timeout_failure(
+                    self.env,
+                    tui.capture_dir,
+                    "root turn did not finish",
+                    tui.lookup_faults,
+                    timeout=180,
+                )
             classify_tui_turn(home, session, 0, "wake", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             painted = mark["n"] or 0
@@ -2400,9 +2713,11 @@ class Jobs:
                 # HUD and the process list together. Sampling either one on
                 # the first paint races the promotion. A border drawn before
                 # the terminal still counts when nothing repainted after it.
-                return (not marker(repo, "job-finished")
-                        and bool(matching(command_lines(), token))
-                        and PROCESS_BADGE in latest_hud(tui.screen, painted))
+                return (
+                    not marker(repo, "job-finished")
+                    and bool(matching(command_lines(), token))
+                    and PROCESS_BADGE in latest_hud(tui.screen, painted)
+                )
 
             idle_with_job = tui.wait_until(idle_snapshot, WAKE_AFTER_STOP_S)
             hud = idle_with_job
@@ -2414,11 +2729,15 @@ class Jobs:
             origin = None
             if len(second) >= 2:
                 _jobs, turns = read_telemetry(home)
-                origin = next((row.get("origin") for row in turns
-                               if row.get("turn_id") == second[1]), None)
+                origin = next(
+                    (row.get("origin") for row in turns if row.get("turn_id") == second[1]), None
+                )
             return judge_wake(
-                idle_with_job=idle_with_job, hud=hud, second_admission=woke,
-                origin=origin, finished=marker(repo, "job-finished"),
+                idle_with_job=idle_with_job,
+                hud=hud,
+                second_admission=woke,
+                origin=origin,
+                finished=marker(repo, "job-finished"),
             )
         finally:
             if tui is not None:
@@ -2445,9 +2764,20 @@ class Jobs:
 
             if not tui.wait_until(root_finished, 180):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "badge", lookup_faults=tui.lookup_faults)
-                raise live.timeout_failure(self.env, tui.capture_dir, "root turn did not finish",
-                                          tui.lookup_faults, timeout=180)
+                    classify_tui_turn(
+                        home,
+                        session,
+                        len(terminals(home, session)) - 1,
+                        "badge",
+                        lookup_faults=tui.lookup_faults,
+                    )
+                raise live.timeout_failure(
+                    self.env,
+                    tui.capture_dir,
+                    "root turn did not finish",
+                    tui.lookup_faults,
+                    timeout=180,
+                )
             classify_tui_turn(home, session, 0, "badge", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             painted = mark["n"] or 0
@@ -2475,7 +2805,8 @@ class Jobs:
             return judge_badge(
                 root_idle=root_is_idle(live.session_records(home, session)),
                 child_alive=bool(captured["live"]),
-                agent=AGENT_BADGE in screen, process=PROCESS_BADGE in screen,
+                agent=AGENT_BADGE in screen,
+                process=PROCESS_BADGE in screen,
                 promoted=command_promoted(all_session_records(home), token),
             )
         finally:
@@ -2488,8 +2819,9 @@ def _discover(home: Path, timeout: float = 30) -> str:
     """The first session log. A child may add another; the root was created first."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        logs = sorted(home.glob("state/*/sessions/*.events.jsonl"),
-                      key=lambda path: path.stat().st_mtime)
+        logs = sorted(
+            home.glob("state/*/sessions/*.events.jsonl"), key=lambda path: path.stat().st_mtime
+        )
         if logs:
             return logs[0].name.removesuffix(".events.jsonl")
         time.sleep(0.2)
@@ -2497,8 +2829,11 @@ def _discover(home: Path, timeout: float = 30) -> str:
 
 
 def _capture_complete(segments: list[Path], pending: list[Path]) -> bool:
-    return bool(segments) and all(any(segment.glob("*.info")) for segment in segments) \
+    return (
+        bool(segments)
+        and all(any(segment.glob("*.info")) for segment in segments)
         and live.capture_integrity(segments, pending)
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2549,8 +2884,9 @@ def main(argv: list[str]) -> int:
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
         segments = env.capture_segments[segment_start:]
-        outcome, detail = live.score_runaway(outcome, detail, segments,
-                                           model_error_kind=model_error_kind)
+        outcome, detail = live.score_runaway(
+            outcome, detail, segments, model_error_kind=model_error_kind
+        )
         pending = live.provider_pending(env, segments, outcome)
         complete = _capture_complete(segments, pending)
         evidence[name] = {
@@ -2570,30 +2906,54 @@ def main(argv: list[str]) -> int:
             usage = usage.add(live.usage_delta(live.session_usage(private), live.TokenUsage()))
         usage = live.larger_usage(usage, live.transcript_usage(artifacts / name / "agent.jsonl"))
         result = live.Result(
-            name, surface, outcome, detail, time.monotonic() - started,
-            usage.input_tokens, usage.output_tokens,
-            usage.cached_input_tokens, usage.reasoning_tokens,
+            name,
+            surface,
+            outcome,
+            detail,
+            time.monotonic() - started,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens,
+            usage.reasoning_tokens,
         )
         results.append(result)
         print(f"{result.outcome:8} {name}: {detail}", flush=True)
     binary_end = live.binary_sha256(env.binary)
     evidence_complete = all(item["capture_complete"] for item in evidence.values())
-    (artifacts / "report.json").write_text(json.dumps({
-        **live.route_report(route, bound=env.bound_compositions),
-        "binary": str(env.binary),
-        "binary_sha256_start": binary_start,
-        "binary_sha256_end": binary_end,
-        "token_telemetry": live.sum_usage(
-            live.TokenUsage(result.input_tokens, result.output_tokens,
-                            result.cached_input_tokens, result.reasoning_tokens)
-            for result in results),
-        "evidence": evidence,
-        "capture_complete": evidence_complete,
-        "results": [result.__dict__ for result in results],
-    }, indent=2) + "\n")
+    (artifacts / "report.json").write_text(
+        json.dumps(
+            {
+                **live.route_report(route, bound=env.bound_compositions),
+                "binary": str(env.binary),
+                "binary_sha256_start": binary_start,
+                "binary_sha256_end": binary_end,
+                "token_telemetry": live.sum_usage(
+                    live.TokenUsage(
+                        result.input_tokens,
+                        result.output_tokens,
+                        result.cached_input_tokens,
+                        result.reasoning_tokens,
+                    )
+                    for result in results
+                ),
+                "evidence": evidence,
+                "capture_complete": evidence_complete,
+                "results": [result.__dict__ for result in results],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print("\n" + live.table(results) + f"\n\nartifacts: {artifacts}")
-    return 0 if (all(result.outcome == PASS for result in results)
-                 and evidence_complete and binary_start == binary_end) else 1
+    return (
+        0
+        if (
+            all(result.outcome == PASS for result in results)
+            and evidence_complete
+            and binary_start == binary_end
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

@@ -56,9 +56,11 @@ def capture_root_mismatch(binary: Path, root: Path = ROOT) -> str | None:
                 return None
         except (OSError, ValueError):
             continue
-    return (f"{binary} was not built from this checkout ({root}); its capture root is "
-            "another checkout's tests/provider-authority. Run the driver from the "
-            "checkout that built the binary.")
+    return (
+        f"{binary} was not built from this checkout ({root}); its capture root is "
+        "another checkout's tests/provider-authority. Run the driver from the "
+        "checkout that built the binary."
+    )
 
 
 def binary_sha256(binary: Path) -> str:
@@ -134,12 +136,21 @@ class Route:
         return flags
 
 
-def _route(name: str, account: str, model: str, effort: str | None,
-           protocol: str | None, endpoint: tuple[str, str], route_class: str, rung: int,
-           informational_lanes: frozenset[str] = frozenset()) -> Route:
+def _route(
+    name: str,
+    account: str,
+    model: str,
+    effort: str | None,
+    protocol: str | None,
+    endpoint: tuple[str, str],
+    route_class: str,
+    rung: int,
+    informational_lanes: frozenset[str] = frozenset(),
+) -> Route:
     host, path = endpoint
-    return Route(name, account, model, effort, protocol, host, path, route_class, rung,
-                 informational_lanes)
+    return Route(
+        name, account, model, effort, protocol, host, path, route_class, rung, informational_lanes
+    )
 
 
 # The owner's catalog. Exact ids are pinned spellings. OpenRouter ids are not
@@ -151,64 +162,130 @@ ROUTES = {
     # every long-session cell, while sol paged through compaction and passed.
     "codex": _route("codex", "codex", "gpt-6-luna", "low", None, _CODEX, LIGHT, FIRST),
     "codex-luna-medium": _route(
-        "codex-luna-medium", "codex", "gpt-6-luna", "medium", None, _CODEX, LIGHT, THEN),
+        "codex-luna-medium", "codex", "gpt-6-luna", "medium", None, _CODEX, LIGHT, THEN
+    ),
     "codex-sol": _route("codex-sol", "codex", "gpt-6.1-sol", "low", None, _CODEX, FULL, THEN),
     "codex-astra": _route(
-        "codex-astra", "codex", "gpt-6-astra", "low", None, _CODEX, LIGHT, CONFIRM),
+        "codex-astra", "codex", "gpt-6-astra", "low", None, _CODEX, LIGHT, CONFIRM
+    ),
     "grok-46": _route("grok-46", "grok", "grok-4.6", "low", None, _GROK, LIGHT, FIRST),
     "grok": _route("grok", "grok", "grok-4.7", "low", None, _GROK, FULL, THEN),
     "claude-haiku55-low": _route(
-        "claude-haiku55-low", "claude", "claude-haiku-5-5", "low", None, _CLAUDE, LIGHT, FIRST),
+        "claude-haiku55-low", "claude", "claude-haiku-5-5", "low", None, _CLAUDE, LIGHT, FIRST
+    ),
     "claude-haiku55-medium": _route(
-        "claude-haiku55-medium", "claude", "claude-haiku-5-5", "medium", None, _CLAUDE,
-        LIGHT, THEN),
+        "claude-haiku55-medium", "claude", "claude-haiku-5-5", "medium", None, _CLAUDE, LIGHT, THEN
+    ),
     "claude-sonnet55-low": _route(
-        "claude-sonnet55-low", "claude", "claude-sonnet-5-5", "low", None, _CLAUDE, FULL, THEN),
+        "claude-sonnet55-low", "claude", "claude-sonnet-5-5", "low", None, _CLAUDE, FULL, THEN
+    ),
     "claude-sonnet55-medium": _route(
-        "claude-sonnet55-medium", "claude", "claude-sonnet-5-5", "medium", None, _CLAUDE,
-        LIGHT, THEN),
+        "claude-sonnet55-medium",
+        "claude",
+        "claude-sonnet-5-5",
+        "medium",
+        None,
+        _CLAUDE,
+        LIGHT,
+        THEN,
+    ),
     "claude-opus-low": _route(
-        "claude-opus-low", "claude", "claude-opus-5-5", "low", None, _CLAUDE, LIGHT, CONFIRM),
+        "claude-opus-low", "claude", "claude-opus-5-5", "low", None, _CLAUDE, LIGHT, CONFIRM
+    ),
     "claude-opus-medium": _route(
-        "claude-opus-medium", "claude", "claude-opus-5-5", "medium", None, _CLAUDE,
-        LIGHT, CONFIRM),
+        "claude-opus-medium", "claude", "claude-opus-5-5", "medium", None, _CLAUDE, LIGHT, CONFIRM
+    ),
     "claude-fable": _route(
-        "claude-fable", "claude", "claude-fable-5-1", "low", None, _CLAUDE, LIGHT, CONFIRM),
+        "claude-fable", "claude", "claude-fable-5-1", "low", None, _CLAUDE, LIGHT, CONFIRM
+    ),
     # Free OpenRouter rows are best effort and flaky: informational depth.
     "or-nemotron-free": _route(
-        "or-nemotron-free", "openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free", None, None,
-        _OR_CHAT, INFORMATIONAL, FIRST),
+        "or-nemotron-free",
+        "openrouter",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        None,
+        None,
+        _OR_CHAT,
+        INFORMATIONAL,
+        FIRST,
+    ),
     "or-nemotron-vl-free": _route(
-        "or-nemotron-vl-free", "openrouter", "nvidia/nemotron-3.5-super-vl:free", None, None,
-        _OR_CHAT, INFORMATIONAL, FIRST),
+        "or-nemotron-vl-free",
+        "openrouter",
+        "nvidia/nemotron-3.5-super-vl:free",
+        None,
+        None,
+        _OR_CHAT,
+        INFORMATIONAL,
+        FIRST,
+    ),
     "or-inkling-free": _route(
-        "or-inkling-free", "openrouter", "thinkingmachines/inkling:free", None, None,
-        _OR_CHAT, INFORMATIONAL, FIRST),
+        "or-inkling-free",
+        "openrouter",
+        "thinkingmachines/inkling:free",
+        None,
+        None,
+        _OR_CHAT,
+        INFORMATIONAL,
+        FIRST,
+    ),
     "or-flint-free": _route(
-        "or-flint-free", "openrouter", "recursive/flint-v1.0:free", None, None,
-        _OR_CHAT, INFORMATIONAL, FIRST),
+        "or-flint-free",
+        "openrouter",
+        "recursive/flint-v1.0:free",
+        None,
+        None,
+        _OR_CHAT,
+        INFORMATIONAL,
+        FIRST,
+    ),
     "or-lfm-free": _route(
-        "or-lfm-free", "openrouter", "liquid/lfm-2.5-2.6b:free", None, None,
-        _OR_CHAT, INFORMATIONAL, FIRST),
+        "or-lfm-free",
+        "openrouter",
+        "liquid/lfm-2.5-2.6b:free",
+        None,
+        None,
+        _OR_CHAT,
+        INFORMATIONAL,
+        FIRST,
+    ),
     # Long-session stays informational on both DeepSeek rows: given Plak's
     # complete summary request, the earlier DeepSeek flash model's summary
     # dropped the earlier turn's fact once large tool results followed it, on
     # Chat and on Messages. Smoke, jobs and soak stay blocking.
     "deepseek": _route(
-        "deepseek", "openrouter", "deepseek/deepseek-v4-flash-0731", None, None,
-        _OR_CHAT, FULL, THEN, informational_lanes=frozenset({"long-session"})),
+        "deepseek",
+        "openrouter",
+        "deepseek/deepseek-v4-flash-0731",
+        None,
+        None,
+        _OR_CHAT,
+        FULL,
+        THEN,
+        informational_lanes=frozenset({"long-session"}),
+    ),
     "deepseek-messages": _route(
-        "deepseek-messages", "openrouter", "deepseek/deepseek-v4-flash-0731", None,
-        "messages", _OR_MESSAGES, FULL, THEN, informational_lanes=frozenset({"long-session"})),
+        "deepseek-messages",
+        "openrouter",
+        "deepseek/deepseek-v4-flash-0731",
+        None,
+        "messages",
+        _OR_MESSAGES,
+        FULL,
+        THEN,
+        informational_lanes=frozenset({"long-session"}),
+    ),
     "or-glm": _route(
-        "or-glm", "openrouter", "z-ai/glm-5.3-flash", None, None, _OR_CHAT, LIGHT, THEN),
+        "or-glm", "openrouter", "z-ai/glm-5.3-flash", None, None, _OR_CHAT, LIGHT, THEN
+    ),
     # Direct API rows (spec 05 §3.4): very light, not best-effort. Linux musl
     # smokes these three plus the full rows.
     "api-openai": _route(
-        "api-openai", "openai", "gpt-6-luna", "low", None, _OPENAI_API, LIGHT, FIRST),
+        "api-openai", "openai", "gpt-6-luna", "low", None, _OPENAI_API, LIGHT, FIRST
+    ),
     "api-anthropic": _route(
-        "api-anthropic", "anthropic", "claude-haiku-5-5", "low", None, _ANTHROPIC_API,
-        LIGHT, FIRST),
+        "api-anthropic", "anthropic", "claude-haiku-5-5", "low", None, _ANTHROPIC_API, LIGHT, FIRST
+    ),
     "api-xai": _route("api-xai", "xai-api", "grok-4.6", "low", None, _XAI_API, LIGHT, FIRST),
 }
 
@@ -257,10 +334,16 @@ class EventTimeout(ScenarioFailure):
 # `Authentication` is the provider refusing the credential, not a product bug.
 # `Policy` is the provider refusing the request content (spec 05 §3.2: a
 # refusal rejected before acceptance, or a model refusal terminal).
-PROVIDER_ERROR_KINDS = frozenset({
-    "RateLimited", "QuotaExceeded", "QuotaExhausted", "Unavailable", "Authentication",
-    "Policy",
-})
+PROVIDER_ERROR_KINDS = frozenset(
+    {
+        "RateLimited",
+        "QuotaExceeded",
+        "QuotaExhausted",
+        "Unavailable",
+        "Authentication",
+        "Policy",
+    }
+)
 # Statuses that refuse before acceptance, or are the ambiguous 5xx the spec
 # already records as provider. 429 is the rate-limit case on every surface.
 PROVIDER_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
@@ -271,8 +354,11 @@ PROVIDER_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 # account. A 429 or 5xx there, with the class the product typed it as, is the
 # provider's outage, not a protocol violation. A quota 429 carries no class and
 # is provider through its typed kind.
-_IN_BAND_STATUS = re.compile(r"returned an in-band error after accepting the request: HTTP (\d{3}) "
-                             r"\((?:rate limited|unavailable|timeout)\)", re.IGNORECASE)
+_IN_BAND_STATUS = re.compile(
+    r"returned an in-band error after accepting the request: HTTP (\d{3}) "
+    r"\((?:rate limited|unavailable|timeout)\)",
+    re.IGNORECASE,
+)
 IN_BAND_ERROR_MARKER = "returned an in-band error after accepting the request:"
 # Kinds the product types an in-band provider error as; the typed kind scores
 # it even where the rendered text was cut before its status.
@@ -286,6 +372,8 @@ def in_band_provider_status(text: str) -> int | None:
         return None
     status = int(match.group(1))
     return status if status == 429 or 500 <= status <= 599 else None
+
+
 # Kernel phrases. Provider only when the capture shows the protocol violation.
 STREAM_VALIDATION_MARKERS = (
     "stream validation failed",
@@ -331,11 +419,27 @@ def text_is_provider_refusal(text: str) -> bool:
         return True
     if "temporarily overloaded" in lowered or "temporarily unavailable" in lowered:
         return True
-    if any(marker in lowered for marker in (
-            "ratelimited", "rate_limited", "rate limit", "rate-limit",
-            "http 429", "status=429", "status 429", " 429", "(429)",
-            "quotaexceeded", "quota_exceeded", "quotaexhausted", "quota is exhausted",
-            "too many requests", "authentication failed", "signed out")):
+    if any(
+        marker in lowered
+        for marker in (
+            "ratelimited",
+            "rate_limited",
+            "rate limit",
+            "rate-limit",
+            "http 429",
+            "status=429",
+            "status 429",
+            " 429",
+            "(429)",
+            "quotaexceeded",
+            "quota_exceeded",
+            "quotaexhausted",
+            "quota is exhausted",
+            "too many requests",
+            "authentication failed",
+            "signed out",
+        )
+    ):
         return True
     return False
 
@@ -343,16 +447,18 @@ def text_is_provider_refusal(text: str) -> bool:
 # Quota labels and failure kinds on a child `blocked` or `failure` object.
 # Bare "unavailable" in prose is not a provider refusal: the navigator uses
 # that word for a missing hub. It counts here only as a quota or failure kind.
-_PROVIDER_CHILD_LABELS = frozenset({
-    "rate_limited",
-    "ratelimited",
-    "quota_exceeded",
-    "quotaexceeded",
-    "quota_exhausted",
-    "quotaexhausted",
-    "unavailable",
-    "provider_unavailable",
-})
+_PROVIDER_CHILD_LABELS = frozenset(
+    {
+        "rate_limited",
+        "ratelimited",
+        "quota_exceeded",
+        "quotaexceeded",
+        "quota_exhausted",
+        "quotaexhausted",
+        "unavailable",
+        "provider_unavailable",
+    }
+)
 
 
 def provider_child_label(label: str) -> bool:
@@ -383,8 +489,11 @@ def _provider_child_fault(text: str, lookup_faults: str | None = None) -> bool:
     if text_is_provider_refusal(text):
         return True
     lowered = without_attempt_summary(text).lower()
-    if ("provider unavailable" in lowered or "provider-unavailable" in lowered
-            or "provider_unavailable" in lowered):
+    if (
+        "provider unavailable" in lowered
+        or "provider-unavailable" in lowered
+        or "provider_unavailable" in lowered
+    ):
         return True
     if "quota exceeded" in lowered or "quota exhausted" in lowered:
         return True
@@ -420,7 +529,9 @@ def _provider_child_json(value: dict, lookup_faults: str | None = None) -> bool:
     for key in ("agents", "nodes"):
         rows = value.get(key)
         if isinstance(rows, list) and any(
-                isinstance(row, dict) and provider_child_record(row, lookup_faults=lookup_faults) for row in rows):
+            isinstance(row, dict) and provider_child_record(row, lookup_faults=lookup_faults)
+            for row in rows
+        ):
             return True
     return False
 
@@ -494,9 +605,16 @@ LOOKUP_ENDPOINTS = (
 
 
 def _lookup_fault_matches(host: str, path: str) -> bool:
-    return any((not host or host == origin) and (not path or target.startswith(path)
-               or origin == "openrouter.ai" and path.startswith(target + "/"))
-               for origin, target in LOOKUP_ENDPOINTS)
+    return any(
+        (not host or host == origin)
+        and (
+            not path
+            or target.startswith(path)
+            or origin == "openrouter.ai"
+            and path.startswith(target + "/")
+        )
+        for origin, target in LOOKUP_ENDPOINTS
+    )
 
 
 def lookup_failure(text: str, faults: str | None = None) -> tuple[str, str] | None:
@@ -507,7 +625,9 @@ def lookup_failure(text: str, faults: str | None = None) -> tuple[str, str] | No
         r"(operation deadline\b|HTTP (?:429|500|502|503|504)\b|transport timeout\b|DNS failure\b|"
         r"connect failure\b|transport stream failure\b|HTTP transport failed in "
         r"(?:Resolution|Connect|RequestWrite|RequestWriteOrResponseHead|ResponseHead|ResponseBody) "
-        r"\([^\n]*, (?:Io|Resolution|DeadlineExceeded|Protocol)\))", text)
+        r"\([^\n]*, (?:Io|Resolution|DeadlineExceeded|Protocol)\))",
+        text,
+    )
     if not match:
         return None
     attempts, cause = int(match.group(1)), match.group(2)
@@ -526,7 +646,17 @@ def lookup_failure(text: str, faults: str | None = None) -> tuple[str, str] | No
         path = fields.get("path", "")
         if not _lookup_fault_matches(fields.get("host", ""), path):
             continue
-        if fields.get("fault") not in {"connect", "stall", "reset", "eof", "429", "500", "502", "503", "504"}:
+        if fields.get("fault") not in {
+            "connect",
+            "stall",
+            "reset",
+            "eof",
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+        }:
             continue
         if "nth" not in fields:
             return match.group(0), HARNESS
@@ -545,8 +675,9 @@ def lookup_failure_reason(text: str, faults: str | None = None) -> str | None:
     return failure[0] if failure and failure[1] == PROVIDER else None
 
 
-def provider_reason_from(kind: str | None, http_status: int | None, text: str, *,
-                         lookup_faults: str | None = None) -> str | None:
+def provider_reason_from(
+    kind: str | None, http_status: int | None, text: str, *, lookup_faults: str | None = None
+) -> str | None:
     """Why this observation is a typed provider refusal, or None.
 
     Covers JSONL turn failures, `plak run` stderr, TUI session-log terminals,
@@ -632,8 +763,11 @@ def _invalid_tool_arguments(arguments: str, *, reject_duplicate_keys: bool) -> b
         raise ValueError("non-JSON constant")
 
     try:
-        value = json.loads(arguments, object_pairs_hook=unique_object if reject_duplicate_keys else None,
-                           parse_constant=invalid_constant)
+        value = json.loads(
+            arguments,
+            object_pairs_hook=unique_object if reject_duplicate_keys else None,
+            parse_constant=invalid_constant,
+        )
         return not isinstance(value, dict)
     except ValueError:
         return True
@@ -683,26 +817,38 @@ def _finished_invalid_arguments(text: str, protocol: str) -> bool:
         index = event.get("index")
         block = event.get("content_block")
         delta = event.get("delta")
-        if event.get("type") == "content_block_start" and type(index) is int \
-                and isinstance(block, dict) and block.get("type") == "tool_use":
+        if (
+            event.get("type") == "content_block_start"
+            and type(index) is int
+            and isinstance(block, dict)
+            and block.get("type") == "tool_use"
+        ):
             messages[index] = ""
-        if event.get("type") == "content_block_delta" and type(index) is int \
-                and index in messages and isinstance(delta, dict) \
-                and delta.get("type") == "input_json_delta" \
-                and isinstance(delta.get("partial_json"), str):
+        if (
+            event.get("type") == "content_block_delta"
+            and type(index) is int
+            and index in messages
+            and isinstance(delta, dict)
+            and delta.get("type") == "input_json_delta"
+            and isinstance(delta.get("partial_json"), str)
+        ):
             messages[index] += delta["partial_json"]
         if event.get("type") == "content_block_stop" and type(index) is int:
             closed_blocks.add(index)
         if event.get("type") == "message_stop":
             messages_finished = True
     if protocol == "chat":
-        return any(index in finished_choices
-                   and _invalid_tool_arguments(arguments, reject_duplicate_keys=True)
-                   for (index, _), arguments in chat.items())
+        return any(
+            index in finished_choices
+            and _invalid_tool_arguments(arguments, reject_duplicate_keys=True)
+            for (index, _), arguments in chat.items()
+        )
     return messages_finished and any(
-        index in closed_blocks and arguments
+        index in closed_blocks
+        and arguments
         and _invalid_tool_arguments(arguments, reject_duplicate_keys=False)
-        for index, arguments in messages.items())
+        for index, arguments in messages.items()
+    )
 
 
 def capture_shows_invalid_tool_arguments(segments: list[Path] | None, protocol: str) -> bool:
@@ -714,15 +860,19 @@ def capture_shows_invalid_tool_arguments(segments: list[Path] | None, protocol: 
     """
     if not segments or len(segments) != 1 or not capture_integrity(segments):
         return False
-    body = max(segments[0].glob("exchange-*.body"),
-               key=lambda path: int(path.stem.removeprefix("exchange-")), default=None)
+    body = max(
+        segments[0].glob("exchange-*.body"),
+        key=lambda path: int(path.stem.removeprefix("exchange-")),
+        default=None,
+    )
     if body is None:
         return False
     try:
         metadata = body.with_suffix(".info").read_text().splitlines()
-        return (any(line in ("terminal=Complete", "terminal=ProtocolComplete",
-                             "terminal=ClosedEarly") for line in metadata)
-                and _finished_invalid_arguments(body.read_text(), protocol))
+        return any(
+            line in ("terminal=Complete", "terminal=ProtocolComplete", "terminal=ClosedEarly")
+            for line in metadata
+        ) and _finished_invalid_arguments(body.read_text(), protocol)
     except (OSError, UnicodeError):
         return False
 
@@ -761,7 +911,8 @@ OUTPUT_LIMIT_DIAGNOSTICS = (
 OUTPUT_LIMIT_MISS = "OutputLimit: the model spent its output bound without an answer"
 _COMPATIBILITY_NOTICE = re.compile(
     r"the (?:answer to the )?([\w-]+) compatibility notice "
-    r"(?:is not accepted|needs an answer|could not be read)")
+    r"(?:is not accepted|needs an answer|could not be read)"
+)
 
 
 def last_line(text: str) -> str:
@@ -779,8 +930,14 @@ def failure_lines(stderr: str) -> str:
     lines = [" ".join(line.split()) for line in stderr.splitlines() if line.strip()]
     if not lines:
         return ""
-    cause = next((line for line in reversed(lines[:-1])
-                  if "error" in line.lower() or "failed" in line.lower()), None)
+    cause = next(
+        (
+            line
+            for line in reversed(lines[:-1])
+            if "error" in line.lower() or "failed" in line.lower()
+        ),
+        None,
+    )
     return (f"{cause} | {lines[-1]}" if cause else lines[-1])[:300]
 
 
@@ -802,8 +959,10 @@ def compatibility_notice_refusal(text: str) -> str | None:
     if match is None:
         return None
     account = match[1]
-    return (f"the {account} compatibility notice is not accepted; accept it once with "
-            f"`plak models {account}` from a terminal before a live run")
+    return (
+        f"the {account} compatibility notice is not accepted; accept it once with "
+        f"`plak models {account}` from a terminal before a live run"
+    )
 
 
 def with_failure_messages(records: list[dict]) -> list[dict]:
@@ -823,15 +982,20 @@ def with_failure_messages(records: list[dict]) -> list[dict]:
     out = []
     for record in records:
         turn_id = str(record.get("turn_id") or "")
-        if (record.get("kind") == "turn.lifecycle" and record.get("phase") not in (None, "admitted")
-                and not record.get("message") and turn_id in messages):
+        if (
+            record.get("kind") == "turn.lifecycle"
+            and record.get("phase") not in (None, "admitted")
+            and not record.get("message")
+            and turn_id in messages
+        ):
             record = {**record, "message": " ".join(messages[turn_id])}
         out.append(record)
     return out
 
 
-def _absorbed_injection(kind: str | None, http_status: int | None, fault: str | None,
-                        text: str | None = None) -> bool:
+def _absorbed_injection(
+    kind: str | None, http_status: int | None, fault: str | None, text: str | None = None
+) -> bool:
     """The failure is the injected fault the product was required to absorb."""
     if fault not in ABSORBED_FAULTS:
         return False
@@ -850,8 +1014,14 @@ def _real_errors_followed_the_injection(turn: Turn) -> bool:
     return sum(1 for retry in turn.retries if retry.get("cause_kind") == "http_status") > 1
 
 
-def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = None,
-                        segments: list[Path] | None = None, lookup_faults: str | None = None) -> None:
+def classify_incomplete(
+    turn: Turn,
+    what: str,
+    *,
+    injected_fault: str | None = None,
+    segments: list[Path] | None = None,
+    lookup_faults: str | None = None,
+) -> None:
     """Raise when `turn` did not complete, using the shared outcome rules.
 
     A typed provider refusal is `provider` on every surface, including during
@@ -871,33 +1041,43 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
         raise ScenarioFailure(MODEL, f"{what}: {OUTPUT_LIMIT_MISS}")
     status = f"{turn.phase} {turn.model_error_kind or ''} {turn.http_status or ''}".strip()
     if IN_BAND_ERROR_MARKER in text.lower() and turn.model_error_kind in IN_BAND_PROVIDER_KINDS:
-        raise ScenarioFailure(PROVIDER, f"{what}: provider in-band error "
-                                        f"({turn.model_error_kind})")
+        raise ScenarioFailure(PROVIDER, f"{what}: provider in-band error ({turn.model_error_kind})")
     validation = stream_validation_outcome(f"{text} {turn.model_error_kind or ''}", segments)
     if validation == MODEL:
         raise ScenarioFailure(MODEL, f"{what}: model emitted invalid tool arguments")
     if validation == PROVIDER and not _absorbed_injection(
-            turn.model_error_kind, turn.http_status, injected_fault):
+        turn.model_error_kind, turn.http_status, injected_fault
+    ):
         raise ScenarioFailure(PROVIDER, f"{what}: provider stream violated the documented protocol")
     if validation == HARNESS:
-        raise ScenarioFailure(HARNESS, f"{what}: kernel stream validation failed without "
-                                       f"a captured protocol violation")
+        raise ScenarioFailure(
+            HARNESS,
+            f"{what}: kernel stream validation failed without a captured protocol violation",
+        )
     reason = provider_reason_from(turn.model_error_kind, turn.http_status, text)
-    if reason and _absorbed_injection(turn.model_error_kind, turn.http_status, injected_fault, text) \
-            and _real_errors_followed_the_injection(turn):
+    if (
+        reason
+        and _absorbed_injection(turn.model_error_kind, turn.http_status, injected_fault, text)
+        and _real_errors_followed_the_injection(turn)
+    ):
         raise ScenarioFailure(PROVIDER, f"{what}: {reason} after the injected fault was retried")
-    if reason and not _absorbed_injection(turn.model_error_kind, turn.http_status, injected_fault, text):
+    if reason and not _absorbed_injection(
+        turn.model_error_kind, turn.http_status, injected_fault, text
+    ):
         raise ScenarioFailure(PROVIDER, f"{what}: {reason}")
     if turn.phase == "refused" and turn.refusals:
-        raise ScenarioFailure(PROVIDER, f"{what}: provider refused the request "
-                                        f"({turn.refusals[-1]})")
+        raise ScenarioFailure(
+            PROVIDER, f"{what}: provider refused the request ({turn.refusals[-1]})"
+        )
     errors = " | ".join(" ".join(error.split()) for error in turn.errors)[:200]
-    raise ScenarioFailure(HARNESS, f"{what}: {status} {errors}".strip(),
-                          model_error_kind=turn.model_error_kind)
+    raise ScenarioFailure(
+        HARNESS, f"{what}: {status} {errors}".strip(), model_error_kind=turn.model_error_kind
+    )
 
 
-def classify_command_error(message: str, what: str, *,
-                           segments: list[Path] | None = None, lookup_faults: str | None = None) -> None:
+def classify_command_error(
+    message: str, what: str, *, segments: list[Path] | None = None, lookup_faults: str | None = None
+) -> None:
     """A manual `/compact` or other command error, classified like a turn."""
     text = message or ""
     lookup = lookup_failure(text, lookup_faults)
@@ -909,15 +1089,23 @@ def classify_command_error(message: str, what: str, *,
     if validation == PROVIDER:
         raise ScenarioFailure(PROVIDER, f"{what}: provider stream violated the documented protocol")
     if validation == HARNESS:
-        raise ScenarioFailure(HARNESS, f"{what}: kernel stream validation failed without "
-                                       f"a captured protocol violation")
+        raise ScenarioFailure(
+            HARNESS,
+            f"{what}: kernel stream validation failed without a captured protocol violation",
+        )
     if provider_reason_from(None, None, text):
         raise ScenarioFailure(PROVIDER, f"{what}: {' '.join(text.split())[:200]}")
     raise ScenarioFailure(HARNESS, f"{what}: {' '.join(text.split())[:200]}")
 
 
-def classify_cli_failure(code: int, stderr: str, what: str, *,
-                         segments: list[Path] | None = None, lookup_faults: str | None = None) -> None:
+def classify_cli_failure(
+    code: int,
+    stderr: str,
+    what: str,
+    *,
+    segments: list[Path] | None = None,
+    lookup_faults: str | None = None,
+) -> None:
     """`plak run` exit. Exit 5 is the agent class; the text decides provider.
 
     An unaccepted compatibility notice (exit 3) is `harness` naming the
@@ -937,8 +1125,10 @@ def classify_cli_failure(code: int, stderr: str, what: str, *,
     if validation == PROVIDER:
         raise ScenarioFailure(PROVIDER, f"{what}: provider stream violated the documented protocol")
     if validation == HARNESS:
-        raise ScenarioFailure(HARNESS, f"{what}: kernel stream validation failed without "
-                                       f"a captured protocol violation")
+        raise ScenarioFailure(
+            HARNESS,
+            f"{what}: kernel stream validation failed without a captured protocol violation",
+        )
     if output_limit_failure(None, last_line(stderr)):
         raise ScenarioFailure(MODEL, f"{what}: {OUTPUT_LIMIT_MISS}")
     if provider_reason_from(None, None, stderr):
@@ -970,8 +1160,9 @@ def api_key_filename(account: str) -> str:
 DEFAULT_COMPOSITION = "plakous-default"
 
 
-def route_report(route: Route, composition: str = DEFAULT_COMPOSITION,
-                 bound: set[str] | None = None) -> dict[str, object]:
+def route_report(
+    route: Route, composition: str = DEFAULT_COMPOSITION, bound: set[str] | None = None
+) -> dict[str, object]:
     """The evidence tuple a live report should name for this route.
 
     `composition_requested` is what the home pins. A pack may bind it to
@@ -1005,21 +1196,26 @@ def pending_exchange(segment: Path) -> int | None:
     means its request was still waiting on the provider.
     """
     try:
-        last = max(segment.glob("exchange-*.info"),
-                   key=lambda path: int(path.stem.removeprefix("exchange-")), default=None)
+        last = max(
+            segment.glob("exchange-*.info"),
+            key=lambda path: int(path.stem.removeprefix("exchange-")),
+            default=None,
+        )
         if last is None:
             return None
         lines = last.read_text().splitlines()
         fields = dict(line.split("=", 1) for line in lines)
-        if (len(fields) != len(lines)
-                or fields.keys() != {"process_id", "exchange", "status", "terminal",
-                                     "recorded_bytes", "incomplete"}
-                or (fields["status"], fields["terminal"], fields["incomplete"])
-                != ("None", "pending", "true")
-                or not re.fullmatch(r"[1-9][0-9]*", fields["process_id"])
-                or not re.fullmatch(r"[1-9][0-9]*", fields["exchange"])
-                or last.stem != f"exchange-{int(fields['exchange']):04}"
-                or not all(last.with_suffix(suffix).is_file() for suffix in (".request", ".body"))):
+        if (
+            len(fields) != len(lines)
+            or fields.keys()
+            != {"process_id", "exchange", "status", "terminal", "recorded_bytes", "incomplete"}
+            or (fields["status"], fields["terminal"], fields["incomplete"])
+            != ("None", "pending", "true")
+            or not re.fullmatch(r"[1-9][0-9]*", fields["process_id"])
+            or not re.fullmatch(r"[1-9][0-9]*", fields["exchange"])
+            or last.stem != f"exchange-{int(fields['exchange']):04}"
+            or not all(last.with_suffix(suffix).is_file() for suffix in (".request", ".body"))
+        ):
             return None
         return int(fields["exchange"])
     except (OSError, UnicodeError, ValueError):
@@ -1028,8 +1224,13 @@ def pending_exchange(segment: Path) -> int | None:
 
 # Protocol terminal events: a body that carries one was answered in full, so
 # the provider is not what the process was still waiting on.
-_TERMINAL_EVENT_MARKERS = (b"data: [DONE]", b"response.completed", b"response.done",
-                           b"response.failed", b"message_stop")
+_TERMINAL_EVENT_MARKERS = (
+    b"data: [DONE]",
+    b"response.completed",
+    b"response.done",
+    b"response.failed",
+    b"message_stop",
+)
 # A wait the provider mandated after a failure. The capture records no response
 # headers, so Retry-After advice (chapter 01 §13.1 honors up to 60 s) is not
 # visible; the credit is chapter 02's 30 s transient continuation, the longest
@@ -1109,8 +1310,11 @@ def _event_data(event: bytes) -> object:
 # In-band provider errors by wire: Messages `error` event types and Responses
 # error codes, with the HTTP status they stand for.
 _MESSAGES_ERROR_TYPES = {"rate_limit_error": 429, "api_error": 500, "overloaded_error": 529}
-_RESPONSES_ERROR_CODES = {"rate_limit_exceeded": 429, "server_error": 500,
-                          "server_is_overloaded": 503}
+_RESPONSES_ERROR_CODES = {
+    "rate_limit_exceeded": 429,
+    "server_error": 500,
+    "server_is_overloaded": 503,
+}
 
 
 def event_error_status(event: bytes) -> int | None:
@@ -1149,9 +1353,11 @@ def last_event(body: bytes) -> bytes | None:
     return events[-1] if events else None
 
 
-_TRANSPORT_FAILURE = re.compile(r"Failed\(Failure \{ phase: (ResponseHead|ResponseBody), "
-                                r"transmission: \w+, kind: (\w+)(?:\(\w+\))?, "
-                                r".*http2_reason: (None|Some\([0-9]+\))")
+_TRANSPORT_FAILURE = re.compile(
+    r"Failed\(Failure \{ phase: (ResponseHead|ResponseBody), "
+    r"transmission: \w+, kind: (\w+)(?:\(\w+\))?, "
+    r".*http2_reason: (None|Some\([0-9]+\))"
+)
 
 
 def network_failure(terminal: str) -> str | None:
@@ -1258,7 +1464,7 @@ def request_items(request: Path) -> tuple[str, ...] | None:
 
 
 def _extends(longer: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
-    return len(prefix) <= len(longer) and longer[:len(prefix)] == prefix
+    return len(prefix) <= len(longer) and longer[: len(prefix)] == prefix
 
 
 def _segment_exchanges(segment: Path, pending: int | None) -> list[_Exchange] | None:
@@ -1269,10 +1475,15 @@ def _segment_exchanges(segment: Path, pending: int | None) -> list[_Exchange] | 
         request, body_path = info.with_suffix(".request"), info.with_suffix(".body")
         body = body_path.read_bytes()
         finished = any(marker in body for marker in _TERMINAL_EVENT_MARKERS)
-        common = dict(number=number, dispatched=request.stat().st_mtime,
-                      last_byte=body_path.stat().st_mtime, body_bytes=len(body),
-                      request_bytes=request.stat().st_size,
-                      items=request_items(request), finished=finished)
+        common = dict(
+            number=number,
+            dispatched=request.stat().st_mtime,
+            last_byte=body_path.stat().st_mtime,
+            body_bytes=len(body),
+            request_bytes=request.stat().st_size,
+            items=request_items(request),
+            finished=finished,
+        )
         if number == pending:
             exchanges.append(_Exchange(ended=None, settled=False, failure=None, **common))
             continue
@@ -1280,10 +1491,20 @@ def _segment_exchanges(segment: Path, pending: int | None) -> list[_Exchange] | 
         if fields is None:
             return None
         failure = exchange_failure(fields, body)
-        settled = (fields["terminal"] in ("Complete", "ProtocolComplete")
-                   or (fields["terminal"] == "ClosedEarly" and finished) or failure is not None)
-        exchanges.append(_Exchange(ended=info.stat().st_mtime, settled=settled, failure=failure,
-                                   tokens=output_tokens(body), **common))
+        settled = (
+            fields["terminal"] in ("Complete", "ProtocolComplete")
+            or (fields["terminal"] == "ClosedEarly" and finished)
+            or failure is not None
+        )
+        exchanges.append(
+            _Exchange(
+                ended=info.stat().st_mtime,
+                settled=settled,
+                failure=failure,
+                tokens=output_tokens(body),
+                **common,
+            )
+        )
     return sorted(exchanges, key=lambda exchange: exchange.number)
 
 
@@ -1313,19 +1534,25 @@ def _stale_pending(last: _Exchange, killed_at: float, deadline: float) -> str | 
     if last.lookup:
         waited = killed_at - last.dispatched
         if waited > LOOKUP_CAP_S + STALE_SLACK_S:
-            return (f"lookup exchange {last.number} pending {waited:.0f}s, past its "
-                    f"{LOOKUP_CAP_S:.0f}s cap")
+            return (
+                f"lookup exchange {last.number} pending {waited:.0f}s, past its "
+                f"{LOOKUP_CAP_S:.0f}s cap"
+            )
         return None
     if last.body_bytes:
         silent = killed_at - last.last_byte
         if silent > PENDING_RECENT_BYTES_S:
-            return (f"exchange {last.number} received no byte in the {silent:.0f}s before "
-                    f"the kill, more than {PENDING_RECENT_BYTES_S:.0f}s")
+            return (
+                f"exchange {last.number} received no byte in the {silent:.0f}s before "
+                f"the kill, more than {PENDING_RECENT_BYTES_S:.0f}s"
+            )
         return None
     waited = killed_at - last.dispatched
     if waited > deadline + STALE_SLACK_S:
-        return (f"exchange {last.number} had no first byte for {waited:.0f}s, past the "
-                f"{deadline:.0f}s dispatch deadline")
+        return (
+            f"exchange {last.number} had no first byte for {waited:.0f}s, past the "
+            f"{deadline:.0f}s dispatch deadline"
+        )
     return None
 
 
@@ -1347,18 +1574,26 @@ def _request_loop(exchanges: list[_Exchange], start: float) -> str | None:
             if not before.conversation or not _extends(before.items, exchange.items):
                 continue
             if before.items != exchange.items or before.failure is None:
-                return (f"exchange {exchange.number} resent exchange {before.number}'s "
-                        f"conversation without a provider failure to retry")
-            if before.ended is not None and exchange.dispatched - before.ended < MIN_RETRY_BACKOFF_S:
-                return f"exchange {exchange.number} retried exchange {before.number} without backoff"
+                return (
+                    f"exchange {exchange.number} resent exchange {before.number}'s "
+                    f"conversation without a provider failure to retry"
+                )
+            if (
+                before.ended is not None
+                and exchange.dispatched - before.ended < MIN_RETRY_BACKOFF_S
+            ):
+                return (
+                    f"exchange {exchange.number} retried exchange {before.number} without backoff"
+                )
             identical += 1
         if identical > MAX_IDENTICAL_RESENDS:
             return f"exchange {exchange.number} resent one request {identical} times"
     return None
 
 
-def budget_attribution(segment: Path, killed_at: float, timeout: float,
-                       deadline: float = 120.0) -> tuple[bool, str]:
+def budget_attribution(
+    segment: Path, killed_at: float, timeout: float, deadline: float = 120.0
+) -> tuple[bool, str]:
     """Whether a timed-out process's capture proves the provider used its budget.
 
     Over the window [killed_at - timeout, killed_at] every exchange spans its
@@ -1396,22 +1631,31 @@ def budget_attribution(segment: Path, killed_at: float, timeout: float,
         if exchange.ended is None or exchange.failure is not None:
             caused.append(span)
         elif exchange.tokens is not None:
-            unexplained = (span[1] - span[0] - EXPLAINED_PREFILL_S
-                           - exchange.tokens / EXPLAINED_TOKENS_PER_S)
+            unexplained = (
+                span[1] - span[0] - EXPLAINED_PREFILL_S - exchange.tokens / EXPLAINED_TOKENS_PER_S
+            )
             if unexplained > 0:
                 caused.append((span[0], span[0] + unexplained))
         if exchange.failure is None:
             continue
-        resumed = min((later.dispatched for later in exchanges if later.number > exchange.number
-                       and _resumes(later, exchange)), default=killed_at)
+        resumed = min(
+            (
+                later.dispatched
+                for later in exchanges
+                if later.number > exchange.number and _resumes(later, exchange)
+            ),
+            default=killed_at,
+        )
         waits.append((exchange.ended, min(resumed, exchange.ended + cap)))
     provider = _measure(caused, start, killed_at)
     credited = _measure(caused + waits, start, killed_at) - provider
     covered = _measure(spans + waits, start, killed_at)
     explained = covered - provider - credited
     local = max(0.0, timeout - covered)
-    account = (f"provider {provider:.1f}s, token-explained {explained:.1f}s, credited wait "
-               f"{credited:.1f}s, local {local:.1f}s")
+    account = (
+        f"provider {provider:.1f}s, token-explained {explained:.1f}s, credited wait "
+        f"{credited:.1f}s, local {local:.1f}s"
+    )
     last = exchanges[-1]
     if last.ended is None:
         stale = _stale_pending(last, killed_at, deadline)
@@ -1419,20 +1663,34 @@ def budget_attribution(segment: Path, killed_at: float, timeout: float,
             return False, f"{account}; {stale}"
         state = f"exchange {last.number} pending"
     elif last.failure is not None and killed_at - last.ended <= cap:
-        state = (f"killed {killed_at - last.ended:.1f}s into the wait after "
-                 f"{last.failure} on exchange {last.number}")
+        state = (
+            f"killed {killed_at - last.ended:.1f}s into the wait after "
+            f"{last.failure} on exchange {last.number}"
+        )
     else:
-        return False, f"{account}; killed {killed_at - last.ended:.1f}s after exchange {last.number} ended"
-    unsettled = next((exchange for exchange in exchanges if exchange.ended is not None
-                      and exchange.ended >= start and not exchange.settled), None)
+        return (
+            False,
+            f"{account}; killed {killed_at - last.ended:.1f}s after exchange {last.number} ended",
+        )
+    unsettled = next(
+        (
+            exchange
+            for exchange in exchanges
+            if exchange.ended is not None and exchange.ended >= start and not exchange.settled
+        ),
+        None,
+    )
     if unsettled is not None:
-        return False, (f"{account}; exchange {unsettled.number} ended without a protocol "
-                       f"terminal or provider failure")
+        return False, (
+            f"{account}; exchange {unsettled.number} ended without a protocol "
+            f"terminal or provider failure"
+        )
     if local > LOCAL_ALLOWANCE_S:
         return False, f"{account}; local time exceeds {LOCAL_ALLOWANCE_S:.0f}s; {state}"
     if provider + credited < timeout / 2:
-        return False, (f"{account}; the exchanges' own output, not the provider, used the "
-                       f"budget; {state}")
+        return False, (
+            f"{account}; the exchanges' own output, not the provider, used the budget; {state}"
+        )
     lookups = sum(1 for exchange in exchanges if exchange.lookup and exchange.dispatched >= start)
     if lookups > MAX_WINDOW_LOOKUPS:
         return False, f"{account}; {lookups} model lookups in the window; {state}"
@@ -1442,9 +1700,15 @@ def budget_attribution(segment: Path, killed_at: float, timeout: float,
     return True, f"{account}; {state}"
 
 
-def timeout_failure(env: Env | None, segment: Path | None, what: str,
-                    faults: str | None = None, *, timeout: float,
-                    killed_at: float | None = None) -> ScenarioFailure:
+def timeout_failure(
+    env: Env | None,
+    segment: Path | None,
+    what: str,
+    faults: str | None = None,
+    *,
+    timeout: float,
+    killed_at: float | None = None,
+) -> ScenarioFailure:
     """Score a process that outlived its `timeout` budget, killed at `killed_at` (default now).
 
     `provider` when `budget_attribution` shows the provider used the budget,
@@ -1458,8 +1722,11 @@ def timeout_failure(env: Env | None, segment: Path | None, what: str,
         return ScenarioFailure(HARNESS, what)
     try:
         provider, account = budget_attribution(
-            segment, time.time() if killed_at is None else killed_at, timeout,
-            dispatch_deadline_s(getattr(env, "route", None)))
+            segment,
+            time.time() if killed_at is None else killed_at,
+            timeout,
+            dispatch_deadline_s(getattr(env, "route", None)),
+        )
     except (OSError, UnicodeError, ValueError):
         provider, account = False, "capture unreadable"
     if not provider:
@@ -1471,8 +1738,11 @@ def timeout_failure(env: Env | None, segment: Path | None, what: str,
 
 def provider_pending(env: Env, segments: list[Path], outcome: str) -> list[Path]:
     """The scenario's segments a `provider` timeout on a pending exchange explains."""
-    return [segment for segment in segments
-            if segment in env.provider_pending] if outcome == PROVIDER else []
+    return (
+        [segment for segment in segments if segment in env.provider_pending]
+        if outcome == PROVIDER
+        else []
+    )
 
 
 def terminal_fields(info: Path, body: Path) -> dict[str, str] | None:
@@ -1487,28 +1757,38 @@ def terminal_fields(info: Path, body: Path) -> dict[str, str] | None:
         if key in fields:
             return None
         fields[key] = value
-    if (fields.keys() != {"process_id", "exchange", "status", "connection", "terminal",
-                          "recorded_bytes", "incomplete"}
-            or not re.fullmatch(r"[1-9][0-9]*", fields["process_id"])
-            or not re.fullmatch(r"[1-9][0-9]*", fields["exchange"])
-            or info.stem != f"exchange-{int(fields['exchange']):04}"
-            or not re.fullmatch(r"None|Some\([0-9]{3}\)", fields["status"])
-            or not re.fullmatch(r"None|Some\((?:Fresh|Reused|ReplacedStale)\)",
-                                fields["connection"])
-            or not re.fullmatch(
-                r"Complete|ProtocolComplete|ClosedEarly|Abandoned|Failed\(Failure \{ "
-                r"phase: \w+, transmission: \w+, kind: \w+(?:\(\w+\))?, "
-                r'cause: (?:None|Some\("[a-z_0-9]+"\)), http2_reason: (?:None|Some\([0-9]+\)), '
-                r"os_error: (?:None|Some\(-?[0-9]+\)), "
-                r'tls: (?:None|Some\("[a-z_0-9]+"\)), tls_alert: (?:None|Some\([0-9]+\)), '
-                r'alpn: (?:None|Some\("(?:h2|http/1\.1)"\)), http2_io: (?:true|false), '
-                r"connection: (?:None|Some\((?:Fresh|Reused|ReplacedStale)\)), "
-                r"idle_age: (?:None|Some\([0-9.]+(?:ns|µs|ms|s)\)), "
-                r"connect_attempts: (?:None|Some\(ConnectAttempts \{ ipv4: [0-9]+, ipv6: [0-9]+ \}\)) \}\)",
-                fields["terminal"])
-            or fields["incomplete"] != "false"
-            or not re.fullmatch(r"[0-9]+", fields["recorded_bytes"])
-            or int(fields["recorded_bytes"]) != body.stat().st_size):
+    if (
+        fields.keys()
+        != {
+            "process_id",
+            "exchange",
+            "status",
+            "connection",
+            "terminal",
+            "recorded_bytes",
+            "incomplete",
+        }
+        or not re.fullmatch(r"[1-9][0-9]*", fields["process_id"])
+        or not re.fullmatch(r"[1-9][0-9]*", fields["exchange"])
+        or info.stem != f"exchange-{int(fields['exchange']):04}"
+        or not re.fullmatch(r"None|Some\([0-9]{3}\)", fields["status"])
+        or not re.fullmatch(r"None|Some\((?:Fresh|Reused|ReplacedStale)\)", fields["connection"])
+        or not re.fullmatch(
+            r"Complete|ProtocolComplete|ClosedEarly|Abandoned|Failed\(Failure \{ "
+            r"phase: \w+, transmission: \w+, kind: \w+(?:\(\w+\))?, "
+            r'cause: (?:None|Some\("[a-z_0-9]+"\)), http2_reason: (?:None|Some\([0-9]+\)), '
+            r"os_error: (?:None|Some\(-?[0-9]+\)), "
+            r'tls: (?:None|Some\("[a-z_0-9]+"\)), tls_alert: (?:None|Some\([0-9]+\)), '
+            r'alpn: (?:None|Some\("(?:h2|http/1\.1)"\)), http2_io: (?:true|false), '
+            r"connection: (?:None|Some\((?:Fresh|Reused|ReplacedStale)\)), "
+            r"idle_age: (?:None|Some\([0-9.]+(?:ns|µs|ms|s)\)), "
+            r"connect_attempts: (?:None|Some\(ConnectAttempts \{ ipv4: [0-9]+, ipv6: [0-9]+ \}\)) \}\)",
+            fields["terminal"],
+        )
+        or fields["incomplete"] != "false"
+        or not re.fullmatch(r"[0-9]+", fields["recorded_bytes"])
+        or int(fields["recorded_bytes"]) != body.stat().st_size
+    ):
         return None
     return fields
 
@@ -1516,8 +1796,10 @@ def terminal_fields(info: Path, body: Path) -> dict[str, str] | None:
 # The `test-hooks` capture's response cap (`MAX_RESPONSE_BYTES`). The capture is
 # required, so a response that outgrows it aborts the exchange in its body.
 CAPTURE_RESPONSE_CAP_BYTES = 8 * 1024 * 1024
-_RUNAWAY_TERMINAL = re.compile(r"Failed\(Failure \{ phase: ResponseBody, transmission: \w+, "
-                               r"kind: Internal, ")
+_RUNAWAY_TERMINAL = re.compile(
+    r"Failed\(Failure \{ phase: ResponseBody, transmission: \w+, "
+    r"kind: Internal, "
+)
 
 
 def _output_item(value: dict) -> tuple[str, str, bool] | None:
@@ -1531,14 +1813,20 @@ def _output_item(value: dict) -> tuple[str, str, bool] | None:
     kind = value.get("type")
     if kind == "response.output_item.added" and isinstance(value.get("item"), dict):
         item = value["item"]
-        return (str(item.get("id")),
-                " ".join(str(part) for part in (item.get("type"), item.get("name")) if part), False)
+        return (
+            str(item.get("id")),
+            " ".join(str(part) for part in (item.get("type"), item.get("name")) if part),
+            False,
+        )
     if isinstance(kind, str) and kind.startswith("response.") and kind.endswith(".delta"):
         return str(value.get("item_id")), "", True
     if kind == "content_block_start" and isinstance(value.get("content_block"), dict):
         block = value["content_block"]
-        return (f"block {value.get('index')}",
-                " ".join(str(part) for part in (block.get("type"), block.get("name")) if part), False)
+        return (
+            f"block {value.get('index')}",
+            " ".join(str(part) for part in (block.get("type"), block.get("name")) if part),
+            False,
+        )
     if kind == "content_block_delta":
         return f"block {value.get('index')}", "", True
     choices = value.get("choices")
@@ -1549,15 +1837,26 @@ def _output_item(value: dict) -> tuple[str, str, bool] | None:
             if isinstance(calls, list) and len(calls) == 1 and isinstance(calls[0], dict):
                 function = calls[0].get("function") or {}
                 name = function.get("name")
-                return f"tool call {calls[0].get('index')}", f"tool call {name}" if name else "", True
+                return (
+                    f"tool call {calls[0].get('index')}",
+                    f"tool call {name}" if name else "",
+                    True,
+                )
             if isinstance(delta.get("content"), str):
                 return "text", "assistant text", True
     return None
 
 
 # Stream lifecycle events that carry no output of their own.
-_STREAM_PREAMBLE = frozenset({"response.created", "response.in_progress", "message_start", "ping",
-                              "response.content_part.added"})
+_STREAM_PREAMBLE = frozenset(
+    {
+        "response.created",
+        "response.in_progress",
+        "message_start",
+        "ping",
+        "response.content_part.added",
+    }
+)
 
 
 def runaway_output(info: Path, body: Path) -> str | None:
@@ -1570,10 +1869,13 @@ def runaway_output(info: Path, body: Path) -> str | None:
     output item. The final event the cap cut short is not read.
     """
     fields = dict(line.split("=", 1) for line in info.read_text().splitlines() if "=" in line)
-    if (fields.get("status") != "Some(200)" or fields.get("incomplete") != "true"
-            or fields.get("recorded_bytes") != str(CAPTURE_RESPONSE_CAP_BYTES)
-            or body.stat().st_size != CAPTURE_RESPONSE_CAP_BYTES
-            or not _RUNAWAY_TERMINAL.match(fields.get("terminal", ""))):
+    if (
+        fields.get("status") != "Some(200)"
+        or fields.get("incomplete") != "true"
+        or fields.get("recorded_bytes") != str(CAPTURE_RESPONSE_CAP_BYTES)
+        or body.stat().st_size != CAPTURE_RESPONSE_CAP_BYTES
+        or not _RUNAWAY_TERMINAL.match(fields.get("terminal", ""))
+    ):
         return None
     items: set[str] = set()
     kind = ""
@@ -1610,8 +1912,10 @@ def _runaways(segments: list[Path]) -> list[tuple[Path, Path, str]]:
 
 
 def _runaway_reason(segment: Path, info: Path, kind: str) -> str:
-    return (f"model output ran past the {CAPTURE_RESPONSE_CAP_BYTES >> 20} MiB capture bound "
-            f"(runaway output in {kind}) at {segment.name} {info.stem}")
+    return (
+        f"model output ran past the {CAPTURE_RESPONSE_CAP_BYTES >> 20} MiB capture bound "
+        f"(runaway output in {kind}) at {segment.name} {info.stem}"
+    )
 
 
 def runaway_outputs(segments: list[Path]) -> list[str]:
@@ -1627,12 +1931,15 @@ _STREAM_ABORT = re.compile(r"\bTransport\b|stream interrupted|transport failed",
 def _last_answered(segment: Path, info: Path) -> bool:
     """No later exchange in the segment received a response byte."""
     number = int(info.stem.removeprefix("exchange-"))
-    return not any(int(body.stem.removeprefix("exchange-")) > number and body.stat().st_size
-                   for body in segment.glob("exchange-*.body"))
+    return not any(
+        int(body.stem.removeprefix("exchange-")) > number and body.stat().st_size
+        for body in segment.glob("exchange-*.body")
+    )
 
 
-def score_runaway(outcome: str, detail: str, segments: list[Path], *,
-                  model_error_kind: str | None = None) -> tuple[str, str]:
+def score_runaway(
+    outcome: str, detail: str, segments: list[Path], *, model_error_kind: str | None = None
+) -> tuple[str, str]:
     """A failure a runaway model output explains is `model`; any other keeps its class.
 
     The runaway explains a `harness` or `model` failure when that failure is
@@ -1641,13 +1948,19 @@ def score_runaway(outcome: str, detail: str, segments: list[Path], *,
     scenario's last process segment (the one whose turn failed), and it is
     the last exchange there that received a response byte.
     """
-    stream_aborted = (model_error_kind == "Transport" if model_error_kind is not None
-                      else bool(_STREAM_ABORT.search(detail)))
+    stream_aborted = (
+        model_error_kind == "Transport"
+        if model_error_kind is not None
+        else bool(_STREAM_ABORT.search(detail))
+    )
     runaways = _runaways(segments)
     if not runaways or outcome not in (HARNESS, MODEL) or not stream_aborted:
         return outcome, detail
-    explained = [found for found in runaways
-                 if found[0] == segments[-1] and _last_answered(found[0], found[1])]
+    explained = [
+        found
+        for found in runaways
+        if found[0] == segments[-1] and _last_answered(found[0], found[1])
+    ]
     if not explained:
         return outcome, detail
     return MODEL, "; ".join(_runaway_reason(*found) for found in explained)
@@ -1666,11 +1979,16 @@ def capture_problems(segments: list[Path], pending: Collection[Path] = ()) -> li
             if not segment.is_dir():
                 problems.append(f"{segment.name} missing")
                 continue
-            markers = [marker for marker in ("incomplete.log", "retention.info")
-                       if (segment / marker).exists()]
+            markers = [
+                marker
+                for marker in ("incomplete.log", "retention.info")
+                if (segment / marker).exists()
+            ]
             problems += [f"{segment.name} has {marker}" for marker in markers]
-            files = {kind: {path.stem: path for path in segment.glob(f"*.{kind}")}
-                     for kind in ("request", "body", "info")}
+            files = {
+                kind: {path.stem: path for path in segment.glob(f"*.{kind}")}
+                for kind in ("request", "body", "info")
+            }
             names = set().union(*(found.keys() for found in files.values()))
             exchange = pending_exchange(segment)
             open_name = None if exchange is None else f"exchange-{exchange:04}"
@@ -1680,8 +1998,10 @@ def capture_problems(segments: list[Path], pending: Collection[Path] = ()) -> li
                 elif name == open_name:
                     if segment not in pending:
                         problems.append(f"{segment.name} {name} pending")
-                elif terminal_fields(files["info"][name], files["body"][name]) is None \
-                        and runaway_output(files["info"][name], files["body"][name]) is None:
+                elif (
+                    terminal_fields(files["info"][name], files["body"][name]) is None
+                    and runaway_output(files["info"][name], files["body"][name]) is None
+                ):
                     problems.append(f"{segment.name} {name} not terminal")
         except (OSError, UnicodeError, ValueError):
             problems.append(f"{segment.name} unreadable")
@@ -1784,16 +2104,27 @@ def git_repo(path: Path, files: dict[str, str]) -> Path:
     path.mkdir(parents=True)
     for name, text in files.items():
         (path / name).write_text(text)
-    for argv in (["init", "-q"], ["add", "."],
-                 ["-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid",
-                  "commit", "-qm", "seed"]):
+    for argv in (
+        ["init", "-q"],
+        ["add", "."],
+        [
+            "-c",
+            "user.name=smoke",
+            "-c",
+            "user.email=smoke@example.invalid",
+            "commit",
+            "-qm",
+            "seed",
+        ],
+    ):
         subprocess.run(["git", *argv], cwd=path, check=True, env=fixture_git_env())
     return path
 
 
 def unittest_passes(repo: Path) -> bool:
-    result = subprocess.run(["python3", "-m", "unittest", "-q"], cwd=repo,
-                            capture_output=True, text=True, timeout=120)
+    result = subprocess.run(
+        ["python3", "-m", "unittest", "-q"], cwd=repo, capture_output=True, text=True, timeout=120
+    )
     return result.returncode == 0
 
 
@@ -1810,8 +2141,11 @@ def session_records(home: Path, session_id: str) -> list[dict]:
 
 
 def committed_compactions(records: list[dict]) -> int:
-    return sum(1 for record in records if record.get("kind") == "compact.finished"
-               and record.get("outcome") == "committed")
+    return sum(
+        1
+        for record in records
+        if record.get("kind") == "compact.finished" and record.get("outcome") == "committed"
+    )
 
 
 # Spec 01 §10.2: a paid successor must measure strictly smaller than its source.
@@ -1925,12 +2259,14 @@ def transcript_usage(path: Path) -> TokenUsage:
             continue
         if not any(key in record for key in ("input_tokens", "output_tokens")):
             continue
-        total = total.add(TokenUsage(
-            _u64(record, "input_tokens"),
-            _u64(record, "output_tokens"),
-            _u64(record, "cached_input_tokens"),
-            _u64(record, "reasoning_tokens"),
-        ))
+        total = total.add(
+            TokenUsage(
+                _u64(record, "input_tokens"),
+                _u64(record, "output_tokens"),
+                _u64(record, "cached_input_tokens"),
+                _u64(record, "reasoning_tokens"),
+            )
+        )
     return total
 
 
@@ -1995,14 +2331,22 @@ class Env:
     def _private_directory(path: Path) -> None:
         path = path.parent.resolve() / path.name
         metadata = path.lstat()
-        if (stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode)
-                or metadata.st_uid != os.getuid()
-                or stat.S_IMODE(metadata.st_mode) != 0o700):
-            raise ScenarioFailure(HARNESS, "capture directory must be owned, private and symlink-free")
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise ScenarioFailure(
+                HARNESS, "capture directory must be owned, private and symlink-free"
+            )
 
-    def environ(self, faults: str | None = None,
-                source: dict[str, str] | None = None,
-                capture_dir: Path | None = None) -> dict[str, str]:
+    def environ(
+        self,
+        faults: str | None = None,
+        source: dict[str, str] | None = None,
+        capture_dir: Path | None = None,
+    ) -> dict[str, str]:
         self.lookup_faults = faults
         dropped = {"PLAK_TEST_FAULTS", "PLAK_HOME", "PLAK_TEST_EXCHANGE_CAPTURE_DIR"}
         # A stale environment key must never shadow a key copied from the
@@ -2012,7 +2356,9 @@ class Env:
         source = source if source is not None else os.environ
         env = {key: value for key, value in source.items() if key not in dropped}
         env["PLAK_HOME"] = str(self.home)
-        capture_dir = capture_dir or self.capture_root / f"segment-{len(self.capture_segments) + 1:03d}"
+        capture_dir = (
+            capture_dir or self.capture_root / f"segment-{len(self.capture_segments) + 1:03d}"
+        )
         if not capture_dir.is_relative_to(self.capture_root):
             raise ScenarioFailure(HARNESS, "capture segment must belong to this run")
         if not capture_dir.exists():
@@ -2028,9 +2374,15 @@ class Env:
         return env
 
 
-def run_cli(env: Env, repo: Path, args: list[str], log: Path,
-            timeout: float = 300, home: Path | None = None,
-            faults: str | None = None) -> tuple[int, str]:
+def run_cli(
+    env: Env,
+    repo: Path,
+    args: list[str],
+    log: Path,
+    timeout: float = 300,
+    home: Path | None = None,
+    faults: str | None = None,
+) -> tuple[int, str]:
     """`plak run …`; returns the exit status and stdout, keeping both streams.
 
     `home` overrides `PLAK_HOME` for this process only. Capture still belongs
@@ -2045,19 +2397,32 @@ def run_cli(env: Env, repo: Path, args: list[str], log: Path,
     if home is not None:
         child["PLAK_HOME"] = str(home)
     try:
-        result = subprocess.run([str(env.binary), "run", *args], cwd=repo,
-                                env=child, stdin=subprocess.DEVNULL, capture_output=True,
-                                text=True, timeout=timeout)
+        result = subprocess.run(
+            [str(env.binary), "run", *args],
+            cwd=repo,
+            env=child,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
     except subprocess.TimeoutExpired as error:
         killed_at = time.time()
         log.write_text(f"timeout after {timeout}s\n{error.stdout or ''}{error.stderr or ''}")
-        raise timeout_failure(env, segment, f"plak run did not finish in {timeout:.0f}s",
-                              faults, timeout=timeout, killed_at=killed_at) from None
+        raise timeout_failure(
+            env,
+            segment,
+            f"plak run did not finish in {timeout:.0f}s",
+            faults,
+            timeout=timeout,
+            killed_at=killed_at,
+        ) from None
     code, note = result.returncode, ""
     if truncated_answer(code, result.stderr):
         code, note = 0, " (answer committed at its output limit; scored as completed)"
-    log.write_text(f"exit {result.returncode}{note}\n--- stdout\n{result.stdout}"
-                   f"--- stderr\n{result.stderr}")
+    log.write_text(
+        f"exit {result.returncode}{note}\n--- stdout\n{result.stdout}--- stderr\n{result.stderr}"
+    )
     return code, result.stdout
 
 
@@ -2089,8 +2454,10 @@ class Turn:
 
     def usage(self) -> TokenUsage:
         return TokenUsage(
-            self.input_tokens, self.output_tokens,
-            self.cached_input_tokens, self.reasoning_tokens,
+            self.input_tokens,
+            self.output_tokens,
+            self.cached_input_tokens,
+            self.reasoning_tokens,
         )
 
 
@@ -2137,9 +2504,18 @@ STARTUP_EXIT_WAIT_S = 10.0
 class Agent:
     """A `plak agent` process spoken to over JSONL."""
 
-    def __init__(self, env: Env, repo: Path, name: str, *, args: list[str],
-                 faults: str | None = None, capture_dir: Path | None = None,
-                 home: Path | None = None, observe: bool = False):
+    def __init__(
+        self,
+        env: Env,
+        repo: Path,
+        name: str,
+        *,
+        args: list[str],
+        faults: str | None = None,
+        capture_dir: Path | None = None,
+        home: Path | None = None,
+        observe: bool = False,
+    ):
         self.lookup_faults = faults
         child_env = env.environ(faults, capture_dir=capture_dir)
         # A scenario that must pin `[turn]` uses a private home. Capture stays
@@ -2152,9 +2528,14 @@ class Agent:
         self.transcript = (env.artifacts / f"{name}.jsonl").open("a")
         self.stderr = (env.artifacts / f"{name}.stderr").open("a")
         self.proc = subprocess.Popen(
-            [str(env.binary), "agent", *args], cwd=repo, env=child_env,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
-            text=True, start_new_session=True,
+            [str(env.binary), "agent", *args],
+            cwd=repo,
+            env=child_env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self.stderr,
+            text=True,
+            start_new_session=True,
         )
         self.events: queue.Queue = queue.Queue()
         threading.Thread(target=self._read, daemon=True).start()
@@ -2179,8 +2560,13 @@ class Agent:
                 pass
             self.stderr.flush()
             detail = Path(self.stderr.name).read_text(errors="replace")
-            classify_cli_failure(self.proc.poll() or 5, detail + json.dumps(hello),
-                                 "plak agent startup", segments=[self.capture_dir], lookup_faults=faults)
+            classify_cli_failure(
+                self.proc.poll() or 5,
+                detail + json.dumps(hello),
+                "plak agent startup",
+                segments=[self.capture_dir],
+                lookup_faults=faults,
+            )
         if self.composition:
             env.bound_compositions.add(self.composition)
 
@@ -2250,14 +2636,27 @@ class Agent:
     def prompt(self, text: str, timeout: float = 300, on_event=None) -> Turn:
         """Send a root prompt and wait for its terminal lifecycle and `busy:false`."""
         command_id = self.send("prompt", text=text)
-        turn, started, terminal = Turn(lookup_faults=getattr(self, "lookup_faults", None)), time.monotonic(), False
+        turn, started, terminal = (
+            Turn(lookup_faults=getattr(self, "lookup_faults", None)),
+            time.monotonic(),
+            False,
+        )
         while True:
             try:
-                event = self.wait_for(lambda e: e.get("id") == command_id or
-                                      e.get("kind") in ("error", "busy", "eof"), timeout)
+                event = self.wait_for(
+                    lambda e: (
+                        e.get("id") == command_id or e.get("kind") in ("error", "busy", "eof")
+                    ),
+                    timeout,
+                )
             except EventTimeout as error:
-                raise timeout_failure(getattr(self, "env", None), getattr(self, "capture_dir", None),
-                                      f"turn: {error}", turn.lookup_faults, timeout=timeout) from None
+                raise timeout_failure(
+                    getattr(self, "env", None),
+                    getattr(self, "capture_dir", None),
+                    f"turn: {error}",
+                    turn.lookup_faults,
+                    timeout=timeout,
+                ) from None
             kind = event.get("kind")
             if on_event:
                 on_event(event)
@@ -2265,8 +2664,10 @@ class Agent:
                 raise ScenarioFailure(HARNESS, "plak agent exited during a turn")
             if kind == "assistant":
                 turn.text += event.get("text", "")
-            elif kind == "tool" and (event.get("state") == "running"
-                                     or str(event.get("state", "")).startswith("rejected")):
+            elif kind == "tool" and (
+                event.get("state") == "running"
+                or str(event.get("state", "")).startswith("rejected")
+            ):
                 turn.tools += 1
             elif kind == "error":
                 turn.errors.append(event.get("message", ""))
@@ -2304,13 +2705,20 @@ class Agent:
             nonlocal busy, failed_tool
             if event.get("kind") == "error" and event.get("id") == command_id:
                 return True
-            if event.get("kind") == "tool" and event.get("activity_kind") == kind \
-                    and event.get("state") == "failed":
+            if (
+                event.get("kind") == "tool"
+                and event.get("activity_kind") == kind
+                and event.get("state") == "failed"
+            ):
                 failed_tool = event.get("subject") or f"{kind} failed"
             # The failed workflow's cause (for example a provider 429) is a
             # note on the command, not part of the tool row's subject.
-            if event.get("kind") == "status" and event.get("phase") == "note" \
-                    and event.get("id") == command_id and event.get("detail"):
+            if (
+                event.get("kind") == "status"
+                and event.get("phase") == "note"
+                and event.get("id") == command_id
+                and event.get("detail")
+            ):
                 notes.append(str(event["detail"]))
             if event.get("kind") == "busy":
                 busy, was_busy = event.get("busy") is True, busy
@@ -2354,17 +2762,26 @@ class Agent:
 class Tui:
     """The interactive TUI on a pseudo-terminal, driven by keystrokes."""
 
-    def __init__(self, env: Env, repo: Path, log: Path, args: list[str] = (),
-                 capture_dir: Path | None = None, faults: str | None = None):
+    def __init__(
+        self,
+        env: Env,
+        repo: Path,
+        log: Path,
+        args: list[str] = (),
+        capture_dir: Path | None = None,
+        faults: str | None = None,
+    ):
         self.lookup_faults = faults
-        child_env = {**env.environ(faults=faults, capture_dir=capture_dir), "TERM": "xterm-256color"}
+        child_env = {
+            **env.environ(faults=faults, capture_dir=capture_dir),
+            "TERM": "xterm-256color",
+        }
         self.capture_dir = env.capture_segments[-1]
         self.log = log.open("wb")
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(repo)
-            os.execve(str(env.binary), [str(env.binary), *args],
-                      child_env)
+            os.execve(str(env.binary), [str(env.binary), *args], child_env)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         self.screen = b""
         self._quit_output: bytearray | None = None
@@ -2398,7 +2815,9 @@ class Tui:
             self.pump(0.5)
             if predicate():
                 return True
-            failure = lookup_failure(self.screen.decode(errors="replace"), getattr(self, "lookup_faults", None))
+            failure = lookup_failure(
+                self.screen.decode(errors="replace"), getattr(self, "lookup_faults", None)
+            )
             if failure:
                 self.quit()
                 raise ScenarioFailure(failure[1], f"TUI startup: {failure[0]}")
@@ -2440,6 +2859,8 @@ def table(results: list[Result]) -> str:
     rows = [("scenario", "surface", "outcome", "secs", "detail")]
     rows += [(r.scenario, r.surface, r.outcome, f"{r.seconds:.0f}", r.detail) for r in results]
     widths = [max(len(row[i]) for row in rows) for i in range(4)]
-    lines = ["  ".join(cell.ljust(width) for cell, width in zip(row[:4], widths)) + "  " + row[4]
-             for row in rows]
+    lines = [
+        "  ".join(cell.ljust(width) for cell, width in zip(row[:4], widths)) + "  " + row[4]
+        for row in rows
+    ]
     return "\n".join(line.rstrip() for line in lines)

@@ -42,8 +42,10 @@ TEST_CALC = (
     "    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n\n"
     "    def test_subtract(self):\n        self.assertEqual(subtract(5, 3), 2)\n"
 )
-TASK = ("calc.py has a bug that makes `python3 -m unittest` fail. Fix it, add a test "
-        "to test_calc.py for subtracting a negative number, and run the tests.")
+TASK = (
+    "calc.py has a bug that makes `python3 -m unittest` fail. Fix it, add a test "
+    "to test_calc.py for subtracting a negative number, and run the tests."
+)
 CONTINUE = "Reply with exactly the word: continued"
 WRAP_UP_PROMPT = (
     "Run the shell command `ls`, then `cat` each file one at a time, waiting "
@@ -79,9 +81,13 @@ def check_calc(repo: Path) -> None:
         raise ScenarioFailure(MODEL, "no test was added")
 
 
-def require_completed(turn: live.Turn, what: str, injected: bool = False,
-                      injected_fault: str | None = None,
-                      segments: list[Path] | None = None) -> None:
+def require_completed(
+    turn: live.Turn,
+    what: str,
+    injected: bool = False,
+    injected_fault: str | None = None,
+    segments: list[Path] | None = None,
+) -> None:
     """Classify an incomplete turn. `injected` names a fault the product must absorb."""
     fault = injected_fault if injected else None
     live.classify_incomplete(turn, what, injected_fault=fault, segments=segments)
@@ -97,26 +103,33 @@ def durable_terminals(records: list[dict]) -> list[dict]:
 
     A failed terminal carries its turn's `turn.failed` text as `message`.
     """
-    return [record for record in live.with_failure_messages(records)
-            if record.get("kind") == "turn.lifecycle"
-            and record.get("phase") not in (None, "admitted")]
+    return [
+        record
+        for record in live.with_failure_messages(records)
+        if record.get("kind") == "turn.lifecycle" and record.get("phase") not in (None, "admitted")
+    ]
 
 
-def require_durable_completed(record: dict, what: str,
-                              segments: list[Path] | None = None,
-                              home: Path | None = None) -> None:
+def require_durable_completed(
+    record: dict, what: str, segments: list[Path] | None = None, home: Path | None = None
+) -> None:
     """Classify a durable TUI terminal with the same policy as JSONL turns."""
     if home is not None and record.get("phase") != "completed":
         retry = jobs.last_retry(home, str(record.get("turn_id") or ""))
         if jobs.retry_budget_exhausted(retry):
             raise ScenarioFailure(PROVIDER, f"{what}: model_retries {retry[0]} exhausted")
     status = record.get("http_status")
-    require_completed(live.Turn(phase=record.get("phase"),
-                                model_error_kind=record.get("model_error_kind"),
-                                http_status=status if type(status) is int else None,
-                                errors=[str(record.get("message") or "")],
-                                refusals=live.durable_refusals(record)),
-                      what, segments=segments)
+    require_completed(
+        live.Turn(
+            phase=record.get("phase"),
+            model_error_kind=record.get("model_error_kind"),
+            http_status=status if type(status) is int else None,
+            errors=[str(record.get("message") or "")],
+            refusals=live.durable_refusals(record),
+        ),
+        what,
+        segments=segments,
+    )
 
 
 def fault_was_observed(turn: live.Turn, segments: list[Path] | None) -> bool:
@@ -143,8 +156,10 @@ def fault_was_observed(turn: live.Turn, segments: list[Path] | None) -> bool:
 
 def discarded_replay(turn: live.Turn) -> bool:
     """A retry that dropped the failed request's partial output."""
-    return any(retry.get("cause_kind") == "stream_interrupted"
-               and retry.get("output_discarded") is True for retry in turn.retries)
+    return any(
+        retry.get("cause_kind") == "stream_interrupted" and retry.get("output_discarded") is True
+        for retry in turn.retries
+    )
 
 
 def compaction_first_prompt(pack: str) -> str:
@@ -155,8 +170,10 @@ def compaction_first_prompt(pack: str) -> str:
     fold. It is told which tool to use, as the long-session Codex prompts are.
     """
     if pack == "codex":
-        how = ("Print fold.txt in full with one exec that runs exactly one exec_command, "
-               "without max_output_tokens, and returns its whole output with text(...).")
+        how = (
+            "Print fold.txt in full with one exec that runs exactly one exec_command, "
+            "without max_output_tokens, and returns its whole output with text(...)."
+        )
     else:
         how = "Read fold.txt in full with one read."
     return f"{how} Remember the code word ZEBRA-42. Reply: ok"
@@ -173,12 +190,20 @@ def after_events(plan: str) -> int | None:
 
 # Retry causes under which the product replays a request the provider or the
 # network ended (spec 01 §13.1).
-REPLAY_CAUSES = frozenset({"connect", "record_rejected_in_transit", "transport_after_send",
-                           "stream_interrupted", "http_status"})
+REPLAY_CAUSES = frozenset(
+    {
+        "connect",
+        "record_rejected_in_transit",
+        "transport_after_send",
+        "stream_interrupted",
+        "http_status",
+    }
+)
 
 
-def provider_ended_before_cut(turn: live.Turn, segments: list[Path] | None,
-                             threshold: int | None) -> str | None:
+def provider_ended_before_cut(
+    turn: live.Turn, segments: list[Path] | None, threshold: int | None
+) -> str | None:
     """Why an `after-events` reset never fired, when the provider is the reason.
 
     The targeted exchange is the faulted process's lowest-numbered request
@@ -201,19 +226,24 @@ def provider_ended_before_cut(turn: live.Turn, segments: list[Path] | None,
     if turn.completed:
         if not any(retry.get("cause_kind") in REPLAY_CAUSES for retry in turn.retries):
             return None
-    elif turn.model_error_kind not in live.IN_BAND_PROVIDER_KINDS \
-            and turn.http_status not in live.PROVIDER_HTTP_STATUSES:
+    elif (
+        turn.model_error_kind not in live.IN_BAND_PROVIDER_KINDS
+        and turn.http_status not in live.PROVIDER_HTTP_STATUSES
+    ):
         return None
     segment = segments[0]
     try:
-        requests = sorted(segment.glob("exchange-*.request"),
-                          key=lambda path: int(path.stem.removeprefix("exchange-")))
+        requests = sorted(
+            segment.glob("exchange-*.request"),
+            key=lambda path: int(path.stem.removeprefix("exchange-")),
+        )
         conversations = [path for path in requests if live.request_items(path) is not None]
         if not conversations:
             return None
         target = conversations[0]
-        if turn.completed and not any(live.request_items(path) == live.request_items(target)
-                                      for path in conversations[1:]):
+        if turn.completed and not any(
+            live.request_items(path) == live.request_items(target) for path in conversations[1:]
+        ):
             return None
         fields = live.terminal_fields(target.with_suffix(".info"), target.with_suffix(".body"))
         body = target.with_suffix(".body").read_bytes()
@@ -222,18 +252,23 @@ def provider_ended_before_cut(turn: live.Turn, segments: list[Path] | None,
     if fields is None:
         return None
     failure = live.exchange_failure(fields, body)
-    ended = fields["terminal"] in ("Complete", "ProtocolComplete", "ClosedEarly") \
+    ended = (
+        fields["terminal"] in ("Complete", "ProtocolComplete", "ClosedEarly")
         or live.network_failure(fields["terminal"]) is not None
+    )
     events = live.sse_events(body)
     if failure is None or not ended or len(events) >= threshold:
         return None
     retried = "; the product retried it and completed the turn" if turn.completed else ""
-    return (f"the provider ended the targeted stream ({target.stem}) in {failure} after "
-            f"{len(events)} of {threshold} events, before the reset fired{retried}")
+    return (
+        f"the provider ended the targeted stream ({target.stem}) in {failure} after "
+        f"{len(events)} of {threshold} events, before the reset fired{retried}"
+    )
 
 
-def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None,
-                      threshold: int | None = None) -> str:
+def judge_fault_reset(
+    turn: live.Turn, hello: Path, segments: list[Path] | None, threshold: int | None = None
+) -> str:
     """A reset is a safe replay, a declined unsafe replay, or a provider refusal.
 
     The injected fault has to have been observed. A replay that discarded its
@@ -249,8 +284,10 @@ def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None,
         # A real provider HTTP error on the faulted request ends it before any
         # stream event, so the reset (armed after N events) never fires.
         if any(retry.get("cause_kind") == "http_status" for retry in turn.retries):
-            raise ScenarioFailure(PROVIDER, "a provider HTTP error consumed the faulted request "
-                                            "before the reset fired")
+            raise ScenarioFailure(
+                PROVIDER,
+                "a provider HTTP error consumed the faulted request before the reset fired",
+            )
         ended = provider_ended_before_cut(turn, segments, threshold)
         if ended:
             raise ScenarioFailure(PROVIDER, ended)
@@ -261,9 +298,13 @@ def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None,
         if failure.outcome in (live.PROVIDER, live.MODEL) or "stream validation" in str(failure):
             raise
         if discarded_replay(turn):
-            raise ScenarioFailure(HARNESS, "discarded replay did not complete the turn") from failure
+            raise ScenarioFailure(
+                HARNESS, "discarded replay did not complete the turn"
+            ) from failure
         if hello.is_file() and hello.read_text().count("hello") > 1:
-            raise ScenarioFailure(HARNESS, "declined replay still duplicated its effect") from failure
+            raise ScenarioFailure(
+                HARNESS, "declined replay still duplicated its effect"
+            ) from failure
         return "unsafe replay declined; fault observed; effect not repeated"
     if not discarded_replay(turn):
         raise ScenarioFailure(HARNESS, "completed reset was not a discarded-output replay")
@@ -281,16 +322,21 @@ class Smoke:
     def repo(self, name: str, factory=calc_repo) -> Path:
         return factory(self.env.artifacts / name / "repo")
 
-    def agent(self, name: str, repo: Path, faults: str | None = None,
-              args: list[str] | None = None) -> live.Agent:
+    def agent(
+        self, name: str, repo: Path, faults: str | None = None, args: list[str] | None = None
+    ) -> live.Agent:
         return live.Agent(self.env, repo, f"{name}/agent", args=args or [], faults=faults)
 
     # --- CLI one-shot -------------------------------------------------------
 
     def cli_task(self) -> str:
         repo = self.repo("cli_task")
-        code, _ = live.run_cli(self.env, repo, [*self.route.flags(), "--", TASK],
-                               self.env.artifacts / "cli_task" / "run.log")
+        code, _ = live.run_cli(
+            self.env,
+            repo,
+            [*self.route.flags(), "--", TASK],
+            self.env.artifacts / "cli_task" / "run.log",
+        )
         if code != 0:
             _raise_cli_failure(code, self.env.artifacts / "cli_task" / "run.log", "cli_task")
         check_calc(repo)
@@ -299,19 +345,36 @@ class Smoke:
     def cli_resume(self) -> str:
         repo = self.repo("cli_resume")
         log = self.env.artifacts / "cli_resume"
-        code, out = live.run_cli(self.env, repo, [*self.route.flags(), "--print-session-id",
-                                                  "--", "Remember the word MAGENTA. Reply: ok"],
-                                 log / "first.log")
-        session = next((line.split("=", 1)[1] for line in out.splitlines()
-                        if line.startswith("session_id=")), None)
+        code, out = live.run_cli(
+            self.env,
+            repo,
+            [
+                *self.route.flags(),
+                "--print-session-id",
+                "--",
+                "Remember the word MAGENTA. Reply: ok",
+            ],
+            log / "first.log",
+        )
+        session = next(
+            (line.split("=", 1)[1] for line in out.splitlines() if line.startswith("session_id=")),
+            None,
+        )
         if code != 0:
             _raise_cli_failure(code, log / "first.log", "first run")
         if not session:
             raise ScenarioFailure(HARNESS, f"first run exited {code} without a session id")
-        code, out = live.run_cli(self.env, repo, ["--session", session, "--",
-                                                  "What word did I ask you to remember? "
-                                                  "Reply with the word only."],
-                                 log / "second.log")
+        code, out = live.run_cli(
+            self.env,
+            repo,
+            [
+                "--session",
+                session,
+                "--",
+                "What word did I ask you to remember? Reply with the word only.",
+            ],
+            log / "second.log",
+        )
         if code != 0:
             _raise_cli_failure(code, log / "second.log", "plak run --session")
         if "MAGENTA" not in out.upper():
@@ -332,26 +395,35 @@ class Smoke:
         live.pin_max_model_rounds(home, 2)
         log_dir = self.env.artifacts / "wrap_up"
         code, out = live.run_cli(
-            self.env, repo,
+            self.env,
+            repo,
             [*self.route.flags(), "--print-session-id", "--", WRAP_UP_PROMPT],
-            log_dir / "first.log", timeout=600, home=home)
+            log_dir / "first.log",
+            timeout=600,
+            home=home,
+        )
         session = _session_id(out)
         records = live.session_records(home, session) if session else []
         _reject_binding_loss("wrap-up turn", log_dir / "first.log", out, records)
         if code != 0 or not session:
-            _raise_cli_failure(code, log_dir / "first.log", "wrap-up turn",
-                               missing_session=not session)
+            _raise_cli_failure(
+                code, log_dir / "first.log", "wrap-up turn", missing_session=not session
+            )
         terminals = durable_terminals(records)
         if not terminals:
             raise ScenarioFailure(HARNESS, "wrap-up turn produced no durable terminal")
         require_durable_completed(terminals[-1], "wrap-up turn")
         _require_cli_answer(out, records, "wrap-up turn")
-        if not any(record.get("kind") == "turn.operation_budget_exhausted"
-                   for record in records):
+        if not any(record.get("kind") == "turn.operation_budget_exhausted" for record in records):
             raise ScenarioFailure(MODEL, "turn finished without the operation-budget wrap-up")
         code, out = live.run_cli(
-            self.env, repo, ["--session", session, "--", WRAP_UP_FOLLOW],
-            log_dir / "second.log", timeout=240, home=home)
+            self.env,
+            repo,
+            ["--session", session, "--", WRAP_UP_FOLLOW],
+            log_dir / "second.log",
+            timeout=240,
+            home=home,
+        )
         records = live.session_records(home, session)
         _reject_binding_loss("turn after wrap-up", log_dir / "second.log", out, records)
         if code != 0:
@@ -360,8 +432,10 @@ class Smoke:
         if len(terminals) < 2:
             raise ScenarioFailure(HARNESS, "turn after wrap-up produced no durable terminal")
         require_durable_completed(terminals[-1], "turn after wrap-up")
-        return ("wrap-up answered; turn.operation_budget_exhausted recorded; "
-                "next turn completed; prefix-drift telemetry is not persisted")
+        return (
+            "wrap-up answered; turn.operation_budget_exhausted recorded; "
+            "next turn completed; prefix-drift telemetry is not persisted"
+        )
 
     def py_ptc(self) -> str:
         """One CLI turn on the Python harness: a nested tool call, printed output,
@@ -373,17 +447,28 @@ class Smoke:
         returned to the model.
         """
         segment_start = len(self.env.capture_segments)
-        repo = live.git_repo(self.env.artifacts / "py_ptc" / "repo",
-                             {"token.txt": PY_PTC_TOKEN + "\n"})
+        repo = live.git_repo(
+            self.env.artifacts / "py_ptc" / "repo", {"token.txt": PY_PTC_TOKEN + "\n"}
+        )
         home = self.env.artifacts / "py_ptc" / "home"
         live.write_home(home, self.route, self.env.home)
         live.pin_composition(home, "py-ptc")
         log = self.env.artifacts / "py_ptc" / "turn.log"
         code, out = live.run_cli(
-            self.env, repo,
-            [*self.route.flags(), "--composition", "py-ptc", "--print-session-id", "--",
-             PY_PTC_PROMPT],
-            log, timeout=600, home=home)
+            self.env,
+            repo,
+            [
+                *self.route.flags(),
+                "--composition",
+                "py-ptc",
+                "--print-session-id",
+                "--",
+                PY_PTC_PROMPT,
+            ],
+            log,
+            timeout=600,
+            home=home,
+        )
         session = _session_id(out)
         records = live.session_records(home, session) if session else []
         if code != 0 or not session:
@@ -395,7 +480,8 @@ class Smoke:
         exchanges = "\n".join(
             streamed_text(body.read_text(errors="replace"))
             for segment in self.env.capture_segments[segment_start:]
-            for body in sorted(segment.glob("*.body")))
+            for body in sorted(segment.glob("*.body"))
+        )
         _require_py_ptc_oracle(out, records, exchanges)
         return "two exec_py cells; nested read, handled exception, global reused"
 
@@ -437,8 +523,7 @@ class Smoke:
         # cannot answer the follow-up.
         (repo / "fold.txt").write_text(live.compaction_padding())
         agent = self.agent("compaction", repo)
-        first = agent.prompt(compaction_first_prompt(long_session.pack_of(self.route)),
-                             timeout=300)
+        first = agent.prompt(compaction_first_prompt(long_session.pack_of(self.route)), timeout=300)
         capacity_recovered = first.phase == "failed" and first.model_error_kind == "ContextLimit"
         committed = 0
         if capacity_recovered:
@@ -449,17 +534,25 @@ class Smoke:
 
             def capacity_after_failed_turn(records: list[dict]) -> bool:
                 for index, record in enumerate(records):
-                    if record.get("kind") == "turn.lifecycle" \
-                            and record.get("phase") not in (None, "admitted"):
-                        return (record.get("phase") == "failed"
-                                and long_session.capacity_recovery_committed(records[index + 1:]))
+                    if record.get("kind") == "turn.lifecycle" and record.get("phase") not in (
+                        None,
+                        "admitted",
+                    ):
+                        return record.get(
+                            "phase"
+                        ) == "failed" and long_session.capacity_recovery_committed(
+                            records[index + 1 :]
+                        )
                 return False
 
             records = long_session.poll_records(
-                self.env.home, agent.session_id, capacity_after_failed_turn)
+                self.env.home, agent.session_id, capacity_after_failed_turn
+            )
             if not capacity_after_failed_turn(records):
                 agent.quit()
-                raise ScenarioFailure(HARNESS, "context limit produced no committed capacity compact")
+                raise ScenarioFailure(
+                    HARNESS, "context limit produced no committed capacity compact"
+                )
             committed = live.committed_compactions(records)
         else:
             require_completed(first, "first turn", segments=[agent.capture_dir])
@@ -469,16 +562,24 @@ class Smoke:
                 # rejected was still attempted, so it is not this skip.
                 agent.quit()
                 raise ScenarioFailure(MODEL, "first turn replied without reading fold.txt")
-        require_completed(agent.prompt("Now read test_calc.py. Reply: ok"), "second turn",
-                          segments=[agent.capture_dir])
+        require_completed(
+            agent.prompt("Now read test_calc.py. Reply: ok"),
+            "second turn",
+            segments=[agent.capture_dir],
+        )
         if not capacity_recovered:
             answer = agent.command("compact")
             if answer.get("kind") == "error":
-                live.classify_command_error(str(answer.get("message") or ""), "manual compact",
-                                            segments=[agent.capture_dir], lookup_faults=agent.lookup_faults)
+                live.classify_command_error(
+                    str(answer.get("message") or ""),
+                    "manual compact",
+                    segments=[agent.capture_dir],
+                    lookup_faults=agent.lookup_faults,
+                )
             for _ in range(30):  # the log line can trail the command's answer
-                committed = live.committed_compactions(live.session_records(self.env.home,
-                                                                            agent.session_id))
+                committed = live.committed_compactions(
+                    live.session_records(self.env.home, agent.session_id)
+                )
                 if committed:
                     break
                 time.sleep(1)
@@ -506,12 +607,19 @@ class Smoke:
         sent = {"interrupt": False}
 
         def interrupt_on_tool(event: dict) -> None:
-            if event.get("kind") == "tool" and event.get("state") == "running" and not sent["interrupt"]:
+            if (
+                event.get("kind") == "tool"
+                and event.get("state") == "running"
+                and not sent["interrupt"]
+            ):
                 sent["interrupt"] = True
                 agent.send("interrupt")
 
-        turn = agent.prompt("Run the shell command `sleep 60` and then tell me it finished.",
-                            timeout=120, on_event=interrupt_on_tool)
+        turn = agent.prompt(
+            "Run the shell command `sleep 60` and then tell me it finished.",
+            timeout=120,
+            on_event=interrupt_on_tool,
+        )
         if not sent["interrupt"]:
             agent.quit()
             require_completed(turn, "cancel turn", segments=[agent.capture_dir])
@@ -537,27 +645,38 @@ class Smoke:
         continues(agent)
         agent.quit()
         if retried:
-            require_completed(turn, "faulted turn", injected=True, injected_fault=fault_name,
-                              segments=[agent.capture_dir])
+            require_completed(
+                turn,
+                "faulted turn",
+                injected=True,
+                injected_fault=fault_name,
+                segments=[agent.capture_dir],
+            )
             if not (repo / "hello.txt").exists():
                 raise ScenarioFailure(MODEL, "turn completed without writing the file")
             return "fault absorbed, turn completed; session continued"
         return judge_fault_reset(turn, repo / "hello.txt", [agent.capture_dir], after_events(plan))
 
     def fault_429(self) -> str:
-        return self.fault("fault_429", live.fault_plan(self.route, "429", retry_after=2),
-                          True, "429")
+        return self.fault(
+            "fault_429", live.fault_plan(self.route, "429", retry_after=2), True, "429"
+        )
 
     def fault_529(self) -> str:
         return self.fault("fault_529", live.fault_plan(self.route, "529"), True, "529")
 
     def fault_reset(self) -> str:
-        return self.fault("fault_reset",
-                          live.fault_plan(self.route, "reset", after_events=3), False, "reset")
+        return self.fault(
+            "fault_reset", live.fault_plan(self.route, "reset", after_events=3), False, "reset"
+        )
 
     def fault_stall(self) -> str:
-        return self.fault("fault_stall", live.fault_plan(self.route, "stall", seconds=20,
-                                                         after_events=2), True, "stall")
+        return self.fault(
+            "fault_stall",
+            live.fault_plan(self.route, "stall", seconds=20, after_events=2),
+            True,
+            "stall",
+        )
 
     def subagents(self) -> str:
         repo = self.repo("subagents")
@@ -566,7 +685,9 @@ class Smoke:
             "Spawn two worker children at once from the worker template, tier mutate, each "
             "with workspace=fork: one writes alpha.txt containing alpha, the other writes "
             "beta.txt containing beta. Wait for both, adopt both candidates into this "
-            "checkout, then reply done.", timeout=420)
+            "checkout, then reply done.",
+            timeout=420,
+        )
         agent.quit()
         require_completed(turn, "root turn", segments=[agent.capture_dir])
         if len(agent.children) < 2:
@@ -595,20 +716,25 @@ class Smoke:
                 raise ScenarioFailure(HARNESS, "TUI created more than one root session")
             if len(sessions) == 1:
                 session = next(iter(sessions)).name.removesuffix(".events.jsonl")
-            return session is not None and bool(durable_terminals(
-                live.session_records(self.env.home, session)))
+            return session is not None and bool(
+                durable_terminals(live.session_records(self.env.home, session))
+            )
 
         finished = tui.wait_until(first_turn_terminal, 300)
         if not finished or session is None:
             failure = live.timeout_failure(
-                self.env, tui.capture_dir if session else None,
-                "first TUI turn produced no durable terminal", timeout=300)
+                self.env,
+                tui.capture_dir if session else None,
+                "first TUI turn produced no durable terminal",
+                timeout=300,
+            )
             tui.quit()
             raise failure
         first = durable_terminals(live.session_records(self.env.home, session))[0]
         try:
-            require_durable_completed(first, "first TUI turn",
-                                      segments=[tui.capture_dir], home=self.env.home)
+            require_durable_completed(
+                first, "first TUI turn", segments=[tui.capture_dir], home=self.env.home
+            )
         except ScenarioFailure:
             tui.quit()
             raise
@@ -624,26 +750,48 @@ class Smoke:
             return len(durable_terminals(records)) >= 2
 
         answered = tui.wait_until(answered_on_durable_session, 180)
-        unanswered = None if answered else live.timeout_failure(
-            self.env, tui.capture_dir, "second TUI turn produced no durable terminal", timeout=180)
+        unanswered = (
+            None
+            if answered
+            else live.timeout_failure(
+                self.env,
+                tui.capture_dir,
+                "second TUI turn produced no durable terminal",
+                timeout=180,
+            )
+        )
         code = tui.quit()
         if code != 0:
             raise ScenarioFailure(HARNESS, f"TUI exited {code} after Ctrl+Q")
         if unanswered is not None:
             raise unanswered
         records = live.session_records(self.env.home, session)
-        require_durable_completed(durable_terminals(records)[1], "second TUI turn",
-                                  segments=[tui.capture_dir], home=self.env.home)
-        if not any(record.get("kind") == "turn.assistant" and
-                   record.get("text", "").strip() == "continued" for record in records):
+        require_durable_completed(
+            durable_terminals(records)[1],
+            "second TUI turn",
+            segments=[tui.capture_dir],
+            home=self.env.home,
+        )
+        if not any(
+            record.get("kind") == "turn.assistant" and record.get("text", "").strip() == "continued"
+            for record in records
+        ):
             raise ScenarioFailure(MODEL, "second TUI turn completed without the requested answer")
         return "two TUI turns, clean quit"
 
     SCENARIOS = (
-        ("cli_task", "cli"), ("cli_resume", "cli"), ("jsonl_task", "jsonl"),
-        ("jsonl_resume", "jsonl"), ("compaction", "jsonl"), ("cancel", "jsonl"),
-        ("fault_429", "jsonl"), ("fault_529", "jsonl"), ("fault_reset", "jsonl"),
-        ("fault_stall", "jsonl"), ("subagents", "jsonl"), ("tui", "tui"),
+        ("cli_task", "cli"),
+        ("cli_resume", "cli"),
+        ("jsonl_task", "jsonl"),
+        ("jsonl_resume", "jsonl"),
+        ("compaction", "jsonl"),
+        ("cancel", "jsonl"),
+        ("fault_429", "jsonl"),
+        ("fault_529", "jsonl"),
+        ("fault_reset", "jsonl"),
+        ("fault_stall", "jsonl"),
+        ("subagents", "jsonl"),
+        ("tui", "tui"),
     )
     # Named by `--only`, absent from the default run. Listing them on
     # SCENARIOS would make every paid smoke hit the round cap.
@@ -656,8 +804,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plak")
     parser.add_argument("--fixture-seed", type=int, help="replay randomized scenario inputs")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
-    parser.add_argument("--only", default="",
-                        help="comma-separated scenario names, including long-session names")
+    parser.add_argument(
+        "--only", default="", help="comma-separated scenario names, including long-session names"
+    )
     return parser
 
 
@@ -698,49 +847,80 @@ def main(argv: list[str]) -> int:
         if outcome not in (PASS, features.REFUSED) and name in EXPECTED_PENDING:
             outcome, detail = PENDING, f"{detail} [{EXPECTED_PENDING[name]}]"
         segments = env.capture_segments[segment_start:]
-        outcome, detail = live.score_runaway(outcome, detail, segments,
-                                           model_error_kind=model_error_kind)
+        outcome, detail = live.score_runaway(
+            outcome, detail, segments, model_error_kind=model_error_kind
+        )
         pending = live.provider_pending(env, segments, outcome)
         complete = capture_complete(segments, pending)
-        evidence[name] = {"segments": [str(segment) for segment in segments],
-                          "capture_complete": complete,
-                          "provider_pending": [str(segment) for segment in pending],
-                          "captured_exchanges": sum(len(list(segment.glob("*.info")))
-                                                    for segment in segments)}
+        evidence[name] = {
+            "segments": [str(segment) for segment in segments],
+            "capture_complete": complete,
+            "provider_pending": [str(segment) for segment in pending],
+            "captured_exchanges": sum(len(list(segment.glob("*.info"))) for segment in segments),
+        }
         if outcome == PASS and not complete:
             problems = live.capture_problems(segments, pending) or ["no captured exchange"]
-            outcome, detail = HARNESS, ("raw exchange evidence missing or incomplete: "
-                                        + ", ".join(problems))
+            outcome, detail = (
+                HARNESS,
+                ("raw exchange evidence missing or incomplete: " + ", ".join(problems)),
+            )
         usage = scenario_usage(env.home, artifacts / name / "home", usage_before)
-        result = live.Result(name, surface, outcome, detail, time.monotonic() - started,
-                             usage.input_tokens, usage.output_tokens,
-                             usage.cached_input_tokens, usage.reasoning_tokens)
+        result = live.Result(
+            name,
+            surface,
+            outcome,
+            detail,
+            time.monotonic() - started,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens,
+            usage.reasoning_tokens,
+        )
         results.append(result)
         print(f"{result.outcome:8} {name}: {detail}", flush=True)
     binary_end = live.binary_sha256(env.binary)
     # A refused route row stops before inference, so it has no exchange to capture.
-    scored = [name for name, item in evidence.items()
-              if next(r.outcome for r in results if r.scenario == name) != features.REFUSED]
-    scored_segments = [Path(segment) for name in scored
-                       for segment in evidence[name]["segments"]]
+    scored = [
+        name
+        for name, item in evidence.items()
+        if next(r.outcome for r in results if r.scenario == name) != features.REFUSED
+    ]
+    scored_segments = [Path(segment) for name in scored for segment in evidence[name]["segments"]]
     pending = {Path(segment) for name in scored for segment in evidence[name]["provider_pending"]}
     evidence_complete = (not scored or capture_complete(scored_segments, pending)) and all(
-        evidence[name]["capture_complete"] for name in scored)
-    (artifacts / "report.json").write_text(json.dumps(
-        {**live.route_report(route, bound=env.bound_compositions), "binary": str(env.binary),
-         "binary_sha256_start": binary_start,
-         "binary_sha256_end": binary_end,
-         "token_telemetry": live.sum_usage(
-             live.TokenUsage(r.input_tokens, r.output_tokens,
-                             r.cached_input_tokens, r.reasoning_tokens)
-             for r in results),
-         "evidence": evidence,
-         "capture_complete": evidence_complete,
-         "results": [r.__dict__ for r in results]}, indent=2) + "\n")
+        evidence[name]["capture_complete"] for name in scored
+    )
+    (artifacts / "report.json").write_text(
+        json.dumps(
+            {
+                **live.route_report(route, bound=env.bound_compositions),
+                "binary": str(env.binary),
+                "binary_sha256_start": binary_start,
+                "binary_sha256_end": binary_end,
+                "token_telemetry": live.sum_usage(
+                    live.TokenUsage(
+                        r.input_tokens, r.output_tokens, r.cached_input_tokens, r.reasoning_tokens
+                    )
+                    for r in results
+                ),
+                "evidence": evidence,
+                "capture_complete": evidence_complete,
+                "results": [r.__dict__ for r in results],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print("\n" + live.table(results) + f"\n\nartifacts: {artifacts}")
-    return 0 if (all(r.outcome in (PASS, PENDING, features.REFUSED) for r in results)
-                 and evidence_complete
-                 and binary_start == binary_end) else 1
+    return (
+        0
+        if (
+            all(r.outcome in (PASS, PENDING, features.REFUSED) for r in results)
+            and evidence_complete
+            and binary_start == binary_end
+        )
+        else 1
+    )
 
 
 def scenario_usage(env_home: Path, private: Path, before: live.TokenUsage) -> live.TokenUsage:
@@ -762,6 +942,7 @@ def run_named(runner: Smoke, name: str) -> str:
     if name in dict(features.CATALOG):
         return features.play(runner.route, runner.env, name)
     import long_session
+
     return long_session.play(runner.route, runner.env, name)
 
 
@@ -770,13 +951,15 @@ def selected_scenarios(only: set[str]) -> tuple[tuple[str, str], ...]:
     if not only:
         return Smoke.SCENARIOS
     import long_session
+
     catalog = (*Smoke.SCENARIOS, *Smoke.OPT_IN, *long_session.CATALOG, *features.CATALOG)
     return tuple(item for item in catalog if item[0] in only)
 
 
 def _session_id(out: str) -> str | None:
-    return next((line.split("=", 1)[1] for line in out.splitlines()
-                 if line.startswith("session_id=")), None)
+    return next(
+        (line.split("=", 1)[1] for line in out.splitlines() if line.startswith("session_id=")), None
+    )
 
 
 def _reject_binding_loss(what: str, log: Path, out: str, records: list[dict]) -> None:
@@ -793,8 +976,13 @@ def _stderr_excerpt(log: Path) -> str:
     return "\n".join(" ".join(line.split()) for line in stderr.splitlines() if line.strip())
 
 
-def _raise_cli_failure(code: int, log: Path, what: str, missing_session: bool = False,
-                       segments: list[Path] | None = None) -> None:
+def _raise_cli_failure(
+    code: int,
+    log: Path,
+    what: str,
+    missing_session: bool = False,
+    segments: list[Path] | None = None,
+) -> None:
     detail = _stderr_excerpt(log)
     if missing_session and code == 0:
         raise ScenarioFailure(HARNESS, f"{what} exited 0 without a session id")
@@ -802,10 +990,13 @@ def _raise_cli_failure(code: int, log: Path, what: str, missing_session: bool = 
 
 
 def _require_cli_answer(out: str, records: list[dict], what: str) -> None:
-    text = "\n".join(line for line in out.splitlines()
-                     if not line.startswith("session_id=")).strip()
-    logged = any(record.get("kind") == "turn.assistant" and str(record.get("text", "")).strip()
-                 for record in records)
+    text = "\n".join(
+        line for line in out.splitlines() if not line.startswith("session_id=")
+    ).strip()
+    logged = any(
+        record.get("kind") == "turn.assistant" and str(record.get("text", "")).strip()
+        for record in records
+    )
     if not text and not logged:
         raise ScenarioFailure(MODEL, f"{what} completed without assistant text")
 
@@ -823,7 +1014,7 @@ def streamed_text(body: str) -> str:
         if not line.startswith("data: "):
             continue
         try:
-            event = json.loads(line[len("data: "):])
+            event = json.loads(line[len("data: ") :])
         except ValueError:
             continue
         delta = event.get("delta") if isinstance(event, dict) else None
@@ -840,8 +1031,16 @@ def _require_py_ptc_oracle(out: str, records: list[dict], exchanges: str) -> Non
         raise ScenarioFailure(MODEL, "py-ptc turn did not run the second exec_py cell")
     if "handled ValueError" not in exchanges:
         raise ScenarioFailure(MODEL, "py-ptc turn has no handled-exception output")
-    answer = "\n".join([out, *(str(record.get("text", "")) for record in records
-                               if record.get("kind") == "turn.assistant")])
+    answer = "\n".join(
+        [
+            out,
+            *(
+                str(record.get("text", ""))
+                for record in records
+                if record.get("kind") == "turn.assistant"
+            ),
+        ]
+    )
     if PY_PTC_TOKEN[::-1] not in answer:
         raise ScenarioFailure(MODEL, "py-ptc answer lacks the reversed token")
 
@@ -851,8 +1050,11 @@ def capture_complete(segments: list[Path], pending: Collection[Path] = ()) -> bo
 
     `pending` segments may end on the one exchange a provider timeout left pending.
     """
-    return (bool(segments) and all(any(segment.glob("*.info")) for segment in segments)
-            and live.capture_integrity(segments, pending))
+    return (
+        bool(segments)
+        and all(any(segment.glob("*.info")) for segment in segments)
+        and live.capture_integrity(segments, pending)
+    )
 
 
 if __name__ == "__main__":

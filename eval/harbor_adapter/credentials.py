@@ -99,9 +99,7 @@ def require_ready_claude_code_store() -> Path:
     try:
         payload = json.loads(credential.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise CredentialError(
-            "Claude Code credentials file is unreadable"
-        ) from exc
+        raise CredentialError("Claude Code credentials file is unreadable") from exc
     _require_claude_oauth_pair(payload, label="Claude Code credentials file")
     return directory
 
@@ -127,9 +125,7 @@ def replace_claude_code_store(directory: Path, candidate: Path) -> None:
     try:
         payload = json.loads(candidate.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise CredentialError(
-            "refreshed Claude Code credentials file is unreadable"
-        ) from exc
+        raise CredentialError("refreshed Claude Code credentials file is unreadable") from exc
     _require_claude_oauth_pair(payload, label="refreshed Claude Code credentials file")
     os.replace(candidate, credential)
     os.chmod(credential, 0o600)
@@ -149,9 +145,7 @@ def require_ready_oauth(account: str, *, xdg_state_home: Path | None = None) -> 
     directory = subscription_dir(account, xdg_state_home=xdg_state_home)
     credential = directory / "credential.json"
     if not credential.is_file():
-        raise CredentialError(
-            f"missing {credential}; run `plak login {account}` on the host first"
-        )
+        raise CredentialError(f"missing {credential}; run `plak login {account}` on the host first")
     require_host_login(directory, account)
     return directory
 
@@ -167,7 +161,10 @@ def host_login_marker() -> str:
         elif sys.platform == "darwin":
             output = subprocess.run(
                 ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-                capture_output=True, check=True, timeout=10, text=True,
+                capture_output=True,
+                check=True,
+                timeout=10,
+                text=True,
             ).stdout
             match = re.search(r'"IOPlatformUUID" = "([0-9a-fA-F-]{36})"', output)
             if match is None:
@@ -214,10 +211,14 @@ def native_oauth_expiry(path: Path, harness: str, provider: str | None = None) -
         if harness == "codex":
             token = payload["tokens"]["access_token"]
             segment = token.split(".")[1]
-            expiry = json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))["exp"]
+            expiry = json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))[
+                "exp"
+            ]
         elif harness == "grok-build":
             _, entry = validate_grok_auth(path.read_bytes())
-            return datetime.fromisoformat(str(entry["expires_at"]).replace("Z", "+00:00")).timestamp()
+            return datetime.fromisoformat(
+                str(entry["expires_at"]).replace("Z", "+00:00")
+            ).timestamp()
         elif harness == "pmux":
             expiry = payload["claudeAiOauth"]["expiresAt"] / 1000
         elif harness in ("pi", "opencode"):
@@ -234,8 +235,9 @@ def native_oauth_expiry(path: Path, harness: str, provider: str | None = None) -
         raise CredentialError("native OAuth expiry metadata unavailable") from None
 
 
-def require_native_oauth_lifetime(agent, account: str, agent_timeout: float,
-                                  verifier_timeout: float) -> None:
+def require_native_oauth_lifetime(
+    agent, account: str, agent_timeout: float, verifier_timeout: float
+) -> None:
     """Vendor refresh is not a substitute for a trial's initial lifetime gate."""
     harness = getattr(agent, "_native_harness", None)
     if type(agent).__name__ == "FrozenPmux":
@@ -258,7 +260,9 @@ def require_native_oauth_lifetime(agent, account: str, agent_timeout: float,
     if path is None or native_oauth_expiry(Path(path), harness, provider) - time.time() < (
         agent_timeout + verifier_timeout + 300
     ):
-        raise CredentialError("native OAuth lifetime cannot cover task and verifier budgets plus margin; refresh the host store first")
+        raise CredentialError(
+            "native OAuth lifetime cannot cover task and verifier budgets plus margin; refresh the host store first"
+        )
 
 
 def replace_codex_auth(path: Path, candidate: Path, snapshot: bytes) -> None:
@@ -270,7 +274,9 @@ def replace_codex_auth(path: Path, candidate: Path, snapshot: bytes) -> None:
         before, after = old["tokens"], new["tokens"]
         if not before.get("account_id") or after.get("account_id") != before["account_id"]:
             raise ValueError
-        if not all(isinstance(after.get(k), str) and after[k] for k in ("access_token", "refresh_token")):
+        if not all(
+            isinstance(after.get(k), str) and after[k] for k in ("access_token", "refresh_token")
+        ):
             raise ValueError
         if path.read_bytes() != snapshot:
             raise ValueError
@@ -282,12 +288,21 @@ def replace_codex_auth(path: Path, candidate: Path, snapshot: bytes) -> None:
 
 
 @contextmanager
-def trial_oauth(account: str, *, agent_timeout: float, verifier_timeout: float,
-                xdg_state_home: Path | None = None):
+def trial_oauth(
+    account: str,
+    *,
+    agent_timeout: float,
+    verifier_timeout: float,
+    xdg_state_home: Path | None = None,
+):
     directory = require_ready_oauth(account, xdg_state_home=xdg_state_home)
     # Keep the lock through upload, so digest/lifetime and uploaded bytes cannot
     # straddle another trial's host refresh.
-    fd = os.open(directory.parent / ("." + directory.name + ".harbor-refresh.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(
+        directory.parent / ("." + directory.name + ".harbor-refresh.lock"),
+        os.O_CREAT | os.O_RDWR,
+        0o600,
+    )
     with os.fdopen(fd, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         require_host_login(directory, account)
@@ -297,15 +312,22 @@ def trial_oauth(account: str, *, agent_timeout: float, verifier_timeout: float,
             if xdg_state_home is not None:
                 env["XDG_STATE_HOME"] = str(xdg_state_home)
             try:
-                refreshed = subprocess.run(["plak", "refresh", account], env=env,
-                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                           timeout=120, check=False)
+                refreshed = subprocess.run(
+                    ["plak", "refresh", account],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=120,
+                    check=False,
+                )
             except (OSError, subprocess.TimeoutExpired):
                 raise CredentialError("host OAuth refresh failed") from None
             if refreshed.returncode:
                 raise CredentialError("host OAuth refresh failed")
         if oauth_expiry(directory / "credential.json", account) - time.time() < required:
-            raise CredentialError("OAuth lifetime cannot cover task and verifier budgets plus margin")
+            raise CredentialError(
+                "OAuth lifetime cannot cover task and verifier budgets plus margin"
+            )
         yield directory
 
 
@@ -396,12 +418,17 @@ def validate_grok_auth(raw: bytes) -> tuple[str, dict[str, object]]:
     if not isinstance(account, dict) or account.get("auth_mode") != "oidc":
         raise CredentialError("Grok OAuth auth file has the wrong auth mode")
     required = (
-        "key", "refresh_token", "expires_at", "create_time", "principal_id", "user_id",
-        "oidc_issuer", "oidc_client_id",
+        "key",
+        "refresh_token",
+        "expires_at",
+        "create_time",
+        "principal_id",
+        "user_id",
+        "oidc_issuer",
+        "oidc_client_id",
     )
     if any(
-        not isinstance(account.get(name), str) or not account[name].strip()
-        for name in required
+        not isinstance(account.get(name), str) or not account[name].strip() for name in required
     ):
         raise CredentialError("Grok OAuth auth file has incomplete credentials")
     if route != f"https://auth.x.ai::{account['oidc_client_id']}":
@@ -540,9 +567,7 @@ def pi_auth_json_path(*, pi_agent_dir: Path | None = None) -> Path:
     return (pi_agent_dir or default_pi_agent_dir()) / "auth.json"
 
 
-def require_ready_pi_auth(
-    provider: str, *, pi_agent_dir: Path | None = None
-) -> Path:
+def require_ready_pi_auth(provider: str, *, pi_agent_dir: Path | None = None) -> Path:
     require_local_docker()
     auth_json = pi_auth_json_path(pi_agent_dir=pi_agent_dir)
     if not auth_json.is_file():
@@ -682,9 +707,13 @@ def require_watched_openrouter_key(arm: str) -> Path:
     try:
         entry = json.loads(auth.read_text(encoding="utf-8"))["openrouter"]
         expected = watched.read_text(encoding="utf-8").strip()
-        matches = (isinstance(entry, dict) and entry.get("type") == kind
-                   and isinstance(entry.get("key"), str) and bool(expected)
-                   and entry["key"] == expected)
+        matches = (
+            isinstance(entry, dict)
+            and entry.get("type") == kind
+            and isinstance(entry.get("key"), str)
+            and bool(expected)
+            and entry["key"] == expected
+        )
     except (OSError, ValueError, KeyError):
         raise CredentialError("cannot verify watched OpenRouter credential") from None
     if not matches:
@@ -722,15 +751,12 @@ def opencode_auth_json_path(*, data_home: Path | None = None) -> Path:
     return (data_home or default_opencode_data_home()) / "opencode" / "auth.json"
 
 
-def require_ready_opencode_auth(
-    provider: str, *, data_home: Path | None = None
-) -> Path:
+def require_ready_opencode_auth(provider: str, *, data_home: Path | None = None) -> Path:
     require_local_docker()
     auth_json = opencode_auth_json_path(data_home=data_home)
     if not auth_json.is_file():
         raise CredentialError(
-            f"missing {auth_json}; log in with OpenCode so "
-            "~/.local/share/opencode/auth.json exists"
+            f"missing {auth_json}; log in with OpenCode so ~/.local/share/opencode/auth.json exists"
         )
     return _require_auth_provider(auth_json, provider, how="OpenCode auth.json")
 
@@ -738,7 +764,5 @@ def require_ready_opencode_auth(
 def opencode_auth_provider(harbor_model: str) -> str:
     provider = harbor_model.split("/", 1)[0]
     if provider not in {"openai", "xai", "openrouter"}:
-        raise CredentialError(
-            f"OpenCode native-home has no provider mapping for {provider}"
-        )
+        raise CredentialError(f"OpenCode native-home has no provider mapping for {provider}")
     return provider

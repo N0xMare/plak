@@ -8,7 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/gate"))
 import check_workspace as checker
-SPEC = importlib.util.spec_from_file_location("check_prod_loc", ROOT / "tools/perf/check_prod_loc.py")
+
+SPEC = importlib.util.spec_from_file_location(
+    "check_prod_loc", ROOT / "tools/perf/check_prod_loc.py"
+)
 assert SPEC and SPEC.loader
 LOC = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = LOC
@@ -33,9 +36,7 @@ class ResponsibilityReportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (src / "production.rs").write_text("pub fn live() {}\n", encoding="utf-8")
-            (src / "test_support.rs").write_text(
-                "fn only_for_tests() {}\n", encoding="utf-8"
-            )
+            (src / "test_support.rs").write_text("fn only_for_tests() {}\n", encoding="utf-8")
 
             total, files = LOC.crate_prod_loc(crate)
 
@@ -145,8 +146,10 @@ class ResponsibilityReportTests(unittest.TestCase):
             src = ROOT / package.directory / "src"
             if not src.is_dir():
                 continue
-            files = {path.relative_to(src).as_posix(): path.read_text(encoding="utf-8")
-                     for path in src.rglob("*.rs")}
+            files = {
+                path.relative_to(src).as_posix(): path.read_text(encoding="utf-8")
+                for path in src.rglob("*.rs")
+            }
             declared = checker.declared_test_module_paths(files, {"lib.rs", "main.rs"})
             for path in sorted(src.rglob("*.rs")):
                 if not LOC.is_test_only_file_name(path.name):
@@ -159,8 +162,11 @@ class ResponsibilityReportTests(unittest.TestCase):
                     self.assertIn("#[cfg(test)]", text, path)
                     self.assertNotIn("\npub fn ", text, path)
                 else:
-                    self.assertIn(path.relative_to(src).as_posix(), declared,
-                                  f"{path} is not a test-only module target")
+                    self.assertIn(
+                        path.relative_to(src).as_posix(),
+                        declared,
+                        f"{path} is not a test-only module target",
+                    )
         # Fail closed if the conventions stop matching anything at all.
         self.assertGreaterEqual(len(matched), 4, matched)
 

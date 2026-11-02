@@ -50,20 +50,14 @@ class DumpTests(unittest.TestCase):
 
 class ParseTests(unittest.TestCase):
     def test_openai_page_efforts_threshold_and_tools(self):
-        luna = census.parse_openai_model_page(
-            (FIXTURE / "openai/docs/gpt-6-luna.md").read_text()
-        )
+        luna = census.parse_openai_model_page((FIXTURE / "openai/docs/gpt-6-luna.md").read_text())
         self.assertEqual(luna["id"], "gpt-6-luna")
         self.assertEqual(luna["max_input_tokens"], 922_000)
         self.assertEqual(luna["max_tokens"], 128_000)
-        self.assertEqual(
-            luna["efforts"], ["none", "low", "medium", "high", "xhigh", "max"]
-        )
+        self.assertEqual(luna["efforts"], ["none", "low", "medium", "high", "xhigh", "max"])
         self.assertEqual(luna["price_threshold_input_tokens"], 272_000)
         self.assertTrue(luna["responses"])
-        self.assertEqual(
-            luna["hosted_features"], ["web_search", "code_execution", "tool_search"]
-        )
+        self.assertEqual(luna["hosted_features"], ["web_search", "code_execution", "tool_search"])
 
     def test_openai_page_drops_minimal_and_keeps_api_efforts(self):
         gpt5 = census.parse_openai_model_page((FIXTURE / "openai/docs/gpt-5.md").read_text())
@@ -71,9 +65,7 @@ class ParseTests(unittest.TestCase):
         self.assertIsNone(gpt5["price_threshold_input_tokens"])
 
     def test_openai_wrapped_effort_line_excludes_unsupported(self):
-        sol = census.parse_openai_model_page(
-            (FIXTURE / "openai/docs/gpt-6.1-sol.md").read_text()
-        )
+        sol = census.parse_openai_model_page((FIXTURE / "openai/docs/gpt-6.1-sol.md").read_text())
         self.assertEqual(sol["efforts"], ["low", "medium", "high", "xhigh", "max"])
 
     def test_openai_page_without_a_maximum_input_uses_the_context_window(self):
@@ -154,13 +146,13 @@ class RegenerateTests(unittest.TestCase):
                 promote=set(),
                 reviewed_on="2099-01-01",
             )
-            self.assertEqual(census.dump_table(provider, updated), census.dump_table(provider, table))
+            self.assertEqual(
+                census.dump_table(provider, updated), census.dump_table(provider, table)
+            )
             self.assertFalse(any(change.kind == "changed" for change in changes), provider)
             self.assertFalse(any(change.kind == "blocked" for change in changes), provider)
             removed.extend(
-                f"{provider} {change.model_id}"
-                for change in changes
-                if change.kind == "removed"
+                f"{provider} {change.model_id}" for change in changes if change.kind == "removed"
             )
         self.assertEqual(
             removed,
@@ -332,7 +324,10 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(body["max_output_tokens"], 16)
         self.assertFalse(body["store"])
         self.assertEqual(
-            [census.effort_probe_body("gpt-6-luna", effort)["reasoning"]["effort"] for effort in census.PROBE_ORDER],
+            [
+                census.effort_probe_body("gpt-6-luna", effort)["reasoning"]["effort"]
+                for effort in census.PROBE_ORDER
+            ],
             ["minimal", "none", "max", "xhigh"],
         )
         with self.assertRaises(census.CensusError):
@@ -399,7 +394,9 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(continued["used"], ["minimal", "none"])
 
         page = (FIXTURE / "openai/docs/gpt-6-luna.md").read_text()
-        observed = census.observe_openai(["gpt-6-luna"], {"gpt-6-luna": page}, None, {"gpt-6-luna": ["low"]})
+        observed = census.observe_openai(
+            ["gpt-6-luna"], {"gpt-6-luna": page}, None, {"gpt-6-luna": ["low"]}
+        )
         self.assertEqual(observed["gpt-6-luna"]["efforts"][0], "none")
 
     def test_key_loader_does_not_echo_the_secret(self):

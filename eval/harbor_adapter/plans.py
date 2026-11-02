@@ -32,9 +32,7 @@ class PlanError(ValueError):
 
 def _require_digest(value: Any, label: str) -> None:
     if not isinstance(value, str) or not DIGEST_PATTERN.match(value):
-        raise PlanError(
-            f"{label} must be 'sha256:' followed by 64 lowercase hex characters"
-        )
+        raise PlanError(f"{label} must be 'sha256:' followed by 64 lowercase hex characters")
 
 
 def smoke_tasks() -> tuple[str, ...]:
@@ -42,9 +40,7 @@ def smoke_tasks() -> tuple[str, ...]:
 
 
 def canonical_bytes(plan: dict[str, Any]) -> bytes:
-    return (json.dumps(plan, sort_keys=True, separators=(",", ":")) + "\n").encode(
-        "utf-8"
-    )
+    return (json.dumps(plan, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
 
 def plan_digest(plan: dict[str, Any]) -> str:
@@ -63,9 +59,7 @@ def validate_plan(plan: dict[str, Any], *, require_jobs: bool = False) -> None:
         if not isinstance(task, dict) or "name" not in task:
             raise PlanError("each task needs a name")
         if require_jobs:
-            _require_digest(
-                task.get("digest"), f"task {task.get('name')!r} digest"
-            )
+            _require_digest(task.get("digest"), f"task {task.get('name')!r} digest")
     policy = plan.get("policy")
     if not isinstance(policy, dict):
         raise PlanError("policy is required")

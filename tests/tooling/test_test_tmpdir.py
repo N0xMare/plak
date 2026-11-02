@@ -1,5 +1,6 @@
 """Every test entry point takes its scratch directory from one selector, which
 keeps it off the operator's HOME and on a physical, caller-owned path."""
+
 import os
 from pathlib import Path
 import shutil
@@ -18,7 +19,9 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.base = Path(temporary.name).resolve()
         self.checkout = self.base / "checkout"
         (self.checkout / "tools/gate").mkdir(parents=True)
-        shutil.copyfile(ROOT / "tools/gate/test-tmpdir.sh", self.checkout / "tools/gate/test-tmpdir.sh")
+        shutil.copyfile(
+            ROOT / "tools/gate/test-tmpdir.sh", self.checkout / "tools/gate/test-tmpdir.sh"
+        )
         self.shared = self.base / "shared"
         self.shared.mkdir()
         self.fallback = self.checkout / "target/plak-test-tmp"
@@ -26,21 +29,29 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.env.pop("PLAK_TEST_TMPDIR", None)
 
     def select(self, *args):
-        result = subprocess.run(["bash", str(self.checkout / "tools/gate/test-tmpdir.sh"), *args],
-                                cwd=self.base, env=self.env, capture_output=True, text=True,
-                                timeout=20)
+        result = subprocess.run(
+            ["bash", str(self.checkout / "tools/gate/test-tmpdir.sh"), *args],
+            cwd=self.base,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         return Path(result.stdout.strip()), result.stderr
 
     def per_checkout_name(self):
-        digest = subprocess.run(["cksum"], input=str(self.checkout), capture_output=True,
-                                text=True, check=True).stdout.split()[0]
+        digest = subprocess.run(
+            ["cksum"], input=str(self.checkout), capture_output=True, text=True, check=True
+        ).stdout.split()[0]
         return f"plak-test-{os.getuid()}-{digest}"
 
     def test_linux_and_darwin_use_a_private_per_checkout_shared_directory(self):
         for system in ("Linux", "Darwin"):
             with self.subTest(system=system):
-                selected, stderr = self.select("--system", system, "--shared-root", str(self.shared))
+                selected, stderr = self.select(
+                    "--system", system, "--shared-root", str(self.shared)
+                )
                 self.assertEqual(selected, self.shared / self.per_checkout_name())
                 self.assertEqual(stat.S_IMODE(selected.stat().st_mode), 0o700)
                 self.assertFalse(selected.is_symlink())
@@ -50,17 +61,25 @@ class TestTmpdirSelectorTests(unittest.TestCase):
     def test_fresh_empties_the_shared_directory_and_plain_runs_keep_it(self):
         selected, _ = self.select("--system", "Darwin", "--shared-root", str(self.shared))
         (selected / "left-over").write_text("x")
-        self.assertEqual(self.select("--system", "Darwin", "--shared-root", str(self.shared))[0], selected)
+        self.assertEqual(
+            self.select("--system", "Darwin", "--shared-root", str(self.shared))[0], selected
+        )
         self.assertTrue((selected / "left-over").exists())
-        self.assertEqual(self.select("--fresh", "--system", "Darwin",
-                                     "--shared-root", str(self.shared))[0], selected)
+        self.assertEqual(
+            self.select("--fresh", "--system", "Darwin", "--shared-root", str(self.shared))[0],
+            selected,
+        )
         self.assertEqual(list(selected.iterdir()), [])
 
     def test_default_shared_roots_are_dev_shm_and_private_tmp(self):
         for system, shared_root in (("Linux", Path("/dev/shm")), ("Darwin", Path("/private/tmp"))):
             with self.subTest(system=system):
-                usable = (shared_root.is_dir() and not shared_root.is_symlink()
-                          and shared_root.resolve() == shared_root and os.access(shared_root, os.W_OK))
+                usable = (
+                    shared_root.is_dir()
+                    and not shared_root.is_symlink()
+                    and shared_root.resolve() == shared_root
+                    and os.access(shared_root, os.W_OK)
+                )
                 if not usable:
                     continue
                 selected, _ = self.select("--system", system)
@@ -77,7 +96,9 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         (planted / self.per_checkout_name()).symlink_to(self.shared)
         for shared_root in (linked_root, ancestor_link / "shared", planted):
             with self.subTest(shared_root=shared_root):
-                selected, stderr = self.select("--system", "Darwin", "--shared-root", str(shared_root))
+                selected, stderr = self.select(
+                    "--system", "Darwin", "--shared-root", str(shared_root)
+                )
                 self.assertEqual(selected, self.fallback)
                 self.assertIn("unusable; using target/plak-test-tmp", stderr)
         self.assertEqual(list(self.shared.iterdir()), [])
@@ -101,9 +122,14 @@ class TestTmpdirSelectorTests(unittest.TestCase):
 
     def test_every_test_entry_point_uses_the_selector(self):
         self.assertIn("test-tmpdir.sh", (ROOT / "tools/gate/test-env.sh").read_text())
-        for path in ("tools/gate/dev-check.sh", "tools/perf/perf-smoke.sh",
-                     "tools/dev/crash-sweep.py", "tools/dev/jj-tools.py",
-                     "tools/dev/coverage.sh", "tests/live/live.py"):
+        for path in (
+            "tools/gate/dev-check.sh",
+            "tools/perf/perf-smoke.sh",
+            "tools/dev/crash-sweep.py",
+            "tools/dev/jj-tools.py",
+            "tools/dev/coverage.sh",
+            "tests/live/live.py",
+        ):
             with self.subTest(path=path):
                 self.assertIn("test-env.sh", (ROOT / path).read_text())
         dev = (ROOT / "tools/dev/dev.just").read_text()
@@ -117,10 +143,12 @@ class TestTmpdirSelectorTests(unittest.TestCase):
     def test_test_env_exports_home_and_empty_git_config(self):
         script = ROOT / "tools/gate/test-env.sh"
         env = dict(os.environ, PLAK_TEST_TMPDIR=str(self.base / "explicit-tmp"))
-        result = subprocess.run(["bash", str(script), "--json"], env=env,
-                                capture_output=True, text=True, timeout=20)
+        result = subprocess.run(
+            ["bash", str(script), "--json"], env=env, capture_output=True, text=True, timeout=20
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         import json
+
         values = json.loads(result.stdout)
         scratch = (self.base / "explicit-tmp").resolve()
         self.assertEqual(Path(values["TMPDIR"]), scratch)

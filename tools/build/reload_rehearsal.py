@@ -219,7 +219,11 @@ def run_environment(home, source=None):
     source = os.environ if source is None else source
     # Do not let inherited credentials, provider endpoints, telemetry exporters
     # or scripted test-hook bindings influence this read-only command.
-    env = {name: source[name] for name in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL") if name in source}
+    env = {
+        name: source[name]
+        for name in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")
+        if name in source
+    }
     env["PLAK_HOME"] = str(home)
     env["XDG_STATE_HOME"] = str(home / "empty-xdg-state")
     return env
@@ -242,7 +246,9 @@ def session_state_key(home, session_id, staged_key):
     except FileNotFoundError:
         raise SessionBusy("source_changed") from None
     for entry in names:
-        if entry.name != staged_key and not re.fullmatch(r"r[0-9]+\.e[0-9]+\.p[0-9]+\.t[0-9]+", entry.name):
+        if entry.name != staged_key and not re.fullmatch(
+            r"r[0-9]+\.e[0-9]+\.p[0-9]+\.t[0-9]+", entry.name
+        ):
             continue
         database = entry / "product.sqlite3"
         if entry.is_symlink() or database.is_symlink():
@@ -250,7 +256,9 @@ def session_state_key(home, session_id, staged_key):
         if not database.is_file():
             continue
         try:
-            with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            with closing(
+                sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+            ) as connection:
                 found = connection.execute(
                     "SELECT 1 FROM sessions WHERE id=? LIMIT 1", (session_id,)
                 ).fetchone()
@@ -307,9 +315,20 @@ def detach_rehearsal(options, home):
     log_path = Path(options.log).absolute()
     if _inside(log_path.resolve(), home):
         raise ValueError("log_inside_live_home")
-    command = [sys.executable, str(Path(__file__).resolve()), options.session_id,
-               "--wait-idle", "--timeout", str(options.timeout), "--interval", str(options.interval)]
-    for flag, value in (("--installed", options.installed), ("--config-overlay", options.config_overlay)):
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        options.session_id,
+        "--wait-idle",
+        "--timeout",
+        str(options.timeout),
+        "--interval",
+        str(options.interval),
+    ]
+    for flag, value in (
+        ("--installed", options.installed),
+        ("--config-overlay", options.config_overlay),
+    ):
         if value:
             command.extend([flag, str(Path(value).absolute())])
     if options.install:
@@ -319,8 +338,13 @@ def detach_rehearsal(options, home):
     descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as log:
         child = subprocess.Popen(
-            command, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log,
-            stderr=subprocess.STDOUT, start_new_session=True, close_fds=True,
+            command,
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
         )
     print(f"reload rehearsal detached: pid={child.pid}", flush=True)
     return 0
@@ -379,7 +403,9 @@ def import_lacks_credentials(result):
     lines = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
     if len(lines) != 1:
         return False
-    return lines[0] == IMPORT_CREDENTIAL_REFUSAL or bool(IMPORT_NATIVE_ACCEPTANCE_REFUSAL.match(lines[0]))
+    return lines[0] == IMPORT_CREDENTIAL_REFUSAL or bool(
+        IMPORT_NATIVE_ACCEPTANCE_REFUSAL.match(lines[0])
+    )
 
 
 def report_refusal(label, result, roots):
@@ -413,8 +439,14 @@ def run_command(argv, env, cwd, timeout, on_stdout=None):
 
 def run_progress_command(argv, env, cwd, timeout, on_stdout):
     with subprocess.Popen(
-        argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace",
+        argv,
+        env=env,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
     ) as process:
         stdout = process.stdout
         process.stdout = None  # communicate owns stderr; this joined reader owns stdout.
@@ -439,7 +471,10 @@ def run_progress_command(argv, env, cwd, timeout, on_stdout):
 
 
 def idle_rehearsal_refusal(result):
-    if result.returncode != 1 or (result.stderr or "").strip() != "plak: offline reload rehearsal refused":
+    if (
+        result.returncode != 1
+        or (result.stderr or "").strip() != "plak: offline reload rehearsal refused"
+    ):
         return False
     lines = (result.stdout or "").splitlines()
     busy = any(re.fullmatch(r"c[0-9]+(?:-c[0-9]+)*: busy: active_turn", line) for line in lines)
@@ -458,7 +493,8 @@ def rehearse_copy(live, backup, key, binary, session_id, wait_idle, timeout, int
             capture_home(live, backup, key)
             result = run_command(
                 [str(binary), "session", "rehearse", session_id],
-                run_environment(backup), ROOT,
+                run_environment(backup),
+                ROOT,
                 min(120, max(0.01, deadline - time.monotonic())) if wait_idle else 120,
                 on_stdout=lambda line: emit(line, roots),
             )
@@ -502,7 +538,9 @@ def reopen_verdict(live, key, binary, session_id):
     roots.append(cwd)
     result = run_command(
         [str(binary), "version", "--reopen-probe", session_id],
-        verdict_environment(live), cwd, 120,
+        verdict_environment(live),
+        cwd,
+        120,
     )
     try:
         payload = json.loads(result.stdout) if result.returncode == 0 else None
@@ -608,8 +646,18 @@ def idle_export_refusal(result, session_id):
     return any(lines == [prefix + reason] for reason in IDLE_EXPORT_REFUSALS)
 
 
-def export_copy(live, source_home, source_key, session_id, binary, export_path, roots,
-                wait_idle, timeout, interval=WAIT_IDLE_INTERVAL):
+def export_copy(
+    live,
+    source_home,
+    source_key,
+    session_id,
+    binary,
+    export_path,
+    roots,
+    wait_idle,
+    timeout,
+    interval=WAIT_IDLE_INTERVAL,
+):
     deadline = time.monotonic() + timeout
     while True:
         if wait_idle and time.monotonic() >= deadline:
@@ -625,7 +673,8 @@ def export_copy(live, source_home, source_key, session_id, binary, export_path, 
             return False
         exported = run_command(
             [str(binary), "session", "export", session_id, "--out", str(export_path)],
-            run_environment(source_home), cwd,
+            run_environment(source_home),
+            cwd,
             min(120, max(0.01, deadline - time.monotonic())) if wait_idle else 120,
         )
         if exported.returncode == 0 and export_path.is_file():
@@ -641,8 +690,19 @@ def export_copy(live, source_home, source_key, session_id, binary, export_path, 
         time.sleep(min(interval, max(0, deadline - time.monotonic())))
 
 
-def rehearse_carry(live, temporary, staged, session_id, source_key, staged_key, installed, overlay,
-                   wait_idle=False, timeout=300, interval=WAIT_IDLE_INTERVAL):
+def rehearse_carry(
+    live,
+    temporary,
+    staged,
+    session_id,
+    source_key,
+    staged_key,
+    installed,
+    overlay,
+    wait_idle=False,
+    timeout=300,
+    interval=WAIT_IDLE_INTERVAL,
+):
     binary = resolve_installed(installed)
     if binary is None:
         print(
@@ -655,8 +715,18 @@ def rehearse_carry(live, temporary, staged, session_id, source_key, staged_key, 
     source_home = temporary / "source-home"
     export_path = temporary / "session-export.json"
     roots = [live, temporary, source_home, export_path, binary]
-    if not export_copy(live, source_home, source_key, session_id, binary, export_path, roots,
-                       wait_idle, timeout, interval):
+    if not export_copy(
+        live,
+        source_home,
+        source_key,
+        session_id,
+        binary,
+        export_path,
+        roots,
+        wait_idle,
+        timeout,
+        interval,
+    ):
         return 1
     print("export=ok", flush=True)
     destination = temporary / "destination"
@@ -748,7 +818,9 @@ def rehearse(home, options):
     if not target.is_absolute():
         target = ROOT / target
     output = target / os.environ.get("CARGO_BUILD_TARGET", "") / "maintainer"
-    with tempfile.TemporaryDirectory(prefix="plak-reload-rehearsal-", dir=temporary_parent(home)) as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="plak-reload-rehearsal-", dir=temporary_parent(home)
+    ) as directory:
         temporary = Path(directory).resolve()
         if temporary == home or home in temporary.parents:
             raise ValueError("disposable_home")
@@ -782,13 +854,28 @@ def rehearse(home, options):
         source_key = session_state_key(home, session_id, key)
         if source_key != key:
             return rehearse_carry(
-                home, temporary, stage / "plak", session_id, source_key, key,
-                options.installed, options.config_overlay, options.wait_idle, options.timeout, options.interval
+                home,
+                temporary,
+                stage / "plak",
+                session_id,
+                source_key,
+                key,
+                options.installed,
+                options.config_overlay,
+                options.wait_idle,
+                options.timeout,
+                options.interval,
             )
         backup = temporary / "home"
         status = rehearse_copy(
-            home, backup, key, stage / "plak", session_id,
-            options.wait_idle, options.timeout, options.interval,
+            home,
+            backup,
+            key,
+            stage / "plak",
+            session_id,
+            options.wait_idle,
+            options.timeout,
+            options.interval,
         )
         if status != 0:
             return status
@@ -798,5 +885,12 @@ def rehearse(home, options):
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
-    except (ValueError, OSError, sqlite3.Error, subprocess.SubprocessError, KeyError, SessionBusy) as error:
+    except (
+        ValueError,
+        OSError,
+        sqlite3.Error,
+        subprocess.SubprocessError,
+        KeyError,
+        SessionBusy,
+    ) as error:
         sys.exit(refuse(error))

@@ -1,4 +1,5 @@
 """JJ compatibility tools are explicit, pinned and checksummed before install."""
+
 import hashlib
 import importlib.util
 import io
@@ -28,25 +29,36 @@ class JjToolsTests(unittest.TestCase):
             member.size = 7
             archive.addfile(member, io.BytesIO(b'fixture'))
         content = stream.getvalue()
-        with tempfile.TemporaryDirectory() as temporary, \
-             patch.object(jj_tools.platform, 'system', return_value='Linux'), \
-             patch.object(jj_tools.platform, 'machine', return_value='x86_64'), \
-             patch.object(jj_tools, 'VERSIONS', ('0.46.0',)), \
-             patch.dict(jj_tools.PINS, {('0.46.0', 'x86_64-unknown-linux-musl'): hashlib.sha256(content).hexdigest()}), \
-             patch.object(jj_tools.urllib.request, 'urlopen', side_effect=lambda *a, **kw: io.BytesIO(content)) as fetch:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(jj_tools.platform, 'system', return_value='Linux'),
+            patch.object(jj_tools.platform, 'machine', return_value='x86_64'),
+            patch.object(jj_tools, 'VERSIONS', ('0.46.0',)),
+            patch.dict(
+                jj_tools.PINS,
+                {('0.46.0', 'x86_64-unknown-linux-musl'): hashlib.sha256(content).hexdigest()},
+            ),
+            patch.object(
+                jj_tools.urllib.request, 'urlopen', side_effect=lambda *a, **kw: io.BytesIO(content)
+            ) as fetch,
+        ):
             prefix = Path(temporary)
             jj_tools.install(prefix)
             binary = prefix / 'jj/0.46.0/jj'
             self.assertEqual(binary.read_bytes(), b'fixture')
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
-            self.assertIn('/v0.46.0/jj-v0.46.0-x86_64-unknown-linux-musl.tar.gz', fetch.call_args.args[0])
+            self.assertIn(
+                '/v0.46.0/jj-v0.46.0-x86_64-unknown-linux-musl.tar.gz', fetch.call_args.args[0]
+            )
 
     def test_checksum_mismatch_preserves_existing_binary(self):
-        with tempfile.TemporaryDirectory() as temporary, \
-             patch.object(jj_tools.platform, 'system', return_value='Linux'), \
-             patch.object(jj_tools.platform, 'machine', return_value='x86_64'), \
-             patch.object(jj_tools, 'VERSIONS', ('0.46.0',)), \
-             patch.object(jj_tools.urllib.request, 'urlopen', return_value=io.BytesIO(b'wrong')):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(jj_tools.platform, 'system', return_value='Linux'),
+            patch.object(jj_tools.platform, 'machine', return_value='x86_64'),
+            patch.object(jj_tools, 'VERSIONS', ('0.46.0',)),
+            patch.object(jj_tools.urllib.request, 'urlopen', return_value=io.BytesIO(b'wrong')),
+        ):
             prefix = Path(temporary)
             binary = prefix / 'jj/0.46.0/jj'
             binary.parent.mkdir(parents=True)
@@ -56,15 +68,32 @@ class JjToolsTests(unittest.TestCase):
             self.assertEqual(binary.read_bytes(), b'existing')
 
     def test_compat_requires_explicit_install(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.object(jj_tools.subprocess, 'check_output', return_value=temporary):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(
+                jj_tools.subprocess,
+                'check_output',
+                return_value='{"TMPDIR":"/tmp","PLAK_HOME":"/tmp/h","GIT_CONFIG_GLOBAL":"/tmp/g","GIT_CONFIG_NOSYSTEM":"1"}',
+            ),
+        ):
             with self.assertRaisesRegex(RuntimeError, 'run just dev-tools install'):
                 jj_tools.compat(Path(temporary))
 
     def test_compat_selects_workspace_jj_tests_for_each_pinned_binary(self):
         calls = []
-        with tempfile.TemporaryDirectory() as temporary, \
-             patch.object(jj_tools.subprocess, 'check_output', return_value=temporary), \
-             patch.object(jj_tools.subprocess, 'run', side_effect=lambda command, **kwargs: calls.append((command, dict(kwargs['env'])))):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(
+                jj_tools.subprocess,
+                'check_output',
+                return_value='{"TMPDIR":"/tmp","PLAK_HOME":"/tmp/h","GIT_CONFIG_GLOBAL":"/tmp/g","GIT_CONFIG_NOSYSTEM":"1"}',
+            ),
+            patch.object(
+                jj_tools.subprocess,
+                'run',
+                side_effect=lambda command, **kwargs: calls.append((command, dict(kwargs['env']))),
+            ),
+        ):
             prefix = Path(temporary).resolve()
             for version in jj_tools.VERSIONS:
                 binary = prefix / 'jj' / version / 'jj'
@@ -83,11 +112,16 @@ class JjToolsTests(unittest.TestCase):
     def test_library_pin_supported_range_and_archive_versions_stay_in_lockstep(self):
         import re
         import tomllib
+
         manifest = tomllib.loads((ROOT / 'crates/orchestration/workspace/Cargo.toml').read_text())
         pin = manifest['dependencies']['jj-lib']['version'].removeprefix('=')
         source = (ROOT / 'crates/orchestration/workspace/src/lib.rs').read_text()
         self.assertEqual(re.search(r'JJ_LIB_VERSION: &str = "([^"]+)"', source).group(1), pin)
         minor = int(pin.split('.')[1])
-        low, high = map(int, re.search(r'JJ_CLI_SUPPORTED:.*?= (\d+)\.\.=([0-9]+)', source).groups())
+        low, high = map(
+            int, re.search(r'JJ_CLI_SUPPORTED:.*?= (\d+)\.\.=([0-9]+)', source).groups()
+        )
         self.assertEqual((low, high), (minor - 2, minor))
-        self.assertEqual(tuple(int(v.split('.')[1]) for v in jj_tools.VERSIONS), tuple(range(low, high + 1)))
+        self.assertEqual(
+            tuple(int(v.split('.')[1]) for v in jj_tools.VERSIONS), tuple(range(low, high + 1))
+        )

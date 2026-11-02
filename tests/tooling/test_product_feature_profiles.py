@@ -10,7 +10,9 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("product_features", ROOT / "tools/gate/check_features.py")
+spec = importlib.util.spec_from_file_location(
+    "product_features", ROOT / "tools/gate/check_features.py"
+)
 assert spec and spec.loader
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
@@ -21,28 +23,51 @@ class ProductFeatureProfilesTests(unittest.TestCase):
         return {"features": {"default": ["git-cli", *gate.PRODUCT_FEATURES]}}
 
     def test_named_variants_pin_route_and_surface_omissions(self):
-        profiles = {name: (set(selected), default) for name, selected, default in gate.named_variants(self.manifest())}
+        profiles = {
+            name: (set(selected), default)
+            for name, selected, default in gate.named_variants(self.manifest())
+        }
         self.assertEqual(set(profiles), {"default", "headless", "api", "minimal"})
         self.assertTrue(profiles["default"][1])
         self.assertFalse({"tui", "clipboard"} & profiles["headless"][0])
         self.assertTrue({"codex", "grok", "claude", "python", "mcp"} <= profiles["headless"][0])
         self.assertFalse({"codex", "grok", "claude"} & profiles["api"][0])
-        self.assertTrue({"openai", "anthropic", "xai-api", "openrouter", "tui", "python"} <= profiles["api"][0])
+        self.assertTrue(
+            {"openai", "anthropic", "xai-api", "openrouter", "tui", "python"} <= profiles["api"][0]
+        )
         self.assertEqual(profiles["minimal"], ({"git-cli", "openrouter", "tui"}, False))
 
     def test_compile_covers_bin_and_lib_and_warning_failure_is_not_cached(self):
-        warning = json.dumps({"reason": "compiler-message", "message": {
-            "level": "warning", "rendered": "warning: unused feature-off binding\n"}})
+        warning = json.dumps(
+            {
+                "reason": "compiler-message",
+                "message": {
+                    "level": "warning",
+                    "rendered": "warning: unused feature-off binding\n",
+                },
+            }
+        )
         results = [subprocess.CompletedProcess([], 0, warning, "")] + [
-            subprocess.CompletedProcess([], 0, "", "") for _ in range(7)]
+            subprocess.CompletedProcess([], 0, "", "") for _ in range(7)
+        ]
         with mock.patch.object(gate.subprocess, "run", side_effect=results) as run:
-            errors = gate.check_product_profiles({"plak": self.manifest()}, operation="check", target="reviewed-triple")
+            errors = gate.check_product_profiles(
+                {"plak": self.manifest()}, operation="check", target="reviewed-triple"
+            )
         self.assertEqual(len(errors), 1)
         self.assertIn("headless", errors[0])
         self.assertEqual(run.call_count, 8)
         for call in run.call_args_list:
             command = call.args[0]
-            for flag in ["--locked", "--offline", "--no-default-features", "--lib", "--bins", "--target", "reviewed-triple"]:
+            for flag in [
+                "--locked",
+                "--offline",
+                "--no-default-features",
+                "--lib",
+                "--bins",
+                "--target",
+                "reviewed-triple",
+            ]:
                 self.assertIn(flag, command)
             if command[1] == "clippy":
                 self.assertEqual(command[-3:], ["--", "-D", "warnings"])

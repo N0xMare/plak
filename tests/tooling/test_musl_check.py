@@ -31,13 +31,21 @@ class MuslCheckTests(unittest.TestCase):
         ruff.write_text('#!/bin/sh\nexit 0\n')
         ruff.chmod(0o700)
         self.log = self.root / 'docker.json'
-        self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
-                        PLAK_MUSL_TOOLS=str(self.tools), MUSL_CALLS=str(self.log))
+        self.env = dict(
+            os.environ,
+            PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
+            PLAK_MUSL_TOOLS=str(self.tools),
+            MUSL_CALLS=str(self.log),
+        )
         self.env.pop('PLAK_MUSL_TARGET_DIR', None)
         self.env.pop('CARGO_BUILD_JOBS', None)
         self.executable('getconf', "print('24')\n")
-        self.executable('uname', "import sys\nprint('Linux' if sys.argv[1] == '-s' else 'x86_64')\n")
-        self.executable('docker', r'''import json, os, sys
+        self.executable(
+            'uname', "import sys\nprint('Linux' if sys.argv[1] == '-s' else 'x86_64')\n"
+        )
+        self.executable(
+            'docker',
+            r'''import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
 source = next(arg[:-len(':/qual/src')] for arg in args if arg.endswith(':/qual/src'))
@@ -46,14 +54,22 @@ Path(os.environ['MUSL_CALLS']).write_text(json.dumps(dict(
     args=args, files=sorted(str(path.relative_to(root)) for path in root.rglob('*')
                            if path.is_file()), payload=(root / 'payload').read_text())))
 raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
-''')
+''',
+        )
         self.git('init', '-q')
         (self.root / '.gitignore').write_text('target/\n.dev-tools/\nbin/\ndocker.json\n')
         (self.root / 'payload').write_text('baseline')
         (self.root / 'deleted').write_text('gone')
         self.git('add', '.')
-        self.git('-c', 'user.name=Tooling Test', '-c', 'user.email=test@example.invalid',
-                 'commit', '-qm', 'fixture')
+        self.git(
+            '-c',
+            'user.name=Tooling Test',
+            '-c',
+            'user.email=test@example.invalid',
+            'commit',
+            '-qm',
+            'fixture',
+        )
         (self.root / 'payload').write_text('working tree')
         (self.root / 'deleted').unlink()
         (self.root / 'untracked').write_text('new source')
@@ -69,8 +85,14 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         path.chmod(0o700)
 
     def run_gate(self, *args):
-        result = subprocess.run(['bash', 'tools/musl/musl-check.sh', *args], cwd=self.root,
-                                env=self.env, text=True, capture_output=True, timeout=15)
+        result = subprocess.run(
+            ['bash', 'tools/musl/musl-check.sh', *args],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=15,
+        )
         call = json.loads(self.log.read_text()) if self.log.exists() else None
         return result, call
 
@@ -78,8 +100,11 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         result, call = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         args = call['args']
-        for option, value in (('--platform', 'linux/amd64'), ('--pull', 'never'),
-                              ('--network', 'none')):
+        for option, value in (
+            ('--platform', 'linux/amd64'),
+            ('--pull', 'never'),
+            ('--network', 'none'),
+        ):
             self.assertEqual(args[args.index(option) + 1], value)
         self.assertIn('plak-qual-base:11162b86', args)
         command = args[args.index('-c') + 1]
@@ -95,8 +120,9 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         self.assertEqual(call['payload'], 'working tree')
         self.assertIn('untracked', call['files'])
         self.assertNotIn('deleted', call['files'])
-        self.assertFalse(any(path.startswith(('.git/', '.dev-tools/', 'target/'))
-                             for path in call['files']))
+        self.assertFalse(
+            any(path.startswith(('.git/', '.dev-tools/', 'target/')) for path in call['files'])
+        )
 
     def test_requested_tier_is_forwarded(self):
         result, call = self.run_gate('--fast', 'plak')
@@ -147,8 +173,10 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
             # container runs, so an image bump never merges old caches.
             image = next(arg for arg in call['args'] if arg.startswith('plak-qual-base:'))
             tag = image.split(':', 1)[1]
-            self.assertIn(str(self.root / f'target/musl-gate/cargo-home-{tag}')
-                          + ':/qual/cargo-home', call['args'])
+            self.assertIn(
+                str(self.root / f'target/musl-gate/cargo-home-{tag}') + ':/qual/cargo-home',
+                call['args'],
+            )
             command = call['args'][call['args'].index('-c') + 1]
             self.assertIn('CARGO_HOME=/qual/cargo-home', command)
             self.assertIn('if [ ! -f "$CARGO_HOME/.seeded" ]', command)
@@ -163,8 +191,9 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         seed = seed.replace('/usr/local/cargo', str(image_cargo))
         seed = seed.replace('/tmp/plak-musl-home.XXXXXX', str(self.root / 'home.XXXXXX'))
         for _ in range(2):
-            result = subprocess.run(['/bin/sh', '-c', seed], env=self.env, text=True,
-                                    capture_output=True, timeout=15)
+            result = subprocess.run(
+                ['/bin/sh', '-c', seed], env=self.env, text=True, capture_output=True, timeout=15
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((cargo_home / 'registry' / 'payload').read_text(), 'image seed')
             (image_cargo / 'registry' / 'payload').write_text('must not recopy')
@@ -176,8 +205,9 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
             self.assertEqual(result.returncode, 0, result.stderr)
             image = next(arg for arg in call['args'] if arg.startswith('plak-qual-base:'))
             tag = image.split(':', 1)[1]
-            self.assertIn(f'PLAK_PUBLIC_CONTRACTS_DIR=/qual/target/public-contracts-{tag}',
-                          call['args'])
+            self.assertIn(
+                f'PLAK_PUBLIC_CONTRACTS_DIR=/qual/target/public-contracts-{tag}', call['args']
+            )
             self.assertIn(str(self.root / 'target/musl-gate') + ':/qual/target', call['args'])
 
     def test_missing_musl_nextest_refuses_before_docker(self):

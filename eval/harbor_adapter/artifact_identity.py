@@ -118,8 +118,11 @@ def plak_artifact_record(
     binary: Path, js_host: Path, py_host: Path, *, arch: str = ""
 ) -> dict[str, Any]:
     """Identity of the frozen Plak binary and its uploaded worker cohort."""
-    items = [("plak", Path(binary)), ("plakous-js-host", Path(js_host)),
-             ("plakous-py-host", Path(py_host))]
+    items = [
+        ("plak", Path(binary)),
+        ("plakous-js-host", Path(js_host)),
+        ("plakous-py-host", Path(py_host)),
+    ]
     return artifact_record(harness="plak", binaries=digest_all(items), arch=arch)
 
 
@@ -128,10 +131,13 @@ def require_plak_provenance(binary: Path, js_host: Path, py_host: Path) -> dict[
     try:
         manifest = json.loads(binary.with_name("plak-build.json").read_text())
         source = manifest["source"]
-        if (source.get("repo") != "plak" or source.get("dirty") is not False
-                or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", ""))
-                or manifest.get("features") != ["maintainer"]
-                or not manifest.get("toolchain", "").startswith("rustc 1.99.0")):
+        if (
+            source.get("repo") != "plak"
+            or source.get("dirty") is not False
+            or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", ""))
+            or manifest.get("features") != ["maintainer"]
+            or not manifest.get("toolchain", "").startswith("rustc 1.99.0")
+        ):
             raise ValueError
         for path in (binary, js_host, py_host):
             digest = digest_file(path)
@@ -139,7 +145,9 @@ def require_plak_provenance(binary: Path, js_host: Path, py_host: Path) -> dict[
                 raise ValueError
         return manifest
     except (OSError, ValueError, TypeError, KeyError):
-        raise ValueError("Plak build provenance missing, dirty, or mismatched; rebuild frozen agent") from None
+        raise ValueError(
+            "Plak build provenance missing, dirty, or mismatched; rebuild frozen agent"
+        ) from None
 
 
 def short_digest(record: dict[str, Any], name: str) -> str:

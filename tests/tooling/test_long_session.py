@@ -224,19 +224,30 @@ class LongSessionOracleTests(unittest.TestCase):
         window = long_session.catalog_window("grok-4.7")
         trigger = window - long_session.PAGE_TOKENS
         under = [
-            {"kind": "model.operation_usage", "prepared_input_tokens": trigger - 1,
-             "peak_prepared_input_tokens": trigger - 1},
+            {
+                "kind": "model.operation_usage",
+                "prepared_input_tokens": trigger - 1,
+                "peak_prepared_input_tokens": trigger - 1,
+            },
             {"kind": "tool.started", "name": "read_file", "subject": "bulk.txt (1-2000)"},
         ]
         self.assertFalse(long_session.reached_trigger(under, window))
-        at = [{"kind": "model.operation_usage", "prepared_input_tokens": trigger,
-                "peak_prepared_input_tokens": trigger}]
+        at = [
+            {
+                "kind": "model.operation_usage",
+                "prepared_input_tokens": trigger,
+                "peak_prepared_input_tokens": trigger,
+            }
+        ]
         self.assertTrue(long_session.reached_trigger(at, window))
         self.assertFalse(long_session.reached_trigger(at, None))
         self.assertGreater(long_session.compaction_trigger(window), trigger)
         self.assertEqual(long_session.harness_bar(window), trigger)
-        self.assertIsNone(long_session.prepared_peak([
-            {"kind": "turn.usage", "peak_prepared_input_tokens": trigger}]))
+        self.assertIsNone(
+            long_session.prepared_peak(
+                [{"kind": "turn.usage", "peak_prepared_input_tokens": trigger}]
+            )
+        )
 
     def test_peak_between_the_trigger_and_one_page_under_the_window_is_harness(self):
         window = long_session.catalog_window("claude-sonnet-5")
@@ -245,17 +256,28 @@ class LongSessionOracleTests(unittest.TestCase):
         page_bar = window - long_session.PAGE_TOKENS
         self.assertLess(trigger, page_bar)
         between = (trigger + page_bar) // 2
-        rows = [{"kind": "model.operation_usage", "prepared_input_tokens": between,
-                 "peak_prepared_input_tokens": between}]
+        rows = [
+            {
+                "kind": "model.operation_usage",
+                "prepared_input_tokens": between,
+                "peak_prepared_input_tokens": between,
+            }
+        ]
         self.assertTrue(long_session.reached_trigger(rows, window))
         self.assertEqual(long_session.harness_bar(window), trigger)
-        under = [{"kind": "model.operation_usage", "prepared_input_tokens": trigger - 1,
-                  "peak_prepared_input_tokens": trigger - 1}]
+        under = [
+            {
+                "kind": "model.operation_usage",
+                "prepared_input_tokens": trigger - 1,
+                "peak_prepared_input_tokens": trigger - 1,
+            }
+        ]
         self.assertFalse(long_session.reached_trigger(under, window))
         grok46 = long_session.catalog_window("grok-4.6")
         self.assertEqual(long_session.compaction_trigger(grok46, "grok-4.6"), (grok46 * 80) // 100)
         self.assertLess(
-            long_session.harness_bar(grok46, "grok-4.6"), grok46 - long_session.PAGE_TOKENS)
+            long_session.harness_bar(grok46, "grok-4.6"), grok46 - long_session.PAGE_TOKENS
+        )
 
     def test_default_pages_follow_the_route_window_and_the_capture_cap(self):
         pages = {name: long_session.default_pages(route) for name, route in live.ROUTES.items()}
@@ -268,7 +290,9 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(pages["deepseek"], 6)
         self.assertEqual(pages["deepseek-messages"], 6)
         self.assertEqual(pages["grok-46"], 8)
-        self.assertTrue(all(1 <= value <= long_session.MAX_GROWTH_PAGES for value in pages.values()))
+        self.assertTrue(
+            all(1 <= value <= long_session.MAX_GROWTH_PAGES for value in pages.values())
+        )
         self.assertEqual(long_session.growth_timeout(6), 900)
         self.assertEqual(long_session.child_timeout(6), 1500)
         self.assertGreater(long_session.growth_timeout(16), 900)
@@ -294,14 +318,16 @@ class LongSessionOracleTests(unittest.TestCase):
         lines = long_session.growth_call_lines("pi", window)
         self.assertEqual(lines, 5)
         self.assertLessEqual(lines * long_session.LINE_BYTES, window // 8)
-        self.assertEqual(long_session.growth_call_lines("pi", 256_000),
-                         long_session.GROWTH_CALL_LINES)
-        self.assertEqual(long_session.growth_call_lines("claude", 1_000_000),
-                         long_session.CLAUDE_GROWTH_CALL_LINES)
+        self.assertEqual(
+            long_session.growth_call_lines("pi", 256_000), long_session.GROWTH_CALL_LINES
+        )
+        self.assertEqual(
+            long_session.growth_call_lines("claude", 1_000_000),
+            long_session.CLAUDE_GROWTH_CALL_LINES,
+        )
         calls = long_session.pages_for_window(window) * long_session.lines_per_page() / lines
         self.assertLess(calls, long_session.ROUND_CAP)
-        self.assertEqual(long_session.harness_bar(window),
-                         long_session.compaction_trigger(window))
+        self.assertEqual(long_session.harness_bar(window), long_session.compaction_trigger(window))
         self.assertIn("limit 5", long_session.growth_prompt(348, "pi", lines))
         self.assertIn("limit 6", long_session.child_prompt("pi", lines))
 
@@ -318,37 +344,46 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertEqual(long_session.write_bulk(grok, 1, "grok"), count)
             self.assertTrue(set(claude.read_text()) <= set("0123456789 \n"))
             self.assertTrue(any(char.isalpha() for char in grok.read_text()))
-        self.assertEqual(long_session.growth_call_lines("claude"),
-                         long_session.CLAUDE_GROWTH_CALL_LINES)
+        self.assertEqual(
+            long_session.growth_call_lines("claude"), long_session.CLAUDE_GROWTH_CALL_LINES
+        )
         for pack in ("grok", "codex", "pi"):
             self.assertEqual(long_session.growth_call_lines(pack), long_session.GROWTH_CALL_LINES)
         claude_prompt = long_session.growth_prompt(4, "claude")
         self.assertIn(f"limit {long_session.CLAUDE_GROWTH_CALL_LINES}", claude_prompt)
         self.assertIn(f"limit {long_session.GROWTH_CALL_LINES}", long_session.growth_prompt(4))
-        self.assertIn(f"limit {long_session.CLAUDE_GROWTH_CALL_LINES + 1}",
-                      long_session.child_prompt("claude"))
+        self.assertIn(
+            f"limit {long_session.CLAUDE_GROWTH_CALL_LINES + 1}",
+            long_session.child_prompt("claude"),
+        )
 
     def test_any_tool_that_names_a_fact_file_is_a_reread(self):
         records = [
             {"kind": "turn.lifecycle", "phase": "admitted"},
             {"kind": "tool.started", "name": "grep", "subject": "codeword.txt"},
             {"kind": "compact.finished", "outcome": "committed"},
-            {"kind": "tool.started", "name": "run_terminal_command",
-             "subject": "cat acknowledged.txt"},
+            {
+                "kind": "tool.started",
+                "name": "run_terminal_command",
+                "subject": "cat acknowledged.txt",
+            },
             {"kind": "tool.started", "name": "glob", "subject": "**/acknowledged.txt"},
             {"kind": "turn.lifecycle", "phase": "completed"},
         ]
         reread = long_session.reread_after_commit(records, 0, len(records))
-        self.assertEqual([record["name"] for record in reread],
-                         ["run_terminal_command", "glob"])
+        self.assertEqual([record["name"] for record in reread], ["run_terminal_command", "glob"])
 
     def test_overflow_remedy_accepts_each_product_path(self):
         scheduled = [
             {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "over"},
             {"kind": "tool.started", "name": "read_file", "subject": "bulk.txt (1-2000)"},
             {"kind": "compact.started", "reason": "scheduled"},
-            {"kind": "compact.finished", "outcome": "committed",
-             "input_tokens_before": 10, "input_tokens_after": 3},
+            {
+                "kind": "compact.finished",
+                "outcome": "committed",
+                "input_tokens_before": 10,
+                "input_tokens_after": 3,
+            },
             {"kind": "turn.lifecycle", "phase": "completed", "turn_id": "over"},
         ]
         self.assertEqual(long_session.overflow_remedy(scheduled), "in-turn overflow compact")
@@ -358,21 +393,30 @@ class LongSessionOracleTests(unittest.TestCase):
             {"kind": "context.placeholders", "results": 6},
             {"kind": "turn.lifecycle", "phase": "completed"},
         ]
-        self.assertEqual(long_session.overflow_remedy(placeholders),
-                         "tool-result placeholder shrink")
+        self.assertEqual(
+            long_session.overflow_remedy(placeholders), "tool-result placeholder shrink"
+        )
         # The host logs capacity, then the kernel logs the same compact as manual.
         capacity = [
             {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "over"},
             {"kind": "compact.started", "reason": "capacity"},
             {"kind": "compact.started", "reason": "manual"},
-            {"kind": "compact.finished", "outcome": "committed",
-             "input_tokens_before": 10, "input_tokens_after": 3},
+            {
+                "kind": "compact.finished",
+                "outcome": "committed",
+                "input_tokens_before": 10,
+                "input_tokens_after": 3,
+            },
         ]
         self.assertEqual(long_session.overflow_remedy(capacity), "capacity-recovery compact")
-        self.assertIsNone(long_session.overflow_remedy([
-            {"kind": "compact.started", "reason": "capacity"},
-            {"kind": "compact.finished", "outcome": "failed"},
-        ]))
+        self.assertIsNone(
+            long_session.overflow_remedy(
+                [
+                    {"kind": "compact.started", "reason": "capacity"},
+                    {"kind": "compact.finished", "outcome": "failed"},
+                ]
+            )
+        )
 
     def test_scheduled_compaction_inside_a_turn_counts_and_manual_does_not(self):
         records = [
@@ -381,8 +425,12 @@ class LongSessionOracleTests(unittest.TestCase):
             {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "grow"},
             {"kind": "tool.started", "name": "read_file", "subject": "bulk.txt"},
             {"kind": "compact.started", "reason": "scheduled"},
-            {"kind": "compact.finished", "outcome": "committed",
-             "input_tokens_before": 10, "input_tokens_after": 3},
+            {
+                "kind": "compact.finished",
+                "outcome": "committed",
+                "input_tokens_before": 10,
+                "input_tokens_after": 3,
+            },
             {"kind": "turn.lifecycle", "phase": "completed", "turn_id": "grow"},
             {"kind": "compact.started", "reason": "capacity"},
         ]
@@ -393,8 +441,7 @@ class LongSessionOracleTests(unittest.TestCase):
 
     def test_a_larger_successor_and_a_post_cut_reread_fail(self):
         with self.assertRaises(live.ScenarioFailure) as raised:
-            long_session.assert_shrunk(
-                {"input_tokens_before": 3, "input_tokens_after": 3})
+            long_session.assert_shrunk({"input_tokens_before": 3, "input_tokens_after": 3})
         self.assertEqual(raised.exception.outcome, live.HARNESS)
         records = [
             {"kind": "turn.lifecycle", "phase": "admitted"},
@@ -403,14 +450,20 @@ class LongSessionOracleTests(unittest.TestCase):
             {"kind": "tool.started", "name": "read_file", "subject": "codeword.txt"},
             {"kind": "turn.lifecycle", "phase": "completed"},
         ]
-        self.assertEqual(long_session.reread_after_commit(records, 0, 5)[0]["subject"], "codeword.txt")
+        self.assertEqual(
+            long_session.reread_after_commit(records, 0, 5)[0]["subject"], "codeword.txt"
+        )
         self.assertEqual(long_session.reread_after_commit(records, 0, 2), [])
 
     def test_prompts_do_not_carry_the_fact_token(self):
         for pack, token in (("grok", "ZEBRA-123456"), ("codex", "rel-123456")):
-            for prompt in (long_session.growth_prompt(10, pack), long_session.follow_prompt(pack),
-                           long_session.overflow_prompt(20, [[1, 21], [41, 61]], pack),
-                           long_session.child_prompt(pack), long_session.plant_prompt(pack)):
+            for prompt in (
+                long_session.growth_prompt(10, pack),
+                long_session.follow_prompt(pack),
+                long_session.overflow_prompt(20, [[1, 21], [41, 61]], pack),
+                long_session.child_prompt(pack),
+                long_session.plant_prompt(pack),
+            ):
                 self.assertNotIn(token, prompt)
         long_session.hide_token(long_session.growth_prompt(4), token)
         with self.assertRaises(live.ScenarioFailure):
@@ -442,10 +495,18 @@ class LongSessionOracleTests(unittest.TestCase):
             long_session.main(["grok", "--all", "--only", "overflow"])
         self.assertEqual(caught.exception.code, 2)
         names = [name for name, _surface in long_session.selected_catalog("", True)]
-        self.assertEqual(names, [
-            "in_turn_compaction", "overflow", "kill_reopen", "child_compaction",
-        ])
-        only = [name for name, _surface in long_session.selected_catalog("overflow,kill_reopen", False)]
+        self.assertEqual(
+            names,
+            [
+                "in_turn_compaction",
+                "overflow",
+                "kill_reopen",
+                "child_compaction",
+            ],
+        )
+        only = [
+            name for name, _surface in long_session.selected_catalog("overflow,kill_reopen", False)
+        ]
         self.assertEqual(only, ["overflow", "kill_reopen"])
         with patch.object(long_session, "main", return_value=7) as delegated:
             self.assertEqual(soak.main(["grok", "--long-session", "--only", "overflow"]), 7)
@@ -460,11 +521,27 @@ class LongSessionOracleTests(unittest.TestCase):
             log = private / "state" / "r" / "sessions"
             log.mkdir(parents=True)
             (log / "s.events.jsonl").write_text(
-                json.dumps({"kind": "turn.usage", "input_tokens": 11, "output_tokens": 4,
-                            "cached_input_tokens": 2, "reasoning_tokens": 1}) + "\n")
+                json.dumps(
+                    {
+                        "kind": "turn.usage",
+                        "input_tokens": 11,
+                        "output_tokens": 4,
+                        "cached_input_tokens": 2,
+                        "reasoning_tokens": 1,
+                    }
+                )
+                + "\n"
+            )
             usage = smoke.scenario_usage(home / "missing", private, live.TokenUsage())
-        self.assertEqual((usage.input_tokens, usage.output_tokens,
-                          usage.cached_input_tokens, usage.reasoning_tokens), (11, 4, 2, 1))
+        self.assertEqual(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cached_input_tokens,
+                usage.reasoning_tokens,
+            ),
+            (11, 4, 2, 1),
+        )
 
     def test_report_names_the_route_and_counts_private_tokens(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -476,17 +553,28 @@ class LongSessionOracleTests(unittest.TestCase):
                 private = env.artifacts / name / "home" / "state" / "r" / "sessions"
                 private.mkdir(parents=True)
                 (private / "s.events.jsonl").write_text(
-                    json.dumps({"kind": "turn.usage", "input_tokens": 9, "output_tokens": 3,
-                                "cached_input_tokens": 1, "reasoning_tokens": 2}) + "\n")
+                    json.dumps(
+                        {
+                            "kind": "turn.usage",
+                            "input_tokens": 9,
+                            "output_tokens": 3,
+                            "cached_input_tokens": 1,
+                            "reasoning_tokens": 2,
+                        }
+                    )
+                    + "\n"
+                )
                 # What a Codex `plak agent` hello reports for plakous-default.
                 env.bound_compositions.add("native-ptc")
                 return "synthetic pass"
 
-            with patch.object(live, "ROOT", root), \
-                    patch.object(live, "write_home"), \
-                    patch.object(smoke, "capture_complete", return_value=True), \
-                    patch.object(long_session, "play", fake_play), \
-                    patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": ""}):
+            with (
+                patch.object(live, "ROOT", root),
+                patch.object(live, "write_home"),
+                patch.object(smoke, "capture_complete", return_value=True),
+                patch.object(long_session, "play", fake_play),
+                patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": ""}),
+            ):
                 code = long_session.main(["grok", "--only", "overflow", "--binary", str(binary)])
             report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
         route = live.ROUTES["grok"]
@@ -510,12 +598,16 @@ class LongSessionOracleTests(unittest.TestCase):
                 binary = root / "plak"
                 binary.write_bytes(b"synthetic executable; never launched")
                 environ = {} if ceiling is None else {"PLAK_LIVE_INPUT_CEILING": ceiling}
-                with patch.object(live, "ROOT", root), \
-                        patch.object(live, "write_home") as launch, \
-                        patch.object(long_session, "play") as play, \
-                        patch.dict(os.environ, environ, clear=True), \
-                        patch("builtins.print"):
-                    code = long_session.main(["deepseek-messages", "--all", "--binary", str(binary)])
+                with (
+                    patch.object(live, "ROOT", root),
+                    patch.object(live, "write_home") as launch,
+                    patch.object(long_session, "play") as play,
+                    patch.dict(os.environ, environ, clear=True),
+                    patch("builtins.print"),
+                ):
+                    code = long_session.main(
+                        ["deepseek-messages", "--all", "--binary", str(binary)]
+                    )
                 report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
             self.assertEqual(code, 2)
             launch.assert_not_called()
@@ -531,27 +623,35 @@ class LongSessionOracleTests(unittest.TestCase):
             root = Path(directory)
             binary = root / "plak"
             binary.write_bytes(b"synthetic executable; never launched")
-            with patch.object(live, "ROOT", root), \
-                    patch.object(live, "write_home"), \
-                    patch.object(smoke, "capture_complete", return_value=True), \
-                    patch.object(long_session, "play", return_value="synthetic pass"), \
-                    patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232",
-                                            "PLAK_LIVE_GROWTH_PAGES": ""}), \
-                    patch("builtins.print"):
-                code = long_session.main(["deepseek", "--only", "overflow", "--binary", str(binary)])
+            with (
+                patch.object(live, "ROOT", root),
+                patch.object(live, "write_home"),
+                patch.object(smoke, "capture_complete", return_value=True),
+                patch.object(long_session, "play", return_value="synthetic pass"),
+                patch.dict(
+                    os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232", "PLAK_LIVE_GROWTH_PAGES": ""}
+                ),
+                patch("builtins.print"),
+            ):
+                code = long_session.main(
+                    ["deepseek", "--only", "overflow", "--binary", str(binary)]
+                )
             report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
         self.assertEqual(code, 0)
-        self.assertEqual(report["input_ceiling"],
-                         {"tokens": 967_232, "source": "PLAK_LIVE_INPUT_CEILING"})
+        self.assertEqual(
+            report["input_ceiling"], {"tokens": 967_232, "source": "PLAK_LIVE_INPUT_CEILING"}
+        )
 
     def test_bad_dial_is_a_scenario_result(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / "plak"
             binary.write_bytes(b"synthetic executable; never launched")
-            with patch.object(live, "ROOT", root), \
-                    patch.object(live, "write_home"), \
-                    patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": "29"}):
+            with (
+                patch.object(live, "ROOT", root),
+                patch.object(live, "write_home"),
+                patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": "29"}),
+            ):
                 code = long_session.main(["grok", "--only", "overflow", "--binary", str(binary)])
             report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
         self.assertEqual(code, 1)
@@ -560,14 +660,25 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertIsNone(report["growth_pages"])
 
     def test_child_tool_failure_is_surfaced(self):
-        self.assertIsNone(long_session.child_tool_failure([
-            {"kind": "tree", "nodes": [{"depth": 1, "agent_id": "c1", "status": "running"}]},
-        ]))
+        self.assertIsNone(
+            long_session.child_tool_failure(
+                [
+                    {
+                        "kind": "tree",
+                        "nodes": [{"depth": 1, "agent_id": "c1", "status": "running"}],
+                    },
+                ]
+            )
+        )
         retried = [
-            {"kind": "tool", "name": "adopt_candidate", "state": "failed",
-             "subject": "cand-c1-a1", "detail": '{"code": "target_changed"}'},
-            {"kind": "tool", "name": "adopt_candidate", "state": "done",
-             "subject": "cand-c1-a1"},
+            {
+                "kind": "tool",
+                "name": "adopt_candidate",
+                "state": "failed",
+                "subject": "cand-c1-a1",
+                "detail": '{"code": "target_changed"}',
+            },
+            {"kind": "tool", "name": "adopt_candidate", "state": "done", "subject": "cand-c1-a1"},
         ]
         self.assertIsNone(long_session.child_tool_failure(retried))
         self.assertIn("cand-c1-a1", long_session.child_tool_failure(retried[:1]))
@@ -576,9 +687,15 @@ class LongSessionOracleTests(unittest.TestCase):
             {"kind": "tool", "name": "spawn_agent", "state": "done", "subject": "spawn"},
         ]
         self.assertEqual(long_session.child_tool_failure(spawn_retried), "spawn")
-        text = long_session.child_tool_failure([
-            {"kind": "tool", "state": "failed", "subject": "text projection result violates its raised V2 contract"},
-        ])
+        text = long_session.child_tool_failure(
+            [
+                {
+                    "kind": "tool",
+                    "state": "failed",
+                    "subject": "text projection result violates its raised V2 contract",
+                },
+            ]
+        )
         self.assertIn("V2 contract", text)
         with self.assertRaises(live.ScenarioFailure) as raised:
             long_session.raise_child_tool_failure(text)
@@ -586,7 +703,8 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertIn("child tool failure", str(raised.exception))
         with self.assertRaises(live.ScenarioFailure) as raised:
             long_session.raise_child_tool_failure(
-                "agent turn failed: response reached its output bound before completion")
+                "agent turn failed: response reached its output bound before completion"
+            )
         self.assertEqual(raised.exception.outcome, live.MODEL)
 
     def test_blocked_child_quota_is_provider(self):
@@ -597,21 +715,25 @@ class LongSessionOracleTests(unittest.TestCase):
         }
         tree = {
             "kind": "tree",
-            "nodes": [{
-                "depth": 1,
-                "agent_id": "c1",
-                "status": "failed",
-                "attempt": "blocked",
-                "blocked": blocked,
-            }],
+            "nodes": [
+                {
+                    "depth": 1,
+                    "agent_id": "c1",
+                    "status": "failed",
+                    "attempt": "blocked",
+                    "blocked": blocked,
+                }
+            ],
         }
         receipt = {
-            "agents": [{
-                "agent_id": "c1",
-                "status": "failed",
-                "attempt": "blocked",
-                "blocked": blocked,
-            }],
+            "agents": [
+                {
+                    "agent_id": "c1",
+                    "status": "failed",
+                    "attempt": "blocked",
+                    "blocked": blocked,
+                }
+            ],
             "mail": [],
             "timed_out": False,
             "woke_by": "settled",
@@ -632,10 +754,19 @@ class LongSessionOracleTests(unittest.TestCase):
 
         quota = {
             "kind": "tree",
-            "nodes": [{
-                "depth": 1, "agent_id": "c1", "status": "failed", "attempt": "blocked",
-                "blocked": {"account": "openrouter", "quota": "quota_exceeded", "resets_at": 1700000000},
-            }],
+            "nodes": [
+                {
+                    "depth": 1,
+                    "agent_id": "c1",
+                    "status": "failed",
+                    "attempt": "blocked",
+                    "blocked": {
+                        "account": "openrouter",
+                        "quota": "quota_exceeded",
+                        "resets_at": 1700000000,
+                    },
+                }
+            ],
         }
         with self.assertRaises(live.ScenarioFailure) as raised:
             long_session.raise_child_tool_failure(long_session.child_tool_failure([quota]))
@@ -643,10 +774,14 @@ class LongSessionOracleTests(unittest.TestCase):
 
         unavailable = {
             "kind": "tree",
-            "nodes": [{
-                "depth": 1, "agent_id": "c1", "status": "failed",
-                "fault": "provider unavailable",
-            }],
+            "nodes": [
+                {
+                    "depth": 1,
+                    "agent_id": "c1",
+                    "status": "failed",
+                    "fault": "provider unavailable",
+                }
+            ],
         }
         with self.assertRaises(live.ScenarioFailure) as raised:
             long_session.raise_child_tool_failure(long_session.child_tool_failure([unavailable]))
@@ -654,40 +789,72 @@ class LongSessionOracleTests(unittest.TestCase):
 
         other = {
             "kind": "tree",
-            "nodes": [{
-                "depth": 1, "agent_id": "c1", "status": "failed", "attempt": "failed",
-                "fault": "bind failed",
-                "blocked": {"account": "codex", "quota": "weekly", "resets_at": 1700000000},
-            }],
+            "nodes": [
+                {
+                    "depth": 1,
+                    "agent_id": "c1",
+                    "status": "failed",
+                    "attempt": "failed",
+                    "fault": "bind failed",
+                    "blocked": {"account": "codex", "quota": "weekly", "resets_at": 1700000000},
+                }
+            ],
         }
         text = long_session.child_tool_failure([other])
         self.assertIn("weekly", text)
         with self.assertRaises(live.ScenarioFailure) as raised:
             long_session.raise_child_tool_failure(text)
         self.assertEqual(raised.exception.outcome, live.HARNESS)
-        self.assertIsNone(long_session.child_tool_failure([{
-            "agents": [{
-                "agent_id": "c1", "status": "completed", "attempt": "completed",
-            }],
-            "woke_by": "settled",
-        }]))
+        self.assertIsNone(
+            long_session.child_tool_failure(
+                [
+                    {
+                        "agents": [
+                            {
+                                "agent_id": "c1",
+                                "status": "completed",
+                                "attempt": "completed",
+                            }
+                        ],
+                        "woke_by": "settled",
+                    }
+                ]
+            )
+        )
         unavailable_quota = {
-            "agents": [{
-                "agent_id": "c1",
-                "status": "failed",
-                "attempt": "blocked",
-                "blocked": {"account": "openrouter", "quota": "unavailable", "resets_at": 1700000000},
-            }],
+            "agents": [
+                {
+                    "agent_id": "c1",
+                    "status": "failed",
+                    "attempt": "blocked",
+                    "blocked": {
+                        "account": "openrouter",
+                        "quota": "unavailable",
+                        "resets_at": 1700000000,
+                    },
+                }
+            ],
         }
         raw = json.dumps(unavailable_quota)
         self.assertFalse(live.text_is_provider_refusal(raw))
         self.assertTrue(live.provider_child_text(raw))
         with self.assertRaises(live.ScenarioFailure) as raised:
-            long_session.raise_child_tool_failure(long_session.child_tool_failure([unavailable_quota]))
+            long_session.raise_child_tool_failure(
+                long_session.child_tool_failure([unavailable_quota])
+            )
         self.assertEqual(raised.exception.outcome, live.PROVIDER)
-        self.assertFalse(long_session.is_committed_compaction_projection(
-            {"kind": "history_snapshot", "head": "h", "status": "Working",
-             "text": "", "tool_calls": 0, "tool_results": 0}))
+        self.assertFalse(
+            long_session.is_committed_compaction_projection(
+                {
+                    "kind": "history_snapshot",
+                    "head": "h",
+                    "status": "Working",
+                    "text": "",
+                    "tool_calls": 0,
+                    "tool_results": 0,
+                }
+            )
+        )
         codex = long_session.growth_prompt(40, "codex")
         self.assertIn("exec_command", codex)
         self.assertNotIn("read_file", codex)
@@ -714,20 +881,28 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertEqual(offsets, sorted(set(offsets)), name)
             self.assertLessEqual(offsets[-1] + lines - 1, line_count, name)
             per_token = long_session.bulk_bytes_per_token(pack)
-            self.assertGreater(len(batches) * batch_bytes / per_token,
-                               long_session.compaction_trigger(window, route.model), name)
+            self.assertGreater(
+                len(batches) * batch_bytes / per_token,
+                long_session.compaction_trigger(window, route.model),
+                name,
+            )
             call_lines = long_session.growth_call_lines(pack, window)
             reads = long_session.growth_reads(window, pack, call_lines, line_count, route.model)
             self.assertLessEqual(reads * call_lines, line_count, name)
-            self.assertGreater(reads * call_lines * long_session.LINE_BYTES / per_token,
-                               long_session.compaction_trigger(window, route.model), name)
+            self.assertGreater(
+                reads * call_lines * long_session.LINE_BYTES / per_token,
+                long_session.compaction_trigger(window, route.model),
+                name,
+            )
         self.assertEqual(long_session.round_cap_bytes(1_000_000), 262_144)
         self.assertEqual(long_session.round_cap_bytes(65_536), 32_768)
         self.assertEqual(long_session.round_cap_bytes(272_000), 87_040)
         prompt = long_session.overflow_prompt(21, [[1, 22], [43, 64]], "codex")
         self.assertTrue(prompt.startswith(long_session.codex_paging()))
         self.assertIn("exec_command", prompt)
-        self.assertTrue(long_session.growth_prompt(40, "codex").startswith(long_session.codex_paging()))
+        self.assertTrue(
+            long_session.growth_prompt(40, "codex").startswith(long_session.codex_paging())
+        )
         self.assertIn("non-interactive command", long_session.plant_prompt("codex"))
         for pack in ("codex", "grok", "claude", "pi"):
             for text in (long_session.growth_prompt(40, pack), prompt):
@@ -735,8 +910,10 @@ class LongSessionOracleTests(unittest.TestCase):
                     self.assertNotIn(primer, text, pack)
         for pack in ("grok", "claude", "pi"):
             self.assertNotIn("non-interactive", long_session.plant_prompt(pack))
-        self.assertIn("Round 2: offsets 41, 61.",
-                      long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"))
+        self.assertIn(
+            "Round 2: offsets 41, 61.",
+            long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"),
+        )
         self.assertNotIn("read_file", prompt)
 
     def test_every_planned_read_fits_its_tool_call_cap_and_the_plan_reaches_the_trigger(self):
@@ -746,16 +923,24 @@ class LongSessionOracleTests(unittest.TestCase):
         plan returns whole, every batch stays within the cap share, the file
         holds the plan, and the batches before the last pass the trigger.
         """
-        real_line = {pack: len(long_session.bulk_line(pack)) + 1
-                     for pack in ("pi", "grok", "claude", "codex")}
+        real_line = {
+            pack: len(long_session.bulk_line(pack)) + 1
+            for pack in ("pi", "grok", "claude", "codex")
+        }
         self.assertEqual(long_session.read_call_bytes("pi"), 50 * 1024)
         self.assertEqual(long_session.read_call_bytes("codex"), 40_000)
         self.assertEqual(long_session.read_call_bytes("grok"), long_session.READ_PAGE_BYTES)
-        cases = [("pi", window, "deepseek/deepseek-v4.1-flash-1017")
-                 for window in (*range(65_536, 967_232, 32_768), 967_232)]
-        cases += [("claude", 1_000_000, "claude-sonnet-5-5"), ("grok", 256_000, "grok-4.7"),
-                  ("grok", 500_000, "grok-4.6"), ("codex", 272_000, "gpt-6-luna"),
-                  ("codex", 500_000, "gpt-6.1-sol")]
+        cases = [
+            ("pi", window, "deepseek/deepseek-v4.1-flash-1017")
+            for window in (*range(65_536, 967_232, 32_768), 967_232)
+        ]
+        cases += [
+            ("claude", 1_000_000, "claude-sonnet-5-5"),
+            ("grok", 256_000, "grok-4.7"),
+            ("grok", 500_000, "grok-4.6"),
+            ("codex", 272_000, "gpt-6-luna"),
+            ("codex", 500_000, "gpt-6.1-sol"),
+        ]
         for pack, window, model in cases:
             label = (pack, window)
             with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": str(window)}):
@@ -763,37 +948,49 @@ class LongSessionOracleTests(unittest.TestCase):
             pages = max(route_pages, long_session.overflow_bulk_pages(window, pack, model))
             line_count = pages * long_session.lines_per_page()
             lines, batches = long_session.overflow_plan(window, pack, line_count, model)
-            self.assertEqual((lines, batches),
-                             long_session.overflow_plan(window, pack, None, model), label)
+            self.assertEqual(
+                (lines, batches), long_session.overflow_plan(window, pack, None, model), label
+            )
             self.assertLessEqual(lines, long_session.read_call_lines(pack), label)
             self.assertLessEqual(lines * real_line[pack], long_session.read_call_bytes(pack), label)
             calls = len(batches[0])
-            self.assertLessEqual(calls * lines * long_session.LINE_BYTES,
-                                 long_session.round_cap_bytes(window)
-                                 * long_session.OVERFLOW_CAP_SHARE, label)
+            self.assertLessEqual(
+                calls * lines * long_session.LINE_BYTES,
+                long_session.round_cap_bytes(window) * long_session.OVERFLOW_CAP_SHARE,
+                label,
+            )
             offsets = [offset for batch in batches for offset in batch]
             self.assertEqual(offsets, list(range(1, 1 + len(offsets) * lines, lines)), label)
             self.assertLessEqual(offsets[-1] + lines - 1, line_count, label)
             round_tokens = calls * lines * real_line[pack] / long_session.bulk_bytes_per_token(pack)
-            self.assertGreater((len(batches) - 1) * round_tokens,
-                               long_session.compaction_trigger(window, model), label)
-            self.assertGreaterEqual(len(batches) * round_tokens,
-                                    long_session.harness_bar(window, model), label)
+            self.assertGreater(
+                (len(batches) - 1) * round_tokens,
+                long_session.compaction_trigger(window, model),
+                label,
+            )
+            self.assertGreaterEqual(
+                len(batches) * round_tokens, long_session.harness_bar(window, model), label
+            )
             # Growth and child reads stay under the same per-call cap.
             call_lines = long_session.growth_call_lines(pack, window)
             self.assertLessEqual(call_lines, long_session.read_call_lines(pack), label)
-            child_read = (long_session.CODEX_CHILD_HALF_LINES if pack == "codex"
-                          else long_session.child_page_lines(pack, call_lines) + 1)
+            child_read = (
+                long_session.CODEX_CHILD_HALF_LINES
+                if pack == "codex"
+                else long_session.child_page_lines(pack, call_lines) + 1
+            )
             self.assertLessEqual(child_read, long_session.read_call_lines(pack), label)
         # The measured DeepSeek ceiling: one 32-line read per round, so a model
         # that reads once per response still passes the trigger.
         lines, batches = long_session.overflow_plan(
-            967_232, "pi", None, "deepseek/deepseek-v4.1-flash-1017")
+            967_232, "pi", None, "deepseek/deepseek-v4.1-flash-1017"
+        )
         self.assertEqual((lines, len(batches[0]), len(batches)), (32, 1, 29))
         prompt = long_session.overflow_prompt(lines, batches, "pi")
         self.assertTrue(prompt.startswith(long_session.OVERFLOW_PURPOSE))
-        self.assertIn("using only the read tool, in exactly 29 sequential calls of 32 lines each",
-                      prompt)
+        self.assertIn(
+            "using only the read tool, in exactly 29 sequential calls of 32 lines each", prompt
+        )
         self.assertIn("at line offsets 1, 33, 65, and so on up to 897.", prompt)
         self.assertIn("Make one call per response", prompt)
         self.assertNotIn("parallel batch", prompt)
@@ -807,8 +1004,9 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_pi_paging_prompts_spell_out_the_read_arguments(self):
         example = '{"path": "bulk.txt", "offset": 33, "limit": 32}'
         self.assertIn(example, long_session.growth_prompt(992, "pi", 32))
-        self.assertIn('{"path": "bulk.txt", "offset": 34, "limit": 33}',
-                      long_session.child_paging("pi", 32))
+        self.assertIn(
+            '{"path": "bulk.txt", "offset": 34, "limit": 33}', long_session.child_paging("pi", 32)
+        )
         for pack in ("grok", "claude", "codex"):
             self.assertNotIn("Pass path, offset and limit", long_session.growth_prompt(40, pack))
             self.assertNotIn("Pass path, offset and limit", long_session.child_paging(pack, 20))
@@ -847,7 +1045,9 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertEqual((lines, reads), (992, 31), name)
             self.assertLessEqual(lines * real_line, capture_cap)
             self.assertGreater((reads - long_session.GROWTH_EXTRA_READS + 1) * read_tokens, bar)
-            self.assertIn(f"limit {call_lines}", long_session.growth_prompt(lines, "pi", call_lines))
+            self.assertIn(
+                f"limit {call_lines}", long_session.growth_prompt(lines, "pi", call_lines)
+            )
 
             pages = long_session.child_pages(window, "pi", call_lines, model)
             self.assertEqual(pages, 31, name)
@@ -856,9 +1056,13 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertGreater((pages - long_session.GROWTH_EXTRA_READS + 1) * read_tokens, bar)
             self.assertIn(f"limit {call_lines + 1}", long_session.child_prompt("pi", call_lines))
 
-            line_count = max(long_session.default_pages(route),
-                             long_session.overflow_bulk_pages(window, "pi", model)
-                             ) * long_session.lines_per_page()
+            line_count = (
+                max(
+                    long_session.default_pages(route),
+                    long_session.overflow_bulk_pages(window, "pi", model),
+                )
+                * long_session.lines_per_page()
+            )
             over_lines, batches = long_session.overflow_plan(window, "pi", line_count, model)
             over_reads = sum(len(batch) for batch in batches)
             self.assertEqual((over_lines, over_reads), (32, 29), name)
@@ -866,30 +1070,41 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertLessEqual(line_count * real_line, capture_cap)
             self.assertGreater(
                 (over_reads - long_session.OVERFLOW_EXTRA_ROUNDS + 1)
-                * over_lines * real_line / per_token, bar)
+                * over_lines
+                * real_line
+                / per_token,
+                bar,
+            )
             # Every planned read fits the turn's timeout at a minute or more each.
-            self.assertGreaterEqual(long_session.growth_timeout(long_session.default_pages(route)),
-                                    60 * reads)
-            self.assertGreaterEqual(long_session.child_timeout(long_session.default_pages(route)),
-                                    60 * 2 * pages)
+            self.assertGreaterEqual(
+                long_session.growth_timeout(long_session.default_pages(route)), 60 * reads
+            )
+            self.assertGreaterEqual(
+                long_session.child_timeout(long_session.default_pages(route)), 60 * 2 * pages
+            )
             self.assertGreaterEqual(
                 long_session.overflow_timeout(len(batches), long_session.default_pages(route)),
-                60 * over_reads)
+                60 * over_reads,
+            )
 
     def test_pi_growth_dial_still_sizes_pages_and_small_windows_keep_small_reads(self):
         route = live.ROUTES["deepseek"]
-        with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232",
-                                     "PLAK_LIVE_GROWTH_PAGES": "3"}):
+        with patch.dict(
+            os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232", "PLAK_LIVE_GROWTH_PAGES": "3"}
+        ):
             self.assertEqual(long_session.growth_lines(route), 3 * long_session.lines_per_page())
         with patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": ""}):
             os.environ.pop("PLAK_LIVE_INPUT_CEILING", None)
             self.assertIsNone(long_session.catalog_window(route.model))
             self.assertEqual(long_session.growth_lines(route), 6 * long_session.lines_per_page())
         # One pi read stays at most an eighth of the window: 32 lines from 384k.
-        self.assertEqual(long_session.growth_call_lines("pi", 383_999), long_session.GROWTH_CALL_LINES)
+        self.assertEqual(
+            long_session.growth_call_lines("pi", 383_999), long_session.GROWTH_CALL_LINES
+        )
         self.assertEqual(long_session.growth_call_lines("pi", 384_000), long_session.PI_CALL_LINES)
-        with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "65536",
-                                     "PLAK_LIVE_GROWTH_PAGES": ""}):
+        with patch.dict(
+            os.environ, {"PLAK_LIVE_INPUT_CEILING": "65536", "PLAK_LIVE_GROWTH_PAGES": ""}
+        ):
             window = long_session.catalog_window(route.model)
             call_lines = long_session.growth_call_lines("pi", window)
             self.assertEqual(call_lines, 5)
@@ -897,8 +1112,10 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertEqual(long_session.child_pages(window, "pi", call_lines, route.model), 13)
             lines, batches = long_session.overflow_plan(window, "pi", None, route.model)
             self.assertEqual((lines, len(batches[0]), len(batches)), (16, 1, 5))
-            self.assertLessEqual(lines * long_session.LINE_BYTES,
-                                 long_session.round_cap_bytes(window) * long_session.OVERFLOW_CAP_SHARE)
+            self.assertLessEqual(
+                lines * long_session.LINE_BYTES,
+                long_session.round_cap_bytes(window) * long_session.OVERFLOW_CAP_SHARE,
+            )
 
     def test_grok_claude_and_codex_plans_are_unchanged(self):
         """Pinned: growth lines per read and bulk lines, child pages, overflow plan."""
@@ -917,7 +1134,8 @@ class LongSessionOracleTests(unittest.TestCase):
                 self.assertEqual(long_session.growth_call_lines(pack, window), call_lines, name)
                 self.assertEqual(long_session.growth_lines(route), lines, name)
                 self.assertEqual(
-                    long_session.child_pages(window, pack, call_lines, route.model), pages, name)
+                    long_session.child_pages(window, pack, call_lines, route.model), pages, name
+                )
                 over_lines, batches = long_session.overflow_plan(window, pack, None, route.model)
                 self.assertEqual((over_lines, len(batches[0]), len(batches)), plan, name)
         prompt = long_session.overflow_prompt(21, [[1, 22]] * 18, "codex")
@@ -927,13 +1145,19 @@ class LongSessionOracleTests(unittest.TestCase):
 
     def test_non_codex_prompts_are_pinned(self):
         """The codex reframing leaves every other pack's prompts byte-identical."""
-        texts = {pack: [long_session.plant_prompt(pack), long_session.growth_prompt(1_044, pack),
-                        long_session.growth_prompt(992, pack, 32),
-                        long_session.overflow_prompt(20, [[1, 21], [41, 61]], pack),
-                        long_session.overflow_prompt(32, [[1]] * 29, pack),
-                        long_session.child_prompt(pack, 20), long_session.child_prompt(pack, 32),
-                        long_session.follow_prompt(pack)]
-                 for pack in ("grok", "claude", "pi")}
+        texts = {
+            pack: [
+                long_session.plant_prompt(pack),
+                long_session.growth_prompt(1_044, pack),
+                long_session.growth_prompt(992, pack, 32),
+                long_session.overflow_prompt(20, [[1, 21], [41, 61]], pack),
+                long_session.overflow_prompt(32, [[1]] * 29, pack),
+                long_session.child_prompt(pack, 20),
+                long_session.child_prompt(pack, 32),
+                long_session.follow_prompt(pack),
+            ]
+            for pack in ("grok", "claude", "pi")
+        }
         digest = hashlib.sha256(json.dumps(texts, sort_keys=True).encode()).hexdigest()
         self.assertEqual(digest, NON_CODEX_PROMPTS_SHA256)
 
@@ -941,18 +1165,26 @@ class LongSessionOracleTests(unittest.TestCase):
         """gpt-6-luna refused to reproduce an "earlier secret code word"."""
         fact = long_session.new_fact("codex", lambda size: b"\x00\x00\x00\x05")
         self.assertEqual(fact, "rel-100005")
-        self.assertEqual(long_session.new_fact("grok", lambda size: b"\x00\x00\x00\x05"),
-                         "ZEBRA-100005")
+        self.assertEqual(
+            long_session.new_fact("grok", lambda size: b"\x00\x00\x00\x05"), "ZEBRA-100005"
+        )
         self.assertEqual(long_session.fact_file("codex"), "release_label.txt")
         self.assertEqual(long_session.fact_file("pi"), "codeword.txt")
         self.assertIn("release_label.txt", long_session.FACT_FILES)
         plant = long_session.plant_prompt("codex")
-        self.assertTrue(plant.startswith("This project's release label is in release_label.txt, "
-                                         "and a later step needs it."))
+        self.assertTrue(
+            plant.startswith(
+                "This project's release label is in release_label.txt, and a later step needs it."
+            )
+        )
         child = long_session.child_prompt("codex", 20)
-        prompts = (plant, long_session.growth_prompt(1_044, "codex"),
-                   long_session.overflow_prompt(21, [[1, 22]] * 18, "codex"),
-                   long_session.follow_prompt("codex"), child)
+        prompts = (
+            plant,
+            long_session.growth_prompt(1_044, "codex"),
+            long_session.overflow_prompt(21, [[1, 22]] * 18, "codex"),
+            long_session.follow_prompt("codex"),
+            child,
+        )
         for prompt in prompts:
             for word in ("code word", "codeword", "secret", "from memory"):
                 self.assertNotIn(word, prompt)
@@ -964,22 +1196,39 @@ class LongSessionOracleTests(unittest.TestCase):
 
     def test_codex_growth_and_overflow_read_one_check_word_page_per_exec(self):
         paging = long_session.codex_paging()
-        self.assertIn('const r = await tools.exec_command({cmd: "python3 page.py k"});\n'
-                      "text(r.output);\n", paging)
-        for rule in ("no loops", "never a second page in the same exec", "no max_output_tokens",
-                     "pages/k.txt", "Keep paging until you have read the last page"):
+        self.assertIn(
+            'const r = await tools.exec_command({cmd: "python3 page.py k"});\ntext(r.output);\n',
+            paging,
+        )
+        for rule in (
+            "no loops",
+            "never a second page in the same exec",
+            "no max_output_tokens",
+            "pages/k.txt",
+            "Keep paging until you have read the last page",
+        ):
             self.assertIn(rule, paging)
-        self.assertTrue(long_session.growth_prompt(1_044, "codex").endswith(
-            f"After the last page, {long_session.CODEX_RECALL_STEP} Reply with exactly: done"))
+        self.assertTrue(
+            long_session.growth_prompt(1_044, "codex").endswith(
+                f"After the last page, {long_session.CODEX_RECALL_STEP} Reply with exactly: done"
+            )
+        )
         # Read count is not stated: a Codex child told it bailed early.
         self.assertNotIn("52", long_session.growth_prompt(1_044, "codex"))
         self.assertNotIn("36", long_session.overflow_prompt(21, [[1, 22]] * 18, "codex"))
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
             words = long_session.write_slice_pages(repo / "bulk.txt", 3, 21)
-            pages = [subprocess.run([sys.executable, long_session.PAGER, str(page)], cwd=repo,
-                                    check=True, capture_output=True, text=True).stdout
-                     for page in (1, 2, 3)]
+            pages = [
+                subprocess.run(
+                    [sys.executable, long_session.PAGER, str(page)],
+                    cwd=repo,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                for page in (1, 2, 3)
+            ]
             self.assertEqual(long_session.pages_written(repo, words), 0)
             self.assertEqual(long_session.page_progress(repo, words), "check words for 0/3 pages")
             (repo / "pages").mkdir()
@@ -988,16 +1237,20 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(long_session.page_progress(repo, []), "")
         for index, text in enumerate(pages):
             lines = text.splitlines()
-            after = "This is the last page." if index == 2 else f"The next page is page {index + 2}."
+            after = (
+                "This is the last page." if index == 2 else f"The next page is page {index + 2}."
+            )
             self.assertEqual(lines[0], f"Page {index + 1}. Check word: {words[index]}. {after}")
             self.assertEqual(len(lines), 22)
             self.assertTrue(set("".join(lines[1:])) <= set("0123456789 "))
             # One exec_command result is at most 40,000 bytes.
             self.assertLess(len(text.encode()), long_session.CODEX_EXEC_CALL_BYTES)
         # The pager names the paging turn's window like a direct bulk.txt read.
-        records = [{"kind": "turn.lifecycle", "phase": "admitted"},
-                   {"kind": "tool.started", "name": "exec", "arguments": "python3 page.py 3"},
-                   {"kind": "turn.lifecycle", "phase": "completed"}]
+        records = [
+            {"kind": "turn.lifecycle", "phase": "admitted"},
+            {"kind": "tool.started", "name": "exec", "arguments": "python3 page.py 3"},
+            {"kind": "turn.lifecycle", "phase": "completed"},
+        ]
         self.assertEqual(long_session.bulk_windows(records), [(0, 3)])
 
     def test_child_pages_carry_the_check_words_the_oracle_counts(self):
@@ -1008,11 +1261,15 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertEqual(len(lines), 3 * 5)
             self.assertEqual(len(set(words)), 3)
             for index, word in enumerate(words):
-                after = ("This is the last page." if index == 2
-                         else f"The next page starts at line {1 + (index + 1) * 5}.")
+                after = (
+                    "This is the last page."
+                    if index == 2
+                    else f"The next page starts at line {1 + (index + 1) * 5}."
+                )
                 self.assertEqual(lines[index * 5], f"Page {index + 1}. Check word: {word}. {after}")
-                self.assertTrue(set("".join(lines[index * 5 + 1:index * 5 + 5]))
-                                <= set("0123456789 "))
+                self.assertTrue(
+                    set("".join(lines[index * 5 + 1 : index * 5 + 5])) <= set("0123456789 ")
+                )
             self.assertFalse((repo / long_session.PAGER).exists())
             self.assertEqual(long_session.pages_written(repo, words), 0)
             (repo / "pages").mkdir()
@@ -1033,34 +1290,49 @@ class LongSessionOracleTests(unittest.TestCase):
                 for part in (1, 2):
                     halves[page, part] = subprocess.run(
                         [sys.executable, long_session.PAGER, str(page), str(part)],
-                        cwd=repo, check=True, capture_output=True, text=True).stdout
-        self.assertEqual(halves[1, 1].splitlines()[0],
-                         f"Page 1. Check word: {words[0]}. The next page is page 2.")
-        self.assertEqual(halves[2, 1].splitlines()[0],
-                         f"Page 2. Check word: {words[1]}. This is the last page.")
+                        cwd=repo,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    ).stdout
+        self.assertEqual(
+            halves[1, 1].splitlines()[0],
+            f"Page 1. Check word: {words[0]}. The next page is page 2.",
+        )
+        self.assertEqual(
+            halves[2, 1].splitlines()[0], f"Page 2. Check word: {words[1]}. This is the last page."
+        )
         for (page, part), text in halves.items():
             body = text.splitlines()[1:] if part == 1 else text.splitlines()
             self.assertEqual(len(body), half, (page, part))
             self.assertFalse(any(line.startswith("Page ") for line in body))
             # One exec_command result is at most 40,000 bytes.
             self.assertLess(len(text.encode()), 40_000)
-        self.assertLess(len(halves[1, 1].encode()) + len(halves[1, 2].encode()),
-                        long_session.round_cap_bytes(272_000))
+        self.assertLess(
+            len(halves[1, 1].encode()) + len(halves[1, 2].encode()),
+            long_session.round_cap_bytes(272_000),
+        )
         self.assertEqual(long_session.catalog_window("gpt-6-luna"), 272_000)
         self.assertEqual(long_session.catalog_window("gpt-6.1-sol"), 500_000)
         self.assertEqual(long_session.child_pages(500_000, "codex", 20, "gpt-6.1-sol"), 10)
         pages = long_session.child_pages(272_000, "codex", 20, "gpt-6-luna")
         self.assertEqual(pages, 6)
         per_page = 2 * half * long_session.LINE_BYTES / long_session.CODEX_BASE64_BYTES_PER_TOKEN
-        self.assertGreater((pages - 1) * per_page,
-                           long_session.compaction_trigger(272_000, "gpt-6-luna"))
+        self.assertGreater(
+            (pages - 1) * per_page, long_session.compaction_trigger(272_000, "gpt-6-luna")
+        )
         prompt = long_session.child_prompt("codex", 20)
-        child = json.loads(prompt.split("Give the child exactly this prompt: ", 1)[1]
-                           .split("\nWait for the child", 1)[0])
+        child = json.loads(
+            prompt.split("Give the child exactly this prompt: ", 1)[1].split(
+                "\nWait for the child", 1
+            )[0]
+        )
         self.assertIn('{cmd: "python3 page.py k 1"}); notify(a.output);\n', child)
         self.assertIn('{cmd: "python3 page.py k 2"}); text(b.output);', child)
         self.assertIn("which page is next", child)
-        self.assertNotIn(str(pages), child.split("Then write")[0].split(long_session.plant_steps("codex"), 1)[1])
+        self.assertNotIn(
+            str(pages), child.split("Then write")[0].split(long_session.plant_steps("codex"), 1)[1]
+        )
         self.assertNotIn("earlier turn", child)
 
     def test_child_compaction_projection_and_ordinals(self):
@@ -1068,45 +1340,90 @@ class LongSessionOracleTests(unittest.TestCase):
             "entry_id": "11111111-1111-4111-8111-111111111111",
             "kind": "compaction",
             "text": "compacted 4 earlier segments (semantic summary)",
-            "tool_calls": 0, "tool_results": 0,
+            "tool_calls": 0,
+            "tool_results": 0,
         }
         self.assertTrue(long_session.is_committed_compaction_projection(segment))
-        self.assertTrue(long_session.is_committed_compaction_projection(
-            {**segment, "text": "compacted earlier segments"}))
-        self.assertTrue(long_session.is_committed_compaction_projection(
-            {**segment, "text": "compacted 2 earlier segments (placeholder pass)"}))
+        self.assertTrue(
+            long_session.is_committed_compaction_projection(
+                {**segment, "text": "compacted earlier segments"}
+            )
+        )
+        self.assertTrue(
+            long_session.is_committed_compaction_projection(
+                {**segment, "text": "compacted 2 earlier segments (placeholder pass)"}
+            )
+        )
         self.assertTrue(long_session.is_child_ordinal("c0"))
         self.assertTrue(long_session.is_child_ordinal("c1"))
         self.assertFalse(long_session.is_child_ordinal("c01"))
         self.assertFalse(long_session.is_child_ordinal("child-1"))
-        self.assertFalse(long_session.is_committed_compaction_projection(
-            {**segment, "text": "Summary of earlier work:"}))
-        self.assertFalse(long_session.is_committed_compaction_projection(
-            {**segment, "tool_calls": 1}))
-        self.assertFalse(long_session.is_committed_compaction_projection(
-            {"entry_id": segment["entry_id"], "kind": "assistant", "text": "",
-             "tool_calls": 0, "tool_results": 0}))
-        self.assertFalse(long_session.is_committed_compaction_projection(
-            {**segment, "kind": "user",
-             "text": "[plak: oldest tool results replaced this round]"}))
-        self.assertFalse(long_session.is_committed_compaction_projection(
-            {"kind": "compaction", "text": "compacted earlier segments",
-             "tool_calls": 0, "tool_results": 0}))
+        self.assertFalse(
+            long_session.is_committed_compaction_projection(
+                {**segment, "text": "Summary of earlier work:"}
+            )
+        )
+        self.assertFalse(
+            long_session.is_committed_compaction_projection({**segment, "tool_calls": 1})
+        )
+        self.assertFalse(
+            long_session.is_committed_compaction_projection(
+                {
+                    "entry_id": segment["entry_id"],
+                    "kind": "assistant",
+                    "text": "",
+                    "tool_calls": 0,
+                    "tool_results": 0,
+                }
+            )
+        )
+        self.assertFalse(
+            long_session.is_committed_compaction_projection(
+                {
+                    **segment,
+                    "kind": "user",
+                    "text": "[plak: oldest tool results replaced this round]",
+                }
+            )
+        )
+        self.assertFalse(
+            long_session.is_committed_compaction_projection(
+                {
+                    "kind": "compaction",
+                    "text": "compacted earlier segments",
+                    "tool_calls": 0,
+                    "tool_results": 0,
+                }
+            )
+        )
         events = [
-            {"kind": "tree", "nodes": [
-                {"depth": 0, "agent_id": "root"},
-                {"depth": 1, "agent_id": "c1", "parent_agent_id": "root"},
-                {"depth": 1, "agent_id": "c01"},
-            ]},
-            {"kind": "tool", "name": "wait_agent", "state": "succeeded",
-             "subject": "c1,c2 · up to 30s"},
+            {
+                "kind": "tree",
+                "nodes": [
+                    {"depth": 0, "agent_id": "root"},
+                    {"depth": 1, "agent_id": "c1", "parent_agent_id": "root"},
+                    {"depth": 1, "agent_id": "c01"},
+                ],
+            },
+            {
+                "kind": "tool",
+                "name": "wait_agent",
+                "state": "succeeded",
+                "subject": "c1,c2 · up to 30s",
+            },
             {"kind": "tool", "name": "read_file", "subject": "c3"},
         ]
         self.assertEqual(long_session.child_ordinals(events), ["c1", "c2"])
         # A check word echoed in a wait receipt is not a child ordinal.
-        echoed = [{"kind": "tool", "name": "wait_agent", "state": "succeeded",
-                   "subject": "c1 · up to 30s",
-                   "detail": "pages/2.txt contains check-c40954 (both words); c2:done"}]
+        echoed = [
+            {
+                "kind": "tool",
+                "name": "wait_agent",
+                "state": "succeeded",
+                "subject": "c1 · up to 30s",
+                "detail": "pages/2.txt contains check-c40954 (both words); c2:done",
+            }
+        ]
         self.assertEqual(long_session.child_ordinals(echoed), ["c1", "c2"])
         show = (
             "Session x\n\nTopology children (durable snapshot)\n"
@@ -1116,23 +1433,40 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(long_session.child_ordinals_from_show(show), ["c1", "c2"])
 
     def test_kill_reopen_accepts_nothing_started_or_running_tool(self):
-        self.assertTrue(long_session.accepted_kill_abandonment(
-            {"claim": "running_tool", "cause": "process_lost"}))
-        self.assertTrue(long_session.accepted_kill_abandonment(
-            {"claim": "nothing_started", "cause": "process_lost"}))
-        self.assertFalse(long_session.accepted_kill_abandonment(
-            {"claim": "model_request", "cause": "process_lost"}))
-        self.assertFalse(long_session.accepted_kill_abandonment(
-            {"claim": "running_tool", "cause": "interrupted"}))
-        self.assertFalse(long_session.accepted_kill_abandonment(
-            {"claim": "nothing_started", "cause": "interrupted"}))
+        self.assertTrue(
+            long_session.accepted_kill_abandonment(
+                {"claim": "running_tool", "cause": "process_lost"}
+            )
+        )
+        self.assertTrue(
+            long_session.accepted_kill_abandonment(
+                {"claim": "nothing_started", "cause": "process_lost"}
+            )
+        )
+        self.assertFalse(
+            long_session.accepted_kill_abandonment(
+                {"claim": "model_request", "cause": "process_lost"}
+            )
+        )
+        self.assertFalse(
+            long_session.accepted_kill_abandonment(
+                {"claim": "running_tool", "cause": "interrupted"}
+            )
+        )
+        self.assertFalse(
+            long_session.accepted_kill_abandonment(
+                {"claim": "nothing_started", "cause": "interrupted"}
+            )
+        )
 
     def test_marker_process_is_visible_only_after_exec(self):
         marker = "plak-long-kill-" + os.urandom(4).hex()
         self.assertFalse(long_session.marker_process_running(marker))
         proc = subprocess.Popen(
             ["python3", "-c", "import time; time.sleep(30)", marker],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         try:
             seen = False
             deadline = time.monotonic() + 3
@@ -1169,7 +1503,10 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
         # the copy. A real live run is not under that shim.
         saved = os.environ.get("PATH", "")
         os.environ["PATH"] = os.pathsep.join(
-            part for part in saved.split(os.pathsep) if not part.endswith(f"{os.sep}.plak{os.sep}bin"))
+            part
+            for part in saved.split(os.pathsep)
+            if not part.endswith(f"{os.sep}.plak{os.sep}bin")
+        )
         self.addCleanup(os.environ.__setitem__, "PATH", saved)
 
     def play(self, name: str, route: str = "grok", skip_pages: bool = False) -> str:
@@ -1190,7 +1527,10 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
                         self.assertIn("check words for 36/36 pages", detail)
                     if name == "child_compaction":
                         self.assertIn("recalled.txt matches release_label.txt", detail)
-            repo = self.capture_workspace / "artifacts/codex/in_turn_compaction/in_turn_compaction/repo"
+            repo = (
+                self.capture_workspace
+                / "artifacts/codex/in_turn_compaction/in_turn_compaction/repo"
+            )
             self.assertEqual((repo / "release_label.txt").read_text().strip()[:4], "rel-")
             self.assertFalse((repo / "codeword.txt").exists())
             with self.assertRaises(live.ScenarioFailure) as raised:
@@ -1200,17 +1540,20 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
 
     def test_fake_session_log_emits_the_compaction_projection_and_a_bad_child_is_pending(self):
         items = long_session.read_child_history(
-            self.binary, self.capture_workspace, "long-root", "c1")
-        self.assertTrue(any(long_session.is_committed_compaction_projection(item) for item in items))
+            self.binary, self.capture_workspace, "long-root", "c1"
+        )
+        self.assertTrue(
+            any(long_session.is_committed_compaction_projection(item) for item in items)
+        )
         self.assertGreater(len(items), 1)
         with self.assertRaises(live.ScenarioFailure) as raised:
-            long_session.read_child_history(
-                self.binary, self.capture_workspace, "long-root", "c9")
+            long_session.read_child_history(self.binary, self.capture_workspace, "long-root", "c9")
         self.assertEqual(raised.exception.outcome, live.PENDING)
         self.assertIn("session log", str(raised.exception))
         self.assertNotIn("open product gap", str(raised.exception))
         show = long_session.child_ordinals_from_session_show(
-            self.binary, self.capture_workspace, "long-root")
+            self.binary, self.capture_workspace, "long-root"
+        )
         self.assertEqual(show, ["c1"])
 
     def test_fake_binary_satisfies_each_scenario(self):
@@ -1218,7 +1561,8 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
             with self.subTest(name=name):
                 detail = self.play(name)
                 self.assertIn("wrote", detail) if name != "child_compaction" else self.assertIn(
-                    "recalled.txt", detail)
+                    "recalled.txt", detail
+                )
 
     def test_agent_home_override_is_the_child_plak_home(self):
         env = live.Env(self.binary, self.capture_workspace / "shared", self.capture_workspace)
@@ -1228,9 +1572,11 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
             agent.session_id = "synthetic"
             return {"kind": "ready"}
 
-        with patch.object(live.subprocess, "Popen") as popen, \
-                patch.object(live.threading, "Thread"), \
-                patch.object(live.Agent, "wait_for", ready):
+        with (
+            patch.object(live.subprocess, "Popen") as popen,
+            patch.object(live.threading, "Thread"),
+            patch.object(live.Agent, "wait_for", ready),
+        ):
             agent = live.Agent(env, self.capture_workspace, "agent", args=[], home=private)
             self.assertEqual(popen.call_args.kwargs["env"]["PLAK_HOME"], str(private))
             agent.transcript.close()

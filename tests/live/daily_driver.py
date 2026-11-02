@@ -21,11 +21,19 @@ TARGET = re.compile(r"\b((?:plak|plakous)[a-zA-Z0-9_:.]*):\s")
 FIELDS = re.compile(r'\b([a-z_]+)=(?:"([^"\n]*)"|([^\s}]+))')
 BUILD_PATH = re.compile(r"(?:^|/)maintainer/([0-9a-f]{12,64})/plak(?:\s|\"|$)")
 VERSION = re.compile(r"\bplak (?:version[: ]+)?[0-9][^\n]*?\bbinary ([0-9a-f]{12,64})\b")
-PROVIDERS = frozenset({"codex", "xai", "grok", "claude", "native", "openrouter",
-                       "openai", "anthropic", "xai-api"})
+PROVIDERS = frozenset(
+    {"codex", "xai", "grok", "claude", "native", "openrouter", "openai", "anthropic", "xai-api"}
+)
 MODELS = frozenset(route.model for route in live.ROUTES.values())
-CAUSES = frozenset({"http_status", "connect", "record_rejected_in_transit",
-                   "transport_after_send", "stream_interrupted"})
+CAUSES = frozenset(
+    {
+        "http_status",
+        "connect",
+        "record_rejected_in_transit",
+        "transport_after_send",
+        "stream_interrupted",
+    }
+)
 
 
 @dataclass
@@ -53,8 +61,9 @@ class Build:
 
 
 def fields(text: str) -> dict[str, str]:
-    return {match[1]: match[2] if match[2] is not None else match[3]
-            for match in FIELDS.finditer(text)}
+    return {
+        match[1]: match[2] if match[2] is not None else match[3] for match in FIELDS.finditer(text)
+    }
 
 
 def snapshot_binary_id(snapshot: str) -> str | None:
@@ -88,16 +97,22 @@ def summarize(lines: Iterable[str], since: str | None = None) -> list[Build]:
             continue
         target_match = TARGET.search(body)
         target = target_match[1] if target_match else None
-        message = body[target_match.end():] if target_match else body
+        message = body[target_match.end() :] if target_match else body
         reload = target == "plak.reload" and "exec installed plak" in message
         version = VERSION.search(message) if not reload else None
         startup = fields(message).get("binary") if target == "plak.start" else None
         if startup and re.fullmatch(r"[0-9a-f]{12}", startup):
-            current = next((key for key, build in builds.items() if build.binary_id == startup), startup)
+            current = next(
+                (key for key, build in builds.items() if build.binary_id == startup), startup
+            )
             builds.setdefault(current, Build(current, binary_id=startup))
         elif version:
             previous = builds.get(current)
-            if previous is not None and previous.snapshot and previous.binary_id in {None, version[1]}:
+            if (
+                previous is not None
+                and previous.snapshot
+                and previous.binary_id in {None, version[1]}
+            ):
                 previous.binary_id = version[1]
             else:
                 current = version[1]
@@ -140,47 +155,71 @@ def summarize(lines: Iterable[str], since: str | None = None) -> list[Build]:
             if installed:
                 if current not in snapshot_ids:
                     snapshot_ids[current] = snapshot_binary_id(current)
-                builds.setdefault(current, Build(current, binary_id=snapshot_ids[current], snapshot=True))
-    return [build for build in builds.values()
-            if build.days or build.bindings or build.problems or build.capture or build.reloads]
+                builds.setdefault(
+                    current, Build(current, binary_id=snapshot_ids[current], snapshot=True)
+                )
+    return [
+        build
+        for build in builds.values()
+        if build.days or build.bindings or build.problems or build.capture or build.reloads
+    ]
 
 
 def counts_text(counts: Counter) -> str:
-    return "; ".join(f"{' '.join(key) if isinstance(key, tuple) else key}={count}"
-                     for key, count in sorted(counts.items())) or "0 observed"
+    return (
+        "; ".join(
+            f"{' '.join(key) if isinstance(key, tuple) else key}={count}"
+            for key, count in sorted(counts.items())
+        )
+        or "0 observed"
+    )
 
 
 def render(builds: list[Build]) -> str:
-    lines = ["# Daily-driver evidence", "",
-             "| Build reference | Binary ID | Active days | Root routes | Turns admitted | Reloads / carries | Recovered / abandoned |",
-             "| --- | --- | ---: | --- | ---: | --- | --- |"]
+    lines = [
+        "# Daily-driver evidence",
+        "",
+        "| Build reference | Binary ID | Active days | Root routes | Turns admitted | Reloads / carries | Recovered / abandoned |",
+        "| --- | --- | ---: | --- | ---: | --- | --- |",
+    ]
     for build in builds:
         routes = ", ".join(build.routes(False)) or "none observed"
-        lines.append(f"| {build.build_id} | {build.binary_id or 'unknown'} | {len(build.days)} | {routes} | "
-                     f"{len(build.turns) if build.turns else 'n/a'} | "
-                     f"{build.reloads} / {build.carries} | {build.recovered} / {build.abandoned} |")
-    lines += ["", "| Build | Provider/model | Session bindings |",
-              "| --- | --- | --- |"]
+        lines.append(
+            f"| {build.build_id} | {build.binary_id or 'unknown'} | {len(build.days)} | {routes} | "
+            f"{len(build.turns) if build.turns else 'n/a'} | "
+            f"{build.reloads} / {build.carries} | {build.recovered} / {build.abandoned} |"
+        )
+    lines += ["", "| Build | Provider/model | Session bindings |", "| --- | --- | --- |"]
     for build in builds:
         roots, children = build.routes(False), build.routes(True)
         for route in sorted(roots.keys() | children.keys()):
-            lines.append(f"| {build.build_id} | {route} | root={roots.get(route, 0)}, child={children.get(route, 0)} |")
-    lines += ["", "| Build | WARN/ERROR by target (excluding capture) | Capture noise | Retries by cause |",
-              "| --- | --- | --- | --- |"]
+            lines.append(
+                f"| {build.build_id} | {route} | root={roots.get(route, 0)}, child={children.get(route, 0)} |"
+            )
+    lines += [
+        "",
+        "| Build | WARN/ERROR by target (excluding capture) | Capture noise | Retries by cause |",
+        "| --- | --- | --- | --- |",
+    ]
     for build in builds:
-        lines.append(f"| {build.build_id} | {counts_text(build.problems)} | "
-                     f"{counts_text(build.capture)} | {counts_text(build.retries)} |")
-    lines += ["", "Counts are observed log evidence, not canonical totals. Active days exclude capture-only noise.",
-              "Build attribution prefers plak.start binary IDs, then chronological reload/version boundaries.",
-              "Snapshot binaries still installed are hashed read-only for their 12-hex binary ID; missing snapshots",
-              "and pre-boundary use stay unknown. Concurrent old processes cannot be separated without startup IDs,",
-              "and maintainer directory hashes identify three-executable snapshots, not plak binary IDs.",
-              "Root routes are",
-              "provider/model pairs, not proof of effort, protocol or composition. Bindings deduplicate",
-              "session IDs within each build/route; repeated span lines are not additional sessions.",
-              "Turns are n/a without admitted lifecycle records; absent recovery/carry records do not prove zero.",
-              "Only registered provider/model names, stable retry causes, target names, build hashes and counts",
-              "are printed. No session IDs, prompts, paths, request details, credentials or environment are printed."]
+        lines.append(
+            f"| {build.build_id} | {counts_text(build.problems)} | "
+            f"{counts_text(build.capture)} | {counts_text(build.retries)} |"
+        )
+    lines += [
+        "",
+        "Counts are observed log evidence, not canonical totals. Active days exclude capture-only noise.",
+        "Build attribution prefers plak.start binary IDs, then chronological reload/version boundaries.",
+        "Snapshot binaries still installed are hashed read-only for their 12-hex binary ID; missing snapshots",
+        "and pre-boundary use stay unknown. Concurrent old processes cannot be separated without startup IDs,",
+        "and maintainer directory hashes identify three-executable snapshots, not plak binary IDs.",
+        "Root routes are",
+        "provider/model pairs, not proof of effort, protocol or composition. Bindings deduplicate",
+        "session IDs within each build/route; repeated span lines are not additional sessions.",
+        "Turns are n/a without admitted lifecycle records; absent recovery/carry records do not prove zero.",
+        "Only registered provider/model names, stable retry causes, target names, build hashes and counts",
+        "are printed. No session IDs, prompts, paths, request details, credentials or environment are printed.",
+    ]
     return "\n".join(lines) + "\n"
 
 

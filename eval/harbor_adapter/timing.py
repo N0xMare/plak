@@ -20,8 +20,12 @@ def parse_timestamp(value: str | None) -> datetime | None:
 def span_seconds(block: dict[str, Any] | None) -> float | None:
     if not isinstance(block, dict):
         return None
-    start = parse_timestamp(block.get("started_at") if isinstance(block.get("started_at"), str) else None)
-    end = parse_timestamp(block.get("finished_at") if isinstance(block.get("finished_at"), str) else None)
+    start = parse_timestamp(
+        block.get("started_at") if isinstance(block.get("started_at"), str) else None
+    )
+    end = parse_timestamp(
+        block.get("finished_at") if isinstance(block.get("finished_at"), str) else None
+    )
     if start is None or end is None:
         return None
     if (start.utcoffset() is None) != (end.utcoffset() is None):

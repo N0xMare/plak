@@ -31,13 +31,18 @@ def require_composition_override(composition: str | None, account: str) -> str |
     import os
     from harbor_adapter.campaign import load_campaign
     from harbor_adapter.preflight import PreflightError
+
     try:
         plan = load_campaign()
     except PreflightError as error:
         raise ArgumentError("composition override requires an explicit A/B campaign arm") from error
     arm = plan["arms"].get(os.environ.get("HARBOR_ARM"))
-    if (len(plan["arms"]) < 2 or not arm or arm.get("composition") != composition
-            or arm.get("account") != account):
+    if (
+        len(plan["arms"]) < 2
+        or not arm
+        or arm.get("composition") != composition
+        or arm.get("account") != account
+    ):
         raise ArgumentError("composition override differs from the declared A/B campaign arm")
     return composition
 
@@ -46,16 +51,12 @@ def require_tuple(account: str, model: str, effort: str) -> None:
     if account not in ACCOUNTS:
         raise ArgumentError(f"unsupported eval account {account!r}")
     if (account, model, effort) not in QUALIFIED:
-        raise ArgumentError(
-            f"tuple {account}/{model}/{effort} is not a §5.1 bakeoff cell"
-        )
+        raise ArgumentError(f"tuple {account}/{model}/{effort} is not a §5.1 bakeoff cell")
 
 
 def require_js_host(path: Path) -> None:
     if not path.is_file():
-        raise ArgumentError(
-            f"missing JavaScript host {path}; run `just harbor build-agent`"
-        )
+        raise ArgumentError(f"missing JavaScript host {path}; run `just harbor build-agent`")
 
 
 def sanitize_extra_env(extra_env: dict[str, str] | None) -> dict[str, str]:

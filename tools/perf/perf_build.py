@@ -32,7 +32,15 @@ SCHEMA = "plakous.perf-build.v10"
 FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 10}
 SUPPORTED_PUBLIC_BUILD_PROFILES = {
     "minimal": ("plakous", ("--lib",), ()),
-    "subscriptions": ("plakous", ("--lib",), ("codex", "grok", "claude",)),
+    "subscriptions": (
+        "plakous",
+        ("--lib",),
+        (
+            "codex",
+            "grok",
+            "claude",
+        ),
+    ),
     "sessions-sqlite": ("plakous", ("--lib",), ("sessions-sqlite",)),
     "plak": ("plak", ("--bin", "plak"), ()),
     "agent": ("plakous-agent", ("--lib",), ()),
@@ -239,13 +247,9 @@ def checked_stdout(command: list[str], *, env: dict[str, str] | None = None) -> 
         raise RuntimeError(f"timed out after {TOOL_TIMEOUT_SECONDS}s: {command!r}")
     if result["returncode"] != 0:
         tail = bytes(result["stderr_tail"]).decode(errors="replace")
-        raise RuntimeError(
-            f"command failed ({result['returncode']}): {command!r}: {tail}"
-        )
+        raise RuntimeError(f"command failed ({result['returncode']}): {command!r}: {tail}")
     if not result["stdout_complete"]:
-        raise RuntimeError(
-            f"command stdout exceeded {TOOL_STDOUT_LIMIT_BYTES} bytes: {command!r}"
-        )
+        raise RuntimeError(f"command stdout exceeded {TOOL_STDOUT_LIMIT_BYTES} bytes: {command!r}")
     return bytes(result["stdout"])
 
 
@@ -264,9 +268,7 @@ def checked_stdout_sha256(command: list[str]) -> str:
         except subprocess.TimeoutExpired:
             terminate_process_group(process)
             process.wait()
-            raise RuntimeError(
-                f"timed out after {TOOL_TIMEOUT_SECONDS}s: {command!r}"
-            ) from None
+            raise RuntimeError(f"timed out after {TOOL_TIMEOUT_SECONDS}s: {command!r}") from None
         if returncode != 0:
             tail = file_tail(stderr, OUTPUT_TAIL_BYTES).decode(errors="replace")
             raise RuntimeError(f"command failed ({returncode}): {command!r}: {tail}")
@@ -322,9 +324,7 @@ def cargo_identity(cargo: str) -> dict[str, object]:
     }
 
 
-def cargo_environment(
-    rustc: str, cargo_profile: str
-) -> tuple[dict[str, str], list[str]]:
+def cargo_environment(rustc: str, cargo_profile: str) -> tuple[dict[str, str], list[str]]:
     """Return the explicitly controlled Cargo environment and ambient removals."""
     controlled = {
         "CARGO_ENCODED_RUSTFLAGS": RUSTFLAGS_SEPARATOR.join(RUSTFLAGS),
@@ -348,9 +348,7 @@ def cargo_environment(
     return controlled, removed
 
 
-def sanitized_environment(
-    controlled: dict[str, str], removed: list[str]
-) -> dict[str, str]:
+def sanitized_environment(controlled: dict[str, str], removed: list[str]) -> dict[str, str]:
     """Apply the recorded Cargo environment policy to the ambient environment."""
     env = os.environ.copy()
     dynamic_removals = [
@@ -369,9 +367,7 @@ def profile_config_arguments(cargo_profile: str) -> list[str]:
     """Encode every controlled Cargo profile setting as command-line config."""
     arguments: list[str] = []
     for key, value in TARGET_UNIT_PROFILE_SETTINGS[cargo_profile].items():
-        arguments.extend(
-            ("--config", f"profile.{cargo_profile}.{key}={json.dumps(value)}")
-        )
+        arguments.extend(("--config", f"profile.{cargo_profile}.{key}={json.dumps(value)}"))
     return arguments
 
 
@@ -495,9 +491,7 @@ def closure_provenance(
         "entries_sha256": sha256_bytes(encoded),
         "raw_stdout_sha256": sha256_bytes(raw),
         "resolved_root_features": sorted(
-            feature
-            for feature in root_entries[0].split("|", 1)[1].split(",")
-            if feature
+            feature for feature in root_entries[0].split("|", 1)[1].split(",") if feature
         ),
     }
 
@@ -520,13 +514,9 @@ def cargo_package_and_inputs(
         "Cargo.toml",
     ]
     document = json.loads(checked_stdout(command, env=env))
-    selected = [
-        package for package in document["packages"] if package["name"] == package_name
-    ]
+    selected = [package for package in document["packages"] if package["name"] == package_name]
     if len(selected) != 1:
-        raise RuntimeError(
-            f"cargo metadata found {len(selected)} {package_name} packages"
-        )
+        raise RuntimeError(f"cargo metadata found {len(selected)} {package_name} packages")
     package = selected[0]
     manifest_path = Path(package["manifest_path"]).resolve()
     paths = {
@@ -568,16 +558,12 @@ def git_identity() -> dict[str, object]:
         }
     git = executable("git")
     commit = checked_stdout([git, "rev-parse", "--verify", "HEAD"]).decode().strip()
-    status = checked_stdout(
-        [git, "status", "--porcelain=v1", "--untracked-files=normal"]
-    )
+    status = checked_stdout([git, "status", "--porcelain=v1", "--untracked-files=normal"])
     return {
         "commit": commit,
         "dirty": bool(status),
         "status_sha256": sha256_bytes(status),
-        "tracked_patch_sha256": checked_stdout_sha256(
-            [git, "diff", "--binary", "HEAD"]
-        ),
+        "tracked_patch_sha256": checked_stdout_sha256([git, "diff", "--binary", "HEAD"]),
         "non_ignored_worktree_content_closure": worktree_content_closure(),
     }
 
@@ -652,9 +638,7 @@ def helper_sample(payload: dict[str, Any]) -> dict[str, object]:
             "error": f"target was {'present' if existed_before else 'absent'}; expected {expected}",
             "target_existed_before": existed_before,
         }
-    env = sanitized_environment(
-        payload["controlled_environment"], payload["removed_environment"]
-    )
+    env = sanitized_environment(payload["controlled_environment"], payload["removed_environment"])
     before = resource.getrusage(resource.RUSAGE_CHILDREN) if resource else None
     result = run_captured(
         payload["command"],
@@ -685,9 +669,7 @@ def helper_sample(payload: dict[str, Any]) -> dict[str, object]:
         "elapsed_ns": result["elapsed_ns"],
         "rusage_children_maxrss_kib": rss,
         "rusage_children_maxrss_normalization": rss_normalization,
-        "rusage_children_before_maxrss_native": int(before.ru_maxrss)
-        if before
-        else None,
+        "rusage_children_before_maxrss_native": int(before.ru_maxrss) if before else None,
         **artifact_inventory(target),
         "status": 124 if result["timed_out"] else result["returncode"],
         "process_returncode": result["returncode"],
@@ -715,11 +697,7 @@ def invoke_helper(payload: dict[str, object]) -> dict[str, object]:
         timeout_seconds=int(payload["timeout_seconds"]) + HELPER_GRACE_SECONDS,
         stdout_limit_bytes=256 * 1024,
     )
-    if (
-        result["timed_out"]
-        or result["returncode"] != 0
-        or not result["stdout_complete"]
-    ):
+    if result["timed_out"] or result["returncode"] != 0 or not result["stdout_complete"]:
         return {
             "schema": SCHEMA,
             "kind": "sample",
@@ -758,13 +736,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--cargo-profile", choices=sorted(TARGET_UNIT_PROFILE_SETTINGS), default="dev"
     )
-    parser.add_argument(
-        "--operation", choices=tuple(CARGO_OPERATION_SEMANTICS), default="check"
-    )
+    parser.add_argument("--operation", choices=tuple(CARGO_OPERATION_SEMANTICS), default="check")
     parser.add_argument("--host-id", default=os.environ.get("PLAKOUS_PERF_HOST_ID"))
-    parser.add_argument(
-        "--target", help="explicit Rust target triple; defaults to rustc host"
-    )
+    parser.add_argument("--target", help="explicit Rust target triple; defaults to rustc host")
     parser.add_argument("--jobs", type=int, default=max(1, os.cpu_count() or 1))
     parser.add_argument("--warm-samples", type=int, default=2)
     parser.add_argument("--timeout-seconds", type=int, default=900)
@@ -806,9 +780,7 @@ def main() -> int:
     operation_semantics = CARGO_OPERATION_SEMANTICS[args.operation]
     controlled, removed = cargo_environment(rustc, args.cargo_profile)
     env = sanitized_environment(controlled, removed)
-    package, provenance_inputs = cargo_package_and_inputs(
-        cargo, package_name, target, env
-    )
+    package, provenance_inputs = cargo_package_and_inputs(cargo, package_name, target, env)
     closure = closure_provenance(cargo, package_name, features, target, env)
     metadata: dict[str, object] = {
         "schema": SCHEMA,
@@ -843,9 +815,7 @@ def main() -> int:
             "default_features": False,
             "resolved_feature_closure": closure,
             "cargo_profile": args.cargo_profile,
-            "target_unit_profile_settings": TARGET_UNIT_PROFILE_SETTINGS[
-                args.cargo_profile
-            ],
+            "target_unit_profile_settings": TARGET_UNIT_PROFILE_SETTINGS[args.cargo_profile],
             "profile_settings_scope": "explicit profile.<name> settings for target units",
             "host_build_unit_scope": {
                 "units": "build scripts, proc macros, and their dependencies",

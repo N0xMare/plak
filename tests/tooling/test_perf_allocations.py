@@ -42,7 +42,9 @@ class MemusageParserTests(unittest.TestCase):
 
     def test_rejects_failed_allocations(self) -> None:
         with self.assertRaises(perf.ProbeError):
-            perf.parse_memusage(MEMUSAGE_STDERR.replace("10000              0", "10000              1", 1))
+            perf.parse_memusage(
+                MEMUSAGE_STDERR.replace("10000              0", "10000              1", 1)
+            )
 
 
 class ContractTests(unittest.TestCase):
@@ -55,45 +57,101 @@ class ContractTests(unittest.TestCase):
 
     def test_delta_is_explicitly_derived_from_zero_n_pair(self) -> None:
         common = {
-            "schema": perf.SCHEMA, "kind": "raw-sample", "pair_id": "pair",
-            "workload": "core-event-round", "benchmark": "perf_core", "operation": "event-round",
-            "scenario": "short", "scale": 8,
+            "schema": perf.SCHEMA,
+            "kind": "raw-sample",
+            "pair_id": "pair",
+            "workload": "core-event-round",
+            "benchmark": "perf_core",
+            "operation": "event-round",
+            "scenario": "short",
+            "scale": 8,
         }
-        zero = {**common, "sample_id": "zero", "iteration_count": 0,
-                "metrics": {"allocation_calls": 10, "heap_total_bytes": 100, "heap_peak_bytes": 80}}
-        measured = {**common, "sample_id": "n", "iteration_count": 5,
-                    "metrics": {"allocation_calls": 35, "heap_total_bytes": 600, "heap_peak_bytes": 120}}
+        zero = {
+            **common,
+            "sample_id": "zero",
+            "iteration_count": 0,
+            "metrics": {"allocation_calls": 10, "heap_total_bytes": 100, "heap_peak_bytes": 80},
+        }
+        measured = {
+            **common,
+            "sample_id": "n",
+            "iteration_count": 5,
+            "metrics": {"allocation_calls": 35, "heap_total_bytes": 600, "heap_peak_bytes": 120},
+        }
         row = perf.delta_row(zero, measured)
-        self.assertEqual(row["deltas"], {"allocation_calls": 25, "heap_total_bytes": 500, "heap_peak_bytes": 40})
+        self.assertEqual(
+            row["deltas"], {"allocation_calls": 25, "heap_total_bytes": 500, "heap_peak_bytes": 40}
+        )
         self.assertEqual(row["per_iteration"]["allocation_calls"], 5)
         self.assertIn("non-additive", row["peak_caveat"])
 
     def test_exact_row_validation_rejects_extra_fields(self) -> None:
         row = {
-            "schema": perf.SCHEMA, "kind": "derived-delta", "pair_id": "p",
-            "workload": "core-event-round", "benchmark": "perf_core", "operation": "event-round",
-            "scenario": "short", "scale": 8,
-            "iteration_count": 1, "zero_sample_id": "z", "measured_sample_id": "n",
-            "derivation": "x", "deltas": {"allocation_calls": 1, "heap_total_bytes": 2, "heap_peak_bytes": 3},
-            "per_iteration": {"allocation_calls": 1.0, "heap_total_bytes": 2.0, "heap_peak_bytes": 3.0},
-            "qualification": "host-qualified-unratified-derived-observation", "peak_caveat": "x",
+            "schema": perf.SCHEMA,
+            "kind": "derived-delta",
+            "pair_id": "p",
+            "workload": "core-event-round",
+            "benchmark": "perf_core",
+            "operation": "event-round",
+            "scenario": "short",
+            "scale": 8,
+            "iteration_count": 1,
+            "zero_sample_id": "z",
+            "measured_sample_id": "n",
+            "derivation": "x",
+            "deltas": {"allocation_calls": 1, "heap_total_bytes": 2, "heap_peak_bytes": 3},
+            "per_iteration": {
+                "allocation_calls": 1.0,
+                "heap_total_bytes": 2.0,
+                "heap_peak_bytes": 3.0,
+            },
+            "qualification": "host-qualified-unratified-derived-observation",
+            "peak_caveat": "x",
             "invented": True,
         }
         with self.assertRaises(perf.ProbeError):
             perf.validate_row(row)
 
     @mock.patch.object(perf.subprocess, "run")
-    def test_measure_invokes_memusage_and_validates_probe_confirmation(self, run: mock.Mock) -> None:
+    def test_measure_invokes_memusage_and_validates_probe_confirmation(
+        self, run: mock.Mock
+    ) -> None:
         confirmation = '{"schema":"plakous.perf-isolated-workload.v1","bench":"perf_core","operation":"event-round","history_turns":10,"iterations":4,"completed_iterations":4}\n'
-        run.return_value = subprocess.CompletedProcess([], 0, stdout=confirmation, stderr=MEMUSAGE_STDERR)
-        row = perf.measure(Path("/snapshot/perf_core"), "core-event-round", "perf_core", "event-round", "short", 10, 4, "pair", "sample")
+        run.return_value = subprocess.CompletedProcess(
+            [], 0, stdout=confirmation, stderr=MEMUSAGE_STDERR
+        )
+        row = perf.measure(
+            Path("/snapshot/perf_core"),
+            "core-event-round",
+            "perf_core",
+            "event-round",
+            "short",
+            10,
+            4,
+            "pair",
+            "sample",
+        )
         arguments = run.call_args.args[0]
         self.assertEqual(arguments[:3], ["/usr/bin/memusage", "--", "/snapshot/perf_core"])
         self.assertEqual(arguments[3:], ["--isolated-probe", "event-round", "10", "4"])
-        self.assertEqual(row["scope"], "startup-inclusive process total from one isolated benchmark invocation")
-        run.return_value = subprocess.CompletedProcess([], 0, stdout="unexpected", stderr=MEMUSAGE_STDERR)
+        self.assertEqual(
+            row["scope"], "startup-inclusive process total from one isolated benchmark invocation"
+        )
+        run.return_value = subprocess.CompletedProcess(
+            [], 0, stdout="unexpected", stderr=MEMUSAGE_STDERR
+        )
         with self.assertRaises(perf.ProbeError):
-            perf.measure(Path("/snapshot/perf_core"), "core-event-round", "perf_core", "event-round", "short", 10, 4, "pair", "sample")
+            perf.measure(
+                Path("/snapshot/perf_core"),
+                "core-event-round",
+                "perf_core",
+                "event-round",
+                "short",
+                10,
+                4,
+                "pair",
+                "sample",
+            )
 
     @mock.patch.object(perf, "command")
     def test_discovery_uses_cargo_json_executable(self, command: mock.Mock) -> None:
@@ -102,12 +160,16 @@ class ContractTests(unittest.TestCase):
             executable.write_bytes(b"executable")
             executable.chmod(0o755)
             command.return_value = subprocess.CompletedProcess(
-                [], 0,
-                stdout=json.dumps({
-                    "reason": "compiler-artifact",
-                    "target": {"name": "perf_core", "kind": ["bench"]},
-                    "executable": str(executable),
-                }) + "\n",
+                [],
+                0,
+                stdout=json.dumps(
+                    {
+                        "reason": "compiler-artifact",
+                        "target": {"name": "perf_core", "kind": ["bench"]},
+                        "executable": str(executable),
+                    }
+                )
+                + "\n",
                 stderr="",
             )
             path, arguments = perf.discover_benchmark(Path("/repo"), "perf_core")

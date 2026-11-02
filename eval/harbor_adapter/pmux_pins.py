@@ -59,18 +59,14 @@ def pmux_root(root: Path | None = None, arch: str | None = None) -> Path:
 
 def _require_linux_elf(path: Path, label: str, arch: str) -> None:
     if not path.is_file():
-        raise PmuxArtifactError(
-            f"missing {path}; run `just harbor pmux`"
-        )
+        raise PmuxArtifactError(f"missing {path}; run `just harbor pmux`")
     try:
         require_elf_arch(path, arch, label)
     except RuntimeError as exc:
         raise PmuxArtifactError(str(exc)) from exc
 
 
-def require_frozen_pmux(
-    root: Path | None = None, arch: str | None = None
-) -> FrozenPmuxBins:
+def require_frozen_pmux(root: Path | None = None, arch: str | None = None) -> FrozenPmuxBins:
     selected = resolve_arch(arch)
     base = pmux_root(root, selected)
     paths = {}

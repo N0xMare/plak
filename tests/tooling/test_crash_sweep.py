@@ -1,10 +1,21 @@
 """The standalone sweep prepares the same workers as the offline test gate."""
+
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+
+TEST_ENV = json.dumps(
+    {
+        "TMPDIR": "/tmp/plak-test",
+        "PLAK_HOME": "/tmp/plak-test/home",
+        "GIT_CONFIG_GLOBAL": "/tmp/plak-test/gitconfig",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("crash_sweep", ROOT / "tools/dev/crash-sweep.py")
@@ -16,25 +27,52 @@ class CrashSweepTests(unittest.TestCase):
     def run_sweep(self, scratch, results, args=None):
         if args is None:
             args = ["--strict", "--jobs", "8", "--shapes", "code_mode_cell_final"]
-        with patch("sys.argv", ["crash-sweep.py", *args]), \
-                patch.object(SWEEP.subprocess, "run", return_value=subprocess.CompletedProcess(
-                    [], 0, stdout=str(scratch) + "\n")), \
-                patch.object(SWEEP.subprocess, "call", side_effect=results) as calls, \
-                patch.dict("os.environ", {"CARGO_TARGET_DIR": "custom-target",
-                                          "CARGO_BUILD_TARGET": "host-triple",
-                                          "PLAK_CRASH_SWEEP_SHAPES": "final_only"}):
+        with (
+            patch("sys.argv", ["crash-sweep.py", *args]),
+            patch.object(
+                SWEEP.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, stdout=str(scratch) + "\n"),
+            ),
+            patch.object(SWEEP.subprocess, "check_output", return_value=TEST_ENV),
+            patch.object(SWEEP.subprocess, "call", side_effect=results) as calls,
+            patch.dict(
+                "os.environ",
+                {
+                    "CARGO_TARGET_DIR": "custom-target",
+                    "CARGO_BUILD_TARGET": "host-triple",
+                    "PLAK_CRASH_SWEEP_SHAPES": "final_only",
+                },
+            ),
+        ):
             return SWEEP.main(), calls.call_args_list
 
     def test_builds_workers_and_product_before_running_sweep_with_the_same_environment(self):
         with tempfile.TemporaryDirectory() as directory:
             code, calls = self.run_sweep(Path(directory), [0, 0])
             self.assertEqual(code, 0)
-            self.assertEqual(calls[0].args[0], ["cargo", "test", "--no-run", "--locked",
-                                             "--workspace", "--all-features"])
-            self.assertEqual(calls[1].args[0], ["cargo", "test", "--locked", "-p", "plak",
-                                             "--all-features", "--test", "integration",
-                                             "crash_sweep::full_sweep", "--", "--ignored",
-                                             "--exact", "--nocapture"])
+            self.assertEqual(
+                calls[0].args[0],
+                ["cargo", "test", "--no-run", "--locked", "--workspace", "--all-features"],
+            )
+            self.assertEqual(
+                calls[1].args[0],
+                [
+                    "cargo",
+                    "test",
+                    "--locked",
+                    "-p",
+                    "plak",
+                    "--all-features",
+                    "--test",
+                    "integration",
+                    "crash_sweep::full_sweep",
+                    "--",
+                    "--ignored",
+                    "--exact",
+                    "--nocapture",
+                ],
+            )
             env = calls[0].kwargs["env"]
             self.assertEqual(env, calls[1].kwargs["env"])
             self.assertEqual(env["CARGO_TARGET_DIR"], "custom-target")
@@ -56,18 +94,23 @@ class CrashSweepTests(unittest.TestCase):
             code, calls = self.run_sweep(Path(directory), [0, 0], [])
             self.assertEqual(code, 0)
             for call in calls:
-                self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_SHAPES"],
-                                 "final_only,direct_tool_then_final")
+                self.assertEqual(
+                    call.kwargs["env"]["PLAK_CRASH_SWEEP_SHAPES"],
+                    "final_only,direct_tool_then_final",
+                )
                 self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_STRICT"], "0")
 
     def test_explicit_non_strict_selection_overrides_the_quick_default(self):
         with tempfile.TemporaryDirectory() as directory:
-            code, calls = self.run_sweep(Path(directory), [0, 0],
-                                         ["--shapes", "tree_refresh,code_mode_cell_final"])
+            code, calls = self.run_sweep(
+                Path(directory), [0, 0], ["--shapes", "tree_refresh,code_mode_cell_final"]
+            )
             self.assertEqual(code, 0)
             for call in calls:
-                self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_SHAPES"],
-                                 "tree_refresh,code_mode_cell_final")
+                self.assertEqual(
+                    call.kwargs["env"]["PLAK_CRASH_SWEEP_SHAPES"],
+                    "tree_refresh,code_mode_cell_final",
+                )
 
     def test_build_failure_never_runs_sweep_against_leftover_workers(self):
         with tempfile.TemporaryDirectory() as directory:

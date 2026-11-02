@@ -16,11 +16,29 @@ class RecoveryShape:
     obligations: tuple[tuple[int, str], ...] = ()
 
 
-PHASES = frozenset({"DispatchEvidence", "EffectReconciliation", "CommitRecovery",
-                    "Finalization", "EffectDecision", "HostedContinuation"})
-ACTIONS = frozenset({"CommitRecovery", "ProviderEvidenceRequired", "EffectEvidenceRequired",
-                     "RestoreEffectDecision", "RestoreToolBatch", "RestoreServerPause",
-                     "EvaluationAbandonmentRequired", "ProvenNotDispatched", "FinalizationRequired"})
+PHASES = frozenset(
+    {
+        "DispatchEvidence",
+        "EffectReconciliation",
+        "CommitRecovery",
+        "Finalization",
+        "EffectDecision",
+        "HostedContinuation",
+    }
+)
+ACTIONS = frozenset(
+    {
+        "CommitRecovery",
+        "ProviderEvidenceRequired",
+        "EffectEvidenceRequired",
+        "RestoreEffectDecision",
+        "RestoreToolBatch",
+        "RestoreServerPause",
+        "EvaluationAbandonmentRequired",
+        "ProvenNotDispatched",
+        "FinalizationRequired",
+    }
+)
 
 
 def decode_show(text: str) -> RecoveryShape:
@@ -48,8 +66,12 @@ def bucket(shape: RecoveryShape) -> str:
     actions = {action for _, action in shape.obligations}
     if shape.phase not in PHASES or "unknown" in actions:
         return "unknown"
-    if actions & {"RestoreEffectDecision", "RestoreToolBatch", "RestoreServerPause",
-                  "EvaluationAbandonmentRequired"}:
+    if actions & {
+        "RestoreEffectDecision",
+        "RestoreToolBatch",
+        "RestoreServerPause",
+        "EvaluationAbandonmentRequired",
+    }:
         return "known-uncovered"
     # Finalization/dispatch alone cannot identify finish reasons, hosted calls,
     # finalized cells, retries, steers, compaction or live process sessions.
@@ -58,20 +80,27 @@ def bucket(shape: RecoveryShape) -> str:
 
 def detail(shape: RecoveryShape) -> str:
     ordered = ", ".join(f"({op}, {action})" for op, action in shape.obligations)
-    return (f"refusal triage: bucket={bucket(shape)} status={shape.status} "
-            f"phase={shape.phase} obligations=[{ordered}]")
+    return (
+        f"refusal triage: bucket={bucket(shape)} status={shape.status} "
+        f"phase={shape.phase} obligations=[{ordered}]"
+    )
 
 
 def rehearsal_verdict(text: str) -> str | None:
     """The root line of `plak session rehearse`, whose trailing fields are optional."""
     for line in text.splitlines():
-        if match := re.fullmatch(r"root: offline=(\w+) recovery_phase=(None|Some\(\w+\)) "
-                                 r"evaluator=(verified|refused: recorded_artifact) "
-                                 r"process_budgets=(verified|refused)"
-                                 r"(?: projects:\d+ laws=(valid|refused))?", line):
+        if match := re.fullmatch(
+            r"root: offline=(\w+) recovery_phase=(None|Some\(\w+\)) "
+            r"evaluator=(verified|refused: recorded_artifact) "
+            r"process_budgets=(verified|refused)"
+            r"(?: projects:\d+ laws=(valid|refused))?",
+            line,
+        ):
             laws = f" laws={match[5]}" if match[5] else ""
-            return (f"offline={match[1]} recovery_phase={match[2]} "
-                    f"evaluator={match[3]} process_budgets={match[4]}{laws}")
+            return (
+                f"offline={match[1]} recovery_phase={match[2]} "
+                f"evaluator={match[3]} process_budgets={match[4]}{laws}"
+            )
         if match := re.fullmatch(r"root: refuses: (\w+)", line):
             return "refuses:" + match[1]
     return None
@@ -80,14 +109,24 @@ def rehearsal_verdict(text: str) -> str | None:
 def inspect(binary: Path, repo: Path, home: Path, session: str) -> str:
     env = dict(os.environ)
     env["PLAK_HOME"] = str(home)
-    for key in ("PLAK_TEST_FAULTS", "PLAK_TEST_EXCHANGE_CAPTURE_DIR",
-                "PLAK_TEST_COMMIT_TRACE", "PLAK_TEST_COMMIT_KILL"):
+    for key in (
+        "PLAK_TEST_FAULTS",
+        "PLAK_TEST_EXCHANGE_CAPTURE_DIR",
+        "PLAK_TEST_COMMIT_TRACE",
+        "PLAK_TEST_COMMIT_KILL",
+    ):
         env.pop(key, None)
     shape, verdict = RecoveryShape(), None
     for command in ("show", "rehearse"):
         try:
-            result = subprocess.run([str(binary), "session", command, session], cwd=repo,
-                                    env=env, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                [str(binary), "session", command, session],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
         except (OSError, subprocess.TimeoutExpired):
             continue
         if command == "show" and result.returncode == 0:
@@ -106,8 +145,12 @@ def reopen(factory, binary: Path, repo: Path, home: Path, session: str):
     except live.ScenarioFailure as failure:
         message = str(failure)
         if failure.outcome == live.HARNESS and (
-                "did not become ready" in message or "exit code 5" in message
-                or "stale" in message.lower() or "unfinished" in message.lower()):
-            raise live.ScenarioFailure(failure.outcome,
-                                      message + "; " + inspect(binary, repo, home, session)) from failure
+            "did not become ready" in message
+            or "exit code 5" in message
+            or "stale" in message.lower()
+            or "unfinished" in message.lower()
+        ):
+            raise live.ScenarioFailure(
+                failure.outcome, message + "; " + inspect(binary, repo, home, session)
+            ) from failure
         raise

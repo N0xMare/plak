@@ -20,8 +20,13 @@ from pathlib import Path
 
 import live
 
-LANES = {"smoke": "smoke", "jobs": "jobs", "long-session": "long_session",
-         "soak": "soak", "tui-soak": "tui_soak"}
+LANES = {
+    "smoke": "smoke",
+    "jobs": "jobs",
+    "long-session": "long_session",
+    "soak": "soak",
+    "tui-soak": "tui_soak",
+}
 
 
 def incomplete_captures(report: dict) -> str:
@@ -33,8 +38,11 @@ def incomplete_captures(report: dict) -> str:
         segments = [Path(segment) for segment in item.get("segments") or []]
         pending = {Path(segment) for segment in item.get("provider_pending") or []}
         problems = live.capture_problems(segments, pending) if segments else ["no capture segment"]
-        problems += [f"{segment.name} has no exchange" for segment in segments
-                     if segment.is_dir() and not any(segment.glob("*.info"))]
+        problems += [
+            f"{segment.name} has no exchange"
+            for segment in segments
+            if segment.is_dir() and not any(segment.glob("*.info"))
+        ]
         if problems:
             named.append(f"{scenario}: {', '.join(problems)}")
     return "; ".join(named)
@@ -49,12 +57,16 @@ def score_report(code: int, report: dict) -> tuple[str, str]:
     summary = report.get("summary", report)
     if not summary.get("capture_complete"):
         named = incomplete_captures(report)
-        return live.HARNESS, "raw exchange evidence missing or incomplete" + (f": {named}" if named else "")
+        return live.HARNESS, "raw exchange evidence missing or incomplete" + (
+            f": {named}" if named else ""
+        )
     if not summary.get("binary_sha256_start") or not summary.get("binary_sha256_end"):
         return live.HARNESS, "binary identity missing"
     if summary.get("rebuild") == "changed":
-        if (not summary.get("binary_sha256_rebuilt")
-                or summary["binary_sha256_end"] != summary["binary_sha256_rebuilt"]):
+        if (
+            not summary.get("binary_sha256_rebuilt")
+            or summary["binary_sha256_end"] != summary["binary_sha256_rebuilt"]
+        ):
             return live.HARNESS, "binary differs from intentional rebuild"
     elif summary["binary_sha256_start"] != summary["binary_sha256_end"]:
         return live.HARNESS, "binary changed during attempt"
@@ -65,42 +77,58 @@ def score_report(code: int, report: dict) -> tuple[str, str]:
     evidence = report.get("evidence", {})
     if any(not item.get("capture_complete") for item in evidence.values()):
         named = incomplete_captures(report)
-        return live.HARNESS, "scenario capture missing or incomplete" + (f": {named}" if named else "")
+        return live.HARNESS, "scenario capture missing or incomplete" + (
+            f": {named}" if named else ""
+        )
     if summary.get("evidence_gaps") or summary.get("diagnostics_available") is False:
         return live.HARNESS, "diagnostic evidence missing"
-    if (summary.get("clean_quit") is False
-            or (summary.get("rebuild") == "failed" and summary.get("rebuild_attempted"))):
+    if summary.get("clean_quit") is False or (
+        summary.get("rebuild") == "failed" and summary.get("rebuild_attempted")
+    ):
         return live.HARNESS, "quit or rebuild failed"
     if summary.get("turn_failures"):
         return live.HARNESS, "unclassified failed turn"
     if summary.get("dead_ends") or any(
-            record.get("dead_end") or record.get("outcome", "").split()[:1] == ["dead-end"]
-            for record in records):
+        record.get("dead_end") or record.get("outcome", "").split()[:1] == ["dead-end"]
+        for record in records
+    ):
         return live.HARNESS, "soak dead end"
-    model_records = [record for record in records
-                     if record.get("outcome", "").split()[:1] == [live.MODEL]
-                     or (record.get("phase") == "completed" and record.get("oracle") is False)]
+    model_records = [
+        record
+        for record in records
+        if record.get("outcome", "").split()[:1] == [live.MODEL]
+        or (record.get("phase") == "completed" and record.get("oracle") is False)
+    ]
     model_reasons = []
     for record in model_records:
         task = record.get("scenario") or record.get("task")
         capture = evidence.get(task, {}) if record.get("scenario") else record
-        segments = capture.get("segments") or ([capture["segment"]] if capture.get("segment") else [])
+        segments = capture.get("segments") or (
+            [capture["segment"]] if capture.get("segment") else []
+        )
         exchanges = capture.get("captured_exchanges", 0)
-        status = capture.get("evidence_status", "response" if capture.get("capture_complete") else "")
+        status = capture.get(
+            "evidence_status", "response" if capture.get("capture_complete") else ""
+        )
         if not task or not segments or not exchanges or status != "response":
             return live.HARNESS, "MODEL record lacks a capture reference"
         detail = record.get("detail") or str(record.get("errors", []))
-        model_reasons.append(f"{task}: {detail}; evidence_status={status}, "
-                             f"captured_exchanges={exchanges}, segments={segments}")
+        model_reasons.append(
+            f"{task}: {detail}; evidence_status={status}, "
+            f"captured_exchanges={exchanges}, segments={segments}"
+        )
     if summary.get("model_misses") and not model_records:
         return live.HARNESS, "MODEL summary lacks a capture-referenced task"
     for outcome in (live.HARNESS, live.PENDING, live.PROVIDER, live.MODEL):
         if outcome == live.MODEL and model_reasons:
             return live.MODEL, "; ".join(model_reasons)
-        failed = [record for record in records if record.get("outcome", "").split()[:1] == [outcome]]
+        failed = [
+            record for record in records if record.get("outcome", "").split()[:1] == [outcome]
+        ]
         if failed:
-            return outcome, "; ".join(record.get("detail") or str(record.get("errors", []))
-                                      for record in failed)
+            return outcome, "; ".join(
+                record.get("detail") or str(record.get("errors", [])) for record in failed
+            )
     if code != 0 or not records:
         return live.HARNESS, "unscored driver failure or empty attempt"
     return live.PASS, "all selected oracles passed"
@@ -116,8 +144,16 @@ def run_cell(artifacts: Path, attempt, *, binding: dict | None = None) -> dict:
         except (Exception, SystemExit) as error:
             code, report = 1, {"capture_complete": False, "driver_error": repr(error)}
         outcome, reason = score_report(code, report)
-        records.append({"attempt": number, "artifacts": str(path), "outcome": outcome,
-                        "reason": reason, "exit_code": code, "report": report})
+        records.append(
+            {
+                "attempt": number,
+                "artifacts": str(path),
+                "outcome": outcome,
+                "reason": reason,
+                "exit_code": code,
+                "report": report,
+            }
+        )
         print(f"attempt {number}: {outcome.upper()}: {reason}", flush=True)
         if number == 1 and outcome in (live.MODEL, live.PROVIDER):
             continue
@@ -126,8 +162,7 @@ def run_cell(artifacts: Path, attempt, *, binding: dict | None = None) -> dict:
     status = final.upper()
     if len(records) == 2:
         status += f" after {records[0]['outcome'].upper()} rerun"
-    result = {"outcome": final, "status": status, "attempts": records,
-              "binding": binding or {}}
+    result = {"outcome": final, "status": status, "attempts": records, "binding": binding or {}}
     (artifacts / "report.json").write_text(json.dumps(result, indent=2) + "\n")
     print(status + f"\nartifacts: {artifacts}", flush=True)
     return result
@@ -159,11 +194,22 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--dry-run", action="store_true")
     args, forwarded = parser.parse_known_args(argv)
     live.isolate_test_environment()
-    option_error = ("attempt artifacts/seed are owned by this driver; use lane long-session"
-                    if any(arg.split("=", 1)[0] in ("--artifacts", "--fixture-seed", "--long-session")
-                           for arg in forwarded) else None)
-    command = ["python3", f"tests/live/{LANES[args.lane]}.py", args.route,
-               "--binary", str(args.binary), *forwarded]
+    option_error = (
+        "attempt artifacts/seed are owned by this driver; use lane long-session"
+        if any(
+            arg.split("=", 1)[0] in ("--artifacts", "--fixture-seed", "--long-session")
+            for arg in forwarded
+        )
+        else None
+    )
+    command = [
+        "python3",
+        f"tests/live/{LANES[args.lane]}.py",
+        args.route,
+        "--binary",
+        str(args.binary),
+        *forwarded,
+    ]
     if args.dry_run:
         if option_error:
             print(option_error, file=sys.stderr)
@@ -174,8 +220,10 @@ def main(argv: list[str]) -> int:
         except SystemExit:
             return 2
         print(shlex.join(command))
-        print("up to 2 attempts: first MODEL or PROVIDER may rerun once; "
-              "same route/build/prompt, fresh session; HARNESS never reruns")
+        print(
+            "up to 2 attempts: first MODEL or PROVIDER may rerun once; "
+            "same route/build/prompt, fresh session; HARNESS never reruns"
+        )
         return 0
     binary = args.binary.resolve()
     digest = live.binary_sha256(binary)
@@ -185,6 +233,7 @@ def main(argv: list[str]) -> int:
         # Every long-session scenario sizes against this operator input, so a
         # missing one is refused here rather than scored after a paid attempt.
         import long_session
+
         ceiling = long_session.input_ceiling(route)
         option_error = option_error or long_session.input_ceiling_error(route)
     root = live.ROOT / "target/live"
@@ -202,33 +251,48 @@ def main(argv: list[str]) -> int:
     def attempt(path):
         nonlocal intentional_rebuild
         current = live.binary_sha256(binary)
-        metadata = {"starting_build_restored": False,
-                    "binary_sha256_current": current,
-                    "binary_sha256_restored": None,
-                    "binary_sha256_intentional": intentional_rebuild}
+        metadata = {
+            "starting_build_restored": False,
+            "binary_sha256_current": current,
+            "binary_sha256_restored": None,
+            "binary_sha256_intentional": intentional_rebuild,
+        }
         if option_error or retained_error:
             return 1, {**metadata, "pre_attempt_error": option_error or retained_error}
         if current != digest and current == intentional_rebuild:
             # The completed soak owns this one known byte-distinct rebuild.
             # Restore its retained starting build, never an unexpected replacement.
             if live.binary_sha256(retained) != digest:
-                return 1, {**metadata, "pre_attempt_error": "retained binary digest differs before restoring"}
+                return 1, {
+                    **metadata,
+                    "pre_attempt_error": "retained binary digest differs before restoring",
+                }
             replacement = binary.with_name(binary.name + "." + artifacts.name + ".restore")
             try:
                 shutil.copy2(retained, replacement)
                 if live.binary_sha256(replacement) != digest:
-                    return 1, {**metadata, "pre_attempt_error": "retained replacement digest differs"}
+                    return 1, {
+                        **metadata,
+                        "pre_attempt_error": "retained replacement digest differs",
+                    }
                 if live.binary_sha256(binary) != intentional_rebuild:
-                    return 1, {**metadata, "pre_attempt_error": "binary changed before attempt; no paid attempt"}
+                    return 1, {
+                        **metadata,
+                        "pre_attempt_error": "binary changed before attempt; no paid attempt",
+                    }
                 os.replace(replacement, binary)
             finally:
                 replacement.unlink(missing_ok=True)
             current = live.binary_sha256(binary)
             metadata.update(starting_build_restored=True, binary_sha256_restored=current)
         if current != digest:
-            return 1, {**metadata, "pre_attempt_error": "binary changed before attempt; no paid attempt",
-                       "capture_complete": True, "binary_sha256_start": digest,
-                       "binary_sha256_end": current}
+            return 1, {
+                **metadata,
+                "pre_attempt_error": "binary changed before attempt; no paid attempt",
+                "capture_complete": True,
+                "binary_sha256_start": digest,
+                "binary_sha256_end": current,
+            }
         code, report = execute(args.lane, args.route, binary, forwarded, seed, path)
         report.update(metadata)
         summary = report.get("summary", report)
@@ -236,12 +300,20 @@ def main(argv: list[str]) -> int:
             intentional_rebuild = summary.get("binary_sha256_rebuilt")
         return code, report
 
-    result = run_cell(artifacts, attempt, binding={
-        **live.route_report(route), "lane": args.lane, "lane_class": route.lane_class(args.lane),
-        "binary": str(binary), "binary_sha256_start": digest, "fixture_seed": seed,
-        "lane_options": forwarded,
-        **({"input_ceiling": ceiling} if ceiling is not None else {}),
-    })
+    result = run_cell(
+        artifacts,
+        attempt,
+        binding={
+            **live.route_report(route),
+            "lane": args.lane,
+            "lane_class": route.lane_class(args.lane),
+            "binary": str(binary),
+            "binary_sha256_start": digest,
+            "fixture_seed": seed,
+            "lane_options": forwarded,
+            **({"input_ceiling": ceiling} if ceiling is not None else {}),
+        },
+    )
     return 0 if qualifies(route, result, args.lane) else 1
 
 

@@ -31,22 +31,29 @@ def predicates(profile: str) -> list[str]:
 
 def module_overmatches(names: list[str], modules: set[str]) -> list[tuple[str, str]]:
     """Substring module predicates must not capture a suffix of another module."""
-    return sorted((name, module) for name in names
-                  if re.fullmatch(r"[a-z0-9_]+::", name)
-                  for module in modules
-                  if module.endswith("_" + name[:-2]))
+    return sorted(
+        (name, module)
+        for name in names
+        if re.fullmatch(r"[a-z0-9_]+::", name)
+        for module in modules
+        if module.endswith("_" + name[:-2])
+    )
 
 
 class NextestLaneTests(unittest.TestCase):
     def test_module_predicates_cannot_capture_prefixed_modules(self) -> None:
-        self.assertEqual(module_overmatches(["application::"], {"application", "terminal_application"}),
-                         [("application::", "terminal_application")])
+        self.assertEqual(
+            module_overmatches(["application::"], {"application", "terminal_application"}),
+            [("application::", "terminal_application")],
+        )
         modules = set()
         for root in SOURCE_ROOTS:
             for path in (ROOT / root).rglob("*.rs"):
                 modules.add(path.stem)
                 modules.update(re.findall(r"\bmod\s+([a-z0-9_]+)\s*[;{]", path.read_text()))
-        self.assertEqual(module_overmatches(predicates("serial") + predicates("durability"), modules), [])
+        self.assertEqual(
+            module_overmatches(predicates("serial") + predicates("durability"), modules), []
+        )
 
     def test_offline_excludes_exactly_the_serial_and_durability_lanes(self) -> None:
         serial, durability = predicates("serial"), predicates("durability")
@@ -78,20 +85,34 @@ class NextestLaneTests(unittest.TestCase):
                 text = path.read_text()
                 file_functions = set(re.findall(r"\bfn\s+([a-z0-9_]+)\s*\(", text))
                 functions |= file_functions
-                modules |= set(re.findall(
-                    r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([a-z0-9_]+)\s*[;{]", text, re.MULTILINE))
-                module_path = path.parent.parts if path.stem in {"main", "mod"} else path.with_suffix("").parts
+                modules |= set(
+                    re.findall(
+                        r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([a-z0-9_]+)\s*[;{]",
+                        text,
+                        re.MULTILINE,
+                    )
+                )
+                module_path = (
+                    path.parent.parts
+                    if path.stem in {"main", "mod"}
+                    else path.with_suffix("").parts
+                )
                 for name in names:
                     if "::" in name and not name.endswith("::"):
                         prefix, function = name.rsplit("::", 1)
                         parts = tuple(prefix.split("::"))
-                        if module_path[-len(parts):] == parts and function in file_functions:
+                        if module_path[-len(parts) :] == parts and function in file_functions:
                             qualified.add(name)
         missing = [
-            name for name in names
-            if not (name[:-2] in modules if name.endswith("::")
-                    else name in qualified if "::" in name
-                    else name in functions)
+            name
+            for name in names
+            if not (
+                name[:-2] in modules
+                if name.endswith("::")
+                else name in qualified
+                if "::" in name
+                else name in functions
+            )
         ]
         self.assertEqual(missing, [], f"lane predicates with no definition under {SOURCE_ROOTS}")
 

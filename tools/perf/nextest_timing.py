@@ -61,16 +61,20 @@ def parse(lane: str, path: Path) -> Lane:
     for suite in suites:
         binary = suite.get("name", "")
         for case in suite.findall("testcase"):
-            tests.append(TestTime(
-                lane=lane,
-                binary=case.get("classname") or binary,
-                name=case.get("name", ""),
-                seconds=float(case.get("time") or 0),
-                started=timestamp(case.get("timestamp")),
-                failed=case.find("failure") is not None or case.find("error") is not None,
-                retries=len(case.findall("flakyFailure")) + len(case.findall("flakyError"))
-                + len(case.findall("rerunFailure")) + len(case.findall("rerunError")),
-            ))
+            tests.append(
+                TestTime(
+                    lane=lane,
+                    binary=case.get("classname") or binary,
+                    name=case.get("name", ""),
+                    seconds=float(case.get("time") or 0),
+                    started=timestamp(case.get("timestamp")),
+                    failed=case.find("failure") is not None or case.find("error") is not None,
+                    retries=len(case.findall("flakyFailure"))
+                    + len(case.findall("flakyError"))
+                    + len(case.findall("rerunFailure"))
+                    + len(case.findall("rerunError")),
+                )
+            )
     wall = float(root.get("time") or 0) or sum(test.seconds for test in tests)
     return Lane(lane, wall, tuple(tests))
 
@@ -112,28 +116,41 @@ def report(lanes: list[Lane], top: int) -> list[str]:
         if longest is not None:
             lines.append(f"  longest test: {longest.seconds:.2f} s {label(longest)}")
         if last is not None and any(test.started is not None for test in lane.tests):
-            lines.append(f"  test span: {span:.1f} s from the first start, ending with {label(last)}")
+            lines.append(
+                f"  test span: {span:.1f} s from the first start, ending with {label(last)}"
+            )
         elif last is not None:
-            lines.append(f"  test span: no per-test timestamps; at least {span:.1f} s ({label(last)})")
+            lines.append(
+                f"  test span: no per-test timestamps; at least {span:.1f} s ({label(last)})"
+            )
     tests = [test for lane in lanes for test in lane.tests]
     lines.append(f"slowest {min(top, len(tests))} tests:")
     for test in sorted(tests, key=lambda test: -test.seconds)[:top]:
         lines.append(f"  {test.seconds:8.2f} s  {test.lane:<10} {label(test)}")
-    for title, key in (("binaries", lambda test: test.binary), ("packages", lambda test: test.package)):
+    for title, key in (
+        ("binaries", lambda test: test.binary),
+        ("packages", lambda test: test.package),
+    ):
         totals: dict[str, list[float]] = defaultdict(list)
         for test in tests:
             totals[key(test)].append(test.seconds)
         lines.append(f"top {min(top, len(totals))} {title} by summed test time:")
         for name, times in sorted(totals.items(), key=lambda item: -sum(item[1]))[:top]:
-            lines.append(f"  {sum(times):8.1f} s  {len(times):5} tests  max {max(times):7.2f} s  {name}")
+            lines.append(
+                f"  {sum(times):8.1f} s  {len(times):5} tests  max {max(times):7.2f} s  {name}"
+            )
     return lines
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lanes", nargs="*", default=list(LANES), help="nextest profiles to read")
-    parser.add_argument("--dir", type=Path, default=ROOT / "target/nextest",
-                        help="the nextest store directory holding <profile>/junit.xml")
+    parser.add_argument(
+        "--dir",
+        type=Path,
+        default=ROOT / "target/nextest",
+        help="the nextest store directory holding <profile>/junit.xml",
+    )
     parser.add_argument("--top", type=int, default=15)
     args = parser.parse_args(argv)
     lanes: list[Lane] = []

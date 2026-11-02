@@ -28,11 +28,15 @@ DIRS = {
 
 class TouchedPackagesTests(unittest.TestCase):
     def test_ignored_proptest_regressions_are_package_inputs(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(
-                os.environ, {"PATH": "/usr/bin:/bin"}, clear=True):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}, clear=True),
+        ):
             root = Path(temporary)
+
             def git(*args):
                 return subprocess.check_output(["git", *args], cwd=root, text=True)
+
             git("init", "-q")
             git("config", "user.name", "Test")
             git("config", "user.email", "test@example.invalid")
@@ -52,22 +56,38 @@ class TouchedPackagesTests(unittest.TestCase):
 
     def test_a_file_belongs_to_its_innermost_package(self):
         self.assertEqual(
-            self.touched("crates/core/model/src/lib.rs", "bin/plak/tests/goldens/a.frame",
-                         "crates/core/model/Cargo.toml"),
+            self.touched(
+                "crates/core/model/src/lib.rs",
+                "bin/plak/tests/goldens/a.frame",
+                "crates/core/model/Cargo.toml",
+            ),
             ["plak", "plakous-model"],
         )
 
     def test_sibling_directory_prefixes_do_not_match(self):
-        self.assertEqual(self.touched("crates/runtimes/py-worker/src/cell.rs"), ["plakous-py-worker"])
+        self.assertEqual(
+            self.touched("crates/runtimes/py-worker/src/cell.rs"), ["plakous-py-worker"]
+        )
         self.assertEqual(self.touched("crates/core/model-extra/src/lib.rs"), [])
 
     def test_files_outside_every_package_touch_nothing(self):
-        self.assertEqual(self.touched("docs/spec/05-testing-and-evidence.md",
-                                      "tools/gate/check_features.py", "Justfile"), [])
+        self.assertEqual(
+            self.touched(
+                "docs/spec/05-testing-and-evidence.md", "tools/gate/check_features.py", "Justfile"
+            ),
+            [],
+        )
 
     def test_workspace_inputs_select_the_whole_workspace(self):
-        for path in ("Cargo.toml", "Cargo.lock", ".config/nextest.toml", ".cargo/config.toml",
-                     "rust-toolchain.toml", ".clippy.toml", ".rustfmt.toml"):
+        for path in (
+            "Cargo.toml",
+            "Cargo.lock",
+            ".config/nextest.toml",
+            ".cargo/config.toml",
+            "rust-toolchain.toml",
+            ".clippy.toml",
+            ".rustfmt.toml",
+        ):
             with self.subTest(path=path):
                 self.assertEqual(self.touched("bin/plak/src/lib.rs", path), ["--workspace"])
 

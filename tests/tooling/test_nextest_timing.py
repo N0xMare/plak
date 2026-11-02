@@ -13,7 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests/tooling/fixtures/nextest_timing"
-SPEC = importlib.util.spec_from_file_location("nextest_timing", ROOT / "tools/perf/nextest_timing.py")
+SPEC = importlib.util.spec_from_file_location(
+    "nextest_timing", ROOT / "tools/perf/nextest_timing.py"
+)
 assert SPEC is not None and SPEC.loader is not None
 timing = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = timing
@@ -31,10 +33,15 @@ class NextestTimingTests(unittest.TestCase):
     def test_parses_cases_binaries_packages_failures_and_timestamps(self):
         lane = timing.parse("offline", FIXTURE / "offline/junit.xml")
         self.assertEqual(lane.wall, 10.0)
-        self.assertEqual([test.name for test in lane.tests], [
-            "native_auth::tests::fast", "native_auth::tests::slow",
-            "offline_e2e::longest", "cli_contract::quick",
-        ])
+        self.assertEqual(
+            [test.name for test in lane.tests],
+            [
+                "native_auth::tests::fast",
+                "native_auth::tests::slow",
+                "offline_e2e::longest",
+                "cli_contract::quick",
+            ],
+        )
         self.assertEqual({test.package for test in lane.tests}, {"plakous-xai", "plak"})
         self.assertEqual([test.failed for test in lane.tests], [False, False, True, False])
         span, last = timing.test_span(lane)
@@ -44,11 +51,19 @@ class NextestTimingTests(unittest.TestCase):
     def test_report_names_slowest_tests_totals_and_lane_paths(self):
         lanes = [timing.parse(name, FIXTURE / name / "junit.xml") for name in ("offline", "serial")]
         lines = timing.report(lanes, 2)
-        self.assertIn("lane offline: 4 tests, wall 10.0 s, summed 16.0 s, parallelism 1.6x, 1 failed, 1 flaky, "
-                      "1 retries", lines)
-        self.assertIn("  test span: 9.5 s from the first start, ending with plak::integration offline_e2e::longest",
-                      lines)
-        self.assertIn("  test span: no per-test timestamps; at least 4.0 s (plak::bin/plak budget::one)", lines)
+        self.assertIn(
+            "lane offline: 4 tests, wall 10.0 s, summed 16.0 s, parallelism 1.6x, 1 failed, 1 flaky, "
+            "1 retries",
+            lines,
+        )
+        self.assertIn(
+            "  test span: 9.5 s from the first start, ending with plak::integration offline_e2e::longest",
+            lines,
+        )
+        self.assertIn(
+            "  test span: no per-test timestamps; at least 4.0 s (plak::bin/plak budget::one)",
+            lines,
+        )
         slowest = lines.index("slowest 2 tests:")
         self.assertEqual(lines[slowest + 1].split()[:3], ["8.50", "s", "offline"])
         self.assertEqual(lines[slowest + 2].split()[-1], "native_auth::tests::slow")
@@ -61,7 +76,9 @@ class NextestTimingTests(unittest.TestCase):
         lane = timing.parse("offline", FIXTURE / "real-offline/junit.xml")
         self.assertEqual(lane.wall, 166.044)
         self.assertEqual(len(lane.tests), 6)
-        self.assertEqual({test.binary for test in lane.tests}, {"plak", "plak::integration", "plakous-xai"})
+        self.assertEqual(
+            {test.binary for test in lane.tests}, {"plak", "plak::integration", "plakous-xai"}
+        )
         self.assertEqual({test.package for test in lane.tests}, {"plak", "plakous-xai"})
         self.assertTrue(all(test.started is not None and test.seconds > 0 for test in lane.tests))
         self.assertFalse(any(test.failed or test.retries for test in lane.tests))

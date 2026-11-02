@@ -17,14 +17,31 @@ SPEC.loader.exec_module(COMPARE)
 
 
 def row(state="prepared", outcome="ABANDONED", repeat=1):
-    return {"shape": "capacity_overflow", "store": "product", "store_ordinal": 5,
-            "repeat": repeat, "outcome": outcome, "invariants": True,
-            "before": {"ledger": [{"operation": 1, "kind": "model", "state": state}]},
-            "global_order": [
-                {"store": "runtime", "store_ordinal": 1, "ordinal": 1,
-                 "label": "prepare", "tables": []},
-                {"store": "product", "store_ordinal": 5, "ordinal": 2,
-                 "label": "projection", "tables": ["sessions"]}]}
+    return {
+        "shape": "capacity_overflow",
+        "store": "product",
+        "store_ordinal": 5,
+        "repeat": repeat,
+        "outcome": outcome,
+        "invariants": True,
+        "before": {"ledger": [{"operation": 1, "kind": "model", "state": state}]},
+        "global_order": [
+            {
+                "store": "runtime",
+                "store_ordinal": 1,
+                "ordinal": 1,
+                "label": "prepare",
+                "tables": [],
+            },
+            {
+                "store": "product",
+                "store_ordinal": 5,
+                "ordinal": 2,
+                "label": "projection",
+                "tables": ["sessions"],
+            },
+        ],
+    }
 
 
 class CompareCrashSweepsTests(unittest.TestCase):
@@ -72,8 +89,9 @@ class CompareCrashSweepsTests(unittest.TestCase):
         report = COMPARE.compare([row()], [tip])
         self.assertEqual(report["counts"]["only_left"], 1)
         self.assertEqual(report["counts"]["only_right"], 1)
-        pilot = {key: value for key, value in row().items()
-                 if key not in ("global_order", "before")}
+        pilot = {
+            key: value for key, value in row().items() if key not in ("global_order", "before")
+        }
         report = COMPARE.compare([pilot], [copy.deepcopy(pilot)])
         self.assertEqual(report["counts"]["uncomparable"], 2)
         self.assertFalse(report["matching"])
@@ -86,7 +104,8 @@ class CompareCrashSweepsTests(unittest.TestCase):
     def test_bad_tip_rows_regress_even_with_different_or_missing_inputs(self):
         extra_commit = row(outcome="UNCLASSIFIED")
         extra_commit["global_order"].append(
-            {"store": "tree", "store_ordinal": 1, "label": "cursor", "tables": []})
+            {"store": "tree", "store_ordinal": 1, "label": "cursor", "tables": []}
+        )
         extra_commit["invariants"] = False
         pilot = dict(row(outcome="DIVERGENT"), store="pilot", store_ordinal=0)
         refused = dict(row("dispatched", "REFUSED: recovery"), invariants=False)
@@ -103,7 +122,10 @@ class CompareCrashSweepsTests(unittest.TestCase):
                 tip_path.write_text(json.dumps(tip) + "\n")
                 result = subprocess.run(
                     [sys.executable, str(SCRIPT), str(base_path), str(tip_path), "--json"],
-                    capture_output=True, text=True, check=False)
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["counts"]["regressed"], 1)
 
@@ -117,8 +139,12 @@ class CompareCrashSweepsTests(unittest.TestCase):
             paths = [Path(directory) / name for name in ("base", "tip")]
             for path, sample in zip(paths, (base, tip)):
                 path.write_text(json.dumps(sample) + "\n")
-            result = subprocess.run([sys.executable, str(SCRIPT), *map(str, paths)],
-                                    capture_output=True, text=True, check=False)
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), *map(str, paths)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("regressed=1", result.stdout)
 
@@ -135,17 +161,23 @@ class CompareCrashSweepsTests(unittest.TestCase):
     def test_floating_failures_cannot_hide_increasing_counts_or_new_kinds(self):
         base = [dict(row(), invariants=False)]
         duplicate = dict(row("dispatched"), invariants=False)
-        for tip in ([duplicate, dict(duplicate, repeat=2)],
-                    [row("dispatched", "DIVERGENT")],
-                    [dict(row("dispatched", "REFUSED_STORE"), invariants=False)]):
+        for tip in (
+            [duplicate, dict(duplicate, repeat=2)],
+            [row("dispatched", "DIVERGENT")],
+            [dict(row("dispatched", "REFUSED_STORE"), invariants=False)],
+        ):
             with self.subTest(tip=tip), tempfile.TemporaryDirectory() as directory:
                 report = COMPARE.compare(base, tip)
                 self.assertFalse(report["changed"])
                 paths = [Path(directory) / name for name in ("base", "tip")]
                 for path, samples in zip(paths, (base, tip)):
                     path.write_text("".join(json.dumps(sample) + "\n" for sample in samples))
-                result = subprocess.run([sys.executable, str(SCRIPT), *map(str, paths)],
-                                        capture_output=True, text=True, check=False)
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), *map(str, paths)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertTrue(any(not r["baseline_failed"] for r in report["regressed"]))
 
@@ -161,11 +193,18 @@ class CompareCrashSweepsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base, tip = (Path(directory) / name for name in ("base.jsonl", "tip.jsonl"))
             base.write_text(json.dumps(row()) + "\n")
-            for content, expected in ((row("dispatched"), 0),
-                                      (row(outcome="COMPLETED_ONCE"), 1), ({}, 2)):
+            for content, expected in (
+                (row("dispatched"), 0),
+                (row(outcome="COMPLETED_ONCE"), 1),
+                ({}, 2),
+            ):
                 tip.write_text(json.dumps(content) + "\n")
-                result = subprocess.run([sys.executable, str(SCRIPT), str(base), str(tip),
-                                         "--json"], capture_output=True, text=True, check=False)
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), str(base), str(tip), "--json"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
                 self.assertEqual(result.returncode, expected, result.stderr)
                 if expected != 2:
                     self.assertIn("counts", json.loads(result.stdout))

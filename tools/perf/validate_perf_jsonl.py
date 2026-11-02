@@ -341,10 +341,7 @@ def positive_int(value: dict[str, Any], *path: str) -> int:
 
 def tagged_sha256(value: dict[str, Any], *path: str) -> str:
     actual = field(value, *path)
-    if (
-        not isinstance(actual, str)
-        or re.fullmatch(r"sha256:[0-9a-f]{64}", actual) is None
-    ):
+    if not isinstance(actual, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", actual) is None:
         fail(f"{'.'.join(path)} must be a tagged lowercase SHA-256 digest")
     return actual
 
@@ -547,9 +544,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
                 or "\n" in host_id
             ):
                 fail(f"{schema} requires a bounded stable host ID")
-            exact(
-                metadata, operation_contracts[operation], "cargo", "operation_semantics"
-            )
+            exact(metadata, operation_contracts[operation], "cargo", "operation_semantics")
     kinds = Counter(row["kind"] for row in rows)
     if set(kinds) - {"metadata", "sample", "dry-run"}:
         fail("perf-build contains an unknown row kind")
@@ -749,10 +744,7 @@ def validate_current_build_sample_fixture(sample: dict[str, Any]) -> None:
         "plakous.perf-build.v10": V10_BUILD_FIXTURE,
     }.get(schema)
     if fixture is None:
-        fail(
-            "perf-build sample fixture validation requires schema "
-            "v5, v6, v7, v8, v9, or v10"
-        )
+        fail("perf-build sample fixture validation requires schema v5, v6, v7, v8, v9, or v10")
     exact(sample, fixture["revision"], "fixture_revision")
 
 
@@ -775,9 +767,7 @@ def validate_v5_sample_fixture(sample: dict[str, Any]) -> None:
 
 def validate_build_command(row: dict[str, Any], metadata: dict[str, Any]) -> None:
     command = field(row, "command")
-    if not isinstance(command, list) or not all(
-        isinstance(value, str) for value in command
-    ):
+    if not isinstance(command, list) or not all(isinstance(value, str) for value in command):
         fail("perf-build command must be a string list")
     cargo = field(metadata, "cargo")
     schema = field(metadata, "schema")
@@ -822,9 +812,7 @@ def validate_build_command(row: dict[str, Any], metadata: dict[str, Any]) -> Non
         fail("perf-build command unexpectedly enables features")
 
 
-def expected_current_build_command(
-    row: dict[str, Any], metadata: dict[str, Any]
-) -> list[str]:
+def expected_current_build_command(row: dict[str, Any], metadata: dict[str, Any]) -> list[str]:
     """Reconstruct the complete ordered Cargo command for one v5/v6 row."""
     schema = field(metadata, "schema")
     cargo = field(metadata, "cargo")
@@ -860,9 +848,7 @@ def expected_current_build_command(
         fail(f"{schema} target directory must be non-empty")
     command = [cargo_identity_command[0]]
     for key, value in settings.items():
-        command.extend(
-            ("--config", f"profile.{cargo_profile}.{key}={json.dumps(value)}")
-        )
+        command.extend(("--config", f"profile.{cargo_profile}.{key}={json.dumps(value)}"))
     command.extend(
         (
             field(cargo, "operation"),
@@ -895,9 +881,7 @@ def expected_current_build_command(
     return command
 
 
-def expected_v5_build_command(
-    row: dict[str, Any], metadata: dict[str, Any]
-) -> list[str]:
+def expected_v5_build_command(row: dict[str, Any], metadata: dict[str, Any]) -> list[str]:
     """Compatibility entry point for immutable v5 evidence tests."""
     return expected_current_build_command(row, metadata)
 
@@ -914,9 +898,7 @@ def validate_core(rows: list[dict[str, Any]]) -> None:
     )
     expected = Counter({"metadata": 1, "turn": expected_turns, "prompt-bound": 1})
     if schema in {"plakous.perf-core.v3", "plakous.perf-core.v5"}:
-        expected["event-history-instrumented-sample"] = len(
-            field(metadata, "history_sweep_turns")
-        )
+        expected["event-history-instrumented-sample"] = len(field(metadata, "history_sweep_turns"))
     if counts != expected:
         fail("perf-core row counts disagree with metadata")
     for row in rows[1:]:
@@ -967,9 +949,7 @@ def validate_core(rows: list[dict[str, Any]]) -> None:
                     "projected_event_serialized_bytes_per_event",
                 )
                 before_bytes = positive_int(row, "snapshot_cursor_serialized_bytes")
-                after_bytes = positive_int(
-                    row, "post_snapshot_cursor_serialized_bytes"
-                )
+                after_bytes = positive_int(row, "post_snapshot_cursor_serialized_bytes")
                 exact(
                     row,
                     max(0, after_bytes - before_bytes),
@@ -979,9 +959,7 @@ def validate_core(rows: list[dict[str, Any]]) -> None:
                 if not isinstance(external, str) or not external:
                     fail("perf-core v5 must name its external retained-byte probe")
     if schema in {"plakous.perf-core.v3", "plakous.perf-core.v5"}:
-        event_rows = [
-            row for row in rows if row["kind"] == "event-history-instrumented-sample"
-        ]
+        event_rows = [row for row in rows if row["kind"] == "event-history-instrumented-sample"]
         if [row["history_prefill_turns"] for row in event_rows] != field(
             metadata, "history_sweep_turns"
         ):
@@ -1123,18 +1101,14 @@ def validate_project(rows: list[dict[str, Any]]) -> None:
                 exact(trace, field(cache, "identity"), "cache_affinity_identity")
 
     if schema in {"plakous.perf-project.v5", "plakous.perf-project.v6"}:
-        artifact_rows = [
-            row for row in rows if row["kind"] == "family-artifact-growth-sample"
-        ]
+        artifact_rows = [row for row in rows if row["kind"] == "family-artifact-growth-sample"]
         expected_sizes = field(metadata, "family_artifact_sweep_bytes")
         if [row["opaque_bytes"] for row in artifact_rows] != expected_sizes:
             fail("family-artifact rows must exactly follow the declared sweep")
         if rows[-len(artifact_rows) :] != artifact_rows:
             fail("family-artifact sweep must run after all primary project timing rows")
         for row in artifact_rows:
-            if positive_int(row, "serialized_envelope_bytes") <= positive_int(
-                row, "opaque_bytes"
-            ):
+            if positive_int(row, "serialized_envelope_bytes") <= positive_int(row, "opaque_bytes"):
                 fail("serialized family-artifact envelope must exceed opaque bytes")
         if schema == "plakous.perf-project.v6":
             for row in artifact_rows[:-1]:
@@ -1264,15 +1238,11 @@ def validate_store(rows: list[dict[str, Any]]) -> None:
             busy = nonnegative_int(row, "backend_busy_public_outcomes")
             maximum = nonnegative_int(row, "maximum_actor_operation_plus_queued_work")
             if acknowledged > maximum or busy < 1 or acknowledged + busy != attempts:
-                fail(
-                    "perf-store saturation summary violates the bounded actor invariant"
-                )
+                fail("perf-store saturation summary violates the bounded actor invariant")
             if acknowledged != saturation_outcomes["ok_create_receipt"]:
                 fail("perf-store saturation receipt count disagrees with sample rows")
             if busy != saturation_outcomes["error_backend_busy"]:
-                fail(
-                    "perf-store saturation backpressure count disagrees with sample rows"
-                )
+                fail("perf-store saturation backpressure count disagrees with sample rows")
         elif kind == "sqlite-observation-schema-proof":
             exact(row, 0, "observation_named_schema_object_count")
             exact(row, [], "observation_named_schema_objects")
@@ -1433,11 +1403,7 @@ def validate_allocations(rows: list[dict[str, Any]]) -> None:
     for row in raw:
         pair_id = field(row, "pair_id")
         sample_id = field(row, "sample_id")
-        if (
-            not isinstance(pair_id, str)
-            or not pair_id
-            or not isinstance(sample_id, str)
-        ):
+        if not isinstance(pair_id, str) or not pair_id or not isinstance(sample_id, str):
             fail("allocation sample identities must be non-empty strings")
         if sample_id in sample_ids:
             fail("allocation sample identities must be unique")
@@ -1488,15 +1454,11 @@ def validate_allocations(rows: list[dict[str, Any]]) -> None:
         exact(confirmation, count, "completed_iterations")
 
     derived_by_pair = {field(row, "pair_id"): row for row in derived}
-    if len(derived_by_pair) != expected_pairs or set(derived_by_pair) != set(
-        raw_by_pair
-    ):
+    if len(derived_by_pair) != expected_pairs or set(derived_by_pair) != set(raw_by_pair):
         fail("allocation derived pairs are incomplete or duplicated")
     for pair_id, samples in raw_by_pair.items():
         if len(samples) != 2:
-            fail(
-                "allocation pair must contain exactly one zero and one measured sample"
-            )
+            fail("allocation pair must contain exactly one zero and one measured sample")
         by_role = {field(row, "pair_role"): row for row in samples}
         if set(by_role) != {"zero-iteration-startup", "measured-iterations"}:
             fail("allocation pair roles are incomplete")
@@ -1514,9 +1476,7 @@ def validate_allocations(rows: list[dict[str, Any]]) -> None:
             delta = field(measured, "metrics", metric) - field(zero, "metrics", metric)
             exact(result, delta, "deltas", metric)
             per_iteration = field(result, "per_iteration", metric)
-            if isinstance(per_iteration, bool) or not isinstance(
-                per_iteration, (int, float)
-            ):
+            if isinstance(per_iteration, bool) or not isinstance(per_iteration, (int, float)):
                 fail("allocation per-iteration delta must be numeric")
             if per_iteration != delta / iterations:
                 fail("allocation per-iteration delta is not recomputable")
@@ -1562,10 +1522,7 @@ def validate_build_campaign(
     if actual_names != expected_names:
         missing = sorted(expected_names - actual_names)
         extra = sorted(actual_names - expected_names)
-        fail(
-            f"{version} campaign filenames disagree: "
-            f"missing={missing!r}, extra={extra!r}"
-        )
+        fail(f"{version} campaign filenames disagree: missing={missing!r}, extra={extra!r}")
     common_paths = (
         ("baseline", "identity"),
         ("fixture",),
@@ -1607,44 +1564,32 @@ def validate_build_campaign(
 
 def validate_v5_campaign(directory: Path) -> None:
     """Validate the immutable 23-profile pre-consolidation v5 cohort."""
-    validate_build_campaign(
-        directory, "plakous.perf-build.v5", V5_BUILD_PROFILE_CONTRACTS
-    )
+    validate_build_campaign(directory, "plakous.perf-build.v5", V5_BUILD_PROFILE_CONTRACTS)
 
 
 def validate_v6_campaign(directory: Path) -> None:
     """Validate the immutable 22-profile post-agent-consolidation v6 cohort."""
-    validate_build_campaign(
-        directory, "plakous.perf-build.v6", V6_BUILD_PROFILE_CONTRACTS
-    )
+    validate_build_campaign(directory, "plakous.perf-build.v6", V6_BUILD_PROFILE_CONTRACTS)
 
 
 def validate_v7_campaign(directory: Path) -> None:
     """Validate the immutable 21-profile post-dispatch-consolidation v7 cohort."""
-    validate_build_campaign(
-        directory, "plakous.perf-build.v7", V7_BUILD_PROFILE_CONTRACTS
-    )
+    validate_build_campaign(directory, "plakous.perf-build.v7", V7_BUILD_PROFILE_CONTRACTS)
 
 
 def validate_v8_campaign(directory: Path) -> None:
     """Validate the immutable 20-profile post-product-consolidation v8 cohort."""
-    validate_build_campaign(
-        directory, "plakous.perf-build.v8", V8_BUILD_PROFILE_CONTRACTS
-    )
+    validate_build_campaign(directory, "plakous.perf-build.v8", V8_BUILD_PROFILE_CONTRACTS)
 
 
 def validate_v9_campaign(directory: Path) -> None:
     """Validate the immutable 19-profile post-paid-platform-removal v9 cohort."""
-    validate_build_campaign(
-        directory, "plakous.perf-build.v9", V9_BUILD_PROFILE_CONTRACTS
-    )
+    validate_build_campaign(directory, "plakous.perf-build.v9", V9_BUILD_PROFILE_CONTRACTS)
 
 
 def validate_v10_campaign(directory: Path) -> None:
     """Validate the current 18-profile merged-Responses v10 cohort."""
-    validate_build_campaign(
-        directory, "plakous.perf-build.v10", V10_BUILD_PROFILE_CONTRACTS
-    )
+    validate_build_campaign(directory, "plakous.perf-build.v10", V10_BUILD_PROFILE_CONTRACTS)
 
 
 def main() -> int:

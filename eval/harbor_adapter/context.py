@@ -17,10 +17,21 @@ from harbor_adapter.tuples import (
 
 
 def invocation_context(
-    *, arm: str, slice_name: str, account: str, model: str, effort: str,
-    arch: str, attempts: int, concurrency: int, selected_task: str | None,
-    source_commit: str, source_dirty: bool, cohort: str | None = None,
-    repeat_block: str | None = None, prompt_variant: str | None = None,
+    *,
+    arm: str,
+    slice_name: str,
+    account: str,
+    model: str,
+    effort: str,
+    arch: str,
+    attempts: int,
+    concurrency: int,
+    selected_task: str | None,
+    source_commit: str,
+    source_dirty: bool,
+    cohort: str | None = None,
+    repeat_block: str | None = None,
+    prompt_variant: str | None = None,
 ) -> dict:
     if slice_name not in {"plumbing", "ab", "expanded"}:
         raise ValueError("unknown Rung A slice")
@@ -36,15 +47,25 @@ def invocation_context(
             raise ValueError("selected task is outside the frozen slice")
         tasks = (selected_task,)
     return {
-        "schema_version": 1, "kind": "rung-a-comparison-context",
-        "arm": arm, "slice": slice_name, "account": account,
-        "model": model, "effort": effort, "arch": arch,
+        "schema_version": 1,
+        "kind": "rung-a-comparison-context",
+        "arm": arm,
+        "slice": slice_name,
+        "account": account,
+        "model": model,
+        "effort": effort,
+        "arch": arch,
         "prompt_variant": prompt_variant or "default",
-        "eval_source_commit": source_commit, "eval_source_dirty": source_dirty,
-        "cohort": cohort, "repeat_block": repeat_block,
-        "tasks": list(tasks), "attempts_per_task": attempts,
-        "planned_trials": len(tasks) * attempts, "concurrency": concurrency,
-        "dataset": "plak/rung-a-plumbing" if slice_name == "plumbing"
+        "eval_source_commit": source_commit,
+        "eval_source_dirty": source_dirty,
+        "cohort": cohort,
+        "repeat_block": repeat_block,
+        "tasks": list(tasks),
+        "attempts_per_task": attempts,
+        "planned_trials": len(tasks) * attempts,
+        "concurrency": concurrency,
+        "dataset": "plak/rung-a-plumbing"
+        if slice_name == "plumbing"
         else "terminal-bench/terminal-bench-2-1@6",
         "timeout_policy": "task-default; native internal deadlines recorded separately",
         "adapter_task_retries": 0,
@@ -64,22 +85,34 @@ def main() -> None:
     parser.add_argument("--prompt-variant")
     args = parser.parse_args()
     source = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=args.root, text=True,
+        ["git", "rev-parse", "HEAD"],
+        cwd=args.root,
+        text=True,
     ).strip()
-    dirty = bool(subprocess.check_output(
-        ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=args.root,
-    ))
+    dirty = bool(
+        subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            cwd=args.root,
+        )
+    )
     record = invocation_context(
-        arm=args.arm, slice_name=args.slice, account=args.account,
-        model=args.model, effort=args.effort, arch=args.arch,
-        attempts=args.attempts, concurrency=args.concurrency,
+        arm=args.arm,
+        slice_name=args.slice,
+        account=args.account,
+        model=args.model,
+        effort=args.effort,
+        arch=args.arch,
+        attempts=args.attempts,
+        concurrency=args.concurrency,
         selected_task=os.environ.get("HARBOR_INCLUDE_TASK") or None,
-        source_commit=source, source_dirty=dirty,
+        source_commit=source,
+        source_dirty=dirty,
         cohort=os.environ.get("HARBOR_COMPARISON_ID") or None,
         repeat_block=os.environ.get("HARBOR_REPEAT_BLOCK") or None,
         prompt_variant=args.prompt_variant,
     )
     from harbor_adapter.campaign import load_campaign
+
     campaign = load_campaign()
     if args.arm not in campaign["arms"]:
         raise ValueError("arm is not in the frozen campaign")
@@ -91,8 +124,10 @@ def main() -> None:
     record["input_sha256"] = {
         relative: hashlib.sha256((args.root / relative).read_bytes()).hexdigest()
         for relative in (
-            "eval/scripts/rung-a.sh", "eval/harbor_adapter/rate_card.json",
-            "eval/harbor_adapter/vendor_pins.py", f"eval/rung-a-{args.slice}.yaml",
+            "eval/scripts/rung-a.sh",
+            "eval/harbor_adapter/rate_card.json",
+            "eval/harbor_adapter/vendor_pins.py",
+            f"eval/rung-a-{args.slice}.yaml",
         )
     }
     # One sidecar per invocation: a second launch cannot rewrite its bindings.

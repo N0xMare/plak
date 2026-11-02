@@ -53,8 +53,9 @@ def outside_workspace_base() -> str:
     """A temporary base with no `Cargo.toml` above it, so Cargo finds no workspace."""
     for base in (tempfile.gettempdir(), "/tmp"):
         path = Path(base).resolve()
-        if path.is_dir() and not any((parent / "Cargo.toml").exists()
-                                     for parent in (path, *path.parents)):
+        if path.is_dir() and not any(
+            (parent / "Cargo.toml").exists() for parent in (path, *path.parents)
+        ):
             return str(path)
     raise RuntimeError("no temporary directory outside a Cargo workspace")
 
@@ -64,7 +65,9 @@ def pinned_channel(start: Path) -> str | None:
     for directory in (start, *start.parents):
         path = directory / "rust-toolchain.toml"
         if path.is_file():
-            channel = tomllib.loads(path.read_text(encoding="utf-8")).get("toolchain", {}).get("channel")
+            channel = (
+                tomllib.loads(path.read_text(encoding="utf-8")).get("toolchain", {}).get("channel")
+            )
             return channel if isinstance(channel, str) else None
     return None
 
@@ -79,11 +82,17 @@ def refresh_environment(start: Path) -> dict[str, str] | None:
 
 def refresh_index_entries(names: Sequence[str], runner: Runner, env: dict[str, str] | None) -> bool:
     """Read each crate's registry entry online from outside any workspace."""
-    with tempfile.TemporaryDirectory(prefix="plak-index-refresh.",
-                                     dir=outside_workspace_base()) as empty:
+    with tempfile.TemporaryDirectory(
+        prefix="plak-index-refresh.", dir=outside_workspace_base()
+    ) as empty:
         return all(
-            runner(["cargo", "info", "--quiet", "--", name], cwd=empty, env=env,
-                   stdout=subprocess.DEVNULL).returncode == 0
+            runner(
+                ["cargo", "info", "--quiet", "--", name],
+                cwd=empty,
+                env=env,
+                stdout=subprocess.DEVNULL,
+            ).returncode
+            == 0
             for name in names
         )
 
@@ -94,10 +103,15 @@ def run(command: Sequence[str], runner: Runner = subprocess.run) -> int:
         return 0
     names = stale_index_names(offline.stderr or "")
     if names:
-        print(f"offline resolution found stale index entries; refreshing {', '.join(names)}",
-              file=sys.stderr)
+        print(
+            f"offline resolution found stale index entries; refreshing {', '.join(names)}",
+            file=sys.stderr,
+        )
         env = refresh_environment(Path.cwd())
-        if refresh_index_entries(names, runner, env) and run_offline(command, runner).returncode == 0:
+        if (
+            refresh_index_entries(names, runner, env)
+            and run_offline(command, runner).returncode == 0
+        ):
             print("offline retry succeeded after the index refresh", file=sys.stderr)
             return 0
     return runner(list(command)).returncode

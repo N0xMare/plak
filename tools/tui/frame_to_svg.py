@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Render Ratatui .frame goldens to dependency-free deterministic SVG."""
+
 from __future__ import annotations
 
 import argparse
@@ -27,8 +28,7 @@ def svg_color(value: str, default: str) -> str:
 def render(source: str) -> str:
     lines = source.splitlines()
     headers = [
-        index for index, line in enumerate(lines)
-        if re.fullmatch(r"frame (\d+)x(\d+)", line)
+        index for index, line in enumerate(lines) if re.fullmatch(r"frame (\d+)x(\d+)", line)
     ]
     if headers == [0]:
         return render_frame(source)
@@ -54,7 +54,8 @@ def render(source: str) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
         f'height="{offset}" viewBox="0 0 {width} {offset}">'
         f'<rect width="100%" height="100%" fill="{DEFAULT_BACKGROUND}"/>'
-        + "".join(stories) + "</svg>\n"
+        + "".join(stories)
+        + "</svg>\n"
     )
 
 

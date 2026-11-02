@@ -57,8 +57,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             "malformed token private-command --key=secret\n"
         )
         record = parse_sample(raw, "after_agent_run")
-        self.assertEqual(record["processes"][0],
-                         {"pid": 123, "ppid": 1, "pgid": 123, "state": "S"})
+        self.assertEqual(record["processes"][0], {"pid": 123, "ppid": 1, "pgid": 123, "state": "S"})
         self.assertEqual(record["listen_sockets"], [{"port": 8080, "inode": 98765}])
         self.assertNotIn("secret", str(record))
         self.assertIn("observed_at_utc", record)
@@ -76,6 +75,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
 class VendorPreflightTests(unittest.IsolatedAsyncioTestCase):
     async def test_shell_preamble_is_inside_the_bounded_version_probe(self):
         with _installed_agent_with_harbor_stub("vendor_agents") as module:
+
             class Vendor:
                 def get_version_command(self):
                     return "if [ -s ~/.nvm/nvm.sh ]; then . ~/.nvm/nvm.sh; fi; codex --version"
@@ -97,6 +97,7 @@ class VendorPreflightTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_vendor_identity_covers_installed_command_and_archive(self):
         with _installed_agent_with_harbor_stub("vendor_agents") as module:
+
             class Cell:
                 commands: list[str]
 
@@ -115,13 +116,15 @@ class VendorPreflightTests(unittest.IsolatedAsyncioTestCase):
                 cell = Cell()
                 await module._record_executable_identity(agent, cell, "codex", "amd64")
                 record = json.loads((pathlib.Path(tmp) / "vendor-artifact.json").read_text())
-                self.assertEqual(set(record["binaries"]),
-                                 {"codex", "codex-archive", "node", "node-archive"})
+                self.assertEqual(
+                    set(record["binaries"]), {"codex", "codex-archive", "node", "node-archive"}
+                )
                 self.assertEqual(record["arch"], "amd64")
                 self.assertEqual(record["version"], "0.159.3")
 
     async def test_vendor_identity_refuses_missing_bytes(self):
         with _installed_agent_with_harbor_stub("vendor_agents") as module:
+
             class Cell:
                 async def exec(self, *, command):
                     return SimpleNamespace(return_code=127, stdout="", stderr="secret")

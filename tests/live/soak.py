@@ -36,15 +36,29 @@ from live import ScenarioFailure  # noqa: E402
 
 REPO_URL = "https://github.com/more-itertools/more-itertools.git"
 REPO_COMMIT = "4998a257373f36e91edef7324572ed8df10f39d1"  # v10.5.0
-REBUILD = [str(live.ROOT / "tools/build/build-plak.sh"), "--release", "--features", "plak/test-hooks", "--plak-only"]
+REBUILD = [
+    str(live.ROOT / "tools/build/build-plak.sh"),
+    "--release",
+    "--features",
+    "plak/test-hooks",
+    "--plak-only",
+]
 
 # Bugs the driver plants before asking for a fix: (file, function, correct
 # text, broken text). The correct text is in the pinned commit's function.
 BUGS = {
-    "ilen": ("more_itertools/more.py", "ilen", "return sum(compress(repeat(1), zip(iterable)))",
-             "return sum(compress(repeat(2), zip(iterable)))"),
-    "quantify": ("more_itertools/recipes.py", "quantify", "return sum(map(pred, iterable))",
-                 "return sum(map(bool, iterable))"),
+    "ilen": (
+        "more_itertools/more.py",
+        "ilen",
+        "return sum(compress(repeat(1), zip(iterable)))",
+        "return sum(compress(repeat(2), zip(iterable)))",
+    ),
+    "quantify": (
+        "more_itertools/recipes.py",
+        "quantify",
+        "return sum(map(pred, iterable))",
+        "return sum(map(bool, iterable))",
+    ),
 }
 
 
@@ -60,27 +74,47 @@ def tasks(cycle: int) -> list[Task]:
     """One cycle of work. Names carry the cycle so repeated cycles add new code."""
     fn = f"every_nth_{cycle}"
     return [
-        Task("explore", "Which module defines `chunked`, and which test file covers it? "
-             "Answer in two short lines."),
-        Task("fix_ilen", "The test suite (`python3 -m unittest -q`) fails. Find the bug and "
-             "fix it, then run the suite.", bug="ilen"),
-        Task("feature", f"Add a function `{fn}(iterable, n)` to more_itertools/more.py that "
-             f"yields every n-th item starting with the first, export it in `__all__`, add a "
-             f"stub to more.pyi and tests to tests/test_more.py, then run the suite.",
-             check=f"from more_itertools import {fn}; "
-                   f"assert list({fn}(range(10), 3)) == [0, 3, 6, 9]"),
-        Task("fix_quantify", "The test suite fails again. Find and fix the bug, then run "
-             "the suite.", bug="quantify"),
-        Task("docs", f"Add `{fn}` to the API listing in docs/api.rst next to `chunked`.",
-             check=f"assert '{fn}' in open('docs/api.rst').read()"),
+        Task(
+            "explore",
+            "Which module defines `chunked`, and which test file covers it? "
+            "Answer in two short lines.",
+        ),
+        Task(
+            "fix_ilen",
+            "The test suite (`python3 -m unittest -q`) fails. Find the bug and "
+            "fix it, then run the suite.",
+            bug="ilen",
+        ),
+        Task(
+            "feature",
+            f"Add a function `{fn}(iterable, n)` to more_itertools/more.py that "
+            f"yields every n-th item starting with the first, export it in `__all__`, add a "
+            f"stub to more.pyi and tests to tests/test_more.py, then run the suite.",
+            check=f"from more_itertools import {fn}; "
+            f"assert list({fn}(range(10), 3)) == [0, 3, 6, 9]",
+        ),
+        Task(
+            "fix_quantify",
+            "The test suite fails again. Find and fix the bug, then run the suite.",
+            bug="quantify",
+        ),
+        Task(
+            "docs",
+            f"Add `{fn}` to the API listing in docs/api.rst next to `chunked`.",
+            check=f"assert '{fn}' in open('docs/api.rst').read()",
+        ),
     ]
 
 
 # Faults sprinkled over the run, one plan per task process, cycling.
 def fault_plans(route: live.Route) -> list[str | None]:
-    return [None, live.fault_plan(route, "429", retry_after=1),
-            live.fault_plan(route, "reset", after_events=4).replace("nth=1", "nth=2"),
-            None, live.fault_plan(route, "stall", seconds=15, after_events=3)]
+    return [
+        None,
+        live.fault_plan(route, "429", retry_after=1),
+        live.fault_plan(route, "reset", after_events=4).replace("nth=1", "nth=2"),
+        None,
+        live.fault_plan(route, "stall", seconds=15, after_events=3),
+    ]
 
 
 @dataclasses.dataclass
@@ -107,16 +141,21 @@ class Record:
     segment: str | None = None
 
 
-def segment_evidence(capture_dir: Path, diagnostics: Path,
-                     diagnostic_offset: int) -> tuple[int, list[str], str]:
+def segment_evidence(
+    capture_dir: Path, diagnostics: Path, diagnostic_offset: int
+) -> tuple[int, list[str], str]:
     """Classify a process without treating an absent response as a successful capture."""
     info = list(capture_dir.glob("*.info"))
-    if (not diagnostics.is_file() or diagnostics.is_symlink()
-            or stat.S_IMODE(diagnostics.stat().st_mode) != 0o600):
+    if (
+        not diagnostics.is_file()
+        or diagnostics.is_symlink()
+        or stat.S_IMODE(diagnostics.stat().st_mode) != 0o600
+    ):
         return len(info), [], "diagnostics_missing"
     lines = diagnostics.read_bytes()[diagnostic_offset:].decode(errors="replace")
-    predicates = sorted(set(re.findall(
-        r'\bpredicate="?((?:route|native)\.[a-z_]+(?:\.[a-z_]+)*)"?', lines)))
+    predicates = sorted(
+        set(re.findall(r'\bpredicate="?((?:route|native)\.[a-z_]+(?:\.[a-z_]+)*)"?', lines))
+    )
     if info:
         return len(info), predicates, "response"
     if predicates:
@@ -129,8 +168,12 @@ def prepare_repo(cache: Path, work: Path) -> Path:
         subprocess.run(["git", "clone", "-q", REPO_URL, str(cache)], check=True)
     env = live.fixture_git_env()
     subprocess.run(["git", "clone", "-q", "--local", str(cache), str(work)], check=True, env=env)
-    subprocess.run(["git", "-c", "advice.detachedHead=false", "checkout", "-q", REPO_COMMIT],
-                   cwd=work, check=True, env=env)
+    subprocess.run(
+        ["git", "-c", "advice.detachedHead=false", "checkout", "-q", REPO_COMMIT],
+        cwd=work,
+        check=True,
+        env=env,
+    )
     return work
 
 
@@ -155,12 +198,17 @@ def plant(repo: Path, bug: str) -> None:
     nor restoring the whole file works. Only the function is reset.
     """
     path, name, good, bad = BUGS[bug]
-    pinned = subprocess.run(["git", "show", f"{REPO_COMMIT}:{path}"], cwd=repo,
-                            capture_output=True, text=True, check=True).stdout
+    pinned = subprocess.run(
+        ["git", "show", f"{REPO_COMMIT}:{path}"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     pinned_span = function_span(pinned, name)
     if pinned_span is None:
         raise ScenarioFailure(live.HARNESS, f"cannot plant {bug}: {name} is not in {REPO_COMMIT}")
-    original = pinned.splitlines(keepends=True)[pinned_span[0]:pinned_span[1]]
+    original = pinned.splitlines(keepends=True)[pinned_span[0] : pinned_span[1]]
     broken = "".join(original)
     if good not in broken:
         raise ScenarioFailure(live.HARNESS, f"cannot plant {bug}: the pinned {name} moved")
@@ -168,7 +216,7 @@ def plant(repo: Path, bug: str) -> None:
     span = function_span("".join(lines), name)
     if span is None:
         raise ScenarioFailure(live.HARNESS, f"cannot plant {bug}: {path} has no parseable {name}")
-    lines[span[0]:span[1]] = [broken.replace(good, bad, 1)]
+    lines[span[0] : span[1]] = [broken.replace(good, bad, 1)]
     (repo / path).write_text("".join(lines))
 
 
@@ -176,8 +224,9 @@ def check(repo: Path, task: Task, answer: str = "") -> bool:
     if not live.unittest_passes(repo):
         return False
     if task.name == "explore":
-        return ("more_itertools.more" in answer or "more_itertools/more.py" in answer) \
-            and "test_more.py" in answer
+        return (
+            "more_itertools.more" in answer or "more_itertools/more.py" in answer
+        ) and "test_more.py" in answer
     if task.check:
         return subprocess.run(["python3", "-c", task.check], cwd=repo).returncode == 0
     return True
@@ -196,8 +245,14 @@ class Soak:
         args = ["--session", self.session] if self.session else []
         capture_dir = self.capture_root / f"segment-{self.segment:03d}"
         capture_dir.mkdir(mode=0o700)
-        agent = live.Agent(self.env, self.repo, f"segment-{self.segment:03d}", args=args,
-                           faults=faults, capture_dir=capture_dir)
+        agent = live.Agent(
+            self.env,
+            self.repo,
+            f"segment-{self.segment:03d}",
+            args=args,
+            faults=faults,
+            capture_dir=capture_dir,
+        )
         if self.session and agent.session_id != self.session:
             raise ScenarioFailure(live.HARNESS, "reopen attached a different session")
         self.session = agent.session_id
@@ -208,15 +263,19 @@ class Soak:
         segment_before = self.segment
         diagnostics = self.env.home / "logs/plak.log"
         diagnostic_offset = diagnostics.stat().st_size if diagnostics.is_file() else 0
-        before = live.committed_compactions(live.session_records(self.env.home, self.session)) \
-            if self.session else 0
+        before = (
+            live.committed_compactions(live.session_records(self.env.home, self.session))
+            if self.session
+            else 0
+        )
         agent = None
         timer = None
 
         def observe(event: dict) -> None:
             nonlocal timer
-            record.peak_context = max(record.peak_context,
-                                      event.get("peak_prepared_input_tokens", 0))
+            record.peak_context = max(
+                record.peak_context, event.get("peak_prepared_input_tokens", 0)
+            )
             self._note_peak(event)
             if sleep and timer is None and event.get("kind") == "tool":
                 agent.signal(signal.SIGSTOP)  # the lid closes mid-tool
@@ -239,13 +298,19 @@ class Soak:
             after = ""
             if not turn.completed:
                 reason = live.provider_reason_from(
-                    turn.model_error_kind, turn.http_status, " ".join(turn.errors),
-                    lookup_faults=turn.lookup_faults)
+                    turn.model_error_kind,
+                    turn.http_status,
+                    " ".join(turn.errors),
+                    lookup_faults=turn.lookup_faults,
+                )
                 validation = live.stream_validation_outcome(
-                    " ".join(turn.errors), [agent.capture_dir])
+                    " ".join(turn.errors), [agent.capture_dir]
+                )
                 if reason or validation == live.PROVIDER:
                     record.outcome = "provider"
-                    record.errors.append(reason or "provider stream violated the documented protocol")
+                    record.errors.append(
+                        reason or "provider stream violated the documented protocol"
+                    )
                     raise live.ScenarioFailure(live.PROVIDER, record.errors[-1])
                 if live.output_limit_failure(turn.model_error_kind, " ".join(turn.errors)):
                     raise live.ScenarioFailure(live.MODEL, live.OUTPUT_LIMIT_MISS)
@@ -263,8 +328,11 @@ class Soak:
             else:
                 record.outcome = ("pass" if check(self.repo, task, answer) else "model") + after
         except ScenarioFailure as failure:
-            record.outcome = failure.outcome if failure.outcome in (
-                live.PROVIDER, live.MODEL, live.HARNESS) else "harness"
+            record.outcome = (
+                failure.outcome
+                if failure.outcome in (live.PROVIDER, live.MODEL, live.HARNESS)
+                else "harness"
+            )
             record.errors = [str(failure)]
         finally:
             if timer:
@@ -276,17 +344,21 @@ class Soak:
         else:
             capture_dir = self.capture_root / f"segment-{self.segment:03d}"
             record.segment = str(capture_dir)
-            (record.captured_exchanges, record.authority_predicates,
-             record.evidence_status) = segment_evidence(
-                 capture_dir, diagnostics, diagnostic_offset)
-            if (record.outcome.startswith(("pass", "model"))
-                    and record.captured_exchanges == 0
-                    and record.evidence_status != "diagnostics_missing"):
+            (record.captured_exchanges, record.authority_predicates, record.evidence_status) = (
+                segment_evidence(capture_dir, diagnostics, diagnostic_offset)
+            )
+            if (
+                record.outcome.startswith(("pass", "model"))
+                and record.captured_exchanges == 0
+                and record.evidence_status != "diagnostics_missing"
+            ):
                 record.evidence_status = "unexplained_no_response"
         record.seconds = time.monotonic() - started
         if self.session:
-            record.compactions = live.committed_compactions(
-                live.session_records(self.env.home, self.session)) - before
+            record.compactions = (
+                live.committed_compactions(live.session_records(self.env.home, self.session))
+                - before
+            )
         return record
 
     def _note_peak(self, event: dict) -> None:
@@ -298,6 +370,7 @@ class Soak:
         if not self.session:
             return 0
         import long_session
+
         peak = long_session.prepared_peak(live.session_records(self.env.home, self.session))
         return peak or 0
 
@@ -331,8 +404,11 @@ class Soak:
             answer = agent.command("compact", timeout=600)
             if answer.get("kind") == "error":
                 live.classify_command_error(
-                    str(answer.get("message") or ""), "manual compact",
-                    segments=[agent.capture_dir], lookup_faults=agent.lookup_faults)
+                    str(answer.get("message") or ""),
+                    "manual compact",
+                    segments=[agent.capture_dir],
+                    lookup_faults=agent.lookup_faults,
+                )
         finally:
             agent.quit()
 
@@ -372,13 +448,17 @@ def main(argv: list[str]) -> int:
     # Long-session scenarios are opt-in and bounded. They are not the hour loop.
     if "--long-session" in argv:
         import long_session
+
         forwarded = [arg for arg in argv if arg != "--long-session"]
         return long_session.main(forwarded)
     parser = build_parser()
     args = parser.parse_args(argv)
     live.isolate_test_environment()
     route = live.ROUTES[args.route]
-    artifacts = args.artifacts or live.ROOT / "target" / "live" / f"soak-{route.name}-{time.strftime('%Y%m%d-%H%M%S')}"
+    artifacts = (
+        args.artifacts
+        or live.ROOT / "target" / "live" / f"soak-{route.name}-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
     artifacts.mkdir(parents=True)
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
     env.route = route
@@ -406,10 +486,13 @@ def main(argv: list[str]) -> int:
                 record = soak.run_task(task, cycle, plans[index % len(plans)], sleep=index % 4 == 2)
                 index += 1
                 records.append(record)
-                print(f"{record.outcome:28} c{cycle} {task.name:13} {record.seconds:5.0f}s "
-                      f"ctx={record.peak_context} comp={record.compactions}"
-                      f"{' slept' if record.slept else ''}{' faults' if record.faults else ''}"
-                      f"{' dead-end' if record.dead_end else ''}", flush=True)
+                print(
+                    f"{record.outcome:28} c{cycle} {task.name:13} {record.seconds:5.0f}s "
+                    f"ctx={record.peak_context} comp={record.compactions}"
+                    f"{' slept' if record.slept else ''}{' faults' if record.faults else ''}"
+                    f"{' dead-end' if record.dead_end else ''}",
+                    flush=True,
+                )
                 # A provider refusal is recorded and stops the hour. It is not a
                 # harness failure and it is not retried.
                 if record.outcome in ("harness", "provider") or record.dead_end:
@@ -419,15 +502,20 @@ def main(argv: list[str]) -> int:
                     try:
                         soak.compact()
                     except ScenarioFailure as error:
-                        records.append(Record("compact", cycle, None, outcome=error.outcome,
-                                              errors=[str(error)]))
+                        records.append(
+                            Record(
+                                "compact", cycle, None, outcome=error.outcome, errors=[str(error)]
+                            )
+                        )
                         failed = True
                         break
                 if not rebuilt and time.monotonic() > started + args.hours * 1800:
                     rebuilt = True
                     rebuild_ok = rebuild(env.binary, artifacts / "rebuild.log")
                     binary_rebuilt = live.binary_sha256(env.binary)
-                    print(f"rebuild: {'ok' if rebuild_ok else 'FAILED (see rebuild.log)'}", flush=True)
+                    print(
+                        f"rebuild: {'ok' if rebuild_ok else 'FAILED (see rebuild.log)'}", flush=True
+                    )
             if failed:
                 break
     except Exception:
@@ -435,22 +523,27 @@ def main(argv: list[str]) -> int:
         crash = traceback.format_exc()
         print(crash, file=sys.stderr, flush=True)
     summary = {
-        **live.route_report(route, bound=env.bound_compositions), "task_repo_commit": REPO_COMMIT,
+        **live.route_report(route, bound=env.bound_compositions),
+        "task_repo_commit": REPO_COMMIT,
         "binary_sha256_start": binary_start,
         "binary_sha256_rebuilt": binary_rebuilt,
         "binary_sha256_end": live.binary_sha256(env.binary),
-        "session": soak.session, "tasks": len(records),
+        "session": soak.session,
+        "tasks": len(records),
         "passed": sum(r.outcome.startswith("pass") for r in records),
         "harness_failures": sum(r.outcome == "harness" for r in records),
         "provider_failures": sum(r.outcome == "provider" for r in records),
         "dead_ends": sum(r.dead_end for r in records),
         "compactions": live.committed_compactions(live.session_records(env.home, soak.session))
-        if soak.session else 0,
+        if soak.session
+        else 0,
         "tokens": sum(r.input_tokens + r.output_tokens for r in records),
         "token_telemetry": live.sum_usage(
-            live.TokenUsage(r.input_tokens, r.output_tokens,
-                            r.cached_input_tokens, r.reasoning_tokens)
-            for r in records),
+            live.TokenUsage(
+                r.input_tokens, r.output_tokens, r.cached_input_tokens, r.reasoning_tokens
+            )
+            for r in records
+        ),
         "hours": round((time.monotonic() - started) / 3600, 2),
         "tasks_per_hour": round(len(records) * 3600 / (time.monotonic() - started), 1),
         "peak_context": max((r.peak_context for r in records), default=0),
@@ -463,19 +556,35 @@ def main(argv: list[str]) -> int:
     summary["captured_exchanges"] = len(info)
     segments = env.capture_segments
     summary["capture_segments"] = [str(segment) for segment in segments]
-    summary["capture_complete"] = (bool(info) and len(bodies) == len(info)
-                                   and live.capture_integrity(segments))
+    summary["capture_complete"] = (
+        bool(info) and len(bodies) == len(info) and live.capture_integrity(segments)
+    )
     summary["evidence_gaps"] = sum(
         record.evidence_status in ("diagnostics_missing", "unexplained_no_response")
-        for record in records)
-    (artifacts / "report.json").write_text(json.dumps(
-        {"summary": summary, "records": [dataclasses.asdict(r) for r in records]}, indent=2) + "\n")
+        for record in records
+    )
+    (artifacts / "report.json").write_text(
+        json.dumps(
+            {"summary": summary, "records": [dataclasses.asdict(r) for r in records]}, indent=2
+        )
+        + "\n"
+    )
     print(json.dumps(summary, indent=2) + f"\nartifacts: {artifacts}")
-    return 0 if (crash is None and summary["harness_failures"] == 0 and summary["provider_failures"] == 0
-                 and summary["dead_ends"] == 0
-                 and rebuild_ok and summary["capture_complete"]
-                 and summary["binary_sha256_end"] == (binary_start if args.no_rebuild else binary_rebuilt)
-                 and summary["evidence_gaps"] == 0) else 1
+    return (
+        0
+        if (
+            crash is None
+            and summary["harness_failures"] == 0
+            and summary["provider_failures"] == 0
+            and summary["dead_ends"] == 0
+            and rebuild_ok
+            and summary["capture_complete"]
+            and summary["binary_sha256_end"]
+            == (binary_start if args.no_rebuild else binary_rebuilt)
+            and summary["evidence_gaps"] == 0
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

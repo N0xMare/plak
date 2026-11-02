@@ -31,14 +31,24 @@ CALL_RE = re.compile(
     r"([0-9][0-9,]*)\s+([0-9][0-9,]*)(?:\s+\([^\n]*\))?\s*$",
     re.MULTILINE,
 )
-FREE_RE = re.compile(
-    r"^\s*free\s*\|\s*([0-9][0-9,]*)\s+([0-9][0-9,]*)\s*$", re.MULTILINE
-)
+FREE_RE = re.compile(r"^\s*free\s*\|\s*([0-9][0-9,]*)\s+([0-9][0-9,]*)\s*$", re.MULTILINE)
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 WORKLOADS = {
-    "core-event-round": ("perf_core", "event-round", (("short", 10), ("medium", 100), ("long", 1_000))),
-    "project-round": ("perf_project", "project-round", (("short", 10), ("medium", 100), ("long", 1_000))),
-    "family-artifact": ("perf_project", "family-artifact", (("short", 64), ("medium", 65_536), ("long", 1_048_576))),
+    "core-event-round": (
+        "perf_core",
+        "event-round",
+        (("short", 10), ("medium", 100), ("long", 1_000)),
+    ),
+    "project-round": (
+        "perf_project",
+        "project-round",
+        (("short", 10), ("medium", 100), ("long", 1_000)),
+    ),
+    "family-artifact": (
+        "perf_project",
+        "family-artifact",
+        (("short", 64), ("medium", 65_536), ("long", 1_048_576)),
+    ),
     "tool-schema": ("perf_project", "tool-schema", (("short", 4), ("medium", 32), ("long", 128))),
 }
 
@@ -129,8 +139,15 @@ def require_platform() -> None:
 
 def discover_benchmark(root: Path, name: str) -> tuple[Path, list[str]]:
     arguments = [
-        "cargo", "bench", "--locked", "-p", "plakous", "--bench", name,
-        "--no-run", "--message-format=json",
+        "cargo",
+        "bench",
+        "--locked",
+        "-p",
+        "plakous",
+        "--bench",
+        name,
+        "--no-run",
+        "--message-format=json",
     ]
     result = command(arguments, cwd=root)
     matches: list[Path] = []
@@ -182,7 +199,9 @@ def source_binding(root: Path) -> dict[str, Any]:
             after = os.fstat(descriptor)
         finally:
             os.close(descriptor)
-        if _file_identity(before) != _file_identity(after) or _file_identity(path.lstat()) != _file_identity(before):
+        if _file_identity(before) != _file_identity(after) or _file_identity(
+            path.lstat()
+        ) != _file_identity(before):
             raise ProbeError(f"source changed while hashing: {path}")
         digest.update(len(encoded).to_bytes(8, "big"))
         digest.update(encoded)
@@ -205,9 +224,10 @@ def snapshot_executable(source: Path, destination: Path) -> dict[str, Any]:
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode) or before.st_mode & 0o111 == 0:
             raise ProbeError(f"benchmark is not a regular executable: {source}")
-        with os.fdopen(os.dup(descriptor), "rb") as input_stream, destination.open(
-            "xb"
-        ) as output_stream:
+        with (
+            os.fdopen(os.dup(descriptor), "rb") as input_stream,
+            destination.open("xb") as output_stream,
+        ):
             shutil.copyfileobj(input_stream, output_stream, 1024 * 1024)
         destination.chmod(0o500)
         after = os.fstat(descriptor)
@@ -223,13 +243,24 @@ def probe_arguments(binary: Path, operation: str, scale: int, iterations: int) -
     return [str(binary), "--isolated-probe", operation, str(scale), str(iterations)]
 
 
-def measure(binary: Path, workload: str, benchmark: str, operation: str, scenario: str, scale: int, iterations: int,
-            pair_id: str, sample_id: str) -> dict[str, Any]:
+def measure(
+    binary: Path,
+    workload: str,
+    benchmark: str,
+    operation: str,
+    scenario: str,
+    scale: int,
+    iterations: int,
+    pair_id: str,
+    sample_id: str,
+) -> dict[str, Any]:
     probe = probe_arguments(binary, operation, scale, iterations)
     arguments = [str(MEMUSAGE), "--", *probe]
     result = subprocess.run(arguments, text=True, capture_output=True, check=False, env={})
     if result.returncode != 0:
-        raise ProbeError(f"{benchmark} allocation probe exited {result.returncode}: {result.stderr[-500:]}")
+        raise ProbeError(
+            f"{benchmark} allocation probe exited {result.returncode}: {result.stderr[-500:]}"
+        )
     try:
         confirmations = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
     except json.JSONDecodeError as error:
@@ -312,18 +343,85 @@ def validate_row(row: dict[str, Any]) -> None:
         raise ProbeError("invalid allocation schema")
     kind = row.get("kind")
     if kind == "metadata":
-        _exact(row, ("schema", "kind", "qualification", "host", "measurement", "plan", "bindings"), kind)
-        _exact(row["qualification"], ("status", "portable_numeric_baseline", "raw_totals"), "qualification")
+        _exact(
+            row,
+            ("schema", "kind", "qualification", "host", "measurement", "plan", "bindings"),
+            kind,
+        )
+        _exact(
+            row["qualification"],
+            ("status", "portable_numeric_baseline", "raw_totals"),
+            "qualification",
+        )
         _exact(row["host"], ("id", "os", "arch", "kernel", "glibc"), "host")
-        _exact(row["measurement"], ("tool", "process_isolation", "delta_method", "failed_allocations"), "measurement")
-        _exact(row["bindings"], ("source", "toolchain", "memusage", "binaries", "builds"), "bindings")
+        _exact(
+            row["measurement"],
+            ("tool", "process_isolation", "delta_method", "failed_allocations"),
+            "measurement",
+        )
+        _exact(
+            row["bindings"], ("source", "toolchain", "memusage", "binaries", "builds"), "bindings"
+        )
     elif kind == "raw-sample":
-        _exact(row, ("schema", "kind", "sample_id", "pair_id", "workload", "benchmark", "operation", "scenario", "scale", "iteration_count", "pair_role", "scope", "command", "metrics", "stderr_sha256", "probe_confirmation"), kind)
-        _exact(row["metrics"], ("allocation_calls", "heap_total_bytes", "heap_peak_bytes", "stack_peak_bytes", "call_table", "summary_text"), "metrics")
+        _exact(
+            row,
+            (
+                "schema",
+                "kind",
+                "sample_id",
+                "pair_id",
+                "workload",
+                "benchmark",
+                "operation",
+                "scenario",
+                "scale",
+                "iteration_count",
+                "pair_role",
+                "scope",
+                "command",
+                "metrics",
+                "stderr_sha256",
+                "probe_confirmation",
+            ),
+            kind,
+        )
+        _exact(
+            row["metrics"],
+            (
+                "allocation_calls",
+                "heap_total_bytes",
+                "heap_peak_bytes",
+                "stack_peak_bytes",
+                "call_table",
+                "summary_text",
+            ),
+            "metrics",
+        )
         if row["scenario"] not in {"short", "medium", "long"} or row["iteration_count"] < 0:
             raise ProbeError("invalid raw sample scenario or iteration count")
     elif kind == "derived-delta":
-        _exact(row, ("schema", "kind", "pair_id", "workload", "benchmark", "operation", "scenario", "scale", "iteration_count", "zero_sample_id", "measured_sample_id", "derivation", "deltas", "per_iteration", "qualification", "peak_caveat"), kind)
+        _exact(
+            row,
+            (
+                "schema",
+                "kind",
+                "pair_id",
+                "workload",
+                "benchmark",
+                "operation",
+                "scenario",
+                "scale",
+                "iteration_count",
+                "zero_sample_id",
+                "measured_sample_id",
+                "derivation",
+                "deltas",
+                "per_iteration",
+                "qualification",
+                "peak_caveat",
+            ),
+            kind,
+        )
         keys = ("allocation_calls", "heap_total_bytes", "heap_peak_bytes")
         _exact(row["deltas"], keys, "deltas")
         _exact(row["per_iteration"], keys, "per_iteration")
@@ -332,7 +430,14 @@ def validate_row(row: dict[str, Any]) -> None:
     json.dumps(row, allow_nan=False)
 
 
-def metadata(root: Path, host_id: str, binaries: dict[str, Any], builds: dict[str, Any], iterations: int, samples: int) -> dict[str, Any]:
+def metadata(
+    root: Path,
+    host_id: str,
+    binaries: dict[str, Any],
+    builds: dict[str, Any],
+    iterations: int,
+    samples: int,
+) -> dict[str, Any]:
     rustc = Path(shutil.which("rustc") or "")
     cargo = Path(shutil.which("cargo") or "")
     if not rustc.is_file() or not cargo.is_file():
@@ -359,15 +464,28 @@ def metadata(root: Path, host_id: str, binaries: dict[str, Any], builds: dict[st
             "failed_allocations": "rejected",
         },
         "plan": {
-            "workloads": {name: {"benchmark": bench, "operation": operation, "scenarios": [{"name": label, "scale": scale} for label, scale in scenarios]} for name, (bench, operation, scenarios) in WORKLOADS.items()},
+            "workloads": {
+                name: {
+                    "benchmark": bench,
+                    "operation": operation,
+                    "scenarios": [{"name": label, "scale": scale} for label, scale in scenarios],
+                }
+                for name, (bench, operation, scenarios) in WORKLOADS.items()
+            },
             "iterations_per_measured_process": iterations,
             "pairs_per_scenario": samples,
         },
         "bindings": {
             "source": source_binding(root),
             "toolchain": {
-                "rustc": {"version": command([str(rustc), "-Vv"]).stdout.strip(), "sha256": sha256(rustc.resolve())},
-                "cargo": {"version": command([str(cargo), "-V"]).stdout.strip(), "sha256": sha256(cargo.resolve())},
+                "rustc": {
+                    "version": command([str(rustc), "-Vv"]).stdout.strip(),
+                    "sha256": sha256(rustc.resolve()),
+                },
+                "cargo": {
+                    "version": command([str(cargo), "-V"]).stdout.strip(),
+                    "sha256": sha256(cargo.resolve()),
+                },
             },
             "memusage": {"path": str(MEMUSAGE), "sha256": sha256(MEMUSAGE)},
             "binaries": binaries,
@@ -419,8 +537,28 @@ def run(arguments: list[str] | None = None) -> list[dict[str, Any]]:
             for scenario, history in scenarios:
                 for sample in range(args.samples):
                     pair_id = f"{workload}-{scenario}-{sample}-{uuid.uuid4().hex}"
-                    zero = measure(snapshots[benchmark], workload, benchmark, operation, scenario, history, 0, pair_id, f"{pair_id}-zero")
-                    measured = measure(snapshots[benchmark], workload, benchmark, operation, scenario, history, args.iterations, pair_id, f"{pair_id}-n")
+                    zero = measure(
+                        snapshots[benchmark],
+                        workload,
+                        benchmark,
+                        operation,
+                        scenario,
+                        history,
+                        0,
+                        pair_id,
+                        f"{pair_id}-zero",
+                    )
+                    measured = measure(
+                        snapshots[benchmark],
+                        workload,
+                        benchmark,
+                        operation,
+                        scenario,
+                        history,
+                        args.iterations,
+                        pair_id,
+                        f"{pair_id}-n",
+                    )
                     rows.extend((zero, measured, delta_row(zero, measured)))
     return rows
 

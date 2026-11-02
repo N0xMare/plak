@@ -1,4 +1,5 @@
 """Offline readiness fixtures: real local TLS, no provider or credential access."""
+
 from __future__ import annotations
 
 import copy
@@ -26,7 +27,13 @@ from harbor_adapter.leases import account_leases
 from harbor_adapter.lifecycle import parse_sample
 from harbor_adapter.observed_config import request_config
 from harbor_adapter.preflight import PreflightError
-from harbor_adapter.recording_proxy import make_certificate, ProxyHandler, ProxyServer, Recorder, require_hosts
+from harbor_adapter.recording_proxy import (
+    make_certificate,
+    ProxyHandler,
+    ProxyServer,
+    Recorder,
+    require_hosts,
+)
 from harbor_adapter.tuples import RUNG_A_AB_TASKS, RUNG_A_PLUMBING_TASKS
 from harbor_adapter.wire import bounded_command
 from test_eval_validity import campaign
@@ -37,16 +44,25 @@ class RecorderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'reduced.json'
             recorder = Recorder(output)
-            first = recorder.begin(b'{"model":"fixture","instructions":"private-system","input":"private-task","reasoning":{"effort":"low"}}')
+            first = recorder.begin(
+                b'{"model":"fixture","instructions":"private-system","input":"private-task","reasoning":{"effort":"low"}}'
+            )
             second = recorder.begin(b'{"model":"later"}')
             recorder.finish(second, b'data: {"model":"served-later"}\n\n')
-            recorder.finish(first, b'data: {"response":{"model":"served-first","output":"private-answer"}}\n\n')
+            recorder.finish(
+                first, b'data: {"response":{"model":"served-first","output":"private-answer"}}\n\n'
+            )
             self.assertIsNone(recorder.begin(b'{"telemetry":"private-telemetry"}'))
             data = json.loads(output.read_text())
             self.assertEqual(data['first_request']['model'], 'fixture')
             self.assertEqual(data['requests'][0]['response']['served_model'], 'served-first')
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
-            for content in ('private-system', 'private-task', 'private-answer', 'private-telemetry'):
+            for content in (
+                'private-system',
+                'private-task',
+                'private-answer',
+                'private-telemetry',
+            ):
                 self.assertNotIn(content, output.read_text())
             self.assertEqual(list(Path(directory).iterdir()), [output])
 
@@ -70,15 +86,28 @@ class RecorderTests(unittest.TestCase):
             upstream = mock.Mock()
             response = mock.Mock(status=200)
             response.getheaders.return_value = [('Content-Type', 'text/event-stream')]
-            response.read1.side_effect = [b'data: {"model":"served","content":"private-answer"}\n\n', b'']
+            response.read1.side_effect = [
+                b'data: {"model":"served","content":"private-answer"}\n\n',
+                b'',
+            ]
             upstream.getresponse.return_value = response
-            client = real_connection('127.0.0.1', server.server_port,
-                                     context=ssl.create_default_context(cafile=str(root / 'ca.pem')))
+            client = real_connection(
+                '127.0.0.1',
+                server.server_port,
+                context=ssl.create_default_context(cafile=str(root / 'ca.pem')),
+            )
             client.set_tunnel('api.example.test', 443)
             try:
-                with mock.patch('harbor_adapter.recording_proxy.http.client.HTTPSConnection', return_value=upstream) as connect:
-                    body = b'{"model":"fixture","messages":[{"role":"user","content":"private-task"}]}'
-                    client.request('POST', '/v1/responses', body, {'Authorization': 'Bearer synthetic-only'})
+                with mock.patch(
+                    'harbor_adapter.recording_proxy.http.client.HTTPSConnection',
+                    return_value=upstream,
+                ) as connect:
+                    body = (
+                        b'{"model":"fixture","messages":[{"role":"user","content":"private-task"}]}'
+                    )
+                    client.request(
+                        'POST', '/v1/responses', body, {'Authorization': 'Bearer synthetic-only'}
+                    )
                     result = client.getresponse()
                     self.assertEqual(result.status, 200)
                     self.assertIn(b'private-answer', result.read())
@@ -88,9 +117,16 @@ class RecorderTests(unittest.TestCase):
                     self.assertEqual(connect.call_args.args, ('api.example.test',))
                     self.assertNotIn('Proxy-Authorization', upstream.request.call_args.args[3])
                     output = (root / 'observed-config.json').read_text()
-                    for secret in ('synthetic-only', 'private-answer', 'private-task', 'Authorization'):
+                    for secret in (
+                        'synthetic-only',
+                        'private-answer',
+                        'private-task',
+                        'Authorization',
+                    ):
                         self.assertNotIn(secret, output)
-                    self.assertEqual(json.loads(output)['requests'][0]['response']['served_model'], 'served')
+                    self.assertEqual(
+                        json.loads(output)['requests'][0]['response']['served_model'], 'served'
+                    )
             finally:
                 client.close()
                 server.shutdown()
@@ -134,10 +170,16 @@ class BuilderTests(unittest.TestCase):
                 member = tarfile.TarInfo('prefix/bin/cli')
                 member.size = len(b'fixture-cli')
                 tar.addfile(member, io.BytesIO(b'fixture-cli'))
-            self.assertEqual(builder.artifact_digest(root, 'amd64', '.plak/installed/amd64/binary'),
-                             hashlib.sha256(b'fixture-executable').hexdigest())
-            self.assertEqual(builder.artifact_digest(root, 'amd64', {'archive': str(archive), 'member': 'prefix/bin/cli'}),
-                             hashlib.sha256(b'fixture-cli').hexdigest())
+            self.assertEqual(
+                builder.artifact_digest(root, 'amd64', '.plak/installed/amd64/binary'),
+                hashlib.sha256(b'fixture-executable').hexdigest(),
+            )
+            self.assertEqual(
+                builder.artifact_digest(
+                    root, 'amd64', {'archive': str(archive), 'member': 'prefix/bin/cli'}
+                ),
+                hashlib.sha256(b'fixture-cli').hexdigest(),
+            )
             with self.assertRaises(PreflightError):
                 builder.artifact_digest(root, 'amd64', '/etc/passwd')
 
@@ -150,36 +192,74 @@ class BuilderTests(unittest.TestCase):
             binary.write_bytes(b'fixture')
             capture = root / 'capture.json'
             observed = request_config({'model': 'fixture', 'reasoning': {'effort': 'low'}})
-            capture.write_text(json.dumps({'source': 'exchange', 'wire_verified': True, 'first_request': observed,
-                'calibration_binding': {'source_commit': 'a' * 40, 'arch': 'amd64',
-                                        'binaries': {'codex': hashlib.sha256(b'fixture').hexdigest()}}}))
-            arm = {'account': 'codex', 'binaries': {'codex': str(binary)}, 'calibration_file': str(capture)}
-            inventory = {'arch': 'amd64', 'artifact_paths': [str(binary)],
-                         'tasks': {t: {} for t in RUNG_A_AB_TASKS}, 'arms': {'codex': arm, 'pi-codex-oauth': arm}}
-            with mock.patch.object(builder.subprocess, 'check_output', side_effect=['a' * 40, b'']), \
-                 mock.patch.object(builder, 'task_binding', return_value=campaign()['tasks']['task']):
+            capture.write_text(
+                json.dumps(
+                    {
+                        'source': 'exchange',
+                        'wire_verified': True,
+                        'first_request': observed,
+                        'calibration_binding': {
+                            'source_commit': 'a' * 40,
+                            'arch': 'amd64',
+                            'binaries': {'codex': hashlib.sha256(b'fixture').hexdigest()},
+                        },
+                    }
+                )
+            )
+            arm = {
+                'account': 'codex',
+                'binaries': {'codex': str(binary)},
+                'calibration_file': str(capture),
+            }
+            inventory = {
+                'arch': 'amd64',
+                'artifact_paths': [str(binary)],
+                'tasks': {t: {} for t in RUNG_A_AB_TASKS},
+                'arms': {'codex': arm, 'pi-codex-oauth': arm},
+            }
+            with (
+                mock.patch.object(builder.subprocess, 'check_output', side_effect=['a' * 40, b'']),
+                mock.patch.object(
+                    builder, 'task_binding', return_value=campaign()['tasks']['task']
+                ),
+            ):
                 plan = builder.generate(root, inventory, phase='scored', slice_name='ab', blocks=3)
             self.assertEqual(validate_campaign(plan), [])
             self.assertEqual(plan['arms']['codex']['observed_config'], observed)
-            self.assertEqual(plan['arms']['codex']['calibration_sha256'], hashlib.sha256(capture.read_bytes()).hexdigest())
-            self.assertEqual(plan['artifact_sha256'][str(binary)], hashlib.sha256(b'fixture').hexdigest())
+            self.assertEqual(
+                plan['arms']['codex']['calibration_sha256'],
+                hashlib.sha256(capture.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                plan['artifact_sha256'][str(binary)], hashlib.sha256(b'fixture').hexdigest()
+            )
 
     def test_task_probe_binds_checksum_budgets_arch_and_resource_limits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             task = root / 'task'
             (task / 'environment').mkdir(parents=True)
-            (task / 'task.toml').write_text('[agent]\ntimeout_sec=1200\n[verifier]\ntimeout_sec=90\n[environment]\ncpus=2\nmemory_mb=4096\n')
+            (task / 'task.toml').write_text(
+                '[agent]\ntimeout_sec=1200\n[verifier]\ntimeout_sec=90\n[environment]\ncpus=2\nmemory_mb=4096\n'
+            )
             image = 'sha256:' + 'a' * 64
-            with mock.patch.object(builder, 'docker', side_effect=[json.dumps([{'Id': image, 'Architecture': 'amd64'}]), '0\nmanifest']) as docker:
+            with mock.patch.object(
+                builder,
+                'docker',
+                side_effect=[json.dumps([{'Id': image, 'Architecture': 'amd64'}]), '0\nmanifest'],
+            ) as docker:
                 binding = builder.task_binding(root, 'amd64', {'path': str(task), 'image': image})
             self.assertEqual(binding['agent_timeout'], 1200)
             self.assertEqual(binding['verifier_timeout'], 90)
-            self.assertEqual(binding['cell_manifest_sha256'], hashlib.sha256(b'0\nmanifest\n').hexdigest())
+            self.assertEqual(
+                binding['cell_manifest_sha256'], hashlib.sha256(b'0\nmanifest\n').hexdigest()
+            )
             self.assertIn('--cpus', docker.call_args.args)
             self.assertIn('4096m', docker.call_args.args)
             self.assertIn('--network=none', docker.call_args.args)
-            with mock.patch.object(builder, 'docker', return_value=json.dumps([{'Id': image, 'Architecture': 'arm64'}])):
+            with mock.patch.object(
+                builder, 'docker', return_value=json.dumps([{'Id': image, 'Architecture': 'arm64'}])
+            ):
                 with self.assertRaises(PreflightError):
                     builder.task_binding(root, 'amd64', {'path': str(task), 'image': image})
 
@@ -195,10 +275,14 @@ class BuilderTests(unittest.TestCase):
 
     def test_null_requires_identical_binary_tuple_and_eight_tasks_three_blocks(self):
         plan = campaign()
-        plan.update(phase='null', tasks={t: copy.deepcopy(plan['tasks']['task']) for t in RUNG_A_AB_TASKS})
+        plan.update(
+            phase='null', tasks={t: copy.deepcopy(plan['tasks']['task']) for t in RUNG_A_AB_TASKS}
+        )
         plan['arms'] = {'plak-codex': plan['arms']['a'], 'plak-codex-aa': plan['arms']['b']}
         for arm in plan['arms'].values():
-            arm['binaries'] = {name: 'b' * 64 for name in ('plak', 'plakous-js-host', 'plakous-py-host')}
+            arm['binaries'] = {
+                name: 'b' * 64 for name in ('plak', 'plakous-js-host', 'plakous-py-host')
+            }
             arm['resolved_composition'] = 'direct'
         self.assertEqual(validate_campaign(plan), [])
         plan['arms']['plak-codex-aa']['binaries']['plak'] = 'e' * 64
@@ -223,18 +307,30 @@ class RuntimeTests(unittest.TestCase):
     def test_timeout_stops_inside_shell_not_only_docker_client(self):
         if not shutil.which('timeout'):
             self.skipTest('GNU timeout is a Linux cell prerequisite')
-        result = subprocess.run(bounded_command('sleep 10', .05), shell=True, capture_output=True, timeout=3)
+        result = subprocess.run(
+            bounded_command('sleep 10', 0.05), shell=True, capture_output=True, timeout=3
+        )
         self.assertEqual(result.returncode, 124)
         with self.assertRaises(PreflightError):
             bounded_command('true', 0)
 
     def test_cgroup_metrics_are_numeric_only(self):
-        parsed = parse_sample('RESOURCES\nmemory.peak\n8192\nmemory.events\noom 2\noom_kill 1\ncpu.stat\nusage_usec 3000\nprivate invalid\n', 'after')
-        self.assertEqual(parsed['resources'], {'memory_peak_bytes': 8192, 'oom': 2, 'oom_kill': 1, 'cpu_usage_usec': 3000})
+        parsed = parse_sample(
+            'RESOURCES\nmemory.peak\n8192\nmemory.events\noom 2\noom_kill 1\ncpu.stat\nusage_usec 3000\nprivate invalid\n',
+            'after',
+        )
+        self.assertEqual(
+            parsed['resources'],
+            {'memory_peak_bytes': 8192, 'oom': 2, 'oom_kill': 1, 'cpu_usage_usec': 3000},
+        )
 
     def test_developer_input_is_digested_without_retaining_content(self):
-        a = request_config({'model': 'fixture', 'input': [{'role': 'developer', 'content': 'first'}]})
-        b = request_config({'model': 'fixture', 'input': [{'role': 'developer', 'content': 'second'}]})
+        a = request_config(
+            {'model': 'fixture', 'input': [{'role': 'developer', 'content': 'first'}]}
+        )
+        b = request_config(
+            {'model': 'fixture', 'input': [{'role': 'developer', 'content': 'second'}]}
+        )
         self.assertNotEqual(a['instructions_sha256'], b['instructions_sha256'])
         self.assertNotIn('first', json.dumps(a))
 
@@ -242,22 +338,48 @@ class RuntimeTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         harbor = (root / 'eval/harbor.just').read_text()
         for name, phase in [('phase0', 'calibration'), ('null', 'null'), ('codex', 'codex')]:
-            self.assertIn(name + ':\n    uv run --project eval python eval/scripts/campaign.py ' + phase, harbor)
+            self.assertIn(
+                name + ':\n    uv run --project eval python eval/scripts/campaign.py ' + phase,
+                harbor,
+            )
         for script in ('campaign.py', 'campaign_builder.py', 'recording_proxy.py'):
-            path = root / ('eval/scripts' if script == 'campaign.py' else 'eval/harbor_adapter') / script
+            path = (
+                root
+                / ('eval/scripts' if script == 'campaign.py' else 'eval/harbor_adapter')
+                / script
+            )
             compile(path.read_text(), str(path), 'exec')
+
 
 class EvidenceTests(unittest.TestCase):
     def test_argv_parsers_exclude_instruction_and_shell_redirection(self):
         from harbor_adapter.argv import native_argv
+
         instruction = "Task with 'quotes' and\nprivate content"
         import shlex
+
         prompt = shlex.quote(instruction)
         for harness, command, expected in (
-            ('codex', f'. nvm.sh; codex exec --json -- {prompt} 2>&1 | tee /logs/output', ['codex', 'exec', '--json', '--']),
-            ('grok-build', f'grok --no-auto-update --single {prompt} --always-approve &', ['grok', '--no-auto-update', '--single', '--always-approve']),
-            ('pi', f'pi --print --mode json {prompt} 2>&1 | tee output', ['pi', '--print', '--mode', 'json']),
-            ('opencode', f'opencode --model=openai/fixture run --format=json -- {prompt} 2>&1 | tee output', ['opencode', '--model=openai/fixture', 'run', '--format=json', '--']),
+            (
+                'codex',
+                f'. nvm.sh; codex exec --json -- {prompt} 2>&1 | tee /logs/output',
+                ['codex', 'exec', '--json', '--'],
+            ),
+            (
+                'grok-build',
+                f'grok --no-auto-update --single {prompt} --always-approve &',
+                ['grok', '--no-auto-update', '--single', '--always-approve'],
+            ),
+            (
+                'pi',
+                f'pi --print --mode json {prompt} 2>&1 | tee output',
+                ['pi', '--print', '--mode', 'json'],
+            ),
+            (
+                'opencode',
+                f'opencode --model=openai/fixture run --format=json -- {prompt} 2>&1 | tee output',
+                ['opencode', '--model=openai/fixture', 'run', '--format=json', '--'],
+            ),
         ):
             with self.subTest(harness=harness):
                 argv = native_argv(command, instruction, harness)
@@ -267,19 +389,41 @@ class EvidenceTests(unittest.TestCase):
 
     def test_nested_tools_and_sse_without_space(self):
         from harbor_adapter.observed_config import json_records
-        value = request_config({'model': 'fixture', 'tools': [{'type': 'namespace', 'name': 'functions',
-                                'tools': [{'type': 'function', 'name': 'exec'}, {'type': 'custom', 'name': 'patch'}]}]})
+
+        value = request_config(
+            {
+                'model': 'fixture',
+                'tools': [
+                    {
+                        'type': 'namespace',
+                        'name': 'functions',
+                        'tools': [
+                            {'type': 'function', 'name': 'exec'},
+                            {'type': 'custom', 'name': 'patch'},
+                        ],
+                    }
+                ],
+            }
+        )
         self.assertEqual(value['tool_names'], ['functions.exec', 'functions.patch'])
-        self.assertEqual(json_records('event: message\ndata:{"model":"served"}\n\ndata: [DONE]'), [{'model': 'served'}])
+        self.assertEqual(
+            json_records('event: message\ndata:{"model":"served"}\n\ndata: [DONE]'),
+            [{'model': 'served'}],
+        )
 
     def test_retry_lower_bound_never_claims_complete_zero(self):
         from harbor_adapter.observed_config import retry_telemetry
-        value = retry_telemetry({'requests': [
-            {'request_sha256': 'a', 'response': {'status_code': 429}},
-            {'request_sha256': 'a', 'response': {'transport_error': True}},
-            {'request_sha256': 'a', 'response': {'status_code': 200}},
-            {'request_sha256': 'b', 'response': {'status_code': 200}},
-        ]})
+
+        value = retry_telemetry(
+            {
+                'requests': [
+                    {'request_sha256': 'a', 'response': {'status_code': 429}},
+                    {'request_sha256': 'a', 'response': {'transport_error': True}},
+                    {'request_sha256': 'a', 'response': {'status_code': 200}},
+                    {'request_sha256': 'b', 'response': {'status_code': 200}},
+                ]
+            }
+        )
         self.assertEqual(value['observed_retries'], 2)
         self.assertEqual(value['causes'], {'http_429': 1, 'transport': 1})
         self.assertFalse(value['complete'])
@@ -287,13 +431,16 @@ class EvidenceTests(unittest.TestCase):
 
     def test_retained_capture_cannot_substitute_for_full_run(self):
         from harbor_adapter.observed_config import extract_exchanges
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'exchange-0129.request').write_text('{"model":"fixture"}')
             (root / 'exchange-0129.body').write_text('{"model":"served"}')
             (root / 'exchange-0129.info').write_text('status=Some(200)\nincomplete=false\n')
             self.assertTrue(extract_exchanges(root)['wire_verified'])
-            (root / 'retention.info').write_text('full_run=false\nselected_successful_exchange_ranges=[(1, 128)]\n')
+            (root / 'retention.info').write_text(
+                'full_run=false\nselected_successful_exchange_ranges=[(1, 128)]\n'
+            )
             reduced = extract_exchanges(root)
             self.assertFalse(reduced['wire_verified'])
             self.assertEqual(reduced['requests'][0]['response']['status_code'], 200)
@@ -304,7 +451,9 @@ class EvidenceTests(unittest.TestCase):
             for name in RUNG_A_PLUMBING_TASKS:
                 (root / name).mkdir()
                 (root / name / 'task.toml').write_text('')
-            value = builder.inventory(root, 'amd64', 'plumbing', ['plak-codex', 'codex'], root / 'captures')
+            value = builder.inventory(
+                root, 'amd64', 'plumbing', ['plak-codex', 'codex'], root / 'captures'
+            )
             self.assertEqual(set(value['tasks']), set(RUNG_A_PLUMBING_TASKS))
             self.assertNotIn('resolved_composition', value['arms']['plak-codex'])
             (root / 'duplicate/write-hello').mkdir(parents=True)
@@ -318,7 +467,11 @@ class EvidenceTests(unittest.TestCase):
             (root / 'environment').mkdir()
             (root / 'task.toml').write_text('[environment]\ndocker_image="public/task:tag"\n')
             value = {'arch': 'amd64', 'tasks': {'task': {'path': str(root)}}}
-            with mock.patch.object(builder, 'docker', side_effect=['pulled', json.dumps([{'Id': 'sha256:base'}]), '', 'sha256:prepared']) as docker:
+            with mock.patch.object(
+                builder,
+                'docker',
+                side_effect=['pulled', json.dumps([{'Id': 'sha256:base'}]), '', 'sha256:prepared'],
+            ) as docker:
                 frozen = builder.freeze(value)
             self.assertEqual(frozen['tasks']['task']['image'], 'sha256:prepared')
             self.assertEqual(docker.call_count, 4)
@@ -326,10 +479,13 @@ class EvidenceTests(unittest.TestCase):
             self.assertIn(builder.PACKAGES, docker.call_args.kwargs['input'])
             self.assertTrue(frozen['tasks']['task']['base_tag'].startswith('plak-harbor-freeze-'))
             self.assertEqual(frozen['tasks']['task']['base_image'], 'sha256:base')
-            self.assertFalse(any(call.args[:2] == ('image', 'rm') for call in docker.call_args_list))
+            self.assertFalse(
+                any(call.args[:2] == ('image', 'rm') for call in docker.call_args_list)
+            )
 
     def test_native_state_copy_excludes_auth_before_common_scan(self):
         from harbor_adapter.hygiene import NATIVE_STATE_HARVEST
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             sessions = root / 'source'
@@ -345,23 +501,28 @@ class EvidenceTests(unittest.TestCase):
 
     def test_paired_supporting_tests_are_bounded_and_equivalence_is_not_superiority(self):
         from harbor_adapter.paired import estimate
+
         same = estimate({'one': ([True] * 3, [True] * 3)}, replicates=100)
         self.assertEqual(same['permutation_p'], 1)
         self.assertEqual(same['mcnemar_majority_p'], 1)
         self.assertTrue(same['equivalent_within_10pp'])
         different = estimate({str(i): ([True] * 3, [False] * 3) for i in range(8)}, replicates=100)
-        self.assertLess(different['permutation_p'], .05)
-        self.assertLess(different['mcnemar_majority_p'], .05)
+        self.assertLess(different['permutation_p'], 0.05)
+        self.assertLess(different['mcnemar_majority_p'], 0.05)
         self.assertFalse(different['equivalent_within_10pp'])
+
 
 class WireLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_environment_overlay_cell_local_data_and_bounded_actual_command(self):
         from harbor_adapter.wire import WireAgent
+
         class Base:
             async def exec_as_agent(self, environment, command, **kwargs):
                 return SimpleNamespace(command=command, **kwargs)
+
         class Agent(WireAgent, Base):
             _native_harness = 'opencode'
+
         with tempfile.TemporaryDirectory() as directory:
             agent = Agent()
             agent.logs_dir = Path(directory)
@@ -369,24 +530,39 @@ class WireLifecycleTests(unittest.IsolatedAsyncioTestCase):
             agent._wire_env = {'HTTPS_PROXY': 'http://127.0.0.1:18080'}
             agent._eval_deadline = 130
             with mock.patch('harbor_adapter.wire.time.monotonic', return_value=100):
-                result = await agent.exec_as_agent(object(),
+                result = await agent.exec_as_agent(
+                    object(),
                     command='opencode --model=openai/fixture run -- private-prompt 2>&1 | tee /logs/out',
-                    env={'XDG_DATA_HOME': '/logs/agent/opencode/xdg-data'})
-            self.assertTrue(result.command.startswith('timeout --signal=TERM --kill-after=2s 30.000s'))
+                    env={'XDG_DATA_HOME': '/logs/agent/opencode/xdg-data'},
+                )
+            self.assertTrue(
+                result.command.startswith('timeout --signal=TERM --kill-after=2s 30.000s')
+            )
             self.assertEqual(result.env['XDG_DATA_HOME'], '/tmp/opencode-cell/xdg-data')
             self.assertEqual(result.env['HTTPS_PROXY'], 'http://127.0.0.1:18080')
             self.assertNotIn('private-prompt', (agent.logs_dir / 'argv.json').read_text())
 
     async def test_recorder_upload_readiness_and_private_trust_bundle(self):
         from harbor_adapter.wire import start_recording, harvest_recording
-        agent = SimpleNamespace(_native_harness='opencode', model_name='openai/fixture',
-                                exec_as_root=mock.AsyncMock(return_value=SimpleNamespace(return_code=0)))
-        environment = SimpleNamespace(upload_file=mock.AsyncMock(),
-                                      exec=mock.AsyncMock(return_value=SimpleNamespace(return_code=0)))
+
+        agent = SimpleNamespace(
+            _native_harness='opencode',
+            model_name='openai/fixture',
+            exec_as_root=mock.AsyncMock(return_value=SimpleNamespace(return_code=0)),
+        )
+        environment = SimpleNamespace(
+            upload_file=mock.AsyncMock(),
+            exec=mock.AsyncMock(return_value=SimpleNamespace(return_code=0)),
+        )
         await start_recording(agent, environment)
         self.assertEqual(environment.upload_file.await_count, 2)
         commands = [call.kwargs['command'] for call in agent.exec_as_root.await_args_list]
-        self.assertTrue(any('--host chatgpt.com' in command and '--host api.openai.com' in command for command in commands))
+        self.assertTrue(
+            any(
+                '--host chatgpt.com' in command and '--host api.openai.com' in command
+                for command in commands
+            )
+        )
         self.assertNotIn('/logs', agent._wire_env['NODE_EXTRA_CA_CERTS'])
         self.assertNotIn('HTTP_PROXY', agent._wire_env)
         self.assertNotIn('PLAK_HOME', agent._wire_env)
@@ -401,19 +577,32 @@ class WireLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_start_failure_still_harvests_and_runs_secret_scan(self):
         from harbor_adapter.lifecycle import observe_run
+
         class Agent:
             @observe_run
             async def run(self, *args):
                 raise AssertionError('must not dispatch after recorder startup failure')
+
         with tempfile.TemporaryDirectory() as directory:
             agent = Agent()
             agent.logs_dir = Path(directory)
             agent.exec_as_root = mock.AsyncMock()
-            with mock.patch('harbor_adapter.cell_prep.record_cell', new_callable=mock.AsyncMock), \
-                 mock.patch('harbor_adapter.preflight.task_budgets', return_value=(900, 600)), \
-                 mock.patch('harbor_adapter.wire.start_recording', side_effect=PreflightError('start failed')), \
-                 mock.patch('harbor_adapter.wire.harvest_recording', new_callable=mock.AsyncMock) as stop, \
-                 mock.patch('harbor_adapter.lifecycle.sample_cell', new_callable=mock.AsyncMock, return_value={}):
+            with (
+                mock.patch('harbor_adapter.cell_prep.record_cell', new_callable=mock.AsyncMock),
+                mock.patch('harbor_adapter.preflight.task_budgets', return_value=(900, 600)),
+                mock.patch(
+                    'harbor_adapter.wire.start_recording',
+                    side_effect=PreflightError('start failed'),
+                ),
+                mock.patch(
+                    'harbor_adapter.wire.harvest_recording', new_callable=mock.AsyncMock
+                ) as stop,
+                mock.patch(
+                    'harbor_adapter.lifecycle.sample_cell',
+                    new_callable=mock.AsyncMock,
+                    return_value={},
+                ),
+            ):
                 with self.assertRaisesRegex(PreflightError, 'start failed'):
                     await agent.run('private-prompt', object(), object())
             stop.assert_awaited_once()
@@ -426,9 +615,11 @@ class WireLifecycleTests(unittest.IsolatedAsyncioTestCase):
         plan.update(phase='calibration', blocks=1)
         self.assertNotIn('calibration_only_arm', validate_campaign(plan))
 
+
 class FreezePinTests(unittest.TestCase):
     def test_default_archive_members_are_discovered_and_node_bytes_are_verified(self):
         from harbor_adapter.vendor_pins import CLI_PINS, NODE_VERSION, node_tarball_name
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prefix = root / '.plak/installed/amd64/vendor'
@@ -446,13 +637,22 @@ class FreezePinTests(unittest.TestCase):
                 link = tarfile.TarInfo('./bin/codex')
                 link.type, link.linkname = tarfile.SYMTYPE, '../lib/cli.js'
                 archive.addfile(link)
-            manifest = {'arch': 'amd64', 'node': {'version': NODE_VERSION, 'file': node.name},
-                        'clis': {'codex': {'version': CLI_PINS['codex'], 'file': cli.name}}}
+            manifest = {
+                'arch': 'amd64',
+                'node': {'version': NODE_VERSION, 'file': node.name},
+                'clis': {'codex': {'version': CLI_PINS['codex'], 'file': cli.name}},
+            }
             (prefix / 'manifest.json').write_text(json.dumps(manifest))
-            with mock.patch.dict('harbor_adapter.vendor_pins.NODE_SHA256', {'amd64': hashlib.sha256(node.read_bytes()).hexdigest()}):
+            with mock.patch.dict(
+                'harbor_adapter.vendor_pins.NODE_SHA256',
+                {'amd64': hashlib.sha256(node.read_bytes()).hexdigest()},
+            ):
                 binaries = builder.frozen_binaries(root, 'amd64', 'codex')
                 self.assertEqual(set(binaries), {'codex', 'node', 'codex-archive', 'node-archive'})
-                self.assertEqual(builder.artifact_digest(root, 'amd64', binaries['codex']), hashlib.sha256(b'cli').hexdigest())
+                self.assertEqual(
+                    builder.artifact_digest(root, 'amd64', binaries['codex']),
+                    hashlib.sha256(b'cli').hexdigest(),
+                )
                 node.write_bytes(b'replaced')
                 with self.assertRaisesRegex(PreflightError, 'Node archive'):
                     builder.frozen_binaries(root, 'amd64', 'codex')
@@ -462,7 +662,7 @@ class FreezePinTests(unittest.TestCase):
                 builder.frozen_binaries(root, 'amd64', 'codex')
 
     def test_temperature_and_thinking_budgets_are_not_implicit_parity(self):
-        for key, value in [('temperature', .5), ('thinking_budget', 2048)]:
+        for key, value in [('temperature', 0.5), ('thinking_budget', 2048)]:
             plan = campaign()
             plan['arms']['a']['observed_config'][key] = value
             self.assertIn('policy_or_wire_parity', validate_campaign(plan))
@@ -472,16 +672,30 @@ class FreezePinTests(unittest.TestCase):
 
     def test_argv_redaction_survives_first_party_prompt_templates(self):
         from harbor_adapter.argv import native_argv
-        argv = native_argv("codex exec --json -- 'template contains private content'", 'original-task', 'codex')
+
+        argv = native_argv(
+            "codex exec --json -- 'template contains private content'", 'original-task', 'codex'
+        )
         self.assertEqual(argv, ['codex', 'exec', '--json', '--'])
-        argv = native_argv("grok --no-auto-update --single 'template private content' --always-approve", 'original-task', 'grok-build')
+        argv = native_argv(
+            "grok --no-auto-update --single 'template private content' --always-approve",
+            'original-task',
+            'grok-build',
+        )
         self.assertEqual(argv, ['grok', '--no-auto-update', '--single', '--always-approve'])
-        self.assertIsNone(native_argv("pi --print 'template private content'", 'original-task', 'pi'))
-        self.assertEqual(native_argv('pi --print --thinking low low', 'low', 'pi'), ['pi', '--print', '--thinking', 'low'])
+        self.assertIsNone(
+            native_argv("pi --print 'template private content'", 'original-task', 'pi')
+        )
+        self.assertEqual(
+            native_argv('pi --print --thinking low low', 'low', 'pi'),
+            ['pi', '--print', '--thinking', 'low'],
+        )
+
 
 class PhaseTests(unittest.TestCase):
     def runner(self, root):
         import importlib.util
+
         path = Path(__file__).resolve().parents[1] / 'scripts/campaign.py'
         spec = importlib.util.spec_from_file_location('fixture_ready_runner', path)
         module = importlib.util.module_from_spec(spec)
@@ -501,17 +715,37 @@ class PhaseTests(unittest.TestCase):
             for arm in plan['arms']:
                 trial = root / arm
                 (trial / 'agent').mkdir(parents=True)
-                reduced = {'source': 'exchange', 'wire_verified': True,
-                           'first_request': request_config({'model': 'fixture', 'reasoning': {'effort': 'low'}}),
-                           'requests': [{'response': {'served_model': 'fixture'}}]}
+                reduced = {
+                    'source': 'exchange',
+                    'wire_verified': True,
+                    'first_request': request_config(
+                        {'model': 'fixture', 'reasoning': {'effort': 'low'}}
+                    ),
+                    'requests': [{'response': {'served_model': 'fixture'}}],
+                }
                 (trial / 'agent/observed-config.json').write_text(json.dumps(reduced))
-                (trial / 'agent/plak-stderr.log').write_text('plak: composition Code Mode (native-ptc): fixture\n')
-                rows.append({'trials': [{'arm': arm, 'task': 'write-hello', 'failure_class': 'agent',
-                    'pass': True, 'evidence': {'result': str(trial / 'result.json')}}]})
-            with mock.patch.object(module.subprocess, 'run') as launch, \
-                 mock.patch.object(module, 'build_report', side_effect=rows), \
-                 mock.patch.object(module, 'discover', side_effect=lambda value: value), \
-                 mock.patch.dict(os.environ, {'HARBOR_CAMPAIGN_SHA256': 'a' * 64}):
+                (trial / 'agent/plak-stderr.log').write_text(
+                    'plak: composition Code Mode (native-ptc): fixture\n'
+                )
+                rows.append(
+                    {
+                        'trials': [
+                            {
+                                'arm': arm,
+                                'task': 'write-hello',
+                                'failure_class': 'agent',
+                                'pass': True,
+                                'evidence': {'result': str(trial / 'result.json')},
+                            }
+                        ]
+                    }
+                )
+            with (
+                mock.patch.object(module.subprocess, 'run') as launch,
+                mock.patch.object(module, 'build_report', side_effect=rows),
+                mock.patch.object(module, 'discover', side_effect=lambda value: value),
+                mock.patch.dict(os.environ, {'HARBOR_CAMPAIGN_SHA256': 'a' * 64}),
+            ):
                 self.assertEqual(module.run(plan, 'plumbing'), 0)
             self.assertEqual(launch.call_count, 2)
             output = next((root / '.plak/harbor/jobs').glob('campaign-*'))
@@ -524,6 +758,7 @@ class PhaseTests(unittest.TestCase):
     def test_codex_recipe_refuses_missing_or_mismatched_null_receipt_before_launch(self):
         from contextlib import nullcontext
         from harbor_adapter.tuples import RUNG_A_EXPANDED_TASKS
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             module = self.runner(root)
@@ -531,18 +766,28 @@ class PhaseTests(unittest.TestCase):
             plan.update(phase='scored', slice='expanded', blocks=5)
             plan['arms'] = {'plak-codex': plan['arms']['a'], 'codex': plan['arms']['b']}
             plan['tasks'] = {name: plan['tasks']['task'] for name in RUNG_A_EXPANDED_TASKS}
-            with mock.patch.object(module, 'campaign_gate', return_value=plan), \
-                 mock.patch.object(module, 'account_leases', return_value=nullcontext()), \
-                 mock.patch.object(module, 'run', return_value=0) as run, \
-                 mock.patch.object(sys, 'argv', ['campaign.py', 'codex']):
+            with (
+                mock.patch.object(module, 'campaign_gate', return_value=plan),
+                mock.patch.object(module, 'account_leases', return_value=nullcontext()),
+                mock.patch.object(module, 'run', return_value=0) as run,
+                mock.patch.object(sys, 'argv', ['campaign.py', 'codex']),
+            ):
                 with self.assertRaises(PreflightError):
                     module.main()
                 run.assert_not_called()
                 receipt = root / 'null-receipt.json'
-                value = {'phase': 'null', 'passed': True, 'source_commit': plan['source_commit'],
-                         'arch': plan['arch'], 'plak_binaries': plan['arms']['plak-codex']['binaries']}
+                value = {
+                    'phase': 'null',
+                    'passed': True,
+                    'source_commit': plan['source_commit'],
+                    'arch': plan['arch'],
+                    'plak_binaries': plan['arms']['plak-codex']['binaries'],
+                }
                 receipt.write_text(json.dumps(value))
-                plan.update(null_receipt_file=str(receipt), null_receipt_sha256=hashlib.sha256(receipt.read_bytes()).hexdigest())
+                plan.update(
+                    null_receipt_file=str(receipt),
+                    null_receipt_sha256=hashlib.sha256(receipt.read_bytes()).hexdigest(),
+                )
                 self.assertEqual(module.main(), 0)
                 self.assertEqual(run.call_count, 1)
                 value['source_commit'] = 'f' * 40
@@ -555,10 +800,14 @@ class PhaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(PreflightError, 'phase'):
                     module.main()
 
+
 class CapabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_pre_amp_jobs_binaries_refuse_before_dispatch(self):
         from harbor_adapter.preflight import probe_run_capabilities
-        environment = SimpleNamespace(exec=mock.AsyncMock(return_value=SimpleNamespace(return_code=0, stdout='plak run help')))
+
+        environment = SimpleNamespace(
+            exec=mock.AsyncMock(return_value=SimpleNamespace(return_code=0, stdout='plak run help'))
+        )
         with self.assertRaisesRegex(PreflightError, 'amp-jobs'):
             await probe_run_capabilities(environment, '/installed-agent/plak')
         environment.exec.return_value.stdout = 'plak run --leave-jobs-running'
@@ -568,9 +817,11 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PreflightError):
             await probe_run_capabilities(environment, '/installed-agent/plak')
 
+
 class CaptureTerminalTests(unittest.TestCase):
     def test_plak_capture_io_failure_is_not_a_transport_retry(self):
         from harbor_adapter.observed_config import extract_exchanges
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'exchange-0001.request').write_text('{"model":"fixture"}')
@@ -588,6 +839,7 @@ class CaptureTerminalTests(unittest.TestCase):
             reduced = extract_exchanges(root)
             self.assertTrue(reduced['requests'][0]['response']['client_cancelled'])
 
+
 class RecorderCapacityTests(unittest.TestCase):
     def test_capacity_or_parser_loss_is_never_an_admitted_wire_observation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -601,12 +853,15 @@ class RecorderCapacityTests(unittest.TestCase):
             self.assertFalse(value['wire_verified'])
             self.assertTrue(value['capture_incomplete'])
 
+
 class ToolNetworkParityTests(unittest.TestCase):
     def test_non_provider_tool_traffic_is_opaque_and_not_recorded(self):
         import socketserver
+
         class Echo(socketserver.BaseRequestHandler):
             def handle(self):
                 self.request.sendall(self.request.recv(4096))
+
         with tempfile.TemporaryDirectory() as directory:
             echo = socketserver.TCPServer(('127.0.0.1', 0), Echo)
             echo_thread = threading.Thread(target=echo.serve_forever, daemon=True)
@@ -634,27 +889,40 @@ class ToolNetworkParityTests(unittest.TestCase):
                 proxy_thread.join()
                 echo_thread.join()
 
+
 class RotatedCredentialHarvestTests(unittest.TestCase):
     def test_rotated_opencode_credentials_are_known_to_the_final_scan(self):
         from harbor_adapter.hygiene import HARVEST_SCRIPT
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'home').mkdir()
             (root / 'logs/agent').mkdir(parents=True)
             credential = root / 'synthetic-auth.json'
-            credential.write_text(json.dumps({'openai': {'access': 'synthetic-rotated-access-value-123456789'}}))
+            credential.write_text(
+                json.dumps({'openai': {'access': 'synthetic-rotated-access-value-123456789'}})
+            )
             artifact = root / 'logs/agent/artifact.txt'
             artifact.write_text('unlabelled synthetic-rotated-access-value-123456789')
-            script = HARVEST_SCRIPT.replace('/tmp/plak-cell/home', str(root / 'home')).replace('/logs', str(root / 'logs'))
-            script = script.replace('/tmp/opencode-cell/xdg-data/opencode/auth.json', str(credential))
+            script = HARVEST_SCRIPT.replace('/tmp/plak-cell/home', str(root / 'home')).replace(
+                '/logs', str(root / 'logs')
+            )
+            script = script.replace(
+                '/tmp/opencode-cell/xdg-data/opencode/auth.json', str(credential)
+            )
             for name in ('grok', 'pi', 'opencode', 'codex', 'claude'):
-                script = script.replace('/tmp/' + name + '-secrets', str(root / (name + '-secrets')))
+                script = script.replace(
+                    '/tmp/' + name + '-secrets', str(root / (name + '-secrets'))
+                )
             script = script.replace('/tmp/codex-home', str(root / 'codex-home'))
             result = subprocess.run([sys.executable, '-c', script], capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(artifact.exists())
-            self.assertTrue(json.loads((root / 'logs/agent/harvest.json').read_text())['secrets_harvested'])
+            self.assertTrue(
+                json.loads((root / 'logs/agent/harvest.json').read_text())['secrets_harvested']
+            )
             self.assertNotIn(b'synthetic-rotated-access-value', result.stdout + result.stderr)
+
 
 class SourceImageFreezeTests(unittest.TestCase):
     def test_explicit_source_build_does_not_pull_an_amd64_only_task_tag(self):
@@ -663,34 +931,60 @@ class SourceImageFreezeTests(unittest.TestCase):
             (root / 'environment').mkdir()
             (root / 'task.toml').write_text('[environment]\ndocker_image="public/task:tag"\n')
             value = {'arch': 'arm64', 'tasks': {'task': {'path': str(root)}}}
-            with mock.patch.object(builder, 'docker', side_effect=['sha256:base', '', 'sha256:prepared']) as docker:
+            with mock.patch.object(
+                builder, 'docker', side_effect=['sha256:base', '', 'sha256:prepared']
+            ) as docker:
                 result = builder.freeze(value, build_tasks=True)
             self.assertEqual(result['tasks']['task']['image'], 'sha256:prepared')
             self.assertEqual(docker.call_count, 3)
             self.assertEqual(docker.call_args_list[0].args[0], 'build')
             self.assertIn('linux/arm64', docker.call_args_list[0].args)
 
+
 class ClaudeBillingProjectionTests(unittest.TestCase):
     def body(self):
-        return {'model': 'same-model', 'output_config': {'effort': 'low'},
-                'thinking': {'type': 'adaptive'},
-                'system': [{'type': 'text', 'text': 'x-anthropic-billing-header: cc_version=2.1.295.8a8; cc_entrypoint=cli; cch=123ab; cc_prompt_id=12345678-1234-1234-1234-123456789abc; cc_turn_origin=human;'},
-                           {'type': 'text', 'text': 'All other instructions stay pinned.'}], 'tools': []}
+        return {
+            'model': 'same-model',
+            'output_config': {'effort': 'low'},
+            'thinking': {'type': 'adaptive'},
+            'system': [
+                {
+                    'type': 'text',
+                    'text': 'x-anthropic-billing-header: cc_version=2.1.295.8a8; cc_entrypoint=cli; cch=123ab; cc_prompt_id=12345678-1234-1234-1234-123456789abc; cc_turn_origin=human;',
+                },
+                {'type': 'text', 'text': 'All other instructions stay pinned.'},
+            ],
+            'tools': [],
+        }
 
     def evidence(self, plan, first):
-        return dict(plan['tasks']['task'], secrets_harvested=False,
-                    artifact={'binaries': {'binary': {'sha256': 'b' * 64}}},
-                    observed_config={'wire_verified': True, 'first_request': first,
-                                     'requests': [{'response': {'served_model': 'same-model'}}]})
+        return dict(
+            plan['tasks']['task'],
+            secrets_harvested=False,
+            artifact={'binaries': {'binary': {'sha256': 'b' * 64}}},
+            observed_config={
+                'wire_verified': True,
+                'first_request': first,
+                'requests': [{'response': {'served_model': 'same-model'}}],
+            },
+        )
 
     def test_only_known_billing_nonces_change_without_losing_exact_digests(self):
         from harbor_adapter.campaign import trial_gate
+
         before = self.body()
         after = copy.deepcopy(before)
-        after['system'][0]['text'] = after['system'][0]['text'].replace('2.1.295.8a8', '2.1.295.05c').replace('cch=123ab', 'cch=abcde').replace('12345678-1234-1234-1234-123456789abc', 'abcdef01-2345-6789-abcd-0123456789ab')
+        after['system'][0]['text'] = (
+            after['system'][0]['text']
+            .replace('2.1.295.8a8', '2.1.295.05c')
+            .replace('cch=123ab', 'cch=abcde')
+            .replace('12345678-1234-1234-1234-123456789abc', 'abcdef01-2345-6789-abcd-0123456789ab')
+        )
         a, b = request_config(before), request_config(after)
         self.assertNotEqual(a['instructions_sha256'], b['instructions_sha256'])
-        self.assertEqual(a['claude_instruction_projection_sha256'], b['claude_instruction_projection_sha256'])
+        self.assertEqual(
+            a['claude_instruction_projection_sha256'], b['claude_instruction_projection_sha256']
+        )
         plan = campaign()
         plan['arms']['a'].update(account='claude', observed_config=a)
         self.assertEqual(trial_gate(plan, 'a', 'task', self.evidence(plan, b)), [])
@@ -699,23 +993,43 @@ class ClaudeBillingProjectionTests(unittest.TestCase):
             recorder = Recorder(Path(directory) / 'reduced.json')
             for body in (before, after):
                 recorder.begin(json.dumps(body).encode())
-            self.assertNotEqual(recorder.requests[0]['request_sha256'], recorder.requests[1]['request_sha256'])
-            self.assertEqual(recorder.requests[0]['request']['instructions_sha256'], a['instructions_sha256'])
-            self.assertEqual(recorder.requests[1]['request']['instructions_sha256'], b['instructions_sha256'])
+            self.assertNotEqual(
+                recorder.requests[0]['request_sha256'], recorder.requests[1]['request_sha256']
+            )
+            self.assertEqual(
+                recorder.requests[0]['request']['instructions_sha256'], a['instructions_sha256']
+            )
+            self.assertEqual(
+                recorder.requests[1]['request']['instructions_sha256'], b['instructions_sha256']
+            )
         # No other account is admitted by this Claude-only exception.
         plan['arms']['a']['account'] = 'codex'
-        self.assertIn('first_request_unverified_or_mismatched', trial_gate(plan, 'a', 'task', self.evidence(plan, b)))
+        self.assertIn(
+            'first_request_unverified_or_mismatched',
+            trial_gate(plan, 'a', 'task', self.evidence(plan, b)),
+        )
 
     def test_unknown_billing_fields_base_version_entrypoint_or_other_content_fail(self):
         from harbor_adapter.campaign import trial_gate
+
         baseline = request_config(self.body())
-        for mutation in ('base_version', 'entrypoint', 'unknown_field', 'other_instruction', 'effort'):
+        for mutation in (
+            'base_version',
+            'entrypoint',
+            'unknown_field',
+            'other_instruction',
+            'effort',
+        ):
             with self.subTest(mutation=mutation):
                 body = self.body()
                 if mutation == 'base_version':
-                    body['system'][0]['text'] = body['system'][0]['text'].replace('2.1.295', '2.1.296')
+                    body['system'][0]['text'] = body['system'][0]['text'].replace(
+                        '2.1.295', '2.1.296'
+                    )
                 elif mutation == 'entrypoint':
-                    body['system'][0]['text'] = body['system'][0]['text'].replace('cc_entrypoint=cli', 'cc_entrypoint=ide')
+                    body['system'][0]['text'] = body['system'][0]['text'].replace(
+                        'cc_entrypoint=cli', 'cc_entrypoint=ide'
+                    )
                 elif mutation == 'unknown_field':
                     body['system'][0]['text'] += ' cc_new_field=unreviewed;'
                 elif mutation == 'effort':
@@ -725,10 +1039,14 @@ class ClaudeBillingProjectionTests(unittest.TestCase):
                 plan = campaign()
                 plan['arms']['a'].update(account='claude', observed_config=baseline)
                 observed = request_config(body)
-                self.assertIn('first_request_unverified_or_mismatched', trial_gate(plan, 'a', 'task', self.evidence(plan, observed)))
+                self.assertIn(
+                    'first_request_unverified_or_mismatched',
+                    trial_gate(plan, 'a', 'task', self.evidence(plan, observed)),
+                )
 
     def test_nonce_shaped_text_outside_the_billing_line_is_never_normalized(self):
         from harbor_adapter.observed_config import first_request_matches
+
         first = request_config({'model': 'fixture', 'system': 'A real instruction: cch=123ab;'})
         second = request_config({'model': 'fixture', 'system': 'A real instruction: cch=abcde;'})
         self.assertNotIn('claude_instruction_projection_sha256', first)

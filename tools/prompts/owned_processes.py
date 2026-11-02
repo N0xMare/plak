@@ -144,9 +144,7 @@ class Owned:
     def capture(self):
         rows = processes()
         parents = {
-            pid
-            for pid, birth in self.known.items()
-            if pid in rows and rows[pid][2] == birth
+            pid for pid, birth in self.known.items() if pid in rows and rows[pid][2] == birth
         }
         group_owned = any(rows[pid][1] == self.proc.pid for pid in parents)
         while True:
@@ -165,9 +163,7 @@ class Owned:
         return {
             pid
             for pid, birth in self.known.items()
-            if pid in rows
-            and rows[pid][2] == birth
-            and not rows[pid][3].startswith("Z")
+            if pid in rows and rows[pid][2] == birth and not rows[pid][3].startswith("Z")
         }
 
     async def watch(self):
@@ -231,9 +227,7 @@ async def capture_stream(reader, path, exceeded, limit=OUTPUT_LIMIT):
 
 
 @preserve_cleanup
-async def run_command(
-    argv, *, cwd, env, stdout_path, stderr_path, timeout, cleanup_record=None
-):
+async def run_command(argv, *, cwd, env, stdout_path, stderr_path, timeout, cleanup_record=None):
     """Run with an absolute wall deadline; output never refreshes that deadline."""
     started = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
@@ -260,6 +254,7 @@ async def run_command(
         )
         timed_out = not done
     finally:
+
         async def finish_cleanup():
             cleanup = None
             try:

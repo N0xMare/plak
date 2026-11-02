@@ -20,15 +20,21 @@ def contract_environment() -> dict[str, str]:
     target = environment.get("CARGO_BUILD_TARGET")
     if not target:
         version = subprocess.check_output(["rustc", "-vV"], text=True)
-        target = next(line.removeprefix("host: ") for line in version.splitlines()
-                      if line.startswith("host: "))
+        target = next(
+            line.removeprefix("host: ")
+            for line in version.splitlines()
+            if line.startswith("host: ")
+        )
     base = Path(environment.get("CARGO_TARGET_DIR", ROOT / "target"))
     base = base.resolve()
     # cargo-sweep descends into nested target dirs. A gitignored sibling survives
     # both lane sweeps and checkout cleanup without sharing another lane's graph.
-    cache = Path(environment.get(
-        "PLAK_PUBLIC_CONTRACTS_DIR", base.parent / ".public-contracts" / base.name,
-    ))
+    cache = Path(
+        environment.get(
+            "PLAK_PUBLIC_CONTRACTS_DIR",
+            base.parent / ".public-contracts" / base.name,
+        )
+    )
     environment["CARGO_TARGET_DIR"] = str(cache.resolve() / target)
     return environment
 
@@ -70,10 +76,7 @@ EMBEDDING_SOURCES = tuple(
     source
     for _, manifest in EMBEDDING_WORKFLOW_FIXTURES
     for source in sorted((ROOT / manifest.parent / "src").rglob("*.rs"))
-) + tuple(
-    source
-    for source in sorted((ROOT / "crates/plakous/examples").rglob("*.rs"))
-)
+) + tuple(source for source in sorted((ROOT / "crates/plakous/examples").rglob("*.rs")))
 NAMEABILITY_POLICY_SOURCES = SUPPORTED_INVENTORY_SOURCES + EMBEDDING_SOURCES
 RUNTIME_ONLY_TOOL_NAMES = (
     "AuthorizedToolInvocation",
@@ -158,53 +161,57 @@ EXAMPLE_POSITIVE = tuple(
     for name, features, runs in EMBEDDING_EXAMPLES
     if runs
 )
-LOCK_PREFLIGHT = tuple(
-    (
-        f"locked-preflight-{label}",
+LOCK_PREFLIGHT = (
+    tuple(
         (
-            "cargo",
-            "metadata",
-            "--manifest-path",
-            str(manifest),
-            "--locked",
-            "--offline",
-            "--format-version",
-            "1",
-            "--no-deps",
+            f"locked-preflight-{label}",
+            (
+                "cargo",
+                "metadata",
+                "--manifest-path",
+                str(manifest),
+                "--locked",
+                "--offline",
+                "--format-version",
+                "1",
+                "--no-deps",
+            ),
+        )
+        for label, _, manifest in SUPPORTED_API_FIXTURES
+    )
+    + tuple(
+        (
+            f"locked-preflight-{label}",
+            (
+                "cargo",
+                "metadata",
+                "--manifest-path",
+                str(manifest),
+                "--locked",
+                "--offline",
+                "--format-version",
+                "1",
+                "--no-deps",
+            ),
+        )
+        for label, manifest in EMBEDDING_WORKFLOW_FIXTURES
+    )
+    + (
+        (
+            "locked-preflight-authority-negative",
+            (
+                "cargo",
+                "metadata",
+                "--manifest-path",
+                "tests/fixtures/authority-negative/Cargo.toml",
+                "--locked",
+                "--offline",
+                "--format-version",
+                "1",
+                "--no-deps",
+            ),
         ),
     )
-    for label, _, manifest in SUPPORTED_API_FIXTURES
-) + tuple(
-    (
-        f"locked-preflight-{label}",
-        (
-            "cargo",
-            "metadata",
-            "--manifest-path",
-            str(manifest),
-            "--locked",
-            "--offline",
-            "--format-version",
-            "1",
-            "--no-deps",
-        ),
-    )
-    for label, manifest in EMBEDDING_WORKFLOW_FIXTURES
-) + (
-    (
-        "locked-preflight-authority-negative",
-        (
-            "cargo",
-            "metadata",
-            "--manifest-path",
-            "tests/fixtures/authority-negative/Cargo.toml",
-            "--locked",
-            "--offline",
-            "--format-version",
-            "1",
-            "--no-deps",
-        ),
-    ),
 )
 FETCH_FIXTURES = tuple(
     (
@@ -273,7 +280,18 @@ CONSUMER_MANIFEST_POSITIVE = tuple(
 DOCUMENTATION_NEGATIVE = (
     (
         "negative-curated-doctests",
-        ("cargo", "test", "--locked", "--offline", "--doc", "-p", "plakous-agent", "-p", "plakous", "--all-features"),
+        (
+            "cargo",
+            "test",
+            "--locked",
+            "--offline",
+            "--doc",
+            "-p",
+            "plakous-agent",
+            "-p",
+            "plakous",
+            "--all-features",
+        ),
     ),
 )
 AUTHORITY_NEGATIVE_BINS = (
@@ -337,10 +355,7 @@ AUTHORITY_NEGATIVE_IMPORTS = {
     "local_composition_session": "use plakous::agent::LocalCompositionSession;",
 }
 AUTHORITY_NEGATIVE_MARKERS = {
-    binary: statement.rsplit("::", maxsplit=1)[-1]
-    .rstrip(";")
-    .split(",", maxsplit=1)[0]
-    .strip("{}")
+    binary: statement.rsplit("::", maxsplit=1)[-1].rstrip(";").split(",", maxsplit=1)[0].strip("{}")
     for binary, statement in AUTHORITY_NEGATIVE_IMPORTS.items()
 }
 AUTHORITY_NEGATIVE_MARKERS["credential_bytes"] = "expose"
@@ -367,7 +382,9 @@ fn main() {
     let _ = secret.expose();
 }
 """
-AUTHORITY_NEGATIVE_SOURCES["hosted_runtime_factory"] = """#![allow(dead_code, unused_variables, unused_imports)]
+AUTHORITY_NEGATIVE_SOURCES[
+    "hosted_runtime_factory"
+] = """#![allow(dead_code, unused_variables, unused_imports)]
 use plakous::sessions::{SessionInputWindow, SessionLocator, SessionRuntimeBinding};
 use plakous_hosted::{
     CliResult,
@@ -477,7 +494,9 @@ impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
 
 fn main() {}
 """
-AUTHORITY_NEGATIVE_SOURCES["hosted_registered_authority"] = """use plakous_hosted::runtime::RegisteredRuntimeAuthority;
+AUTHORITY_NEGATIVE_SOURCES[
+    "hosted_registered_authority"
+] = """use plakous_hosted::runtime::RegisteredRuntimeAuthority;
 
 fn main() {
     let _ = RegisteredRuntimeAuthority(());
@@ -508,9 +527,7 @@ for binary, argument, operation in (
         f"fn forbidden(value: &{argument}) {{\n    let _ = value.{operation};\n}}\n\nfn main() {{}}\n"
     )
     AUTHORITY_NEGATIVE_MARKERS[binary] = operation.split("(", maxsplit=1)[0]
-AUTHORITY_NEGATIVE_ERROR_CODES = {
-    binary: "E0432" for binary in AUTHORITY_NEGATIVE_BINS
-}
+AUTHORITY_NEGATIVE_ERROR_CODES = {binary: "E0432" for binary in AUTHORITY_NEGATIVE_BINS}
 AUTHORITY_NEGATIVE_ERROR_CODES["hosted_runtime_factory"] = "E0277"
 AUTHORITY_NEGATIVE_ERROR_CODES["hosted_registered_authority"] = "E0423"
 AUTHORITY_NEGATIVE_ERROR_CODES["component_checkpoint"] = "E0603"
@@ -531,9 +548,7 @@ AUTHORITY_NEGATIVE_ERROR_MESSAGES = {
         "cannot construct `TurnResult` with struct literal syntax due to private fields"
     ),
 }
-AUTHORITY_NEGATIVE_ERROR_LINES = {
-    binary: 1 for binary in AUTHORITY_NEGATIVE_BINS
-}
+AUTHORITY_NEGATIVE_ERROR_LINES = {binary: 1 for binary in AUTHORITY_NEGATIVE_BINS}
 AUTHORITY_NEGATIVE_ERROR_LINES["hosted_runtime_factory"] = 11
 AUTHORITY_NEGATIVE_ERROR_LINES["hosted_registered_authority"] = 4
 AUTHORITY_NEGATIVE_ERROR_LINES["issued_invocation"] = 4
@@ -583,10 +598,7 @@ def validate_supported_inventory_policy() -> bool:
                 return False
     example_dir = ROOT / "crates/plakous/examples"
     declared_examples = {name for name, _, _ in EMBEDDING_EXAMPLES}
-    actual_examples = {
-        source.stem
-        for source in example_dir.glob("*.rs")
-        }
+    actual_examples = {source.stem for source in example_dir.glob("*.rs")}
     if actual_examples != declared_examples:
         print(
             "error: embedding example inventory drifted: "
@@ -634,9 +646,7 @@ def has_authority_diagnostic(output: str, binary: str) -> bool:
     """Require the exact rustc error at the fixture's pinned authority span."""
     expected_file = f"src/bin/{binary}.rs"
     expected_line_number = AUTHORITY_NEGATIVE_ERROR_LINES[binary]
-    expected_line = AUTHORITY_NEGATIVE_SOURCES[binary].splitlines()[
-        expected_line_number - 1
-    ]
+    expected_line = AUTHORITY_NEGATIVE_SOURCES[binary].splitlines()[expected_line_number - 1]
     for line in output.splitlines():
         try:
             message = json.loads(line)
@@ -652,10 +662,7 @@ def has_authority_diagnostic(output: str, binary: str) -> bool:
         if expected_message is not None and diagnostic.get("message") != expected_message:
             continue
         for span in diagnostic.get("spans", []):
-            if (
-                not span.get("is_primary")
-                or span.get("line_start") != expected_line_number
-            ):
+            if not span.get("is_primary") or span.get("line_start") != expected_line_number:
                 continue
             if not span.get("file_name", "").endswith(expected_file):
                 continue
@@ -725,7 +732,8 @@ def main() -> int:
     selection.add_argument("--positive-only", action="store_true")
     selection.add_argument("--negative-only", action="store_true")
     selection.add_argument(
-        "--fetch", action="store_true",
+        "--fetch",
+        action="store_true",
         help="prefetch every locked fixture's dependencies online without compiling",
     )
     parser.add_argument(
@@ -772,9 +780,7 @@ def main() -> int:
         def wanted(label: str) -> bool:
             return any(fragment in label for fragment in selected)
 
-        passing_commands = tuple(
-            pin for pin in passing_commands if wanted(pin[0])
-        )
+        passing_commands = tuple(pin for pin in passing_commands if wanted(pin[0]))
         failing_pairs = tuple(pair for pair in failing_pairs if wanted(pair[0][0]))
         if not passing_commands and not failing_pairs:
             print(f"error: --only {selected} matched no pin", file=sys.stderr)
@@ -805,9 +811,14 @@ def main() -> int:
             return result.returncode
     if failing_pairs:
         command = (
-            "cargo", "check", "--manifest-path",
-            "tests/fixtures/authority-negative/Cargo.toml", "--locked", "--offline",
-            "--keep-going", "--message-format=json",
+            "cargo",
+            "check",
+            "--manifest-path",
+            "tests/fixtures/authority-negative/Cargo.toml",
+            "--locked",
+            "--offline",
+            "--keep-going",
+            "--message-format=json",
             *(arg for _, binary in failing_pairs for arg in ("--bin", binary)),
         )
         header = f"== authority-negative batch (expected failures) ==\n$ {' '.join(command)}\n"
@@ -830,7 +841,9 @@ def main() -> int:
             if args.archive_dir:
                 log = (
                     f"== {label} (expected failure) ==\n"
-                    + header + result.stdout + f"exit_code={result.returncode}\n"
+                    + header
+                    + result.stdout
+                    + f"exit_code={result.returncode}\n"
                 )
                 (args.archive_dir / f"{label}.log").write_text(log, encoding="utf-8")
             if not has_authority_diagnostic(output, binary):

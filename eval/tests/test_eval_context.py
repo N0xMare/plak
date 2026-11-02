@@ -12,11 +12,19 @@ from harbor_adapter.context import invocation_context
 class InvocationContextTests(unittest.TestCase):
     def make(self, **overrides):
         values = dict(
-            arm="plak-openrouter", slice_name="ab", account="openrouter",
-            model="deepseek/deepseek-v4-flash", effort="none", arch="amd64",
-            attempts=3, concurrency=1, selected_task=None,
-            source_commit="f" * 40, source_dirty=False,
-            cohort="publication-comparison", repeat_block="1",
+            arm="plak-openrouter",
+            slice_name="ab",
+            account="openrouter",
+            model="deepseek/deepseek-v4-flash",
+            effort="none",
+            arch="amd64",
+            attempts=3,
+            concurrency=1,
+            selected_task=None,
+            source_commit="f" * 40,
+            source_dirty=False,
+            cohort="publication-comparison",
+            repeat_block="1",
         )
         values.update(overrides)
         return invocation_context(**values)
@@ -42,8 +50,12 @@ class InvocationContextTests(unittest.TestCase):
         self.assertEqual(record["dataset"], "terminal-bench/terminal-bench-2-1@6")
 
     def test_scope_and_invalid_counts_refuse(self):
-        for values in ({"selected_task": "unknown"}, {"attempts": 0},
-                       {"concurrency": 0}, {"slice_name": "other"}):
+        for values in (
+            {"selected_task": "unknown"},
+            {"attempts": 0},
+            {"concurrency": 0},
+            {"slice_name": "other"},
+        ):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 self.make(**values)
 

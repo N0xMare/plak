@@ -62,26 +62,46 @@ def main():
     steps = []
     for _ in range(args.turns):
         steps += [
-            {"output": {"tool": {"name": "loopback_effect", "arguments": {}}},
-             "finish": "tool_calls"}
+            {
+                "output": {"tool": {"name": "loopback_effect", "arguments": {}}},
+                "finish": "tool_calls",
+            }
         ] * args.calls
         steps.append({"output": {"text": "turn done"}})
     script = os.path.join(root, "long.json")
     with open(script, "w") as handle:
         json.dump({"version": 1, "steps": steps}, handle)
 
-    env = {"PATH": os.environ["PATH"], "HOME": os.path.join(root, "fake-home"),
-           "TMPDIR": os.path.join(root, "tmp"), "PLAK_HOME": home,
-           "PLAK_TEST_MODEL": "offline-loopback-v1", "PLAK_TEST_SCRIPT": script}
+    env = {
+        "PATH": os.environ["PATH"],
+        "HOME": os.path.join(root, "fake-home"),
+        "TMPDIR": os.path.join(root, "tmp"),
+        "PLAK_HOME": home,
+        "PLAK_TEST_MODEL": "offline-loopback-v1",
+        "PLAK_TEST_SCRIPT": script,
+    }
     command = [args.plak, "agent"]
     trace = os.path.join(root, "strace.txt")
     if os.environ.get("FSYNC_TRACE") == "1":
-        command = ["strace", "-f", "-c", "-o", trace,
-                   "-e", "trace=fsync,fdatasync,msync,sync_file_range"] + command
+        command = [
+            "strace",
+            "-f",
+            "-c",
+            "-o",
+            trace,
+            "-e",
+            "trace=fsync,fdatasync,msync,sync_file_range",
+        ] + command
 
-    child = subprocess.Popen(command, env=env, cwd=os.path.join(root, "ws"),
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True)
+    child = subprocess.Popen(
+        command,
+        env=env,
+        cwd=os.path.join(root, "ws"),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
     for line in child.stdout:
         if json.loads(line).get("kind") == "ready":
             break

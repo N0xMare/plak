@@ -20,13 +20,28 @@ def line(day, text, level="INFO"):
 class DailyDriverTests(unittest.TestCase):
     def test_build_boundaries_since_filter_and_distinct_root_child_bindings(self):
         logs = [
-            line(1, 'plak.reload: exec installed plak executable=/private/maintainer/abcdef123456/plak carried=true'),
-            line(2, 'session_runtime_binding{provider="grok" model="grok-4.7" session_id="root"}: plakous_hosted::agent::build: ready'),
-            line(2, 'session_runtime_binding{provider="grok" model="grok-4.7" session_id="root"}: plakous_hosted::agent::build: ready'),
-            line(3, 'session_runtime_binding{provider="grok" model="grok-4.7" session_id="root.c1"}: plakous_hosted::agent::build: ready'),
+            line(
+                1,
+                'plak.reload: exec installed plak executable=/private/maintainer/abcdef123456/plak carried=true',
+            ),
+            line(
+                2,
+                'session_runtime_binding{provider="grok" model="grok-4.7" session_id="root"}: plakous_hosted::agent::build: ready',
+            ),
+            line(
+                2,
+                'session_runtime_binding{provider="grok" model="grok-4.7" session_id="root"}: plakous_hosted::agent::build: ready',
+            ),
+            line(
+                3,
+                'session_runtime_binding{provider="grok" model="grok-4.7" session_id="root.c1"}: plakous_hosted::agent::build: ready',
+            ),
             line(3, 'plak.retry: retrying cause="http_status" detail="PRIVATE PROMPT"', "WARN"),
             line(3, 'plak.capture: PRIVATE PROMPT /private/token', "ERROR"),
-            line(3, 'plak.reload: exec installed plak executable=/private/maintainer/123456abcdef/plak carried=false'),
+            line(
+                3,
+                'plak.reload: exec installed plak executable=/private/maintainer/123456abcdef/plak carried=false',
+            ),
             line(4, 'plak::store: PRIVATE PROMPT', "ERROR"),
         ]
         report = daily_driver.render(daily_driver.summarize(logs, since="2026-10-02"))
@@ -58,11 +73,16 @@ class DailyDriverTests(unittest.TestCase):
         self.assertEqual(build.recovered, 1)
 
     def test_unknown_build_invalid_lines_and_since(self):
-        report = daily_driver.render(daily_driver.summarize([
-            "PRIVATE PROMPT WARN plak.retry: cause=secret\n",
-            line(1, 'plak::store: warning', "WARN"),
-            line(3, 'plak::store: warning', "WARN"),
-        ], since="2026-10-02"))
+        report = daily_driver.render(
+            daily_driver.summarize(
+                [
+                    "PRIVATE PROMPT WARN plak.retry: cause=secret\n",
+                    line(1, 'plak::store: warning', "WARN"),
+                    line(3, 'plak::store: warning', "WARN"),
+                ],
+                since="2026-10-02",
+            )
+        )
         self.assertIn("unknown", report)
         self.assertIn("WARN plak::store=1", report)
         self.assertNotIn("secret", report)
@@ -71,11 +91,18 @@ class DailyDriverTests(unittest.TestCase):
             daily_driver.summarize([], since="not-a-date")
 
     def test_untrusted_field_values_are_not_printed(self):
-        report = daily_driver.render(daily_driver.summarize([
-            line(1, 'session_runtime_binding{provider="SECRET" model="SECRET" session_id="s"}: plak::store: hi'),
-            line(1, 'plak.retry: cause="SECRET"', "WARN"),
-            line(1, 'plak.reload: exec installed plak executable=/PRIVATE/SECRET/plak'),
-        ]))
+        report = daily_driver.render(
+            daily_driver.summarize(
+                [
+                    line(
+                        1,
+                        'session_runtime_binding{provider="SECRET" model="SECRET" session_id="s"}: plak::store: hi',
+                    ),
+                    line(1, 'plak.retry: cause="SECRET"', "WARN"),
+                    line(1, 'plak.reload: exec installed plak executable=/PRIVATE/SECRET/plak'),
+                ]
+            )
+        )
         self.assertNotIn("SECRET", report)
         self.assertNotIn("PRIVATE", report)
 
@@ -91,38 +118,54 @@ class DailyDriverTests(unittest.TestCase):
                 self.assertEqual(daily_driver.snapshot_binary_id(snapshot), expected)
                 self.assertIsNone(daily_driver.snapshot_binary_id("123456abcdef"))
                 self.assertIsNone(daily_driver.snapshot_binary_id("../../PRIVATE"))
-                builds = daily_driver.summarize([
-                    line(1, f'plak.reload: exec installed plak executable=/PRIVATE/maintainer/{snapshot}/plak'),
-                    line(2, f'plak.start: startup binary={expected} state_key=r22.e24.p30.t4'),
-                ])
+                builds = daily_driver.summarize(
+                    [
+                        line(
+                            1,
+                            f'plak.reload: exec installed plak executable=/PRIVATE/maintainer/{snapshot}/plak',
+                        ),
+                        line(2, f'plak.start: startup binary={expected} state_key=r22.e24.p30.t4'),
+                    ]
+                )
             self.assertEqual(builds[-1].binary_id, expected)
             self.assertEqual(builds[-1].build_id, snapshot)
 
     def test_startup_binary_preferred_over_snapshot_attribution(self):
         with patch.object(daily_driver, "snapshot_binary_id", return_value="abcdef123456"):
-            builds = daily_driver.summarize([
-                line(1, 'plak.reload: exec installed plak executable=/PRIVATE/maintainer/123456abcdef/plak'),
-                line(2, 'plak.start: binary=111111111111 state_key=r22.e24.p30.t4'),
-                line(2, 'plak::store: warning', "WARN"),
-            ])
+            builds = daily_driver.summarize(
+                [
+                    line(
+                        1,
+                        'plak.reload: exec installed plak executable=/PRIVATE/maintainer/123456abcdef/plak',
+                    ),
+                    line(2, 'plak.start: binary=111111111111 state_key=r22.e24.p30.t4'),
+                    line(2, 'plak::store: warning', "WARN"),
+                ]
+            )
         self.assertEqual(builds[-1].binary_id, "111111111111")
         self.assertEqual(builds[-1].problems[("WARN", "plak::store")], 1)
 
     def test_cli_since_reads_without_changing_log_and_redacts_file_errors(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "PRIVATE.log"
-            source.write_text(line(1, "plak::store: PRIVATE PROMPT", "ERROR") +
-                              line(2, "plak.start: binary=abcdef123456 state_key=r22.e24.p30.t4"))
+            source.write_text(
+                line(1, "plak::store: PRIVATE PROMPT", "ERROR")
+                + line(2, "plak.start: binary=abcdef123456 state_key=r22.e24.p30.t4")
+            )
             before = source.read_bytes()
             output = StringIO()
             with redirect_stdout(output):
-                self.assertEqual(daily_driver.main(["--log", str(source), "--since", "2026-10-02"]), 0)
+                self.assertEqual(
+                    daily_driver.main(["--log", str(source), "--since", "2026-10-02"]), 0
+                )
             self.assertEqual(source.read_bytes(), before)
             self.assertIn("abcdef123456", output.getvalue())
             self.assertNotIn("PRIVATE", output.getvalue())
             self.assertNotIn("ERROR plak::store", output.getvalue())
             errors = StringIO()
             with redirect_stderr(errors):
-                self.assertEqual(daily_driver.main(["--log", str(source.parent / "PRIVATE-missing")]), 2)
+                self.assertEqual(
+                    daily_driver.main(["--log", str(source.parent / "PRIVATE-missing")]), 2
+                )
             self.assertNotIn("PRIVATE", errors.getvalue())
             self.assertNotIn(directory, errors.getvalue())

@@ -20,15 +20,12 @@ from harbor_adapter.tuples import (
     REMOTE_PMUX_TRIAL,
 )
 
+
 def pmux_prompt_write_command(instruction: str) -> str:
     payload = base64.b64encode(instruction.encode("utf-8")).decode("ascii")
     runtime = shlex.quote(REMOTE_PMUX_RUNTIME)
     dest = shlex.quote(REMOTE_PMUX_PROMPT)
-    return (
-        f"mkdir -p {runtime} && "
-        f"printf '%s' {payload} | base64 -d > {dest} && "
-        f"chmod 0644 {dest}"
-    )
+    return f"mkdir -p {runtime} && printf '%s' {payload} | base64 -d > {dest} && chmod 0644 {dest}"
 
 
 def pmux_trial_command(

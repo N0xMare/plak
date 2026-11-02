@@ -49,23 +49,30 @@ def main(argv: list[str] | None = None) -> int:
         help=f"also write {SUMMARY_NAME} into each job directory",
     )
     parser.add_argument(
-        "--report", type=Path, metavar="DIR",
+        "--report",
+        type=Path,
+        metavar="DIR",
         help="write eval-report.json and eval-report.md to DIR",
     )
     parser.add_argument(
-        "--selection", type=Path, metavar="INDEX",
+        "--selection",
+        type=Path,
+        metavar="INDEX",
         help="restrict to result hashes pinned in an immutable selection index",
     )
     parser.add_argument(
-        "--prompt-ablation", action="store_true",
+        "--prompt-ablation",
+        action="store_true",
         help="compare only same-binary Plak legacy/parity prompt arms",
     )
     parser.add_argument(
-        "--require-readable", action="store_true",
+        "--require-readable",
+        action="store_true",
         help="fail if a trial result is missing or cannot be parsed",
     )
     parser.add_argument(
-        "--expect-trials", type=int,
+        "--expect-trials",
+        type=int,
         help="fail unless this many trial results were found",
     )
     args = parser.parse_args(argv)
@@ -82,20 +89,32 @@ def main(argv: list[str] | None = None) -> int:
         jobs.extend(find_job_dirs(root))
     summaries = [summarize_job(job) for job in sorted(set(jobs))]
     try:
-        report = build_report(jobs, args.selection, roots,
-                              prompt_ablation=args.prompt_ablation)
+        report = build_report(jobs, args.selection, roots, prompt_ablation=args.prompt_ablation)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"summarize: selection/report error: {exc}", file=sys.stderr)
         return 2
-    found = len(report["trials"]) if args.selection else sum(len(summary.trials) for summary in summaries)
-    unreadable = (
-        [trial for trial in report["trials"] if trial["result_status"] not in (RESULT_OK, RESULT_REPAIRED)]
-        if args.selection else
-        [trial for summary in summaries for trial in summary.trials
-         if trial.record.result_status not in (RESULT_OK, RESULT_REPAIRED)]
+    found = (
+        len(report["trials"])
+        if args.selection
+        else sum(len(summary.trials) for summary in summaries)
     )
-    count_matches = (args.expect_trials is None or
-                     (args.expect_trials > 0 and found == args.expect_trials))
+    unreadable = (
+        [
+            trial
+            for trial in report["trials"]
+            if trial["result_status"] not in (RESULT_OK, RESULT_REPAIRED)
+        ]
+        if args.selection
+        else [
+            trial
+            for summary in summaries
+            for trial in summary.trials
+            if trial.record.result_status not in (RESULT_OK, RESULT_REPAIRED)
+        ]
+    )
+    count_matches = args.expect_trials is None or (
+        args.expect_trials > 0 and found == args.expect_trials
+    )
     if args.write:
         for job, summary in zip(sorted(set(jobs)), summaries):
             (job / SUMMARY_NAME).write_text(
@@ -127,8 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         print("summarize: no job directories found", file=sys.stderr)
         return 1
     if not count_matches:
-        print(f"summarize: expected {args.expect_trials} trials, found {found}",
-              file=sys.stderr)
+        print(f"summarize: expected {args.expect_trials} trials, found {found}", file=sys.stderr)
         return 1
     if args.require_readable and unreadable:
         print(f"summarize: {len(unreadable)} unreadable trial results", file=sys.stderr)

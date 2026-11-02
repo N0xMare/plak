@@ -16,7 +16,9 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("reload_rehearsal", ROOT / "tools/build/reload_rehearsal.py")
+SPEC = importlib.util.spec_from_file_location(
+    "reload_rehearsal", ROOT / "tools/build/reload_rehearsal.py"
+)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
@@ -30,12 +32,18 @@ class ReloadRehearsalTests(unittest.TestCase):
                 on_stdout("c11: step=projection\n")
                 raise subprocess.TimeoutExpired("private /home/secret SELECT token", 120)
 
-            with patch.object(MODULE, "capture_home"), \
-                 patch.object(MODULE, "run_command", side_effect=timed_out), \
-                 contextlib.redirect_stdout(io.StringIO()) as report:
-                code = MODULE.rehearse_copy(base, base / "backup", "key", base / "plak", "session", True, 300, 0.01)
+            with (
+                patch.object(MODULE, "capture_home"),
+                patch.object(MODULE, "run_command", side_effect=timed_out),
+                contextlib.redirect_stdout(io.StringIO()) as report,
+            ):
+                code = MODULE.rehearse_copy(
+                    base, base / "backup", "key", base / "plak", "session", True, 300, 0.01
+                )
             self.assertEqual(code, 1)
-            self.assertEqual(report.getvalue(), "c11: step=projection\nrehearse refused: inspection_timeout\n")
+            self.assertEqual(
+                report.getvalue(), "c11: step=projection\nrehearse refused: inspection_timeout\n"
+            )
 
     def test_same_key_busy_wait_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -43,13 +51,20 @@ class ReloadRehearsalTests(unittest.TestCase):
 
             def busy(*_args, on_stdout):
                 on_stdout("c2: busy: active_turn\n")
-                return subprocess.CompletedProcess([], 1, "c2: busy: active_turn\n", "plak: offline reload rehearsal refused\n")
+                return subprocess.CompletedProcess(
+                    [], 1, "c2: busy: active_turn\n", "plak: offline reload rehearsal refused\n"
+                )
 
-            with patch.object(MODULE, "capture_home"), \
-                 patch.object(MODULE, "run_command", side_effect=busy) as run, \
-                 patch.object(MODULE.time, "monotonic", side_effect=[0, 0, 0, 30, 30]), \
-                 patch.object(MODULE.time, "sleep"), contextlib.redirect_stdout(io.StringIO()) as report:
-                code = MODULE.rehearse_copy(base, base / "backup", "key", base / "plak", "session", True, 30, 0.01)
+            with (
+                patch.object(MODULE, "capture_home"),
+                patch.object(MODULE, "run_command", side_effect=busy) as run,
+                patch.object(MODULE.time, "monotonic", side_effect=[0, 0, 0, 30, 30]),
+                patch.object(MODULE.time, "sleep"),
+                contextlib.redirect_stdout(io.StringIO()) as report,
+            ):
+                code = MODULE.rehearse_copy(
+                    base, base / "backup", "key", base / "plak", "session", True, 30, 0.01
+                )
             self.assertEqual(code, 1)
             self.assertEqual(run.call_count, 1)
             self.assertIn("wait_idle_timeout", report.getvalue())
@@ -59,7 +74,9 @@ class ReloadRehearsalTests(unittest.TestCase):
             base = Path(directory)
             live, backup = base / "live", base / "backup"
             results = [
-                subprocess.CompletedProcess([], 1, "c2: busy: active_turn\n", "plak: offline reload rehearsal refused\n"),
+                subprocess.CompletedProcess(
+                    [], 1, "c2: busy: active_turn\n", "plak: offline reload rehearsal refused\n"
+                ),
                 subprocess.CompletedProcess([], 0, "c2: offline=OpensQuiescent\n", ""),
             ]
             captures = []
@@ -75,29 +92,45 @@ class ReloadRehearsalTests(unittest.TestCase):
                 on_stdout(result.stdout)
                 return result
 
-            with patch.object(MODULE, "capture_home", capture), \
-                 patch.object(MODULE, "run_command", side_effect=complete) as run, \
-                 patch.object(MODULE.time, "sleep"), contextlib.redirect_stdout(io.StringIO()) as report:
-                code = MODULE.rehearse_copy(live, backup, "key", base / "plak", "session", True, 30, 0.01)
+            with (
+                patch.object(MODULE, "capture_home", capture),
+                patch.object(MODULE, "run_command", side_effect=complete) as run,
+                patch.object(MODULE.time, "sleep"),
+                contextlib.redirect_stdout(io.StringIO()) as report,
+            ):
+                code = MODULE.rehearse_copy(
+                    live, backup, "key", base / "plak", "session", True, 30, 0.01
+                )
             self.assertEqual(code, 0)
             self.assertEqual(len(captures), 2)
             self.assertEqual(run.call_count, 2)
             self.assertIn("c2: busy: active_turn", report.getvalue())
 
     def test_same_key_broken_child_and_no_wait_do_not_retry(self):
-        for stdout, wait in [("c2: refuses: projection_integrity\n", True),
-                             ("c2: busy: active_turn\n", False),
-                             ("c2: busy: active_turn\nc3: config=refused\n", True)]:
+        for stdout, wait in [
+            ("c2: refuses: projection_integrity\n", True),
+            ("c2: busy: active_turn\n", False),
+            ("c2: busy: active_turn\nc3: config=refused\n", True),
+        ]:
             with self.subTest(stdout=stdout, wait=wait), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
-                result = subprocess.CompletedProcess([], 1, stdout, "plak: offline reload rehearsal refused\n")
+                result = subprocess.CompletedProcess(
+                    [], 1, stdout, "plak: offline reload rehearsal refused\n"
+                )
+
                 def complete(*_args, on_stdout):
                     on_stdout(result.stdout)
                     return result
-                with patch.object(MODULE, "capture_home"), \
-                     patch.object(MODULE, "run_command", side_effect=complete) as run, \
-                     patch.object(MODULE.time, "sleep") as sleep, contextlib.redirect_stdout(io.StringIO()) as report:
-                    code = MODULE.rehearse_copy(base, base / "backup", "key", base / "plak", "session", wait, 30, 0.01)
+
+                with (
+                    patch.object(MODULE, "capture_home"),
+                    patch.object(MODULE, "run_command", side_effect=complete) as run,
+                    patch.object(MODULE.time, "sleep") as sleep,
+                    contextlib.redirect_stdout(io.StringIO()) as report,
+                ):
+                    code = MODULE.rehearse_copy(
+                        base, base / "backup", "key", base / "plak", "session", wait, 30, 0.01
+                    )
                 self.assertEqual(code, 1)
                 self.assertEqual(run.call_count, 1)
                 sleep.assert_not_called()
@@ -155,19 +188,32 @@ class ReloadRehearsalTests(unittest.TestCase):
         binary.write_text(
             "#!/usr/bin/env python3\nimport os,sys\nfrom pathlib import Path\n"
             f"Path({str(base / 'probe-call')!r}).write_text(' '.join(sys.argv[1:]) + '\\n' + os.environ['PLAK_HOME'] + '\\n' + os.getcwd())\n"
-            f"print({answer!r}); sys.exit({code})\n")
+            f"print({answer!r}); sys.exit({code})\n"
+        )
         binary.chmod(0o700)
         return live, binary, workspace
 
     def test_reopen_verdict_reports_exact_carry_and_refusal_from_the_live_home(self):
         cases = [
             ('{"verdict":"opens"}', 0, 0, "reopen=exact"),
-            ('{"verdict":"binding_changed","change":"model adapter profile (recorded `a`, this build `b`)"}',
-             0, 0, "reopen=carries: model adapter profile (recorded `a`, this build `b`)"),
-            ('{"verdict":"refused","reason":"run `plak login claude`"}', 0, 1,
-             "reopen=refused: run `plak login claude`"),
-            ('{"verdict":"unknown","reason":"needs_refresh"}', 0, 1,
-             "reopen=unknown: needs_refresh"),
+            (
+                '{"verdict":"binding_changed","change":"model adapter profile (recorded `a`, this build `b`)"}',
+                0,
+                0,
+                "reopen=carries: model adapter profile (recorded `a`, this build `b`)",
+            ),
+            (
+                '{"verdict":"refused","reason":"run `plak login claude`"}',
+                0,
+                1,
+                "reopen=refused: run `plak login claude`",
+            ),
+            (
+                '{"verdict":"unknown","reason":"needs_refresh"}',
+                0,
+                1,
+                "reopen=unknown: needs_refresh",
+            ),
             ("not json", 2, 1, "reopen refused: not json"),
         ]
         for answer, code, expected, line in cases:
@@ -185,18 +231,39 @@ class ReloadRehearsalTests(unittest.TestCase):
                 self.assertEqual(Path(cwd).resolve(), workspace.resolve())
 
     def test_verdict_environment_keeps_logins_but_not_keys_or_test_hooks(self):
-        env = MODULE.verdict_environment(Path("/live"), {
-            "PATH": "/bin", "HOME": "/home/fixture", "XDG_STATE_HOME": "/state",
-            "OPENAI_API_KEY": "synthetic", "PLAK_TEST_SCRIPT": "fixture", "PLAK_HOME": "/other",
-        })
-        self.assertEqual(env, {"PATH": "/bin", "HOME": "/home/fixture",
-                               "XDG_STATE_HOME": "/state", "PLAK_HOME": "/live"})
+        env = MODULE.verdict_environment(
+            Path("/live"),
+            {
+                "PATH": "/bin",
+                "HOME": "/home/fixture",
+                "XDG_STATE_HOME": "/state",
+                "OPENAI_API_KEY": "synthetic",
+                "PLAK_TEST_SCRIPT": "fixture",
+                "PLAK_HOME": "/other",
+            },
+        )
+        self.assertEqual(
+            env,
+            {
+                "PATH": "/bin",
+                "HOME": "/home/fixture",
+                "XDG_STATE_HOME": "/state",
+                "PLAK_HOME": "/live",
+            },
+        )
 
     def test_run_environment_does_not_inherit_credentials_or_test_hooks(self):
-        env = MODULE.run_environment(Path("/fixture"), {
-            "PATH": "/bin", "HOME": "/home/fixture", "OPENAI_API_KEY": "synthetic",
-            "PLAK_TEST_SCRIPT": "fixture", "PLAK_HOME": "/live", "ANTHROPIC_API_KEY": "synthetic",
-        })
+        env = MODULE.run_environment(
+            Path("/fixture"),
+            {
+                "PATH": "/bin",
+                "HOME": "/home/fixture",
+                "OPENAI_API_KEY": "synthetic",
+                "PLAK_TEST_SCRIPT": "fixture",
+                "PLAK_HOME": "/live",
+                "ANTHROPIC_API_KEY": "synthetic",
+            },
+        )
         self.assertEqual(env["PLAK_HOME"], "/fixture")
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertNotIn("ANTHROPIC_API_KEY", env)
@@ -209,57 +276,79 @@ class ReloadRehearsalTests(unittest.TestCase):
             repo = base / "repo"
             (repo / "tools/build").mkdir(parents=True)
             import shutil
+
             shutil.copy(ROOT / "tools/build/reload-rehearsal.sh", repo / "tools/build")
             shutil.copy(ROOT / "tools/build/reload_rehearsal.py", repo / "tools/build")
             shutil.copy(ROOT / "tools/build/build-plak.sh", repo / "tools/build")
             (repo / "tools/build/build-plak.sh").chmod(0o755)
             (repo / "tools/build/check-artifact-linkage.py").write_text(
                 "import sys\nfrom pathlib import Path\n"
-                "Path('linkage-checked').write_text(sys.argv[1])\n")
+                "Path('linkage-checked').write_text(sys.argv[1])\n"
+            )
             tools = base / "bin"
             tools.mkdir()
             (tools / "python3").symlink_to(sys.executable)
-            (tools / "cargo").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$HOME/cargo-args"\nexit 0\n')
+            (tools / "cargo").write_text(
+                '#!/bin/sh\nprintf "%s\\n" "$*" >> "$HOME/cargo-args"\nexit 0\n'
+            )
             (tools / "cargo").chmod(0o700)
             (tools / "just").write_text(
-                '#!/bin/sh\nprintf "%s\\n%s\\n" "$PWD" "$*" > "$HOME/install-call"\n')
+                '#!/bin/sh\nprintf "%s\\n%s\\n" "$PWD" "$*" > "$HOME/install-call"\n'
+            )
             (tools / "just").chmod(0o700)
             output = repo / "target/maintainer"
             output.mkdir(parents=True)
             for name in ("plakous-js-host", "plakous-py-host"):
                 (output / name).write_text("#!/bin/sh\nexit 0\n")
                 (output / name).chmod(0o700)
-            (output / "plak").write_text("#!/usr/bin/env python3\nimport json,os,sys\n"
+            (output / "plak").write_text(
+                "#!/usr/bin/env python3\nimport json,os,sys\n"
                 "from pathlib import Path\n"
                 "if '--reload-probe' in sys.argv: print(json.dumps({'state_key':'key'}))\n"
                 "elif sys.argv[1:] == ['version']: print('plak fixture (build fixture-id)')\n"
                 "else:\n"
                 " Path(os.environ['HOME'],'observed').write_text(os.environ['PLAK_HOME'])\n"
-                " print('fixture refusal'); sys.exit(1)\n")
+                " print('fixture refusal'); sys.exit(1)\n"
+            )
             (output / "plak").chmod(0o700)
             home = base / "home"
             (home / "state/key").mkdir(parents=True)
             env = os.environ.copy()
-            env.update(PATH=str(tools) + os.pathsep + env["PATH"], HOME=str(base), PLAK_HOME=str(home))
+            env.update(
+                PATH=str(tools) + os.pathsep + env["PATH"], HOME=str(base), PLAK_HOME=str(home)
+            )
             env.pop("CARGO_BUILD_TARGET", None)
             env.pop("CARGO_TARGET_DIR", None)
             yield base, repo, home, env, output
 
     def run_wrapper(self, repo, env, extra=()):
-        return subprocess.run(["bash", str(repo / "tools/build/reload-rehearsal.sh"),
-                               "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", *extra],
-                              env=env, text=True, capture_output=True)
+        return subprocess.run(
+            [
+                "bash",
+                str(repo / "tools/build/reload-rehearsal.sh"),
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                *extra,
+            ],
+            env=env,
+            text=True,
+            capture_output=True,
+        )
 
     def test_wrapper_stages_without_install_and_cleans_up_on_refusal(self):
         with self.wrapper_fixture() as (base, repo, _home, env, _output):
             result = self.run_wrapper(repo, env)
             self.assertEqual(result.returncode, 1, result.stderr)
             arguments = (base / "cargo-args").read_text().splitlines()
-            self.assertEqual(arguments, [
-                "build --locked --offline -p plak --features plak/maintainer --profile maintainer",
-                "build --locked --offline -p plakous-js-runtime -p plakous-py-worker --profile maintainer",
-            ])
-            self.assertEqual((repo / "linkage-checked").read_text(), str(repo / "target/maintainer"))
+            self.assertEqual(
+                arguments,
+                [
+                    "build --locked --offline -p plak --features plak/maintainer --profile maintainer",
+                    "build --locked --offline -p plakous-js-runtime -p plakous-py-worker --profile maintainer",
+                ],
+            )
+            self.assertEqual(
+                (repo / "linkage-checked").read_text(), str(repo / "target/maintainer")
+            )
             self.assertIn("fixture-id", result.stdout)
             self.assertFalse(Path((base / "observed").read_text()).exists())
             self.assertFalse((base / ".local").exists())
@@ -350,7 +439,9 @@ class ReloadRehearsalTests(unittest.TestCase):
             MODULE.scrub("see /tmp/plak-home/secrets/token", [Path("/tmp/plak-home")]),
         )
 
-    def write_carry_binary(self, path, role, import_status, live, import_failure=None, export_failures=()):
+    def write_carry_binary(
+        self, path, role, import_status, live, import_failure=None, export_failures=()
+    ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             "#!/usr/bin/env python3\n"
@@ -445,13 +536,26 @@ class ReloadRehearsalTests(unittest.TestCase):
                 found[rel] = ("dir",)
         return found
 
-    def prepare_carry(self, base, _repo, home, env, output, import_status, overlay=False, on_path=False, import_failure=None):
+    def prepare_carry(
+        self,
+        base,
+        _repo,
+        home,
+        env,
+        output,
+        import_status,
+        overlay=False,
+        on_path=False,
+        import_failure=None,
+    ):
         source = home / "state" / "r21.e19.p27.t3"
         source.mkdir(parents=True)
         with contextlib.closing(sqlite3.connect(source / "product.sqlite3")) as db:
             db.execute("CREATE TABLE sessions(id TEXT, workspace_root TEXT)")
-            db.execute("INSERT INTO sessions VALUES(?,?)",
-                       ("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", str(base / "workspace")))
+            db.execute(
+                "INSERT INTO sessions VALUES(?,?)",
+                ("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", str(base / "workspace")),
+            )
             db.commit()
         (home / "config.toml").write_text("# live\n")
         (home / "agents").mkdir()
@@ -554,13 +658,13 @@ class ReloadRehearsalTests(unittest.TestCase):
 
     def test_cross_key_export_uses_plak_on_path(self):
         with self.wrapper_fixture() as (base, repo, home, env, output):
-            env, extra, before = self.prepare_carry(
-                base, repo, home, env, output, 0, on_path=True
-            )
+            env, extra, before = self.prepare_carry(base, repo, home, env, output, 0, on_path=True)
             result = self.run_wrapper(repo, env, extra)
             self.assertEqual(extra, [])
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            export = next(call for call in self.calls(base) if call["argv"][:2] == ["session", "export"])
+            export = next(
+                call for call in self.calls(base) if call["argv"][:2] == ["session", "export"]
+            )
             self.assertEqual(export["role"], "installed")
             self.assertEqual(Path(export["argv0"]), base / "bin" / "plak")
             self.assert_live_untouched(home, before, result)
@@ -574,7 +678,9 @@ class ReloadRehearsalTests(unittest.TestCase):
             self.assertIn("config refused:", result.stdout)
             self.assertNotIn(str(base / "overlay"), result.stdout + result.stderr)
             self.assertNotIn("session import", result.stdout)
-            self.assertFalse(any(call["argv"][:2] == ["session", "import"] for call in self.calls(base)))
+            self.assertFalse(
+                any(call["argv"][:2] == ["session", "import"] for call in self.calls(base))
+            )
             self.assert_live_untouched(home, before, result)
 
     def test_cross_key_import_refusal_is_scrubbed_and_skips_rehearse(self):
@@ -596,39 +702,77 @@ class ReloadRehearsalTests(unittest.TestCase):
 
         typed = "plak: session has no exact effort binding\n"
         self.assertTrue(MODULE.import_lacks_credentials(result(1, typed)))
-        self.assertFalse(MODULE.import_lacks_credentials(result(1, "plak: session has no exact account binding\n")))
-        self.assertFalse(MODULE.import_lacks_credentials(result(1, "session has no exact effort binding\n")))
+        self.assertFalse(
+            MODULE.import_lacks_credentials(
+                result(1, "plak: session has no exact account binding\n")
+            )
+        )
+        self.assertFalse(
+            MODULE.import_lacks_credentials(result(1, "session has no exact effort binding\n"))
+        )
         self.assertFalse(MODULE.import_lacks_credentials(result(1, typed + "plak: also this\n")))
         self.assertFalse(MODULE.import_lacks_credentials(result(3, typed)))
-        self.assertFalse(MODULE.import_lacks_credentials(result(1, "already carried /tmp/home/secrets/token\n")))
-        self.assertFalse(MODULE.import_lacks_credentials(result(
-            1, "plak: session has no exact effort binding; see /tmp/plak-home/secrets/token\n",
-        )))
+        self.assertFalse(
+            MODULE.import_lacks_credentials(result(1, "already carried /tmp/home/secrets/token\n"))
+        )
+        self.assertFalse(
+            MODULE.import_lacks_credentials(
+                result(
+                    1,
+                    "plak: session has no exact effort binding; see /tmp/plak-home/secrets/token\n",
+                )
+            )
+        )
 
     def test_native_acceptance_refusal_matches_only_the_typed_resolve_line(self):
         def result(code, stderr):
             return subprocess.CompletedProcess([], code, "", stderr)
 
         def line(account, model, cause="exact native compatibility acceptance is required"):
-            return (f"plak: resolve {account}/{model}: {cause} \u2014 check `plak login {account}` "
-                    f"and `plak models {account}`\n")
+            return (
+                f"plak: resolve {account}/{model}: {cause} \u2014 check `plak login {account}` "
+                f"and `plak models {account}`\n"
+            )
 
-        for account, model in (("claude", "claude-opus-5-5"), ("codex", "gpt-6-luna"),
-                               ("grok", "grok-4.7-build-fast")):
+        for account, model in (
+            ("claude", "claude-opus-5-5"),
+            ("codex", "gpt-6-luna"),
+            ("grok", "grok-4.7-build-fast"),
+        ):
             with self.subTest(account=account):
                 self.assertTrue(MODULE.import_lacks_credentials(result(1, line(account, model))))
-        self.assertFalse(MODULE.import_lacks_credentials(result(3, line("claude", "claude-opus-5-5"))))
-        self.assertFalse(MODULE.import_lacks_credentials(result(
-            1, line("claude", "claude-opus-5-5") + "plak: also this\n")))
+        self.assertFalse(
+            MODULE.import_lacks_credentials(result(3, line("claude", "claude-opus-5-5")))
+        )
+        self.assertFalse(
+            MODULE.import_lacks_credentials(
+                result(1, line("claude", "claude-opus-5-5") + "plak: also this\n")
+            )
+        )
         self.assertFalse(MODULE.import_lacks_credentials(result(1, line("openai", "gpt-6-luna"))))
-        self.assertFalse(MODULE.import_lacks_credentials(result(1, line("claude", "claude-opus-5-5").replace(
-            "plak login claude", "plak login grok"))))
-        self.assertFalse(MODULE.import_lacks_credentials(result(1, line("claude", "/tmp/plak-home/secrets"))))
-        for cause in ("native subscription storage is unsafe",
-                      "stored native login was written by a newer build; use that build or replace the login"):
+        self.assertFalse(
+            MODULE.import_lacks_credentials(
+                result(
+                    1,
+                    line("claude", "claude-opus-5-5").replace(
+                        "plak login claude", "plak login grok"
+                    ),
+                )
+            )
+        )
+        self.assertFalse(
+            MODULE.import_lacks_credentials(result(1, line("claude", "/tmp/plak-home/secrets")))
+        )
+        for cause in (
+            "native subscription storage is unsafe",
+            "stored native login was written by a newer build; use that build or replace the login",
+        ):
             with self.subTest(cause=cause):
-                self.assertFalse(MODULE.import_lacks_credentials(
-                    result(1, line("claude", "claude-opus-5-5", cause))))
+                self.assertFalse(
+                    MODULE.import_lacks_credentials(
+                        result(1, line("claude", "claude-opus-5-5", cause))
+                    )
+                )
 
     def test_cross_key_credential_binding_refusal_is_not_rehearsed(self):
         refusals = (
@@ -643,7 +787,12 @@ class ReloadRehearsalTests(unittest.TestCase):
     def assert_credential_refusal_is_not_rehearsed(self, refusal):
         with self.wrapper_fixture() as (base, repo, home, env, output):
             env, extra, before = self.prepare_carry(
-                base, repo, home, env, output, 1,
+                base,
+                repo,
+                home,
+                env,
+                output,
+                1,
                 import_failure=refusal,
             )
             result = self.run_wrapper(repo, env, extra)
@@ -664,14 +813,29 @@ class ReloadRehearsalTests(unittest.TestCase):
 
     def test_wrapper_cleans_private_copies_on_hup_int_and_term(self):
         for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-            with self.subTest(signal=signum), self.wrapper_fixture() as (base, repo, _home, env, output):
+            with (
+                self.subTest(signal=signum),
+                self.wrapper_fixture() as (base, repo, _home, env, output),
+            ):
                 binary = output / "plak"
-                binary.write_text(binary.read_text().replace(
-                    "print('fixture refusal'); sys.exit(1)",
-                    "print('fixture ready', flush=True); import time; time.sleep(60)"))
-                process = subprocess.Popen(["bash", str(repo / "tools/build/reload-rehearsal.sh"),
-                                            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
-                                           env=env, text=True, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                binary.write_text(
+                    binary.read_text().replace(
+                        "print('fixture refusal'); sys.exit(1)",
+                        "print('fixture ready', flush=True); import time; time.sleep(60)",
+                    )
+                )
+                process = subprocess.Popen(
+                    [
+                        "bash",
+                        str(repo / "tools/build/reload-rehearsal.sh"),
+                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    ],
+                    env=env,
+                    text=True,
+                    start_new_session=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
                 try:
                     # Read through the build identity line to the child's readiness.
                     with selectors.DefaultSelector() as ready:
@@ -699,11 +863,15 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
     write_carry_binary = ReloadRehearsalTests.write_carry_binary
     tree_snapshot = ReloadRehearsalTests.tree_snapshot
 
-    RUNNING = ("a turn is running or parked with an unresolved operation; let it finish or run "
-               "`plak session recover` first")
+    RUNNING = (
+        "a turn is running or parked with an unresolved operation; let it finish or run "
+        "`plak session recover` first"
+    )
     BEHIND = "the runtime advanced past the session record; resume the session once first"
-    BACKGROUND = ("background process outcomes are not settled; resume the session "
-                  "and send a prompt to deliver their notices before exporting")
+    BACKGROUND = (
+        "background process outcomes are not settled; resume the session "
+        "and send a prompt to deliver their notices before exporting"
+    )
 
     def test_default_idle_retry_interval_is_fifteen_seconds(self):
         options = MODULE.parse_args(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "--wait-idle"])
@@ -746,22 +914,41 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
     def test_wait_retries_only_exact_idle_export_refusals_then_installs(self):
         with self.wrapper_fixture() as (base, repo, home, env, output):
             env, extra, _ = self.prepare_carry(base, repo, home, env, output, 0)
-            self.write_carry_binary(Path(extra[1]), "installed", 0, home,
-                                    export_failures=(self.RUNNING, self.BEHIND, self.BACKGROUND))
+            self.write_carry_binary(
+                Path(extra[1]),
+                "installed",
+                0,
+                home,
+                export_failures=(self.RUNNING, self.BEHIND, self.BACKGROUND),
+            )
             just = base / "bin/just"
             just.write_text('#!/bin/sh\nprintf "%s\n%s\n" "$PWD" "$*" > "$HOME/install-call"\n')
             just.chmod(0o700)
-            result = self.run_wrapper(repo, env, [*extra, "--wait-idle", "--timeout", "10", "--interval", "0.01", "--install"])
+            result = self.run_wrapper(
+                repo,
+                env,
+                [*extra, "--wait-idle", "--timeout", "10", "--interval", "0.01", "--install"],
+            )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual((base / "export-count").read_text(), "4")
-            self.assertEqual((base / "install-call").read_text().splitlines(), [str(repo), "install maintainer"])
+            self.assertEqual(
+                (base / "install-call").read_text().splitlines(), [str(repo), "install maintainer"]
+            )
 
     def test_unknown_export_refusal_and_no_wait_fail_fast_without_install(self):
-        for reason, wait in ((self.BEHIND, []), ("the session has no canonical runtime yet", ["--wait-idle"]),
-                             ("prefix " + self.BEHIND, ["--wait-idle"])):
-            with self.subTest(reason=reason, wait=wait), self.wrapper_fixture() as (base, repo, home, env, output):
+        for reason, wait in (
+            (self.BEHIND, []),
+            ("the session has no canonical runtime yet", ["--wait-idle"]),
+            ("prefix " + self.BEHIND, ["--wait-idle"]),
+        ):
+            with (
+                self.subTest(reason=reason, wait=wait),
+                self.wrapper_fixture() as (base, repo, home, env, output),
+            ):
                 env, extra, _ = self.prepare_carry(base, repo, home, env, output, 0)
-                self.write_carry_binary(Path(extra[1]), "installed", 0, home, export_failures=(reason,))
+                self.write_carry_binary(
+                    Path(extra[1]), "installed", 0, home, export_failures=(reason,)
+                )
                 result = self.run_wrapper(repo, env, [*extra, *wait, "--install"])
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertEqual((base / "export-count").read_text(), "1")
@@ -772,18 +959,37 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             source = base / "source"
-            exported = subprocess.CompletedProcess([], 1, "", "plak: session a cannot be exported: " + self.BEHIND)
+            exported = subprocess.CompletedProcess(
+                [], 1, "", "plak: session a cannot be exported: " + self.BEHIND
+            )
             ticks = [0.0]
+
             def capture(_live, target, _key):
                 target.mkdir()
+
             def sleep(seconds):
                 ticks[0] += seconds
-            with patch.object(MODULE, "capture_home", side_effect=capture) as captures, \
-                    patch.object(MODULE, "session_workspace", return_value=base), \
-                    patch.object(MODULE, "run_command", return_value=exported) as commands, \
-                    patch.object(MODULE.time, "monotonic", side_effect=lambda: ticks[0]), \
-                    patch.object(MODULE.time, "sleep", side_effect=sleep), contextlib.redirect_stdout(io.StringIO()) as report:
-                result = MODULE.export_copy(base, source, "key", "a", base / "plak", base / "export", [], True, 2, interval=1)
+
+            with (
+                patch.object(MODULE, "capture_home", side_effect=capture) as captures,
+                patch.object(MODULE, "session_workspace", return_value=base),
+                patch.object(MODULE, "run_command", return_value=exported) as commands,
+                patch.object(MODULE.time, "monotonic", side_effect=lambda: ticks[0]),
+                patch.object(MODULE.time, "sleep", side_effect=sleep),
+                contextlib.redirect_stdout(io.StringIO()) as report,
+            ):
+                result = MODULE.export_copy(
+                    base,
+                    source,
+                    "key",
+                    "a",
+                    base / "plak",
+                    base / "export",
+                    [],
+                    True,
+                    2,
+                    interval=1,
+                )
             self.assertFalse(result)
             self.assertEqual(captures.call_count, 2)
             self.assertEqual(commands.call_count, 2)
@@ -792,13 +998,27 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
 
     def test_detached_child_uses_setsid_private_log_and_absolute_arguments(self):
         with self.wrapper_fixture() as (base, repo, home, env, _output):
-            with patch.dict(os.environ, env), patch.object(MODULE, "ROOT", repo), \
-                    patch.object(MODULE.subprocess, "Popen") as spawn, \
-                    contextlib.redirect_stdout(io.StringIO()):
+            with (
+                patch.dict(os.environ, env),
+                patch.object(MODULE, "ROOT", repo),
+                patch.object(MODULE.subprocess, "Popen") as spawn,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
                 spawn.return_value.pid = 42
-                result = MODULE.main(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "--wait-idle",
-                                      "--detach", "--log", str(base / "rehearsal.log"),
-                                      "--installed", "relative-plak", "--interval", "2", "--install"])
+                result = MODULE.main(
+                    [
+                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "--wait-idle",
+                        "--detach",
+                        "--log",
+                        str(base / "rehearsal.log"),
+                        "--installed",
+                        "relative-plak",
+                        "--interval",
+                        "2",
+                        "--install",
+                    ]
+                )
             self.assertEqual(result, 0)
             args, kwargs = spawn.call_args
             self.assertTrue(kwargs["start_new_session"])
@@ -812,12 +1032,22 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
             self.assertEqual((base / "rehearsal.log").stat().st_mode & 0o777, 0o600)
 
     def test_invalid_wait_or_detach_options_fail_before_build(self):
-        for options in (["--timeout", "2"], ["--interval", "1"],
-                        ["--wait-idle", "--interval", "inf"], ["--wait-idle", "--interval", "0"], ["--wait-idle", "--timeout", "nan"],
-                        ["--wait-idle", "--timeout", "0"], ["--detach"],
-                        ["--wait-idle", "--detach"], ["--log", "file"]):
-            with self.subTest(options=options), contextlib.redirect_stderr(io.StringIO()), \
-                    patch.object(MODULE.subprocess, "run") as run:
+        for options in (
+            ["--timeout", "2"],
+            ["--interval", "1"],
+            ["--wait-idle", "--interval", "inf"],
+            ["--wait-idle", "--interval", "0"],
+            ["--wait-idle", "--timeout", "nan"],
+            ["--wait-idle", "--timeout", "0"],
+            ["--detach"],
+            ["--wait-idle", "--detach"],
+            ["--log", "file"],
+        ):
+            with (
+                self.subTest(options=options),
+                contextlib.redirect_stderr(io.StringIO()),
+                patch.object(MODULE.subprocess, "run") as run,
+            ):
                 result = MODULE.main(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", *options])
             self.assertEqual(result, 1)
             run.assert_not_called()
@@ -827,29 +1057,54 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
             existing = base / "existing.log"
             existing.write_text("keep")
             for path, error in ((existing, FileExistsError), (home / "log", ValueError)):
-                with patch.dict(os.environ, env), patch.object(MODULE, "ROOT", repo), \
-                        patch.object(MODULE.subprocess, "Popen") as spawn, self.assertRaises(error):
-                    MODULE.main(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "--wait-idle", "--detach",
-                                 "--log", str(path)])
+                with (
+                    patch.dict(os.environ, env),
+                    patch.object(MODULE, "ROOT", repo),
+                    patch.object(MODULE.subprocess, "Popen") as spawn,
+                    self.assertRaises(error),
+                ):
+                    MODULE.main(
+                        [
+                            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                            "--wait-idle",
+                            "--detach",
+                            "--log",
+                            str(path),
+                        ]
+                    )
                 spawn.assert_not_called()
             self.assertEqual(existing.read_text(), "keep")
 
     def test_detached_real_child_has_its_own_session_and_no_input_terminal(self):
         with self.wrapper_fixture() as (base, repo, _home, env, _output):
             runner = repo / "detached-fixture.py"
-            runner.write_text("import json, os\nprint(json.dumps([os.getsid(0), os.getpid(), os.isatty(0)]))\n")
+            runner.write_text(
+                "import json, os\nprint(json.dumps([os.getsid(0), os.getpid(), os.isatty(0)]))\n"
+            )
             children = []
             popen = subprocess.Popen
+
             def launch(*args, **kwargs):
                 child = popen(*args, **kwargs)
                 children.append(child)
                 return child
-            with patch.dict(os.environ, env), patch.object(MODULE, "ROOT", repo), \
-                    patch.object(MODULE, "__file__", str(runner)), \
-                    patch.object(MODULE.subprocess, "Popen", side_effect=launch), \
-                    contextlib.redirect_stdout(io.StringIO()):
-                result = MODULE.main(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "--wait-idle",
-                                      "--detach", "--log", str(base / "log")])
+
+            with (
+                patch.dict(os.environ, env),
+                patch.object(MODULE, "ROOT", repo),
+                patch.object(MODULE, "__file__", str(runner)),
+                patch.object(MODULE.subprocess, "Popen", side_effect=launch),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = MODULE.main(
+                    [
+                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "--wait-idle",
+                        "--detach",
+                        "--log",
+                        str(base / "log"),
+                    ]
+                )
             self.assertEqual(result, 0)
             self.assertEqual(children[0].wait(timeout=10), 0)
             sid, pid, terminal = json.loads((base / "log").read_text())
@@ -859,14 +1114,22 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
 
     def test_install_requires_success_and_propagates_installer_status(self):
         for status in (0, 1):
-            with self.subTest(status=status), self.wrapper_fixture() as (base, repo, _home, env, _output), \
-                    patch.dict(os.environ, env), patch.object(MODULE, "ROOT", repo), \
-                    patch.object(MODULE, "rehearse", return_value=status), \
-                    patch.object(MODULE.subprocess, "run", return_value=subprocess.CompletedProcess([], 7)) as run:
+            with (
+                self.subTest(status=status),
+                self.wrapper_fixture() as (base, repo, _home, env, _output),
+                patch.dict(os.environ, env),
+                patch.object(MODULE, "ROOT", repo),
+                patch.object(MODULE, "rehearse", return_value=status),
+                patch.object(
+                    MODULE.subprocess, "run", return_value=subprocess.CompletedProcess([], 7)
+                ) as run,
+            ):
                 result = MODULE.main(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "--install"])
             self.assertEqual(result, 7 if status == 0 else 1)
             if status == 0:
-                run.assert_called_once_with(["just", "install", "maintainer"], cwd=repo, check=False)
+                run.assert_called_once_with(
+                    ["just", "install", "maintainer"], cwd=repo, check=False
+                )
             else:
                 run.assert_not_called()
 

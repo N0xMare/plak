@@ -55,7 +55,11 @@ class PerfBuildProfileTests(unittest.TestCase):
                 "subscriptions": (
                     "plakous",
                     ("--lib",),
-                    ("codex", "grok", "claude",),
+                    (
+                        "codex",
+                        "grok",
+                        "claude",
+                    ),
                 ),
                 "sessions-sqlite": (
                     "plakous",
@@ -79,7 +83,9 @@ class PerfBuildProfileTests(unittest.TestCase):
                     ("--lib",),
                     (
                         "anthropic",
-                        "codex", "grok", "claude",
+                        "codex",
+                        "grok",
+                        "claude",
                         "openai",
                         "openrouter",
                         "xai",
@@ -131,9 +137,7 @@ class PerfBuildProfileTests(unittest.TestCase):
         )
         self.assertEqual(len(perf_build.BUILD_PROFILES), 18)
         for profile in perf_build.SUPPORTED_PUBLIC_BUILD_PROFILES:
-            self.assertEqual(
-                perf_build.build_profile_scope(profile), "supported-public"
-            )
+            self.assertEqual(perf_build.build_profile_scope(profile), "supported-public")
         for profile in perf_build.TRANSITIONAL_FACADE_BUILD_PROFILES:
             self.assertEqual(
                 perf_build.build_profile_scope(profile),
@@ -212,19 +216,13 @@ class PerfBuildProfileTests(unittest.TestCase):
         self.assertEqual(missing.exception.code, 2)
 
         with (
-            patch.dict(
-                os.environ, {"PLAKOUS_PERF_HOST_ID": "benchmark-worker-07"}, clear=True
-            ),
+            patch.dict(os.environ, {"PLAKOUS_PERF_HOST_ID": "benchmark-worker-07"}, clear=True),
             patch.object(sys, "argv", ["perf_build.py"]),
         ):
-            self.assertEqual(
-                perf_build.parse_arguments().host_id, "benchmark-worker-07"
-            )
+            self.assertEqual(perf_build.parse_arguments().host_id, "benchmark-worker-07")
 
         with (
-            patch.dict(
-                os.environ, {"PLAKOUS_PERF_HOST_ID": "environment-host"}, clear=True
-            ),
+            patch.dict(os.environ, {"PLAKOUS_PERF_HOST_ID": "environment-host"}, clear=True),
             patch.object(sys, "argv", ["perf_build.py", "--host-id", "cli-host"]),
         ):
             self.assertEqual(perf_build.parse_arguments().host_id, "cli-host")
@@ -285,9 +283,7 @@ class PerfBuildProfileTests(unittest.TestCase):
                     self.assertNotIn("--lib", command)
                 self.assertEqual(command.count("--features"), int(bool(features)))
                 if features:
-                    self.assertEqual(
-                        command[command.index("--features") + 1], ",".join(features)
-                    )
+                    self.assertEqual(command[command.index("--features") + 1], ",".join(features))
                 self.assertIn("--no-default-features", command)
                 self.assertIn("build", command)
 
@@ -348,9 +344,7 @@ class PerfBuildProfileTests(unittest.TestCase):
         )
         self.assertEqual(closure["resolved_root_features"], ["default", "serde"])
         expected = perf_build.sha256_bytes(
-            json.dumps(
-                closure["entries"], ensure_ascii=True, separators=(",", ":")
-            ).encode()
+            json.dumps(closure["entries"], ensure_ascii=True, separators=(",", ":")).encode()
         )
         self.assertEqual(closure["entries_sha256"], expected)
 
@@ -369,25 +363,19 @@ class PerfBuildProfileTests(unittest.TestCase):
         unsorted["cargo"]["resolved_feature_closure"]["entries"] = list(
             reversed(closure["entries"])
         )
-        with self.assertRaisesRegex(
-            perf_validator.ValidationError, "sorted unique list"
-        ):
+        with self.assertRaisesRegex(perf_validator.ValidationError, "sorted unique list"):
             perf_validator.validate_resolved_build_closure(unsorted)
 
         wrong_command = copy.deepcopy(metadata)
-        wrong_command["cargo"]["resolved_feature_closure"]["resolver_command"][-1] = (
-            "{p}"
-        )
+        wrong_command["cargo"]["resolved_feature_closure"]["resolver_command"][-1] = "{p}"
         with self.assertRaisesRegex(perf_validator.ValidationError, "resolver_command"):
             perf_validator.validate_resolved_build_closure(wrong_command)
 
         wrong_root_features = copy.deepcopy(metadata)
-        wrong_root_features["cargo"]["resolved_feature_closure"][
-            "resolved_root_features"
-        ] = ["serde"]
-        with self.assertRaisesRegex(
-            perf_validator.ValidationError, "normalized package root"
-        ):
+        wrong_root_features["cargo"]["resolved_feature_closure"]["resolved_root_features"] = [
+            "serde"
+        ]
+        with self.assertRaisesRegex(perf_validator.ValidationError, "normalized package root"):
             perf_validator.validate_resolved_build_closure(wrong_root_features)
 
         missing_root = copy.deepcopy(metadata)
@@ -420,9 +408,7 @@ class PerfBuildProfileTests(unittest.TestCase):
         perf_validator.validate_v5_run_identity(metadata)
 
         metadata["cargo"]["build_profile"] = "tools"
-        with self.assertRaisesRegex(
-            perf_validator.ValidationError, "canonical metadata"
-        ):
+        with self.assertRaisesRegex(perf_validator.ValidationError, "canonical metadata"):
             perf_validator.validate_v5_run_identity(metadata)
 
     def test_v5_measured_command_is_exact_and_ordered(self) -> None:
@@ -453,15 +439,9 @@ class PerfBuildProfileTests(unittest.TestCase):
             "extra-config": lambda value: value.__setitem__(
                 slice(1, 1), ["--config", "profile.dev.opt-level=1"]
             ),
-            "duplicate-config": lambda value: value.__setitem__(
-                slice(1, 1), value[1:3]
-            ),
-            "selector": lambda value: value.__setitem__(
-                value.index("--lib"), "--all-targets"
-            ),
-            "package": lambda value: value.__setitem__(
-                value.index("plakous"), "plakous-tools"
-            ),
+            "duplicate-config": lambda value: value.__setitem__(slice(1, 1), value[1:3]),
+            "selector": lambda value: value.__setitem__(value.index("--lib"), "--all-targets"),
+            "package": lambda value: value.__setitem__(value.index("plakous"), "plakous-tools"),
             "jobs": lambda value: value.__setitem__(value.index("7"), "8"),
             "target-dir": lambda value: value.__setitem__(
                 value.index(target_directory), f"{target_directory}-other"
@@ -544,9 +524,7 @@ class PerfBuildProfileTests(unittest.TestCase):
             with (
                 patch("perf_validator.load_rows", side_effect=mixed_rows),
                 patch("perf_validator.validate_build"),
-                self.assertRaisesRegex(
-                    perf_validator.ValidationError, "host in tools.jsonl"
-                ),
+                self.assertRaisesRegex(perf_validator.ValidationError, "host in tools.jsonl"),
             ):
                 perf_validator.validate_v7_campaign(root)
 
@@ -562,9 +540,7 @@ class PerfBuildProfileTests(unittest.TestCase):
                     "dirty": True,
                     "status_sha256": f"sha256:{'e' * 64}",
                     "tracked_patch_sha256": f"sha256:{'f' * 64}",
-                    "non_ignored_worktree_content_closure": {
-                        "identity": "other-source"
-                    },
+                    "non_ignored_worktree_content_closure": {"identity": "other-source"},
                 },
                 ("toolchain",): {"cargo": "other-cargo", "rustc": "rustc"},
                 ("cargo", "target"): "aarch64-unknown-linux-gnu",
@@ -688,7 +664,10 @@ class PerfBuildProfileTests(unittest.TestCase):
 
     def test_campaign_v10_selects_its_own_contract(self) -> None:
         directory = Path("v10-campaign")
-        with patch.object(sys, "argv", ["validator", "--campaign-v10", str(directory)]), patch.object(perf_validator, "validate_v10_campaign") as validate:
+        with (
+            patch.object(sys, "argv", ["validator", "--campaign-v10", str(directory)]),
+            patch.object(perf_validator, "validate_v10_campaign") as validate,
+        ):
             self.assertEqual(perf_validator.main(), 0)
         validate.assert_called_once_with(directory)
 
@@ -699,13 +678,30 @@ class PerfBuildProfileTests(unittest.TestCase):
         self.assertNotIn("plak-app", perf_validator.V10_BUILD_PROFILE_CONTRACTS)
         self.assertEqual(len(perf_validator.V9_BUILD_PROFILE_CONTRACTS), 19)
         self.assertNotIn("responses", perf_validator.V9_BUILD_PROFILE_CONTRACTS)
-        self.assertEqual(perf_validator.V9_BUILD_PROFILE_CONTRACTS["responses-kernel"][1], "plakous-responses")
-        self.assertEqual(perf_validator.V9_BUILD_PROFILE_CONTRACTS["responses-host"][1], "plakous-responses-dialect")
-        for version, fixture in [(9, perf_validator.V9_BUILD_FIXTURE), (10, perf_validator.V10_BUILD_FIXTURE)]:
-            perf_validator.validate_current_build_fixture({"schema": f"plakous.perf-build.v{version}", "fixture": fixture})
-            perf_validator.validate_current_build_sample_fixture({"schema": f"plakous.perf-build.v{version}", "fixture_revision": version})
+        self.assertEqual(
+            perf_validator.V9_BUILD_PROFILE_CONTRACTS["responses-kernel"][1], "plakous-responses"
+        )
+        self.assertEqual(
+            perf_validator.V9_BUILD_PROFILE_CONTRACTS["responses-host"][1],
+            "plakous-responses-dialect",
+        )
+        for version, fixture in [
+            (9, perf_validator.V9_BUILD_FIXTURE),
+            (10, perf_validator.V10_BUILD_FIXTURE),
+        ]:
+            perf_validator.validate_current_build_fixture(
+                {"schema": f"plakous.perf-build.v{version}", "fixture": fixture}
+            )
+            perf_validator.validate_current_build_sample_fixture(
+                {"schema": f"plakous.perf-build.v{version}", "fixture_revision": version}
+            )
             with self.assertRaises(perf_validator.ValidationError):
-                perf_validator.validate_current_build_sample_fixture({"schema": f"plakous.perf-build.v{version}", "fixture_revision": 10 if version == 9 else 9})
+                perf_validator.validate_current_build_sample_fixture(
+                    {
+                        "schema": f"plakous.perf-build.v{version}",
+                        "fixture_revision": 10 if version == 9 else 9,
+                    }
+                )
         self.assertEqual(len(perf_validator.V8_BUILD_PROFILE_CONTRACTS), 20)
         self.assertIn("paid-platform", perf_validator.V8_BUILD_PROFILE_CONTRACTS)
         self.assertNotIn("plak-app", perf_validator.V8_BUILD_PROFILE_CONTRACTS)
@@ -726,16 +722,12 @@ class PerfBuildProfileTests(unittest.TestCase):
         ):
             with (
                 self.subTest(fixture=tampered),
-                self.assertRaisesRegex(
-                    perf_validator.ValidationError, "fixture must be"
-                ),
+                self.assertRaisesRegex(perf_validator.ValidationError, "fixture must be"),
             ):
                 perf_validator.validate_v5_fixture({"fixture": tampered})
 
         perf_validator.validate_v5_sample_fixture({"fixture_revision": 5})
-        with self.assertRaisesRegex(
-            perf_validator.ValidationError, "fixture_revision must be 5"
-        ):
+        with self.assertRaisesRegex(perf_validator.ValidationError, "fixture_revision must be 5"):
             perf_validator.validate_v5_sample_fixture({"fixture_revision": 4})
 
 

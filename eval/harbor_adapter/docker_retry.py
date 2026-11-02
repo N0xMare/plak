@@ -19,8 +19,11 @@ class RetryingDocker(DockerEnvironment):
         plan = load_campaign()
         if force_build:
             raise PreflightError("per-trial force-build is forbidden; freeze campaign images first")
-        matches = [value for name, value in plan["tasks"].items()
-                   if name.rsplit("/", 1)[-1] == self.environment_dir.parent.name]
+        matches = [
+            value
+            for name, value in plan["tasks"].items()
+            if name.rsplit("/", 1)[-1] == self.environment_dir.parent.name
+        ]
         if len(matches) != 1:
             raise PreflightError("task has no unique campaign image binding")
         image = matches[0]["image"]

@@ -45,9 +45,7 @@ class PiCodexContractTests(unittest.TestCase):
     def test_codex_auth_preflight_requires_complete_oauth(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             auth = pathlib.Path(tmp) / "auth.json"
-            with mock.patch.dict(
-                os.environ, {"PI_AUTH_JSON_PATH": str(auth)}, clear=False
-            ):
+            with mock.patch.dict(os.environ, {"PI_AUTH_JSON_PATH": str(auth)}, clear=False):
                 for entry in (
                     {"type": "api_key", "key": "not-used"},
                     {"type": "oauth", "access": "present"},

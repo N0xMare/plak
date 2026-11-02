@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the opt-in real-product SQLite commit sweep."""
+
 import argparse
 import json
 import os
@@ -19,9 +20,11 @@ def main() -> int:
     script = Path(__file__).resolve().parents[1] / "gate" / "test-env.sh"
     env = os.environ.copy()
     env.update(json.loads(subprocess.check_output([str(script), "--json"], text=True)))
-    env.update(PLAK_CRASH_SWEEP_JOBS=str(args.jobs),
-               PLAK_CRASH_SWEEP_REPEAT=str(args.repeat),
-               PLAK_CRASH_SWEEP_STRICT=str(int(args.strict)))
+    env.update(
+        PLAK_CRASH_SWEEP_JOBS=str(args.jobs),
+        PLAK_CRASH_SWEEP_REPEAT=str(args.repeat),
+        PLAK_CRASH_SWEEP_STRICT=str(int(args.strict)),
+    )
     if args.shapes is not None:
         env["PLAK_CRASH_SWEEP_SHAPES"] = args.shapes
     elif args.strict:
@@ -30,16 +33,37 @@ def main() -> int:
         env["PLAK_CRASH_SWEEP_SHAPES"] = "final_only,direct_tool_then_final"
     # Use the gate's test build, including both cell workers. Building only
     # plak can silently run stale sibling executables from another tree.
-    built = subprocess.call([
-        "cargo", "test", "--no-run", "--locked", "--workspace", "--all-features",
-    ], env=env)
+    built = subprocess.call(
+        [
+            "cargo",
+            "test",
+            "--no-run",
+            "--locked",
+            "--workspace",
+            "--all-features",
+        ],
+        env=env,
+    )
     if built:
         return built
-    return subprocess.call([
-        "cargo", "test", "--locked", "-p", "plak", "--all-features",
-        "--test", "integration", "crash_sweep::full_sweep", "--",
-        "--ignored", "--exact", "--nocapture",
-    ], env=env)
+    return subprocess.call(
+        [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "plak",
+            "--all-features",
+            "--test",
+            "integration",
+            "crash_sweep::full_sweep",
+            "--",
+            "--ignored",
+            "--exact",
+            "--nocapture",
+        ],
+        env=env,
+    )
 
 
 if __name__ == "__main__":

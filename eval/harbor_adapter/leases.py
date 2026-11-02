@@ -1,4 +1,5 @@
 """One host-local campaign owner per subscription account, across checkouts."""
+
 from contextlib import contextmanager, ExitStack
 import fcntl
 import os
@@ -19,7 +20,9 @@ def account_leases(accounts, *, directory=None):
         for account in sorted(set(accounts)):
             if account not in ("codex", "grok", "claude"):
                 raise PreflightError("only subscription accounts may be leased")
-            fd = os.open(directory / (account + ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            fd = os.open(
+                directory / (account + ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
+            )
             handle = stack.enter_context(os.fdopen(fd, "w"))
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)

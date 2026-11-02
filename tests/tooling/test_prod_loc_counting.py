@@ -17,7 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/gate"))
-SPEC = importlib.util.spec_from_file_location("check_prod_loc", ROOT / "tools/perf/check_prod_loc.py")
+SPEC = importlib.util.spec_from_file_location(
+    "check_prod_loc", ROOT / "tools/perf/check_prod_loc.py"
+)
 assert SPEC and SPEC.loader
 LOC = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = LOC
@@ -58,13 +60,13 @@ class ProdLineCountingTests(unittest.TestCase):
     def test_nested_mod_tests_does_not_swallow_production_below_it(self):
         """The facade shape: `profiles::codex` holds tests, real code follows."""
         source = (
-            "pub mod profiles {\n"                    # 1
-            "    pub mod codex {\n"                   # 2
+            "pub mod profiles {\n"  # 1
+            "    pub mod codex {\n"  # 2
             "        pub fn recommended() -> u8 {\n"  # 3
-            "            1\n"                         # 4
-            "        }\n"                             # 5
-            "\n"                                      # 6
-            "        #[cfg(test)]\n"                  # (excluded)
+            "            1\n"  # 4
+            "        }\n"  # 5
+            "\n"  # 6
+            "        #[cfg(test)]\n"  # (excluded)
             "        #[allow(clippy::expect_used, reason = \"unit tests\")]\n"
             "        mod tests {\n"
             "            use super::*;\n"
@@ -73,14 +75,14 @@ class ProdLineCountingTests(unittest.TestCase):
             "                assert_eq!(recommended(), 1);\n"
             "            }\n"
             "        }\n"
-            "    }\n"                                 # 7
-            "\n"                                      # 8
-            "    pub mod grok {\n"                    # 9
+            "    }\n"  # 7
+            "\n"  # 8
+            "    pub mod grok {\n"  # 9
             "        pub fn recommended() -> u8 {\n"  # 10
-            "            2\n"                         # 11
-            "        }\n"                             # 12
-            "    }\n"                                 # 13
-            "}\n"                                     # 14
+            "            2\n"  # 11
+            "        }\n"  # 12
+            "    }\n"  # 13
+            "}\n"  # 14
         )
         self.assertEqual(self.count(source), 14)
 
@@ -190,12 +192,7 @@ class ProdLineCountingTests(unittest.TestCase):
         self.assertEqual(self.count(source), 3)
 
     def test_identifier_ending_in_mod_tests_is_not_a_test_module(self):
-        source = (
-            "pub mod a {\n"
-            "    pub fn submod_tests() {}\n"
-            "    pub fn f() {}\n"
-            "}\n"
-        )
+        source = "pub mod a {\n    pub fn submod_tests() {}\n    pub fn f() {}\n}\n"
         self.assertEqual(self.count(source), 4)
 
 

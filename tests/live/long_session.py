@@ -141,10 +141,18 @@ PAGER = "page.py"
 CHILD_HISTORY_TAIL = 65_536
 # Spawn/wait receipts name a child on these tools. Tree frames are the other
 # source; `session show` is the fallback when neither carries `cN`.
-_CHILD_RECEIPT_TOOLS = frozenset({
-    "spawn_agent", "wait_agent", "list_agents", "send_agent_message",
-    "close_agent", "interrupt_agent", "recover_agent", "adopt_candidate",
-})
+_CHILD_RECEIPT_TOOLS = frozenset(
+    {
+        "spawn_agent",
+        "wait_agent",
+        "list_agents",
+        "send_agent_message",
+        "close_agent",
+        "interrupt_agent",
+        "recover_agent",
+        "adopt_candidate",
+    }
+)
 CATALOG = (
     ("in_turn_compaction", "jsonl"),
     ("overflow", "jsonl"),
@@ -176,7 +184,9 @@ def catalog_window(model: str) -> int | None:
         try:
             ceiling = int(raw)
         except ValueError as error:
-            raise ScenarioFailure(HARNESS, "PLAK_LIVE_INPUT_CEILING must be a positive admitted token count") from error
+            raise ScenarioFailure(
+                HARNESS, "PLAK_LIVE_INPUT_CEILING must be a positive admitted token count"
+            ) from error
         if ceiling <= 0:
             raise ScenarioFailure(HARNESS, "PLAK_LIVE_INPUT_CEILING must be positive")
         return ceiling
@@ -190,7 +200,8 @@ def catalog_window(model: str) -> int | None:
 INPUT_CEILING_ENV = "PLAK_LIVE_INPUT_CEILING"
 INPUT_CEILING_REMEDY = (
     f"set {INPUT_CEILING_ENV} to the admitted input ceiling of a short session on this "
-    "route and protocol: `plak usage --session <id>` prints admitted_input_ceiling=N")
+    "route and protocol: `plak usage --session <id>` prints admitted_input_ceiling=N"
+)
 
 
 def input_ceiling(route: live.Route) -> dict:
@@ -201,7 +212,10 @@ def input_ceiling(route: live.Route) -> dict:
         tokens = None
     if tokens is None:
         return {"tokens": None, "source": None}
-    return {"tokens": tokens, "source": INPUT_CEILING_ENV if "/" in route.model else "driver catalog"}
+    return {
+        "tokens": tokens,
+        "source": INPUT_CEILING_ENV if "/" in route.model else "driver catalog",
+    }
 
 
 def input_ceiling_error(route: live.Route) -> str | None:
@@ -326,8 +340,7 @@ def child_page_bytes_per_token(pack: str) -> float:
     return CODEX_BASE64_BYTES_PER_TOKEN if pack == "codex" else bulk_bytes_per_token(pack)
 
 
-def child_pages(window: int | None, pack: str, call_lines: int,
-                model: str | None = None) -> int:
+def child_pages(window: int | None, pack: str, call_lines: int, model: str | None = None) -> int:
     """Child pages whose text passes the compaction trigger, plus margin.
 
     The margin is `GROWTH_EXTRA_READS` sequential reads, at least one page.
@@ -350,8 +363,9 @@ def page_header(index: int, count: int, word: str, size: int, pack: str = "grok"
     return f"Page {index}. Check word: {word}. {after}"
 
 
-def write_child_pages(path: Path, pages: int, call_lines: int, pack: str = "grok",
-                      random_bytes=os.urandom) -> list[str]:
+def write_child_pages(
+    path: Path, pages: int, call_lines: int, pack: str = "grok", random_bytes=os.urandom
+) -> list[str]:
     """Write `pages` child pages: one header line, then `child_page_lines` bulk lines.
 
     Returns each page's check word, in page order. The header is the only
@@ -371,7 +385,9 @@ def write_child_pages(path: Path, pages: int, call_lines: int, pack: str = "grok
             words.append(word)
             handle.write(page_header(index, pages, word, size, pack) + "\n")
             for _ in range(page_lines):
-                line = base64_line(random_bytes) if pack == "codex" else bulk_line(pack, random_bytes)
+                line = (
+                    base64_line(random_bytes) if pack == "codex" else bulk_line(pack, random_bytes)
+                )
                 handle.write(line + "\n")
     if pack == "codex":
         (path.parent / PAGER).write_text(codex_pager(path.name))
@@ -430,8 +446,9 @@ def page_progress(repo: Path, words: list[str]) -> str:
 
 def pages_written(repo: Path, words: list[str]) -> int:
     """Pages whose `pages/<k>.txt` holds that page's check word."""
-    return sum(text_equals(repo / PAGE_DIR / f"{index}.txt", word)
-               for index, word in enumerate(words, 1))
+    return sum(
+        text_equals(repo / PAGE_DIR / f"{index}.txt", word) for index, word in enumerate(words, 1)
+    )
 
 
 def base64_line(random_bytes=os.urandom) -> str:
@@ -443,8 +460,10 @@ def digit_line(random_bytes=os.urandom) -> str:
     """1468 characters of random five-digit groups, the length of `base64_line`."""
     width = len(base64_line(random_bytes))
     digits = "".join(str(byte % 10) for byte in random_bytes(width))
-    groups = [digits[index:index + _DIGITS_PER_GROUP]
-              for index in range(0, len(digits), _DIGITS_PER_GROUP)]
+    groups = [
+        digits[index : index + _DIGITS_PER_GROUP]
+        for index in range(0, len(digits), _DIGITS_PER_GROUP)
+    ]
     return " ".join(groups)[:width]
 
 
@@ -547,9 +566,11 @@ def _pi_read_arguments(pack: str, offset: int, limit: int) -> str:
     """
     if pack != "pi":
         return ""
-    return (f" Pass path, offset and limit on every call, for example "
-            f'{{"path": "bulk.txt", "offset": {offset}, "limit": {limit}}}, then '
-            f'{{"path": "bulk.txt", "offset": {offset + limit}, "limit": {limit}}}.')
+    return (
+        f" Pass path, offset and limit on every call, for example "
+        f'{{"path": "bulk.txt", "offset": {offset}, "limit": {limit}}}, then '
+        f'{{"path": "bulk.txt", "offset": {offset + limit}, "limit": {limit}}}.'
+    )
 
 
 def growth_prompt(line_count: int, pack: str = "grok", call_lines: int | None = None) -> str:
@@ -610,8 +631,9 @@ def round_cap_bytes(window: int) -> int:
     return min(ROUND_CAP_MAX_BYTES, max(ROUND_CAP_MIN_BYTES, window * 4 * 8 // 100))
 
 
-def overflow_plan(window: int | None, pack: str, line_count: int | None,
-                  model: str | None = None) -> tuple[int, list[list[int]]]:
+def overflow_plan(
+    window: int | None, pack: str, line_count: int | None, model: str | None = None
+) -> tuple[int, list[list[int]]]:
     """Lines per call and the offsets of each round's parallel batch.
 
     Each batch fills `OVERFLOW_CAP_SHARE` of the round cap, so nothing is
@@ -638,8 +660,9 @@ def overflow_plan(window: int | None, pack: str, line_count: int | None,
     if line_count is not None:
         rounds = min(rounds, line_count // per_round)
     rounds = max(1, rounds)
-    batches = [[1 + (index * calls + call) * lines
-                for call in range(calls)] for index in range(rounds)]
+    batches = [
+        [1 + (index * calls + call) * lines for call in range(calls)] for index in range(rounds)
+    ]
     return lines, batches
 
 
@@ -661,9 +684,11 @@ def read_call_lines(pack: str) -> int:
 
 
 def bulk_bytes_per_token(pack: str) -> float:
-    return {"codex": CODEX_DIGIT_BYTES_PER_TOKEN,
-            "claude": DIGIT_BYTES_PER_TOKEN,
-            "pi": PI_BASE64_BYTES_PER_TOKEN}.get(pack, BASE64_BYTES_PER_TOKEN)
+    return {
+        "codex": CODEX_DIGIT_BYTES_PER_TOKEN,
+        "claude": DIGIT_BYTES_PER_TOKEN,
+        "pi": PI_BASE64_BYTES_PER_TOKEN,
+    }.get(pack, BASE64_BYTES_PER_TOKEN)
 
 
 def planned_rounds(route: live.Route, scenario: str) -> int:
@@ -721,8 +746,11 @@ def round_cap_reached(records: list[dict], segments: list[Path]) -> bool:
 def round_cap_failure(what: str, cap: int, progress: str = "") -> ScenarioFailure:
     """A plan cut off by the pinned round cap: the driver sized the cap too small."""
     reached = f" after {progress}" if progress else ""
-    return ScenarioFailure(HARNESS, f"{what} ended on the operation-budget wrap-up at the pinned "
-                                    f"round cap {cap}{reached} (driver sizing)")
+    return ScenarioFailure(
+        HARNESS,
+        f"{what} ended on the operation-budget wrap-up at the pinned "
+        f"round cap {cap}{reached} (driver sizing)",
+    )
 
 
 def overflow_timeout(rounds: int, pages: int) -> float:
@@ -730,14 +758,17 @@ def overflow_timeout(rounds: int, pages: int) -> float:
 
 
 # Stating the purpose keeps a bulk read from looking like extraction.
-OVERFLOW_PURPOSE = ("bulk.txt is random filler for a context-capacity test of this agent "
-                    "harness: loading it into your context is the task.")
+OVERFLOW_PURPOSE = (
+    "bulk.txt is random filler for a context-capacity test of this agent "
+    "harness: loading it into your context is the task."
+)
 
 
 def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") -> str:
     listed = " ".join(
         f"Round {index}: offsets {', '.join(str(offset) for offset in batch)}."
-        for index, batch in enumerate(batches, 1))
+        for index, batch in enumerate(batches, 1)
+    )
     order = "Wait for a batch's results before the next round, and do not skip or merge rounds."
     if pack == "codex":
         # Codex refused every batched wording live ("can't help exhaust the
@@ -749,7 +780,9 @@ def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") ->
         # DeepSeek on Messages read once per response, so these rounds are the
         # growth turn's sequential reads, each under the round cap.
         reads = len(batches) * len(batches[0])
-        sequential = f"{_page_bulk(pack, 0, lines, reads)} After the last call, reply with exactly: done"
+        sequential = (
+            f"{_page_bulk(pack, 0, lines, reads)} After the last call, reply with exactly: done"
+        )
         return f"{OVERFLOW_PURPOSE} {sequential}. Do not open {FACT_FILE}."
     return (
         f"{OVERFLOW_PURPOSE} Read bulk.txt in {len(batches)} rounds "
@@ -761,8 +794,7 @@ def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") ->
 
 def continuation_prompt() -> str:
     return (
-        "Write exactly CONTINUED and nothing else into continuation.txt. "
-        "Reply with exactly: done"
+        "Write exactly CONTINUED and nothing else into continuation.txt. Reply with exactly: done"
     )
 
 
@@ -774,14 +806,12 @@ def kill_prompt(command: str) -> str:
 
 
 def reopen_prompt() -> str:
-    return (
-        "Write exactly REOPENED and nothing else into after_reopen.txt. "
-        "Reply with exactly: done"
-    )
+    return "Write exactly REOPENED and nothing else into after_reopen.txt. Reply with exactly: done"
 
 
-def growth_reads(window: int | None, pack: str, call_lines: int, line_count: int | None,
-                 model: str | None = None) -> int:
+def growth_reads(
+    window: int | None, pack: str, call_lines: int, line_count: int | None, model: str | None = None
+) -> int:
     """Sequential reads whose text passes the compaction trigger, plus margin.
 
     Bounded by the file; None plans unbounded.
@@ -910,8 +940,11 @@ def in_turn_compactions(records: list[dict]) -> list[dict]:
 
 def capacity_compactions(records: list[dict]) -> list[dict]:
     """Host capacity-recovery compacts (`compact.started` reason `capacity`)."""
-    return [record for record in records
-            if record.get("kind") == "compact.started" and record.get("reason") == "capacity"]
+    return [
+        record
+        for record in records
+        if record.get("kind") == "compact.started" and record.get("reason") == "capacity"
+    ]
 
 
 def capacity_recovery_committed(records: list[dict]) -> bool:
@@ -925,8 +958,11 @@ def capacity_recovery_committed(records: list[dict]) -> bool:
     for record in records:
         if record.get("kind") == "compact.started" and record.get("reason") == "capacity":
             seen = True
-        elif (seen and record.get("kind") == "compact.finished"
-              and record.get("outcome") == "committed"):
+        elif (
+            seen
+            and record.get("kind") == "compact.finished"
+            and record.get("outcome") == "committed"
+        ):
             return True
     return False
 
@@ -996,8 +1032,10 @@ def overflow_remedy(records: list[dict]) -> str | None:
     if any(scheduled_in_window(records, start, end) for start, end in windows):
         return "in-turn overflow compact"
     for start, end in windows:
-        if any(record.get("kind") == "context.placeholders"
-               for record in _slice_records(records, start, end)):
+        if any(
+            record.get("kind") == "context.placeholders"
+            for record in _slice_records(records, start, end)
+        ):
             return "tool-result placeholder shrink"
     return None
 
@@ -1007,8 +1045,10 @@ def tool_hits(records: list[dict], start: int, end: int, needles: tuple[str, ...
     for record in _slice_records(records, start, end):
         if record.get("kind") != "tool.started":
             continue
-        blob = " ".join(str(record.get(key) or "")
-                        for key in ("name", "exposed_name", "subject", "arguments", "detail"))
+        blob = " ".join(
+            str(record.get(key) or "")
+            for key in ("name", "exposed_name", "subject", "arguments", "detail")
+        )
         if any(needle in blob for needle in needles):
             hits.append(record)
     return hits
@@ -1016,8 +1056,11 @@ def tool_hits(records: list[dict], start: int, end: int, needles: tuple[str, ...
 
 def bulk_windows(records: list[dict]) -> list[tuple[int, int]]:
     """Turns that read `bulk.txt`, directly or through Codex's `PAGER`."""
-    return [window for window in lifecycle_windows(records)
-            if tool_hits(records, window[0], window[1], ("bulk.txt", PAGER))]
+    return [
+        window
+        for window in lifecycle_windows(records)
+        if tool_hits(records, window[0], window[1], ("bulk.txt", PAGER))
+    ]
 
 
 def forbidden_reread(records: list[dict], start: int, end: int) -> list[dict]:
@@ -1066,8 +1109,7 @@ MARKER_OBSERVE_SECONDS = 15.0
 
 def accepted_kill_abandonment(record: dict) -> bool:
     """True for a SIGKILL whose claim is running_tool or nothing_started."""
-    return (record.get("cause") == "process_lost"
-            and record.get("claim") in PROCESS_LOST_CLAIMS)
+    return record.get("cause") == "process_lost" and record.get("claim") in PROCESS_LOST_CLAIMS
 
 
 def marker_process_running(marker: str) -> bool:
@@ -1080,8 +1122,8 @@ def marker_process_running(marker: str) -> bool:
     if not marker or any(char in marker for char in "\n\x00"):
         return False
     found = subprocess.run(
-        ["pgrep", "-f", marker],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        ["pgrep", "-f", marker], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+    )
     return found.returncode == 0
 
 
@@ -1191,11 +1233,12 @@ CHILD_TOOL_NAMES = frozenset({"spawn_agent", "wait_agent"})
 def _retried_successfully(events: list[dict], index: int, failed: dict) -> bool:
     """A later call of the same tool on the same subject finished."""
     return any(
-        isinstance(later, dict) and later.get("kind") == "tool"
+        isinstance(later, dict)
+        and later.get("kind") == "tool"
         and later.get("name") == failed.get("name")
         and later.get("subject") == failed.get("subject")
         and later.get("state") in ("done", "succeeded")
-        for later in events[index + 1:]
+        for later in events[index + 1 :]
     )
 
 
@@ -1218,10 +1261,13 @@ def child_tool_failure(events: list[dict]) -> str | None:
             # A root call the model retried successfully (an adopt refused as
             # target_changed, then made with the current target) is the
             # model correcting itself, not a failure the scenario carries.
-            if event.get("name") not in CHILD_TOOL_NAMES \
-                    and _retried_successfully(events, index, event):
+            if event.get("name") not in CHILD_TOOL_NAMES and _retried_successfully(
+                events, index, event
+            ):
                 continue
-            subject = event.get("subject") or event.get("detail") or event.get("name") or "tool failed"
+            subject = (
+                event.get("subject") or event.get("detail") or event.get("name") or "tool failed"
+            )
             return str(subject)
         if event.get("kind") == "tree":
             for node in event.get("nodes") or []:
@@ -1244,8 +1290,10 @@ def raise_child_tool_failure(text: str, lookup_faults: str | None = None) -> Non
     `model`. Any other child failure is `harness`.
     """
     detail = f"child tool failure: {' '.join(text.split())[:200]}"
-    if (live.provider_child_text(text, lookup_faults=lookup_faults)
-            or live.stream_validation_outcome(text, None) == live.PROVIDER):
+    if (
+        live.provider_child_text(text, lookup_faults=lookup_faults)
+        or live.stream_validation_outcome(text, None) == live.PROVIDER
+    ):
         raise ScenarioFailure(live.PROVIDER, detail)
     if live.output_limit_failure(None, text):
         raise ScenarioFailure(MODEL, detail)
@@ -1349,8 +1397,9 @@ def is_committed_compaction_projection(record: dict) -> bool:
     return True
 
 
-def _session_command(binary: Path, home: Path, args: list[str],
-                     timeout: float) -> tuple[int, str, str]:
+def _session_command(
+    binary: Path, home: Path, args: list[str], timeout: float
+) -> tuple[int, str, str]:
     """`plak session …` against `home`. A dead binary or a timeout is the channel failing."""
     env = os.environ.copy()
     env["PLAK_HOME"] = str(home)
@@ -1358,7 +1407,10 @@ def _session_command(binary: Path, home: Path, args: list[str],
     try:
         result = subprocess.run(
             [str(binary), "session", *args],
-            env=env, capture_output=True, text=True, timeout=timeout,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
         raise ScenarioFailure(live.PENDING, "session channel timed out") from error
@@ -1369,11 +1421,12 @@ def _session_command(binary: Path, home: Path, args: list[str],
 
 def _channel_detail(code: int, stdout: str, stderr: str) -> str:
     text = " ".join((stderr or stdout).split())
-    return (text[:200] if text else f"exit {code}")
+    return text[:200] if text else f"exit {code}"
 
 
-def child_ordinals_from_session_show(binary: Path, home: Path, root_id: str,
-                                     timeout: float = 120) -> list[str]:
+def child_ordinals_from_session_show(
+    binary: Path, home: Path, root_id: str, timeout: float = 120
+) -> list[str]:
     """Child ordinals from `plak session show <root>`. Non-zero with no child line is pending.
 
     A recovery-required show still prints `Child` lines before it exits
@@ -1384,15 +1437,18 @@ def child_ordinals_from_session_show(binary: Path, home: Path, root_id: str,
     found = child_ordinals_from_show(stdout)
     if code != 0 and not found:
         raise ScenarioFailure(
-            live.PENDING, f"session show channel failed: {_channel_detail(code, stdout, stderr)}")
+            live.PENDING, f"session show channel failed: {_channel_detail(code, stdout, stderr)}"
+        )
     return found
 
 
-def read_child_history(binary: Path, home: Path, root_id: str, ordinal: str,
-                       timeout: float = 120) -> list[dict]:
+def read_child_history(
+    binary: Path, home: Path, root_id: str, ordinal: str, timeout: float = 120
+) -> list[dict]:
     """`plak session log <root>.cN --json` items, including a Working `history_snapshot` header."""
     code, stdout, stderr = _session_command(
-        binary, home,
+        binary,
+        home,
         ["log", f"{root_id}.{ordinal}", "--json", "--tail", str(CHILD_HISTORY_TAIL)],
         timeout,
     )
@@ -1408,8 +1464,7 @@ def read_child_history(binary: Path, home: Path, root_id: str, ordinal: str,
         try:
             record = json.loads(line)
         except json.JSONDecodeError as error:
-            raise ScenarioFailure(
-                live.PENDING, f"session log {ordinal} was not JSONL") from error
+            raise ScenarioFailure(live.PENDING, f"session log {ordinal} was not JSONL") from error
         if not isinstance(record, dict):
             raise ScenarioFailure(live.PENDING, f"session log {ordinal} was not JSONL")
         items.append(record)
@@ -1427,14 +1482,28 @@ def poll_records(home: Path, session_id: str, predicate, seconds: float = 30) ->
 
 def require_completed(turn: live.Turn, what: str) -> None:
     import smoke
+
     smoke.require_completed(turn, what)
 
 
 def commit_extra(repo: Path, message: str) -> None:
     env = live.fixture_git_env()
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
-    subprocess.run(["git", "-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid",
-                    "commit", "-qm", message], cwd=repo, check=True, env=env)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=smoke",
+            "-c",
+            "user.email=smoke@example.invalid",
+            "commit",
+            "-qm",
+            message,
+        ],
+        cwd=repo,
+        check=True,
+        env=env,
+    )
 
 
 def close_agent(agent: live.Agent) -> None:
@@ -1464,8 +1533,9 @@ class LongSession:
         import random
 
         self.route, self.env = route, env
-        self.random_bytes = (os.urandom if env.fixture_seed is None
-                             else random.Random(env.fixture_seed).randbytes)
+        self.random_bytes = (
+            os.urandom if env.fixture_seed is None else random.Random(env.fixture_seed).randbytes
+        )
         self.pages = growth_pages(route)
         self.window = catalog_window(route.model)
         if "/" in route.model and self.window is None:
@@ -1520,23 +1590,30 @@ class LongSession:
             turn = agent.prompt(growth, timeout=growth_timeout(self.pages))
             require_completed(turn, "growth turn")
             records = poll_records(
-                home, agent.session_id,
-                lambda rows: any(scheduled_in_window(rows, start, end)
-                                 for start, end in bulk_windows(rows)))
+                home,
+                agent.session_id,
+                lambda rows: any(
+                    scheduled_in_window(rows, start, end) for start, end in bulk_windows(rows)
+                ),
+            )
             try:
                 self._require_in_turn(records, token, repo, words)
             except ScenarioFailure as failure:
-                raise self._sizing("in_turn_compaction", failure, records, [agent.capture_dir],
-                                   "growth turn",
-                                   f"{pages_written(repo, words)}/{len(words)} pages"
-                                   if words else "") from None
+                raise self._sizing(
+                    "in_turn_compaction",
+                    failure,
+                    records,
+                    [agent.capture_dir],
+                    "growth turn",
+                    f"{pages_written(repo, words)}/{len(words)} pages" if words else "",
+                ) from None
             follow = follow_prompt(pack)
             hide_token(follow, token)
             follow_turn = agent.prompt(follow, timeout=180)
             require_completed(follow_turn, "follow-up")
             records = poll_records(
-                home, agent.session_id,
-                lambda rows: len(lifecycle_windows(rows)) >= 3)
+                home, agent.session_id, lambda rows: len(lifecycle_windows(rows)) >= 3
+            )
             self._reject_follow_reread(records)
             if not text_equals(repo / "followup.txt", token):
                 raise ScenarioFailure(MODEL, "follow-up did not write the pre-compaction code word")
@@ -1544,8 +1621,9 @@ class LongSession:
             close_agent(agent)
         return "in-turn scheduled compaction committed; fact survived; follow-up wrote followup.txt"
 
-    def _require_in_turn(self, records: list[dict], token: str, repo: Path,
-                         words: list[str]) -> None:
+    def _require_in_turn(
+        self, records: list[dict], token: str, repo: Path, words: list[str]
+    ) -> None:
         """The growth turn's compaction, then its pages and recall, in that order.
 
         An early stop names how far the growth turn got before the recall is
@@ -1553,14 +1631,20 @@ class LongSession:
         """
         progress = page_progress(repo, words)
         windows = bulk_windows(records)
-        committed = [record for start, end in windows
-                     for record in scheduled_in_window(records, start, end)]
+        committed = [
+            record for start, end in windows for record in scheduled_in_window(records, start, end)
+        ]
         if not committed:
             if reached_trigger(records, self.window, self.route.model):
                 raise ScenarioFailure(
-                    HARNESS, "prepared input reached the compaction trigger without a committed compact")
-            raise ScenarioFailure(MODEL, "growth turn did not reach the compaction trigger"
-                                  + (f" ({progress})" if progress else ""))
+                    HARNESS,
+                    "prepared input reached the compaction trigger without a committed compact",
+                )
+            raise ScenarioFailure(
+                MODEL,
+                "growth turn did not reach the compaction trigger"
+                + (f" ({progress})" if progress else ""),
+            )
         for record in committed:
             assert_shrunk(record)
         for start, end in windows:
@@ -1575,8 +1659,15 @@ class LongSession:
         if not text_equals(repo / "recalled.txt", token):
             raise ScenarioFailure(MODEL, "recalled.txt does not match the pre-compaction code word")
 
-    def _sizing(self, scenario: str, failure: ScenarioFailure, records: list[dict],
-                segments: list[Path], what: str, progress: str) -> ScenarioFailure:
+    def _sizing(
+        self,
+        scenario: str,
+        failure: ScenarioFailure,
+        records: list[dict],
+        segments: list[Path],
+        what: str,
+        progress: str,
+    ) -> ScenarioFailure:
         """Score a `model` miss that ended on the operation-budget wrap-up.
 
         `harness` (driver sizing) only when the plan itself, run as a
@@ -1590,8 +1681,11 @@ class LongSession:
         planned = planned_rounds(self.route, scenario)
         if planned + ROUND_HEADROOM > cap:
             return round_cap_failure(what, cap, progress)
-        return ScenarioFailure(MODEL, f"{failure}; the turn spent the pinned round cap {cap}, "
-                                      f"and its plan needs {planned} rounds")
+        return ScenarioFailure(
+            MODEL,
+            f"{failure}; the turn spent the pinned round cap {cap}, "
+            f"and its plan needs {planned} rounds",
+        )
 
     def _reject_follow_reread(self, records: list[dict]) -> None:
         windows = lifecycle_windows(records)
@@ -1626,7 +1720,8 @@ class LongSession:
             hide_token(prompt, token)
             turn = agent.prompt(prompt, timeout=overflow_timeout(len(batches), self.pages))
             records = poll_records(
-                home, agent.session_id, lambda rows: overflow_remedy(rows) is not None)
+                home, agent.session_id, lambda rows: overflow_remedy(rows) is not None
+            )
             progress = page_progress(repo, words)
             remedy = self._require_overflow(turn, records, progress, [agent.capture_dir])
             if progress:
@@ -1641,8 +1736,9 @@ class LongSession:
             close_agent(agent)
         return f"{remedy}; continuation wrote continuation.txt"
 
-    def _require_overflow(self, turn: live.Turn, records: list[dict], progress: str = "",
-                          segments: list[Path] = ()) -> str:
+    def _require_overflow(
+        self, turn: live.Turn, records: list[dict], progress: str = "", segments: list[Path] = ()
+    ) -> str:
         remedy = overflow_remedy(records)
         if remedy is not None:
             return remedy
@@ -1652,11 +1748,20 @@ class LongSession:
             require_completed(turn, "overflow turn")
         if reached_trigger(records, self.window, self.route.model):
             raise ScenarioFailure(
-                HARNESS, "prepared input reached the compaction trigger without a committed remedy")
-        raise self._sizing("overflow", ScenarioFailure(
-            MODEL, "overflow turn did not reach the compaction trigger"
-            + (f" ({progress})" if progress else "")), records, list(segments), "overflow turn",
-            progress.removeprefix("check words for "))
+                HARNESS, "prepared input reached the compaction trigger without a committed remedy"
+            )
+        raise self._sizing(
+            "overflow",
+            ScenarioFailure(
+                MODEL,
+                "overflow turn did not reach the compaction trigger"
+                + (f" ({progress})" if progress else ""),
+            ),
+            records,
+            list(segments),
+            "overflow turn",
+            progress.removeprefix("check words for "),
+        )
 
     def kill_reopen(self) -> str:
         marker = "plak-long-kill-" + self.random_bytes(4).hex()
@@ -1706,7 +1811,11 @@ class LongSession:
             self._reap(marker, started["pid"])
             agent = crash_triage.reopen(
                 lambda: self.agent("kill_reopen", repo, home, args=["--session", session]),
-                self.env.binary, repo, home, session)
+                self.env.binary,
+                repo,
+                home,
+                session,
+            )
             if agent.session_id != session:
                 raise ScenarioFailure(HARNESS, "reopen attached a different session")
             follow = agent.prompt(reopen_prompt(), timeout=240)
@@ -1717,8 +1826,7 @@ class LongSession:
         finally:
             self._reap(marker, started["pid"])
             close_agent(agent)
-        return (f"turn.abandoned {claim}/process_lost; "
-                "reopen follow-up wrote after_reopen.txt")
+        return f"turn.abandoned {claim}/process_lost; reopen follow-up wrote after_reopen.txt"
 
     def _require_abandoned(self, home: Path, session: str, agent: live.Agent) -> str:
         # Process restart logs `turn.abandoned` only. `session.recovered` is
@@ -1730,10 +1838,13 @@ class LongSession:
         claim = report.get("claim")
         if not accepted_kill_abandonment(report) or not isinstance(claim, str):
             raise ScenarioFailure(
-                HARNESS,
-                f"turn.abandoned claim={claim} cause={report.get('cause')}")
-        matched = [event for event in agent.recovered
-                   if event.get("claim") == claim and event.get("cause") == "process_lost"]
+                HARNESS, f"turn.abandoned claim={claim} cause={report.get('cause')}"
+            )
+        matched = [
+            event
+            for event in agent.recovered
+            if event.get("claim") == claim and event.get("cause") == "process_lost"
+        ]
         if not matched:
             raise ScenarioFailure(HARNESS, f"reopen did not emit recovered {claim}/process_lost")
         return claim
@@ -1743,8 +1854,9 @@ class LongSession:
         token = new_fact(pack, self.random_bytes)
         repo = self.repo("child_compaction", token)
         pages = child_pages(self.window, pack, self.call_lines, self.route.model)
-        words = write_child_pages(repo / "bulk.txt", pages, self.call_lines, pack,
-                                  self.random_bytes)
+        words = write_child_pages(
+            repo / "bulk.txt", pages, self.call_lines, pack, self.random_bytes
+        )
         commit_extra(repo, "bulk")
         home = self.home("child_compaction")
         agent = self.agent("child_compaction", repo, home)
@@ -1794,21 +1906,37 @@ class LongSession:
                     # The projection has no `model.operation_usage`, so a
                     # missing segment is not evidence the trigger was reached.
                     raise ScenarioFailure(
-                        MODEL, "child history has no committed compaction segment "
-                        f"(check words for {written}/{pages} pages)")
+                        MODEL,
+                        "child history has no committed compaction segment "
+                        f"(check words for {written}/{pages} pages)",
+                    )
                 if written != pages:
-                    raise ScenarioFailure(MODEL, f"child wrote check words for {written}/{pages} pages")
+                    raise ScenarioFailure(
+                        MODEL, f"child wrote check words for {written}/{pages} pages"
+                    )
                 if not text_equals(repo / "recalled.txt", token):
-                    raise ScenarioFailure(MODEL, "child did not report the code word in recalled.txt")
+                    raise ScenarioFailure(
+                        MODEL, "child did not report the code word in recalled.txt"
+                    )
                 if not text_equals(repo / "acknowledged.txt", token):
-                    raise ScenarioFailure(MODEL, "child did not write acknowledged.txt before compaction")
+                    raise ScenarioFailure(
+                        MODEL, "child did not write acknowledged.txt before compaction"
+                    )
             except ScenarioFailure as failure:
-                raise self._sizing("child_compaction", failure, [], [agent.capture_dir],
-                                   "child turn", f"{written}/{pages} pages") from None
+                raise self._sizing(
+                    "child_compaction",
+                    failure,
+                    [],
+                    [agent.capture_dir],
+                    "child turn",
+                    f"{written}/{pages} pages",
+                ) from None
         finally:
             close_agent(agent)
-        return (f"child compaction segment committed; {pages}/{pages} page check words; "
-                f"recalled.txt matches {fact_file(pack)}")
+        return (
+            f"child compaction segment committed; {pages}/{pages} page check words; "
+            f"recalled.txt matches {fact_file(pack)}"
+        )
 
     @staticmethod
     def _reap(marker: str, pid: int | None) -> None:
@@ -1818,8 +1946,12 @@ class LongSession:
             except OSError:
                 pass
         # The marker is an argv token of the sleeper, so it survives exec.
-        subprocess.run(["pkill", "-f", marker], stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, check=False)
+        subprocess.run(
+            ["pkill", "-f", marker],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
 
 
 def play(route: live.Route, env: live.Env, name: str) -> str:
@@ -1842,7 +1974,8 @@ def selected_catalog(only: str, run_all: bool) -> tuple[tuple[str, str], ...]:
     chosen = [name for name in only.split(",") if name]
     if not chosen:
         raise ValueError(
-            "refusing to launch without --only or --all; scenarios: " + ", ".join(names))
+            "refusing to launch without --only or --all; scenarios: " + ", ".join(names)
+        )
     unknown = [name for name in chosen if name not in names]
     if unknown:
         raise ValueError("unknown long-session scenario: " + ", ".join(unknown))
@@ -1857,8 +1990,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     select = parser.add_mutually_exclusive_group()
     select.add_argument("--only", default="", help="comma-separated long-session scenario names")
-    select.add_argument("--all", action="store_true",
-                        help="run exactly the four bar scenarios")
+    select.add_argument("--all", action="store_true", help="run exactly the four bar scenarios")
     return parser
 
 
@@ -1879,9 +2011,18 @@ def main(argv: list[str]) -> int:
     if refused:
         # Every scenario sizes against this ceiling, so none can start.
         artifacts.mkdir(parents=True, exist_ok=True)
-        (artifacts / "report.json").write_text(json.dumps(
-            {**live.route_report(route), "pre_attempt_error": refused,
-             "input_ceiling": ceiling, "results": []}, indent=2) + "\n")
+        (artifacts / "report.json").write_text(
+            json.dumps(
+                {
+                    **live.route_report(route),
+                    "pre_attempt_error": refused,
+                    "input_ceiling": ceiling,
+                    "results": [],
+                },
+                indent=2,
+            )
+            + "\n"
+        )
         print(refused, file=sys.stderr)
         return 2
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
@@ -1911,43 +2052,78 @@ def main(argv: list[str]) -> int:
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
         segments = env.capture_segments[segment_start:]
-        outcome, detail = live.score_runaway(outcome, detail, segments,
-                                           model_error_kind=model_error_kind)
+        outcome, detail = live.score_runaway(
+            outcome, detail, segments, model_error_kind=model_error_kind
+        )
         import smoke
+
         pending = live.provider_pending(env, segments, outcome)
         complete = smoke.capture_complete(segments, pending)
-        evidence[name] = {"segments": [str(segment) for segment in segments],
-                          "capture_complete": complete,
-                          "provider_pending": [str(segment) for segment in pending],
-                          "captured_exchanges": sum(len(list(segment.glob("*.info")))
-                                                    for segment in segments)}
+        evidence[name] = {
+            "segments": [str(segment) for segment in segments],
+            "capture_complete": complete,
+            "provider_pending": [str(segment) for segment in pending],
+            "captured_exchanges": sum(len(list(segment.glob("*.info"))) for segment in segments),
+        }
         if outcome == PASS and not complete:
             outcome, detail = HARNESS, "raw exchange evidence missing or incomplete"
         usage = live.usage_delta(live.session_usage(env.home), usage_before)
         private = artifacts / name / "home"
         if private.is_dir():
             usage = usage.add(live.session_usage(private))
-        result = live.Result(name, surface, outcome, detail, time.monotonic() - started,
-                             usage.input_tokens, usage.output_tokens,
-                             usage.cached_input_tokens, usage.reasoning_tokens)
+        result = live.Result(
+            name,
+            surface,
+            outcome,
+            detail,
+            time.monotonic() - started,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens,
+            usage.reasoning_tokens,
+        )
         results.append(result)
         print(f"{result.outcome:8} {name}: {detail}", flush=True)
     binary_end = live.binary_sha256(env.binary)
     evidence_complete = all(item["capture_complete"] for item in evidence.values())
     header = live.route_report(route, bound=env.bound_compositions)
-    (artifacts / "report.json").write_text(json.dumps(
-        {**header, "binary": str(env.binary),
-         "binary_sha256_start": binary_start, "binary_sha256_end": binary_end,
-         "growth_pages": reported_pages, "round_cap": round_caps, "input_ceiling": ceiling,
-         "token_telemetry": live.sum_usage(
-             live.TokenUsage(result.input_tokens, result.output_tokens,
-                             result.cached_input_tokens, result.reasoning_tokens)
-             for result in results),
-         "evidence": evidence, "capture_complete": evidence_complete,
-         "results": [result.__dict__ for result in results]}, indent=2) + "\n")
+    (artifacts / "report.json").write_text(
+        json.dumps(
+            {
+                **header,
+                "binary": str(env.binary),
+                "binary_sha256_start": binary_start,
+                "binary_sha256_end": binary_end,
+                "growth_pages": reported_pages,
+                "round_cap": round_caps,
+                "input_ceiling": ceiling,
+                "token_telemetry": live.sum_usage(
+                    live.TokenUsage(
+                        result.input_tokens,
+                        result.output_tokens,
+                        result.cached_input_tokens,
+                        result.reasoning_tokens,
+                    )
+                    for result in results
+                ),
+                "evidence": evidence,
+                "capture_complete": evidence_complete,
+                "results": [result.__dict__ for result in results],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print("\n" + live.table(results) + f"\n\nartifacts: {artifacts}")
-    return 0 if (all(result.outcome == PASS for result in results)
-                 and evidence_complete and binary_start == binary_end) else 1
+    return (
+        0
+        if (
+            all(result.outcome == PASS for result in results)
+            and evidence_complete
+            and binary_start == binary_end
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

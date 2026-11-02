@@ -9,9 +9,17 @@ def failure_class(termination: str, exception: str | None = None) -> str:
     if termination == "turn_failed:credential":
         return "infra"
     if exception in {
-        "CredentialError", "CancelledError", "RuntimeError", "PreflightError", "VendorArtifactError",
-        "AgentSetupTimeoutError", "EnvironmentBuildError", "EnvironmentStartError",
-        "VerifierTimeoutError", "VerifierOutputParseError", "BudgetWatchStop",
+        "CredentialError",
+        "CancelledError",
+        "RuntimeError",
+        "PreflightError",
+        "VendorArtifactError",
+        "AgentSetupTimeoutError",
+        "EnvironmentBuildError",
+        "EnvironmentStartError",
+        "VerifierTimeoutError",
+        "VerifierOutputParseError",
+        "BudgetWatchStop",
     }:
         return "infra"
     if termination in {"completed", "agent_exit_nonzero"} or termination.startswith("turn_failed:"):

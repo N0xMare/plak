@@ -10,7 +10,9 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("gate_evidence", ROOT / "tools/release/gate_evidence.py")
+SPEC = importlib.util.spec_from_file_location(
+    "gate_evidence", ROOT / "tools/release/gate_evidence.py"
+)
 assert SPEC is not None and SPEC.loader is not None
 gate_evidence = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate_evidence)
@@ -52,8 +54,13 @@ class VerifyTests(unittest.TestCase):
         self.record(self.tree)
 
     def git(self, *args: str) -> str:
-        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=self.root,
-                              check=True, capture_output=True, text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
 
     def commit(self) -> None:
         self.git("add", "-A")
@@ -115,28 +122,37 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(gate_evidence.audit(ROOT, gate_evidence.listed_files(ROOT)), [])
 
     def test_a_gate_input_naming_an_allowlisted_path_or_component_fails(self):
-        errors = self.audit({
-            "crates/a/tests/docs.rs": 'let spec = read("../../docs/spec/05-testing.md");\n',
-            "tests/tooling/test_x.py": 'text = (ROOT / "CHANGELOG.md").read_text()\n',
-            "scripts/x.sh": "cat tests/live/STATUS.md\n",
-            "bin/b/build.rs": 'println!("cargo:rerun-if-changed=../../docs/user-guide/cli.md");\n',
-            "crates/c/tests/join.rs": 'let page = root.join("../../docs").join("user-guide").join("x.md");\n',
-            "tests/tooling/test_y.py": 'pages = sorted((REPO / "docs" / "spec").rglob("*.md"))\n',
-            "scripts/y.sh": 'cat "$root/README.md"\n',
-        })
-        flagged = {error.split(": names ")[0] + " " + error.split("'")[1] for error in errors if ": names " in error}
-        self.assertEqual(flagged, {
-            "crates/a/tests/docs.rs:1 docs/spec/05-testing.md",
-            "tests/tooling/test_x.py:1 CHANGELOG.md",
-            "scripts/x.sh:1 STATUS.md",
-            "bin/b/build.rs:1 docs/user-guide/cli.md",
-            'crates/c/tests/join.rs:1 "../../docs"',
-            'crates/c/tests/join.rs:1 "user-guide"',
-            'tests/tooling/test_y.py:1 "docs"',
-            'tests/tooling/test_y.py:1 "spec"',
-            "tests/tooling/test_y.py:1 *.md",
-            "scripts/y.sh:1 README.md",
-        })
+        errors = self.audit(
+            {
+                "crates/a/tests/docs.rs": 'let spec = read("../../docs/spec/05-testing.md");\n',
+                "tests/tooling/test_x.py": 'text = (ROOT / "CHANGELOG.md").read_text()\n',
+                "scripts/x.sh": "cat tests/live/STATUS.md\n",
+                "bin/b/build.rs": 'println!("cargo:rerun-if-changed=../../docs/user-guide/cli.md");\n',
+                "crates/c/tests/join.rs": 'let page = root.join("../../docs").join("user-guide").join("x.md");\n',
+                "tests/tooling/test_y.py": 'pages = sorted((REPO / "docs" / "spec").rglob("*.md"))\n',
+                "scripts/y.sh": 'cat "$root/README.md"\n',
+            }
+        )
+        flagged = {
+            error.split(": names ")[0] + " " + error.split("'")[1]
+            for error in errors
+            if ": names " in error
+        }
+        self.assertEqual(
+            flagged,
+            {
+                "crates/a/tests/docs.rs:1 docs/spec/05-testing.md",
+                "tests/tooling/test_x.py:1 CHANGELOG.md",
+                "scripts/x.sh:1 STATUS.md",
+                "bin/b/build.rs:1 docs/user-guide/cli.md",
+                'crates/c/tests/join.rs:1 "../../docs"',
+                'crates/c/tests/join.rs:1 "user-guide"',
+                'tests/tooling/test_y.py:1 "docs"',
+                'tests/tooling/test_y.py:1 "spec"',
+                "tests/tooling/test_y.py:1 *.md",
+                "scripts/y.sh:1 README.md",
+            },
+        )
 
     def test_a_root_readme_read_fails_even_when_the_token_is_reviewed(self):
         reviewed = {"crates/a/src/lib.rs": (frozenset({"README.md"}), "test")}
@@ -146,8 +162,13 @@ class AuditTests(unittest.TestCase):
         }
         with mock.patch.dict(gate_evidence.REVIEWED_REFERENCES, reviewed, clear=True):
             errors = self.audit(sources)
-            self.assertEqual(errors, ["crates/a/src/lib.rs: reads the root README.md; PACKAGE_ONLY assumes no gate "
-                                      "but packaging does"])
+            self.assertEqual(
+                errors,
+                [
+                    "crates/a/src/lib.rs: reads the root README.md; PACKAGE_ONLY assumes no gate "
+                    "but packaging does"
+                ],
+            )
             sources["crates/a/src/lib.rs"] = (
                 'const R: &str = include_str!(concat!(\n    env!("CARGO_MANIFEST_DIR"),\n    "/../../README.md"));\n'
             )
@@ -156,16 +177,21 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(self.audit(sources), [])
 
     def test_comments_urls_documents_and_manifest_readme_keys_are_not_readers(self):
-        self.assertEqual(self.audit({
-            "crates/a/src/lib.rs": "//! See docs/spec/01-plakous-library.md.\n",
-            "crates/a/Cargo.toml": (
-                'documentation = "https://example.invalid/tree/main/docs/user-guide"\n'
-                'readme = "../../README.md"\n'
+        self.assertEqual(
+            self.audit(
+                {
+                    "crates/a/src/lib.rs": "//! See docs/spec/01-plakous-library.md.\n",
+                    "crates/a/Cargo.toml": (
+                        'documentation = "https://example.invalid/tree/main/docs/user-guide"\n'
+                        'readme = "../../README.md"\n'
+                    ),
+                    "tools/perf/perf.just": "# See docs/spec/05.\n",
+                    "docs/spec/06.md": "CHANGELOG.md and docs/spec/07-config-reference.md\n",
+                    "crates/a/README.md": "docs/spec\n",
+                }
             ),
-            "tools/perf/perf.just": "# See docs/spec/05.\n",
-            "docs/spec/06.md": "CHANGELOG.md and docs/spec/07-config-reference.md\n",
-            "crates/a/README.md": "docs/spec\n",
-        }), [])
+            [],
+        )
 
     def test_reviewed_references_are_exact_texts_and_stale_ones_fail(self):
         reviewed = {"src/a.rs": (frozenset({'"docs"', "README.md"}), "fixture")}
@@ -173,12 +199,16 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(self.audit({"src/a.rs": 'f("docs"); g("README.md");\n'}), [])
             errors = self.audit({"src/a.rs": 'f("docs"); g("docs/spec/x.md");\n'})
         self.assertTrue(any("names 'docs/spec/x.md'" in error for error in errors), errors)
-        self.assertIn("REVIEWED_REFERENCES entry src/a.rs: 'README.md' no longer occurs; drop it", errors)
+        self.assertIn(
+            "REVIEWED_REFERENCES entry src/a.rs: 'README.md' no longer occurs; drop it", errors
+        )
 
     def test_the_excluded_reader_reads_exactly_its_excluded_path(self):
         reader = "bin/plak/src/product_config/tests.rs"
         with mock.patch.dict(gate_evidence.REVIEWED_REFERENCES, {}, clear=True):
-            self.assertEqual(self.audit({reader: 'join("../../docs/spec/07-config-reference.md")\n'}), [])
+            self.assertEqual(
+                self.audit({reader: 'join("../../docs/spec/07-config-reference.md")\n'}), []
+            )
             for other in ("docs/spec/02-plak-product.md", "docs/spec/07"):
                 errors = self.audit({reader: f'join("../../{other}")\n'})
                 self.assertEqual(len(errors), 1, errors)

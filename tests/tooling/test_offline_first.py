@@ -13,15 +13,20 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("offline_first", ROOT / "tools/release/offline_first.py")
+SPEC = importlib.util.spec_from_file_location(
+    "offline_first", ROOT / "tools/release/offline_first.py"
+)
 assert SPEC is not None and SPEC.loader is not None
 offline_first = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(offline_first)
 
-MISMATCH = ('error: failed to select a version for the requirement `monty-typeshed = "^1.2.0"`\n'
-            "candidate versions found which didn't match: 1.1.0\n")
-CONFLICT = ("error: failed to select a version for `ruff_python_ast` which could resolve "
-            "this conflict\n")
+MISMATCH = (
+    'error: failed to select a version for the requirement `monty-typeshed = "^1.2.0"`\n'
+    "candidate versions found which didn't match: 1.1.0\n"
+)
+CONFLICT = (
+    "error: failed to select a version for `ruff_python_ast` which could resolve this conflict\n"
+)
 
 
 class FakeCargo:
@@ -60,8 +65,10 @@ def run(cargo: FakeCargo) -> int:
 
 class OfflineFirstTests(unittest.TestCase):
     def test_names_come_from_both_mismatch_spellings(self) -> None:
-        self.assertEqual(offline_first.stale_index_names(MISMATCH + CONFLICT + MISMATCH),
-                         ["monty-typeshed", "ruff_python_ast"])
+        self.assertEqual(
+            offline_first.stale_index_names(MISMATCH + CONFLICT + MISMATCH),
+            ["monty-typeshed", "ruff_python_ast"],
+        )
         self.assertEqual(offline_first.stale_index_names("error: no matching package named"), [])
 
     def test_a_warm_cache_never_goes_online(self) -> None:
@@ -72,11 +79,14 @@ class OfflineFirstTests(unittest.TestCase):
     def test_a_stale_entry_is_refreshed_and_the_offline_step_retried_once(self) -> None:
         cargo = FakeCargo([(101, MISMATCH), (0, "")])
         self.assertEqual(run(cargo), 0)
-        self.assertEqual(cargo.calls, [
-            ["cargo", "fetch", "--offline"],
-            ["cargo", "info", "--quiet", "--", "monty-typeshed"],
-            ["cargo", "fetch", "--offline"],
-        ])
+        self.assertEqual(
+            cargo.calls,
+            [
+                ["cargo", "fetch", "--offline"],
+                ["cargo", "info", "--quiet", "--", "monty-typeshed"],
+                ["cargo", "fetch", "--offline"],
+            ],
+        )
 
     def test_the_refresh_runs_outside_the_callers_workspace(self) -> None:
         cargo = FakeCargo([(101, MISMATCH), (0, "")])
@@ -86,8 +96,10 @@ class OfflineFirstTests(unittest.TestCase):
         self.assertFalse(cargo.info_cwds[0].exists(), "the empty directory is removed")
 
     def test_the_refresh_runs_on_the_callers_pinned_toolchain(self) -> None:
-        with mock.patch.dict(os.environ, {}, clear=False), \
-                mock.patch.object(offline_first.Path, "cwd", return_value=ROOT):
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            mock.patch.object(offline_first.Path, "cwd", return_value=ROOT),
+        ):
             os.environ.pop("RUSTUP_TOOLCHAIN", None)
             cargo = FakeCargo([(101, MISMATCH), (0, "")])
             self.assertEqual(run(cargo), 0)
@@ -100,7 +112,8 @@ class OfflineFirstTests(unittest.TestCase):
             nested = Path(root) / "stage" / "crates"
             nested.mkdir(parents=True)
             (Path(root) / "stage" / "rust-toolchain.toml").write_text(
-                '[toolchain]\nchannel = "1.2.3"\n', encoding="utf-8")
+                '[toolchain]\nchannel = "1.2.3"\n', encoding="utf-8"
+            )
             self.assertEqual(offline_first.pinned_channel(nested), "1.2.3")
             self.assertIsNone(offline_first.pinned_channel(Path(root)))
 
@@ -109,8 +122,12 @@ class OfflineFirstTests(unittest.TestCase):
             self.assertIsNone(offline_first.refresh_environment(ROOT))
 
     def test_names_must_start_with_a_letter(self) -> None:
-        self.assertEqual(offline_first.stale_index_names(
-            'failed to select a version for the requirement `-x = "1"`'), [])
+        self.assertEqual(
+            offline_first.stale_index_names(
+                'failed to select a version for the requirement `-x = "1"`'
+            ),
+            [],
+        )
 
     def test_a_retry_that_still_fails_runs_the_step_online(self) -> None:
         cargo = FakeCargo([(101, MISMATCH), (101, MISMATCH)], online=0)
@@ -121,11 +138,14 @@ class OfflineFirstTests(unittest.TestCase):
     def test_a_failed_refresh_skips_the_retry(self) -> None:
         cargo = FakeCargo([(101, MISMATCH)], info=101, online=7)
         self.assertEqual(run(cargo), 7)
-        self.assertEqual(cargo.calls, [
-            ["cargo", "fetch", "--offline"],
-            ["cargo", "info", "--quiet", "--", "monty-typeshed"],
-            ["cargo", "fetch"],
-        ])
+        self.assertEqual(
+            cargo.calls,
+            [
+                ["cargo", "fetch", "--offline"],
+                ["cargo", "info", "--quiet", "--", "monty-typeshed"],
+                ["cargo", "fetch"],
+            ],
+        )
 
     def test_a_missing_input_goes_online_without_a_refresh(self) -> None:
         cargo = FakeCargo([(101, "error: failed to download `x`")], online=0)

@@ -36,11 +36,15 @@ TELEMETRY_COLUMNS = (
     "endpoint_compact_workflows",
 )
 
+
 # `plak telemetry sql --json` emits arrays of string cells, not objects.
 # Bare aggregates over zero turns still yield one SQLite row; HAVING drops it.
 def _usage_sql(
-    session_filter: str, *, include_compactions: bool = True,
-    compaction_cost_columns: bool = True, endpoint_workflows: str = "0",
+    session_filter: str,
+    *,
+    include_compactions: bool = True,
+    compaction_cost_columns: bool = True,
+    endpoint_workflows: str = "0",
 ) -> str:
     compaction_filter = "" if include_compactions else " AND 0"
     compaction_cost = "cost_micros" if compaction_cost_columns else "NULL"
@@ -104,10 +108,12 @@ HAVING COUNT(*) > 0;
 """
 
 
-TELEMETRY_SQL = _usage_sql("""SELECT substr(locator, 1, instr(locator, '/') - 1)
+TELEMETRY_SQL = _usage_sql(
+    """SELECT substr(locator, 1, instr(locator, '/') - 1)
   FROM product.sessions WHERE id = '{session_id}'""",
-  endpoint_workflows="""(SELECT COUNT(*) FROM product.workflows
-  WHERE session_id = '{session_id}' AND kind = 'compact')""")
+    endpoint_workflows="""(SELECT COUNT(*) FROM product.workflows
+  WHERE session_id = '{session_id}' AND kind = 'compact')""",
+)
 ARCHIVE_SQL = _usage_sql("?")
 ARCHIVE_V7_SQL = _usage_sql("?", compaction_cost_columns=False)
 ARCHIVE_TURN_SQL = _usage_sql("?", include_compactions=False, compaction_cost_columns=False)
@@ -229,9 +235,15 @@ def read_archived_plak_usage(agent_dir: Path) -> ArchivedPlakUsage:
             stack.enter_context(closing(telemetry))
             sessions = product.execute("SELECT id, locator FROM sessions LIMIT 2").fetchall()
             if len(sessions) != 1:
-                return ArchivedPlakUsage(None, "ambiguous_session" if sessions else "missing_session", hashes)
+                return ArchivedPlakUsage(
+                    None, "ambiguous_session" if sessions else "missing_session", hashes
+                )
             product_id, locator = sessions[0]
-            if not isinstance(product_id, str) or not isinstance(locator, str) or "/" not in locator:
+            if (
+                not isinstance(product_id, str)
+                or not isinstance(locator, str)
+                or "/" not in locator
+            ):
                 return ArchivedPlakUsage(None, "invalid_session", hashes)
             stdout_path = agent_dir / "plak-stdout.txt"
             if stdout_path.exists():
@@ -261,14 +273,18 @@ def read_archived_plak_usage(agent_dir: Path) -> ArchivedPlakUsage:
                 "SELECT DISTINCT session_id FROM compactions LIMIT 2"
             ).fetchall()
             if any(row[0] != runtime_id for row in compaction_ids):
-                return ArchivedPlakUsage(None, "ambiguous_compactions", hashes, product_id, runtime_id)
+                return ArchivedPlakUsage(
+                    None, "ambiguous_compactions", hashes, product_id, runtime_id
+                )
             schema = telemetry.execute("PRAGMA user_version").fetchone()[0]
             compaction_columns = {
                 column[1] for column in telemetry.execute("PRAGMA table_info(compactions)")
             }
             has_cost_columns = {"cost_micros", "cost_status"} <= compaction_columns
             if (schema, has_cost_columns) not in ((7, False), (8, True)):
-                return ArchivedPlakUsage(None, "unsupported_telemetry_schema", hashes, product_id, runtime_id)
+                return ArchivedPlakUsage(
+                    None, "unsupported_telemetry_schema", hashes, product_id, runtime_id
+                )
             query = ARCHIVE_SQL if schema == 8 else ARCHIVE_V7_SQL
             row = telemetry.execute(query, (runtime_id,)).fetchone()
             if row is None:
@@ -276,9 +292,15 @@ def read_archived_plak_usage(agent_dir: Path) -> ArchivedPlakUsage:
             usage = parse_telemetry_json(json.dumps([list(row)]))
             if endpoint_workflows:
                 usage = replace(
-                    usage, resolved=False, usage_status="partial", cost_usd=None,
+                    usage,
+                    resolved=False,
+                    usage_status="partial",
+                    cost_usd=None,
                     cost_status="partial_scope",
-                    missing_buckets=(*usage.missing_buckets, "endpoint_compaction_scope_unverified"),
+                    missing_buckets=(
+                        *usage.missing_buckets,
+                        "endpoint_compaction_scope_unverified",
+                    ),
                     endpoint_compact_workflows=endpoint_workflows,
                 )
             turn_row = telemetry.execute(ARCHIVE_TURN_SQL, (runtime_id,)).fetchone()
@@ -312,7 +334,9 @@ def parse_session_id_line(stdout: str) -> str:
     return ids[0]
 
 
-def _unresolved(*, cost_status: str = "missing", missing_buckets: tuple[str, ...] = ("usage",)) -> UsageTotals:
+def _unresolved(
+    *, cost_status: str = "missing", missing_buckets: tuple[str, ...] = ("usage",)
+) -> UsageTotals:
     return UsageTotals(
         n_input_tokens=None,
         n_cache_tokens=None,
@@ -377,22 +401,36 @@ def parse_telemetry_json(payload: str) -> UsageTotals:
         ("missing_cache_write_rows", "cache_write", "cache_write_tokens"),
     ):
         # A legacy SUM without coverage counters can hide unmeasured rows.
-        if row_count is None or _as_int(fields.get(column)) != 0 or _as_int(fields.get(source)) is None:
+        if (
+            row_count is None
+            or _as_int(fields.get(column)) != 0
+            or _as_int(fields.get(source)) is None
+        ):
             missing.append(bucket)
     if compaction_coverage_mismatches is None or compaction_coverage_mismatches:
         missing.append("compaction_coverage")
     if endpoint_compact_workflows:
         missing.append("endpoint_compaction_scope_unverified")
     token_counts = (input_tokens, cached, cache_write, output_tokens, reasoning)
-    if row_count is None and all(value in (None, 0) for value in token_counts) and cost_status in {
-        "unknown",
-        "missing",
-    }:
+    if (
+        row_count is None
+        and all(value in (None, 0) for value in token_counts)
+        and cost_status
+        in {
+            "unknown",
+            "missing",
+        }
+    ):
         return _unresolved(cost_status="missing")
     if input_tokens is None and output_tokens is None:
         return _unresolved()
     cost_usd = None
-    if row_count is not None and cost_status in {"known", "reported", "mixed_reported"} and cost_micros is not None and _as_int(fields.get("missing_cost_rows")) == 0:
+    if (
+        row_count is not None
+        and cost_status in {"known", "reported", "mixed_reported"}
+        and cost_micros is not None
+        and _as_int(fields.get("missing_cost_rows")) == 0
+    ):
         cost_usd = cost_micros / 1_000_000
     if row_count is None and cost_status in {"known", "reported"}:
         # Historical six-column aggregates cannot prove every contributing row.
@@ -415,8 +453,9 @@ def parse_telemetry_json(payload: str) -> UsageTotals:
         missing_buckets=tuple(missing),
         usage_status="partial" if missing else "complete",
         compaction_rows=compaction_rows,
-        observed_turn_cost_usd=(observed_turn_cost_micros / 1_000_000
-                                if observed_turn_cost_micros is not None else None),
+        observed_turn_cost_usd=(
+            observed_turn_cost_micros / 1_000_000 if observed_turn_cost_micros is not None else None
+        ),
         observed_cost_usd=(cost_micros / 1_000_000 if cost_micros is not None else None),
         missing_compaction_cost_rows=missing_compaction_cost_rows,
         missing_turn_cost_rows=missing_turn_cost_rows,
@@ -442,10 +481,23 @@ def _claude_prompt_totals(
     (a subset). `n_cache_write_tokens` is cache_creation; Harbor has no write
     field, so callers put it on metadata.
     """
-    missing = tuple(name for name, value in (("input", input_tokens), ("cache_read", cache_read), ("cache_write", cache_write), ("output", output_tokens)) if value is None)
+    missing = tuple(
+        name
+        for name, value in (
+            ("input", input_tokens),
+            ("cache_read", cache_read),
+            ("cache_write", cache_write),
+            ("output", output_tokens),
+        )
+        if value is None
+    )
     if input_tokens is None and output_tokens is None:
         return _unresolved()
-    prompt = None if any(value is None for value in (input_tokens, cache_read, cache_write)) else input_tokens + cache_read + cache_write
+    prompt = (
+        None
+        if any(value is None for value in (input_tokens, cache_read, cache_write))
+        else input_tokens + cache_read + cache_write
+    )
     return UsageTotals(
         n_input_tokens=prompt,
         n_cache_tokens=cache_read,
@@ -494,9 +546,7 @@ def parse_pmux_jsonl(payload: str) -> UsageTotals:
     requests, not one. A usage record without an id is unattributable, so the
     whole payload resolves as unresolved rather than being guessed at.
     """
-    snapshots: dict[
-        tuple[str, str], tuple[int | None, int | None, int | None, int | None]
-    ] = {}
+    snapshots: dict[tuple[str, str], tuple[int | None, int | None, int | None, int | None]] = {}
     for line in payload.splitlines():
         line = line.strip()
         if not line:
@@ -564,11 +614,7 @@ def merge_usage(*parts: UsageTotals) -> UsageTotals:
         return _unresolved()
 
     def summed(attr: str) -> int | None:
-        values = [
-            getattr(part, attr)
-            for part in parts
-            if getattr(part, attr) is not None
-        ]
+        values = [getattr(part, attr) for part in parts if getattr(part, attr) is not None]
         if not values:
             return None
         return int(sum(values))
@@ -582,7 +628,12 @@ def merge_usage(*parts: UsageTotals) -> UsageTotals:
     status = "mixed_reported" if all_costs else "partial"
     if all_costs and len({part.cost_status for part in parts}) == 1:
         status = parts[0].cost_status
-    missing = tuple(sorted({bucket for part in parts for bucket in part.missing_buckets} | ({"session"} if any(not part.resolved for part in parts) else set())))
+    missing = tuple(
+        sorted(
+            {bucket for part in parts for bucket in part.missing_buckets}
+            | ({"session"} if any(not part.resolved for part in parts) else set())
+        )
+    )
     complete = all(part.resolved for part in parts)
     return UsageTotals(
         n_input_tokens=summed("n_input_tokens"),

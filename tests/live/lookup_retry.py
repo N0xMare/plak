@@ -48,22 +48,42 @@ def main() -> int:
     faults = f"host={host},path={path},nth=1,fault={args.fault}"
     log = artifacts / "run.log"
     before = live.binary_sha256(binary)
-    code, out = live.run_cli(env, repo, [*route.flags(), "--print-session-id", "--",
-        "Write lookup-proof.txt containing exactly LOOKUP_OK, then reply DONE."], log, faults=faults)
+    code, out = live.run_cli(
+        env,
+        repo,
+        [
+            *route.flags(),
+            "--print-session-id",
+            "--",
+            "Write lookup-proof.txt containing exactly LOOKUP_OK, then reply DONE.",
+        ],
+        log,
+        faults=faults,
+    )
     text = log.read_text(errors="replace")
     if code:
-        live.classify_cli_failure(code, text, "lookup retry", segments=env.capture_segments, lookup_faults=faults)
+        live.classify_cli_failure(
+            code, text, "lookup retry", segments=env.capture_segments, lookup_faults=faults
+        )
     if "retrying model lookup (2/3):" not in text:
         raise live.ScenarioFailure(live.HARNESS, "fault did not exercise the model lookup retry")
-    if route.account in {"openai", "anthropic", "xai-api"} and not any((env.home / "cache/api-models").glob("*.json")):
-        raise live.ScenarioFailure(live.HARNESS, "API model list fell back instead of caching successful lookup evidence")
-    session = next((line.split("=", 1)[1] for line in out.splitlines()
-                    if line.startswith("session_id=")), None)
+    if route.account in {"openai", "anthropic", "xai-api"} and not any(
+        (env.home / "cache/api-models").glob("*.json")
+    ):
+        raise live.ScenarioFailure(
+            live.HARNESS, "API model list fell back instead of caching successful lookup evidence"
+        )
+    session = next(
+        (line.split("=", 1)[1] for line in out.splitlines() if line.startswith("session_id=")), None
+    )
     if session is None:
         raise live.ScenarioFailure(live.HARNESS, "turn completed without session id")
     records = live.session_records(env.home, session)
-    terminals = [row for row in records if row.get("kind") == "turn.lifecycle"
-                 and row.get("phase") != "admitted"]
+    terminals = [
+        row
+        for row in records
+        if row.get("kind") == "turn.lifecycle" and row.get("phase") != "admitted"
+    ]
     if not terminals or terminals[-1].get("phase") != "completed":
         raise live.ScenarioFailure(live.HARNESS, "turn has no completed durable terminal")
     proof = repo / "lookup-proof.txt"
@@ -71,8 +91,13 @@ def main() -> int:
         raise live.ScenarioFailure(live.MODEL, "turn completed without the requested file")
     if live.binary_sha256(binary) != before:
         raise live.ScenarioFailure(live.HARNESS, "executable changed during the run")
-    report = {"route": args.route, "fault": faults, "outcome": live.PASS,
-              "session_id": session, "binary_sha256": before}
+    report = {
+        "route": args.route,
+        "fault": faults,
+        "outcome": live.PASS,
+        "session_id": session,
+        "binary_sha256": before,
+    }
     (artifacts / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report))
     return 0

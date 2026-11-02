@@ -83,8 +83,7 @@ def _git(checkout: Path, *args: str) -> str:
         ) from exc
     if result.returncode != 0:
         raise PmuxProvenanceError(
-            f"git {' '.join(args)} failed in {checkout}: "
-            f"{(result.stderr or '').strip()}"
+            f"git {' '.join(args)} failed in {checkout}: {(result.stderr or '').strip()}"
         )
     return (result.stdout or "").strip()
 
@@ -92,9 +91,7 @@ def _git(checkout: Path, *args: str) -> str:
 def head_commit(checkout: Path) -> str:
     commit = _git(checkout, "rev-parse", "HEAD")
     if len(commit) != 40 or not all(c in "0123456789abcdef" for c in commit):
-        raise PmuxProvenanceError(
-            f"{checkout} did not resolve HEAD to a full commit: {commit!r}"
-        )
+        raise PmuxProvenanceError(f"{checkout} did not resolve HEAD to a full commit: {commit!r}")
     return commit
 
 
@@ -103,9 +100,7 @@ def worktree_is_dirty(checkout: Path) -> bool:
     return bool(_git(checkout, "status", "--porcelain"))
 
 
-def resolve_source_commit(
-    checkout: Path, *, allow_dirty: bool | None = None
-) -> SourceCommit:
+def resolve_source_commit(checkout: Path, *, allow_dirty: bool | None = None) -> SourceCommit:
     """Resolves what the build is about to be made from, failing closed.
 
     `allow_dirty` defaults to whether the operator set the override
@@ -141,9 +136,7 @@ def manifest_path(pmux_root: Path) -> Path:
     return Path(pmux_root) / MANIFEST_NAME
 
 
-def build_manifest(
-    *, arch: str, source: SourceCommit, bins: tuple[str, ...]
-) -> dict[str, Any]:
+def build_manifest(*, arch: str, source: SourceCommit, bins: tuple[str, ...]) -> dict[str, Any]:
     return {
         "schemaVersion": SCHEMA_VERSION,
         "arch": resolve_arch(arch),
@@ -164,8 +157,7 @@ def record_provenance(
     path = manifest_path(pmux_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(build_manifest(arch=arch, source=source, bins=bins), indent=2)
-        + "\n",
+        json.dumps(build_manifest(arch=arch, source=source, bins=bins), indent=2) + "\n",
         encoding="utf-8",
     )
     return path
@@ -204,9 +196,7 @@ def require_pinned_provenance(
         )
     source = manifest.get("source")
     if not isinstance(source, dict):
-        raise PmuxProvenanceError(
-            f"{manifest_path(pmux_root)} records no source commit"
-        )
+        raise PmuxProvenanceError(f"{manifest_path(pmux_root)} records no source commit")
     commit = str(source.get("commit") or "")
     dirty = bool(source.get("dirty"))
     if allow_unpinned is None:

@@ -35,7 +35,9 @@ class PublishedPlakManifestTests(unittest.TestCase):
         self.assertEqual(after, before)
 
     def test_a_moved_block_fails_closed(self) -> None:
-        edited = self.repository.replace('"plakous-hosted/test-support",\n]', '"plakous-hosted/test-support",\n    "x",\n]')
+        edited = self.repository.replace(
+            '"plakous-hosted/test-support",\n]', '"plakous-hosted/test-support",\n    "x",\n]'
+        )
         edited = edited.replace("optional = true }", "optional = true, features = [] }")
         with self.assertRaises(publish_shape.ShapeError):
             publish_shape.published_plak_manifest(edited)

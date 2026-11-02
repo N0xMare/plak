@@ -72,9 +72,7 @@ TERMINATION_CLASSES = (
 #
 #   plak: agent could not be initialized (Revalidation): <detail>
 INIT_FAILURE_MARKER = "agent could not be initialized"
-_INIT_KIND = re.compile(
-    r"agent could not be initialized\s*\(([A-Za-z0-9_]+)\)"
-)
+_INIT_KIND = re.compile(r"agent could not be initialized\s*\(([A-Za-z0-9_]+)\)")
 
 # How much of `result.json` we could actually read. Anything but `ok` is
 # printed, because a trial summary is worthless if the reader cannot say
@@ -216,9 +214,7 @@ def turn_failed_class(text: str) -> str:
 def harness_exception_class(exception_type: str) -> str:
     """Names the exception in the class, the way pmux names its own deaths."""
     return (
-        f"{CLASS_HARNESS_EXCEPTION}:{exception_type}"
-        if exception_type
-        else CLASS_HARNESS_EXCEPTION
+        f"{CLASS_HARNESS_EXCEPTION}:{exception_type}" if exception_type else CLASS_HARNESS_EXCEPTION
     )
 
 
@@ -380,9 +376,7 @@ def classify_plak(
         tool_calls_failed=failed,
     )
     if exception_type and exception_type != AGENT_EXIT_EXCEPTION:
-        record.termination_class = classify_harness_exception(
-            exception_type, exception_message
-        )
+        record.termination_class = classify_harness_exception(exception_type, exception_message)
         record.detail = _first_line(exception_message) or exception_type
         return record
     if exit_code == 0:
@@ -407,9 +401,7 @@ def classify_plak(
         return record
     if exit_code is None:
         record.termination_class = (
-            harness_exception_class(exception_type)
-            if exception_type
-            else CLASS_UNKNOWN
+            harness_exception_class(exception_type) if exception_type else CLASS_UNKNOWN
         )
         record.detail = _first_line(exception_message) or exception_type
         return record
@@ -482,13 +474,17 @@ def _vendor_jsonl_tail(text: str) -> tuple[bool, str]:
             elif stop in ("stop", "toolUse", "length"):
                 ended_in_error = False
             continue
-        if kind == "result" and (record.get("is_error") is True or
-                                 str(record.get("subtype", "")).startswith("error")):
+        if kind == "result" and (
+            record.get("is_error") is True or str(record.get("subtype", "")).startswith("error")
+        ):
             ended_in_error = True
-            last_error = str(record.get("error") or record.get("errors") or
-                             record.get("result") or record.get("subtype"))
+            last_error = str(
+                record.get("error")
+                or record.get("errors")
+                or record.get("result")
+                or record.get("subtype")
+            )
         elif kind in ("error", "turn.failed", "turn.aborted"):
-
             ended_in_error = True
             error = record.get("error")
             if isinstance(error, dict):
@@ -530,12 +526,11 @@ def classify_vendor(
     if harness == "pmux":
         diagnostic = log_text if pmux_log_text is None else pmux_log_text
         if any(marker in diagnostic for marker in ("NeedsLogin", "DaemonLost", "RmuxUnavailable")):
-            record.termination_class = ("infra:daemon-loss" if "NeedsLogin" not in diagnostic
-                                        else "turn_failed:credential")
+            record.termination_class = (
+                "infra:daemon-loss" if "NeedsLogin" not in diagnostic else "turn_failed:credential"
+            )
             return record
-    if exception_type == AGENT_EXIT_EXCEPTION or (
-        exit_code is not None and exit_code != 0
-    ):
+    if exception_type == AGENT_EXIT_EXCEPTION or (exit_code is not None and exit_code != 0):
         evidence = last_error
         record.detail = _first_line(last_error or exception_message)
         record.termination_class = (
@@ -549,9 +544,7 @@ def classify_vendor(
         record.detail = _first_line(last_error)
         return record
     if exception_type:
-        record.termination_class = classify_harness_exception(
-            exception_type, exception_message
-        )
+        record.termination_class = classify_harness_exception(exception_type, exception_message)
         record.detail = _first_line(exception_message) or exception_type
         return record
     return record
@@ -653,9 +646,7 @@ def classify_trial_dir(trial_dir: Path) -> TerminationRecord:
     if harness == "pmux":
         # FrozenPmux already names its own death in pmux-usage.json; keep it
         # rather than re-deriving a weaker answer from the exception alone.
-        declared = _load_json(agent_dir / "pmux-usage.json").get(
-            "harness_termination"
-        )
+        declared = _load_json(agent_dir / "pmux-usage.json").get("harness_termination")
         if isinstance(declared, str) and declared:
             record.disposition = declared
     return record
@@ -807,9 +798,7 @@ class JobSummary:
 
     @property
     def unreadable_results(self) -> int:
-        return sum(
-            1 for trial in self.trials if trial.record.result_status != RESULT_OK
-        )
+        return sum(1 for trial in self.trials if trial.record.result_status != RESULT_OK)
 
     @property
     def rewarded(self) -> int:
@@ -873,19 +862,24 @@ def trial_artifact(trial_dir: Path) -> dict[str, Any]:
             return found
     vendor = load_json(agent_dir / "vendor-artifact.json").data
     binaries = vendor.get("binaries")
-    if (vendor.get("schemaVersion") == 1 and isinstance(vendor.get("harness"), str)
-            and isinstance(binaries, dict) and binaries
-            and all(isinstance(entry, dict)
-                    and isinstance(entry.get("sha256"), str)
-                    and re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
-                    and isinstance(entry.get("bytes"), int) and entry["bytes"] > 0
-                    for entry in binaries.values())):
+    if (
+        vendor.get("schemaVersion") == 1
+        and isinstance(vendor.get("harness"), str)
+        and isinstance(binaries, dict)
+        and binaries
+        and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("sha256"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+            and isinstance(entry.get("bytes"), int)
+            and entry["bytes"] > 0
+            for entry in binaries.values()
+        )
+    ):
         return vendor
-    metadata = (
-        (load_json(trial_dir / "result.json").data.get("agent_result") or {})
-        .get("metadata")
-        or {}
-    )
+    metadata = (load_json(trial_dir / "result.json").data.get("agent_result") or {}).get(
+        "metadata"
+    ) or {}
     found = metadata.get("artifact")
     return found if isinstance(found, dict) else {}
 
@@ -925,9 +919,7 @@ def is_trial_dir(path: Path) -> bool:
     if not path.is_dir():
         return False
     if not (path / "result.json").is_file():
-        return "__" in path.name and (
-            (path / "agent").is_dir() or (path / "config.json").is_file()
-        )
+        return "__" in path.name and ((path / "agent").is_dir() or (path / "config.json").is_file())
     if (path / "agent").is_dir():
         return True
     result = load_json(path / "result.json").data
@@ -935,9 +927,7 @@ def is_trial_dir(path: Path) -> bool:
 
 
 def is_job_dir(path: Path) -> bool:
-    return path.is_dir() and any(
-        is_trial_dir(child) for child in path.iterdir() if child.is_dir()
-    )
+    return path.is_dir() and any(is_trial_dir(child) for child in path.iterdir() if child.is_dir())
 
 
 def find_job_dirs(root: Path) -> list[Path]:
@@ -954,7 +944,8 @@ def find_job_dirs(root: Path) -> list[Path]:
     found |= {
         candidate.parent.parent
         for candidate in root.rglob("agent")
-        if candidate.is_dir() and is_trial_dir(candidate.parent)
+        if candidate.is_dir()
+        and is_trial_dir(candidate.parent)
         and is_job_dir(candidate.parent.parent)
     }
     return sorted(found)
@@ -977,8 +968,7 @@ def render_table(summary: JobSummary) -> str:
     for trial in summary.trials:
         rejections = (
             ", ".join(
-                f"{item.tool}:{item.reason}x{item.count}"
-                for item in trial.record.tool_rejections
+                f"{item.tool}:{item.reason}x{item.count}" for item in trial.record.tool_rejections
             )
             or "-"
         )
@@ -1006,25 +996,18 @@ def render_table(summary: JobSummary) -> str:
         f"harness-terminated={summary.harness_terminated}"
     )
     lines.append(f"classes: {classes or '-'}")
-    rejections = ", ".join(
-        f"{key}={count}" for key, count in summary.rejection_counts.items()
-    )
+    rejections = ", ".join(f"{key}={count}" for key, count in summary.rejection_counts.items())
     lines.append(f"tool rejections: {rejections or '-'}")
     for name in ("pmuxd", "plak"):
         digests = summary.artifact_digests(name)
         if not digests:
             continue
-        shown = ", ".join(
-            f"{sha[:12]}x{count}" for sha, count in digests.items()
-        )
+        shown = ", ".join(f"{sha[:12]}x{count}" for sha, count in digests.items())
         warning = "  <-- MORE THAN ONE" if len(digests) > 1 else ""
         lines.append(f"{name}: {shown}{warning}")
     commits = summary.source_commits
     if commits:
-        lines.append(
-            "pseudomux: "
-            + ", ".join(f"{c[:7]}x{n}" for c, n in commits.items())
-        )
+        lines.append("pseudomux: " + ", ".join(f"{c[:7]}x{n}" for c, n in commits.items()))
     if summary.unreadable_results:
         statuses = ", ".join(
             f"{name}={count}"

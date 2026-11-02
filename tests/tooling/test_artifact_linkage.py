@@ -31,9 +31,7 @@ def load_module(name: str, path: Path):  # type: ignore[no-untyped-def]
     return module
 
 
-workspace_policy = load_module(
-    "check_workspace_linkage", ROOT / "tools/gate/check_workspace.py"
-)
+workspace_policy = load_module("check_workspace_linkage", ROOT / "tools/gate/check_workspace.py")
 
 # A worker listing as Mach-O prints it, and as ELF prints it. Both must count.
 MACH_O_WORKER_SYMBOLS = """\
@@ -71,29 +69,46 @@ class ArtifactLinkageFindings(unittest.TestCase):
     """The linkage rules, applied to listings that need no release build."""
 
     def test_monty_runtime_leaks_are_refused_on_both_platforms(self) -> None:
-        for marker in ("_ZN5monty8bytecode2vmE", "__ZN19monty_type_checking5checkE",
-                       "_RNvCsabc_11monty_alloc4Heap", "_RNvCsabc_19monty_type_checking5check",
-                       "_RNvNtCsabc_11monty_proto6worker4main"):
+        for marker in (
+            "_ZN5monty8bytecode2vmE",
+            "__ZN19monty_type_checking5checkE",
+            "_RNvCsabc_11monty_alloc4Heap",
+            "_RNvCsabc_19monty_type_checking5check",
+            "_RNvNtCsabc_11monty_proto6worker4main",
+        ):
             with self.subTest(marker=marker):
                 findings = workspace_policy.artifact_linkage_findings(
-                    {"plak": CLIENT_ONLY_SYMBOLS + marker,
-                     "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-                     "plakous-py-host": PYTHON_WORKER_SYMBOLS}, DISTINCT_DIGESTS)
+                    {
+                        "plak": CLIENT_ONLY_SYMBOLS + marker,
+                        "plakous-js-host": MACH_O_WORKER_SYMBOLS,
+                        "plakous-py-host": PYTHON_WORKER_SYMBOLS,
+                    },
+                    DISTINCT_DIGESTS,
+                )
                 self.assertEqual(len(findings), 1, findings)
                 self.assertIn("plak links the Monty runtime", findings[0])
 
     def test_monty_worker_is_the_positive_control(self) -> None:
         findings = workspace_policy.artifact_linkage_findings(
-            {"plak": CLIENT_ONLY_SYMBOLS, "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-             "plakous-py-host": CLIENT_ONLY_SYMBOLS}, DISTINCT_DIGESTS)
+            {
+                "plak": CLIENT_ONLY_SYMBOLS,
+                "plakous-js-host": MACH_O_WORKER_SYMBOLS,
+                "plakous-py-host": CLIENT_ONLY_SYMBOLS,
+            },
+            DISTINCT_DIGESTS,
+        )
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("plakous-py-host does not link the Monty runtime", findings[0])
 
     def test_monty_adapter_names_do_not_count_as_runtime(self) -> None:
         findings = workspace_policy.artifact_linkage_findings(
-            {"plak": "__ZN13json_to_monty5applyE\n__ZN11monty_proto6client4sendE",
-             "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-             "plakous-py-host": PYTHON_WORKER_SYMBOLS}, DISTINCT_DIGESTS)
+            {
+                "plak": "__ZN13json_to_monty5applyE\n__ZN11monty_proto6client4sendE",
+                "plakous-js-host": MACH_O_WORKER_SYMBOLS,
+                "plakous-py-host": PYTHON_WORKER_SYMBOLS,
+            },
+            DISTINCT_DIGESTS,
+        )
         self.assertEqual(findings, [])
 
     def test_a_clean_product_build_reports_no_finding(self) -> None:
@@ -158,14 +173,10 @@ class ArtifactLinkageFindings(unittest.TestCase):
             DISTINCT_DIGESTS,
             "llvm-nm",
         )
-        self.assertEqual(
-            findings, ["plak: could not list symbols with llvm-nm"]
-        )
+        self.assertEqual(findings, ["plak: could not list symbols with llvm-nm"])
 
     def test_the_client_crate_name_alone_is_not_an_engine_marker(self) -> None:
-        self.assertEqual(
-            workspace_policy.engine_symbol_markers(CLIENT_ONLY_SYMBOLS), set()
-        )
+        self.assertEqual(workspace_policy.engine_symbol_markers(CLIENT_ONLY_SYMBOLS), set())
 
 
 class StaleReleaseBuild(unittest.TestCase):
@@ -197,9 +208,7 @@ class StaleReleaseBuild(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = {"plak": self.build(root, "plak", -10_000, 1_700_000_000.0)}
-            with patch.object(
-                workspace_policy, "newest_tracked_source_mtime", lambda _root: None
-            ):
+            with patch.object(workspace_policy, "newest_tracked_source_mtime", lambda _root: None):
                 stale = workspace_policy.stale_release_artifacts(root, artifacts)
         self.assertEqual(stale, [])
 
@@ -231,9 +240,11 @@ class MandatoryArtifactLinkage(unittest.TestCase):
             tools = root / "bin"
             tools.mkdir()
             nm = tools / "nm"
-            for parent, status, success in (("_main", 0, True),
-                                            ("__ZN19monty_type_checking5checkE", 0, False),
-                                            ("", 2, False)):
+            for parent, status, success in (
+                ("_main", 0, True),
+                ("__ZN19monty_type_checking5checkE", 0, False),
+                ("", 2, False),
+            ):
                 nm.write_text(
                     '#!/bin/sh\ncase "$1" in\n'
                     f' */plak) echo "{parent}"; exit {status} ;;\n'
@@ -242,8 +253,14 @@ class MandatoryArtifactLinkage(unittest.TestCase):
                 )
                 nm.chmod(0o700)
                 result = subprocess.run(
-                    [sys.executable, str(ROOT / "tools/build/check-artifact-linkage.py"), str(root)],
-                    env=dict(os.environ, PATH=str(tools)), capture_output=True, text=True,
+                    [
+                        sys.executable,
+                        str(ROOT / "tools/build/check-artifact-linkage.py"),
+                        str(root),
+                    ],
+                    env=dict(os.environ, PATH=str(tools)),
+                    capture_output=True,
+                    text=True,
                     check=False,
                 )
                 self.assertEqual(result.returncode == 0, success, result.stderr)
@@ -252,7 +269,9 @@ class MandatoryArtifactLinkage(unittest.TestCase):
 
     def test_missing_artifacts_fail_closed(self):
         errors, _ = workspace_policy.verify_artifact_linkage({})
-        self.assertEqual(errors, ["missing product artifacts: plak, plakous-js-host, plakous-py-host"])
+        self.assertEqual(
+            errors, ["missing product artifacts: plak, plakous-js-host, plakous-py-host"]
+        )
 
     def test_missing_symbol_tool_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

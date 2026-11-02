@@ -102,7 +102,11 @@ def implied_usd(
     row = loaded["models"][key]
     if any(value is None for value in (usage.cache_read, usage.cache_write, usage.output_tokens)):
         return ImpliedCost(None, "unresolved_usage", card_id, key)
-    assert usage.cache_read is not None and usage.cache_write is not None and usage.output_tokens is not None
+    assert (
+        usage.cache_read is not None
+        and usage.cache_write is not None
+        and usage.output_tokens is not None
+    )
     if usage.cache_read + usage.cache_write > usage.input_tokens:
         return ImpliedCost(None, "cache_exceeds_input", card_id, key)
     # This is a frozen standard-rate proxy. Aggregate usage does not establish

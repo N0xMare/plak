@@ -9,7 +9,9 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("review_expiry", ROOT / "tools/release/review_expiry.py")
+SPEC = importlib.util.spec_from_file_location(
+    "review_expiry", ROOT / "tools/release/review_expiry.py"
+)
 assert SPEC is not None and SPEC.loader is not None
 review_expiry = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(review_expiry)
@@ -55,18 +57,25 @@ class ReviewExpiryTests(unittest.TestCase):
             root = Path(scratch)
             auth = root / review_expiry.WINDOW_CONSTANTS
             auth.parent.mkdir(parents=True)
-            auth.write_text("pub const DAY_SECONDS: u64 = 86_400;\n"
-                            "pub const SUBSCRIPTION_REVIEW_WINDOW_SECONDS: u64 = 90 * DAY_SECONDS;\n")
+            auth.write_text(
+                "pub const DAY_SECONDS: u64 = 86_400;\n"
+                "pub const SUBSCRIPTION_REVIEW_WINDOW_SECONDS: u64 = 90 * DAY_SECONDS;\n"
+            )
             for _, path, reviewed, deadline, _ in review_expiry.SURFACES:
                 source = root / "crates/providers" / path
                 source.parent.mkdir(parents=True, exist_ok=True)
-                source.write_text(f"const {reviewed}: u64 = 1_000;\n"
-                                  f"const {deadline}: u64 = {reviewed} + SUBSCRIPTION_REVIEW_WINDOW_SECONDS;\n"
-                                  if reviewed.isupper() else
-                                  "const REVIEWED: u64 = 1_000;\n"
-                                  f"{reviewed}: REVIEWED,\n{deadline}: REVIEWED + SUBSCRIPTION_REVIEW_WINDOW_SECONDS,\n")
+                source.write_text(
+                    f"const {reviewed}: u64 = 1_000;\n"
+                    f"const {deadline}: u64 = {reviewed} + SUBSCRIPTION_REVIEW_WINDOW_SECONDS;\n"
+                    if reviewed.isupper()
+                    else "const REVIEWED: u64 = 1_000;\n"
+                    f"{reviewed}: REVIEWED,\n{deadline}: REVIEWED + SUBSCRIPTION_REVIEW_WINDOW_SECONDS,\n"
+                )
             reviews = review_expiry.compiled_reviews(root)
-            self.assertEqual({(reviewed, deadline) for *_, reviewed, deadline in reviews}, {(1_000, 1_000 + 90 * DAY)})
+            self.assertEqual(
+                {(reviewed, deadline) for *_, reviewed, deadline in reviews},
+                {(1_000, 1_000 + 90 * DAY)},
+            )
             auth.write_text("")
             with self.assertRaises(ValueError):
                 review_expiry.compiled_reviews(root)
@@ -77,43 +86,90 @@ class ReviewExpiryTests(unittest.TestCase):
     def test_derived_values_and_profile_fields(self):
         source = "const REVIEWED: u64 = 1_000; const EXPIRES: u64 = REVIEWED + 30 * 86_400;"
         self.assertEqual(review_expiry.compiled_value(source, "EXPIRES"), 2_593_000)
-        self.assertEqual(review_expiry.compiled_value(source + "expires_at_unix: EXPIRES - 1,", "expires_at_unix"), 2_592_999)
+        self.assertEqual(
+            review_expiry.compiled_value(
+                source + "expires_at_unix: EXPIRES - 1,", "expires_at_unix"
+            ),
+            2_592_999,
+        )
         shared = {"WINDOW": "2 * 86_400"}
-        self.assertEqual(review_expiry.compiled_value("const DUE: u64 = 1 + WINDOW;", "DUE", shared), 172_801)
-        self.assertEqual(review_expiry.compiled_value("const DUE: u64 = 1 + crate_a::pins::WINDOW;", "DUE", shared), 172_801)
+        self.assertEqual(
+            review_expiry.compiled_value("const DUE: u64 = 1 + WINDOW;", "DUE", shared), 172_801
+        )
+        self.assertEqual(
+            review_expiry.compiled_value(
+                "const DUE: u64 = 1 + crate_a::pins::WINDOW;", "DUE", shared
+            ),
+            172_801,
+        )
         with self.assertRaises(ValueError):
             review_expiry.compiled_value("#[cfg(test)]\nconst DUE: u64 = 1;", "DUE")
 
     def test_source_drift_fails_closed(self):
-        for source in ["", "expires_at_unix: unknown,", "expires_at_unix: 1, expires_at_unix: 2,", "const EXPIRES: u64 = clock();",
-                       "const EXPIRES: u64 = EXPIRES;", "const EXPIRES: u64 = 0 - 1;", "const EXPIRES: u64 = a::B;"]:
+        for source in [
+            "",
+            "expires_at_unix: unknown,",
+            "expires_at_unix: 1, expires_at_unix: 2,",
+            "const EXPIRES: u64 = clock();",
+            "const EXPIRES: u64 = EXPIRES;",
+            "const EXPIRES: u64 = 0 - 1;",
+            "const EXPIRES: u64 = a::B;",
+        ]:
             with self.subTest(source=source), self.assertRaises((ValueError, SyntaxError)):
-                review_expiry.compiled_value(source, "EXPIRES" if "const" in source else "expires_at_unix")
+                review_expiry.compiled_value(
+                    source, "EXPIRES" if "const" in source else "expires_at_unix"
+                )
 
     def test_command_names_the_refused_surface_class_date_and_floor(self):
-        reviews = [("test surface", review_expiry.HARD_EXPIRY, 0, 90 * DAY),
-                   ("test api", review_expiry.REVIEW_DUE, 0, 90 * DAY)]
+        reviews = [
+            ("test surface", review_expiry.HARD_EXPIRY, 0, 90 * DAY),
+            ("test api", review_expiry.REVIEW_DUE, 0, 90 * DAY),
+        ]
         output = io.StringIO()
-        with patch.object(review_expiry, "compiled_reviews", return_value=reviews), \
-                patch.object(review_expiry.time, "time", return_value=60 * DAY), contextlib.redirect_stderr(output):
+        with (
+            patch.object(review_expiry, "compiled_reviews", return_value=reviews),
+            patch.object(review_expiry.time, "time", return_value=60 * DAY),
+            contextlib.redirect_stderr(output),
+        ):
             self.assertEqual(review_expiry.main(), 1)
-        self.assertIn("publish: test surface review expires 1970-04-01T00:00:00Z; require more than 30 days "
-                      "(a third of the 90-day window) remaining", output.getvalue())
+        self.assertIn(
+            "publish: test surface review expires 1970-04-01T00:00:00Z; require more than 30 days "
+            "(a third of the 90-day window) remaining",
+            output.getvalue(),
+        )
         self.assertIn("publish: test api review is due 1970-04-01T00:00:00Z", output.getvalue())
-        with patch.object(review_expiry, "compiled_reviews", return_value=reviews), contextlib.redirect_stderr(io.StringIO()):
+        with (
+            patch.object(review_expiry, "compiled_reviews", return_value=reviews),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             self.assertEqual(review_expiry.main(now=60 * DAY - 1), 0)
 
     def test_command_refuses_unreadable_compiled_sources(self):
-        with patch.object(review_expiry, "compiled_reviews", side_effect=ValueError("missing pin")), contextlib.redirect_stderr(io.StringIO()):
+        with (
+            patch.object(review_expiry, "compiled_reviews", side_effect=ValueError("missing pin")),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             self.assertEqual(review_expiry.main(), 1)
 
     def test_qualification_note_never_fails_on_time_or_source_drift(self):
         output = io.StringIO()
-        with patch.object(review_expiry, "compiled_reviews", return_value=[("expired", review_expiry.HARD_EXPIRY, 0, 90 * DAY)]), \
-                contextlib.redirect_stdout(output):
+        with (
+            patch.object(
+                review_expiry,
+                "compiled_reviews",
+                return_value=[("expired", review_expiry.HARD_EXPIRY, 0, 90 * DAY)],
+            ),
+            contextlib.redirect_stdout(output),
+        ):
             self.assertEqual(review_expiry.main(now=91 * DAY, note=True), 0)
-        self.assertIn("-1 days remaining; publication requires more than 30 (informational)", output.getvalue())
-        with patch.object(review_expiry, "compiled_reviews", side_effect=ValueError("missing pin")), contextlib.redirect_stderr(io.StringIO()):
+        self.assertIn(
+            "-1 days remaining; publication requires more than 30 (informational)",
+            output.getvalue(),
+        )
+        with (
+            patch.object(review_expiry, "compiled_reviews", side_effect=ValueError("missing pin")),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             self.assertEqual(review_expiry.main(now=0, note=True), 0)
 
 

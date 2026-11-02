@@ -38,10 +38,16 @@ class CampaignGateTests(unittest.TestCase):
             binary.write_bytes(b'synthetic executable')
             plan['artifact_sha256'] = {relative: hashlib.sha256(binary.read_bytes()).hexdigest()}
             calibration = root / 'calibration.json'
-            reduced = {'source': 'exchange', 'wire_verified': True,
-                       'first_request': plan['arms']['a']['observed_config'],
-                       'calibration_binding': {'source_commit': plan['source_commit'], 'arch': plan['arch'],
-                                               'binaries': plan['arms']['a']['binaries']}}
+            reduced = {
+                'source': 'exchange',
+                'wire_verified': True,
+                'first_request': plan['arms']['a']['observed_config'],
+                'calibration_binding': {
+                    'source_commit': plan['source_commit'],
+                    'arch': plan['arch'],
+                    'binaries': plan['arms']['a']['binaries'],
+                },
+            }
             calibration.write_text(json.dumps(reduced))
             for arm in plan['arms'].values():
                 arm['calibration_file'] = str(calibration)
@@ -58,11 +64,15 @@ class CampaignGateTests(unittest.TestCase):
                 self.assertEqual(argv[:3], ['docker', 'image', 'inspect'])
                 return json.dumps([info])
 
-            with mock.patch('harbor_adapter.arch.docker_daemon_arch', return_value='arm64'), \
-                 mock.patch('harbor_adapter.campaign.load_campaign', return_value=plan), \
-                 mock.patch('harbor_adapter.campaign.subprocess.check_output', side_effect=output), \
-                 mock.patch.dict(os.environ, {'HARBOR_ARCH': 'arm64', 'HARBOR_N_CONCURRENT': '1',
-                                              'HARBOR_N_ATTEMPTS': '1'}):
+            with (
+                mock.patch('harbor_adapter.arch.docker_daemon_arch', return_value='arm64'),
+                mock.patch('harbor_adapter.campaign.load_campaign', return_value=plan),
+                mock.patch('harbor_adapter.campaign.subprocess.check_output', side_effect=output),
+                mock.patch.dict(
+                    os.environ,
+                    {'HARBOR_ARCH': 'arm64', 'HARBOR_N_CONCURRENT': '1', 'HARBOR_N_ATTEMPTS': '1'},
+                ),
+            ):
                 self.assertEqual(campaign_gate(root), plan)
                 for key, invalid in (('commit', 'f' * 40), ('dirty', b' M eval/file')):
                     original = state[key]
@@ -70,9 +80,15 @@ class CampaignGateTests(unittest.TestCase):
                     with self.assertRaises(PreflightError):
                         campaign_gate(root)
                     state[key] = original
-                for key, invalid in (('HARBOR_ARCH', 'amd64'), ('HARBOR_N_CONCURRENT', '2'),
-                                     ('HARBOR_N_ATTEMPTS', '3')):
-                    with mock.patch.dict(os.environ, {key: invalid}), self.assertRaises(PreflightError):
+                for key, invalid in (
+                    ('HARBOR_ARCH', 'amd64'),
+                    ('HARBOR_N_CONCURRENT', '2'),
+                    ('HARBOR_N_ATTEMPTS', '3'),
+                ):
+                    with (
+                        mock.patch.dict(os.environ, {key: invalid}),
+                        self.assertRaises(PreflightError),
+                    ):
                         campaign_gate(root)
                 binary.write_bytes(b'changed')
                 with self.assertRaises(PreflightError):
@@ -111,8 +127,10 @@ class CampaignGateTests(unittest.TestCase):
             plan['blocks'] = blocks
             self.assertIn('repeat_blocks', validate_campaign(plan))
         self.assertNotIn('PLAK_TEST_EXCHANGE_CAPTURE_DIR', run_env())
-        self.assertNotIn('PLAK_TEST_EXCHANGE_CAPTURE_DIR',
-                         run_env(extra_env={'PLAK_TEST_EXCHANGE_CAPTURE_DIR': '/invalid'}))
+        self.assertNotIn(
+            'PLAK_TEST_EXCHANGE_CAPTURE_DIR',
+            run_env(extra_env={'PLAK_TEST_EXCHANGE_CAPTURE_DIR': '/invalid'}),
+        )
 
 
 class CellTests(unittest.IsolatedAsyncioTestCase):
@@ -124,8 +142,11 @@ class CellTests(unittest.IsolatedAsyncioTestCase):
             stdout = '0\n/usr/local/bin/rg\nmanifest\n'
             task = plan['tasks']['task']
             task['cell_manifest_sha256'] = hashlib.sha256(stdout.encode()).hexdigest()
-            environment = SimpleNamespace(environment_dir=root / 'task/environment',
-                task_env_config=SimpleNamespace(docker_image=task['image']), exec=mock.AsyncMock())
+            environment = SimpleNamespace(
+                environment_dir=root / 'task/environment',
+                task_env_config=SimpleNamespace(docker_image=task['image']),
+                exec=mock.AsyncMock(),
+            )
             agent = SimpleNamespace(logs_dir=root)
             state = {'pin': 0, 'stdout': stdout, 'user': 'pmux', 'user_status': 0}
 
@@ -138,12 +159,16 @@ class CellTests(unittest.IsolatedAsyncioTestCase):
                 return SimpleNamespace(return_code=0, stdout=state['stdout'])
 
             environment.exec.side_effect = execute
-            with mock.patch('harbor_adapter.cell_prep.load_campaign', return_value=plan), \
-                 mock.patch('harbor_adapter.cell_prep.task_budgets', return_value=(1800, 600)), \
-                 mock.patch('harbor_adapter.cell_prep.require_native_oauth_lifetime'), \
-                 mock.patch.dict(os.environ, {'HARBOR_ARM': 'a'}):
+            with (
+                mock.patch('harbor_adapter.cell_prep.load_campaign', return_value=plan),
+                mock.patch('harbor_adapter.cell_prep.task_budgets', return_value=(1800, 600)),
+                mock.patch('harbor_adapter.cell_prep.require_native_oauth_lifetime'),
+                mock.patch.dict(os.environ, {'HARBOR_ARM': 'a'}),
+            ):
                 await record_cell(agent, environment)
-                self.assertEqual(json.loads((root / 'cell-preflight.json').read_text())['image'], task['image'])
+                self.assertEqual(
+                    json.loads((root / 'cell-preflight.json').read_text())['image'], task['image']
+                )
                 for key, invalid in (('pin', 1), ('stdout', '99\nwrong manifest\n')):
                     original = state[key]
                     state[key] = invalid
@@ -157,9 +182,11 @@ class CellTests(unittest.IsolatedAsyncioTestCase):
                         await record_cell(agent, environment)
                     task[key] = original
                 pmux = type('FrozenPmux', (), {'logs_dir': root})()
+
                 async def as_agent(env, **kwargs):
                     self.assertIs(env, environment)
                     return await execute(**kwargs)
+
                 pmux.exec_as_agent = mock.AsyncMock(side_effect=as_agent)
                 await record_cell(pmux, environment)
                 plan['arms']['a']['policy']['user'] = 'pmux'
@@ -171,31 +198,49 @@ class CellTests(unittest.IsolatedAsyncioTestCase):
             root = Path(directory)
             (root / 'tools').mkdir()
             (root / 'tools/rg').write_bytes(b'fixture')
-            environment = SimpleNamespace(upload_file=mock.AsyncMock(), exec=mock.AsyncMock(
-                return_value=SimpleNamespace(return_code=0)))
+            environment = SimpleNamespace(
+                upload_file=mock.AsyncMock(),
+                exec=mock.AsyncMock(return_value=SimpleNamespace(return_code=0)),
+            )
             agent = SimpleNamespace(exec_as_root=mock.AsyncMock())
-            with mock.patch('harbor_adapter.cell_prep.installed_root', return_value=root), \
-                 mock.patch('harbor_adapter.cell_prep.load_campaign', return_value={'arch': 'arm64'}), \
-                 mock.patch('harbor_adapter.cell_prep.digest_file', return_value=SimpleNamespace(sha256=RG_PINS['arm64'][2])), \
-                 mock.patch('harbor_adapter.cell_prep.require_elf_arch'):
+            with (
+                mock.patch('harbor_adapter.cell_prep.installed_root', return_value=root),
+                mock.patch(
+                    'harbor_adapter.cell_prep.load_campaign', return_value={'arch': 'arm64'}
+                ),
+                mock.patch(
+                    'harbor_adapter.cell_prep.digest_file',
+                    return_value=SimpleNamespace(sha256=RG_PINS['arm64'][2]),
+                ),
+                mock.patch('harbor_adapter.cell_prep.require_elf_arch'),
+            ):
                 await prepare_cell(agent, environment, 'arm64')
-                environment.upload_file.assert_awaited_once_with(str(root / 'tools/rg'), '/usr/local/bin/rg')
+                environment.upload_file.assert_awaited_once_with(
+                    str(root / 'tools/rg'), '/usr/local/bin/rg'
+                )
                 self.assertIn(RG_PINS['arm64'][2], agent.exec_as_root.call_args.kwargs['command'])
 
     async def test_rung_a_reuses_cached_ab_images_without_pull(self):
         from harbor_adapter.docker_retry import RetryingDocker, DockerEnvironment
+
         # Exercise the environment used by Rung A, not its source spelling.
         environment = object.__new__(RetryingDocker)
         environment.environment_dir = Path('/task/environment')
         environment.task_env_config = SimpleNamespace(docker_image='moving:tag')
         environment._env_vars = SimpleNamespace(prebuilt_image_name='moving:tag')
         plan = campaign()
-        with mock.patch('harbor_adapter.docker_retry.load_campaign', return_value=plan), \
-             mock.patch.object(DockerEnvironment, 'start', new_callable=mock.AsyncMock) as start, \
-             mock.patch('subprocess.run') as dispatch:
+        with (
+            mock.patch('harbor_adapter.docker_retry.load_campaign', return_value=plan),
+            mock.patch.object(DockerEnvironment, 'start', new_callable=mock.AsyncMock) as start,
+            mock.patch('subprocess.run') as dispatch,
+        ):
             await environment.start(False)
-            self.assertEqual(environment.task_env_config.docker_image, plan['tasks']['task']['image'])
-            self.assertEqual(environment._env_vars.prebuilt_image_name, plan['tasks']['task']['image'])
+            self.assertEqual(
+                environment.task_env_config.docker_image, plan['tasks']['task']['image']
+            )
+            self.assertEqual(
+                environment._env_vars.prebuilt_image_name, plan['tasks']['task']['image']
+            )
             start.assert_awaited_once_with(False)
             dispatch.assert_not_called()
             with self.assertRaises(PreflightError):
@@ -213,20 +258,36 @@ class HarvestTests(unittest.TestCase):
             text = logs / 'agent/transcript.txt'
             content = 'task example: Bearer synthetic-content-123456789\n'
             text.write_text(content)
-            script = HARVEST_SCRIPT.replace('/tmp/plak-cell/home', str(home)).replace('/logs', str(logs))
+            script = HARVEST_SCRIPT.replace('/tmp/plak-cell/home', str(home)).replace(
+                '/logs', str(logs)
+            )
             # Override the cell-only private roots; never inspect host secrets.
-            script = script.replace("source.parent / 'xdg/plak/subscriptions'", "source.parent / 'subscriptions'")
+            script = script.replace(
+                "source.parent / 'xdg/plak/subscriptions'", "source.parent / 'subscriptions'"
+            )
             for name in ('grok', 'pi', 'opencode', 'codex', 'claude'):
-                script = script.replace('/tmp/' + name + '-secrets', str(root / (name + '-secrets')))
+                script = script.replace(
+                    '/tmp/' + name + '-secrets', str(root / (name + '-secrets'))
+                )
             script = script.replace('/tmp/codex-home', str(root / 'codex-home'))
             subprocess.run([sys.executable, '-c', script], check=True, capture_output=True)
             self.assertEqual(text.read_text(), content)
-            self.assertTrue(json.loads((logs / 'agent/harvest.json').read_text())['generic_secret_pattern_hits'])
+            self.assertTrue(
+                json.loads((logs / 'agent/harvest.json').read_text())['generic_secret_pattern_hits']
+            )
             private = root / 'subscriptions/codex'
             private.mkdir(parents=True)
             value = 'synthetic-known-secret-123456789'
-            (private / 'credential.json').write_text(json.dumps({'format_version': 1,
-                'payload': base64.b64encode(json.dumps({'access_token': value}).encode()).decode()}))
+            (private / 'credential.json').write_text(
+                json.dumps(
+                    {
+                        'format_version': 1,
+                        'payload': base64.b64encode(
+                            json.dumps({'access_token': value}).encode()
+                        ).decode(),
+                    }
+                )
+            )
             text.write_text('leaked ' + value)
             result = subprocess.run([sys.executable, '-c', script], capture_output=True)
             self.assertNotEqual(result.returncode, 0)
@@ -235,6 +296,7 @@ class HarvestTests(unittest.TestCase):
 
     def test_pmux_markers_are_not_hidden_or_supplied_by_transcripts(self):
         from test_eval_reporting import ReportTests
+
         fixture = ReportTests()
         with tempfile.TemporaryDirectory() as directory:
             trial = fixture._trial(Path(directory), 'claude', 'task__one', reward=0)
@@ -247,7 +309,10 @@ class HarvestTests(unittest.TestCase):
             (agent / 'claude-transcripts').mkdir()
             transcript = agent / 'claude-transcripts/session.jsonl'
             transcript.write_text('{"type":"assistant","message":"unrelated"}\n')
-            for marker, expected in (('NeedsLogin', 'turn_failed:credential'), ('DaemonLost', 'infra:daemon-loss')):
+            for marker, expected in (
+                ('NeedsLogin', 'turn_failed:credential'),
+                ('DaemonLost', 'infra:daemon-loss'),
+            ):
                 (agent / 'pmux-stderr.log').write_text(marker + '\n')
                 self.assertEqual(classify_trial_dir(trial).termination_class, expected)
             (agent / 'pmux-stderr.log').write_text('')
@@ -257,14 +322,20 @@ class HarvestTests(unittest.TestCase):
 
 class RunnerTests(unittest.TestCase):
     def run_campaign(self, root, responses, *, health=None):
-        spec = importlib.util.spec_from_file_location('fixture_campaign_runner', ROOT / 'eval/scripts/campaign.py')
+        spec = importlib.util.spec_from_file_location(
+            'fixture_campaign_runner', ROOT / 'eval/scripts/campaign.py'
+        )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         module.ROOT = root
         scripts = root / 'eval/scripts'
         scripts.mkdir(parents=True)
         stub = scripts / 'rung-a.sh'
-        stub.write_text('#!/bin/sh\nprintf "%s %s %s\\n" "$HARBOR_REPEAT_BLOCK" "$2" "$HARBOR_INCLUDE_TASK" >> "' + str(root / 'calls') + '"\n')
+        stub.write_text(
+            '#!/bin/sh\nprintf "%s %s %s\\n" "$HARBOR_REPEAT_BLOCK" "$2" "$HARBOR_INCLUDE_TASK" >> "'
+            + str(root / 'calls')
+            + '"\n'
+        )
         stub.chmod(0o700)
         calls = []
         real_run = subprocess.run
@@ -279,18 +350,32 @@ class RunnerTests(unittest.TestCase):
         def report(*args, **kwargs):
             index = len(calls) - 1
             arm = (root / 'calls').read_text().splitlines()[-1].split()[1]
-            return {'trials': [dict({'arm': arm, 'task': 'task', 'failure_class': 'agent',
-                'validity_failures': [], 'eligible_pass_rate': True,
-                'evidence': {'result': 'fixture-result'}, 'result_sha256': 'f' * 64},
-                **responses.get(index, {}))]}
+            return {
+                'trials': [
+                    dict(
+                        {
+                            'arm': arm,
+                            'task': 'task',
+                            'failure_class': 'agent',
+                            'validity_failures': [],
+                            'eligible_pass_rate': True,
+                            'evidence': {'result': 'fixture-result'},
+                            'result_sha256': 'f' * 64,
+                        },
+                        **responses.get(index, {}),
+                    )
+                ]
+            }
 
-        with mock.patch.object(module, 'account_leases', return_value=nullcontext()), \
-             mock.patch.object(module, 'campaign_gate', return_value=campaign()), \
-             mock.patch.object(module.subprocess, 'run', side_effect=launch), \
-             mock.patch.object(module, 'discover', side_effect=lambda paths: paths), \
-             mock.patch.object(module, 'build_report', side_effect=report), \
-             mock.patch.object(sys, 'argv', ['campaign.py', 'ab']), \
-             mock.patch.dict(os.environ, {'HARBOR_CAMPAIGN_SHA256': 'c' * 64}):
+        with (
+            mock.patch.object(module, 'account_leases', return_value=nullcontext()),
+            mock.patch.object(module, 'campaign_gate', return_value=campaign()),
+            mock.patch.object(module.subprocess, 'run', side_effect=launch),
+            mock.patch.object(module, 'discover', side_effect=lambda paths: paths),
+            mock.patch.object(module, 'build_report', side_effect=report),
+            mock.patch.object(sys, 'argv', ['campaign.py', 'ab']),
+            mock.patch.dict(os.environ, {'HARBOR_CAMPAIGN_SHA256': 'c' * 64}),
+        ):
             if health is None:
                 result = module.main()
             else:
@@ -312,7 +397,9 @@ class RunnerTests(unittest.TestCase):
     def test_two_infra_reruns_then_symmetric_drop(self):
         with tempfile.TemporaryDirectory() as directory:
             infra = {'failure_class': 'infra', 'eligible_pass_rate': False}
-            status, calls, output = self.run_campaign(Path(directory), {0: infra, 1: infra, 2: infra}, health=[])
+            status, calls, output = self.run_campaign(
+                Path(directory), {0: infra, 1: infra, 2: infra}, health=[]
+            )
             self.assertEqual(status, 0)
             self.assertEqual(len(calls), 8)
             self.assertEqual([p['HARBOR_REPEAT_BLOCK'] for p in calls[:4]], ['0'] * 4)
@@ -326,13 +413,17 @@ class RunnerTests(unittest.TestCase):
             status, calls, output = self.run_campaign(Path(directory), {0: unknown})
             self.assertEqual(status, 2)
             self.assertEqual(len(calls), 2)
-            self.assertEqual(json.loads((output / 'halt.json').read_text())['blockers'], ['a:unknown_threshold'])
+            self.assertEqual(
+                json.loads((output / 'halt.json').read_text())['blockers'], ['a:unknown_threshold']
+            )
             self.assertFalse((output / 'selection.json').exists())
 
     def test_invalid_agent_row_stops_before_next_dispatch(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(RuntimeError, 'post-run validity gate'):
-                self.run_campaign(Path(directory), {0: {'validity_failures': ['first_request_unverified']}})
+                self.run_campaign(
+                    Path(directory), {0: {'validity_failures': ['first_request_unverified']}}
+                )
             self.assertEqual(len((Path(directory) / 'calls').read_text().splitlines()), 1)
 
 
@@ -340,6 +431,7 @@ class VendorReviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_codex_writeback_failure_preserves_primary_error(self):
         from harbor_adapter.vendor_agents import FrozenCodex, Codex
         from harbor_adapter.credentials import CredentialError
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             auth = root / 'synthetic-auth.json'
@@ -369,6 +461,7 @@ class VendorReviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_codex_exact_scan_precedes_harbor_secret_cleanup(self):
         from harbor_adapter.vendor_agents import FrozenCodex, Codex
         from harbor_adapter.hygiene import harvest_command
+
         agent = object.__new__(FrozenCodex)
         events = []
 
@@ -394,11 +487,13 @@ class ReportReviewTests(unittest.TestCase):
     def test_generic_pattern_flags_are_unknown_not_scored_agent_failures(self):
         from test_eval_reporting import ReportTests
         from harbor_adapter.report import build_report, discover
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             trial = ReportTests()._trial(root, 'codex', 'task__one', reward=1)
-            (trial / 'agent/harvest.json').write_text(json.dumps({
-                'secrets_harvested': False, 'generic_secret_pattern_hits': True}))
+            (trial / 'agent/harvest.json').write_text(
+                json.dumps({'secrets_harvested': False, 'generic_secret_pattern_hits': True})
+            )
             row = build_report(discover([root]))['trials'][0]
             self.assertEqual(row['failure_class'], 'unknown')
             self.assertFalse(row['eligible_pass_rate'])

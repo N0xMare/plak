@@ -1,4 +1,5 @@
 """Native musl prerequisites and target propagation, without invoking Rust."""
+
 import json
 import os
 from pathlib import Path
@@ -33,12 +34,21 @@ exit "${NATIVE_EXIT:-0}"
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'])
-        for name in ('CC_x86_64_unknown_linux_musl',
-                     'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER', 'CARGO_BUILD_TARGET'):
+        for name in (
+            'CC_x86_64_unknown_linux_musl',
+            'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER',
+            'CARGO_BUILD_TARGET',
+        ):
             self.env.pop(name, None)
         self.env.pop('CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS', None)
-        self.executable('uname', "import os, sys\nprint(os.environ.get('NATIVE_OS', 'Linux') if sys.argv[1] == '-s' else os.environ.get('NATIVE_ARCH', 'x86_64'))\n")
-        self.executable('rustup', "import os\nprint(os.environ.get('NATIVE_TARGETS', 'x86_64-unknown-linux-musl'))\n")
+        self.executable(
+            'uname',
+            "import os, sys\nprint(os.environ.get('NATIVE_OS', 'Linux') if sys.argv[1] == '-s' else os.environ.get('NATIVE_ARCH', 'x86_64'))\n",
+        )
+        self.executable(
+            'rustup',
+            "import os\nprint(os.environ.get('NATIVE_TARGETS', 'x86_64-unknown-linux-musl'))\n",
+        )
         self.executable('musl-gcc', 'pass\n')
 
     def executable(self, name, source):
@@ -48,22 +58,37 @@ exit "${NATIVE_EXIT:-0}"
         return str(path)
 
     def run_gate(self, *args):
-        return subprocess.run(['bash', 'tools/musl/musl-native.sh', *args], cwd=self.root,
-                              env=self.env, text=True, capture_output=True, timeout=15)
+        return subprocess.run(
+            ['bash', 'tools/musl/musl-native.sh', *args],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=15,
+        )
 
     def test_defaults_to_platform_with_explicit_target_and_path_compiler(self):
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), dict(args=['--platform'],
-                         target='x86_64-unknown-linux-musl', cc='musl-gcc', linker='rust-lld',
-                         flags=None))
+        self.assertEqual(
+            json.loads(result.stdout),
+            dict(
+                args=['--platform'],
+                target='x86_64-unknown-linux-musl',
+                cc='musl-gcc',
+                linker='rust-lld',
+                flags=None,
+            ),
+        )
 
     def test_environment_compiler_and_linker_are_preserved_and_tier_forwarded(self):
         cc = self.executable('custom-cc', 'pass\n')
         linker = self.executable('custom-linker', 'pass\n')
-        self.env.update(CC_x86_64_unknown_linux_musl=cc,
-                        CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=linker,
-                        CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C opt-level=1')
+        self.env.update(
+            CC_x86_64_unknown_linux_musl=cc,
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=linker,
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C opt-level=1',
+        )
         result = self.run_gate('--fast', 'plak')
         self.assertEqual(result.returncode, 0, result.stderr)
         call = json.loads(result.stdout)
@@ -84,11 +109,19 @@ exit "${NATIVE_EXIT:-0}"
         for setting, value, message in (
             ('NATIVE_OS', 'Darwin', 'Linux x86_64'),
             ('NATIVE_ARCH', 'aarch64', 'Linux x86_64'),
-            ('NATIVE_TARGETS', 'x86_64-unknown-linux-gnu', 'rustup target add x86_64-unknown-linux-musl'),
+            (
+                'NATIVE_TARGETS',
+                'x86_64-unknown-linux-gnu',
+                'rustup target add x86_64-unknown-linux-musl',
+            ),
             ('CC_x86_64_unknown_linux_musl', 'missing-musl-cc', 'missing-musl-cc'),
             ('CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER', 'missing-linker', 'missing-linker'),
             ('CC_x86_64_unknown_linux_musl', '', 'CC_x86_64_unknown_linux_musl'),
-            ('CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER', '', 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER'),
+            (
+                'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER',
+                '',
+                'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER',
+            ),
         ):
             with self.subTest(setting=setting):
                 original = self.env.copy()

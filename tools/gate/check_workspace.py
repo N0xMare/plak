@@ -64,18 +64,20 @@ VENDOR_PACKAGE = "plakous-codex-code-mode-protocol"
 VENDOR_LICENSE = "Apache-2.0"
 # The crates.io category slugs this workspace uses (a reviewed subset of the
 # registry's list; an unknown slug is rejected at upload).
-CRATES_IO_CATEGORIES = frozenset({
-    "api-bindings",
-    "asynchronous",
-    "authentication",
-    "command-line-utilities",
-    "database",
-    "development-tools",
-    "filesystem",
-    "network-programming",
-    "text-processing",
-    "web-programming::http-client",
-})
+CRATES_IO_CATEGORIES = frozenset(
+    {
+        "api-bindings",
+        "asynchronous",
+        "authentication",
+        "command-line-utilities",
+        "database",
+        "development-tools",
+        "filesystem",
+        "network-programming",
+        "text-processing",
+        "web-programming::http-client",
+    }
+)
 CRATES_IO_KEYWORD = re.compile(r"[a-z][a-z0-9_-]{0,19}")
 
 # The supported library packages' external compile-positive fixtures. The
@@ -141,7 +143,9 @@ SUPPORTED_COMPILE_FIXTURES = {
             "anthropic",
             "auth",
             "composition-python",
-            "codex", "grok", "claude",
+            "codex",
+            "grok",
+            "claude",
             "openai",
             "openrouter",
             "sessions-sqlite",
@@ -352,7 +356,9 @@ FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS = {
     "product_compaction",
 }
 SourceKey = tuple[str, str]
-EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]] = {
+EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
+    SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
+] = {
     ("plak", "src/environment.rs"): [
         ("var_os", (("string", "PLAK_RELOAD_APPLY_ORCHESTRATION"),)),
     ],
@@ -481,7 +487,9 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # Git and jj redirect shims are static text rendered into the copy.
     ("plakous-workspace", "src/git_redirect_fence.rs"): ("include_str",) * 3,
 }
-EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]] = {
+EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
+    SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
+] = {
     # Doctor's one cleared-env, five-second, own-group local version probe.
     ("plak", "src/product_doctor/jj_cli.rs"): [
         ("Command", (("identifier", "executable"),)),
@@ -508,7 +516,15 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
     # maintainer snapshot export a session its own state holds.
     ("plak", "src/carry/interactive.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
-        ("std::process::Command", (("punct", "&"), ("identifier", "target"), ("punct", "."), ("identifier", "executable"))),
+        (
+            "std::process::Command",
+            (
+                ("punct", "&"),
+                ("identifier", "target"),
+                ("punct", "."),
+                ("identifier", "executable"),
+            ),
+        ),
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "snapshot"),)),
@@ -695,44 +711,94 @@ _NOT_MACRO_KEYWORDS = {"else", "if", "in", "match", "return", "while"}
 # is a one-row edit here.
 _SHARED_PLAKOUS_SYMBOLS = {
     "api_key": {
-        "ApiKey", "ApiKeyAuthorityToken", "ApiKeyError", "ApiKeyGenerationGrant",
-        "ApiKeyRequest", "ApiKeySource", "CredentialGenerationFingerprint",
-        "CredentialGenerationFingerprintError", "CredentialProviderTag",
+        "ApiKey",
+        "ApiKeyAuthorityToken",
+        "ApiKeyError",
+        "ApiKeyGenerationGrant",
+        "ApiKeyRequest",
+        "ApiKeySource",
+        "CredentialGenerationFingerprint",
+        "CredentialGenerationFingerprintError",
+        "CredentialProviderTag",
         "StaticApiKeySource",
     },
     "openai": {
-        "OpenAiApiKeyRequest", "static_openai_api_key_source",
+        "OpenAiApiKeyRequest",
+        "static_openai_api_key_source",
         "OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS",
-        "CredentialAuthorityId", "CredentialReference", "EndpointOrigin", "ApiKey",
-        "OpenAiKeyGeneration", "OpenAiApiModel", "OpenAiApiModelStatus",
-        "OpenAiAuthError", "OpenAiListedModel", "OpenAiPlatformModel",
-        "OpenAiPlatformModelBuilder", "OpenAiPlatformModelFacts", "OpenAiKeySource",
-        "PlatformProjectPolicy", "PlatformStoragePolicy", "StaticOpenAiKeySource",
-        "accept_openai_listed_models", "list_openai_api_models", "openai_api_bundled_listing",
-        "openai_api_key_fingerprint", "openai_api_models",
+        "CredentialAuthorityId",
+        "CredentialReference",
+        "EndpointOrigin",
+        "ApiKey",
+        "OpenAiKeyGeneration",
+        "OpenAiApiModel",
+        "OpenAiApiModelStatus",
+        "OpenAiAuthError",
+        "OpenAiListedModel",
+        "OpenAiPlatformModel",
+        "OpenAiPlatformModelBuilder",
+        "OpenAiPlatformModelFacts",
+        "OpenAiKeySource",
+        "PlatformProjectPolicy",
+        "PlatformStoragePolicy",
+        "StaticOpenAiKeySource",
+        "accept_openai_listed_models",
+        "list_openai_api_models",
+        "openai_api_bundled_listing",
+        "openai_api_key_fingerprint",
+        "openai_api_models",
     },
     "anthropic": {
-        "AnthropicApiKeyRequest", "anthropic_api_key_fingerprint",
+        "AnthropicApiKeyRequest",
+        "anthropic_api_key_fingerprint",
         "ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_UNIX_SECONDS",
-        "ApiKey", "AnthropicKeySource", "AnthropicLanguageModel", "AnthropicError",
-        "AnthropicErrorKind", "AnthropicErrorPhase", "claude_max_output_tokens",
-        "CLAUDE_ENROLLMENTS", "AnthropicApiModel", "AnthropicApiModelStatus",
-        "AnthropicListedModel", "accept_anthropic_listed_models", "anthropic_api_bundled_listing",
-        "anthropic_api_models", "list_anthropic_api_models",
+        "ApiKey",
+        "AnthropicKeySource",
+        "AnthropicLanguageModel",
+        "AnthropicError",
+        "AnthropicErrorKind",
+        "AnthropicErrorPhase",
+        "claude_max_output_tokens",
+        "CLAUDE_ENROLLMENTS",
+        "AnthropicApiModel",
+        "AnthropicApiModelStatus",
+        "AnthropicListedModel",
+        "accept_anthropic_listed_models",
+        "anthropic_api_bundled_listing",
+        "anthropic_api_models",
+        "list_anthropic_api_models",
     },
     "xai": {
-        "XaiPlatformApiKeyRequest", "xai_api_key_generation",
+        "XaiPlatformApiKeyRequest",
+        "xai_api_key_generation",
         "XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS",
-        "XaiApiModel", "XaiApiModelError", "XaiApiModelStatus", "XaiListedModel",
-        "ApiKey", "XaiPlatformApiKeyAuthority", "XaiPlatformKeySource",
-        "XaiPlatformBuildError", "XaiPlatformKeyGeneration", "XaiPlatformModel",
-        "accept_xai_listed_models", "grok_max_output_tokens", "list_xai_api_models",
-        "xai_api_bundled_listing", "xai_api_key_fingerprint", "xai_api_models",
-        "xai_platform_selection", "xai_platform_selection_for", "XAI_PLATFORM_GROK_46_MODEL",
-        "XAI_PLATFORM_GROK_46_CONTEXT_TOKENS", "XAI_PLATFORM_MAX_OUTPUT_TOKENS",
+        "XaiApiModel",
+        "XaiApiModelError",
+        "XaiApiModelStatus",
+        "XaiListedModel",
+        "ApiKey",
+        "XaiPlatformApiKeyAuthority",
+        "XaiPlatformKeySource",
+        "XaiPlatformBuildError",
+        "XaiPlatformKeyGeneration",
+        "XaiPlatformModel",
+        "accept_xai_listed_models",
+        "grok_max_output_tokens",
+        "list_xai_api_models",
+        "xai_api_bundled_listing",
+        "xai_api_key_fingerprint",
+        "xai_api_models",
+        "xai_platform_selection",
+        "xai_platform_selection_for",
+        "XAI_PLATFORM_GROK_46_MODEL",
+        "XAI_PLATFORM_GROK_46_CONTEXT_TOKENS",
+        "XAI_PLATFORM_MAX_OUTPUT_TOKENS",
     },
     "exchange_observation": {
-        "ConnectionUse", "ExchangeObserver", "ExchangeObservation", "ExchangeTerminal",
+        "ConnectionUse",
+        "ExchangeObserver",
+        "ExchangeObservation",
+        "ExchangeTerminal",
     },
     "openrouter": {
         "OPENROUTER_CHAT_REVIEW_DUE_AT",
@@ -1295,7 +1361,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-hosted": {
         **_SHARED_PLAKOUS_SYMBOLS,
         # Hidden, unsupported preview-minimization seam; not a product API.
-        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"] | {
+        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"]
+        | {
             "CodexMinimalLocalCodeModeDescriptorV1",
             "preview_redaction",
         },
@@ -1309,7 +1376,14 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "agent": {"TurnViewState"},
     },
     ("plakous-hosted", "src/runtime/child_projection.rs"): {
-        "agent": {"CommandAck", "TurnEvents", "EventDelivery", "SubscriptionEnd", "AgentViewState", "TurnViewState"},
+        "agent": {
+            "CommandAck",
+            "TurnEvents",
+            "EventDelivery",
+            "SubscriptionEnd",
+            "AgentViewState",
+            "TurnViewState",
+        },
     },
     # Plak owns the export document, not a second runtime. This one codec
     # reconstructs validated public content data, never mutable authority.
@@ -1385,16 +1459,35 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # service processes, and the named-secret value type.
     ("plakous-hosted", "src/mcp_binding/available.rs"): {
         "mcp": {
-            "HeaderName", "HeaderValue", "McpError", "McpErrorKind", "McpHttpEndpoint", "McpHttpSecret",
-            "McpHttpSecretResolver", "McpLease", "McpOAuthSecretResolver", "McpOAuthSettings",
-            "McpOAuthStatus", "McpPool", "McpPrompt", "McpPromptExpansion", "McpSecretResolver",
-            "McpNamedSecretMissing", "McpServerSpec", "McpToolPack",
-            "McpToolRecord", "McpToolSelection", "SensitiveBytes", "ServiceSecretValue",
+            "HeaderName",
+            "HeaderValue",
+            "McpError",
+            "McpErrorKind",
+            "McpHttpEndpoint",
+            "McpHttpSecret",
+            "McpHttpSecretResolver",
+            "McpLease",
+            "McpOAuthSecretResolver",
+            "McpOAuthSettings",
+            "McpOAuthStatus",
+            "McpPool",
+            "McpPrompt",
+            "McpPromptExpansion",
+            "McpSecretResolver",
+            "McpNamedSecretMissing",
+            "McpServerSpec",
+            "McpToolPack",
+            "McpToolRecord",
+            "McpToolSelection",
+            "SensitiveBytes",
+            "ServiceSecretValue",
             "exposed_tool_name",
         },
         "model": {"RunId"},
         "tools": {
-            "EnvironmentVariableName", "ExecutionEnvironment", "ExecutionEnvironmentConfig",
+            "EnvironmentVariableName",
+            "ExecutionEnvironment",
+            "ExecutionEnvironmentConfig",
             "ExecutionEnvironmentScope",
         },
     },
@@ -1428,7 +1521,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # Binding reads each route's release-owned hosted retrieval table.
     ("plakous-hosted", "src/tool_plan.rs"): {
         "model": {
-            "HostedRetrievalSupport", "HostedRetrievalTable", "HostedRetrievalTool",
+            "HostedRetrievalSupport",
+            "HostedRetrievalTable",
+            "HostedRetrievalTool",
             "HostedRetrievalUnsupported",
         },
         # The MCP records a root's frozen selection carries to its bind.
@@ -1437,9 +1532,17 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         # a planned fetch_url runs under, and the retrieval options a route
         # must serve.
         "tools": {
-            "DEFAULT_WEB_SEARCH_MAX_USES", "ExecutionOperationControl", "FetchUrlLimits",
-            "ImageGenFuture", "ImageGenPort", "ImageGenRequest", "RetrievalError",
-            "RetrievalErrorKind", "RetrievalFuture", "RetrievalKind", "RetrievalOptions",
+            "DEFAULT_WEB_SEARCH_MAX_USES",
+            "ExecutionOperationControl",
+            "FetchUrlLimits",
+            "ImageGenFuture",
+            "ImageGenPort",
+            "ImageGenRequest",
+            "RetrievalError",
+            "RetrievalErrorKind",
+            "RetrievalFuture",
+            "RetrievalKind",
+            "RetrievalOptions",
             "RetrievalRequest",
         },
     },
@@ -1558,9 +1661,7 @@ PRODUCTION_TARGET_KINDS = {
     "staticlib",
 }
 RAW_STRING_START = re.compile(r'(?:br|r)(?P<hashes>#{0,255})"')
-RUST_CHARACTER = re.compile(
-    r"(?:b)?'(?:\\(?:.|u\{[0-9A-Fa-f_]+\}|x[0-9A-Fa-f]{2})|[^'\\\n])'"
-)
+RUST_CHARACTER = re.compile(r"(?:b)?'(?:\\(?:.|u\{[0-9A-Fa-f_]+\}|x[0-9A-Fa-f]{2})|[^'\\\n])'")
 RUST_IDENTIFIER = re.compile(r"(?:r#)?[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -1694,8 +1795,10 @@ def production_rust_source(source: str) -> str:
     while match := CFG_TEST_BLOCK_ITEM.search(masked, cursor):
         # A production gate may precede a test gate on the same item.
         cursor = match.start() + 1
-        if not any(cfg_implies_test(gate.group("predicate"))
-                   for gate in CFG_ATTRIBUTE.finditer(match.group("attributes"))):
+        if not any(
+            cfg_implies_test(gate.group("predicate"))
+            for gate in CFG_ATTRIBUTE.finditer(match.group("attributes"))
+        ):
             continue
         closing = _block_end(masked, match.end() - 1)
         spans.append((match.start(), closing))
@@ -1703,8 +1806,10 @@ def production_rust_source(source: str) -> str:
     cursor = 0
     while match := CFG_TEST_SEMICOLON_ITEM.search(masked, cursor):
         cursor = match.start() + 1
-        if not any(cfg_implies_test(gate.group("predicate"))
-                   for gate in CFG_ATTRIBUTE.finditer(match.group("attributes"))):
+        if not any(
+            cfg_implies_test(gate.group("predicate"))
+            for gate in CFG_ATTRIBUTE.finditer(match.group("attributes"))
+        ):
             continue
         cursor = match.end()
         if not any(start <= match.start() < end for start, end in spans):
@@ -1818,9 +1923,7 @@ def _cached_rust_tokens(source: str) -> tuple[RustToken, ...]:
                 else:
                     escaped = False
                 end += 1
-            tokens.append(
-                RustToken("string", _decode_rust_string(source[content_start:end]))
-            )
+            tokens.append(RustToken("string", _decode_rust_string(source[content_start:end])))
             index = min(end + 1, len(source))
             continue
 
@@ -2035,8 +2138,7 @@ def _identifier_values(tokens: list[RustToken]) -> list[str]:
 def _contains_identifier_pair(tokens: list[RustToken], first: str, second: str) -> bool:
     identifiers = _identifier_values(tokens)
     return any(
-        identifiers[index : index + 2] == [first, second]
-        for index in range(len(identifiers) - 1)
+        identifiers[index : index + 2] == [first, second] for index in range(len(identifiers) - 1)
     )
 
 
@@ -2099,9 +2201,7 @@ def _unapproved_plakous_symbols(
                 continue
             module = names[1]
             unapproved.update(
-                f"{module}::{name}"
-                for name in names[2:]
-                if name not in allowed_symbols[module]
+                f"{module}::{name}" for name in names[2:] if name not in allowed_symbols[module]
             )
 
     for index in range(len(tokens) - 2):
@@ -2225,10 +2325,7 @@ def _process_command_calls(
         if not qualified and not imports_command:
             continue
         owner = "std::process::Command" if qualified else "Command"
-        arguments = tuple(
-            (token.kind, token.value)
-            for token in _call_arguments(tokens, index + 3)
-        )
+        arguments = tuple((token.kind, token.value) for token in _call_arguments(tokens, index + 3))
         calls.append((owner, arguments))
     return calls
 
@@ -2237,10 +2334,16 @@ def validate_claude_oauth_state_comparison(source: str) -> list[str]:
     """Pin the production callback rejection to subtle's constant-time comparison."""
     tokens = rust_tokens(source)
     try:
-        function = next(index for index, token in enumerate(tokens[:-1])
-                        if token.value == "fn" and tokens[index + 1].value == "parse_claude_oauth_authorization_input")
-        opening = next(index for index in range(function, len(tokens)) if tokens[index].value == "{")
-        body = tokens[opening:_token_group_end(tokens, opening)]
+        function = next(
+            index
+            for index, token in enumerate(tokens[:-1])
+            if token.value == "fn"
+            and tokens[index + 1].value == "parse_claude_oauth_authorization_input"
+        )
+        opening = next(
+            index for index in range(function, len(tokens)) if tokens[index].value == "{"
+        )
+        body = tokens[opening : _token_group_end(tokens, opening)]
     except StopIteration:
         body = []
     rejection = rust_tokens("""
@@ -2248,14 +2351,14 @@ def validate_claude_oauth_state_comparison(source: str) -> list[str]:
             && !bool::from(state.as_bytes().ct_eq(expected_state.as_bytes()))
         { return None; }
     """)
-    if any(body[index:index + len(rejection)] == rejection for index in range(len(body))):
+    if any(body[index : index + len(rejection)] == rejection for index in range(len(body))):
         return []
-    return ["plakous-anthropic:src/oauth.rs: callback state must reject through the pinned constant-time ct_eq comparison"]
+    return [
+        "plakous-anthropic:src/oauth.rs: callback state must reject through the pinned constant-time ct_eq comparison"
+    ]
 
 
-def validate_product_session_authority_sources(
-    package: str, sources: dict[str, str]
-) -> list[str]:
+def validate_product_session_authority_sources(package: str, sources: dict[str, str]) -> list[str]:
     """Forbid known Plak-owned canonical context, compaction, and fork seams."""
     errors: list[str] = []
     for path, source in sources.items():
@@ -2378,10 +2481,7 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
         if re.search(r"(?:^|/)\.(?:codex)(?:/|$)|(?:^|/)opencode(?:/|$)", lowered):
             errors.append("plak CLI contains forbidden delegated-login storage/owner locator")
             break
-    if any(
-        re.search(r"(?:^|/)proc/+self/+environ(?:$|/)", value.lower())
-        for value in strings
-    ):
+    if any(re.search(r"(?:^|/)proc/+self/+environ(?:$|/)", value.lower()) for value in strings):
         errors.append("plak CLI contains forbidden /proc/self/environ access")
 
     for path, tokens in tokens_by_file.items():
@@ -2444,7 +2544,9 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
             and tokens[index + 2].value in {"(", "[", "{"}
         }
         for macro in sorted(macro_names - allowed_macros):
-            errors.append(f"{package}:{path}: unapproved macro invocation cannot cross CLI boundary: {macro}!")
+            errors.append(
+                f"{package}:{path}: unapproved macro invocation cannot cross CLI boundary: {macro}!"
+            )
 
     return errors
 
@@ -2474,8 +2576,11 @@ def source_scan() -> Iterator[None]:
     finally:
         _source_scan = previous
         for cached in (
-            _blank_rust_non_code, production_rust_source, _cached_rust_tokens,
-            _cached_test_module_targets, _cached_test_module_files,
+            _blank_rust_non_code,
+            production_rust_source,
+            _cached_rust_tokens,
+            _cached_test_module_targets,
+            _cached_test_module_files,
         ):
             cached.cache_clear()
 
@@ -2583,33 +2688,25 @@ def _discover_rust_files(
                 path = current_path / name
                 label = relative(path) or str(path)
                 if path.is_symlink():
-                    errors.append(
-                        f"production Rust source is a symbolic link: {label}"
-                    )
+                    errors.append(f"production Rust source is a symbolic link: {label}")
                 elif path.is_file():
                     files.add(path)
                 else:
-                    errors.append(
-                        f"production Rust source is not a regular file: {label}"
-                    )
+                    errors.append(f"production Rust source is not a regular file: {label}")
 
     pending = list(files)
     inspected: set[Path] = set()
 
     def resolve_explicit_target(source: Path, path_value: str, kind: str) -> None:
         if not path_value or "\0" in path_value or "\\" in path_value:
-            errors.append(
-                f"production Rust source has invalid {kind} target: {relative(source)}"
-            )
+            errors.append(f"production Rust source has invalid {kind} target: {relative(source)}")
             return
         target = Path(os.path.abspath(source.parent / path_value))
         label = relative(target) or str(target)
         if relative(target) is None:
             errors.append(f"production Rust {kind} target escapes repository: {label}")
         elif has_symlink(target):
-            errors.append(
-                f"production Rust {kind} target traverses a symbolic link: {label}"
-            )
+            errors.append(f"production Rust {kind} target traverses a symbolic link: {label}")
         elif not target.is_file():
             errors.append(f"production Rust {kind} target is not a regular file: {label}")
         else:
@@ -2671,17 +2768,13 @@ def _discover_rust_files(
                     continue
                 label = relative(target) or str(target)
                 if relative(target) is None:
-                    errors.append(
-                        f"production Rust module target escapes repository: {label}"
-                    )
+                    errors.append(f"production Rust module target escapes repository: {label}")
                 elif has_symlink(target):
                     errors.append(
                         f"production Rust module target traverses a symbolic link: {label}"
                     )
                 elif not target.is_file():
-                    errors.append(
-                        f"production Rust module target is not a regular file: {label}"
-                    )
+                    errors.append(f"production Rust module target is not a regular file: {label}")
                 else:
                     newly_discoverable = target not in module_discovery_sources
                     files.add(target)
@@ -2720,10 +2813,7 @@ def _discover_rust_files(
                     and cursor + 1 < len(tokens)
                     and tokens[cursor + 1].value == "="
                 ):
-                    if (
-                        cursor + 2 >= len(tokens)
-                        or tokens[cursor + 2].kind != "string"
-                    ):
+                    if cursor + 2 >= len(tokens) or tokens[cursor + 2].kind != "string":
                         errors.append(
                             "production Rust cfg_attr(path) target must be a direct "
                             f"string literal: {relative(source)}"
@@ -2747,7 +2837,8 @@ def _discover_rust_files(
             closing = {"(": ")", "[": "]", "{": "}"}[tokens[index + 2].value]
             cursor = index + 3
             if tokens[index].value == "include_str" and (
-                cursor >= len(tokens) or tokens[cursor].kind != "string"
+                cursor >= len(tokens)
+                or tokens[cursor].kind != "string"
                 or Path(tokens[cursor].value).suffix != ".rs"
             ):
                 continue
@@ -2779,7 +2870,9 @@ class ModuleTarget(NamedTuple):
 
 
 def test_module_targets(
-    path: Path, source: str, crate_root: bool,
+    path: Path,
+    source: str,
+    crate_root: bool,
 ) -> list[ModuleTarget]:
     """Resolve module edges, retaining test gates and Rust's child directory.
 
@@ -2791,7 +2884,9 @@ def test_module_targets(
 
 @lru_cache(maxsize=None)
 def _cached_test_module_targets(
-    path: Path, source: str, crate_root: bool,
+    path: Path,
+    source: str,
+    crate_root: bool,
 ) -> tuple[ModuleTarget, ...]:
     targets: list[ModuleTarget] = []
     masked = _blank_rust_non_code(source)
@@ -2809,8 +2904,7 @@ def _cached_test_module_targets(
         ancestors = [span for span in inline if span[0] <= match.start() < span[1]]
         attributes = match.group("attributes")
         gated = any(span[3] for span in ancestors) or any(
-            cfg_implies_test(gate.group("predicate"))
-            for gate in CFG_ATTRIBUTE.finditer(attributes)
+            cfg_implies_test(gate.group("predicate")) for gate in CFG_ATTRIBUTE.finditer(attributes)
         )
         has_path = re.search(r"\bpath\s*=", attributes) is not None
         name = match.group("name")
@@ -2824,19 +2918,26 @@ def _cached_test_module_targets(
             if ancestors:
                 continue
             offset = match.start("attributes")
-            tokens = rust_tokens(source[offset + redirect.start():offset + redirect.end()])
+            tokens = rust_tokens(source[offset + redirect.start() : offset + redirect.end()])
             if len(tokens) != 6 or tokens[4].kind != "string":
                 continue
             target = Path(os.path.normpath(path.parent / tokens[4].value))
-            targets.append(ModuleTarget(target, target.parent if target.name == "mod.rs" else None,
-                                        gated, True))
+            targets.append(
+                ModuleTarget(
+                    target, target.parent if target.name == "mod.rs" else None, gated, True
+                )
+            )
         elif has_path:
             # A conditional path override is not a default-path declaration.
             continue
         else:
             directory = base.joinpath(*(span[2] for span in ancestors), name)
-            targets.extend((ModuleTarget(directory.with_suffix(".rs"), directory, gated, False),
-                            ModuleTarget(directory / "mod.rs", directory, gated, False)))
+            targets.extend(
+                (
+                    ModuleTarget(directory.with_suffix(".rs"), directory, gated, False),
+                    ModuleTarget(directory / "mod.rs", directory, gated, False),
+                )
+            )
     return tuple(targets)
 
 
@@ -2845,12 +2946,19 @@ def explicit_rust_source_targets(path: Path, source: str) -> set[Path]:
     targets: set[Path] = set()
     tokens = rust_tokens(source)
     for index in range(len(tokens) - 2):
-        if (tokens[index] == RustToken("identifier", "path")
-                and tokens[index + 1].value == "=" and tokens[index + 2].kind == "string"):
+        if (
+            tokens[index] == RustToken("identifier", "path")
+            and tokens[index + 1].value == "="
+            and tokens[index + 2].kind == "string"
+        ):
             targets.add(Path(os.path.normpath(path.parent / tokens[index + 2].value)))
-        if (index + 3 < len(tokens) and tokens[index].value in {"include", "include_str"}
-                and tokens[index + 1].value == "!" and tokens[index + 2].value in {"(", "[", "{"}
-                and tokens[index + 3].kind == "string"):
+        if (
+            index + 3 < len(tokens)
+            and tokens[index].value in {"include", "include_str"}
+            and tokens[index + 1].value == "!"
+            and tokens[index + 2].value in {"(", "[", "{"}
+            and tokens[index + 3].kind == "string"
+        ):
             target = Path(os.path.normpath(path.parent / tokens[index + 3].value))
             if target.suffix == ".rs":
                 targets.add(target)
@@ -2863,23 +2971,29 @@ def _test_module_files(files: dict[Path, str], crate_roots: set[Path]) -> set[Pa
 
 @lru_cache(maxsize=None)
 def _cached_test_module_files(
-    entries: tuple[tuple[Path, str], ...], crate_roots: frozenset[Path],
+    entries: tuple[tuple[Path, str], ...],
+    crate_roots: frozenset[Path],
 ) -> frozenset[Path]:
     """Follow test module edges, then restore every production-reachable file."""
     files = dict(entries)
     excluded: set[Path] = set()
     path_loaded = {
-        target.path for path, source in files.items()
+        target.path
+        for path, source in files.items()
         for target in test_module_targets(path, source, path in crate_roots)
         if target.redirected
     }
-    edges = {path: test_module_targets(path, source, path in crate_roots or path in path_loaded)
-             for path, source in files.items()}
+    edges = {
+        path: test_module_targets(path, source, path in crate_roots or path in path_loaded)
+        for path, source in files.items()
+    }
     descendants: dict[Path, set[Path]] = {}
     for path in files:
         for parent in (path, *path.parents):
             descendants.setdefault(parent, set()).add(path)
-    references = {path: explicit_rust_source_targets(path, source) for path, source in files.items()}
+    references = {
+        path: explicit_rust_source_targets(path, source) for path, source in files.items()
+    }
     while True:
         previous = excluded.copy()
         for path, targets in edges.items():
@@ -2908,7 +3022,8 @@ def _cached_test_module_files(
 
 
 def cfg_test_module_files(
-    sources: Iterable[Path], crate_roots: set[Path],
+    sources: Iterable[Path],
+    crate_roots: set[Path],
 ) -> set[Path]:
     """Exclude module files reachable only from test code."""
     files: dict[Path, str] = {}
@@ -3304,8 +3419,10 @@ def _component_crate_paths(tokens: list[RustToken]) -> set[str]:
                 continue
             # A leading segment of the use tree: statement root or a `{`-group
             # member directly under the root (`use {plakous_x::y, ...}`).
-            if index == 0 or statement[index - 1].value in {"{", ","} and (
-                index < 2 or statement[index - 2].value != "::"
+            if (
+                index == 0
+                or statement[index - 1].value in {"{", ","}
+                and (index < 2 or statement[index - 2].value != "::")
             ):
                 crates.add(token.value.replace("_", "-"))
     return crates
@@ -3391,10 +3508,16 @@ def validate_module_rules(
 
 
 # Test seams are composition-root registrations, not production control flow.
-TEST_SEAM_FEATURES = frozenset({
-    "test-support", "test-hooks", "commit-trace", "fault-injection",
-    "perf-instrumentation", "scripted-code-mode-enrolment",
-})
+TEST_SEAM_FEATURES = frozenset(
+    {
+        "test-support",
+        "test-hooks",
+        "commit-trace",
+        "fault-injection",
+        "perf-instrumentation",
+        "scripted-code-mode-enrolment",
+    }
+)
 
 
 def _token_group_end(tokens: list[RustToken], opening: int) -> int:
@@ -3454,7 +3577,8 @@ def configuration_debt(
     for path, source in sorted(sources.items()):
         parts = Path(path).parts
         if any(part in {"tests", "benches", "examples"} for part in parts) or (
-            Path(path).name == "tests.rs" or Path(path).name.endswith("_tests.rs")
+            Path(path).name == "tests.rs"
+            or Path(path).name.endswith("_tests.rs")
             or any(part.startswith("test_support") for part in parts)
         ):
             continue
@@ -3474,8 +3598,10 @@ def configuration_debt(
                 continue
             end = _token_group_end(tokens, opening)
             features = {
-                tokens[i + 2].value for i in range(opening + 1, end - 2)
-                if tokens[i].value == "feature" and tokens[i + 1].value == "="
+                tokens[i + 2].value
+                for i in range(opening + 1, end - 2)
+                if tokens[i].value == "feature"
+                and tokens[i + 1].value == "="
                 and tokens[i + 2].kind == "string"
             }
             if not features:
@@ -3494,7 +3620,8 @@ def configuration_debt(
                     following = _token_group_end(tokens, following)
             is_module = following < len(tokens) and tokens[following].value == "mod"
             is_registration = (
-                cursor >= 2 and cursor - 2 in registry_positions
+                cursor >= 2
+                and cursor - 2 in registry_positions
                 and tokens[cursor - 2].value == "#"
                 and following + 2 < len(tokens)
                 and tokens[following].value == "&"
@@ -3508,8 +3635,14 @@ def configuration_debt(
                 if package == "plak":
                     allowed = path in {"src/lib.rs", "src/test_hooks.rs"}
                 else:
-                    name = tokens[following + 1].value if is_module and following + 1 < len(tokens) else ""
-                    allowed = is_module and (name.startswith("test") or name.endswith("test_support"))
+                    name = (
+                        tokens[following + 1].value
+                        if is_module and following + 1 < len(tokens)
+                        else ""
+                    )
+                    allowed = is_module and (
+                        name.startswith("test") or name.endswith("test_support")
+                    )
                 if not allowed:
                     debt["test-seam"].append(label)
             cursor = end
@@ -3538,16 +3671,26 @@ def validate_configuration_rules(
     errors: list[str] = []
     if not isinstance(rule, dict):
         return [f"cfg.{package}: expected a table"]
-    allowed_keys = {"feature-sites", "env-sites", "feature-ceiling", "test-seam-ceiling", "env-ceiling", "reason"}
+    allowed_keys = {
+        "feature-sites",
+        "env-sites",
+        "feature-ceiling",
+        "test-seam-ceiling",
+        "env-ceiling",
+        "reason",
+    }
     for key in sorted(set(rule) - allowed_keys):
         errors.append(f"cfg.{package}: unknown key {key!r}")
     if "reason" in rule and not isinstance(rule["reason"], str):
         errors.append(f"cfg.{package}.reason: expected a review reason string")
     for key in ("feature-sites", "env-sites"):
-        if key in rule and (not isinstance(rule[key], list) or any(
-            not isinstance(path, str) or not path.startswith("src/") or ".." in path.split("/")
-            for path in rule[key]
-        )):
+        if key in rule and (
+            not isinstance(rule[key], list)
+            or any(
+                not isinstance(path, str) or not path.startswith("src/") or ".." in path.split("/")
+                for path in rule[key]
+            )
+        ):
             errors.append(f"cfg.{package}.{key}: expected package-relative src paths")
     for kind in ("feature", "test-seam", "env"):
         ceiling = rule.get(f"{kind}-ceiling", 0)
@@ -3556,9 +3699,14 @@ def validate_configuration_rules(
     if errors:
         return errors
     debt = configuration_debt(package, sources, rule)
-    if any(rule.get(f"{kind}-ceiling", 0) for kind in debt) and not str(rule.get("reason", "")).strip():
+    if (
+        any(rule.get(f"{kind}-ceiling", 0) for kind in debt)
+        and not str(rule.get("reason", "")).strip()
+    ):
         errors.append(f"cfg.{package}: nonzero ceilings require a reviewed reason")
-    elif (rule.get("env-sites") or rule.get("feature-sites")) and not str(rule.get("reason", "")).strip():
+    elif (rule.get("env-sites") or rule.get("feature-sites")) and not str(
+        rule.get("reason", "")
+    ).strip():
         errors.append(f"cfg.{package}: explicit boundary sites require a reviewed reason")
     for kind, sites in debt.items():
         ceiling = rule.get(f"{kind}-ceiling", 0)
@@ -3638,7 +3786,7 @@ def _suppression_body(body: str) -> str | None:
         elif body[index] in ")]":
             depth -= 1
         elif body[index] == "," and depth == 1:
-            rest = body[index + 1:]
+            rest = body[index + 1 :]
             return rest if _SUPPRESSING.match(rest) else None
     return None
 
@@ -3659,7 +3807,7 @@ def lint_suppressions(source: str, crate_root: bool = False) -> list[tuple[str, 
     leading = True
     previous_end = 0
     for match in _ATTRIBUTE_START.finditer(masked):
-        if masked[previous_end:match.start()].strip():
+        if masked[previous_end : match.start()].strip():
             leading = False
         depth = 0
         end = len(masked)
@@ -3675,10 +3823,12 @@ def lint_suppressions(source: str, crate_root: bool = False) -> list[tuple[str, 
         if not inner:
             leading = False
         previous_end = end + 1
-        body = _suppression_body(masked[match.end():end])
+        body = _suppression_body(masked[match.end() : end])
         if body is None:
             continue
-        lints: list[str] = [lint for lint in RATCHET_LINTS if re.search(rf"\bclippy\s*::\s*{lint}\b", body)]
+        lints: list[str] = [
+            lint for lint in RATCHET_LINTS if re.search(rf"\bclippy\s*::\s*{lint}\b", body)
+        ]
         for group, members in RATCHET_LINT_GROUPS.items():
             if re.search(rf"\bclippy\s*::\s*{group}\b", body):
                 lints.extend(member for member in members if member not in lints)
@@ -3700,7 +3850,9 @@ def is_test_target_path(path: str) -> bool:
 
 
 def lint_ratchet_inventory(
-    files: dict[str, str], crate_roots: set[str], test_files: set[str] | None = None,
+    files: dict[str, str],
+    crate_roots: set[str],
+    test_files: set[str] | None = None,
 ) -> dict[str, Any]:
     """Item-level suppressions per lint, crate-wide allows and large files.
 
@@ -3717,7 +3869,8 @@ def lint_ratchet_inventory(
                 items[lint].append(f"{path}:{line}")
     # Only a file with more non-blank lines than the limit can exceed it.
     candidates = [
-        path for path, source in sorted(files.items())
+        path
+        for path, source in sorted(files.items())
         if not is_test_target_path(path)
         and sum(1 for line in source.splitlines() if line.strip()) > LARGE_FILE_LINES
     ]
@@ -3733,12 +3886,17 @@ def lint_ratchet_inventory(
 
 
 def declared_test_module_paths(
-    files: dict[str, str], crate_roots: set[str],
+    files: dict[str, str],
+    crate_roots: set[str],
 ) -> set[str]:
     """Package-relative test-only module files, shared with production scans."""
-    return {path.as_posix() for path in _test_module_files(
-        {Path(path): source for path, source in files.items()}, {Path(path) for path in crate_roots},
-    )}
+    return {
+        path.as_posix()
+        for path in _test_module_files(
+            {Path(path): source for path, source in files.items()},
+            {Path(path) for path in crate_roots},
+        )
+    }
 
 
 def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) -> list[str]:
@@ -3746,15 +3904,19 @@ def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) ->
     if not isinstance(rule, dict):
         return [f"{package}: [package.metadata.plakous-lint] must be a table"]
     allowed = {*RATCHET_LINTS.values(), "large-file-ceiling", "crate-wide-allows", "reason"}
-    errors = [f"{package}: unknown [package.metadata.plakous-lint] key {key!r}"
-              for key in sorted(set(rule) - allowed)]
+    errors = [
+        f"{package}: unknown [package.metadata.plakous-lint] key {key!r}"
+        for key in sorted(set(rule) - allowed)
+    ]
     ceilings = {key: rule.get(key, 0) for key in (*RATCHET_LINTS.values(), "large-file-ceiling")}
     for key, ceiling in ceilings.items():
         if type(ceiling) is not int or ceiling < 0:
             errors.append(f"{package}: plakous-lint {key} must be a nonnegative integer")
     recorded = rule.get("crate-wide-allows", [])
     if not isinstance(recorded, list) or not all(isinstance(item, str) for item in recorded):
-        errors.append(f"{package}: plakous-lint crate-wide-allows must be a list of path:lint strings")
+        errors.append(
+            f"{package}: plakous-lint crate-wide-allows must be a list of path:lint strings"
+        )
     if errors:
         return errors
     if (any(ceilings.values()) or recorded) and not str(rule.get("reason", "")).strip():
@@ -3797,7 +3959,9 @@ def package_lint_rule(package: Package) -> Any:
     return package.manifest.get("package", {}).get("metadata", {}).get("plakous-lint", {})
 
 
-def package_lint_inventory(package: Package, files: dict[str, str], repository: Path = ROOT) -> dict[str, Any]:
+def package_lint_inventory(
+    package: Package, files: dict[str, str], repository: Path = ROOT
+) -> dict[str, Any]:
     base = (repository / package.directory).resolve()
     crate_roots = {
         Path(os.path.relpath(Path(target["src_path"]).resolve(), base)).as_posix()
@@ -3837,7 +4001,11 @@ def cargo_tree_output(root: Path, spec: list[str], errors: list[str]) -> str | N
     """Fail closed with Cargo's diagnostic rather than treating failure as absence."""
     command = ["cargo", "tree", "--offline", *spec]
     result = subprocess.run(
-        command, cwd=root, text=True, capture_output=True, check=False,
+        command,
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
     )
     if result.returncode != 0:
         errors.append(
@@ -3874,10 +4042,12 @@ def rquickjs_reaches_plak_jointly(root: Path, errors: list[str]) -> bool | None:
 def rquickjs_linkage_errors(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     for spec, must_link, message in (
-        (["-p", "plakous", "--all-features"], False,
-         "plakous must not link rquickjs under any feature; Code Mode uses the sidecar"),
-        (["-p", "plak"], False,
-         "plak must not link rquickjs; Code Mode uses plakous-js-host"),
+        (
+            ["-p", "plakous", "--all-features"],
+            False,
+            "plakous must not link rquickjs under any feature; Code Mode uses the sidecar",
+        ),
+        (["-p", "plak"], False, "plak must not link rquickjs; Code Mode uses plakous-js-host"),
         (["-p", "plakous-js-runtime"], True, "plakous-js-runtime must link rquickjs"),
     ):
         # An inverse query errors when rquickjs is absent from a selected graph.
@@ -3940,9 +4110,7 @@ def built_product_artifacts(root: Path) -> dict[str, Path]:
 
 def engine_symbol_markers(symbol_output: str) -> set[str]:
     """Return the QuickJS engine markers present in one symbol listing."""
-    return {
-        marker for marker in RQUICKJS_ENGINE_SYMBOL_MARKERS if marker in symbol_output
-    }
+    return {marker for marker in RQUICKJS_ENGINE_SYMBOL_MARKERS if marker in symbol_output}
 
 
 def artifact_linkage_findings(
@@ -3981,9 +4149,7 @@ def artifact_linkage_findings(
         if name == "plakous-py-host" and found:
             errors.append(f"plakous-py-host links the QuickJS engine ({sorted(found)!r})")
     if len(set(digests.values())) != len(digests):
-        errors.append(
-            f"the product executables are not separate artifacts: {digests!r}"
-        )
+        errors.append(f"the product executables are not separate artifacts: {digests!r}")
     return errors
 
 
@@ -3994,8 +4160,11 @@ def newest_tracked_source_mtime(root: Path) -> float | None:
     the tree just as a source edit does. Returns `None` only when there is no
     extant source input; repository listing failures propagate.
     """
-    listed = [path for path in vcs_listing.listed_files(root)
-              if path.endswith((".rs", "Cargo.toml")) or path == "Cargo.lock"]
+    listed = [
+        path
+        for path in vcs_listing.listed_files(root)
+        if path.endswith((".rs", "Cargo.toml")) or path == "Cargo.lock"
+    ]
     newest: float | None = None
     for relative in listed:
         if not relative:
@@ -4014,9 +4183,7 @@ def stale_release_artifacts(root: Path, artifacts: dict[str, Path]) -> list[str]
     newest = newest_tracked_source_mtime(root)
     if newest is None:
         return []
-    return sorted(
-        name for name, path in artifacts.items() if path.stat().st_mtime < newest
-    )
+    return sorted(name for name, path in artifacts.items() if path.stat().st_mtime < newest)
 
 
 def artifact_linkage_errors(root: Path = ROOT) -> tuple[list[str], str]:
@@ -4047,7 +4214,11 @@ def artifact_linkage_errors(root: Path = ROOT) -> tuple[list[str], str]:
 
 def verify_artifact_linkage(artifacts: dict[str, Path]) -> tuple[list[str], str]:
     """Mandatory linkage proof for a freshly built product on either platform."""
-    missing = [name for name in PRODUCT_EXECUTABLES if name not in artifacts or not artifacts[name].is_file()]
+    missing = [
+        name
+        for name in PRODUCT_EXECUTABLES
+        if name not in artifacts or not artifacts[name].is_file()
+    ]
     if missing:
         return [f"missing product artifacts: {', '.join(missing)}"], "artifact linkage refused"
     tool = symbol_tool()
@@ -4055,9 +4226,7 @@ def verify_artifact_linkage(artifacts: dict[str, Path]) -> tuple[list[str], str]
         return ["artifact linkage requires nm or llvm-nm on PATH"], "artifact linkage refused"
 
     def symbol_listing(path: Path) -> str | None:
-        result = subprocess.run(
-            [*tool, str(path)], text=True, capture_output=True, check=False
-        )
+        result = subprocess.run([*tool, str(path)], text=True, capture_output=True, check=False)
         return None if result.returncode != 0 else result.stdout
 
     digests = {
@@ -4077,9 +4246,17 @@ def supported_target_atomic_polyfill_errors(root: Path = ROOT) -> list[str]:
         output = cargo_tree_output(
             root,
             [
-                "--locked", "--workspace", "--all-features",
-                "--target", target, "--edges", "normal,build", "--prefix", "none",
-                "--format", "{p}",
+                "--locked",
+                "--workspace",
+                "--all-features",
+                "--target",
+                target,
+                "--edges",
+                "normal,build",
+                "--prefix",
+                "none",
+                "--format",
+                "{p}",
             ],
             errors,
         )
@@ -4111,7 +4288,9 @@ def packaged_dependency_names(manifest: dict[str, Any]) -> set[str]:
 
 
 def validate_packaged_dependencies(
-    manifests: dict[str, dict[str, Any]], classes: dict[str, str], published_plak: dict[str, Any],
+    manifests: dict[str, dict[str, Any]],
+    classes: dict[str, str],
+    published_plak: dict[str, Any],
 ) -> list[str]:
     """No packaged manifest names a repository-only package outside dev-dependencies.
 
@@ -4147,9 +4326,8 @@ def validate_commit_trace_edge(manifests: dict[str, dict[str, Any]]) -> list[str
     if (
         dependency.get("optional") is not True
         or dependency.get("features", []) != []
-        or tree.get("features", {}).get("commit-trace") != [
-            "dep:plakous-store", "plakous-store/commit-trace"
-        ]
+        or tree.get("features", {}).get("commit-trace")
+        != ["dep:plakous-store", "plakous-store/commit-trace"]
     ):
         return ["tree store's plakous-store edge must be optional and commit-trace-only"]
     return []
@@ -4221,7 +4399,9 @@ def hygiene_private_names(text: bytes, private_names: frozenset[bytes]) -> list[
 
 
 def hygiene_findings(
-    relative: str, data: bytes, private_names: frozenset[bytes] = frozenset(),
+    relative: str,
+    data: bytes,
+    private_names: frozenset[bytes] = frozenset(),
 ) -> list[str]:
     """Owner-specific strings in one file's bytes; binary files have none."""
     if b"\0" in data:
@@ -4234,7 +4414,9 @@ def hygiene_findings(
     for number, line in enumerate(data.split(b"\n"), start=1):
         for match in HYGIENE_HOME_PATH.finditer(line):
             if match.group(1).decode() not in HYGIENE_HOME_PLACEHOLDERS:
-                findings.append(f"{relative}:{number}: absolute home path {match.group(0).decode()!r}")
+                findings.append(
+                    f"{relative}:{number}: absolute home path {match.group(0).decode()!r}"
+                )
         if has_private_name:
             for name in hygiene_private_names(line, private_names):
                 findings.append(f"{relative}:{number}: private host or tool name {name!r}")
@@ -4251,7 +4433,8 @@ def hygiene_candidate_files(root: Path) -> list[str]:
 
 
 def validate_tracked_hygiene(
-    root: Path = ROOT, private_names: frozenset[bytes] | None = None,
+    root: Path = ROOT,
+    private_names: frozenset[bytes] | None = None,
 ) -> list[str]:
     if private_names is None:
         private_names = load_hygiene_private_names(root)
@@ -4272,7 +4455,8 @@ INCLUDED_FILE = re.compile(
 
 
 def validate_package_local_includes(
-    package_name: str, sources: dict[str, str],
+    package_name: str,
+    sources: dict[str, str],
 ) -> list[str]:
     """Every `include_str!`/`include_bytes!` stays inside its own package.
 
@@ -4351,7 +4535,9 @@ def validate_publication(
         errors.append(f"{name}: published packages carry a LICENSE file")
     elif license_text is not None and packaged_license.read_text(encoding="utf-8") != license_text:
         errors.append(f"{name}: LICENSE differs from the repository LICENSE")
-    if license_text is not None and manifest.get("package", {}).get("exclude") != {"workspace": True}:
+    if license_text is not None and manifest.get("package", {}).get("exclude") != {
+        "workspace": True
+    }:
         errors.append(f"{name}: published members inherit the workspace exclude list")
     return errors
 
@@ -4363,8 +4549,11 @@ def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[s
     the tracked and nonignored untracked files) every `*.rs` file under the
     package directory except build output counts as tracked.
     """
-    listed = [path for path in vcs_listing.listed_files(root)
-              if path.startswith(f"{package.directory}/") and path.endswith(".rs")]
+    listed = [
+        path
+        for path in vcs_listing.listed_files(root)
+        if path.startswith(f"{package.directory}/") and path.endswith(".rs")
+    ]
     files: dict[str, str] = {}
     for path in filter(None, listed):
         if any(path.startswith(f"{other}/") for other in nested):
@@ -4387,7 +4576,8 @@ def load_publish_shape() -> Any:
 
 
 def validate_workspace_excludes(
-    root_workspace: dict[str, Any], supported_fixture_paths: set[str],
+    root_workspace: dict[str, Any],
+    supported_fixture_paths: set[str],
 ) -> list[str]:
     """Keep operator state outside Cargo without hiding unreviewed packages."""
     excludes = set(root_workspace.get("exclude", []))
@@ -4398,8 +4588,7 @@ def validate_workspace_excludes(
     unknown_excludes = excludes - supported_fixture_paths - reviewed_vendor_packages - {".plak"}
     if unknown_excludes:
         errors.append(
-            "workspace excludes unsupported nested packages: "
-            f"{sorted(unknown_excludes)!r}"
+            f"workspace excludes unsupported nested packages: {sorted(unknown_excludes)!r}"
         )
     return errors
 
@@ -4459,14 +4648,17 @@ def _check_workspace() -> int:
     errors.extend(validate_ratchet_clippy_thresholds(ROOT))
     for name, package in sorted(packages.items()):
         nested = {
-            other for other in directories
+            other
+            for other in directories
             if other != package.directory and other.startswith(f"{package.directory}/")
         }
         rust_files = package_rust_files(ROOT, package, nested)
         errors.extend(validate_package_local_includes(name, rust_files))
-        errors.extend(validate_lint_ratchet(
-            name, package_lint_inventory(package, rust_files), package_lint_rule(package)
-        ))
+        errors.extend(
+            validate_lint_ratchet(
+                name, package_lint_inventory(package, rust_files), package_lint_rule(package)
+            )
+        )
 
     # Layer policy: metadata shape, layout, edges, classes, pinned dependencies.
     errors.extend(validate_package_metadata(workspace))
@@ -4481,10 +4673,17 @@ def _check_workspace() -> int:
     for name, package in sorted(packages.items()):
         metadata = package.metadata
         if name == VENDOR_PACKAGE:
-            errors.extend(validate_publication(
-                name, package.package_class, metadata, package.manifest,
-                package.manifest_path.parent, VENDOR_LICENSE, None,
-            ))
+            errors.extend(
+                validate_publication(
+                    name,
+                    package.package_class,
+                    metadata,
+                    package.manifest,
+                    package.manifest_path.parent,
+                    VENDOR_LICENSE,
+                    None,
+                )
+            )
             continue
         if metadata.get("edition") != "2024":
             errors.append(f"{name}: edition must be 2024")
@@ -4492,10 +4691,17 @@ def _check_workspace() -> int:
             errors.append(f"{name}: rust-version must be 1.99.0")
         if metadata.get("license") != WORKSPACE_LICENSE:
             errors.append(f"{name}: license expression is inconsistent")
-        errors.extend(validate_publication(
-            name, package.package_class, metadata, package.manifest,
-            package.manifest_path.parent, WORKSPACE_LICENSE, root_license,
-        ))
+        errors.extend(
+            validate_publication(
+                name,
+                package.package_class,
+                metadata,
+                package.manifest,
+                package.manifest_path.parent,
+                WORKSPACE_LICENSE,
+                root_license,
+            )
+        )
 
     # Every supported library package has exactly one external consumer fixture;
     # `plak` is pinned by cli_contract.rs instead.
@@ -4534,8 +4740,25 @@ def _check_workspace() -> int:
         for section in ("dependencies", "dev-dependencies"):
             hosted = app.manifest.get(section, {}).get("plakous-hosted", {})
             if not isinstance(hosted, dict) or hosted.get("default-features") is not False:
-                errors.append(f"plak {section}: hosted defaults must be disabled for product selection")
-        for feature in ("tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"):
+                errors.append(
+                    f"plak {section}: hosted defaults must be disabled for product selection"
+                )
+        for feature in (
+            "tui",
+            "clipboard",
+            "images",
+            "js",
+            "python",
+            "mcp",
+            "web-fetch",
+            "codex",
+            "grok",
+            "claude",
+            "openai",
+            "xai-api",
+            "anthropic",
+            "openrouter",
+        ):
             if f"plakous-hosted/{feature}" not in app_features.get(feature, []):
                 errors.append(f"plak/{feature} must forward the matching hosted capability")
         if not {"tui", "images"} <= set(app_features.get("clipboard", [])):
@@ -4552,18 +4775,45 @@ def _check_workspace() -> int:
             "test-support",
             "git-cli",
             "jj",
-            "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter",
+            "tui",
+            "clipboard",
+            "images",
+            "js",
+            "python",
+            "mcp",
+            "web-fetch",
+            "codex",
+            "grok",
+            "claude",
+            "openai",
+            "xai-api",
+            "anthropic",
+            "openrouter",
         }:
             errors.append(
                 "plak may expose only default, maintainer, otel, test-hooks, test-support "
                 "workspace backend features and product build capabilities"
             )
-        elif set(app_features.get("default", [])) != {"git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"}:
+        elif set(app_features.get("default", [])) != {
+            "git-cli",
+            "tui",
+            "clipboard",
+            "images",
+            "js",
+            "python",
+            "mcp",
+            "web-fetch",
+            "codex",
+            "grok",
+            "claude",
+            "openai",
+            "xai-api",
+            "anthropic",
+            "openrouter",
+        }:
             errors.append("plak default must enable git-cli and all product capabilities")
         elif app_features.get("maintainer") != ["jj"]:
-            errors.append(
-                "plak maintainer feature must enable jj"
-            )
+            errors.append("plak maintainer feature must enable jj")
         elif "dep:opentelemetry" not in app_features.get("otel", []):
             errors.append("plak otel feature must enable the opentelemetry dependency")
         elif sorted(app_features.get("test-hooks", [])) != [
@@ -4590,10 +4840,50 @@ def _check_workspace() -> int:
         if len(libraries) != 1 or libraries[0]["name"] != "plakous_hosted":
             errors.append("plakous-hosted must expose exactly one library named plakous_hosted")
         host_features = host.metadata.get("features", {})
-        if set(host_features) != {"default", "test-support", "git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"}:
-            errors.append("plakous-hosted must expose exactly the workspace backends, test-support and product capabilities")
-        elif set(host_features.get("default", [])) != {"git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"}:
-            errors.append("plakous-hosted default must enable both workspace backends and all product capabilities")
+        if set(host_features) != {
+            "default",
+            "test-support",
+            "git-cli",
+            "jj-lib",
+            "tui",
+            "clipboard",
+            "images",
+            "js",
+            "python",
+            "mcp",
+            "web-fetch",
+            "codex",
+            "grok",
+            "claude",
+            "openai",
+            "xai-api",
+            "anthropic",
+            "openrouter",
+        }:
+            errors.append(
+                "plakous-hosted must expose exactly the workspace backends, test-support and product capabilities"
+            )
+        elif set(host_features.get("default", [])) != {
+            "git-cli",
+            "jj-lib",
+            "tui",
+            "clipboard",
+            "images",
+            "js",
+            "python",
+            "mcp",
+            "web-fetch",
+            "codex",
+            "grok",
+            "claude",
+            "openai",
+            "xai-api",
+            "anthropic",
+            "openrouter",
+        }:
+            errors.append(
+                "plakous-hosted default must enable both workspace backends and all product capabilities"
+            )
         elif host_features.get("test-support") != [
             "dep:tempfile",
             "plakous-recursive-subagents/test-support",
@@ -4615,7 +4905,9 @@ def _check_workspace() -> int:
             "full",
             "test-clock",
             "mcp",
-            "codex", "grok", "claude",
+            "codex",
+            "grok",
+            "claude",
             "openai",
             "openrouter",
             "sessions-sqlite",
@@ -4656,9 +4948,11 @@ def _check_workspace() -> int:
     for package in sorted(packages.values(), key=lambda item: item.name):
         sources, discovery_errors = package_sources(package, ROOT)
         errors.extend(discovery_errors)
-        errors.extend(validate_configuration_rules(
-            package.name, sources, configuration_rules.get(package.name, {})
-        ))
+        errors.extend(
+            validate_configuration_rules(
+                package.name, sources, configuration_rules.get(package.name, {})
+            )
+        )
 
     # Neutral packages: no provider dependency (above) and no provider name.
     for package in sorted(packages.values(), key=lambda item: item.name):
@@ -4684,7 +4978,9 @@ def _check_workspace() -> int:
 
     def package_tree_linked(package: str, needle: str) -> bool:
         output = cargo_tree_output(
-            ROOT, ["-p", package, "-e", "normal"], errors,
+            ROOT,
+            ["-p", package, "-e", "normal"],
+            errors,
         )
         return output is not None and needle in output
 
@@ -4694,7 +4990,9 @@ def _check_workspace() -> int:
                 errors.append(f"{neutral} must not link {forbidden}")
     if package_tree_linked("plak", "opentelemetry"):
         default_plak = cargo_tree_output(
-            ROOT, ["-p", "plak", "--locked", "-e", "normal"], errors,
+            ROOT,
+            ["-p", "plak", "--locked", "-e", "normal"],
+            errors,
         )
         if default_plak is not None and "opentelemetry" in default_plak:
             errors.append("default plak build must not link opentelemetry")

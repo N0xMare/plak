@@ -34,8 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ("tests/live/STATUS.md", "CHANGELOG.md", "docs/spec/**", "docs/user-guide/**")
 # Allowlisted by pattern but read by a gate; a change to one invalidates.
 EXCLUDED = {
-    "docs/spec/07-config-reference.md":
-        "bin/plak product_config tests compare the config key table and template schema with it",
+    "docs/spec/07-config-reference.md": "bin/plak product_config tests compare the config key table and template schema with it",
 }
 # Packaged into a published crate (`readme.workspace`) and read by no test.
 PACKAGE_ONLY = ("README.md",)
@@ -51,34 +50,69 @@ SELF = ("tools/release/gate_evidence.py", "tests/tooling/test_gate_evidence.py")
 REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     "bin/plak/src/carry/history/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/cli/tests.rs": (frozenset({'"docs"'}), "an MCP server id argument fixture"),
-    "bin/plak/src/tui/surface_views/tests.rs": (frozenset({'"docs"'}), "an MCP server id in help text"),
+    "bin/plak/src/tui/surface_views/tests.rs": (
+        frozenset({'"docs"'}),
+        "an MCP server id in help text",
+    ),
     "bin/plak/src/cli_output/tests.rs": (frozenset({'"STATUS"'}), "a table header"),
-    "bin/plak/src/product_config/mcp_edit/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
-    "bin/plak/src/product_config/tool_sections_tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
+    "bin/plak/src/product_config/mcp_edit/tests.rs": (
+        frozenset({'"docs"'}),
+        "an MCP server id fixture",
+    ),
+    "bin/plak/src/product_config/tool_sections_tests.rs": (
+        frozenset({'"docs"'}),
+        "an MCP server id fixture",
+    ),
     "bin/plak/src/tui/markdown_tests.rs": (frozenset({"README.md"}), "rendered transcript text"),
     "bin/plak/src/tui/ui/pilot_tests.rs": (frozenset({"README.md"}), "a tool-call path fixture"),
     "bin/plak/src/tui/ui/test_support.rs": (frozenset({"README.md"}), "rendered tool output"),
-    "crates/core/agent/src/manifest/tests.rs": (frozenset({"README.md"}), "a tool-call path fixture"),
+    "crates/core/agent/src/manifest/tests.rs": (
+        frozenset({"README.md"}),
+        "a tool-call path fixture",
+    ),
     "crates/core/agent/src/profile/tests.rs": (frozenset({'"spec"'}), "an expect message"),
     "crates/core/tools/src/environment/backend/workspace.rs": (
         frozenset({'"docs"', "*.md", "docs/spec", "docs/spec/*.md", "docs/spec/{a,b}/*.md"}),
-        "glob-prefix unit inputs, not repository paths"),
+        "glob-prefix unit inputs, not repository paths",
+    ),
     "crates/core/tools/src/exposure/lowering.rs": (frozenset({"*.md"}), "a file-type glob table"),
     "crates/core/tools/tests/integration/environment_backend.rs": (
         frozenset({'"docs"', "*.md", "docs/spec", "docs/spec/*.md", "docs/spec/01.md"}),
-        "a temporary workspace that creates its own docs/spec tree"),
+        "a temporary workspace that creates its own docs/spec tree",
+    ),
     "crates/harness/compose/tests/integration/coding_menu.rs": (
-        frozenset({"docs/spec/*.md"}), "a tool-call argument fixture"),
+        frozenset({"docs/spec/*.md"}),
+        "a tool-call argument fixture",
+    ),
     "crates/harness/compose/tests/integration/pack_registrations.rs": (
-        frozenset({"README.md"}), "a tool-call argument fixture"),
-    "bin/plak/src/refusal_text/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture; these refusal scenarios read no documentation"),
-    "crates/hosting/hosted/src/runtime/tool_facts/tests.rs": (frozenset({"README.md"}), "a conflict path fixture"),
+        frozenset({"README.md"}),
+        "a tool-call argument fixture",
+    ),
+    "bin/plak/src/refusal_text/tests.rs": (
+        frozenset({'"docs"'}),
+        "an MCP server id fixture; these refusal scenarios read no documentation",
+    ),
+    "crates/hosting/hosted/src/runtime/tool_facts/tests.rs": (
+        frozenset({"README.md"}),
+        "a conflict path fixture",
+    ),
     "crates/orchestration/recursive-subagents/src/tools/tests/registrations.rs": (
-        frozenset({'"docs"'}), "an MCP server id fixture"),
-    "eval/harbor_adapter/pmux_provenance.py": (frozenset({"README.md"}), "docstring naming eval/README.md"),
-    "eval/tests/test_eval_harbor_adapter.py": (frozenset({"README.md"}), "reads eval/README.md; not a gate"),
+        frozenset({'"docs"'}),
+        "an MCP server id fixture",
+    ),
+    "eval/harbor_adapter/pmux_provenance.py": (
+        frozenset({"README.md"}),
+        "docstring naming eval/README.md",
+    ),
+    "eval/tests/test_eval_harbor_adapter.py": (
+        frozenset({"README.md"}),
+        "reads eval/README.md; not a gate",
+    ),
     "tools/dev/api_model_census.py": (frozenset({'"docs"', "*.md"}), "census fixture directories"),
-    "tools/prompts/native_compare_prompts.py": (frozenset({"README.md"}), "writes a scratch README"),
+    "tools/prompts/native_compare_prompts.py": (
+        frozenset({"README.md"}),
+        "writes a scratch README",
+    ),
     "tests/fixtures/facade-consumer/src/inventory.rs": (frozenset({'"spec"'}), "an expect message"),
     "tests/live/features.py": (frozenset({"README.md"}), "a scenario repository file; docstring"),
     "tests/live/jobs.py": (frozenset({"README.md"}), "a scenario repository file"),
@@ -87,18 +121,42 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     "tests/live/soak.py": (frozenset({'"docs"'}), "a soak task name"),
     "tests/tooling/test_api_model_census.py": (frozenset({"*.md"}), "census fixture pages"),
     "tests/tooling/test_build_plak.py": (
-        frozenset({'"docs"'}), "a temporary parent for the copied reference home, not spec or the user guide"),
+        frozenset({'"docs"'}),
+        "a temporary parent for the copied reference home, not spec or the user guide",
+    ),
     "tests/tooling/test_changed_packages.py": (
-        frozenset({"docs/spec/05-testing-and-evidence.md"}), "a path the mapper classifies, never opened"),
-    "tests/tooling/test_policy_validators.py": (frozenset({"README.md"}), "a temporary package fixture"),
+        frozenset({"docs/spec/05-testing-and-evidence.md"}),
+        "a path the mapper classifies, never opened",
+    ),
+    "tests/tooling/test_policy_validators.py": (
+        frozenset({"README.md"}),
+        "a temporary package fixture",
+    ),
     "tests/tooling/test_publish.py": (
-        frozenset({"CHANGELOG.md", "README.md", "STATUS.md", "docs/spec/01-plakous-library.md", "docs/spec/01.md",
-                   "docs/spec/05.md", "docs/spec/07-config-reference.md", "docs/user-guide/cli.md"}),
-        "commits to a throwaway fixture repository that exercise this rule"),
+        frozenset(
+            {
+                "CHANGELOG.md",
+                "README.md",
+                "STATUS.md",
+                "docs/spec/01-plakous-library.md",
+                "docs/spec/01.md",
+                "docs/spec/05.md",
+                "docs/spec/07-config-reference.md",
+                "docs/user-guide/cli.md",
+            }
+        ),
+        "commits to a throwaway fixture repository that exercise this rule",
+    ),
     "tests/tooling/test_publish_shape.py": (frozenset({"README.md"}), "a temporary source tree"),
     "tests/tooling/test_release.py": (frozenset({"README.md"}), "a release-archive fixture"),
-    "tools/gate/check_workspace.py": (frozenset({"README.md"}), "an expected manifest readme value"),
-    "vendor/monty-typeshed/src/lib.rs": (frozenset({"README.md"}), "the vendored crate's own README"),
+    "tools/gate/check_workspace.py": (
+        frozenset({"README.md"}),
+        "an expected manifest readme value",
+    ),
+    "vendor/monty-typeshed/src/lib.rs": (
+        frozenset({"README.md"}),
+        "the vendored crate's own README",
+    ),
 }
 # Gate readers of an excluded path: the exact path each one reads.
 EXCLUDED_READERS = {
@@ -143,7 +201,9 @@ def classify(path: str) -> str:
 
 
 def git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+    ).stdout
 
 
 def read_evidence(path: Path) -> str:
@@ -155,7 +215,9 @@ def read_evidence(path: Path) -> str:
 
 def hygiene_findings(root: Path, paths: list[str]) -> list[str]:
     """The tracked-file hygiene scan of check_workspace.py over `paths`."""
-    spec = importlib.util.spec_from_file_location("check_workspace", root / "tools/gate/check_workspace.py")
+    spec = importlib.util.spec_from_file_location(
+        "check_workspace", root / "tools/gate/check_workspace.py"
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError("cannot load tools/gate/check_workspace.py")
     workspace = importlib.util.module_from_spec(spec)
@@ -177,7 +239,9 @@ def tree_delta(root: Path, evidence: str, head: str) -> list[tuple[str, str, str
     `diff-tree` with `--ignore-submodules=none` reads no porcelain diff
     configuration, so user settings cannot hide a gitlink or other change.
     """
-    raw = git(root, "diff-tree", "-r", "--no-renames", "-z", "--ignore-submodules=none", evidence, head)
+    raw = git(
+        root, "diff-tree", "-r", "--no-renames", "-z", "--ignore-submodules=none", evidence, head
+    )
     fields = raw.split("\0")
     entries: list[tuple[str, str, str]] = []
     index = 0
@@ -193,21 +257,31 @@ def verify(root: Path, target_dir: Path) -> tuple[bool, list[str]]:
     head = git(root, "rev-parse", "HEAD^{tree}").strip()
     evidence = read_evidence(target_dir / "gate-evidence" / "full")
     if not evidence:
-        return False, [f"no passing `just full` evidence for tree {head} in {target_dir / 'gate-evidence' / 'full'}"]
+        return False, [
+            f"no passing `just full` evidence for tree {head} in {target_dir / 'gate-evidence' / 'full'}"
+        ]
     if evidence == head:
         return True, [f"evidence: `just full` passed on tree {head} (HEAD)"]
-    unknown = f"no passing `just full` evidence for tree {head}: evidence names unknown tree {evidence!r}"
+    unknown = (
+        f"no passing `just full` evidence for tree {head}: evidence names unknown tree {evidence!r}"
+    )
     if not OBJECT_ID.fullmatch(evidence):
         return False, [unknown]
-    probe = subprocess.run(["git", "cat-file", "-t", "--end-of-options", evidence],
-                           cwd=root, capture_output=True, text=True)
+    probe = subprocess.run(
+        ["git", "cat-file", "-t", "--end-of-options", evidence],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
     if probe.returncode != 0 or probe.stdout.strip() != "tree":
         return False, [unknown]
     entries = tree_delta(root, evidence, head)
     lines = [f"evidence: `just full` passed on tree {evidence}; HEAD tree {head}"]
     if not entries:
-        return False, lines + [f"no passing `just full` evidence for tree {head}: the trees differ but no delta "
-                               "was read; rerun `just full`"]
+        return False, lines + [
+            f"no passing `just full` evidence for tree {head}: the trees differ but no delta "
+            "was read; rerun `just full`"
+        ]
     delta = [path for _, _, path in entries]
     classes = {path: classify(path) for path in delta}
     lines.extend(f"  delta {classes[path]}: {path}" for path in delta)
@@ -225,7 +299,9 @@ def verify(root: Path, target_dir: Path) -> tuple[bool, list[str]]:
         ]
     findings = hygiene_findings(root, delta)
     if findings:
-        return False, lines + findings + [f"no passing `just full` evidence for tree {head}: the delta fails hygiene"]
+        return False, lines + findings + [
+            f"no passing `just full` evidence for tree {head}: the delta fails hygiene"
+        ]
     if any(classes[path] == "package" for path in delta):
         package = read_evidence(target_dir / "gate-evidence" / "package")
         if package != head:
@@ -270,11 +346,16 @@ def audit(root: Path, files: list[str]) -> list[str]:
         comment = RUST_COMMENT if relative.endswith(".rs") else HASH_COMMENT
         reviewed, _reason = REVIEWED_REFERENCES.get(relative, (frozenset(), ""))
         for number, line in enumerate(text.splitlines(), start=1):
-            if comment.match(line) or (relative.endswith(".toml") and MANIFEST_README_KEY.match(line)):
+            if comment.match(line) or (
+                relative.endswith(".toml") and MANIFEST_README_KEY.match(line)
+            ):
                 continue
-            plain = [match for match in REFERENCE.finditer(line) if "://" not in line[: match.start()]]
+            plain = [
+                match for match in REFERENCE.finditer(line) if "://" not in line[: match.start()]
+            ]
             components = [
-                match for match in COMPONENT.finditer(line)
+                match
+                for match in COMPONENT.finditer(line)
                 if "://" not in match.group(0)
                 and not any(match.start() <= other.start() < match.end() for other in plain)
             ]
@@ -291,14 +372,18 @@ def audit(root: Path, files: list[str]) -> list[str]:
         # Multi-line include_str!(concat!(...)) forms read across lines.
         joined = " ".join(text.split())
         if reads_root_readme(relative, joined, files):
-            errors.append(f"{relative}: reads the root README.md; PACKAGE_ONLY assumes no gate but packaging does")
+            errors.append(
+                f"{relative}: reads the root README.md; PACKAGE_ONLY assumes no gate but packaging does"
+            )
     listed = set(files)
     for relative, (texts, _reason) in sorted(REVIEWED_REFERENCES.items()):
         if relative not in listed:
             continue
         for named in sorted(texts):
             if (relative, named) not in seen:
-                errors.append(f"REVIEWED_REFERENCES entry {relative}: {named!r} no longer occurs; drop it")
+                errors.append(
+                    f"REVIEWED_REFERENCES entry {relative}: {named!r} no longer occurs; drop it"
+                )
     return errors
 
 

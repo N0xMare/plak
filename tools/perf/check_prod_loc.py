@@ -64,45 +64,63 @@ RESPONSIBILITIES = (
 RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("store", (("plakous-store", "src/"),)),
     ("auth", (("plakous-auth", "src/"),)),
-    ("auth", (
-        ("plakous-openai", "src/native_auth.rs"),
-        ("plakous-openai", "src/native_auth/"),
-        ("plakous-anthropic", "src/native_auth.rs"),
-        ("plakous-anthropic", "src/native_auth/"),
-        ("plakous-xai", "src/native_auth.rs"),
-        ("plakous-xai", "src/native_auth/"),
-    )),
-    ("event/presentation", (
-        ("plakous-agent", "src/event/"),
-        ("plakous-agent", "src/telemetry.rs"),
-        ("plakous-model", "src/event.rs"),
-        ("plakous-model", "src/diagnostic.rs"),
-    )),
-    ("checkpoint/rehydration", (
-        ("plakous-agent", "src/checkpoint_bundle.rs"),
-        ("plakous-agent", "src/checkpoint_bundle/"),
-        ("plakous-agent", "src/recovery_scope.rs"),
-        ("plakous-agent", "src/manifest.rs"),
-        ("plakous-agent", "src/manifest/"),
-        ("plakous-agent", "src/rehydration.rs"),
-    )),
-    ("session/facade", (
-        ("plakous-agent", "src/facade_support.rs"),
-        ("plakous-agent", "src/session.rs"),
-        ("plakous", "src/"),
-    )),
-    ("family kernels", (
-        ("plakous-anthropic", "src/"),
-        ("plakous-chat-completions", "src/"),
-        ("plakous-exchange", "src/"),
-        ("plakous-messages", "src/"),
-        ("plakous-responses", "src/"),
-    )),
-    ("provider glue", (
-        ("plakous-openai", "src/"),
-        ("plakous-openrouter", "src/"),
-        ("plakous-xai", "src/"),
-    )),
+    (
+        "auth",
+        (
+            ("plakous-openai", "src/native_auth.rs"),
+            ("plakous-openai", "src/native_auth/"),
+            ("plakous-anthropic", "src/native_auth.rs"),
+            ("plakous-anthropic", "src/native_auth/"),
+            ("plakous-xai", "src/native_auth.rs"),
+            ("plakous-xai", "src/native_auth/"),
+        ),
+    ),
+    (
+        "event/presentation",
+        (
+            ("plakous-agent", "src/event/"),
+            ("plakous-agent", "src/telemetry.rs"),
+            ("plakous-model", "src/event.rs"),
+            ("plakous-model", "src/diagnostic.rs"),
+        ),
+    ),
+    (
+        "checkpoint/rehydration",
+        (
+            ("plakous-agent", "src/checkpoint_bundle.rs"),
+            ("plakous-agent", "src/checkpoint_bundle/"),
+            ("plakous-agent", "src/recovery_scope.rs"),
+            ("plakous-agent", "src/manifest.rs"),
+            ("plakous-agent", "src/manifest/"),
+            ("plakous-agent", "src/rehydration.rs"),
+        ),
+    ),
+    (
+        "session/facade",
+        (
+            ("plakous-agent", "src/facade_support.rs"),
+            ("plakous-agent", "src/session.rs"),
+            ("plakous", "src/"),
+        ),
+    ),
+    (
+        "family kernels",
+        (
+            ("plakous-anthropic", "src/"),
+            ("plakous-chat-completions", "src/"),
+            ("plakous-exchange", "src/"),
+            ("plakous-messages", "src/"),
+            ("plakous-responses", "src/"),
+        ),
+    ),
+    (
+        "provider glue",
+        (
+            ("plakous-openai", "src/"),
+            ("plakous-openrouter", "src/"),
+            ("plakous-xai", "src/"),
+        ),
+    ),
     # The harness layer: model-visible instruction text and its assembler.
     # Not "runtime" -- nothing here dispatches; it is the text a turn carries.
     ("prompts", (("plakous-prompts", "src/"),)),
@@ -110,24 +128,30 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("compose", (("plakous-compose", "src/"),)),
     # The coding packs, the MCP client pack and the hosted-retrieval wrappers:
     # executors, menus, and their own model-visible text.
-    ("tool packs", (
-        ("plakous-mcp", "src/"),
-        ("plakous-tool-files", "src/"),
-        ("plakous-tool-plan", "src/"),
-        ("plakous-tool-process", "src/"),
-        ("plakous-tool-search", "src/"),
-        ("plakous-tool-web", "src/"),
-    )),
-    ("runtime", (
-        ("plakous-agent", "src/"),
-        ("plakous-attempt", "src/"),
-        ("plakous-cell", "src/"),
-        ("plakous-js-runtime", "src/"),
-        ("plakous-py-worker", "src/"),
-        ("plakous-http", "src/"),
-        ("plakous-model", "src/"),
-        ("plakous-tools", "src/"),
-    )),
+    (
+        "tool packs",
+        (
+            ("plakous-mcp", "src/"),
+            ("plakous-tool-files", "src/"),
+            ("plakous-tool-plan", "src/"),
+            ("plakous-tool-process", "src/"),
+            ("plakous-tool-search", "src/"),
+            ("plakous-tool-web", "src/"),
+        ),
+    ),
+    (
+        "runtime",
+        (
+            ("plakous-agent", "src/"),
+            ("plakous-attempt", "src/"),
+            ("plakous-cell", "src/"),
+            ("plakous-js-runtime", "src/"),
+            ("plakous-py-worker", "src/"),
+            ("plakous-http", "src/"),
+            ("plakous-model", "src/"),
+            ("plakous-tools", "src/"),
+        ),
+    ),
 )
 # Host and binary sources share the product responsibility in this report.
 LAYER_RESPONSIBILITIES: dict[str, str] = {layer: "product" for layer in ABOVE_FACADE_LAYERS}
@@ -290,7 +314,7 @@ def production_line_mask(lines: list[str]) -> list[bool]:
         test_module = False
         if test_depth is None and INLINE_MODULE.search(code):
             start = _attribute_run_start(blanked, index)
-            attributes = "\n".join(blanked[start:index + 1])
+            attributes = "\n".join(blanked[start : index + 1])
             test_module = bool(MOD_TESTS.search(code) or CFG_TEST.search(attributes))
         if test_depth is None and test_module:
             test_depth = depth
@@ -391,7 +415,11 @@ def responsibility_for(package: Package, relative: str) -> str:
         for owner, prefix in sources:
             if owner != package.name:
                 continue
-            if prefix == "" or (prefix.endswith("/") and relative.startswith(prefix)) or relative == prefix:
+            if (
+                prefix == ""
+                or (prefix.endswith("/") and relative.startswith(prefix))
+                or relative == prefix
+            ):
                 matches.append(responsibility)
                 break
     if not matches:
@@ -435,7 +463,10 @@ def responsibility_report(workspace: Workspace) -> dict[str, object]:
             "package-keyed exact-file-or-directory-prefix over production Rust sources"
         ),
         "rules": [
-            {"responsibility": responsibility, "sources": [f"{owner}:{prefix}" for owner, prefix in paths]}
+            {
+                "responsibility": responsibility,
+                "sources": [f"{owner}:{prefix}" for owner, prefix in paths],
+            }
             for responsibility, paths in RESPONSIBILITY_RULES
         ],
         "layer_rules": dict(LAYER_RESPONSIBILITIES),
