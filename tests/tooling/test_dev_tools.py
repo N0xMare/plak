@@ -125,10 +125,15 @@ raise SystemExit(0)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("Development prerequisites are available.", result.stdout)
 
-    def test_old_ruff_is_rejected(self):
-        result = self.run_script("check", env=dict(self.env, FAKE_RUFF_VERSION="0.17.2"))
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("ruff 0.17.3 or newer is required", result.stderr)
+    def test_old_and_newer_ruff_are_rejected(self):
+        for version in ("0.17.2", "0.17.4", "0.18.0"):
+            with self.subTest(version=version):
+                result = self.run_script("check", env=dict(self.env, FAKE_RUFF_VERSION=version))
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("ruff 0.17.3 is required exactly", result.stderr)
+        pinned = self.run_script("check")
+        self.assertEqual(pinned.returncode, 0, pinned.stderr)
+        self.assertIn('required-version = "==0.17.3"', (ROOT / "pyproject.toml").read_text())
 
     def test_old_deny_fails_before_policy_check(self):
         result = self.run_script("deny", env=dict(self.env, FAKE_DENY_VERSION="0.18.999"))

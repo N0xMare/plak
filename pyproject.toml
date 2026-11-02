@@ -1,6 +1,7 @@
 # Tool configuration only. This file is not a Python project: do not add a
 # project table. eval/ stays its own project (`uv run --project eval`).
 [tool.ruff]
+required-version = "==0.17.3"
 target-version = "py311"
 line-length = 100
 extend-exclude = ["vendor", "eval/datasets"]

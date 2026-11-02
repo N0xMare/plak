@@ -697,9 +697,12 @@ cargo-nextest already on `PATH`. The prefix sits outside `target/` so
 `.dev-tools/build`. Installation also prefetches all locked public
 compile-contract fixture dependencies (chapter 05 §1.1), so subsequent contract
 gates can stay offline. Every `tools/gate/dev-check.sh` tier requires at least
-the pinned cargo-nextest and ruff versions before it runs anything, and
-`just dev-tools deny` requires at least the pinned cargo-deny; a newer tool
-already on `PATH` is accepted.
+the pinned cargo-nextest version before it runs anything, and
+`just dev-tools deny` requires at least the pinned cargo-deny; a newer
+cargo-nextest or cargo-deny already on `PATH` is accepted. Ruff is the
+exception: `pyproject.toml` sets `required-version = "==0.17.3"` and
+`dev-tools.sh check` requires that exact ruff, because a newer formatter
+can rewrite the tree the pin does not.
 
 ### 6.1 Cargo-native product build
 

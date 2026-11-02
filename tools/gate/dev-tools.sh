@@ -31,12 +31,23 @@ require_version() {
   fi
 }
 
+# Ruff is exact: a newer formatter can rewrite the tree the pin does not.
+require_exact_version() {
+  local label="$1" expected="$2" output
+  shift 2
+  output="$("$@" 2>/dev/null)" || fail "$label is unavailable; run just dev-tools install"
+  [[ "$output" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]] || fail "$label returned an unrecognized version; run just dev-tools install"
+  if [[ "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" != "$expected" ]]; then
+    fail "$label $expected is required exactly; run just dev-tools install"
+  fi
+}
+
 case "${1:-check}" in
   check)
     [[ $# -le 1 ]] || fail 'usage: dev-tools.sh check|install|deny'
     require_python
     require_version cargo-nextest "$nextest_version" cargo nextest --version
-    require_version ruff "$ruff_version" ruff --version
+    require_exact_version ruff "$ruff_version" ruff --version
     printf 'Development prerequisites are available.\n'
     ;;
   deny)
