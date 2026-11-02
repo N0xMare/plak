@@ -737,6 +737,54 @@ fn holder_and_sqlite_locks_refuse_before_any_directory_is_removed() {
 }
 
 #[test]
+fn free_local_holder_evidence_of_every_format_is_pruned_and_foreign_evidence_refuses() {
+    let host = rustix::system::uname()
+        .nodename()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let (_root, paths, old) = fixture();
+    let locks = old.join("runtime.sqlite3-holders");
+    fs::create_dir(&locks).unwrap();
+    fs::write(locks.join("s.b.lock"), format!("plak-holder-v1 {host} 1\n")).unwrap();
+    fs::write(
+        locks.join("t.b.lock"),
+        format!("plak-holder-v2 {host} 2 0\nfence 1\n"),
+    )
+    .unwrap();
+    fs::write(
+        locks.join("u.b.holder"),
+        format!("plak-holder-v3 {host} 3-00000000000000aa\nfence 1\n"),
+    )
+    .unwrap();
+    fs::write(locks.join("3-00000000000000aa.lock"), "").unwrap();
+    fs::write(
+        locks.join("v.b.holder"),
+        "plak-holder-v3 some-other-host 4-00000000000000aa\nfence 1\n",
+    )
+    .unwrap();
+    assert!(
+        prune_legacy(&paths)
+            .unwrap_err()
+            .contains("is local and unused")
+    );
+    assert!(old.exists());
+    fs::remove_file(locks.join("v.b.holder")).unwrap();
+    // A temporary record is not evidence of its own; its writer's lock is.
+    fs::write(locks.join("u.b.holder.3-00000000000000aa.tmp"), "partial").unwrap();
+    let writer = fs::File::open(locks.join("3-00000000000000aa.lock")).unwrap();
+    rustix::fs::flock(
+        &writer,
+        rustix::fs::FlockOperation::NonBlockingLockExclusive,
+    )
+    .unwrap();
+    assert!(prune_legacy(&paths).unwrap_err().contains("holder lock"));
+    drop(writer);
+    assert_eq!(prune_legacy(&paths).unwrap(), 1);
+    assert!(!old.exists());
+}
+
+#[test]
 fn flat_files_must_pass_mode_and_database_lock_checks_before_any_removal() {
     use std::os::unix::fs::PermissionsExt as _;
     let (_root, paths, old) = fixture();

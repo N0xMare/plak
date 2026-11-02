@@ -1149,7 +1149,8 @@ acquisition and the `recover_*` lookups append nothing; an exact recovery of an
 accepted mutation returns the sequence its record already holds.
 
 `SessionStore::release_many` releases exact captured leases; SQLite validates
-all grants and releases them in one transaction before dropping holder locks.
+all grants and releases them in one transaction before removing their holder
+records.
 An invalid grant rolls back the whole batch. The facade exposes this as
 `sessions::abandon_and_release` and `OpenedSession::abandon_and_release` for
 host-owned related runtime handles; the core agent still owns no topology.
@@ -1282,6 +1283,50 @@ answer (busy, unavailable or past its deadline) keeps that error and is not
 reported as a takeover. Start admission that refuses
 because authority was lost or expired is a definite `Session` failure, because
 nothing was started; only a loss after dispatch remains `OutcomeUnknown`.
+
+**Holder claims (`plak-holder-v3`)** are the SQLite store's host-local proof
+that a lease holder is gone (§13.1); they are evidence only, never lease
+authority, which stays the database fence. They live in the directory
+`<database>-holders` beside the database and are a state-directory file
+format, not database state. The store creates that directory mode `0700` and
+uses it only while it is a real directory owned by the effective user, with
+the owner write bit and no group or other write bit; otherwise claims are
+unavailable and the clock rule applies. Each process that takes a branch holds an exclusive `flock` on
+`<identity>.lock`, where the identity is the decimal process id, a hyphen and
+16 random lowercase hex digits drawn per process image (so a `/reload` exec is
+a new identity), opened close-on-exec so a spawned child never inherits it.
+Every store of the process using that directory (by device and inode) shares
+the one lock, which is released when the last of them closes. A record is
+published only while that lock is the file its path names in the directory as
+it is now; a directory or lock file replaced under a live process is locked
+again before anything is published into it. Each grant the
+process receives has a record `<session>.<branch>.holder`, mode `0600`,
+published whole by creating `<session>.<branch>.holder.<identity>.tmp`
+exclusively without following links and renaming it over the record; it is
+exactly three lines, `plak-holder-v3 <host> <identity>`, `fence <n>` and
+`owner <run id>`. Locks and records are opened without following links and
+without blocking, and anything that is not a regular file is ignored. **A
+record proves only its own grant:** proof requires the record's fence and
+owner to equal the active lease's. A fence alone does not name a grant,
+because a grant that never committed leaves its fence unconsumed. The owner
+narrows it to one runtime's grants, but an owner is not unique to a process: a
+create's owner and fence are fixed by its operation identity, and a fork's
+target branch takes its source's owner under fence 1, so a create or fork
+retried after a crash can be the same grant as the attempt that died. A claim therefore replaces
+or removes the record it finds; when it can do neither and that record names
+this grant under another process, the grant is refused
+(`BackendUnavailable`) and its transaction rolled back, because committing it
+would leave proof that its live holder is gone. Release and a
+superseded claim's forfeit remove a record only while it still names this
+process and the claim's grant; archive and delete remove every record of the
+session. The first claim a process makes in a directory schedules a sweep,
+run after the granting transaction: a free process lock that no record names,
+and a temporary record whose writer's lock is free or gone, are removed; a free
+lock a record still names is kept as the proof the next opener needs.
+Cross-build safety comes from the state key, not from the file format: the
+directory lives in the build's keyed state directory (chapter 02 §2.5), and a
+holder-format change must ride a state-key bump, so builds with different
+holder formats never share holder files.
 
 The facade grants a 30 s session lease. `test-hooks` builds may set
 `PLAK_TEST_SESSION_LEASE_SECONDS` to a whole second from 1 through 30; other
@@ -10946,29 +10991,31 @@ or one whose identity was never recorded, and the wrong one for the common case:
 a `plak` that died on the machine in front of you leaves a session nothing is
 using, and waiting out its lease reads as a session that will not open.
 
-So a holder also takes an exclusive advisory lock on a file beside its database,
-under the product home and with the store's own permission discipline, never in
-the workspace, and holds it for the life of the lease. The kernel releases that
-lock when the process ends, however it ends, so a later acquire that can take it
-has proof rather than an inference, and a recycled process identifier cannot
-make that proof ambiguous. Create, fork and acquire all take the claim with the
-lease they grant. A claimant writes its record only after it holds the lock, and
-the record names the fence of the grant it holds; a claim that loses to a live
-lock leaves the other holder's record untouched. Proof is a free lock whose
-record names this host, another process and exactly the active lease's fence. A
-held lock, a file naming another host, an empty or unreadable record, a record
-naming an earlier grant (a superseded holder whose successor never got the lock),
-or a branch this store itself holds is not proof, and each keeps the lease's
+So a holder process also takes one exclusive advisory lock on a file of its
+own beside its database, under the product home and with the store's own
+permission discipline, never in the workspace, and holds it while it has the
+store open; every grant it receives gets a record naming this host, that
+process and the grant's fence and owner (the holder-claim format is §5.1). The
+kernel releases the lock when the process ends, however it ends, so a later
+acquire that finds a record naming exactly the active grant and can take the
+lock it names has proof rather than an inference, and a recycled process
+identifier cannot make that proof ambiguous. Create, fork and acquire all
+record the claim with the lease they grant, before the grant commits; a claim
+replaces whatever record the branch had, and a claim that cannot publish its
+record removes the old one. Proof is a free process lock named by a record
+that names this host, another process and exactly the active lease's fence and
+owner. A held lock, a missing record or lock file, a record naming another
+host, an empty or unreadable record, a record naming another grant, or a
+branch this process itself holds is not proof, and each keeps the lease's
 clock exactly as it was, with the refusal saying that the holder could not be
 confirmed gone and roughly how long the wait is. A store that sees its grant
-superseded on renew, revive or release drops its claim for that grant.
-Each held claim keeps one descriptor open, so a store holds at most 128 claims
-at once; a grant past that bound skips its claim exactly like a claim that fails
-to open or lock, keeping the lease's clock rule, rather than letting held leases
-exhaust the process's descriptor limit and starve the database's own temporary
-files.
+superseded on renew, revive or release drops its claim for that grant and
+leaves its successor's record alone. Records hold no descriptor: a process
+keeps one descriptor per store directory however many branches it holds, so
+claims have no count bound and never fall back to the clock for being
+numerous.
 
-The lock files are not database state. A missing holder lock file establishes
+The holder files are not database state. A missing holder record establishes
 no proof of owner loss, so acquisition preserves the lease's clock-based rule.
 
 **It also covers a turn cut while one of its tools was running.** That is the

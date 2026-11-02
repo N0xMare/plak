@@ -37,7 +37,7 @@ tracing = { workspace = true, optional = true }
 futures-channel = { workspace = true, optional = true }
 plakous-agent.workspace = true
 rusqlite = { workspace = true, optional = true }
-rustix = { workspace = true, features = ["fs", "system"] }
+rustix = { workspace = true, features = ["fs", "process", "system"] }
 nix = { workspace = true, features = ["time", "process"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

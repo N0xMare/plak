@@ -41,7 +41,7 @@ tracing-subscriber.workspace = true
 plakous = { workspace = true, features = ["sessions-sqlite"] }
 nix.workspace = true
 rusqlite.workspace = true
-rustix = { workspace = true, features = ["event", "fs", "process", "termios", "time"] }
+rustix = { workspace = true, features = ["event", "fs", "process", "system", "termios", "time"] }
 # The TUI module's terminal stack: match Ratatui's current Crossterm backend so
 # the product carries one terminal stack.
 crossterm = { version = "0.29", default-features = false, features = ["events"], optional = true }

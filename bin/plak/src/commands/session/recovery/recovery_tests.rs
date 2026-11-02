@@ -2,21 +2,50 @@ use super::*;
 use plakous_hosted::topology_runtime::test_support::bootstrap;
 
 #[test]
-fn holder_status_probe_is_read_only_and_distinguishes_locked_from_abandoned() {
+fn holder_status_probe_is_read_only_and_distinguishes_live_absent_and_elsewhere() {
     let home = tempfile::tempdir().unwrap();
-    let path = home.path().join("holder.lock");
-    assert!(!holder_is_live(&path).unwrap());
-    assert!(!path.exists());
-    let holder = std::fs::File::create(&path).unwrap();
-    assert!(!holder_is_live(&path).unwrap());
-    rustix::fs::flock(&holder, rustix::fs::FlockOperation::LockExclusive).unwrap();
-    assert!(holder_is_live(&path).unwrap());
-    drop(holder);
-    assert!(!holder_is_live(&path).unwrap());
-    std::fs::remove_file(&path).unwrap();
-    assert!(!holder_is_live(&path).unwrap());
-    assert!(holder_is_live(&home.path().join("missing-parent/holder.lock")).is_ok());
-    assert!(!home.path().join("missing-parent").exists());
+    let record = home.path().join("session.branch.holder");
+    let host = rustix::system::uname()
+        .nodename()
+        .to_string_lossy()
+        .into_owned();
+    let write = |host: &str, pid: u32| {
+        std::fs::write(
+            &record,
+            format!("plak-holder-v3 {host} {pid}-00000000000000aa\nfence 1\nowner o\n"),
+        )
+        .unwrap();
+    };
+    assert_eq!(observe_holder(&record).unwrap(), HolderObservation::Absent);
+    assert!(!record.exists());
+
+    write(&host, std::process::id());
+    assert_eq!(observe_holder(&record).unwrap(), HolderObservation::Live);
+
+    let mut exited = std::process::Command::new("true").spawn().unwrap();
+    let gone = exited.id();
+    exited.wait().unwrap();
+    write(&host, gone);
+    assert_eq!(observe_holder(&record).unwrap(), HolderObservation::Absent);
+
+    write("some-other-host", std::process::id());
+    assert_eq!(
+        observe_holder(&record).unwrap(),
+        HolderObservation::Elsewhere
+    );
+
+    for unnamed in ["", "plak-holder-v2 host 4321 0\nfence 1\n"] {
+        std::fs::write(&record, unnamed).unwrap();
+        assert_eq!(
+            observe_holder(&record).unwrap(),
+            HolderObservation::Absent,
+            "{unnamed:?}"
+        );
+    }
+    let missing = home.path().join("missing-parent");
+    assert!(observe_holder(&missing.join("session.branch.holder")).is_ok());
+    assert!(!missing.exists());
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 1);
 }
 
 #[test]

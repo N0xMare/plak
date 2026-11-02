@@ -20,6 +20,11 @@ use crate::home::paths::PlakPaths;
 
 /// This build's state directory name. Derived, never hand-bumped: a change to
 /// any persisted format moves the key with it.
+///
+/// The runtime store's holder-claim files (`runtime.sqlite3-holders/`) have
+/// no version of their own in the key: builds of different holder formats are
+/// kept apart only by this key, so a holder-format change must ship with a
+/// bump of one of these four versions.
 #[must_use]
 pub fn state_key() -> String {
     format!(
@@ -759,28 +764,54 @@ fn probe_state_locks(
         .and_then(Path::file_name)
         .is_some_and(|name| name.to_string_lossy().ends_with("-holders"))
     {
-        let mut file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|error| format!("cannot prove legacy state is unused: {error}"))?;
-        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
-            .map_err(|_| format!("legacy state {} is in use (holder lock)", path.display()))?;
-        let mut identity = String::new();
-        file.read_to_string(&mut identity)
-            .map_err(|error| error.to_string())?;
-        let uname = rustix::system::uname();
-        let host = uname
-            .nodename()
-            .to_str()
-            .map_err(|error| error.to_string())?;
-        if !identity.is_empty() && !identity.starts_with(&format!("plak-holder-v1 {host} ")) {
-            return Err(format!(
-                "cannot prove legacy holder {} is local and unused",
-                path.display()
-            ));
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // A temporary record is published by a writer holding its process
+        // lock, which this probe locks with every other lock file, so a
+        // temporary record whose writer is gone is simply removable.
+        let temporary = name
+            .strip_suffix(".tmp")
+            .and_then(|stem| stem.rsplit_once('.'))
+            .is_some_and(|(stem, _writer)| stem.ends_with(".holder"));
+        if !temporary {
+            // A record is evidence, not a lock: it is read, never held open.
+            let record = name.ends_with(".holder");
+            let mut file = fs::OpenOptions::new()
+                .read(true)
+                .write(!record)
+                .open(path)
+                .map_err(|error| format!("cannot prove legacy state is unused: {error}"))?;
+            if !record {
+                rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+                    .map_err(|_| {
+                        format!("legacy state {} is in use (holder lock)", path.display())
+                    })?;
+            }
+            let mut identity = String::new();
+            file.read_to_string(&mut identity)
+                .map_err(|error| error.to_string())?;
+            let uname = rustix::system::uname();
+            let host = uname
+                .nodename()
+                .to_str()
+                .map_err(|error| error.to_string())?;
+            // Every holder format names its host after the format tag;
+            // process locks are empty.
+            let local = ["plak-holder-v1", "plak-holder-v2", "plak-holder-v3"]
+                .iter()
+                .any(|format| identity.starts_with(&format!("{format} {host} ")));
+            if !identity.is_empty() && !local {
+                return Err(format!(
+                    "cannot prove legacy holder {} is local and unused",
+                    path.display()
+                ));
+            }
+            if !record {
+                holders.push(file);
+            }
         }
-        holders.push(file);
     }
     if path
         .extension()

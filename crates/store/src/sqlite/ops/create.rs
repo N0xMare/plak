@@ -173,7 +173,7 @@ pub(in super::super) fn create(
         .map_err(map_sqlite)?,
     )?;
     meta(&tx, 1, 1)?;
-    super::lease::commit_claimed(tx, &mut b.holders, r.session(), lease_fence)?;
+    super::lease::commit_claimed(tx, &mut b.holders, r.session(), lease_fence, r.owner())?;
     #[cfg(test)]
     if r.continuation().is_some() {
         test_crash_cut("carry-after-commit");

@@ -33,7 +33,7 @@ pub(in super::super) fn acquire(
         // nothing and reads to the next user as a session that will not open.
         // Anything short of proof keeps the clock. Probed inside the writer's
         // transaction, which serializes it against every other reclaim.
-        if !b.holders.holder_is_gone(r.session(), current.fence()) {
+        if !b.holders.holder_is_gone(current) {
             tx.commit().map_err(map_sqlite)?;
             return Err(SessionStoreError::LeaseHeld);
         }
@@ -51,28 +51,38 @@ pub(in super::super) fn acquire(
     );
     write_active(&tx, &value, None)?;
     bump(&tx)?;
-    commit_claimed(tx, &mut b.holders, r.session(), fence)?;
+    commit_claimed(tx, &mut b.holders, r.session(), fence, r.owner())?;
     Ok(value)
 }
 
-/// Commits a transaction that grants `session` a lease under `fence`, holding
-/// the branch's host-local claim from before the commit.
+/// Commits a transaction that grants `session` a lease under `fence` to
+/// `owner`, holding the branch's host-local claim from before the commit.
 ///
-/// Claimed first, so the lock and the lease become visible together. Claiming
-/// afterwards would leave a window in which the lease is live but its lock is
-/// not yet held, which is exactly the state a concurrent reclaim reads as a
-/// dead holder. A grant that fails to commit gives its claim back.
+/// Claimed first, so the record and the lease become visible together: a
+/// holder that dies the instant its grant commits is already provably gone.
+/// A grant that fails to commit gives its claim back. A claim refused because
+/// a dead attempt's record of this same grant cannot be removed rolls the
+/// grant back: committed, it would be provably gone the moment it began. The
+/// first claim of a process sweeps the holder directory, after the
+/// transaction.
 pub(in super::super) fn commit_claimed(
     tx: Transaction<'_>,
     holders: &mut crate::holder::HolderClaims,
     session: SessionRef,
     fence: NonZeroU64,
+    owner: RunId,
 ) -> Result<(), SessionStoreError> {
-    holders.claim(session, fence);
-    tx.commit().map_err(|error| {
-        holders.release(session);
-        map_sqlite(error)
-    })
+    let committed = if holders.claim(session, fence, owner).is_ok() {
+        tx.commit().map_err(|error| {
+            holders.release(session);
+            map_sqlite(error)
+        })
+    } else {
+        drop(tx);
+        Err(SessionStoreError::BackendUnavailable)
+    };
+    holders.sweep_if_pending();
+    committed
 }
 
 pub(in super::super) fn renew(
@@ -122,7 +132,7 @@ pub(in super::super) fn renew(
 
 /// Extends an expired lease under its own fence when nothing has happened to
 /// the branch since: it still names exactly this lease, no acquire has bumped
-/// the fence, this store still holds the host lock it took with the lease, and
+/// the fence, this store still holds the host claim it took with the lease, and
 /// the clock domain is unchanged. Any acquire replaces `active` and bumps
 /// `last_fence` first, so a revival and an acquire cannot both succeed.
 pub(in super::super) fn revive(
@@ -216,7 +226,7 @@ pub(in super::super) fn release_many(
 }
 
 /// Drops this store's claim for `lease` once another acquire has replaced it,
-/// so a superseded holder stops pinning a lock that no longer proves anything.
+/// so a superseded grant is never revived as one this store still holds.
 fn forfeit_if_superseded(
     holders: &mut crate::holder::HolderClaims,
     row: &BranchRow,
@@ -267,7 +277,7 @@ pub(in super::super) fn release(b: &mut Backend, l: &BranchLease) -> Result<(), 
     )?;
     bump(&tx)?;
     tx.commit().map_err(map_sqlite)?;
-    // The lock and the lease end together, so a released branch is not left
+    // The record and the lease end together, so a released branch is not left
     // looking like one whose holder died.
     b.holders.release(l.session());
     Ok(())

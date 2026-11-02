@@ -102,6 +102,7 @@ pub(in super::super) fn archive(
     )?;
     bump(&tx)?;
     tx.commit().map_err(map_sqlite)?;
+    b.holders.forget_session(r.session_id());
     Ok(receipt)
 }
 
@@ -241,6 +242,7 @@ pub(in super::super) fn delete(
     .map_err(map_sqlite)?;
     tx.execute("UPDATE store_meta SET sessions=sessions-1,branches=branches-?1,checkpoints=checkpoints-?2,semantic_mutations=semantic_mutations+1,tombstones=tombstones+1 WHERE id=1", params![i64n(branches)?,i64n(checkpoints)?]).map_err(map_sqlite)?;
     tx.commit().map_err(map_sqlite)?;
+    b.holders.forget_session(r.session_id());
     b.gc_pending = true;
     Ok(receipt)
 }

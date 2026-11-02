@@ -633,8 +633,9 @@ compaction is a row of kind `compaction` (`compacted N earlier segments
 shown. `--kind compaction` selects those rows.
 
 `show` labels a Working checkpoint `working (live owner present)` while the
-runtime holder lock is held, and `recovery required` when it is unowned. Both
-show the phase and recovery obligations; those details do not mean a live turn
+process named by the branch's runtime holder record is still running,
+`owner unknown (recorded on another host)` when another machine holds it, and
+`recovery required` when it is unowned. All show the phase and recovery obligations; those details do not mean a live turn
 needs recovery. Ownership and the head are separately observed, read-only facts.
 
 `recover` reopens a session whose last turn was interrupted — a crash, a

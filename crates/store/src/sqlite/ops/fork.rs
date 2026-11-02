@@ -228,7 +228,7 @@ pub(in super::super) fn fork(
     meta(&tx, 0, 1)?;
     #[cfg(test)]
     test_crash_cut("fork-before-commit");
-    super::lease::commit_claimed(tx, &mut b.holders, target, lease_fence)?;
+    super::lease::commit_claimed(tx, &mut b.holders, target, lease_fence, r.owner())?;
     #[cfg(test)]
     test_crash_cut("fork-after-commit");
     b.checkpoints

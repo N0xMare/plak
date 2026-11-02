@@ -96,38 +96,68 @@ fn working_status(
     paths: &crate::home::paths::PlakPaths,
     locator: SessionLocator,
 ) -> CliResult<&'static str> {
-    let lock = paths
+    let record = paths
         .state_dir()
         .join("runtime.sqlite3-holders")
         .join(format!(
-            "{}.{}.lock",
+            "{}.{}.holder",
             locator.session_id(),
             locator.branch_id()
         ));
-    Ok(if holder_is_live(&lock)? {
-        "working (live owner present)"
-    } else {
-        "recovery required"
+    Ok(match observe_holder(&record)? {
+        HolderObservation::Live => "working (live owner present)",
+        HolderObservation::Absent => "recovery required",
+        HolderObservation::Elsewhere => "owner unknown (recorded on another host)",
     })
 }
 
-/// Probe only an existing branch holder lock; never create a file or claim a lease.
-fn holder_is_live(path: &Path) -> CliResult<bool> {
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => {
-            return Err(CliFailure::new(format!(
-                "runtime holder inspection unavailable: {error}"
-            )));
-        }
+/// What a branch holder record says about its owner, as far as this host can see.
+#[derive(Debug, Eq, PartialEq)]
+enum HolderObservation {
+    /// The record names a running process on this host.
+    Live,
+    /// No record, an unreadable one, or one naming a process that is gone.
+    Absent,
+    /// The record names another host, whose processes this host cannot see.
+    Elsewhere,
+}
+
+/// Reads only an existing branch holder record and asks whether the process
+/// it names is running. It takes no lock, so it never disturbs a concurrent
+/// holder proof, creates no file and claims no lease.
+fn observe_holder(record: &Path) -> CliResult<HolderObservation> {
+    let unavailable = |error: &dyn std::fmt::Display| {
+        CliFailure::new(format!("runtime holder inspection unavailable: {error}"))
     };
-    match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockShared) {
-        Ok(()) => Ok(false),
-        Err(rustix::io::Errno::WOULDBLOCK) => Ok(true),
-        Err(error) => Err(CliFailure::new(format!(
-            "runtime holder inspection unavailable: {error}"
-        ))),
+    let recorded = match std::fs::read_to_string(record) {
+        Ok(recorded) => recorded,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(HolderObservation::Absent);
+        }
+        Err(error) => return Err(unavailable(&error)),
+    };
+    let Some((host, identity)) = recorded
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("plak-holder-v3 "))
+        .and_then(|line| line.rsplit_once(' '))
+    else {
+        return Ok(HolderObservation::Absent);
+    };
+    if host != rustix::system::uname().nodename().to_string_lossy() {
+        return Ok(HolderObservation::Elsewhere);
+    }
+    let Some(pid) = identity
+        .split_once('-')
+        .and_then(|(pid, _)| pid.parse::<i32>().ok())
+        .and_then(rustix::process::Pid::from_raw)
+    else {
+        return Ok(HolderObservation::Absent);
+    };
+    match rustix::process::test_kill_process(pid) {
+        Ok(()) | Err(rustix::io::Errno::PERM) => Ok(HolderObservation::Live),
+        Err(rustix::io::Errno::SRCH) => Ok(HolderObservation::Absent),
+        Err(error) => Err(unavailable(&error)),
     }
 }
 

@@ -2186,6 +2186,39 @@ async fn a_dead_holder_releases_its_branch_at_once_and_a_live_one_does_not()
     }
     assert!(held.contains("held"), "holder subprocess did not report");
 
+    // The branch's record names the holder process, and that process holds
+    // its lock.
+    let holders = db.directory.join("sessions.sqlite3-holders");
+    let recorded = fs::read_to_string(holders.join(format!(
+        "{}.{}.holder",
+        initial.selector.session_id(),
+        initial.selector.branch_id()
+    )))?;
+    let identity = recorded
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("plak-holder-v3 "))
+        .and_then(|line| line.rsplit_once(' '))
+        .map(|(_host, identity)| identity.to_owned())
+        .ok_or("holder record")?;
+    assert!(
+        identity.starts_with(&format!("{}-", child.id())),
+        "the record names the holder process: {recorded:?}"
+    );
+    assert!(
+        recorded.ends_with(&format!(
+            "\nfence {}\nowner {}\n",
+            created.lease().fence().get() + 1,
+            conformance::id::<RunId>(46_010)?
+        )),
+        "the record names the holder's grant: {recorded:?}"
+    );
+    let probe = || -> Result<bool, Box<dyn Error>> {
+        let lock = fs::File::open(holders.join(format!("{identity}.lock")))?;
+        Ok(rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockShared).is_ok())
+    };
+    assert!(!probe()?, "a live holder holds its process lock");
+
     // A live holder is refused, exactly as before.
     assert_eq!(
         store.acquire(request).await,
@@ -2197,6 +2230,7 @@ async fn a_dead_holder_releases_its_branch_at_once_and_a_live_one_does_not()
     // its clock, so anything but proof of death would refuse here.
     child.kill()?;
     child.wait()?;
+    assert!(probe()?, "a killed holder holds no lock");
     let reclaimed = store.acquire(request).await?;
     assert_eq!(reclaimed.owner(), conformance::id::<RunId>(46_020)?);
     assert!(reclaimed.fence().get() > created.lease().fence().get());
@@ -2208,10 +2242,10 @@ async fn a_dead_holder_releases_its_branch_at_once_and_a_live_one_does_not()
 /// A superseded holder's exit is no proof that the current holder is gone.
 ///
 /// A holder suspended past its lease still has its lock when another process
-/// acquires the expired lease, so the new holder runs without one. When the old
-/// holder later exits its lock comes free, but the record still names its own
-/// grant, not the live one, so a third process must keep waiting rather than
-/// take a lease that is in use.
+/// acquires the expired lease, and the new holder's record replaces the old
+/// one. When the old holder later exits its lock comes free, but no record
+/// names it with the live grant, so a third store must keep waiting rather
+/// than take a lease that is in use.
 #[tokio::test]
 async fn a_superseded_holders_exit_does_not_hand_the_live_lease_to_a_third_process()
 -> Result<(), Box<dyn Error>> {
@@ -2400,6 +2434,199 @@ async fn a_holders_surviving_child_does_not_keep_its_branch() -> Result<(), Box<
     let reclaimed = store.acquire(request).await?;
     assert_eq!(reclaimed.owner(), conformance::id::<RunId>(47_020)?);
     store.release(reclaimed).await?;
+    store.shutdown().await?;
+    Ok(())
+}
+
+fn private_holders(db: &Database) -> Result<PathBuf, Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let holders = db.directory.join("sessions.sqlite3-holders");
+    fs::create_dir_all(&holders)?;
+    fs::set_permissions(&holders, fs::Permissions::from_mode(0o700))?;
+    Ok(holders)
+}
+
+fn holder_record(holders: &std::path::Path, session: SessionRef) -> PathBuf {
+    holders.join(format!(
+        "{}.{}.holder",
+        session.session_id(),
+        session.branch_id()
+    ))
+}
+
+/// Archiving and deleting a session take its holder records with it, and the
+/// first grant a process makes in a holder directory sweeps a dead process's
+/// lock that no record names.
+#[tokio::test]
+async fn holder_records_follow_their_session_and_the_first_grant_sweeps_dead_locks()
+-> Result<(), Box<dyn Error>> {
+    let db = Database::new();
+    let holders = private_holders(&db)?;
+    let dead_lock = holders.join("999999-00000000000000d1.lock");
+    fs::write(&dead_lock, "")?;
+    let clock = Arc::new(ObservedLeaseClock::new(100));
+    let store = SqliteSessionStore::open_with_clock(&db.path, clock.clone())?;
+    let initial = seed(48_000, RuntimeDurability::Required, 1)?;
+    let created = store.create(initial.request.clone()).await?;
+    assert!(
+        !dead_lock.exists(),
+        "the first grant swept the dead process's unnamed lock"
+    );
+    let record = holder_record(&holders, initial.selector);
+    assert!(record.exists(), "the grant has its record");
+
+    // The lease runs out unreleased; archive takes the record with it.
+    clock.set(created.lease().expires_at().seconds() + 600);
+    let archived = store
+        .archive(plakous_agent::internal::ArchiveSession::new(
+            initial.selector.session_id(),
+            created.session().revision(),
+        ))
+        .await?;
+    assert!(!record.exists(), "archive removes the session's records");
+
+    // A record a dead process left behind goes with the deletion.
+    fs::write(
+        &record,
+        "plak-holder-v3 elsewhere 999999-00000000000000d2\nfence 1\nowner x\n",
+    )?;
+    store
+        .delete(DeleteSession::new(
+            initial.selector.session_id(),
+            archived.session().revision(),
+        ))
+        .await?;
+    assert!(!record.exists(), "delete removes the session's records");
+    store.shutdown().await?;
+    Ok(())
+}
+
+/// A process's first acquire in a holder directory sweeps a dead process's
+/// lock that no record names, and keeps a live process's lock.
+#[tokio::test]
+async fn a_processes_first_acquire_sweeps_a_dead_unnamed_lock() -> Result<(), Box<dyn Error>> {
+    const CHILD_PATH: &str = "PLAK_STORE_SWEEP_HOLDER_PATH";
+    if let Some(path) = std::env::var_os(CHILD_PATH) {
+        let store = SqliteSessionStore::open(path)?;
+        let initial = seed(48_500, RuntimeDurability::Required, 1)?;
+        let _lease = store
+            .acquire(plakous_agent::internal::AcquireBranch::new(
+                initial.selector,
+                conformance::id::<RunId>(48_510)?,
+                NonZeroU64::new(3_600).ok_or("duration")?,
+            ))
+            .await?;
+        println!("held");
+        std::thread::sleep(Duration::from_secs(600));
+        return Ok(());
+    }
+
+    let db = Database::new();
+    let holders = private_holders(&db)?;
+    let store = SqliteSessionStore::open(&db.path)?;
+    let initial = seed(48_500, RuntimeDurability::Required, 1)?;
+    let created = store.create(initial.request).await?;
+    store.release(created.lease().clone()).await?;
+    let dead_lock = holders.join("999999-00000000000000d3.lock");
+    fs::write(&dead_lock, "")?;
+    let live_locks = fs::read_dir(&holders)?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .strip_suffix(".lock")
+                .is_some()
+        })
+        .map(|entry| entry.path())
+        .filter(|path| *path != dead_lock)
+        .collect::<Vec<_>>();
+    assert_eq!(live_locks.len(), 1, "this process's own lock");
+
+    let mut child = std::process::Command::new(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "sqlite::a_processes_first_acquire_sweeps_a_dead_unnamed_lock",
+            "--nocapture",
+        ])
+        .env(CHILD_PATH, &db.path)
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    let mut held = String::new();
+    {
+        use std::io::Read as _;
+        let mut out = child.stdout.take().ok_or("child stdout")?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut byte = [0_u8; 1];
+        while !held.contains("held") {
+            if std::time::Instant::now() >= deadline {
+                child.kill()?;
+                child.wait()?;
+                return Err("holder subprocess never took the branch".into());
+            }
+            if out.read(&mut byte)? == 0 {
+                break;
+            }
+            held.push(char::from(byte[0]));
+        }
+    }
+    let swept = !dead_lock.exists();
+    let kept = live_locks[0].exists();
+    child.kill()?;
+    child.wait()?;
+    assert!(held.contains("held"), "holder subprocess did not report");
+    assert!(
+        swept,
+        "the child's first acquire swept the dead unnamed lock"
+    );
+    assert!(kept, "a live process's lock is kept");
+    store.shutdown().await?;
+    Ok(())
+}
+
+/// A create retried under its operation identity is the grant that died: the
+/// same fence and owner. Where the retry cannot replace or remove the dead
+/// attempt's record, committing would leave proof that the live creator is
+/// gone, so the create is refused and nothing is written.
+#[tokio::test]
+async fn a_create_whose_dead_twins_record_cannot_be_cleared_is_refused()
+-> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt as _;
+    if rustix::process::geteuid().is_root() {
+        return Ok(());
+    }
+    let db = Database::new();
+    let holders = private_holders(&db)?;
+    let initial = seed(48_800, RuntimeDurability::Required, 1)?;
+    let host = rustix::system::uname()
+        .nodename()
+        .to_string_lossy()
+        .into_owned();
+    fs::write(
+        holder_record(&holders, initial.selector),
+        format!(
+            "plak-holder-v3 {host} 999999-00000000000000d4\nfence 1\nowner {}\n",
+            initial.request.owner()
+        ),
+    )?;
+    fs::write(holders.join("999999-00000000000000d4.lock"), "")?;
+    fs::set_permissions(&holders, fs::Permissions::from_mode(0o500))?;
+    let store = SqliteSessionStore::open(&db.path)?;
+    let refused = store.create(initial.request.clone()).await;
+    let absent = store.load_checkpoint(initial.checkpoint_id).await;
+    fs::set_permissions(&holders, fs::Permissions::from_mode(0o700))?;
+    assert_eq!(refused.err(), Some(SessionStoreError::BackendUnavailable));
+    assert_eq!(absent.err(), Some(SessionStoreError::NotFound));
+
+    // Once the directory is the store's to write again, the retry replaces
+    // the dead attempt's record with its own.
+    let created = store.create(initial.request).await?;
+    let recorded = fs::read_to_string(holder_record(&holders, initial.selector))?;
+    assert!(
+        !recorded.contains("999999-00000000000000d4"),
+        "the live grant's record replaced the dead one: {recorded:?}"
+    );
+    store.release(created.lease().clone()).await?;
     store.shutdown().await?;
     Ok(())
 }

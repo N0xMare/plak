@@ -821,7 +821,11 @@ reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
 schema>`, for example `r27.e35.p36.t9`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
-directory, and a whole-store incompatibility never blocks startup.
+directory, and a whole-store incompatibility never blocks startup. State-directory
+file formats outside the four stores ride the same key: a change to the runtime
+store's holder-claim files (chapter 01 §5.1) must ship with a bump of one of
+the four versions, because only the key keeps builds with different holder
+formats from reading each other's holder files.
 
 Commands that cannot carry a foreign session automatically, including
 `run --session`, recovery, inspection and export, use the same incompatible-build refusal for an id (or uniquely
@@ -2235,10 +2239,16 @@ through the read-only SQLite diagnostic. It displays the head view after an
 in-memory projector pass over the feed past the stored cursor (read through
 `inspect_feed_sqlite`), so it names the head an open would find, and writes no
 view. A Working head displays `working (live owner present)` when its runtime
-branch holder lock is held, or `recovery required` when no owner is observed.
-Both retain the phase and payload-free operation IDs, actions, and request
-identities. The holder probe opens only an existing lock file and takes no
-runtime lease; unavailable probes are reported as errors, not absence.
+branch holder record (chapter 01 §5.1) names this host and a running process
+id, a liveness hint by process id rather than holder proof (a recycled id reads
+as live),
+`owner unknown (recorded on another host)` when it names another host, or
+`recovery required` when no owner is observed.
+All three retain the phase and payload-free operation IDs, actions, and request
+identities. The holder probe reads only an existing record, takes no lock, so
+it never disturbs a concurrent holder proof, and takes no runtime lease; a
+record that names no process observes no owner, and unavailable probes are
+reported as errors, not absence.
 A missing locator
 is labeled unavailable. Inspection does not open a runtime, acquire a lease,
 dispatch work, or modify durable session authority.
