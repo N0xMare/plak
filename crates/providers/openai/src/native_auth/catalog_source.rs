@@ -6,7 +6,7 @@ use super::{
     CODEX_NATIVE_COMPACTION_NAMESPACE, Capability, CapabilityConstraints, CapabilitySet,
     CatalogDocument, CatalogInputModality, CatalogModelWire, CatalogRenewal, CatalogShellType,
     Client, Clock, CodexCatalogApiSupport, CodexCatalogCapacityFacts, CodexCatalogEntry,
-    CodexCatalogToolMode, CodexModelCatalog, CodexReasoningEffortSet, CodexResponsesWireMode,
+    CodexModelCatalog, CodexReasoningEffortSet, CodexResponsesWireMode,
     CodexSubscriptionCredentialManager, CredentialStatus, Deserialize, Duration, FactProvenance,
     FactSource, FeatureSupport, HeaderName, Instant, MAX_CATALOG_MODELS, MAX_MODEL_ID_BYTES,
     Method, ModelAdapterProfileId, ModelFamilyId, ModelId, NamespaceId, NativeCodexAuthError,
@@ -16,9 +16,8 @@ use super::{
     WitnessedDescriptor, bearer_headers, catalog_content_filter_guidance, catalog_enum_fingerprint,
     catalog_service_tiers, credential_selection_epoch, executable_codex_catalog_model,
     execute_catalog_bounded, parse_catalog_json, parse_stored,
-    reference_client_envelope_context_contract, release_enrolled_codex_tool_mode,
-    require_json_media_type, require_status, resolution_route_fingerprint, sensitive_header_value,
-    validate_identifier,
+    reference_client_envelope_context_contract, require_json_media_type, require_status,
+    resolution_route_fingerprint, sensitive_header_value, validate_identifier,
 };
 
 /// The exact catalog inputs a resolver and its models share, so a running
@@ -239,10 +238,9 @@ impl CodexCatalogSource {
             {
                 continue;
             }
+            // `contract_drift` already refused an enrolled row without text
+            // input, local tools, named reasoning or its enrolled tool mode.
             let text = model.input_modalities.contains(&CatalogInputModality::Text);
-            if !text {
-                continue;
-            }
             let tools = matches!(
                 model.shell_type,
                 CatalogShellType::Default
@@ -278,22 +276,6 @@ impl CodexCatalogSource {
             let catalog_enum_fingerprint = catalog_enum_fingerprint(&model)?;
             let tool_mode = model.tool_mode.recognized();
             let reasoning = reasoning_efforts.supports_named_reasoning();
-            if let Some(expected_tool_mode) = release_enrolled_codex_tool_mode(&model.slug) {
-                if !tools || !reasoning {
-                    continue;
-                }
-                let tool_mode_matches = match expected_tool_mode {
-                    CodexCatalogToolMode::CodeModeOnly => matches!(
-                        tool_mode,
-                        Some(CodexCatalogToolMode::CodeModeOnly)
-                            | Some(CodexCatalogToolMode::Direct)
-                    ),
-                    _ => tool_mode == Some(expected_tool_mode),
-                };
-                if !tool_mode_matches {
-                    continue;
-                }
-            }
             let mut features = BTreeMap::new();
             features.insert(
                 Capability::Streaming,
