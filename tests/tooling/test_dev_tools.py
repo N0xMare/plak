@@ -169,9 +169,9 @@ raise SystemExit(0)
                 ["deny", "--version"],
                 [
                     "deny",
+                    "check",
                     "--config",
                     str(self.root / ".config/deny.toml"),
-                    "check",
                     "advisories",
                     "bans",
                     "licenses",

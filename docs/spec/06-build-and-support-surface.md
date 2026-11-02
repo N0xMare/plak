@@ -1598,7 +1598,7 @@ only allowed registry and no allowed Git source.
 Run it when dependencies change:
 
 ```sh
-just dev-tools deny   # cargo deny --config .config/deny.toml check advisories bans licenses sources
+just dev-tools deny   # cargo deny check --config .config/deny.toml advisories bans licenses sources
 ```
 
 The maintenance advisory RUSTSEC-2023-0089 is excepted only for
@@ -1612,7 +1612,7 @@ check cannot complete. This is not a vulnerability waiver for a shipped
 component. Reevaluate the exception when these dependencies or supported
 targets change.
 
-The `zip` extraction advisories RUSTSEC-2026-0367, -0368 and -0369 are
+The `zip` extraction advisories RUSTSEC-2026-0367, -0368, -0369 and -0429 are
 excepted only for `zip` 8.6.0, which `ruff_db` 0.0.14 (the Ruff/ty version
 Monty 1.2.0 locks) uses to read the bundled typeshed archive from memory; it
 never calls the affected extraction APIs. `monty-typeshed` itself uses the

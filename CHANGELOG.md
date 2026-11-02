@@ -43,6 +43,12 @@ one cross-build carrier (a build imports its own and the previous version).
 - Tool measurement uses typed execution values and the new `WaitFact` only,
   and does no work when telemetry is disabled.
 
+### Security
+
+- The build audit also waives RUSTSEC-2026-0429 for zip 8.6.0. Like
+  RUSTSEC-2026-0367, -0368 and -0369 it concerns only `ZipArchive::extract`,
+  which the Monty type checker's in-memory typeshed reader never calls.
+
 ### Persisted formats
 
 - Telemetry store schema 21 (`telemetry-v21.sqlite3`, disposable). The state

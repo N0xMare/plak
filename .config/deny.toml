@@ -6,6 +6,7 @@ ignore = [
     { id = "RUSTSEC-2026-0367", reason = "Extraction-only zip advisory. zip 8.6.0 is reached only through ruff_db 0.0.14, whose VendoredFileSystem reads the build-time typeshed archive in memory and never extracts to disk; monty-typeshed uses zip 9. Revisit when ruff_db moves to zip 9 or calls an extraction API." },
     { id = "RUSTSEC-2026-0368", reason = "Extraction-only zip advisory; same zip 8.6.0 ruff_db in-memory reader as RUSTSEC-2026-0367." },
     { id = "RUSTSEC-2026-0369", reason = "Extraction-only zip advisory; same zip 8.6.0 ruff_db in-memory reader as RUSTSEC-2026-0367." },
+    { id = "RUSTSEC-2026-0429", reason = "Extraction-only zip advisory (symlink target sized from the declared size in ZipArchive::extract); same zip 8.6.0 ruff_db in-memory reader as RUSTSEC-2026-0367." },
 ]
 
 [bans]
