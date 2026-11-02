@@ -15,6 +15,25 @@ one cross-build carrier (a build imports its own and the previous version).
   the route and model named. New sessions record a registry descriptor that
   includes `view_image`; no schema revision or state-key change. Codex native
   Code Mode does not offer `view_image`.
+- Agent Skills: `SKILL.md` folders under `<workspace>/.agents/skills` and
+  `~/.agents/skills` are listed in each family's native wording (the project
+  wins a shared name) and frozen with the session like `AGENTS.md`. Claude
+  sessions get Claude Code's `Skill` tool. `skills.enabled` (default on)
+  applies to new sessions and spawns; a fork, rebind or switch keeps its
+  source's setting, and sessions created before this build never gain `Skill`.
+  Skills that are skipped are reported once as a session notice. A project
+  skills folder that resolves outside the workspace is refused; only the user
+  folder is readable outside the workspace, and only regular files.
+- Grok `read_file` returns the file text verbatim plus one metadata line
+  instead of JSON inside JSON; program cells keep the JSON form. A read cut to
+  fit the context keeps whole leading lines and continues after them. Grok
+  `grep` and `search_repository` accept the agent's own issued `full output:`
+  paths and search job logs up to 64 MiB. Context rows are bounded like match
+  rows, and an empty search says so. Tool path wording matches what the tools
+  accept, the process lifetime sentence appears only on the starting tool, and
+  `list_dir` names a missing path.
+- Existing sessions on routes whose tools changed (Grok, Codex, Claude, pi,
+  Python cells and the typed SDK) carry on their next reopen.
 - `plak session --help` names the export versions from the build's own
   constants: it writes 11 and imports 11 and 10.
 - Text and thinking streamed by a model request that is retried, refused, cut
@@ -46,6 +65,14 @@ one cross-build carrier (a build imports its own and the previous version).
   OAuth web search and page fetch) report a reviewed version gate or sent-beta
   rejection as contract drift with the newer-build remedy. A 401 or 403 keeps
   the credential path.
+- Hosted and orchestration tasks have explicit owners: a session's tasks are
+  aborted and joined at release, a tree's at its last root lease, and tasks
+  that own a child's session or runtime authority run until they return.
+  Operator intents are classified in one table, and each session's product
+  writes have their own storage interrupt.
+- `AgentSessions::created_tool_registration_and_sources` reads a checkpoint's
+  frozen tool registration and instruction sources without opening it.
+  `AgentBuilder::image_normalizer` installs the image decoder tool reads use.
 - Tool measurement uses typed execution values and the new `WaitFact` only,
   and does no work when telemetry is disabled.
 
@@ -72,6 +99,11 @@ one cross-build carrier (a build imports its own and the previous version).
 - The static group compiles seven library feature profiles instead of every
   singleton, still validating every feature closure, and checks maintainer
   Python with ruff 0.17.3.
+- The crash sweep's twin-pilot determinism check covers every strict shape in
+  the durability lane.
+- A portability fence keeps `plakous-model`'s dependency closure free of
+  native-only crates for `wasm32-unknown-unknown`, and the builds group
+  compiles it for that target. `just dev-tools install` adds the target.
 - One test-environment helper and one build entry point serve every recipe;
   `just nextest` runs cargo-nextest under the gate's environment.
 
