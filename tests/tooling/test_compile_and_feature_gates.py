@@ -164,14 +164,18 @@ class FacadeProfileTests(unittest.TestCase):
             errors = feature_gate.check_facade_profiles(self.MANIFESTS, ROOT)
         return errors, [call.args[0] for call in run.call_args_list], stderr.getvalue()
 
-    def test_checks_the_empty_set_and_each_public_feature_alone(self):
+    def test_checks_the_representative_facade_profiles(self):
         clean = subprocess.CompletedProcess([], 0, json.dumps({"reason": "build-finished"}), "")
-        errors, commands, _ = self.check([clean] * 3)
+        errors, commands, _ = self.check([clean] * 4)
         self.assertEqual(errors, [])
         base = ["cargo", "check", "--locked", "--offline", "-p", "plakous", "--no-default-features"]
         tail = ["--lib", "--message-format=json"]
-        self.assertEqual(commands, [base + tail, base + ["--features", "a"] + tail,
-                                    base + ["--features", "b"] + tail])
+        self.assertEqual(commands, [
+            base + tail,
+            base + ["--features", "full"] + tail,
+            base + ["--features", "composition"] + tail,
+            base + ["--features", "claude"] + tail,
+        ])
 
     def test_compile_errors_and_warnings_fail_with_rendered_diagnostics(self):
         failed = subprocess.CompletedProcess([], 101, self.message("error", "error[E0433]: x\n"), "")
@@ -179,10 +183,11 @@ class FacadeProfileTests(unittest.TestCase):
             "not json", self.message("note", "note: ignored\n"), self.message("warning", "warning: y\n"),
         ]), "")
         aborted = subprocess.CompletedProcess([], 101, "", "error: no matching package\n")
-        errors, _, stderr = self.check([failed, warned, aborted])
+        clean = subprocess.CompletedProcess([], 0, "", "")
+        errors, _, stderr = self.check([failed, warned, aborted, clean])
         self.assertEqual(errors, ["plakous [minimal]: cargo check failed",
-                                  "plakous [a]: cargo check reported 1 warning(s)",
-                                  "plakous [b]: cargo check failed"])
+                                  "plakous [full]: cargo check reported 1 warning(s)",
+                                  "plakous [composition]: cargo check failed"])
         self.assertIn("error[E0433]: x", stderr)
         self.assertIn("warning: y", stderr)
         self.assertNotIn("note: ignored", stderr)
@@ -215,18 +220,20 @@ class FacadeProfileTests(unittest.TestCase):
         self.assertEqual(feature_gate.check_facade_profiles({}, ROOT),
                          ["plakous: package missing from workspace metadata"])
 
-    def test_hosted_singletons_do_not_borrow_workspace_unification(self):
+    def test_hosted_profiles_are_none_and_all_features(self):
         clean = subprocess.CompletedProcess([], 0, "", "")
         manifests = {"plakous-hosted": self.MANIFESTS["plakous"]}
         with mock.patch.object(feature_gate.subprocess, "run", return_value=clean) as run:
             self.assertEqual(feature_gate.check_hosted_profiles(manifests, ROOT), [])
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(len(commands), 3)
-        for command in commands:
-            self.assertEqual(command[command.index("-p") + 1], "plakous-hosted")
-            self.assertIn("--no-default-features", command)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][commands[0].index("-p") + 1], "plakous-hosted")
+        self.assertIn("--no-default-features", commands[0])
         self.assertNotIn("--features", commands[0])
-        self.assertEqual([command[command.index("--features") + 1] for command in commands[1:]], ["a", "b"])
+        self.assertNotIn("--all-features", commands[0])
+        self.assertEqual(commands[1][commands[1].index("-p") + 1], "plakous-hosted")
+        self.assertIn("--all-features", commands[1])
+        self.assertNotIn("--no-default-features", commands[1])
 
 class PublicCompileGateTests(unittest.TestCase):
     def setUp(self):

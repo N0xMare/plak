@@ -493,15 +493,18 @@ export without `.git`), the checker reports a cache bypass and queries Cargo
 directly; no cache is read or written.
 
 Closures prove dependency edges, not that the code compiles. Without
-`--build`, the checker therefore also runs `cargo check --lib` on `plakous`
-and `plakous-hosted` with no features and with each public feature alone
-(fourteen facade profiles and eighteen hosted profiles); a
-rustc warning or error in any workspace crate of that profile fails it. Cargo's
+`--build`, the checker therefore also runs `cargo check --lib` on six
+profiles: `plakous` with no features, with `full`, with `composition` alone
+and with `claude` alone (one native route), and `plakous-hosted` with no
+features and with `--all-features`. Hosted defaults are compiled through the
+supported Plak default resolution. A rustc warning or error in any workspace
+crate of that profile fails it. Cargo's
 fingerprints are its cache: an unchanged profile is a no-op, and a facade or
 dependency source change rechecks only the affected crates. Hosted profiles
 must compile without borrowing facade features from another workspace package.
 `--build` checks
-every witness and skips this step.
+every witness and skips this step. The other public features keep their
+closure witnesses; they are not each a compile profile.
 
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no

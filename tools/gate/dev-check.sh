@@ -478,6 +478,8 @@ run_group() {
       run_build_denying_warnings cargo build --locked -p plak --features maintainer --bins ${target_args[@]+"${target_args[@]}"}
       python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;
     variants)
+      # Release-candidate evidence (`just full` or an explicit variants step).
+      # The integration batch does not build these reduced resolutions.
       echo "== product feature-off builds and clippy: warnings denied =="
       # A shared sccache server keeps the TMPDIR it started with; if that is a
       # gate test directory, --fresh can delete its dep-info scratch mid-compile.

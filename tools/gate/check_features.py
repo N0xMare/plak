@@ -21,8 +21,10 @@ closure Cargo reports, the packages a named feature profile must not reach.
 This is what makes the facade's evaluator decoupling provable: `composition`
 buys Code Mode and the JavaScript sidecar and nothing else.
 
-Without `--build`, the facade library is also `cargo check`ed with no features
-and with each public feature alone; a rustc warning or error fails the run.
+Without `--build`, six `cargo check --lib` profiles prove feature-conditioned
+code: facade none, `full`, `composition` and `claude`; hosted none and
+`--all-features`. A rustc warning or error fails the run. Every public
+feature still has its closure witness.
 """
 
 from __future__ import annotations
@@ -1058,9 +1060,12 @@ def cargo_command(
     return command
 
 
-def facade_profiles(manifests: dict[str, dict[str, object]]) -> list[tuple[str, ...]]:
-    """Return the facade's empty feature set and each public feature alone."""
-    return [()] + [(feature,) for feature in optional_features(manifests[FACADE])]
+def facade_profiles(_manifests: dict[str, dict[str, object]]) -> list[tuple[str, ...]]:
+    """Return the facade compile profiles: none, full, composition, claude.
+
+    Closures, not these compiles, witness every public feature.
+    """
+    return [(), ("full",), ("composition",), ("claude",)]
 
 
 def compiler_diagnostics(stdout: str) -> list[str]:
@@ -1097,13 +1102,41 @@ def macos_unwind_size_note(diagnostic: dict[str, object]) -> bool:
                                for line in lines)
 
 
+def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
+    """The compile resolutions for one library, named and as Cargo arguments.
+
+    Facade: no features, `full`, `composition` alone, and `claude` alone.
+    Hosted: no features, and `--all-features`. Hosted defaults are compiled
+    with the supported Plak default resolution, not as a seventh profile.
+    """
+    lib = ["--lib", "--message-format=json"]
+    if package == FACADE:
+        return [
+            (name, cargo_command("check", selected, False, package) + lib)
+            for name, selected in (
+                ("minimal", ()),
+                ("full", ("full",)),
+                ("composition", ("composition",)),
+                ("claude", ("claude",)),
+            )
+        ]
+    if package == "plakous-hosted":
+        return [
+            ("minimal", cargo_command("check", (), False, package) + lib),
+            ("all-features", [
+                "cargo", "check", "--locked", "--offline", "-p", package, "--all-features", *lib,
+            ]),
+        ]
+    return []
+
+
 def check_facade_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT) -> list[str]:
-    """Compile the facade's empty resolution and every public singleton."""
+    """Compile the facade's four representative resolutions."""
     return check_library_profiles(manifests, FACADE, root)
 
 
 def check_hosted_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT) -> list[str]:
-    """Compile hosted without borrowing another package's dependency features."""
+    """Compile hosted with no features and with every feature, un-unified."""
     return check_library_profiles(manifests, "plakous-hosted", root)
 
 
@@ -1118,10 +1151,8 @@ def check_library_profiles(manifests: dict[str, dict[str, object]], package: str
         return [f"{package}: package missing from workspace metadata"]
     errors = []
     started = time.monotonic()
-    profiles = [()] + [(feature,) for feature in optional_features(manifests[package])]
-    for selected in profiles:
-        name = "+".join(selected) or "minimal"
-        command = cargo_command("check", selected, False, package) + ["--lib", "--message-format=json"]
+    profiles = library_compile_commands(package)
+    for name, command in profiles:
         result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
         diagnostics = compiler_diagnostics(result.stdout)
         for diagnostic in diagnostics:
@@ -1244,7 +1275,7 @@ def main() -> int:
     if CARGO_OUTPUTS is not None:
         CARGO_OUTPUTS.save()
         CARGO_OUTPUTS = None
-    # --build already checks the facade witnesses, including each singleton.
+    # --build already cargo-checks every closure witness.
     if not args.build:
         errors.extend(check_facade_profiles(manifests))
         errors.extend(check_hosted_profiles(manifests))
