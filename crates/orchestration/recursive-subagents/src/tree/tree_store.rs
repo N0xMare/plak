@@ -233,20 +233,12 @@ impl ProductAgentTree {
 /// Durability for one tree. The tree knows nothing about where
 /// its rows live; this is the whole surface between them.
 pub trait TreeStore: Send + Sync {
-    /// Binds process shutdown only. Agent interruption is scoped by the tree
-    /// driver, never shared with unrelated publications through this store.
-    fn set_storage_interrupt(&self, _probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>) {}
-
     /// Retry a capacity-blocked store with a minimal authoritative write,
     /// without changing tree revisions or dispatching effects.
     fn recover_storage(&self) -> Result<(), TreeStoreError> {
         Ok(())
     }
 
-    /// An out-of-band operator interruption; never publication authority.
-    fn storage_wait_cancelled(&self) -> bool {
-        false
-    }
     /// A live capacity refusal not yet followed by an authoritative save.
     fn storage_unavailable(&self) -> bool {
         false

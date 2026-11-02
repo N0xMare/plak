@@ -72,6 +72,20 @@ impl DurableSessionRuntime {
         })
     }
 
+    /// This runtime over `store`, keeping its instance and deadlines: a
+    /// handle of the same backend with its own storage-wait interrupt.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_store(&self, store: Arc<dyn SessionStore>) -> Self {
+        Self {
+            store,
+            durability: self.durability,
+            lease_seconds: self.lease_seconds,
+            instance_nonce: self.instance_nonce.clone(),
+            store_timeouts: self.store_timeouts,
+        }
+    }
+
     /// Replaces the per-operation and joined-cleanup store deadlines.
     ///
     /// # Errors

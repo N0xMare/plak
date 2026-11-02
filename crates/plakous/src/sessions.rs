@@ -309,6 +309,8 @@ impl fmt::Debug for SessionRuntimeBinding {
 /// crate-owned.
 pub struct AgentSessions {
     store: Arc<dyn SessionStore>,
+    /// The backend's store before this handle's feed wrapper.
+    backend: Arc<dyn SessionStore>,
     runtime: DurableSessionRuntime,
     drivers: Arc<DriverRegistry>,
     feed: Arc<feed::FeedNotifier>,
@@ -329,18 +331,41 @@ impl AgentSessions {
     ///
     /// Returns a typed failure if the private runtime cannot be composed.
     pub fn new(backend: SessionBackend) -> Result<Self, AgentSessionsError> {
-        let (store, durability, drivers) = backend.into_parts();
+        let (backend, durability, drivers) = backend.into_parts();
         let feed = Arc::new(feed::FeedNotifier::default());
-        let store = feed::NotifyingStore::wrap(store, Arc::clone(&feed));
+        let store = feed::NotifyingStore::wrap(Arc::clone(&backend), Arc::clone(&feed), None);
         let runtime =
             DurableSessionRuntime::current(Arc::clone(&store), durability, session_lease_seconds())
                 .map_err(|error| runtime_error(&error))?;
         Ok(Self {
             store,
+            backend,
             runtime,
             drivers,
             feed,
         })
+    }
+
+    /// This service as one host handle uses it: a store wait for capacity
+    /// that a workflow or agent started through the returned handle stops
+    /// once `interrupt` reports true. The probe is read-only and never
+    /// authorizes a write. Every handle shares the backend, its drivers and
+    /// its change feed; each keeps its own interrupt. An agent's own
+    /// interrupt is bound on the agent.
+    #[must_use]
+    pub fn with_storage_interrupt(&self, interrupt: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
+        let store = feed::NotifyingStore::wrap(
+            Arc::clone(&self.backend),
+            Arc::clone(&self.feed),
+            Some(interrupt),
+        );
+        Self {
+            runtime: self.runtime.with_store(Arc::clone(&store)),
+            store,
+            backend: Arc::clone(&self.backend),
+            drivers: Arc::clone(&self.drivers),
+            feed: Arc::clone(&self.feed),
+        }
     }
 
     async fn attach(

@@ -362,7 +362,12 @@ An interrupted product write retains queue identities and leaves the host
 loop available for further operator actions; it is not a generic host failure.
 Quit releases the runtime cleanly even if final product projection remains
 storage-unavailable. Root Esc affects only the attached root's storage wait;
-child waits observe their own cancellation or latched process shutdown.
+child waits observe their own cancellation or latched process shutdown. No
+probe is shared through a store: the product store takes the interrupt per
+handle, every runtime-store handle the attachment's roots hand out stops on
+that attachment's latched shutdown, and a tree's publications stop on their
+agent's cancellation or on the shutdown of the attachment that attached the
+tree, bound once for the tree's life.
 
 When composing cleanup or release failures, CLI rendering compresses repeated
 semicolon-separated leaf causes with `[same cause]` at later stages.

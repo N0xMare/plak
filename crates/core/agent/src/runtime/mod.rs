@@ -133,6 +133,7 @@ struct StoreTimeouts {
     cleanup: Duration,
 }
 
+#[derive(Clone)]
 struct RuntimeInstanceNonce([u8; 32]);
 
 /// Validated low-level durable branch handoff consumed by the private driver.

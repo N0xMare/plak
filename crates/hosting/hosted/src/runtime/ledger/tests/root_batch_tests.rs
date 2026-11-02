@@ -21,9 +21,6 @@ struct CapacityStore {
 }
 
 impl TreeStore for CapacityStore {
-    fn storage_wait_cancelled(&self) -> bool {
-        self.full.load(Ordering::SeqCst)
-    }
     fn exists(&self, id: &str) -> Result<bool, TreeStoreError> {
         self.inner.exists(id)
     }
@@ -114,13 +111,19 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
         let mut tree = result_tree(&session);
         rows.save_tree(&mut tree).unwrap();
         let runtime = live.then(|| {
-            crate::topology_runtime::insert_root_with(
+            let runtime = crate::topology_runtime::insert_root_with(
                 session.id.clone(),
                 tree,
                 rows.trees.clone(),
                 None,
             )
-            .unwrap()
+            .unwrap();
+            // The capacity park ends at once, as on a host shutting down.
+            let trees = rows.trees.clone();
+            runtime
+                .driver()
+                .bind_storage_shutdown(Arc::new(move || trees.full.load(Ordering::SeqCst)));
+            runtime
         });
         let read_tree = || {
             runtime.as_ref().map_or_else(

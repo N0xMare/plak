@@ -40,12 +40,15 @@ pub struct TreeDriver {
     restored_paused: Arc<std::sync::atomic::AtomicBool>,
     mutation_owner: Arc<Mutex<()>>,
     storage_parking: Arc<storage::StorageParking>,
+    /// The shutdown of the host that attached this tree, bound once.
+    host_shutdown: Arc<std::sync::OnceLock<StorageShutdown>>,
     publication_owner: Option<String>,
     capacity_retry_interval: std::time::Duration,
     checkout_sizes: Arc<Mutex<std::collections::BTreeMap<String, CheckoutSize>>>,
 }
 
 type RetirementRecovery = Arc<dyn Fn() + Send + Sync>;
+type StorageShutdown = Arc<dyn Fn() -> bool + Send + Sync>;
 
 struct CheckoutSize {
     generation: u64,
@@ -171,6 +174,7 @@ impl TreeDriver {
             restored_paused: Arc::new(std::sync::atomic::AtomicBool::new(restored_paused)),
             mutation_owner: Arc::default(),
             storage_parking: Arc::default(),
+            host_shutdown: Arc::default(),
             publication_owner: None,
             capacity_retry_interval: std::time::Duration::from_secs(5),
             checkout_sizes: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
@@ -806,9 +810,7 @@ impl TreeDriver {
                         self.storage_waiting
                             .store(true, std::sync::atomic::Ordering::Release);
                     }
-                    if !wait.wait(self.capacity_retry_interval, || {
-                        self.store.storage_wait_cancelled()
-                    }) {
+                    if !wait.wait(self.capacity_retry_interval, || self.host_shutting_down()) {
                         return Err(error.into());
                     }
                 }
@@ -839,6 +841,18 @@ impl TreeDriver {
 
     pub(crate) fn shutdown_storage_waits(&self) {
         self.storage_parking.shutdown();
+    }
+
+    /// Binds the shutdown of the host that attached this tree. A
+    /// capacity-refused publication stops waiting once it reports true. The
+    /// first binding holds for the tree's life; later attachments of the same
+    /// tree keep it.
+    pub fn bind_storage_shutdown(&self, probe: StorageShutdown) {
+        let _ = self.host_shutdown.set(probe);
+    }
+
+    fn host_shutting_down(&self) -> bool {
+        self.host_shutdown.get().is_some_and(|probe| probe())
     }
 
     /// Applies consequences only to an acknowledged tree, and publishes them

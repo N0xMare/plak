@@ -174,14 +174,22 @@ impl FeedChanges {
 pub(in crate::sessions) struct NotifyingStore {
     inner: Arc<dyn SessionStore>,
     notifier: Arc<FeedNotifier>,
+    /// This handle's storage-wait interrupt; other handles on the same
+    /// backend keep their own.
+    interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl NotifyingStore {
     pub(in crate::sessions) fn wrap(
         inner: Arc<dyn SessionStore>,
         notifier: Arc<FeedNotifier>,
+        interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     ) -> Arc<dyn SessionStore> {
-        Arc::new(Self { inner, notifier })
+        Arc::new(Self {
+            inner,
+            notifier,
+            interrupt,
+        })
     }
 
     fn after<T>(&self, result: &Result<T, SessionStoreError>, session: SessionId) {
@@ -197,7 +205,10 @@ impl SessionStore for NotifyingStore {
     }
 
     fn storage_wait_cancelled(&self) -> bool {
-        self.inner.storage_wait_cancelled()
+        match &self.interrupt {
+            Some(interrupt) => interrupt(),
+            None => self.inner.storage_wait_cancelled(),
+        }
     }
 
     fn recover_storage(&self) -> StoreFuture<'_, ()> {

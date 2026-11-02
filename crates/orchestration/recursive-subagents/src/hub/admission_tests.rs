@@ -49,15 +49,23 @@ impl TreeStore for ParkedCapacityStore {
         }
         self.inner.save(tree)
     }
-    fn storage_wait_cancelled(&self) -> bool {
-        if !self.full.load(Ordering::Acquire) {
-            return false;
-        }
-        if let Some(parked) = self.parked.lock().unwrap().take() {
-            parked.send(()).unwrap();
-            self.release.lock().unwrap().recv().unwrap();
-        }
-        true
+}
+
+impl ParkedCapacityStore {
+    /// The park's shutdown probe: once full, it reports the park and holds it
+    /// until the test releases it, then ends the wait.
+    fn shutdown_probe(self: &Arc<Self>) -> Arc<dyn Fn() -> bool + Send + Sync> {
+        let store = Arc::clone(self);
+        Arc::new(move || {
+            if !store.full.load(Ordering::Acquire) {
+                return false;
+            }
+            if let Some(parked) = store.parked.lock().unwrap().take() {
+                parked.send(()).unwrap();
+                store.release.lock().unwrap().recv().unwrap();
+            }
+            true
+        })
     }
 }
 
@@ -101,6 +109,7 @@ async fn detached_capacity_refused_resume_publishes_live_then_rolls_back_paused(
         None,
     )
     .unwrap();
+    runtime.driver().bind_storage_shutdown(store.shutdown_probe());
     assert_eq!(hub_tree_is_restored_paused(&id), Some(true));
     store.full.store(true, Ordering::Release);
     std::thread::scope(|scope| {

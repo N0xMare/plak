@@ -24,7 +24,6 @@ use crate::rows::{
 
 /// The tree's database as a [`TreeStore`].
 pub struct SqliteTreeStore {
-    storage_interrupt: Mutex<Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>>,
     writer: Mutex<Writer>,
     storage_waiting: std::sync::atomic::AtomicBool,
 }
@@ -45,7 +44,6 @@ impl SqliteTreeStore {
     /// Opens `database`, creating and versioning it when it is new.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
         Ok(Self {
-            storage_interrupt: Mutex::new(None),
             storage_waiting: std::sync::atomic::AtomicBool::new(false),
             writer: Mutex::new(Writer {
                 database: SubagentsDatabase::open(database)?,
@@ -175,19 +173,6 @@ fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
 }
 
 impl TreeStore for SqliteTreeStore {
-    fn set_storage_interrupt(&self, probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>) {
-        *self
-            .storage_interrupt
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(probe);
-    }
-    fn storage_wait_cancelled(&self) -> bool {
-        self.storage_interrupt
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .is_some_and(|probe| probe())
-    }
     fn recover_storage(&self) -> Result<(), TreeStoreError> {
         self.with_writer(|writer| {
             let tx = writer.database.connection.transaction()

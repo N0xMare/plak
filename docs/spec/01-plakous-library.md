@@ -1472,7 +1472,11 @@ fence and ends authority. Every acknowledged same-owner revival replaces the
 owner's held grant even if publication subsequently fails or is interrupted,
 so renewal and cleanup release use the latest grant.
 Interrupt applies only to the addressed turn/agent, not every owner sharing
-the backend. Embedders without an interrupt probe can bound a workflow's
+the backend. The backend carries no interrupt: a host binds one per agent
+(`Agent::set_storage_interrupt`) and per handle
+(`AgentSessions::with_storage_interrupt`, a view that shares the backend, its
+drivers and its change feed and stops the store waits of workflows and agents
+started through it). Embedders without an interrupt probe can bound a workflow's
 outage wait by dropping or timing out its future. Timing out an agent command
 or result observer only bounds the caller's wait, not the already running
 owner: cancel the exact turn or shut down that agent explicitly.

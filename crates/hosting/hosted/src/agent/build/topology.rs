@@ -404,6 +404,9 @@ fn topology_extensions_from_hub_with_owner(
     // Publish the marker before compiling extensions, which may still fail.
     if attach == crate::topology_runtime::TopologyHubAttach::AttachRoot {
         *acquired_owner = Some(spawn_parent_tree_id(parent).to_owned());
+        runtime
+            .driver()
+            .bind_storage_shutdown(roots.storage_shutdown_probe());
     }
     topology_extensions_from_runtime(runtime, parent, caller_id)
 }

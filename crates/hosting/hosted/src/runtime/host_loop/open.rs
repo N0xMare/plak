@@ -27,9 +27,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
     ) -> CliResult<Self> {
         let storage_interrupt = actions.storage_interrupt_probe();
-        config
+        config.state_roots = config
             .state_roots
-            .bind_storage_shutdown(actions.storage_shutdown_probe());
+            .clone()
+            .with_storage_shutdown(actions.storage_shutdown_probe());
         config.store = config
             .store
             .clone()

@@ -332,6 +332,8 @@ fn interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable() {
         tree.vcs_port(),
         None,
     );
+    // A host shutting down ends the capacity park at once.
+    driver.bind_storage_shutdown(std::sync::Arc::new(|| true));
     let command = format!(
         "{}{child}:1:c1-a1:1",
         crate::driver::wake::WakeIdentity::CHILD_PREFIX
@@ -391,10 +393,6 @@ struct SecondSaveStore {
 }
 
 impl crate::agent_tree::TreeStore for SecondSaveStore {
-    fn storage_wait_cancelled(&self) -> bool {
-        self.full
-    }
-
     fn exists(&self, id: &str) -> Result<bool, crate::agent_tree::TreeStoreError> {
         self.inner.exists(id)
     }

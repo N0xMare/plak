@@ -120,10 +120,6 @@ fn uncancelled_stored_only_root_batch_full_keeps_run_loop_alive_and_retries_once
         }
     }
     trees.full.store(true, Ordering::Release);
-    assert!(
-        !trees.storage_wait_cancelled(),
-        "the store never signals operator cancellation"
-    );
     send_attached_action(&actions, UserAction::ResumeQueueDrain);
     loop {
         let event = events.recv_timeout(Duration::from_secs(15)).unwrap();

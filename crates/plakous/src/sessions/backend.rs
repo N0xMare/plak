@@ -71,29 +71,29 @@ impl SessionBackend {
     /// Returns a redaction-safe storage or integrity failure when the database
     /// cannot be opened exactly.
     pub fn sqlite(path: impl AsRef<Path>) -> Result<Self, AgentSessionsError> {
-        Self::sqlite_with_storage_probe(path, Arc::new(|_| false), Arc::new(|| false))
+        Self::sqlite_with_storage_probe(path, Arc::new(|_| false))
     }
 
     /// Opens SQLite with a process-local pause probe for colocated
     /// authoritative stores. True refuses new dispatch, never a retained
     /// publication. The probe receives `true` to retry outstanding storage
     /// debt through an authoritative write, and `false` for observation only.
-    /// Only the store that failed may clear its own pause. On a shared backend,
-    /// the interrupt probe observes process shutdown only, never a single
-    /// agent's Esc or write authority. Bind per-agent interruption on its agent.
+    /// Only the store that failed may clear its own pause. Storage waits are
+    /// interrupted per handle
+    /// ([`AgentSessions::with_storage_interrupt`](super::AgentSessions::with_storage_interrupt)) and
+    /// per agent, never through the shared backend.
     ///
     /// # Errors
     /// Returns the same admission failures as [`Self::sqlite`].
     pub fn sqlite_with_storage_probe(
         path: impl AsRef<Path>,
         probe: Arc<dyn Fn(bool) -> bool + Send + Sync>,
-        interrupt: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Result<Self, AgentSessionsError> {
         let path = path.as_ref();
         let store =
             SqliteSessionStore::open(path).map_err(|error| store_path_error(path, error))?;
         Ok(Self::from_store(
-            Arc::new(store.with_storage_probe(probe, interrupt)),
+            Arc::new(store.with_storage_probe(probe)),
             RuntimeDurability::Required,
         ))
     }

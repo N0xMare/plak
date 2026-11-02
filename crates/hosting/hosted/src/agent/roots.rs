@@ -174,7 +174,10 @@ pub struct ProductStateRoots {
     // Clones are process-lifetime handles: every attach and workflow uses the
     // same bounded SQLite actor instead of reopening its database.
     runtime_sessions: Arc<Mutex<Option<Arc<AgentSessions>>>>,
-    storage_shutdown: Arc<Mutex<Option<StorageShutdownProbe>>>,
+    /// The shutdown of the attachment these roots were handed to. Every
+    /// runtime-store handle and tree they open waits on it, and on nothing
+    /// another attachment bound.
+    storage_shutdown: Option<StorageShutdownProbe>,
     /// The topology store the hub publishes trees through: opened once per
     /// process, on the first root attach, and never per compile.
     tree_store: Arc<Mutex<Option<Arc<dyn TreeStore>>>>,
@@ -205,22 +208,18 @@ pub struct ProductStateRoots {
 }
 
 impl ProductStateRoots {
-    pub(crate) fn bind_storage_shutdown(&self, probe: StorageShutdownProbe) {
-        *self
-            .storage_shutdown
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(probe);
+    /// These roots as one attachment hands them out: storage waits through
+    /// them stop on that attachment's shutdown.
+    pub(crate) fn with_storage_shutdown(mut self, probe: StorageShutdownProbe) -> Self {
+        self.storage_shutdown = Some(probe);
+        self
     }
 
-    fn storage_shutdown_probe(&self) -> StorageShutdownProbe {
-        let state = self.storage_shutdown.clone();
-        Arc::new(move || {
-            state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .is_some_and(|probe| probe())
-        })
+    /// The shutdown probe of the attachment these roots belong to.
+    pub(crate) fn storage_shutdown_probe(&self) -> StorageShutdownProbe {
+        self.storage_shutdown
+            .clone()
+            .unwrap_or_else(|| Arc::new(|| false))
     }
 
     /// These roots as one session hands them out: what they spawn belongs to
@@ -286,7 +285,7 @@ impl ProductStateRoots {
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             runtime_sessions: Arc::new(Mutex::new(None)),
-            storage_shutdown: Arc::default(),
+            storage_shutdown: None,
             tree_store: Arc::new(Mutex::new(None)),
             tree_store_factory: tree_store,
             roster_source: roster,
@@ -478,12 +477,22 @@ impl ProductStateRoots {
         [self.product.clone(), self.subscriptions.clone()]
     }
 
-    /// The process runtime-session handle, opened once.
+    /// The process runtime-session service, opened once, as a handle of the
+    /// attachment these roots belong to: its storage waits stop on that
+    /// attachment's shutdown.
     ///
     /// # Errors
     ///
     /// Returns a redaction-safe failure when the runtime database cannot open.
     pub fn runtime_sessions(&self) -> CliResult<Arc<AgentSessions>> {
+        let shared = self.shared_runtime_sessions()?;
+        Ok(match &self.storage_shutdown {
+            Some(probe) => Arc::new(shared.with_storage_interrupt(Arc::clone(probe))),
+            None => shared,
+        })
+    }
+
+    fn shared_runtime_sessions(&self) -> CliResult<Arc<AgentSessions>> {
         let _span = tracing::info_span!("runtime_sessions.open").entered();
         let mut retained = self
             .runtime_sessions
@@ -513,11 +522,7 @@ impl ProductStateRoots {
                     .as_ref()
                     .is_some_and(|store| store.storage_unavailable())
         });
-        let backend = SessionBackend::sqlite_with_storage_probe(
-            &self.runtime_database,
-            probe,
-            self.storage_shutdown_probe(),
-        )
+        let backend = SessionBackend::sqlite_with_storage_probe(&self.runtime_database, probe)
         .map_err(|error| {
             let raw = format!("plak runtime database could not be opened: {error}");
             CliFailure::new(
@@ -543,7 +548,6 @@ impl ProductStateRoots {
             return Ok(Arc::clone(store));
         }
         let store = self.tree_store_factory.open()?;
-        store.set_storage_interrupt(self.storage_shutdown_probe());
         *retained = Some(Arc::clone(&store));
         Ok(store)
     }
@@ -648,7 +652,7 @@ impl ProductStateRoots {
             product,
             state_home,
             runtime_sessions: Arc::new(Mutex::new(None)),
-            storage_shutdown: Arc::default(),
+            storage_shutdown: None,
             tree_store: Arc::new(Mutex::new(None)),
             tree_store_factory: Arc::new(doubles::MemoryTreeStoreFactory),
             roster_source: Arc::new(doubles::UnpinnedRosterSource),

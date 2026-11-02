@@ -342,7 +342,6 @@ impl SqliteStoreStats {
 /// Durable `SQLite` store using one connection on one bounded blocking actor.
 pub struct SqliteSessionStore {
     storage_probe: Option<Arc<dyn Fn(bool) -> bool + Send + Sync>>,
-    storage_interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     clock: Arc<dyn LeaseClock>,
     domain: LeaseDomain,
     sender: ActorSender,
@@ -394,14 +393,10 @@ enum BackendState {
 impl SqliteSessionStore {
     /// Also pauses new starts while a colocated authoritative store retains
     /// a capacity-refused publication. The probe never authorizes a write.
+    /// Storage waits are interrupted per handle above this store, never here.
     #[must_use]
-    pub fn with_storage_probe(
-        mut self,
-        probe: Arc<dyn Fn(bool) -> bool + Send + Sync>,
-        interrupt: Arc<dyn Fn() -> bool + Send + Sync>,
-    ) -> Self {
+    pub fn with_storage_probe(mut self, probe: Arc<dyn Fn(bool) -> bool + Send + Sync>) -> Self {
         self.storage_probe = Some(probe);
-        self.storage_interrupt = Some(interrupt);
         self
     }
 
@@ -759,7 +754,6 @@ impl SqliteSessionStore {
             wait_for_actor_or_join(ready_rx, sender.clone(), join, STARTUP_TIMEOUT, &progress)?;
         Ok(Self {
             storage_probe: None,
-            storage_interrupt: None,
             clock: authority_clock,
             domain,
             sender,
@@ -903,7 +897,6 @@ impl Clone for SqliteSessionStore {
     fn clone(&self) -> Self {
         Self {
             storage_probe: self.storage_probe.clone(),
-            storage_interrupt: self.storage_interrupt.clone(),
             clock: Arc::clone(&self.clock),
             domain: self.domain,
             sender: self.sender.clone(),
@@ -1210,10 +1203,6 @@ impl Backend {
 }
 
 impl SessionStore for SqliteSessionStore {
-    fn storage_wait_cancelled(&self) -> bool {
-        self.storage_interrupt.as_ref().is_some_and(|probe| probe())
-    }
-
     fn recover_storage(&self) -> StoreFuture<'_, ()> {
         Box::pin(async move {
             if let Some(probe) = self.storage_probe.clone()
