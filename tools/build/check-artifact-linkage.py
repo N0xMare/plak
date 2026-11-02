@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "checks"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gate"))
 from check_workspace import PRODUCT_EXECUTABLES, verify_artifact_linkage
 
 

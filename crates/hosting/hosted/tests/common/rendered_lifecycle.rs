@@ -1,7 +1,7 @@
 //! Assembled model-visible lifecycle goldens (tool results, compaction, child mail, mid-session).
 //!
 //! Included from `agent.rs` under `#[cfg(test)]`. The inner `#[cfg(test)]`
-//! module keeps `tools/checks/check_workspace.py` from treating golden helpers as
+//! module keeps `tools/gate/check_workspace.py` from treating golden helpers as
 //! production CLI code. No production behaviour.
 
 #[cfg(test)]

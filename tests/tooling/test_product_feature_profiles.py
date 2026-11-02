@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("product_features", ROOT / "tools/checks/check_features.py")
+spec = importlib.util.spec_from_file_location("product_features", ROOT / "tools/gate/check_features.py")
 assert spec and spec.loader
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)

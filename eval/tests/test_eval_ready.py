@@ -240,7 +240,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_recipes_route_to_explicit_phases_without_rust_or_paid_tests(self):
         root = Path(__file__).resolve().parents[2]
-        harbor = (root / 'harbor.just').read_text()
+        harbor = (root / 'eval/harbor.just').read_text()
         for name, phase in [('phase0', 'calibration'), ('null', 'null'), ('codex', 'codex')]:
             self.assertIn(name + ':\n    uv run --project eval python eval/scripts/campaign.py ' + phase, harbor)
         for script in ('campaign.py', 'campaign_builder.py', 'recording_proxy.py'):

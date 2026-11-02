@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
-    "check_perf_smoke", ROOT / "tools" / "checks" / "check_perf_smoke.py"
+    "check_perf_smoke", ROOT / "tools" / "perf" / "check_perf_smoke.py"
 )
 assert SPEC and SPEC.loader
 CHECKER = importlib.util.module_from_spec(SPEC)

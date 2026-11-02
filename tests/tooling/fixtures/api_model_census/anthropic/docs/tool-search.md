@@ -1,6 +1,6 @@
 # tool-search
 
-Synthetic fixture for scripts/api_model_census.py; not provider documentation.
+Synthetic fixture for tools/dev/api_model_census.py; not provider documentation.
 
 ## Model compatibility
 

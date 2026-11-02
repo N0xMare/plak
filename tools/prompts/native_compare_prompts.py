@@ -41,8 +41,8 @@ import urllib.request
 from urllib.parse import urlparse
 
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import owned_processes
 
 DEFAULT_OUT = ROOT / "target/prompt-captures/native"

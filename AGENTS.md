@@ -74,7 +74,7 @@ runtime. Vendor comparator arms upload pinned Linux CLI prefixes matching
 they do not nvm/`@latest`/`curl | bash` per trial. When a Claude native-home
 arm exists, compare interactive subscription OAuth, not `claude --print`.
 
-All tiers use `scripts/dev-check.sh`; Rust test lanes build the whole workspace
+All tiers use `tools/gate/dev-check.sh`; Rust test lanes build the whole workspace
 with all features and share that artifact set. Default and reduced product
 resolutions have separate compile evidence. The groups, in canonical order, are
 `static` (fmt, locked dependency fetch, offline first, online only for missing
@@ -86,7 +86,7 @@ resolution, and maintainer-feature builds, rustc warnings denied),
 with warnings denied, and feature-admission/read-only-store contracts; full only),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
 (public compile contracts), `tooling` (Python self-tests) and `package` (the
-publish dry run: `scripts/publish.sh --gate` prefetches archive verification
+publish dry run: `tools/release/publish.sh --gate` prefetches archive verification
 inputs offline first, refreshing a stale index entry a version requirement
 names and retrying offline once, online only for missing cache inputs, then
 packages and verifies the cohort strictly offline; compiled review time is informational
@@ -111,7 +111,7 @@ partition the suite; a new serial test goes into the `serial` or `durability`
 filter and the `offline` exclusion. Contract fixture builds use a persistent
 `.public-contracts/<target-dir-name>/<triple>` directory beside
 `CARGO_TARGET_DIR` (`PLAK_PUBLIC_CONTRACTS_DIR` overrides it).
-`dev-check.sh` and `just dev coverage` set `TMPDIR` from `scripts/test-tmpdir.sh`
+`dev-check.sh` and `just dev coverage` set `TMPDIR` from `tools/gate/test-tmpdir.sh`
 (a per-checkout 0700 directory under `/dev/shm` on Linux, where fsync under gate
 load breaks process deadlines, and under `/private/tmp` on macOS, outside
 `HOME`; `PLAK_TEST_TMPDIR` overrides) and `PLAK_HOME=$TMPDIR/plak-isolated-home`
@@ -119,7 +119,7 @@ load breaks process deadlines, and under `/private/tmp` on macOS, outside
 operator's `~/.plak`, plus `GIT_CONFIG_GLOBAL=$TMPDIR/gitconfig` (empty) and
 `GIT_CONFIG_NOSYSTEM=1`, so fixture git never reads the operator's git config;
 a test that commits sets its own identity. Set all four yourself if you run
-`cargo nextest` by hand: `TMPDIR="$(bash scripts/test-tmpdir.sh)"`. There is no CI: the only workflow,
+`cargo nextest` by hand: `TMPDIR="$(bash tools/gate/test-tmpdir.sh)"`. There is no CI: the only workflow,
 `.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag, and a manual run on `main` is the pre-tag dry run that releases nothing
 (`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
 

@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests/tooling/fixtures/api_model_census"
 SPEC = importlib.util.spec_from_file_location(
-    "api_model_census", ROOT / "scripts/api_model_census.py"
+    "api_model_census", ROOT / "tools/dev/api_model_census.py"
 )
 assert SPEC and SPEC.loader
 census = importlib.util.module_from_spec(SPEC)
@@ -38,7 +38,7 @@ class DumpTests(unittest.TestCase):
         for path in pages:
             with self.subTest(page=path.relative_to(FIXTURE)):
                 self.assertIn(
-                    "Synthetic fixture for scripts/api_model_census.py; not provider documentation.",
+                    "Synthetic fixture for tools/dev/api_model_census.py; not provider documentation.",
                     path.read_text(),
                 )
 
@@ -440,7 +440,7 @@ class CommandTests(unittest.TestCase):
             result = subprocess.run(
                 [
                     sys.executable,
-                    str(ROOT / "scripts/api_model_census.py"),
+                    str(ROOT / "tools/dev/api_model_census.py"),
                     "--fixture",
                     str(FIXTURE),
                     "--write",

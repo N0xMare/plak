@@ -223,7 +223,7 @@ fn emit_metadata() {
             },
             "allocation_probe": {
                 "available": false,
-                "reason": "ordinary timing rows have no in-process allocator instrumentation; tests/performance/baselines/perf_allocations.py runs dedicated entry points under process-isolated glibc memusage",
+                "reason": "ordinary timing rows have no in-process allocator instrumentation; tools/perf/perf_allocations.py runs dedicated entry points under process-isolated glibc memusage",
             },
             "synthetic_context_scope": {
                 "protocol_family": PROTOCOL_FAMILY,

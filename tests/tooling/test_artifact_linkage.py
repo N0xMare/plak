@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools/checks"))
+sys.path.insert(0, str(ROOT / "tools/gate"))
 
 
 def load_module(name: str, path: Path):  # type: ignore[no-untyped-def]
@@ -32,7 +32,7 @@ def load_module(name: str, path: Path):  # type: ignore[no-untyped-def]
 
 
 workspace_policy = load_module(
-    "check_workspace_linkage", ROOT / "tools/checks/check_workspace.py"
+    "check_workspace_linkage", ROOT / "tools/gate/check_workspace.py"
 )
 
 # A worker listing as Mach-O prints it, and as ELF prints it. Both must count.

@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location('jj_tools', ROOT / 'scripts/jj-tools.py')
+SPEC = importlib.util.spec_from_file_location('jj_tools', ROOT / 'tools/dev/jj-tools.py')
 jj_tools = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(jj_tools)
 

@@ -60,13 +60,13 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        (self.root / "scripts").mkdir()
-        shutil.copyfile(ROOT / "scripts/dev-check.sh", self.root / "scripts/dev-check.sh")
-        shutil.copyfile(ROOT / "scripts/dev-tools.sh", self.root / "scripts/dev-tools.sh")
-        shutil.copyfile(ROOT / "scripts/dev-tools-prefix.sh", self.root / "scripts/dev-tools-prefix.sh")
-        shutil.copyfile(ROOT / "scripts/test-tmpdir.sh", self.root / "scripts/test-tmpdir.sh")
-        (self.root / "tools/checks").mkdir(parents=True)
-        shutil.copyfile(ROOT / "tools/checks/vcs_listing.py", self.root / "tools/checks/vcs_listing.py")
+        (self.root / "tools/gate").mkdir(parents=True)
+        (self.root / "tools/release").mkdir(parents=True)
+        shutil.copyfile(ROOT / "tools/gate/dev-check.sh", self.root / "tools/gate/dev-check.sh")
+        shutil.copyfile(ROOT / "tools/gate/dev-tools.sh", self.root / "tools/gate/dev-tools.sh")
+        shutil.copyfile(ROOT / "tools/gate/dev-tools-prefix.sh", self.root / "tools/gate/dev-tools-prefix.sh")
+        shutil.copyfile(ROOT / "tools/gate/test-tmpdir.sh", self.root / "tools/gate/test-tmpdir.sh")
+        shutil.copyfile(ROOT / "tools/gate/vcs_listing.py", self.root / "tools/gate/vcs_listing.py")
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -148,7 +148,7 @@ if sys.argv[1].endswith('changed_packages.py'):
     print(os.environ.get('GATE_CHANGED', ''), end='')
 ''')
 
-        publish = self.root / 'scripts/publish.sh'
+        publish = self.root / 'tools/release/publish.sh'
         publish.write_text('#!' + sys.executable + r'''
 import json, os, sys
 with open(os.environ['GATE_CALLS'], 'a') as log:
@@ -163,7 +163,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         path.chmod(0o700)
 
     def run_gate(self, *args):
-        result = subprocess.run(['bash', str(self.root / 'scripts/dev-check.sh'), *args],
+        result = subprocess.run(['bash', str(self.root / 'tools/gate/dev-check.sh'), *args],
                                 env=self.env, text=True, capture_output=True, timeout=15)
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         self.python_calls = [c for c in calls if 'python' in c]
@@ -189,7 +189,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--steps', 'variants')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([call['args'] for call in calls], [['nextest', '--version']])
-        self.assertIn(['tools/checks/check_features.py', '--product-builds', '--target', 'host-triple'], scripts)
+        self.assertIn(['tools/gate/check_features.py', '--product-builds', '--target', 'host-triple'], scripts)
         call = next(call for call in self.python_calls if '--product-builds' in call['python'])
         self.assertEqual(call['target_rustflags'], '-C target-feature=+crt-static')
         self.assertEqual(call['rustflags'], 'unused-base-flags -D warnings')
@@ -534,8 +534,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
              for package in SUPPORTED],
         )
         ran = [s[0] for s in scripts]
-        for checker in ('tools/checks/check_public_compile.py', 'tools/checks/check_workspace.py',
-                        'tools/checks/check_features.py', 'tools/checks/run_tooling_tests.py'):
+        for checker in ('tools/gate/check_public_compile.py', 'tools/gate/check_workspace.py',
+                        'tools/gate/check_features.py', 'tools/gate/run_tooling_tests.py'):
             self.assertIn(checker, ran)
     def test_platform_tier_checks_features_and_both_lanes_without_linux_checks(self):
         result, calls, scripts = self.run_gate('--platform')
@@ -572,7 +572,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 supported.add(package['name'])
         self.assertEqual(supported, set(SUPPORTED))
         self.assertIn(f"supported_packages=({' '.join(SUPPORTED)})",
-                      (ROOT / 'scripts/dev-check.sh').read_text())
+                      (ROOT / 'tools/gate/dev-check.sh').read_text())
 
     def test_tests_and_tooling_run_with_an_isolated_git_config(self):
         result, calls, _ = self.run_gate()
@@ -611,7 +611,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.env['GATE_CHANGED'] = 'plakous-model\nplak\n'
         result, calls, scripts = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(['tools/checks/changed_packages.py'], scripts)
+        self.assertIn(['tools/gate/changed_packages.py'], scripts)
         scope = 'rdeps(=plakous-model) | rdeps(=plak)'
         # The serial budget lane is left to the default tier.
         self.assertEqual(self.profiles(calls), ['offline'])
@@ -622,7 +622,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def test_fast_tier_takes_explicit_packages_without_reading_the_diff(self):
         result, calls, scripts = self.run_gate('--fast', 'plakous-store')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn(['tools/checks/changed_packages.py'], scripts)
+        self.assertNotIn(['tools/gate/changed_packages.py'], scripts)
         self.assertEqual(self.filtersets(calls), ['rdeps(=plakous-store)'])
 
     def test_fast_tier_with_a_workspace_input_runs_the_whole_suite(self):
@@ -642,7 +642,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def test_unknown_argument_is_refused(self):
         for args in (('--quick',), ('--changed',), ('--full', 'plak'), ('--platform', 'plak')):
             with self.subTest(args=args):
-                result = subprocess.run(['bash', str(self.root / 'scripts/dev-check.sh'), *args],
+                result = subprocess.run(['bash', str(self.root / 'tools/gate/dev-check.sh'), *args],
                                         env=self.env, text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 2)
 
@@ -651,14 +651,14 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'],
                          ['fmt', 'fetch', *CLIPPIES])
-        self.assertIn(['tools/checks/check_workspace.py'], scripts)
-        self.assertIn(['tools/checks/check_features.py'], scripts)
+        self.assertIn(['tools/gate/check_workspace.py'], scripts)
+        self.assertIn(['tools/gate/check_features.py'], scripts)
         self.assertEqual(self.lanes(calls), [])
         records = [json.loads(line) for line in self.log.read_text().splitlines()]
         fmt = next(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'fmt')
         self.assertEqual(records[fmt + 1]['args'], ['fetch', '--locked', '--offline'])
-        self.assertEqual(records[fmt + 2]['python'], ['tools/checks/check_workspace.py'])
-        self.assertEqual(records[fmt + 3]['python'], ['tools/checks/check_features.py'])
+        self.assertEqual(records[fmt + 2]['python'], ['tools/gate/check_workspace.py'])
+        self.assertEqual(records[fmt + 3]['python'], ['tools/gate/check_features.py'])
         self.assertEqual(records[fmt + 4]['python'], ['tools/release/gate_evidence.py', 'audit'])
         self.assertEqual(records[fmt + 5]['args'][0], 'clippy')
         clippies = [row['args'] for row in records if row.get('args', [''])[0] == 'clippy']
@@ -678,14 +678,14 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         records = [json.loads(line) for line in self.log.read_text().splitlines()]
         online = next(i for i, row in enumerate(records)
                       if row.get('args') == ['fetch', '--locked'])
-        self.assertEqual(records[online + 1]['python'], ['tools/checks/check_workspace.py'])
+        self.assertEqual(records[online + 1]['python'], ['tools/gate/check_workspace.py'])
 
     def test_failed_fetch_fails_static_but_runs_the_remaining_checks(self):
         self.env['GATE_CARGO_FAILURES'] = json.dumps({'fetch': 1})
         result, calls, scripts = self.run_gate('--steps', 'static')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('failed static steps: fetch', result.stdout)
-        self.assertIn(['tools/checks/check_features.py'], scripts)
+        self.assertIn(['tools/gate/check_features.py'], scripts)
         self.assertTrue(any(c['args'][0] == 'clippy' for c in calls))
 
     def test_full_equals_every_group_in_canonical_order(self):

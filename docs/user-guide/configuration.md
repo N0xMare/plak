@@ -8,7 +8,7 @@ formatting.
 
 For the exhaustive list of keys — type, default, constraint, meaning — see
 [`../spec/07-config-reference.md`](../spec/07-config-reference.md), or read
-`configs/reference/config.toml` in this repo, which is the same list as a
+`docs/reference-config/config.toml` in this repo, which is the same list as a
 commented file you can copy.
 
 ## Your Plak home
@@ -252,7 +252,7 @@ The fields worth deciding on:
   measured; it is your hint about what this agent costs to run.
 - `[env]` — environment for `on_mint` only, not the copy's tool calls.
 
-`configs/reference/agents/` has all four of these written out with every field
+`docs/reference-config/agents/` has all four of these written out with every field
 documented in place, including the ones most templates leave alone.
 
 ## Optional tools and MCP servers
@@ -466,7 +466,7 @@ databases, logs and cache all stay under `~/.plak`.
 
 ```sh
 # The annotated reference: every key, every field, with its meaning inline.
-cp -r configs/reference/. "$PLAK_HOME"
+cp -r docs/reference-config/. "$PLAK_HOME"
 
 # The same four roles pinned to one provider each, or mixed.
 cp -r bin/plak/presets/codex/. "$PLAK_HOME"    # or claude, grok, multi

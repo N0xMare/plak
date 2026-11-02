@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd -P)"
+root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 # The prefix lives outside target/ so `cargo clean` does not destroy the tools.
-source "$root/scripts/dev-tools-prefix.sh"
+source "$root/tools/gate/dev-tools-prefix.sh"
 prefix="$(plak_dev_tools_prefix "$root")"
 export PATH="$prefix/bin:$PATH"
 nextest_version=0.9.100
@@ -51,8 +51,8 @@ case "${1:-check}" in
     mkdir -p "$prefix" "$prefix/build"
     CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$nextest_version" cargo-nextest
     CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$deny_version" cargo-deny
-    python3 tools/checks/check_public_compile.py --fetch
-    python3 scripts/jj-tools.py install "$prefix"
+    python3 tools/gate/check_public_compile.py --fetch
+    python3 tools/dev/jj-tools.py install "$prefix"
     printf 'Installed verification tools in %s/bin; just check and just dev-tools deny use this prefix.\n' "$prefix"
     ;;
   -h|--help)

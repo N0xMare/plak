@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Map the working-tree diff against HEAD to the workspace packages it touches.
 
-`scripts/dev-check.sh --fast` selects these packages and their reverse
+`tools/gate/dev-check.sh --fast` selects these packages and their reverse
 dependencies for its parallel test lane; static checks cover the workspace.
 A file belongs to the package whose
 directory is its longest prefix. A change to a workspace-wide Cargo input

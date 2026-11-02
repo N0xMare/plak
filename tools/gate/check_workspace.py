@@ -5,7 +5,7 @@ Layer facts are data, not tables in this file: every member manifest carries
 `[package.metadata.plakous] layer/class[/neutral]` and the root `Cargo.toml`
 carries `[workspace.metadata.plakous]` (layer matrix, edge exceptions, layout
 templates, legal classes, host/bin production dependencies, facade features,
-module rules). `tools/checks/plakous_policy.py` loads both from `cargo metadata`.
+module rules). `tools/gate/plakous_policy.py` loads both from `cargo metadata`.
 From that the checker derives the manifest inventory and paths, the internal
 edge map, the package classification, the neutral-core set, the security scan
 set (every host/bin package), and the facade-only symbol rule.

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 
-MODULE_PATH = Path(__file__).with_name("perf_allocations.py")
+MODULE_PATH = Path(__file__).resolve().parents[2] / "tools/perf/perf_allocations.py"
 SPEC = importlib.util.spec_from_file_location("perf_allocations", MODULE_PATH)
 assert SPEC and SPEC.loader
 perf = importlib.util.module_from_spec(SPEC)

@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
-    "native_compare_prompts", ROOT / "scripts/native_compare_prompts.py"
+    "native_compare_prompts", ROOT / "tools/prompts/native_compare_prompts.py"
 )
 assert SPEC and SPEC.loader
 NCP = importlib.util.module_from_spec(SPEC)
@@ -41,7 +41,7 @@ class CertificateTests(unittest.TestCase):
                 [sys.executable, "-c",
                  "import runpy, pathlib, sys; "
                  "runpy.run_path(sys.argv[1])['generate_mitm_certs'](pathlib.Path(sys.argv[2]))",
-                 str(ROOT / "scripts/native_compare_prompts.py"), str(directory)],
+                 str(ROOT / "tools/prompts/native_compare_prompts.py"), str(directory)],
                 cwd=root, check=True, capture_output=True,
             )
             self.assertTrue((directory / "ca.srl").is_file())
@@ -362,7 +362,7 @@ class MockServerTests(unittest.TestCase):
                 fake.write_text(
                     "#!/usr/bin/env python3\n"
                     "import sys\n"
-                    f"sys.path.insert(0, {str(ROOT / 'scripts')!r})\n"
+                    f"sys.path.insert(0, {str(ROOT / 'tools/prompts')!r})\n"
                     "import native_compare_prompts as capture\n"
                     "raise SystemExit(capture.simulate_codex_capture(sys.argv[1:]))\n"
                 )

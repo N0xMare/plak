@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
-    "changed_packages", ROOT / "tools/checks/changed_packages.py"
+    "changed_packages", ROOT / "tools/gate/changed_packages.py"
 )
 assert SPEC and SPEC.loader
 CHANGED = importlib.util.module_from_spec(SPEC)
@@ -63,7 +63,7 @@ class TouchedPackagesTests(unittest.TestCase):
 
     def test_files_outside_every_package_touch_nothing(self):
         self.assertEqual(self.touched("docs/spec/05-testing-and-evidence.md",
-                                      "tools/checks/check_features.py", "Justfile"), [])
+                                      "tools/gate/check_features.py", "Justfile"), [])
 
     def test_workspace_inputs_select_the_whole_workspace(self):
         for path in ("Cargo.toml", "Cargo.lock", ".config/nextest.toml", ".cargo/config.toml",

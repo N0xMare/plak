@@ -20,7 +20,7 @@ A package's class decides publication (§3): supported and published-internal
 packages, the vendored Code Mode protocol snapshot among them, are publishable
 to crates.io; repository-only packages, the compile fixtures under
 `tests/fixtures/`, and the `crates/core/model/fuzz` crate set `publish = false`.
-`tools/checks/check_workspace.py` enforces both directions and the registry
+`tools/gate/check_workspace.py` enforces both directions and the registry
 metadata of §3.3. Uploading the cohort is a maintainer act outside the gate; a
 source checkout remains a complete build. The `0.0.x` cohort carries no API,
 wire, or persisted-format compatibility obligation across versions beyond the
@@ -109,7 +109,7 @@ A retired package stops at its last published version; that version is not yanke
 `plakous-mcp-fake-server`.
 
 Every one of these declares its `layer` and `class` in `[package.metadata.plakous]`,
-and `tools/checks/check_workspace.py` (via `tools/checks/plakous_policy.py`) checks each
+and `tools/gate/check_workspace.py` (via `tools/gate/plakous_policy.py`) checks each
 against the workspace policy in `[workspace.metadata.plakous]` in the root
 `Cargo.toml` — the layer list, the legal production edges, the directory
 template and the legal classes per layer — so a package cannot be added, moved,
@@ -267,7 +267,7 @@ publication needs no file outside the package root:
   binaries; its integration tests, benches and test data, and the unit tests
   that read that data, run only from the repository.
 
-`tools/checks/check_workspace.py` enforces these rules and judges `plak` by its
+`tools/gate/check_workspace.py` enforces these rules and judges `plak` by its
 published shape.
 
 ## 4. Product features
@@ -438,7 +438,7 @@ implementation through this neutral carrier.
 Native facade routes do not imply composition. The product selects its
 evaluators explicitly; its default execution behavior is unchanged.
 
-The reviewed public-feature sanity cap in `tools/checks/check_features.py`
+The reviewed public-feature sanity cap in `tools/gate/check_features.py`
 is **24 per package**; growth requires an amendment here. `mcp` is independent:
 no other facade feature implies it except `full`. `plakous-mcp` depends on
 `plakous-auth` with `http-refresh`
@@ -518,7 +518,7 @@ crate. Every other positive in that checker selects a session backend
 alongside the evaluator or the whole product closure, so without this check
 the minimal evaluator manifest would never be compiled.
 
-`tools/checks/check_workspace.py` checks the same split at the artifact level,
+`tools/gate/check_workspace.py` checks the same split at the artifact level,
 not only in the manifests. It lists the symbols of the `plak`,
 `plakous-js-host`, and `plakous-py-host` executables and requires that only the
 JavaScript worker contains QuickJS engine symbols, only the Python worker
@@ -684,13 +684,13 @@ Install the pinned verification tools once, which the gates require:
 just dev-tools install
 ```
 
-`scripts/dev-tools.sh install` installs exactly cargo-nextest 0.9.100 and
+`tools/gate/dev-tools.sh install` installs exactly cargo-nextest 0.9.100 and
 cargo-deny 0.19.0 into the repository-local `.dev-tools/bin`, which the
 gate puts first on `PATH`. The prefix sits outside `target/` so `cargo clean`
 does not remove it; its install build artifacts go to `.dev-tools/build`.
 Installation also prefetches all locked public compile-contract fixture
 dependencies (chapter 05 §1.1), so subsequent contract gates can stay offline.
-Every `scripts/dev-check.sh` tier and `just dev-tools deny` require at least those versions before they run
+Every `tools/gate/dev-check.sh` tier and `just dev-tools deny` require at least those versions before they run
 anything; a newer tool already on `PATH` is accepted.
 
 ### 6.1 Cargo-native product build
@@ -747,7 +747,7 @@ just musl native          # defaults to --platform
 just musl native --fast plak  # optional targeted iteration
 ```
 
-`scripts/musl-native.sh`, through `scripts/musl-toolchain.sh` (shared with
+`tools/musl/musl-native.sh`, through `tools/musl/musl-toolchain.sh` (shared with
 release packaging, §6.6), requires the installed rustup musl target and an
 executable musl C compiler/linker. It takes the compiler from
 `CC_x86_64_unknown_linux_musl` (default `musl-gcc` on `PATH`) and the linker from
@@ -780,7 +780,7 @@ just musl container          # full tier, including default/maintainer checks
 just musl container --fast plak  # optional targeted iteration
 ```
 
-`just musl container` is a maintainer-only gate. `scripts/musl-check.sh` uses the
+`just musl container` is a maintainer-only gate. `tools/musl/musl-check.sh` uses the
 preloaded image `plak-qual-base:11162b86` (image ID `11162b863a52`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
 run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.2,
@@ -791,12 +791,12 @@ Provide the executable musl cargo-nextest 0.9.100 in `~/plak-musl/bin`
 (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot substitute for it.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.
-`scripts/musl-image.Dockerfile` is the recipe: built from a `git archive` of a
+`tools/musl/image.Dockerfile` is the recipe: built from a `git archive` of a
 commit, its default target is the image, tagged `plak-qual-base:` plus the first
 eight hex digits of its image ID, and its `nextest` target exports the musl
-cargo-nextest at the version `scripts/dev-tools.sh` pins. A toolchain or
+cargo-nextest at the version `tools/gate/dev-tools.sh` pins. A toolchain or
 dependency change rebuilds the image under a new tag and updates the tag in
-`scripts/musl-check.sh`.
+`tools/musl/musl-check.sh`.
 
 The script exports tracked and nonignored untracked source, including the
 working-tree diff and excluding deleted files, into a fresh retained
@@ -847,7 +847,7 @@ PLAK_HOME=/absolute/home just dev reload-rehearsal <full-session-uuid> [--instal
 just dev reload-rehearsal <full-session-uuid> --wait-idle --timeout 300 --detach --log <new-log-path> --install
 ```
 
-`scripts/reload-rehearsal.sh` builds the maintainer binary and both workers
+`tools/build/reload-rehearsal.sh` builds the maintainer binary and both workers
 offline into Cargo output using the same separate parent/worker invocations and
 `plak/maintainer` feature selection as `tools/build/build-plak.sh --maintainer`,
 then copies them into a disposable staging directory,
@@ -1197,7 +1197,7 @@ fat-LTO offline-turn and session-show timings are not established by this table.
 just build release && just dev home-install
 ```
 
-`just dev home-install` points `~/.local/bin/plak-dev` at `scripts/plak-dev.sh`,
+`just dev home-install` points `~/.local/bin/plak-dev` at `tools/dev/plak-dev.sh`,
 repairing a stale symlink from an earlier layout, and seeds
 `~/plak-dev-home/config.toml`. The wrapper pins the login user's `HOME`, uses
 the isolated `~/plak-dev-home`, and unsets provider API keys so they cannot
@@ -1253,7 +1253,7 @@ replacing them, so the linker stays on every group that denies warnings
 
 ### 6.5 Publishing the cohort
 
-`scripts/publish.sh` (`just publish`) is the only publication path. It stages
+`tools/release/publish.sh` (`just publish`) is the only publication path. It stages
 the tracked tree with the published `plak` manifest (§3.3), derives the order
 from `cargo metadata` there (`tools/release/publish_plan.py`: every member
 whose `publish` is not `false`, dependencies first, where normal, build and
@@ -1297,9 +1297,9 @@ a debug build per crate selection and is roughly 20 GB.
 
 | Invocation | Preconditions | Effect |
 | --- | --- | --- |
-| `scripts/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` or a tree that differs from it only in documentation (below) | Package and verify; nothing uploaded |
-| `scripts/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification |
-| `scripts/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
+| `tools/release/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` or a tree that differs from it only in documentation (below) | Package and verify; nothing uploaded |
+| `tools/release/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification |
+| `tools/release/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
 
 Publication dry runs and `--execute` use `tools/release/review_expiry.py` to
 read the review date and deadline of all seven compiled surfaces (the three
@@ -1376,7 +1376,7 @@ continues to clone plain Git.
 `tools/release/package-release.sh [--untagged | --tag TAG] [--out DIR]` builds a release
 on the host's supported target: `x86_64-unknown-linux-musl` on Linux x86_64,
 with the compiler, linker and prerequisite checks of `just musl native`
-(`scripts/musl-toolchain.sh`), and `aarch64-apple-darwin` on Apple Silicon. It
+(`tools/musl/musl-toolchain.sh`), and `aarch64-apple-darwin` on Apple Silicon. It
 refuses a dirty tree and, unless `--untagged` (a rehearsal), a `HEAD` without
 the tag `v<version>` of the workspace version, or without the tag `--tag`
 names. `--tag` accepts `v<version>` or a release candidate `v<version>-rc.<n>`
@@ -1737,7 +1737,7 @@ the CLI or TUI and provider names never enter `plakous-model` or
 Credentials, authorization headers, private session data, and unsanitized
 provider fixtures are never committed.
 
-The feature-security digests in `tools/checks/check_features.py` are reviewed
+The feature-security digests in `tools/gate/check_features.py` are reviewed
 manifest-surface pins, not values to refresh mechanically. After an intentional
 Cargo feature or dependency change: run the checker, review the exact manifest
 diff, the internal edges, the feature forwarding, and the facade exposure, then

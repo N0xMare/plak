@@ -1,6 +1,7 @@
 # eval: the opt-in, paid Harbor / Terminal-Bench bakeoff. Not in any
 # gate tier. See eval/README.md. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set working-directory := '..'
 
 [private]
 default:

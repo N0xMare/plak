@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Developer gate: check (default), fast iteration, platform, full.
-# Usage: scripts/dev-check.sh [--fast [PACKAGE...] | --platform | --full |
+# Usage: tools/gate/dev-check.sh [--fast [PACKAGE...] | --platform | --full |
 #                            --steps GROUP[,GROUP...]]
 # --steps selects exactly the named groups, in canonical order.
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd -P)"
+root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 
 # Canonical group order; every tier runs its groups in this order.
@@ -37,13 +37,13 @@ for group in "${requested[@]}"; do
   if [[ "$known" != true ]]; then echo "unknown step group: $group" >&2; exit 2; fi
 done
 
-source "$root/scripts/dev-tools-prefix.sh"
+source "$root/tools/gate/dev-tools-prefix.sh"
 export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"
-bash scripts/dev-tools.sh check
+bash tools/gate/dev-tools.sh check
 
 # Linux budget tests need RAM-backed fsync under parallel gate load; macOS
 # NOFOLLOW needs a physical path outside HOME. Placement changes, not deadlines.
-TMPDIR="$(bash scripts/test-tmpdir.sh --fresh)"
+TMPDIR="$(bash tools/gate/test-tmpdir.sh --fresh)"
 export TMPDIR
 # Nextest must not inherit the operator product home. A maintainer binary
 # writes its diagnostics log as soon as it starts, and an unresolved
@@ -70,7 +70,7 @@ scope=''
 if [[ "$tier" == fast ]]; then
   if [[ ${#packages[@]} -eq 0 ]]; then
     package_file="$(mktemp "$TMPDIR/plak-packages.XXXXXX")"
-    if ! python3 tools/checks/changed_packages.py >"$package_file"; then
+    if ! python3 tools/gate/changed_packages.py >"$package_file"; then
       rm -f "$package_file"; exit 2
     fi
     while IFS= read -r name; do packages+=("$name"); done <"$package_file"
@@ -446,9 +446,9 @@ run_group() {
         cargo fetch --locked --offline || cargo fetch --locked \
           || failed_steps="${failed_steps:+$failed_steps }fetch"
         echo "== structure: workspace =="
-        python3 tools/checks/check_workspace.py || failed_steps="${failed_steps:+$failed_steps }workspace"
+        python3 tools/gate/check_workspace.py || failed_steps="${failed_steps:+$failed_steps }workspace"
         echo "== structure: features (static) =="
-        python3 tools/checks/check_features.py || failed_steps="${failed_steps:+$failed_steps }features"
+        python3 tools/gate/check_features.py || failed_steps="${failed_steps:+$failed_steps }features"
         echo "== structure: evidence allowlist =="
         python3 tools/release/gate_evidence.py audit || failed_steps="${failed_steps:+$failed_steps }evidence"
       fi
@@ -485,7 +485,7 @@ run_group() {
       # also bypasses the wrapper. Empty overrides Cargo's configured wrapper
       # too, and only this subshell loses caching.
       export RUSTC_WRAPPER=
-      run_build_denying_warnings python3 tools/checks/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
+      run_build_denying_warnings python3 tools/gate/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
     rustdoc)
       echo "== rustdoc =="
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"}
@@ -508,30 +508,30 @@ run_group() {
       run_lane durability --test-threads=1 ;;
     contracts)
       echo "== positive/negative public compile contracts =="
-      python3 tools/checks/check_public_compile.py ;;
+      python3 tools/gate/check_public_compile.py ;;
     tooling)
       echo "== structure: checker unit tests =="
-      python3 tools/checks/run_tooling_tests.py -v ;;
+      python3 tools/gate/run_tooling_tests.py -v ;;
     package)
       # Publication packages a git tree; the musl container mounts an export.
-      if [[ "$(python3 tools/checks/vcs_listing.py kind)" == export ]]; then
+      if [[ "$(python3 tools/gate/vcs_listing.py kind)" == export ]]; then
         echo "skip package: not a git work tree (the dry run stages tracked files)"
         return 0
       fi
       echo "== publish dry run: prefetch inputs, then verify the cohort offline =="
-      scripts/publish.sh --gate ;;
+      tools/release/publish.sh --gate ;;
     *) echo "unimplemented step group: $1" >&2; exit 2 ;;
   esac
 }
 
 # A passing full tier on a clean tree records that tree as publication
 # evidence, and a passing package group (full, or `--steps` naming it) records
-# package evidence. scripts/publish.sh refuses a tree neither covers
+# package evidence. tools/release/publish.sh refuses a tree neither covers
 # (tools/release/gate_evidence.py: documentation-only deltas keep the full
 # evidence; a packaged-file delta also needs package evidence for HEAD).
 evidence_tree=''
 if [[ "$tier" == full || ",$selection," == *",package,"* ]]; then
-  evidence_tree="$(python3 tools/checks/vcs_listing.py evidence-tree)"
+  evidence_tree="$(python3 tools/gate/vcs_listing.py evidence-tree)"
 fi
 
 failed_groups=""
@@ -576,7 +576,7 @@ if [[ "$gate_status" -ne 0 ]]; then
   exit "$gate_status"
 fi
 if [[ -n "$evidence_tree" ]]; then
-  if [[ "$(python3 tools/checks/vcs_listing.py evidence-tree)" == "$evidence_tree" ]]; then
+  if [[ "$(python3 tools/gate/vcs_listing.py evidence-tree)" == "$evidence_tree" ]]; then
     mkdir -p "$target_dir/gate-evidence"
     printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/package"
     echo "== evidence: package group passed on tree $evidence_tree =="

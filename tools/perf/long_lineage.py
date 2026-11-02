@@ -10,8 +10,7 @@ import sys
 import threading
 import time
 
-from_root = Path(__file__).resolve().parents[2] / "scripts"
-sys.path.insert(0, str(from_root))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from perf_long_session import write_home
 
 

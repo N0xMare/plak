@@ -265,8 +265,8 @@ def cache_digest(root: Path = ROOT) -> str:
                  if Path(name).parent.name == ".cargo" and Path(name).name.startswith("config"))
     paths.update(path.relative_to(root) for path in root.glob(".cargo/config*") if path.is_file())
     paths.update(map(Path, (
-        "Cargo.lock", "rust-toolchain.toml", "tools/checks/check_features.py",
-        "tools/checks/plakous_policy.py",
+        "Cargo.lock", "rust-toolchain.toml", "tools/gate/check_features.py",
+        "tools/gate/plakous_policy.py",
     )))
     # Metadata contains absolute manifest paths, so it cannot cross checkouts.
     digest = hashlib.sha256(json.dumps([str(root.resolve()), version]).encode())

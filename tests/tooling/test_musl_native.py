@@ -16,10 +16,11 @@ class MuslNativeTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        (self.root / 'scripts').mkdir()
+        (self.root / 'tools/musl').mkdir(parents=True)
+        (self.root / 'tools/gate').mkdir(parents=True)
         for name in ('musl-native.sh', 'musl-toolchain.sh'):
-            shutil.copyfile(ROOT / 'scripts' / name, self.root / 'scripts' / name)
-        (self.root / 'scripts/dev-check.sh').write_text('''#!/bin/bash
+            shutil.copyfile(ROOT / 'tools/musl' / name, self.root / 'tools/musl' / name)
+        (self.root / 'tools/gate/dev-check.sh').write_text('''#!/bin/bash
 python3 - "$@" <<'PY'
 import json, os, sys
 print(json.dumps(dict(args=sys.argv[1:], target=os.environ.get('CARGO_BUILD_TARGET'),
@@ -47,7 +48,7 @@ exit "${NATIVE_EXIT:-0}"
         return str(path)
 
     def run_gate(self, *args):
-        return subprocess.run(['bash', 'scripts/musl-native.sh', *args], cwd=self.root,
+        return subprocess.run(['bash', 'tools/musl/musl-native.sh', *args], cwd=self.root,
                               env=self.env, text=True, capture_output=True, timeout=15)
 
     def test_defaults_to_platform_with_explicit_target_and_path_compiler(self):

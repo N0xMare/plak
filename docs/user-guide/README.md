@@ -30,9 +30,10 @@ Start here:
   library: features, manifests, examples, and the construction helpers.
 
 Ready-made configuration shapes you can copy into your Plak home live in
-[`configs/`](../../configs/): `reference/` is the annotated every-key home,
-`providers/` pins the four roles to one account each, and `scenarios/` holds complete
-single-agent and tree examples.
+[`docs/reference-config/`](../reference-config/) (the annotated every-key home),
+[`bin/plak/presets/`](../../bin/plak/presets/) (the four roles pinned to one account each)
+and [`tests/fixtures/config-scenarios/`](../../tests/fixtures/config-scenarios/) (complete
+single-agent and tree examples).
 
 > Agents run with full coding tools and no approval gates. Process tools run
 > with your full host authority; there is no OS sandbox. If you need a real boundary around

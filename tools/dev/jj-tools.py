@@ -52,9 +52,9 @@ def install(prefix: Path) -> None:
 
 
 def compat(prefix: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
-    env['TMPDIR'] = subprocess.check_output(['bash', 'scripts/test-tmpdir.sh'], cwd=root, text=True).strip()
+    env['TMPDIR'] = subprocess.check_output(['bash', 'tools/gate/test-tmpdir.sh'], cwd=root, text=True).strip()
     env['PLAK_HOME'] = str(Path(env['TMPDIR']) / 'plak-isolated-home')
     Path(env['PLAK_HOME']).mkdir(mode=0o700, exist_ok=True)
     git_config = Path(env['TMPDIR']) / 'gitconfig'

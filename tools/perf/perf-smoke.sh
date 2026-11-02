@@ -14,11 +14,11 @@
 # is evidence, not a gate: no gate tier runs this recipe. See spec 05
 # §2.7.
 #
-# Usage: scripts/perf-smoke.sh [--check] [--out <file>]
+# Usage: tools/perf/perf-smoke.sh [--check] [--out <file>]
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
-TMPDIR="$(bash scripts/test-tmpdir.sh)"
+TMPDIR="$(bash tools/gate/test-tmpdir.sh)"
 export TMPDIR
 # Fixture git reads no operator config (spec 05 §1, test isolation).
 : >"$TMPDIR/gitconfig"
@@ -361,5 +361,5 @@ fi
 cat "$measurements"
 
 if [[ "$check" -eq 1 ]]; then
-  "$PY" tools/checks/check_perf_smoke.py "$measurements"
+  "$PY" tools/perf/check_perf_smoke.py "$measurements"
 fi

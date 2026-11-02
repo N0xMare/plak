@@ -128,7 +128,7 @@ impl CellBudgetExhausted {
     /// The `cell_budget_exhausted` failure body.
     ///
     /// Built field by field rather than with `json!`: this module ships in the
-    /// CLI binary, and `tools/checks/check_workspace.py` only approves that macro
+    /// CLI binary, and `tools/gate/check_workspace.py` only approves that macro
     /// for the files that already carry it.
     #[must_use]
     pub fn to_failure_json(&self) -> Value {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Package, verify and (only when asked) publish the crate cohort to crates.io.
-# Usage: scripts/publish.sh [--gate | --execute]
+# Usage: tools/release/publish.sh [--gate | --execute]
 #   (none)     dry run: refuse a dirty tree or one without passing `just full`
 #              evidence (for HEAD, or for a tree that differs from HEAD only in
 #              documentation; see tools/release/gate_evidence.py), then package
@@ -13,7 +13,7 @@
 # (seconds per crate, default 600) shape the index wait.
 # Publication modes require more than a third of every compiled review window remaining.
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd -P)"
+root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 
 mode=dry-run

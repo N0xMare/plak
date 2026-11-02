@@ -17,10 +17,9 @@ class MuslCheckTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        (self.root / 'scripts').mkdir()
-        script = ROOT / 'scripts/musl-check.sh'
-        if script.exists():
-            shutil.copyfile(script, self.root / 'scripts/musl-check.sh')
+        (self.root / 'tools/musl').mkdir(parents=True)
+        script = ROOT / 'tools/musl/musl-check.sh'
+        shutil.copyfile(script, self.root / 'tools/musl/musl-check.sh')
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.tools = self.root / 'musl tools'
@@ -67,7 +66,7 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         path.chmod(0o700)
 
     def run_gate(self, *args):
-        result = subprocess.run(['bash', 'scripts/musl-check.sh', *args], cwd=self.root,
+        result = subprocess.run(['bash', 'tools/musl/musl-check.sh', *args], cwd=self.root,
                                 env=self.env, text=True, capture_output=True, timeout=15)
         call = json.loads(self.log.read_text()) if self.log.exists() else None
         return result, call
@@ -83,7 +82,7 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         command = args[args.index('-c') + 1]
         self.assertIn('CARGO_BUILD_TARGET=x86_64-unknown-linux-musl', command)
         self.assertIn('CARGO_NET_OFFLINE=true', command)
-        self.assertIn('bash scripts/dev-check.sh "$@"', command)
+        self.assertIn('bash tools/gate/dev-check.sh "$@"', command)
         self.assertEqual(args[-2:], ['sh', '--full'])
         self.assertIn('EXIT 0', result.stdout)
 

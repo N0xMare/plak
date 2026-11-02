@@ -184,7 +184,7 @@ pub const TEMPLATE_FIELD_DOCS: &[TemplateFieldDoc] = &[
 /// One template file body with the reference commentary attached.
 ///
 /// Fields the template leaves unset print as a commented example, so every
-/// field of the schema is visible in `configs/reference/agents/*.toml`.
+/// field of the schema is visible in `docs/reference-config/agents/*.toml`.
 #[must_use]
 pub fn render_template_annotated(name: &str, template: &AgentTemplate) -> String {
     let rendered = render_template(template);

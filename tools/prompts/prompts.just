@@ -1,5 +1,6 @@
 # Local prompt renders. Never committed. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set working-directory := '../..'
 
 # Render prompt/wire/lifecycle artifacts into target/prompt-renders (git-ignored).
 # Correctness is pinned in code (sha256 tables in rendered_prompts.rs /
@@ -31,4 +32,4 @@ pins:
 # Local mock responses; not live provider qualification.
 [doc("capture native request shapes with local mock responses")]
 native-compare *ARGS:
-    python3 scripts/native_compare_prompts.py {{ARGS}}
+    python3 tools/prompts/native_compare_prompts.py {{ARGS}}

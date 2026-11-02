@@ -1,6 +1,7 @@
 # Opt-in live runs under tests/live. Paid except where a recipe says otherwise.
 # Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set working-directory := '../..'
 
 [private]
 default:
@@ -54,7 +55,7 @@ mcp-oauth *ARGS:
 #        just live census --write
 [doc("diff the bundled API model tables; networked, not a gate")]
 census *ARGS:
-    python3 scripts/api_model_census.py {{ARGS}}
+    python3 tools/dev/api_model_census.py {{ARGS}}
 
 # Dry-run spend for the planned live matrix. No build, no network.
 # Usage: just live estimate --rate-card rates.json

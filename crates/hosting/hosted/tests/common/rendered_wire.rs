@@ -1,7 +1,7 @@
 //! First-turn HTTP request-body goldens for product routes.
 //!
 //! Included from `agent.rs` under `#[cfg(test)]`. The inner `#[cfg(test)]`
-//! module keeps `tools/checks/check_workspace.py` from treating golden helpers as
+//! module keeps `tools/gate/check_workspace.py` from treating golden helpers as
 //! production CLI code. No production behaviour.
 
 #[cfg(test)]

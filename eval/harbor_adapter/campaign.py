@@ -150,7 +150,7 @@ def campaign_gate(root: Path) -> dict[str, Any]:
     plan = load_campaign()
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal",
-                                     "--", "eval", "Justfile", "harbor.just"], cwd=root)
+                                     "--", "eval", "Justfile", "eval/harbor.just"], cwd=root)
     if dirty or commit != plan["source_commit"]:
         raise PreflightError("campaign requires clean recorded eval sources")
     if os.environ.get("HARBOR_ARCH") != plan["arch"]:

@@ -16,8 +16,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools/checks"))
-SPEC = importlib.util.spec_from_file_location("check_prod_loc", ROOT / "tools/checks/check_prod_loc.py")
+sys.path.insert(0, str(ROOT / "tools/gate"))
+SPEC = importlib.util.spec_from_file_location("check_prod_loc", ROOT / "tools/perf/check_prod_loc.py")
 assert SPEC and SPEC.loader
 LOC = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = LOC

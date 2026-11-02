@@ -225,7 +225,7 @@ fn emit_metadata() {
             "turn_timing_scope": "primary turn rows time agent.prompt call through authoritative TurnResult readiness only; agent/workspace construction, history prefill, event subscribers/projections, conversation serialization, and shutdown are excluded",
             "allocation_probe": {
                 "available": false,
-                "reason": "ordinary timing rows have no allocator instrumentation; tests/performance/baselines/perf_allocations.py runs dedicated event entry points under process-isolated glibc memusage",
+                "reason": "ordinary timing rows have no allocator instrumentation; tools/perf/perf_allocations.py runs dedicated event entry points under process-isolated glibc memusage",
             },
             "synthetic_model_preparation": {
                 "token_unit": "one byte of the complete identity-only synthetic model wire",
@@ -446,7 +446,7 @@ async fn measure_event_history(history_turns: usize) {
             "post_snapshot_cursor_serialized_bytes": post_snapshot_cursor_serialized_bytes,
             "snapshot_cursor_serialized_growth_bytes": post_snapshot_cursor_serialized_bytes.saturating_sub(snapshot_cursor_serialized_bytes),
             "retained_bytes": Value::Null,
-            "retained_bytes_external_probe": "tests/performance/baselines/perf_allocations.py process-isolated glibc memusage trace; ordinary timing remains uninstrumented",
+            "retained_bytes_external_probe": "tools/perf/perf_allocations.py process-isolated glibc memusage trace; ordinary timing remains uninstrumented",
             "instrumentation_scope": "separate fresh-agent public projection/subscriber workload executed after all primary prompt latency rows",
         })
     );

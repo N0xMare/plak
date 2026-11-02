@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build and pack the release tarball for this host's supported target:
 # x86_64-unknown-linux-musl on Linux x86_64 (the native musl toolchain of
-# scripts/musl-toolchain.sh, static PIE), aarch64-apple-darwin on Apple Silicon.
+# tools/musl/musl-toolchain.sh, static PIE), aarch64-apple-darwin on Apple Silicon.
 # Writes plak-<version>-<triple>.tar.gz and SHA256SUMS into the output
 # directory (default: <target dir>/release-dist).
 #
@@ -55,7 +55,7 @@ fi
 static=()
 case "$(uname -s) $(uname -m)" in
   "Linux x86_64")
-    source scripts/musl-toolchain.sh
+    source tools/musl/musl-toolchain.sh
     static=(--require-static) ;;
   "Darwin arm64")
     export CARGO_BUILD_TARGET=aarch64-apple-darwin ;;

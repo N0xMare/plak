@@ -195,7 +195,7 @@ Set the root in `~/.plak/config.toml`:
 agent = "main"
 ```
 
-You can then start the TUI with `plak`. To configure multiple agents, use the [orchestration guide](docs/user-guide/agents-and-orchestration.md) and the complete example homes in [`configs/`](configs/). The [configuration guide](docs/user-guide/configuration.md) explains each setting.
+You can then start the TUI with `plak`. To configure multiple agents, use the [orchestration guide](docs/user-guide/agents-and-orchestration.md) and the complete example homes in [`tests/fixtures/config-scenarios/`](tests/fixtures/config-scenarios/). The [configuration guide](docs/user-guide/configuration.md) explains each setting.
 
 ### Commands
 
@@ -217,7 +217,7 @@ You can then start the TUI with `plak`. To configure multiple agents, use the [o
 - **[User guide](docs/user-guide/README.md):** installation, accounts, configuration, CLI/TUI usage, orchestration, and troubleshooting.
 - **[Behavioral specification](docs/spec/README.md):** authority for architecture, runtime behavior, security boundaries, persistence, and supported surfaces. Start with the [system overview](docs/spec/00-overview.md).
 - **[Crate map](docs/spec/00-overview.md#crate-map):** entrypoints and the authoritative package map.
-- **[Example configurations](configs/):** annotated reference settings and complete scenario homes.
+- **[Example configurations](docs/reference-config/):** the annotated reference home. Complete scenario homes live in [`tests/fixtures/config-scenarios/`](tests/fixtures/config-scenarios/), and built-in provider homes live in [`bin/plak/presets/`](bin/plak/presets/).
 - **[Changelog](CHANGELOG.md)**, **[contributing](.github/CONTRIBUTING.md)** and **[security policy](.github/SECURITY.md)**.
 
 For local development, `just fast <packages>` is the worker gate, plus the groups the change needs. `just check` is the Linux workspace gate: formatting, linting, structure checks, feature builds, the parallel and serial offline Rust test lanes, public compile contracts and Python tooling tests, without durability. Before an integration batch lands, its tip passes `just musl native` on Linux x86_64, the target-independent groups once (`just steps static,rustdoc,contracts,tooling,package`), `just platform` on Apple Silicon macOS, and the crash sweep (full strict when recovery, persistence, store, or host-loop code changed; otherwise `just dev crash-sweep --shapes <list>` for the affected shapes). Commits inside a batch are not gated individually. An install requires that batch gate. A release candidate or publication runs `just full` on both supported platforms, `just musl native` and `just musl container`, the full strict crash sweep, and the publish dry run. Live tests are explicit opt-in and may incur provider usage. See [testing and evidence](docs/spec/05-testing-and-evidence.md).
@@ -235,8 +235,9 @@ For local development, `just fast <packages>` is the worker gate, plus the group
 | `crates/hosting/`, `crates/orchestration/` | Hosted sessions, VCS workspaces, and recursive orchestration above the facade |
 | [`tests/`](tests/) | Public-consumer compile fixtures and repository integration contracts |
 | [`eval/`](eval/) | Opt-in Harbor / Terminal-Bench harness comparisons against vendor CLIs |
-| [`scripts/`](scripts/), [`tools/`](tools/) | Maintainer entrypoints, build helpers, policy checks, and profiling |
-| [`configs/`](configs/) | Reference, provider, and scenario configurations |
+| [`tools/`](tools/) | Maintainer entrypoints, build helpers, policy checks, release, musl, profiling, and prompts |
+| [`docs/reference-config/`](docs/reference-config/) | Annotated reference Plak home |
+| [`tests/fixtures/config-scenarios/`](tests/fixtures/config-scenarios/) | Scenario homes loaded by offline tests |
 | [`docs/spec/`](docs/spec/) / [`docs/user-guide/`](docs/user-guide/) | Behavioral authority and usage documentation |
 | [`Justfile`](Justfile) / [`.config/nextest.toml`](.config/nextest.toml) | Development recipes and test profiles; `just dev-tools install` provides the pinned cargo-nextest and cargo-deny the gates require |
 

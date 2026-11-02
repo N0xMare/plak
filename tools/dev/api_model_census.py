@@ -27,7 +27,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 EFFORT_LADDER = ("none", "low", "medium", "high", "xhigh", "max")
 # ``minimal`` and ``ultra`` show up in docs. Neither is an API effort this

@@ -168,7 +168,7 @@ def generate(root: Path, inventory: dict, *, phase: str, slice_name: str, blocks
         raise PreflightError("inventory must contain the exact frozen slice")
     source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     dirty = subprocess.check_output(
-        ["git", "status", "--porcelain", "--", "eval", "Justfile", "harbor.just"], cwd=root)
+        ["git", "status", "--porcelain", "--", "eval", "Justfile", "eval/harbor.just"], cwd=root)
     if dirty:
         raise PreflightError("commit eval sources before generating a campaign")
     plan = {"schemaVersion": 1, "phase": phase, "slice": slice_name, "source_commit": source,

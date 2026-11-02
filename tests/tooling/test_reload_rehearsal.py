@@ -207,10 +207,9 @@ class ReloadRehearsalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory).resolve()
             repo = base / "repo"
-            (repo / "scripts").mkdir(parents=True)
             (repo / "tools/build").mkdir(parents=True)
             import shutil
-            shutil.copy(ROOT / "scripts/reload-rehearsal.sh", repo / "scripts")
+            shutil.copy(ROOT / "tools/build/reload-rehearsal.sh", repo / "tools/build")
             shutil.copy(ROOT / "tools/build/reload_rehearsal.py", repo / "tools/build")
             (repo / "tools/build/check-artifact-linkage.py").write_text(
                 "import sys\nfrom pathlib import Path\n"
@@ -245,7 +244,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             yield base, repo, home, env, output
 
     def run_wrapper(self, repo, env, extra=()):
-        return subprocess.run(["bash", str(repo / "scripts/reload-rehearsal.sh"),
+        return subprocess.run(["bash", str(repo / "tools/build/reload-rehearsal.sh"),
                                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", *extra],
                               env=env, text=True, capture_output=True)
 
@@ -668,7 +667,7 @@ class ReloadRehearsalTests(unittest.TestCase):
                 binary.write_text(binary.read_text().replace(
                     "print('fixture refusal'); sys.exit(1)",
                     "print('fixture ready', flush=True); import time; time.sleep(60)"))
-                process = subprocess.Popen(["bash", str(repo / "scripts/reload-rehearsal.sh"),
+                process = subprocess.Popen(["bash", str(repo / "tools/build/reload-rehearsal.sh"),
                                             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
                                            env=env, text=True, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:

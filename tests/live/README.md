@@ -715,7 +715,7 @@ telemetry and the estimator are covered beside it.
 
 ## API model census
 
-`just live census` (or `python3 scripts/api_model_census.py`) diffs the checked-in
+`just live census` (or `python3 tools/dev/api_model_census.py`) diffs the checked-in
 OpenAI, Anthropic and xAI tables against each provider's model list and docs.
 It is opt-in and networked, and it is not a gate. The key comes from the
 environment or `~/.plak/secrets/<account>.key` and is sent only as a header.

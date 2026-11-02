@@ -1,5 +1,6 @@
 # Maintainer playground, coverage and opt-in sweeps. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set working-directory := '../..'
 
 [private]
 default:
@@ -9,11 +10,11 @@ default:
 # ~/plak-dev-home playground.
 [doc("symlink ~/.local/bin/plak-dev and seed the isolated playground")]
 home-install:
-    scripts/plak-dev.sh --dev-install
+    tools/dev/plak-dev.sh --dev-install
 
 # Wipe ~/plak-dev-home sqlite/sessions; keep config.toml.
 home-reset:
-    scripts/plak-dev.sh --dev-reset-home
+    tools/dev/plak-dev.sh --dev-reset-home
 
 # Offline preflight on a private backup. A changed state key rehearses
 # carry-forward in disposable homes. --wait-idle retries three idle export refusals at
@@ -21,7 +22,7 @@ home-reset:
 # --detach --log <path> survives the caller's turn; --install installs on success.
 [doc("offline reload preflight on a private backup")]
 reload-rehearsal uuid *ARGS:
-    bash scripts/reload-rehearsal.sh {{quote(uuid)}} {{ARGS}}
+    bash tools/build/reload-rehearsal.sh {{quote(uuid)}} {{ARGS}}
 
 # Line/region/function coverage for the parallel and serial lanes, merged.
 # Needs: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov
@@ -34,7 +35,7 @@ coverage:
     set -euo pipefail
     command -v cargo-llvm-cov >/dev/null || { echo "install: cargo install cargo-llvm-cov" >&2; exit 1; }
     mkdir -p target/llvm-cov
-    TMPDIR="$(bash scripts/test-tmpdir.sh)"
+    TMPDIR="$(bash tools/gate/test-tmpdir.sh)"
     export TMPDIR
     isolated_home="$TMPDIR/plak-isolated-home"
     mkdir -p "$isolated_home"
@@ -61,8 +62,8 @@ test-timing *ARGS:
 
 # Opt-in indexed SQLite crash-point sweep of the real offline binary.
 crash-sweep *ARGS:
-    python3 scripts/crash-sweep.py {{ARGS}}
+    python3 tools/dev/crash-sweep.py {{ARGS}}
 
 # Opt-in external jj writer compatibility; not part of a gate tier.
 jj-compat:
-    bash -c 'source scripts/dev-tools-prefix.sh; python3 scripts/jj-tools.py compat "$(plak_dev_tools_prefix "$PWD")"'
+    bash -c 'source tools/gate/dev-tools-prefix.sh; python3 tools/dev/jj-tools.py compat "$(plak_dev_tools_prefix "$PWD")"'

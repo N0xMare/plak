@@ -478,7 +478,7 @@ class PackageReleaseTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.base)
         self.repo = self.base / "repo"
         for path in ("tools/release/package-release.sh", "tools/release/release_tarball.py",
-                     "tools/build/build-plak.sh", "scripts/musl-toolchain.sh", "LICENSE"):
+                     "tools/build/build-plak.sh", "tools/musl/musl-toolchain.sh", "LICENSE"):
             (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / path, self.repo / path)
         # The real check prints a report; stdout must stay the output directory.

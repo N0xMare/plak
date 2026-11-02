@@ -12,7 +12,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
-    "product_feature_fixture", ROOT / "tools/checks/product_feature_fixture.py"
+    "product_feature_fixture", ROOT / "tools/gate/product_feature_fixture.py"
 )
 assert SPEC and SPEC.loader
 FIXTURE = importlib.util.module_from_spec(SPEC)

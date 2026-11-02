@@ -1451,7 +1451,7 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertIn('--n-concurrent "$concurrent"', rung_a)
 
     def test_just_recipes_forward_to_eval_script(self) -> None:
-        harbor = (ROOT / "harbor.just").read_text()
+        harbor = (ROOT / "eval/harbor.just").read_text()
         for command in ("rung-a.sh", "rung-b.sh", "smoke.sh", "harbor.sh"):
             self.assertIn("eval/scripts/" + command, harbor)
         self.assertIn("\ntools:\n", harbor)
@@ -3044,7 +3044,7 @@ class TerminationSurfaceTests(unittest.TestCase):
         self.assertIn("--write", text)
         self.assertIn("--json", text)
         self.assertIn("termination-summary.json", text)
-        harbor = (ROOT / "harbor.just").read_text()
+        harbor = (ROOT / "eval/harbor.just").read_text()
         self.assertIn("\nsummarize *ARGS:", harbor)
         self.assertIn("eval/scripts/summarize.py", harbor)
         rung_a = (ROOT / "eval" / "scripts" / "rung-a.sh").read_text()

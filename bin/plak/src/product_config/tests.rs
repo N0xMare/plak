@@ -1208,7 +1208,7 @@ fn spawns_names_must_be_described_template_files() {
     );
 }
 
-/// The four templates `configs/reference/agents/` ships: the approved
+/// The four templates `docs/reference-config/agents/` ships: the approved
 /// Codex provider preset, annotated by the renderer.
 fn reference_templates() -> Vec<(String, AgentTemplate)> {
     reference_config().templates.into_iter().collect()
@@ -1220,7 +1220,7 @@ fn reference_config() -> ProductConfig {
         .expect("the Codex provider preset is the reference example")
 }
 
-/// `configs/reference/**`, relative path and exact body.
+/// `docs/reference-config/**`, relative path and exact body.
 fn reference_files() -> Vec<(String, String)> {
     let config = reference_config();
     let mut files = vec![("config.toml".to_owned(), config.render_annotated())];
@@ -1233,8 +1233,8 @@ fn reference_files() -> Vec<(String, String)> {
     files
 }
 
-fn repo_configs_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs")
+fn reference_home_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference-config")
 }
 
 /// The built-in profile homes the binary embeds (`presets/<provider>`).
@@ -1248,7 +1248,7 @@ fn presets_dir() -> PathBuf {
 /// `PLAK_REGENERATE_REFERENCE_CONFIGS=1 cargo test -p plak reference`.
 #[test]
 fn the_reference_config_tree_is_the_renderers_own_output() {
-    let dir = repo_configs_dir().join("reference");
+    let dir = reference_home_dir();
     let regenerate = std::env::var_os("PLAK_REGENERATE_REFERENCE_CONFIGS").is_some();
     for (relative, body) in reference_files() {
         let path = dir.join(&relative);
@@ -1329,7 +1329,7 @@ fn the_shipped_presets_load_as_a_home() {
     ];
     for (preset, provider, rows, researcher_tools) in expectations {
         let dir = if preset == "reference" {
-            repo_configs_dir().join(preset)
+            reference_home_dir()
         } else {
             presets_dir().join(preset)
         };
@@ -1408,7 +1408,7 @@ fn the_shipped_presets_load_as_a_home() {
         }
     }
     // The reference tree round-trips: what it renders is what it parses.
-    let dir = repo_configs_dir().join("reference");
+    let dir = reference_home_dir();
     let paths = PlakPaths::resolve(Some(std::ffi::OsStr::new(&dir)), None).expect("home");
     assert_eq!(ProductConfig::load(&paths).unwrap(), reference_config());
     // The schema default stays unbound: an empty home picks no provider.

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 script_path="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")"
-repo_root="$(cd "$(dirname "$script_path")/.." && pwd)"
+repo_root="$(cd "$(dirname "$script_path")/../.." && pwd)"
 # The login user's passwd home, not an inherited HOME; a uid without a passwd
 # entry (e.g. a container user) falls back to HOME.
 operator_home="$(
@@ -48,11 +48,11 @@ fi
 # Seed the playground config from the annotated reference preset; there is
 # no second copy of the schema here. `bin/plak/src/product_config/load.rs`
 # (`ProductConfig::parse`) and `bin/plak/src/product_config/templates.rs`
-# (`parse_template`) are the schema authority, and `configs/reference/` loads
+# (`parse_template`) are the schema authority, and `docs/reference-config/` loads
 # under them in tests.
 seed_config() {
   local dest="$1"
-  cp "$repo_root/configs/reference/config.toml" "$dest"
+  cp "$repo_root/docs/reference-config/config.toml" "$dest"
   chmod 600 "$dest"
 }
 
@@ -61,7 +61,7 @@ seed_config() {
 seed_templates() {
   local dir="$1"
   mkdir -m 700 -p "$dir"
-  cp "$repo_root"/configs/reference/agents/*.toml "$dir/"
+  cp "$repo_root"/docs/reference-config/agents/*.toml "$dir/"
   chmod 600 "$dir"/*.toml
 }
 
@@ -88,7 +88,7 @@ reset_home() {
 install_shim() {
   local bindir="$operator_home/.local/bin"
   local shim="$bindir/plak-dev"
-  local target="$repo_root/scripts/plak-dev.sh"
+  local target="$repo_root/tools/dev/plak-dev.sh"
   mkdir -p "$bindir"
   # Repair, do not merely overwrite. An install from before this script existed
   # left `plak-dev` pointing at another script; `ln -sfn` cannot replace a

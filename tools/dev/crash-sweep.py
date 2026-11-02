@@ -15,7 +15,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.jobs < 1 or args.repeat < 1:
         parser.error("--jobs and --repeat must be positive")
-    selector = Path(__file__).resolve().parent / "test-tmpdir.sh"
+    selector = Path(__file__).resolve().parents[1] / "gate" / "test-tmpdir.sh"
     scratch = Path(subprocess.run(["bash", str(selector)], check=True,
                                   capture_output=True, text=True).stdout.strip())
     home = scratch / "plak-isolated-home"

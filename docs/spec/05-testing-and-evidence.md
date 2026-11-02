@@ -576,18 +576,18 @@ require the release procedure, not a debug gate.
 
 ## 1. Gate layers
 
-The authoritative gate is `scripts/dev-check.sh`, in four tiers plus an
+The authoritative gate is `tools/gate/dev-check.sh`, in four tiers plus an
 explicit step-group mode. It is Cargo tooling plus tests plus thin structure
 checks. Process paperwork -- requirement digests, provenance ledgers,
 documentation link matrices, timing ledgers, source-size reports -- is not part
 of it.
 
 ```text
-scripts/dev-check.sh --fast [PKG...]   # just fast: iteration, no serial lanes
-scripts/dev-check.sh                   # just check: Linux workspace gate (no durability)
-scripts/dev-check.sh --platform        # just platform: per-install platform evidence
-scripts/dev-check.sh --full            # just full: every group; release candidate and publication
-scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these groups (independent lanes)
+tools/gate/dev-check.sh --fast [PKG...]   # just fast: iteration, no serial lanes
+tools/gate/dev-check.sh                   # just check: Linux workspace gate (no durability)
+tools/gate/dev-check.sh --platform        # just platform: per-install platform evidence
+tools/gate/dev-check.sh --full            # just full: every group; release candidate and publication
+tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these groups (independent lanes)
 ```
 
 | Group (canonical order) | Coverage |
@@ -601,7 +601,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, one test thread |
 | `contracts` | Positive/negative public compile contracts |
 | `tooling` | Python tooling self-tests |
-| `package` | Publish dry run, `scripts/publish.sh --gate`: prefetch archive verification inputs offline first, online only for missing cache inputs, then package and verify every publishable crate strictly offline from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
+| `package` | Publish dry run, `tools/release/publish.sh --gate`: prefetch archive verification inputs offline first, online only for missing cache inputs, then package and verify every publishable crate strictly offline from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
 
 | Tier | Groups |
 | --- | --- |
@@ -619,7 +619,7 @@ platform-independent structure checkers and contracts. Full is their union
 plus variants, rustdoc and the package dry run; a passing full run that started and ended
 on the same clean git tree writes that tree id to
 `$CARGO_TARGET_DIR/gate-evidence/full` (default `target/`), the evidence
-`scripts/publish.sh` requires. Any passing run that includes the package group
+`tools/release/publish.sh` requires. Any passing run that includes the package group
 on a clean tree (full, or `--steps` naming `package`) writes its tree id to
 `gate-evidence/package` beside it. Chapter 06 §6.5 says which later trees that
 evidence still covers. `--steps` runs exactly its named groups, in canonical order,
@@ -653,7 +653,7 @@ reports success when any group failed.
 
 `--fast` maps tracked working-tree changes against HEAD on Git plus untracked,
 non-ignored files (and ignored `**/proptest-regressions/**` seeds) to their
-longest-prefix package owner with `tools/checks/changed_packages.py`. Named
+longest-prefix package owner with `tools/gate/changed_packages.py`. Named
 packages replace the diff. At a JJ root, shared root-checked listings use
 `builtin_immutable_heads()..@`; inside a Plak copy they diff `plak_base()` to
 `@`. `PLAK_FAST_BASE` overrides either default. Listings never silently inspect
@@ -730,7 +730,7 @@ supported musl platform.
 
 Every test entry point (`dev-check.sh`, `just dev coverage`,
 `perf-smoke.sh` and `crash-sweep.py`) exports `TMPDIR` from one selector,
-`scripts/test-tmpdir.sh`, before anything runs. On Linux it is a per-checkout
+`tools/gate/test-tmpdir.sh`, before anything runs. On Linux it is a per-checkout
 directory under `/dev/shm`; on macOS a per-checkout directory under
 `/private/tmp`, so neither lies under the operator's `HOME`, where a spawned
 binary's project discovery could reach the real `~/.plak`. The directory is
@@ -750,7 +750,7 @@ SQLite stores open with `SQLITE_OPEN_NOFOLLOW`, and the credential store walks
 refuse symlinked parents, so a default temporary root makes every host test
 that opens `runtime.sqlite3` fail with `SQLITE_CANTOPEN_SYMLINK`. Anyone
 invoking `cargo nextest` by hand MUST set a physical, non-symlinked `TMPDIR`
-outside `HOME`; `TMPDIR="$(bash scripts/test-tmpdir.sh)"` selects the same one.
+outside `HOME`; `TMPDIR="$(bash tools/gate/test-tmpdir.sh)"` selects the same one.
 
 The same scripts export `PLAK_HOME` to `$TMPDIR/plak-isolated-home` (mode
 `0700`) on every nextest lane. Offline tests must not create the operator's
@@ -761,7 +761,7 @@ Cargo reads it. A hand-run `cargo nextest` does not set `PLAK_HOME`;
 export it to an absolute scratch directory first, the same way as `TMPDIR`.
 
 Git in tests reads no operator or system configuration. The same entry points
-(and `scripts/jj-tools.py compat`) export `GIT_CONFIG_GLOBAL` to an empty
+(and `tools/dev/jj-tools.py compat`) export `GIT_CONFIG_GLOBAL` to an empty
 `$TMPDIR/gitconfig`, truncated at start, and `GIT_CONFIG_NOSYSTEM=1`;
 `dev-check.sh` exports them for every group, so the nextest lanes, the crash
 sweep and the Python tooling suite inherit them. An operator's global
@@ -779,10 +779,10 @@ the operator's environment. A hand-run `cargo nextest` exports both as well.
 | Default feature builds | `cargo build --locked --workspace --lib --bins` and `cargo build --locked -p plak --features maintainer --bins`, each with `-D warnings` on the rustflags Cargo passes | Check, platform and full tiers, after clippy: default-feature libraries and binaries compile and link, as does the maintainer installer's Plak feature set, without test hooks or all-features unification hiding missing dependencies. Rustc warnings in those closures are errors; clippy remains the `--all-features` lint |
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked`, then `cargo doc -p <package> --no-deps --locked` for each supported package in its own default resolution | Rustdoc builds every package's documentation with its own lints denied (a default resolution can expose a link the all-features run hides): broken intra-doc links, links from public documentation into private items, and bare URLs are errors. Runs after clippy and before the tests |
 | Offline tests | `cargo nextest run --locked --workspace --all-features --profile offline`, then `--profile serial` and `--profile durability` with `--test-threads=1` | The whole workspace's deterministic behavior, with no network and no credentials |
-| Public compile contracts | `python3 tools/checks/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
-| Workspace structure | `python3 tools/checks/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions |
-| Feature closures | `python3 tools/checks/check_features.py` | Per-package feature closures (2^n subsets of each package's own public features, never a cross-product; 1026 for the facade), statically, then `cargo check --lib` of the facade with no features and with each public feature alone, warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plak` and present under `test-hooks` |
-| Tooling tests | `python3 tools/checks/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per `tests/tooling` module, four at a time |
+| Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
+| Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions |
+| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2^n subsets of each package's own public features, never a cross-product; 1026 for the facade), statically, then `cargo check --lib` of the facade with no features and with each public feature alone, warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plak` and present under `test-hooks` |
+| Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per `tests/tooling` module, four at a time |
 
 Nested-failure regressions cover exact successful string delivery, caught and
 uncaught JavaScript rejection, `Promise.allSettled`, retained earlier output,
@@ -1126,21 +1126,21 @@ correctness.
 | --- | --- |
 | `cargo deny --config .config/deny.toml check advisories bans licenses sources` (`just dev-tools deny`) | Dependencies change. It needs advisory acquisition, so it is not offline |
 | `cargo check --workspace --all-features --all-targets --locked` as an MSRV probe | The MSRV is the toolchain pin, so the ordinary build already is the MSRV build |
-| `python3 tools/checks/check_prod_loc.py` (`just perf density`) | A density question is live. It always exits 0 |
-| `bash scripts/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline product measurements and four worker timings against this machine's seed row (§2.7); informational |
+| `python3 tools/perf/check_prod_loc.py` (`just perf density`) | A density question is live. It always exits 0 |
+| `bash tools/perf/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline product measurements and four worker timings against this machine's seed row (§2.7); informational |
 | `cargo bench` for `perf_core`, `perf_project`, `perf_store`, and `tools/perf/perf_build.py` | A performance claim needs numbers. There is no portable numeric baseline; every claim carries its emitted host, feature, and toolchain metadata |
 | `cargo nextest run -p plakous-offline-crash-harness` | Process-crash matrices are wanted on demand. Unix only |
 | `just prompts native-compare` | Comparing Plak's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
 | `eval/` Harbor two-rung bakeoff (Rung A weekly plumbing + TB 2.1 A/B; Rung B one-task TB 4.0 wire; `just harbor smoke` hard TB 4.0 slice) | Harness-comparison against vendor CLIs. Opt-in, paid, never a qualification row. `just harbor test` runs its adapter tests. See `eval/README.md` |
 | Live scenarios (§3.2); the pre-release bar (§3.4) | A claim needs live evidence. Paid and opt-in. The bar is not a gate tier |
-| `just live census` (`scripts/api_model_census.py`) | Before an install, to diff the bundled API model tables against the providers' lists and docs. Opt-in, networked, never a gate tier. See spec 01 §6.3 |
+| `just live census` (`tools/dev/api_model_census.py`) | Before an install, to diff the bundled API model tables against the providers' lists and docs. Opt-in, networked, never a gate tier. See spec 01 §6.3 |
 
 Local verification is the authoritative gate for every layer above; chapter 06
 §8 owns the repository-settings rule.
 
 ### 1.3 Source-size reporting
 
-`just perf density` runs `tools/checks/check_prod_loc.py` as an informational
+`just perf density` runs `tools/perf/check_prod_loc.py` as an informational
 source-size report outside every gate tier. There is no historical growth baseline,
 strict density mode, or justification-file requirement.
 
@@ -1167,8 +1167,10 @@ The gated ratchet on long-function and wide-signature allows and on files over
 Repository tooling tests live in `tests/tooling/`; opt-in live scenarios and
 their status page live in `tests/live/`. Build helpers
 and their authenticated inputs live in `tools/build/`, repository policy in
-`tools/checks/`, and measurement helpers in `tools/perf/`. `scripts/` holds the
-small maintainer entrypoint surface and delegates to these owners.
+`tools/gate/`, and measurement helpers in `tools/perf/`. Each just module
+lives beside the scripts it runs: `tools/musl/`, `tools/perf/`,
+`tools/prompts/`, `tools/tui/`, `tools/dev/`, `tests/live/live.just` and
+`eval/harbor.just`.
 
 Doc comments are gated on the same footing as tests: the `== rustdoc ==` step
 runs `cargo doc --workspace --no-deps --all-features --locked`, then
@@ -1219,9 +1221,10 @@ The `tests/` tree holds the consumer packages:
 | `tests/performance/baselines` | — | The perf-smoke seed rows and the allocation probe |
 | `tests/live` | — | The live drivers, the status page, and the pre-release bar (§3.2, §3.4) |
 
-The reference, provider, and scenario Plak home shapes live outside that tree,
-in the top-level `configs/`, and are loaded by an offline `plak` test so
-they cannot rot (§4).
+The annotated reference Plak home lives in `docs/reference-config/`. Scenario
+homes live in `tests/fixtures/config-scenarios/` and are loaded by an offline
+`plak` test so they cannot rot (§4). Built-in provider homes live in
+`bin/plak/presets/`.
 
 Every path above is repository-only. Test-support, crash-harness, and fixture
 packages are never publication candidates.
@@ -2135,7 +2138,7 @@ attachment; they do not consume a model-facing notice. Non-refused final head
 views must equal the quiescent head with the cursors at the feed tails.
 Artifacts are `target/crash-sweep/<run>/sweep.jsonl` and `table.md`.
 
-Compare two artifacts with `python3 tools/checks/compare_crash_sweeps.py
+Compare two artifacts with `python3 tools/dev/compare_crash_sweeps.py
 BASE.jsonl TIP.jsonl [--json]`. The cut key is `(shape, store, store_ordinal)`;
 repeat numbers are samples, not identities. Within a key, comparison also
 requires equal recorded pre-cut inputs: the exact indexed per-store prefixes
@@ -2701,7 +2704,7 @@ Every line carries a build `profile` and a machine id derived from the platform,
 architecture and CPU, because a number measured on one machine or profile says
 nothing about another. Seeds live
 in `tests/performance/baselines/offline-perf-smoke.json`, keyed by that id.
-`--check` runs `tools/checks/check_perf_smoke.py` against this machine's row. A
+`--check` runs `tools/perf/check_perf_smoke.py` against this machine's row. A
 machine with no seed row reports `no baseline` and its numbers, then passes.
 Every seed metric also records its `profile`; a missing profile or a profile
 mismatch is refused, including for informational metrics. The baseline document
@@ -2778,7 +2781,7 @@ No numeric baseline is ratified: every latency, RSS, size and growth value is
 a raw, host-qualified observation, and a primary timing never includes the
 instrumented or isolated probes. Allocation counts are unavailable in process
 because the workspace forbids an `unsafe` global allocator wrapper; instead
-`tests/performance/baselines/perf_allocations.py` runs the
+`tools/perf/perf_allocations.py` runs the
 `--isolated-probe` entry points of `perf_core` and `perf_project` under
 Linux glibc `memusage` and emits that evidence as separate JSONL.
 `tools/perf/perf-check.sh --quick` (or `--full`) runs and schema-validates all
@@ -3900,7 +3903,8 @@ provider behavior remains untested.
 
 ## 4. Reference product homes
 
-The top-level `configs/` directory holds reference Plak home shapes: a
+`docs/reference-config/` holds the annotated reference Plak home, and
+`tests/fixtures/config-scenarios/` holds complete scenario homes. Each is a
 `config.toml` plus one flat template file per agent under `agents/`. They are
 opt-in copies, never loaded automatically. To use one, run
 `plak config show | head -1` to learn the home, copy the scenario's
@@ -3925,7 +3929,7 @@ the environmental assumption, never to weaken the assertion.
 
 | Class | Cause | Fix in force |
 | --- | --- | --- |
-| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `scripts/test-tmpdir.sh`, set by `dev-check.sh` and the test recipes, and required for hand-run nextest |
+| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `tools/gate/test-tmpdir.sh`, set by `dev-check.sh` and the test recipes, and required for hand-run nextest |
 | Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |

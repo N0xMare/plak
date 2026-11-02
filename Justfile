@@ -3,58 +3,57 @@
 # macOS `just platform`, and the crash sweep (full strict when recovery, persistence, store, or host-loop code
 # changed; otherwise `just dev crash-sweep --shapes <list>` for the affected shapes). An install requires that batch gate. A release candidate or publication
 # runs `just full` on both platforms, musl native and container, the full strict sweep, and the publish dry run.
-# Module files live beside this justfile, so their recipes run from the
-# repository root (just uses the module file's directory as the working
-# directory).
+# Each module sets its working directory to the repository root, so recipes
+# keep root-relative paths.
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-mod musl
-mod live
-mod perf
-mod prompts
-mod tui
-mod dev
-mod harbor
+mod musl 'tools/musl/musl.just'
+mod live 'tests/live/live.just'
+mod perf 'tools/perf/perf.just'
+mod prompts 'tools/prompts/prompts.just'
+mod tui 'tools/tui/tui.just'
+mod dev 'tools/dev/dev.just'
+mod harbor 'eval/harbor.just'
 
 # fmt, structure checkers, clippy, then the parallel lane over the packages the
 # working-tree diff touches (or the named ones) and their dependents.
 [doc("static checks, then the parallel lane for the diff's packages and dependents")]
 fast *PACKAGES:
-    scripts/dev-check.sh --fast {{PACKAGES}}
+    tools/gate/dev-check.sh --fast {{PACKAGES}}
 
 # Linux workspace gate: fmt/clippy, structure checks, default/maintainer builds,
 # parallel and serial lanes, public contracts and tooling. No durability lane.
 [doc("Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel and serial, contracts, tooling")]
 check:
-    scripts/dev-check.sh
+    tools/gate/dev-check.sh
 
 # Exactly these comma-separated groups, in canonical order (for independent lanes).
 [doc("exactly these comma-separated groups, in canonical order")]
 steps GROUPS:
-    scripts/dev-check.sh --steps {{quote(GROUPS)}}
+    tools/gate/dev-check.sh --steps {{quote(GROUPS)}}
 
 # Per install on macOS/musl: fmt/clippy, default/maintainer builds, parallel,
 # serial and durability lanes. No platform-independent structure checkers or
 # public compile contracts.
 [doc("per install: fmt, clippy, builds, parallel, serial and durability")]
 platform:
-    scripts/dev-check.sh --platform
+    tools/gate/dev-check.sh --platform
 
 # Every group: check + rustdoc, the durability lane and the publish dry run.
 # A pass on a clean tree records it as publication evidence.
 [doc("every group: check, plus rustdoc, durability and the publish dry run")]
 full:
-    scripts/dev-check.sh --full
+    tools/gate/dev-check.sh --full
 
 # crates.io cohort: dry run by default (clean tree with `just full` evidence,
 # package and verify every crate); `--execute` uploads, with CARGO_REGISTRY_TOKEN.
 [doc("crates.io cohort dry run; --execute uploads")]
 publish *ARGS:
-    bash scripts/publish.sh {{ARGS}}
+    bash tools/release/publish.sh {{ARGS}}
 
 dev-tools *ARGS:
-    bash scripts/dev-tools.sh {{ARGS}}
+    bash tools/gate/dev-tools.sh {{ARGS}}
 
 fmt:
     cargo fmt --all

@@ -168,7 +168,7 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
 /// This table is the one source for the key list: the file parser
 /// ([`ProductConfig::parse`]), the `plak config set` grammar
 /// ([`ProductConfig::set_key`]), the renderer behind `plak config show`,
-/// `configs/reference/config.toml` ([`ProductConfig::render_annotated`]) and
+/// `docs/reference-config/config.toml` ([`ProductConfig::render_annotated`]) and
 /// the `docs/spec/07-config-reference.md` §3 table all read it, so none of
 /// them can disagree. The default column is not stored: it is what the schema
 /// default renders ([`ConfigKey::default_value`]).

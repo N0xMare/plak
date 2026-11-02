@@ -1,5 +1,6 @@
 # Local TUI review. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set working-directory := '../..'
 
 [private]
 default:

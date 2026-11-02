@@ -7,8 +7,8 @@ and exits zero. Each measurement and seed row names its build profile; absent
 or mismatched profiles are refused. Within a machine/profile, a metric that
 moved further than its recorded tolerance is a regression and exits non-zero.
 
-Usage: tools/checks/check_perf_smoke.py <measurements.jsonl> [--baseline <file>]
-       tools/checks/check_perf_smoke.py <measurements.jsonl> --seed
+Usage: tools/perf/check_perf_smoke.py <measurements.jsonl> [--baseline <file>]
+       tools/perf/check_perf_smoke.py <measurements.jsonl> --seed
 """
 
 from __future__ import annotations

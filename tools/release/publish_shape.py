@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools/checks"))
+sys.path.insert(0, str(ROOT / "tools/gate"))
 import vcs_listing  # noqa: E402
 PLAK_MANIFEST = Path("bin/plak/Cargo.toml")
 HARNESS = "plakous-offline-crash-harness"

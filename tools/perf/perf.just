@@ -1,5 +1,6 @@
 # Offline performance and size. Not a gate. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set working-directory := '../..'
 
 [private]
 default:
@@ -15,7 +16,7 @@ _profiling:
 # tests/performance/baselines/offline-perf-smoke.json. See docs/spec/05.
 [doc("offline performance smoke against this machine's seed row; not a gate")]
 smoke *ARGS:
-    scripts/perf-smoke.sh {{ARGS}}
+    tools/perf/perf-smoke.sh {{ARGS}}
 
 # Sample a plak invocation with samply (Linux/macOS). Usage: just perf samply agent --help
 samply *ARGS: _profiling
@@ -39,4 +40,4 @@ bloat:
 
 # Production LOC density report (informational, not in any gate tier).
 density:
-    python3 tools/checks/check_prod_loc.py
+    python3 tools/perf/check_prod_loc.py

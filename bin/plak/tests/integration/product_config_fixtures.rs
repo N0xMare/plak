@@ -1,4 +1,4 @@
-//! Load every testing scenario home under `configs/scenarios/`.
+//! Load every testing scenario home under `tests/fixtures/config-scenarios/`.
 //!
 //! Keeps the checked-in operator examples aligned with the current configuration
 //! `ProductConfig` shape: one `config.toml` plus one template file per agent.
@@ -43,7 +43,7 @@ const SCENARIOS: &[&str] = &[
 const FREE_MODEL: &str = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
 fn scenarios_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs/scenarios")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/config-scenarios")
 }
 
 fn scenario_dirs(dir: &Path) -> Vec<PathBuf> {
@@ -95,7 +95,7 @@ fn every_named_scenario_exists_and_nothing_else_does() {
     let expected: BTreeSet<String> = SCENARIOS.iter().map(|name| (*name).to_owned()).collect();
     assert_eq!(
         found, expected,
-        "configs/scenarios drifted from the list in this test"
+        "tests/fixtures/config-scenarios drifted from the list in this test"
     );
 }
 

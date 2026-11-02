@@ -1,4 +1,4 @@
-"""scripts/publish.sh against a fake workspace: preconditions, order, index wait.
+"""tools/release/publish.sh against a fake workspace: preconditions, order, index wait.
 
 The fixture is a three-crate cohort (`plakous-zeta` <- `plakous-mid` <- `plak`,
 alphabetical order differing from dependency order) plus a repository-only
@@ -120,12 +120,12 @@ class PublishScriptTests(unittest.TestCase):
         self.target = base / "target"
         self.index = base / "index"
         self.log = base / "cargo.jsonl"
-        for relative in ("scripts/publish.sh", "tools/release/publish_retry.py", "tools/release/publish_plan.py",
+        for relative in ("tools/release/publish.sh", "tools/release/publish_retry.py", "tools/release/publish_plan.py",
                          "tools/release/publish_shape.py", "tools/release/review_expiry.py",
                          "tools/release/prefetch_packages.py", "tools/release/gate_evidence.py",
                          "tools/release/offline_first.py",
-                         "tools/checks/vcs_listing.py", "tools/checks/check_workspace.py",
-                         "tools/checks/plakous_policy.py"):
+                         "tools/gate/vcs_listing.py", "tools/gate/check_workspace.py",
+                         "tools/gate/plakous_policy.py"):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.repo / relative)
         # Freeze only this copied fixture's invocation, never the maintainer CLI.
@@ -209,7 +209,7 @@ class PublishScriptTests(unittest.TestCase):
 
     def publish(self, *args: str) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
         result = subprocess.run(
-            ["bash", str(self.repo / "scripts/publish.sh"), *args],
+            ["bash", str(self.repo / "tools/release/publish.sh"), *args],
             cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=60,
         )
         lines = self.log.read_text().splitlines() if self.log.exists() else []

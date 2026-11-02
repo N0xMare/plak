@@ -506,9 +506,9 @@ binding wins over any flags. A session that was left as a paused tree needs
 
 ## Trying it
 
-`configs/` holds complete, offline-tested example homes: `reference/` documents
-every key inline, `providers/` pins the same four roles to one account each,
-and `scenarios/` has single-agent, mixed-account tree, direct and PTC variants. Copy a scenario's
+`docs/reference-config/` documents every key inline.
+`bin/plak/presets/` pins the same four roles to one account each, and
+`tests/fixtures/config-scenarios/` has single-agent, mixed-account tree, direct and PTC variants. Copy a scenario's
 `config.toml` and its `agents/*.toml` into the directory `plak config show`
 reports on its first line, log in to the accounts it names, and start a session.
 Nothing there is loaded automatically.
@@ -521,7 +521,7 @@ already have is disturbed. Give it an absolute, non-symlinked path: on macOS
 
 ```sh
 export PLAK_HOME="$HOME/plak-tree-demo"
-mkdir -p "$PLAK_HOME" && cp -r configs/reference/. "$PLAK_HOME/"
+mkdir -p "$PLAK_HOME" && cp -r docs/reference-config/. "$PLAK_HOME/"
 plak config show | head -1      # confirms which home you are on
 ```
 

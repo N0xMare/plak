@@ -13,18 +13,19 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class PerfSmokeTargetTests(unittest.TestCase):
     def test_explicit_build_target_selects_triple_subdirectory(self):
-        source = (ROOT / "scripts" / "perf-smoke.sh").read_text()
+        source = (ROOT / "tools/perf/perf-smoke.sh").read_text()
         prefix, marker, _ = source.partition('plak_bin="$root/plak"')
         self.assertTrue(marker, "perf script lost the executable-copy boundary")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "scripts").mkdir()
+            (root / "tools/perf").mkdir(parents=True)
+            (root / "tools/gate").mkdir(parents=True)
             (root / "bin").mkdir()
             (root / "tmp").mkdir()
-            script = root / "scripts" / "perf-smoke.sh"
+            script = root / "tools/perf/perf-smoke.sh"
             script.write_text(prefix)
-            (root / "scripts" / "test-tmpdir.sh").write_bytes(
-                (ROOT / "scripts" / "test-tmpdir.sh").read_bytes())
+            (root / "tools/gate/test-tmpdir.sh").write_bytes(
+                (ROOT / "tools/gate/test-tmpdir.sh").read_bytes())
             cargo = root / "bin" / "cargo"
             cargo.write_text("#!" + sys.executable + "\n"
                              "import os, pathlib, sys\n"

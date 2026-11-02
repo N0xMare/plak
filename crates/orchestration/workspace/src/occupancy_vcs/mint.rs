@@ -31,7 +31,7 @@ const MINT_HOOK_OUTPUT_BYTES: usize = 2048;
 /// forwards them without reading any additional host variables.
 ///
 /// The command is handed to `sh -c` — this file's approved process constructor
-/// in `tools/checks/check_workspace.py`; `git`'s constructor is in `git.rs` — so
+/// in `tools/gate/check_workspace.py`; `git`'s constructor is in `git.rs` — so
 /// it runs in `cwd` with no repository discovery in the way.
 pub fn run_mint_hook(
     cwd: &Path,

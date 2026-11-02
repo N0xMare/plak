@@ -11,13 +11,13 @@
 # walk refuses symlinked parents. When it is not, the checkout's
 # target/plak-test-tmp is used instead.
 #
-# Usage: scripts/test-tmpdir.sh [--fresh] [--system NAME] [--shared-root DIR]
+# Usage: tools/gate/test-tmpdir.sh [--fresh] [--system NAME] [--shared-root DIR]
 #   --fresh        empty the shared per-checkout directory first
 #   --system       stand-in for `uname -s` (tooling tests)
 #   --shared-root  stand-in for /dev/shm or /private/tmp (tooling tests)
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd -P)"
+root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 fresh=0
 system="$(uname -s)"
 shared_root=""

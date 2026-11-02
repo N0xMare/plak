@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("crash_sweep", ROOT / "scripts/crash-sweep.py")
+SPEC = importlib.util.spec_from_file_location("crash_sweep", ROOT / "tools/dev/crash-sweep.py")
 SWEEP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SWEEP)
 

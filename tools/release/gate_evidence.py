@@ -77,8 +77,8 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({'"docs"'}), "an MCP server id fixture"),
     "eval/harbor_adapter/pmux_provenance.py": (frozenset({"README.md"}), "docstring naming eval/README.md"),
     "eval/tests/test_eval_harbor_adapter.py": (frozenset({"README.md"}), "reads eval/README.md; not a gate"),
-    "scripts/api_model_census.py": (frozenset({'"docs"', "*.md"}), "census fixture directories"),
-    "scripts/native_compare_prompts.py": (frozenset({"README.md"}), "writes a scratch README"),
+    "tools/dev/api_model_census.py": (frozenset({'"docs"', "*.md"}), "census fixture directories"),
+    "tools/prompts/native_compare_prompts.py": (frozenset({"README.md"}), "writes a scratch README"),
     "tests/fixtures/facade-consumer/src/inventory.rs": (frozenset({'"spec"'}), "an expect message"),
     "tests/live/features.py": (frozenset({"README.md"}), "a scenario repository file; docstring"),
     "tests/live/jobs.py": (frozenset({"README.md"}), "a scenario repository file"),
@@ -86,6 +86,8 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     "tests/live/lookup_retry.py": (frozenset({"README.md"}), "a scenario repository file"),
     "tests/live/soak.py": (frozenset({'"docs"'}), "a soak task name"),
     "tests/tooling/test_api_model_census.py": (frozenset({"*.md"}), "census fixture pages"),
+    "tests/tooling/test_build_plak.py": (
+        frozenset({'"docs"'}), "a temporary parent for the copied reference home, not spec or the user guide"),
     "tests/tooling/test_changed_packages.py": (
         frozenset({"docs/spec/05-testing-and-evidence.md"}), "a path the mapper classifies, never opened"),
     "tests/tooling/test_policy_validators.py": (frozenset({"README.md"}), "a temporary package fixture"),
@@ -95,7 +97,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         "commits to a throwaway fixture repository that exercise this rule"),
     "tests/tooling/test_publish_shape.py": (frozenset({"README.md"}), "a temporary source tree"),
     "tests/tooling/test_release.py": (frozenset({"README.md"}), "a release-archive fixture"),
-    "tools/checks/check_workspace.py": (frozenset({"README.md"}), "an expected manifest readme value"),
+    "tools/gate/check_workspace.py": (frozenset({"README.md"}), "an expected manifest readme value"),
     "vendor/monty-typeshed/src/lib.rs": (frozenset({"README.md"}), "the vendored crate's own README"),
 }
 # Gate readers of an excluded path: the exact path each one reads.
@@ -153,9 +155,9 @@ def read_evidence(path: Path) -> str:
 
 def hygiene_findings(root: Path, paths: list[str]) -> list[str]:
     """The tracked-file hygiene scan of check_workspace.py over `paths`."""
-    spec = importlib.util.spec_from_file_location("check_workspace", root / "tools/checks/check_workspace.py")
+    spec = importlib.util.spec_from_file_location("check_workspace", root / "tools/gate/check_workspace.py")
     if spec is None or spec.loader is None:
-        raise RuntimeError("cannot load tools/checks/check_workspace.py")
+        raise RuntimeError("cannot load tools/gate/check_workspace.py")
     workspace = importlib.util.module_from_spec(spec)
     # Publication runs on a clean tree; a bytecode cache must not dirty it.
     sys.dont_write_bytecode = True
@@ -316,7 +318,7 @@ def reads_root_readme(relative: str, line: str, files: list[str]) -> bool:
 
 
 def listed_files(root: Path) -> list[str]:
-    sys.path.insert(0, str(root / "tools/checks"))
+    sys.path.insert(0, str(root / "tools/gate"))
     import vcs_listing  # noqa: PLC0415
 
     return vcs_listing.listed_files(root)

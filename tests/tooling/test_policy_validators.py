@@ -15,7 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools/checks"))
+sys.path.insert(0, str(ROOT / "tools/gate"))
 
 
 def load_module(name: str, path: Path):  # type: ignore[no-untyped-def]
@@ -29,10 +29,10 @@ def load_module(name: str, path: Path):  # type: ignore[no-untyped-def]
     return module
 
 
-policy_module = load_module("plakous_policy", ROOT / "tools/checks/plakous_policy.py")
-workspace_policy = load_module("check_workspace", ROOT / "tools/checks/check_workspace.py")
-feature_policy = load_module("check_features", ROOT / "tools/checks/check_features.py")
-density_policy = load_module("check_prod_loc", ROOT / "tools/checks/check_prod_loc.py")
+policy_module = load_module("plakous_policy", ROOT / "tools/gate/plakous_policy.py")
+workspace_policy = load_module("check_workspace", ROOT / "tools/gate/check_workspace.py")
+feature_policy = load_module("check_features", ROOT / "tools/gate/check_features.py")
+density_policy = load_module("check_prod_loc", ROOT / "tools/perf/check_prod_loc.py")
 
 
 class WorkspaceExclusionTests(unittest.TestCase):

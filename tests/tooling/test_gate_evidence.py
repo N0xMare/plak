@@ -162,7 +162,7 @@ class AuditTests(unittest.TestCase):
                 'documentation = "https://example.invalid/tree/main/docs/user-guide"\n'
                 'readme = "../../README.md"\n'
             ),
-            "perf.just": "# See docs/spec/05.\n",
+            "tools/perf/perf.just": "# See docs/spec/05.\n",
             "docs/spec/06.md": "CHANGELOG.md and docs/spec/07-config-reference.md\n",
             "crates/a/README.md": "docs/spec\n",
         }), [])

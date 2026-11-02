@@ -26,10 +26,10 @@ def load_module(name: str, path: Path):  # type: ignore[no-untyped-def]
 
 
 compile_gate = load_module(
-    "compile_gate_hardening", ROOT / "tools/checks/check_public_compile.py"
+    "compile_gate_hardening", ROOT / "tools/gate/check_public_compile.py"
 )
 feature_gate = load_module(
-    "feature_gate_hardening", ROOT / "tools/checks/check_features.py"
+    "feature_gate_hardening", ROOT / "tools/gate/check_features.py"
 )
 
 
@@ -72,7 +72,7 @@ class FeatureClosureCacheTests(unittest.TestCase):
             root = Path(directory)
             paths = ["Cargo.lock", "Cargo.toml", "crates/example/Cargo.toml",
                      ".cargo/config", ".cargo/config.toml", "nested/.cargo/config.toml", "rust-toolchain.toml",
-                     "tools/checks/check_features.py", "tools/checks/plakous_policy.py"]
+                     "tools/gate/check_features.py", "tools/gate/plakous_policy.py"]
             for name in paths:
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)

@@ -120,10 +120,11 @@ class BuildPlakTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
             repo = base / "repo"
-            (repo / "scripts").mkdir(parents=True)
+            (repo / "tools/dev").mkdir(parents=True)
+            (repo / "docs").mkdir(parents=True)
             (repo / "tests").mkdir()
-            shutil.copy(ROOT / "scripts/plak-dev.sh", repo / "scripts/plak-dev.sh")
-            shutil.copytree(ROOT / "configs/reference", repo / "configs/reference")
+            shutil.copy(ROOT / "tools/dev/plak-dev.sh", repo / "tools/dev/plak-dev.sh")
+            shutil.copytree(ROOT / "docs/reference-config", repo / "docs/reference-config")
             binary = repo / "target/release/plak"
             binary.parent.mkdir(parents=True)
             binary.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
@@ -144,7 +145,7 @@ class BuildPlakTests(unittest.TestCase):
             env.update(PLAK_DEV_PLAK_HOME=str(base / "home"),
                        PLAK_TEST_EXCHANGE_CAPTURE_DIR="stale", OPENAI_API_KEY="synthetic")
             for _ in range(2):
-                process = subprocess.Popen(["bash", str(repo / "scripts/plak-dev.sh"),
+                process = subprocess.Popen(["bash", str(repo / "tools/dev/plak-dev.sh"),
                                             "run", "two words", ""], cwd=base,
                                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                            text=True)
@@ -195,7 +196,7 @@ class BuildPlakTests(unittest.TestCase):
 
     def test_installer_and_build_gate_require_cross_platform_linkage(self) -> None:
         installer = (ROOT / "tools/build/build-plak.sh").read_text()
-        gate = (ROOT / "scripts/dev-check.sh").read_text()
+        gate = (ROOT / "tools/gate/dev-check.sh").read_text()
         self.assertIn('check-artifact-linkage.py "$output_dir"', installer)
         self.assertIn('check-artifact-linkage.py', gate)
         self.assertNotIn('Monty linkage not verified', installer)
@@ -748,7 +749,7 @@ done
         source = (ROOT / "tools/build/build-plak.sh").read_text(encoding="utf-8")
         self.assertNotIn("--features embedded", source)
         self.assertNotIn("-p plak -p plakous-js-eval", source)
-        self.assertIn("JS_NewRuntime", (ROOT / "tools/checks/check_workspace.py").read_text())
+        self.assertIn("JS_NewRuntime", (ROOT / "tools/gate/check_workspace.py").read_text())
         self.assertNotIn("fetch-official-code-mode-host.sh", source)
         self.assertNotIn("build-or-locate-compose-host.sh", source)
         self.assertNotIn("PLAK_BUNDLED_PYTHON_HOST", source)

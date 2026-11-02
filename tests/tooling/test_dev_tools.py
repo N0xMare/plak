@@ -15,9 +15,9 @@ class DevToolsTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        (self.root / "scripts").mkdir()
-        shutil.copyfile(ROOT / "scripts/dev-tools.sh", self.root / "scripts/dev-tools.sh")
-        shutil.copyfile(ROOT / "scripts/dev-tools-prefix.sh", self.root / "scripts/dev-tools-prefix.sh")
+        (self.root / "tools/gate").mkdir(parents=True)
+        shutil.copyfile(ROOT / "tools/gate/dev-tools.sh", self.root / "tools/gate/dev-tools.sh")
+        shutil.copyfile(ROOT / "tools/gate/dev-tools-prefix.sh", self.root / "tools/gate/dev-tools-prefix.sh")
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -59,7 +59,7 @@ elif args[:1] == ['install']:
         path.chmod(0o700)
 
     def run_script(self, *args, env=None):
-        return subprocess.run(["/bin/bash", str(self.root / "scripts/dev-tools.sh"), *args],
+        return subprocess.run(["/bin/bash", str(self.root / "tools/gate/dev-tools.sh"), *args],
                               env=env or self.env, text=True, capture_output=True, timeout=15)
 
     def calls(self):
@@ -121,8 +121,8 @@ elif args[:1] == ['install']:
         self.assertEqual([call["args"] for call in calls], [
             ["install", "--locked", "--root", prefix, "--version", "0.9.100", "cargo-nextest"],
             ["install", "--locked", "--root", prefix, "--version", "0.19.0", "cargo-deny"],
-            ["tools/checks/check_public_compile.py", "--fetch"],
-            ["scripts/jj-tools.py", "install", prefix],
+            ["tools/gate/check_public_compile.py", "--fetch"],
+            ["tools/dev/jj-tools.py", "install", prefix],
         ])
         self.assertTrue(all(call["env_names"] == ["CARGO_TARGET_DIR"] for call in calls[:2]))
         self.assertEqual(calls[-1]["env_names"], [])
@@ -133,7 +133,7 @@ elif args[:1] == ['install']:
         for _ in range(2):
             result = self.run_script("install")
             self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(sum(call["args"] == ["tools/checks/check_public_compile.py", "--fetch"]
+        self.assertEqual(sum(call["args"] == ["tools/gate/check_public_compile.py", "--fetch"]
                              for call in self.calls()), 2)
         result = self.run_script("install", env=dict(self.env, FAKE_FETCH_STATUS="71"))
         self.assertEqual(result.returncode, 71)
@@ -167,13 +167,13 @@ if sys.argv[1:] == ['nextest', '--version']:
         for layout in ('worktrees', 'workspaces'):
             copy = self.root / '.plak' / layout / 'copy'
             (copy / '.dev-tools').mkdir(parents=True)
-            helper = ROOT / 'scripts/dev-tools-prefix.sh'
+            helper = ROOT / 'tools/gate/dev-tools-prefix.sh'
             def prefix():
                 return subprocess.check_output(['bash', '-c', 'source "$1"; plak_dev_tools_prefix "$2"', 'prefix', str(helper), str(copy)], text=True).strip()
             self.assertEqual(prefix(), str(self.root / '.dev-tools'))
             (copy / '.dev-tools/bin').mkdir()
             self.assertEqual(prefix(), str(copy / '.dev-tools'))
-        source = (ROOT / 'scripts/dev-tools.sh').read_text()
+        source = (ROOT / 'tools/gate/dev-tools.sh').read_text()
         self.assertIn('CARGO_TARGET_DIR="$prefix/build"', source)
         self.assertNotIn('CARGO_TARGET_DIR="$root/.dev-tools/build"', source)
 

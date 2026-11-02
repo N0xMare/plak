@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Offline Linux x86_64 musl qualification. Default tier: --full.
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd -P)"
+root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
   echo "musl qualification requires a Linux x86_64 Docker host" >&2
@@ -50,6 +50,6 @@ docker run --rm --platform linux/amd64 --pull never --network none \
     export PATH=/qual/tools:$PATH CARGO_TARGET_DIR=/qual/target/artifacts CARGO_NET_OFFLINE=true
     export CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
     rustc -V; rustc -Vv | grep "^host:"; cargo nextest --version; python3 -V
-    bash scripts/dev-check.sh "$@"' sh "$@" || status=$?
+    bash tools/gate/dev-check.sh "$@"' sh "$@" || status=$?
 echo "EXIT $status"
 exit "$status"

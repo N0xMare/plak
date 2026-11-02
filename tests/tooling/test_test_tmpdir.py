@@ -17,8 +17,8 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.base = Path(temporary.name).resolve()
         self.checkout = self.base / "checkout"
-        (self.checkout / "scripts").mkdir(parents=True)
-        shutil.copyfile(ROOT / "scripts/test-tmpdir.sh", self.checkout / "scripts/test-tmpdir.sh")
+        (self.checkout / "tools/gate").mkdir(parents=True)
+        shutil.copyfile(ROOT / "tools/gate/test-tmpdir.sh", self.checkout / "tools/gate/test-tmpdir.sh")
         self.shared = self.base / "shared"
         self.shared.mkdir()
         self.fallback = self.checkout / "target/plak-test-tmp"
@@ -26,7 +26,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.env.pop("PLAK_TEST_TMPDIR", None)
 
     def select(self, *args):
-        result = subprocess.run(["bash", str(self.checkout / "scripts/test-tmpdir.sh"), *args],
+        result = subprocess.run(["bash", str(self.checkout / "tools/gate/test-tmpdir.sh"), *args],
                                 cwd=self.base, env=self.env, capture_output=True, text=True,
                                 timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -100,11 +100,11 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertEqual(list(self.shared.iterdir()), [])
 
     def test_every_test_entry_point_uses_the_selector(self):
-        for path in ("scripts/dev-check.sh", "scripts/perf-smoke.sh", "scripts/crash-sweep.py"):
+        for path in ("tools/gate/dev-check.sh", "tools/perf/perf-smoke.sh", "tools/dev/crash-sweep.py"):
             with self.subTest(path=path):
                 self.assertIn("test-tmpdir.sh", (ROOT / path).read_text())
-        dev = (ROOT / "dev.just").read_text()
-        self.assertEqual(dev.count('TMPDIR="$(bash scripts/test-tmpdir.sh)"'), 1)
+        dev = (ROOT / "tools/dev/dev.just").read_text()
+        self.assertEqual(dev.count('TMPDIR="$(bash tools/gate/test-tmpdir.sh)"'), 1)
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', dev)
         justfile = (ROOT / "Justfile").read_text()
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)

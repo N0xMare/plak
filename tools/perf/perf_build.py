@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - Python has no resource module on Windo
 
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools/checks"))
+sys.path.insert(0, str(ROOT / "tools/gate"))
 import vcs_listing  # noqa: E402
 
 SCHEMA = "plakous.perf-build.v10"

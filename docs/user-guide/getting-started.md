@@ -325,7 +325,7 @@ first line, `plak config edit` opens it in `$EDITOR`, and `plak config init`
 creates it if missing. `[roster]` and `[orchestration]` are config-only.
 
 Every key is documented in [configuration](configuration.md). Complete,
-tested example homes you can copy live in [`configs/`](../../configs/).
+tested example homes you can copy live in [`docs/reference-config/`](../reference-config/) and [`tests/fixtures/config-scenarios/`](../../tests/fixtures/config-scenarios/).
 
 Next: [the CLI reference](cli.md), [the TUI](tui.md), or [agents and
 orchestration](agents-and-orchestration.md).
