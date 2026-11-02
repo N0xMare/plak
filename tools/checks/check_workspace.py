@@ -3809,15 +3809,15 @@ def package_lint_inventory(package: Package, files: dict[str, str], repository: 
 
 def validate_ratchet_clippy_thresholds(root: Path = ROOT) -> list[str]:
     try:
-        config = tomllib.loads((root / "clippy.toml").read_text(encoding="utf-8"))
+        config = tomllib.loads((root / ".clippy.toml").read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as error:
-        return [f"clippy.toml: unreadable ({error})"]
+        return [f".clippy.toml: unreadable ({error})"]
     errors: list[str] = []
     for key, expected in RATCHET_CLIPPY_THRESHOLDS.items():
         actual = config.get(key, 100 if key == "too-many-lines-threshold" else None)
         if actual != expected:
             errors.append(
-                f"clippy.toml: {key} is {actual!r}; the lint ratchet ceilings were frozen under {expected} "
+                f".clippy.toml: {key} is {actual!r}; the lint ratchet ceilings were frozen under {expected} "
                 "(changing it needs a reviewed recount, spec 06 sec. 4)"
             )
     return errors

@@ -41,7 +41,7 @@ case "${1:-check}" in
     [[ $# -eq 1 ]] || fail 'usage: dev-tools.sh deny'
     require_version cargo-deny "$deny_version" cargo deny --version
     cd "$root"
-    exec cargo deny check advisories bans licenses sources
+    exec cargo deny --config "$root/.config/deny.toml" check advisories bans licenses sources
     ;;
   install)
     [[ $# -eq 1 ]] || fail 'usage: dev-tools.sh install'

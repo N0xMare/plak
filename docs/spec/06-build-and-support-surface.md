@@ -46,7 +46,7 @@ API execution surface.
 The workspace is Rust edition 2024. MSRV is 1.99.0 and `rust-toolchain.toml`
 pins channel `1.99.0` with the `minimal` profile plus `clippy` and `rustfmt`, so
 the ordinary development build is the MSRV build and there is no separate MSRV
-job. `clippy.toml` repeats the MSRV so lint suggestions stay inside it.
+job. `.clippy.toml` repeats the MSRV so lint suggestions stay inside it.
 `.cargo/config.toml` sets `resolver.incompatible-rust-versions = "fallback"`.
 
 Two targets are supported, and one near neighbour is explicitly not:
@@ -340,7 +340,7 @@ tracked Rust file of the package, tests included:
   definition, is not resolved and its file stays counted. A feature-gated
   support module or an example is counted.
 - The ceilings were frozen at the counts on main when the ratchet landed,
-  under the `clippy.toml` thresholds the checker pins (`too-many-lines` 100,
+  under the `.clippy.toml` thresholds the checker pins (`too-many-lines` 100,
   the clippy default, and `too-many-arguments` 7). They follow the cfg rule:
   missing means zero, growth fails, a reduction lowers the ceiling in the
   same change, and nonzero ceilings carry a review reason. A ceiling is not
@@ -1564,7 +1564,7 @@ and MCP; no composition-only closure reaches the converter.
 - provider SDKs are protocol references and differential oracles, not default
   production dependencies.
 
-`deny.toml` enforces the mechanical half: `advisories.yanked = "deny"`;
+`.config/deny.toml` enforces the mechanical half: `advisories.yanked = "deny"`;
 `bans.wildcards = "deny"` with `allow-wildcard-paths = true` and
 `multiple-versions = "warn"`;
 `sources.unknown-registry` and `unknown-git` both denied with crates.io as the
@@ -1572,7 +1572,7 @@ only allowed registry and no allowed Git source.
 Run it when dependencies change:
 
 ```sh
-just dev-tools deny   # cargo deny check advisories bans licenses sources
+just dev-tools deny   # cargo deny --config .config/deny.toml check advisories bans licenses sources
 ```
 
 The maintenance advisory RUSTSEC-2023-0089 is excepted only for
@@ -1596,7 +1596,7 @@ patched `zip` 9 (§7.3). Reevaluate the exception when `ruff_db` moves to
 ### 7.2 Licenses
 
 The workspace is `MIT`; vendored sources and the Codex and pi excerpts named in
-the README keep their upstream licenses. `deny.toml` allows Apache-2.0,
+the README keep their upstream licenses. `.config/deny.toml` allows Apache-2.0,
 BSD-3-Clause, CDLA-Permissive-2.0, ISC, MIT, MIT-0, MPL-2.0, Unicode-3.0, and
 Zlib at a 0.8 confidence threshold. The reviewed transitive allowances are:
 
@@ -1664,7 +1664,8 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 Some controls cannot live in the worktree. Authorized signed commits go directly
 to `main`, and local verification is the authoritative gate. **The repository
 uses local gates and has no CI except the release workflow** (§6.6), which
-builds and publishes a pushed tag and checks nothing else. Check is the Linux
+builds and attests a pushed tag and creates its GitHub Release. A manual run
+is the pre-tag dry run and releases nothing. The workflow checks nothing else. Check is the Linux
 workspace gate: structure checkers, feature builds, the parallel and serial
 lanes, contracts and tooling, but no durability lane; no landing, install or
 publication rule requires it. Worker branches iterate and finish with

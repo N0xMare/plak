@@ -109,7 +109,8 @@ elif args[:1] == ['install']:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([call["args"] for call in self.calls()], [
             ["deny", "--version"],
-            ["deny", "check", "advisories", "bans", "licenses", "sources"],
+            ["deny", "--config", str(self.root / ".config/deny.toml"),
+             "check", "advisories", "bans", "licenses", "sources"],
         ])
 
     def test_install_uses_exact_pins_and_isolated_directories(self):

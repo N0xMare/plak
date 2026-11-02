@@ -1,12 +1,12 @@
 # Contributing
 
-Contributions are accepted under the repository's [MIT license](LICENSE). By
+Contributions are accepted under the repository's [MIT license](../LICENSE). By
 submitting a pull request you agree to license your contribution under it.
 There is no CLA and no DCO sign-off.
 
 ## Before you change anything
 
-- Read [`AGENTS.md`](AGENTS.md) and the [spec overview](docs/spec/00-overview.md),
+- Read [`AGENTS.md`](../AGENTS.md) and the [spec overview](../docs/spec/00-overview.md),
   then the spec chapter that owns your change. `docs/spec/` is the authority for
   behavior; `docs/user-guide/` for usage.
 - A change to public semantics, crate boundaries, persistence or wire formats,
@@ -26,8 +26,10 @@ just fast PKG...         # worker gate: named packages and their dependents
 just check               # Linux workspace gate (no durability)
 ```
 
-There is no CI except the release workflow, which runs only when a release
-tag is pushed. Worker branches iterate and finish with `just fast <packages>`
+There is no CI except the release workflow ([spec 06 §6.6](../docs/spec/06-build-and-support-surface.md)).
+A pushed release tag builds, attests and publishes the release. A manual run
+is the pre-tag dry run: the same build, packaging and attestation, with no
+release. Worker branches iterate and finish with `just fast <packages>`
 plus the groups their change needs; say in the pull request which gates passed
 and on which platform. Before an integration batch lands, its tip tree passes
 `just musl native` on Linux x86_64, the target-independent groups once

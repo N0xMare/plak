@@ -33,8 +33,8 @@ WORKSPACE_INPUTS = {
     "Cargo.lock",
     "rust-toolchain.toml",
     "rust-toolchain",
-    "clippy.toml",
-    "rustfmt.toml",
+    ".clippy.toml",
+    ".rustfmt.toml",
     ".config/nextest.toml",
 }
 WORKSPACE_PREFIXES = (".cargo/", "vendor/")

@@ -1641,8 +1641,7 @@ payloads.
 ## 8. Reporting a vulnerability
 
 Security fixes target the latest `0.0.x` release and the default branch; older
-releases are not patched. `SECURITY.md` at the repository root is the reporting
-policy.
+releases are not patched. `.github/SECURITY.md` is the reporting policy.
 
 A vulnerability is reported **privately to the maintainer**. It MUST NOT be
 opened as a public issue, or discussed in a pull request, a discussion thread,

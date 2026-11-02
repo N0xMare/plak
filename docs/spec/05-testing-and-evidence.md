@@ -1124,7 +1124,7 @@ correctness.
 
 | Not gated | Run it when |
 | --- | --- |
-| `cargo deny check advisories bans licenses sources` (`just dev-tools deny`) | Dependencies change. It needs advisory acquisition, so it is not offline |
+| `cargo deny --config .config/deny.toml check advisories bans licenses sources` (`just dev-tools deny`) | Dependencies change. It needs advisory acquisition, so it is not offline |
 | `cargo check --workspace --all-features --all-targets --locked` as an MSRV probe | The MSRV is the toolchain pin, so the ordinary build already is the MSRV build |
 | `python3 tools/checks/check_prod_loc.py` (`just perf density`) | A density question is live. It always exits 0 |
 | `bash scripts/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline product measurements and four worker timings against this machine's seed row (§2.7); informational |

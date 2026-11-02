@@ -49,7 +49,6 @@ SELF = ("tools/release/gate_evidence.py", "tests/tooling/test_gate_evidence.py")
 # the evidence rule treats as inert. Keys are exact matched texts; an entry
 # whose text no longer occurs is stale and fails.
 REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
-    ".markdownlint-cli2.yaml": (frozenset({"*.md"}), "markdownlint globs; not a gate"),
     "bin/plak/src/carry/history/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/cli/tests.rs": (frozenset({'"docs"'}), "an MCP server id argument fixture"),
     "bin/plak/src/tui/surface_views/tests.rs": (frozenset({'"docs"'}), "an MCP server id in help text"),

@@ -18,7 +18,7 @@ Start here:
   OAuth versus API keys, refresh behaviour, compositions, and which models need
   `--effort`.
 - **[Configuration](configuration.md)** — every `config.toml` and agent-template
-  key, with defaults.
+  key, with defaults, and the environment variables Plak reads.
 - **[Troubleshooting](troubleshooting.md)** — the errors you are most likely to
   hit first and what to do about them.
 - **[Prompt renders](prompt-renders.md)** — what Plak actually sends to each

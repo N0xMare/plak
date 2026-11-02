@@ -27,13 +27,13 @@ fix.
 ## Scope
 
 In scope: breaks of the boundaries Plak claims in
-[spec 04](docs/spec/04-security-and-boundaries.md), for example credential
+[spec 04](../docs/spec/04-security-and-boundaries.md), for example credential
 leaks across accounts, routes or into logs and transcripts, file-tool
 confinement escapes, auth that falls back across routes, canonical-state
 corruption, and the release installer or artifacts.
 
 Out of scope, because they are documented limits
-([known limits](docs/user-guide/known-limits-and-security-model.md)): what a
+([known limits](../docs/user-guide/known-limits-and-security-model.md)): what a
 model-launched process tool does with your host authority (there is no OS
 sandbox and no approval prompt), credentials readable by processes running as
 you (plaintext files, no OS keychain), and behaviour spec 04 states as

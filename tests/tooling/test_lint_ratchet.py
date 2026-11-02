@@ -173,7 +173,7 @@ class LintRatchetValidationTests(unittest.TestCase):
         self.assertEqual(checker.validate_ratchet_clippy_thresholds(checker.ROOT), [])
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
-            (root / "clippy.toml").write_text("too-many-lines-threshold = 150\n")
+            (root / ".clippy.toml").write_text("too-many-lines-threshold = 150\n")
             errors = checker.validate_ratchet_clippy_thresholds(root)
         self.assertEqual(len(errors), 2, errors)
 

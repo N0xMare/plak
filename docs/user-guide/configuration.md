@@ -51,6 +51,41 @@ understand. A typo, a duplicate key, a value of the wrong type and a key that
 does not exist are all errors that name the file, and the line and column
 wherever there is one to name.
 
+## Environment variables
+
+Plak never loads a `.env` file. Set these in the process environment yourself.
+Never commit, paste, log, or share a real key value. Provider base URLs are
+not environment variables: a custom route requires typed configuration with an
+explicit origin-bound credential policy.
+
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` and `XAI_API_KEY`
+are the only credential variables Plak reads. Each corresponds to one API-key
+account (`openai`, `anthropic`, `openrouter`, `xai-api`). The process
+environment wins over the key file written by `plak key set`. When the
+variable is set, the stored file is shadowed and `plak key clear` cannot unset
+it. Leave the variable unset to use the file store. A variable that is set but
+empty, larger than 16 KiB, or not valid UTF-8 is an error: Plak refuses the
+account and does not fall back to the file store. OAuth subscription sign-ins
+are not API keys. `plak login` stores them in Plak's own store; they must never
+be put in these variables.
+
+`PLAK_HOME` overrides the product home and defaults to `$HOME/.plak`. It must
+be an absolute path; a relative value is rejected. It holds `config.toml`,
+`agents/`, the store and the logs.
+
+`PLAK_LOG` is a `tracing` filter directive, for example `info` or
+`plak=debug,info`. When it is set and non-empty, Plak writes
+`$PLAK_HOME/logs/plak.log`. When it is unset, no log file is written, except
+that a maintainer build always writes that log at `info`. An unparseable
+directive is an error, not a fallback.
+
+`PLAK_JS_HOST` and `PLAK_PY_HOST` are absolute paths to the evaluator sidecars.
+`PLAK_JS_HOST` names `plakous-js-host`, the JavaScript evaluator used by Code
+Mode and js-ptc. `PLAK_PY_HOST` names `plakous-py-host`, the Python cell worker
+used by py-ptc. By default Plak looks only for a sibling of the running `plak`
+binary; there is no `PATH` search. Each must name an existing regular file, or
+the lookup fails closed. Neither is a credential.
+
 ## Idle Auto-Continue
 
 `[turn] auto_continue` defaults to `true`. An idle interactive

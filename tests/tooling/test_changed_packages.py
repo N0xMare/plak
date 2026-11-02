@@ -67,7 +67,7 @@ class TouchedPackagesTests(unittest.TestCase):
 
     def test_workspace_inputs_select_the_whole_workspace(self):
         for path in ("Cargo.toml", "Cargo.lock", ".config/nextest.toml", ".cargo/config.toml",
-                     "rust-toolchain.toml"):
+                     "rust-toolchain.toml", ".clippy.toml", ".rustfmt.toml"):
             with self.subTest(path=path):
                 self.assertEqual(self.touched("bin/plak/src/lib.rs", path), ["--workspace"])
 
