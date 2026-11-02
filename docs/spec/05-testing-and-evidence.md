@@ -1483,6 +1483,7 @@ they run per platform (`just platform` and `just full`), not in `just check`.
 | Kind | Predicates |
 | --- | --- |
 | Indexed crash-point sweep | `crash_sweep::durability_subset` — `final_only`, `direct_tool_then_final`, `promoted_background_job`, and `sealed_family_artifacts`, every indexed commit, sixteen workers |
+| Twin-pilot determinism | `crash_sweep::durability_twin_pilots` — every other registered shape's twin pilots, which must commit identical per-store sequences; no cuts |
 | Real SIGKILL relaunch | `actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers` |
 | Real JSONL face SIGKILL | `jsonl_face_cut_before_the_turn_reopens_exactly`, `jsonl_face_cut_inside_the_model_request_is_abandoned_with_the_billing_note`, `jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note`, `jsonl_face_cut_after_the_answer_reopens_exactly`; `jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen` is explicitly ignored under `JSONL-APPROVAL-RESUME` |
 | GC after a compaction cut | `gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`, `sigkill_gc_cuts_preserve_queue_counters_and_oracle` |
@@ -1862,6 +1863,9 @@ panicking; the command-id validity assertion remains in force.
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
 `promoted_background_job`, and `sealed_family_artifacts` with sixteen workers.
+`crash_sweep::durability_twin_pilots` runs the twin pilots of every other
+registered shape without cutting, so a change that makes any strict shape's
+per-store commit sequence differ between twins fails in the durability lane.
 Without `--shapes`, `--strict` selects every registered shape; a non-strict run
 uses the quick `final_only,direct_tool_then_final` selection. An explicit
 `--shapes` selection applies in either mode. The wrapper overrides any inherited

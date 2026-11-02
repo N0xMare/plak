@@ -28,6 +28,46 @@ fn durability_subset() {
     run(&shapes::names(true), jobs, 1, false, "subset");
 }
 
+/// Every shape the strict sweep cuts must replay its twin pilots to identical
+/// per-store commit sequences, or its cuts are not comparable. The subset's
+/// shapes prove it inside `durability_subset`; this proves it for the rest
+/// without cutting, so a change that reorders commits fails in this lane.
+#[test]
+fn durability_twin_pilots() {
+    let subset = shapes::names(true);
+    let names = shapes::names(false)
+        .into_iter()
+        .filter(|name| !subset.contains(name))
+        .collect::<Vec<_>>();
+    let jobs = std::thread::available_parallelism()
+        .unwrap()
+        .get()
+        .min(16)
+        .min(names.len());
+    let next = AtomicUsize::new(0);
+    let divergent = Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..jobs {
+            scope.spawn(|| {
+                while let Some(shape) = names.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let piloted = std::panic::catch_unwind(|| {
+                        let (seed, session) = driver::setup(shape);
+                        driver::pilot(&seed, &session, shape)
+                    });
+                    if let Err(error) = piloted {
+                        divergent
+                            .lock()
+                            .unwrap()
+                            .push(format!("{shape}: {}", panic_text(&error)));
+                    }
+                }
+            });
+        }
+    });
+    let divergent = divergent.into_inner().unwrap();
+    assert!(divergent.is_empty(), "twin pilots refused: {divergent:#?}");
+}
+
 #[test]
 #[ignore = "opt-in exhaustive sweep; just dev crash-sweep"]
 fn full_sweep() {
