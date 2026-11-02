@@ -276,12 +276,12 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(call['target_rustflags'], '-C target-feature=+crt-static')
         self.assertEqual(call['rustflags'], 'unused-base-flags -D warnings')
 
-    def test_variants_bypass_the_compiler_wrapper_without_disabling_other_groups(self):
+    def test_variants_keep_the_compiler_wrapper_without_disabling_other_groups(self):
         self.env['RUSTC_WRAPPER'] = 'sccache'
         result, calls, _ = self.run_gate('--steps', 'builds,variants,rustdoc')
         self.assertEqual(result.returncode, 0, result.stderr)
         variants = next(call for call in self.python_calls if '--product-builds' in call['python'])
-        self.assertEqual(variants['rustc_wrapper'], '')
+        self.assertEqual(variants['rustc_wrapper'], 'sccache')
         builds = [call for call in calls if call['args'][0] == 'build']
         self.assertEqual(len(builds), len(BUILDS))
         self.assertTrue(all(call['rustc_wrapper'] == 'sccache' for call in builds))

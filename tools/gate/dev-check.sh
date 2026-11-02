@@ -482,12 +482,9 @@ run_group() {
       # Release-candidate evidence (`just full` or an explicit variants step).
       # The integration batch does not build these reduced resolutions.
       echo "== product feature-off builds and clippy: warnings denied =="
-      # A shared sccache server keeps the TMPDIR it started with; if that is a
-      # gate test directory, --fresh can delete its dep-info scratch mid-compile.
-      # Lane runners pin the server to a stable TMPDIR (spec 06); this group
-      # also bypasses the wrapper. Empty overrides Cargo's configured wrapper
-      # too, and only this subshell loses caching.
-      export RUSTC_WRAPPER=
+      # The sccache server must be started with a stable TMPDIR (spec 06). That
+      # is what keeps a gate's test directory from being the server's scratch,
+      # so this group keeps the caller's RUSTC_WRAPPER instead of clearing it.
       run_build_denying_warnings python3 tools/gate/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
     rustdoc)
       echo "== rustdoc =="
