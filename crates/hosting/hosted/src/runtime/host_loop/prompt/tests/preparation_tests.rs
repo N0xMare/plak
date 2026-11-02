@@ -73,6 +73,9 @@ pub(super) fn stopped_preparation(
     } else {
         UserAction::Interrupt
     };
+    // The hook drops its sender when the step returns. Disconnected is quit,
+    // so another sender has to outlive the retry or quit branch.
+    let actions_held = actions.clone();
     preparation::hooks::HOOK.with(|slot| {
         *slot.borrow_mut() = Some((
             stage,
@@ -195,6 +198,7 @@ pub(super) fn stopped_preparation(
         );
         assert!(!host.recovery_blocked);
     }
+    drop(actions_held);
     host.release().unwrap();
     observed
 }

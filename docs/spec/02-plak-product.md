@@ -4827,8 +4827,11 @@ stream-token badge, stop button, duplicate turn clock, or send-now sentence.
 `CredentialWait { account }` is a live host
 observation (`credential_wait` in JSONL); `None` clears it without terminalizing
 the turn. A saturated observation mailbox admits a credential park and its
-clear by dropping a streaming delta. It never evicts a queued credential wait,
-and it does not drop a latest-state snapshot to make room. The named login
+clear by dropping a streaming delta, then a transcript row other than a
+notice or a transcript patch, and a tool line only when neither is queued.
+A dropped row or patch is already marked for resnapshot. It never evicts a
+queued credential wait, and it does not drop a notice or a latest-state
+snapshot to make room. The named login
 command is a live `settings` notice, not persisted
 recovery authority. The host observes root waits through the turn event stream
 and idle compaction waits through the agent's read-only live wait scope. Operator

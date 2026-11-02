@@ -956,26 +956,49 @@ fn state_eviction<P: ProtocolExtension>(queue: &VecDeque<SessionObservation<P>>)
     })
 }
 
-/// A credential park and its clear both have to land. A streaming delta is the
-/// only expendable slot: a latest-state snapshot is superseded only by its own
-/// newer value, and a retained edge is never a victim.
+fn streaming_delta<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
+    matches!(
+        event,
+        SessionObservation::AssistantDelta(_)
+            | SessionObservation::ReasoningDelta { .. }
+            | SessionObservation::TranscriptStream { .. }
+    )
+}
+
+/// A transcript row other than a notice, or a transcript patch. Neither has a
+/// JSONL v1 line, and `note_transcript_gap` already repairs the loss. A notice
+/// is not spent: it would disappear with no resnapshot.
+fn resnapshot_repaired<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
+    match event {
+        SessionObservation::Row(row) => !matches!(row, TranscriptRow::Notice(_)),
+        SessionObservation::TranscriptPatch(_) => true,
+        _ => false,
+    }
+}
+
+/// A credential park and its clear both have to land. Spend a streaming delta
+/// first, then a transcript row other than a notice or a transcript patch. A
+/// tool line is a JSONL v1 `tool` record the face never gets back, so it is
+/// spent only when neither of those is queued. A latest-state snapshot and a
+/// retained edge are never victims.
 fn credential_wait_victim<P: ProtocolExtension>(
     queue: &VecDeque<SessionObservation<P>>,
 ) -> Option<usize> {
-    queue.iter().position(|queued| {
-        matches!(
-            queued,
-            SessionObservation::AssistantDelta(_)
-                | SessionObservation::ReasoningDelta { .. }
-                | SessionObservation::TranscriptStream { .. }
-        )
-    })
+    queue
+        .iter()
+        .position(streaming_delta)
+        .or_else(|| queue.iter().position(resnapshot_repaired))
+        .or_else(|| {
+            queue
+                .iter()
+                .position(|queued| matches!(queued, SessionObservation::ToolLine { .. }))
+        })
 }
 
 /// Picks the queue slot a saturated admission may evict for `event`, or `None`
-/// when nothing queued is expendable enough to make room. Refusals and
-/// lifecycle receipts are never eviction candidates: they are the terminal
-/// evidence a dropped observation must not take with it.
+/// when nothing queued is expendable enough to make room. Refusals, lifecycle
+/// receipts, and credential waits are never eviction candidates: they are the
+/// record a dropped observation must not take with it.
 fn eviction_index<P: ProtocolExtension>(
     event: &SessionObservation<P>,
     queue: &VecDeque<SessionObservation<P>>,
@@ -986,33 +1009,16 @@ fn eviction_index<P: ProtocolExtension>(
         queue.iter().position(|queued| {
             !latest_state_event(queued)
                 && !retained_edge(queued)
-                && !matches!(
-                    queued,
-                    SessionObservation::AssistantDone
-                        | SessionObservation::ModelRefusal { .. }
-                        | SessionObservation::TurnLifecycle(_)
-                        | SessionObservation::JobStarted { .. }
-                        | SessionObservation::JobPromoted { .. }
-                        | SessionObservation::JobTerminal { .. }
-                )
+                && !matches!(queued, SessionObservation::AssistantDone)
         })
     } else if terminal_error_event(event) {
         queue
             .iter()
             .position(replaceable_diagnostic_event)
             .or_else(|| {
-                queue.iter().position(|queued| {
-                    !latest_state_event(queued)
-                        && !retained_edge(queued)
-                        && !matches!(
-                            queued,
-                            SessionObservation::ModelRefusal { .. }
-                                | SessionObservation::TurnLifecycle(_)
-                                | SessionObservation::JobStarted { .. }
-                                | SessionObservation::JobPromoted { .. }
-                                | SessionObservation::JobTerminal { .. }
-                        )
-                })
+                queue
+                    .iter()
+                    .position(|queued| !latest_state_event(queued) && !retained_edge(queued))
             })
     } else if replaceable_diagnostic_event(event) {
         queue
@@ -1023,15 +1029,7 @@ fn eviction_index<P: ProtocolExtension>(
                     !latest_state_event(queued)
                         && !replaceable_diagnostic_event(queued)
                         && !retained_edge(queued)
-                        && !matches!(
-                            queued,
-                            SessionObservation::AssistantDone
-                                | SessionObservation::ModelRefusal { .. }
-                                | SessionObservation::TurnLifecycle(_)
-                                | SessionObservation::JobStarted { .. }
-                                | SessionObservation::JobPromoted { .. }
-                                | SessionObservation::JobTerminal { .. }
-                        )
+                        && !matches!(queued, SessionObservation::AssistantDone)
                 })
             })
     } else if admission_event(event) {
@@ -1133,10 +1131,12 @@ impl<P: ProtocolExtension> ObservationSender<P> {
     /// is short; at saturation required final/state events evict only a
     /// replaceable transcript/delta/progress observation. A credential-wait
     /// park and its clear are retained the same way: saturation may drop a
-    /// streaming delta to admit one, and neither wait is itself an eviction
-    /// candidate. A latest-state snapshot is not spent to make room. Latest-state variants
-    /// supersede only their own older value, and the newest error remains until
-    /// the renderer can observe it alongside the terminal state.
+    /// streaming delta, then a transcript row other than a notice or a
+    /// transcript patch, and a tool line only when neither is queued. Neither
+    /// wait is itself an eviction candidate.
+    /// A latest-state snapshot is not spent to make room. Latest-state
+    /// variants supersede only their own older value, and the newest error
+    /// remains until the renderer can observe it alongside the terminal state.
     ///
     /// # Errors
     /// Returns the original replaceable event if bounded capacity cannot admit it.

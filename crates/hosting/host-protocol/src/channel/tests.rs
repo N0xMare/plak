@@ -1208,3 +1208,241 @@ fn saturated_snapshots_are_not_spent_and_a_queued_wait_survives_them() {
         .collect();
     assert_eq!(waits, vec![park]);
 }
+
+fn assert_retained_park(
+    label: &str,
+    filler: fn(usize) -> SessionObservation<Core>,
+    incoming: SessionObservation<Core>,
+) {
+    let park = SessionObservation::CredentialWait {
+        account: Some("codex".into()),
+    };
+    let (sender, receiver) = observation_channel::<Core>();
+    sender.send(park.clone()).unwrap();
+    for index in 1..OBSERVATION_QUEUE_CAPACITY {
+        sender.send(filler(index)).unwrap_or_else(|_| {
+            panic!("{label} filler must enqueue beside the park");
+        });
+    }
+    assert!(
+        sender.send(incoming).is_err(),
+        "{label} must be refused rather than evict the parked credential wait"
+    );
+    let waits: Vec<_> = receiver
+        .try_iter()
+        .filter(|event| matches!(event, SessionObservation::CredentialWait { .. }))
+        .collect();
+    assert_eq!(waits, vec![park], "{label}");
+}
+
+#[test]
+fn saturated_branches_refuse_to_evict_a_queued_credential_wait() {
+    // Fillers are what that branch already refuses to spend, so only the
+    // retained-edge check keeps the park in the queue.
+    assert_retained_park(
+        "assistant done",
+        |_| SessionObservation::AssistantDone,
+        SessionObservation::AssistantDone,
+    );
+    assert_retained_park(
+        "terminal error",
+        |_| SessionObservation::ModelRefusal { detail: None },
+        SessionObservation::Row(TranscriptRow::error(NoticeScope::Host, "terminal")),
+    );
+    assert_retained_park(
+        "replaceable notice",
+        |_| SessionObservation::AssistantDone,
+        SessionObservation::Row(TranscriptRow::info(NoticeScope::Host, "note")),
+    );
+    assert_retained_park(
+        "admission",
+        |_| SessionObservation::IntentStarted(None),
+        SessionObservation::IntentStarted(Some("incoming".into())),
+    );
+}
+
+fn content_tool_line(index: usize) -> SessionObservation<Core> {
+    SessionObservation::ToolLine {
+        call_id: Some(index.to_string()),
+        parent_call_id: None,
+        cell_id: None,
+        kind: crate::views::ActivityKind::Tool,
+        name: "read_file".into(),
+        state: "running".into(),
+        subject: None,
+        detail: None,
+        duration_ms: None,
+        started_at_ms: None,
+        finished_at_ms: None,
+        wait: None,
+    }
+}
+
+fn content_patch(index: usize) -> SessionObservation<Core> {
+    use crate::views::transcript::{TranscriptPatch, TranscriptScope};
+    let revision = u64::try_from(index).unwrap() * 2;
+    SessionObservation::TranscriptPatch(TranscriptPatch {
+        scope: TranscriptScope::Root,
+        from_revision: revision,
+        to_revision: revision + 1,
+        upserts: Vec::new(),
+        deletes: Vec::new(),
+    })
+}
+
+fn admit_credential_wait_by_spending(
+    label: &str,
+    filler: fn(usize) -> SessionObservation<Core>,
+    wait: &SessionObservation<Core>,
+) {
+    let (sender, receiver) = observation_channel::<Core>();
+    for index in 0..OBSERVATION_QUEUE_CAPACITY {
+        sender.send(filler(index)).unwrap();
+    }
+    assert!(
+        !sender.transcript_resnapshot_required(),
+        "{label} fill must not open a gap"
+    );
+    sender.send(wait.clone()).unwrap();
+    assert!(
+        sender.transcript_resnapshot_required(),
+        "{label} drop must mark the transcript for resnapshot"
+    );
+    let events: Vec<_> = receiver.try_iter().collect();
+    assert!(events.contains(wait), "{label}");
+    assert!(
+        !events.contains(&filler(0)),
+        "{label} spends the earliest repaired content"
+    );
+    assert!(events.contains(&filler(1)), "{label}");
+}
+
+#[test]
+fn credential_wait_spends_gap_repaired_content_when_no_delta_is_queued() {
+    let park = SessionObservation::CredentialWait {
+        account: Some("codex".into()),
+    };
+    let clear = SessionObservation::CredentialWait { account: None };
+    let (sender, receiver) = observation_channel::<Core>();
+    for index in 0..OBSERVATION_QUEUE_CAPACITY - 1 {
+        sender
+            .send(SessionObservation::Row(TranscriptRow::assistant(format!(
+                "row {index}"
+            ))))
+            .unwrap();
+    }
+    let delta = SessionObservation::ReasoningDelta {
+        location_key: "k".into(),
+        text: "think".into(),
+    };
+    sender.send(delta.clone()).unwrap();
+    sender.send(park.clone()).unwrap();
+    let events: Vec<_> = receiver.try_iter().collect();
+    assert_eq!(events.len(), OBSERVATION_QUEUE_CAPACITY);
+    assert!(events.contains(&park));
+    assert!(
+        !events.contains(&delta),
+        "a streaming delta is spent before a transcript row"
+    );
+    assert!(events.contains(&SessionObservation::Row(TranscriptRow::assistant("row 0"))));
+
+    admit_credential_wait_by_spending(
+        "row",
+        |index| SessionObservation::Row(TranscriptRow::assistant(format!("row {index}"))),
+        &park,
+    );
+    admit_credential_wait_by_spending("tool", content_tool_line, &clear);
+    admit_credential_wait_by_spending("patch", content_patch, &park);
+
+    assert_unspent_credential_wait("error row", &clear, |index| {
+        SessionObservation::Row(TranscriptRow::error(
+            NoticeScope::Host,
+            format!("e {index}"),
+        ))
+    });
+    assert_unspent_credential_wait("info notice", &clear, |index| {
+        SessionObservation::Row(TranscriptRow::info(NoticeScope::Host, format!("n {index}")))
+    });
+}
+
+#[test]
+fn credential_wait_spends_a_row_or_patch_before_an_earlier_tool_line() {
+    use crate::views::transcript::{TranscriptPatch, TranscriptScope};
+    let park = SessionObservation::CredentialWait {
+        account: Some("codex".into()),
+    };
+    let (sender, receiver) = observation_channel::<Core>();
+    let ahead = content_tool_line(0);
+    sender.send(ahead.clone()).unwrap();
+    for index in 1..OBSERVATION_QUEUE_CAPACITY - 1 {
+        sender.send(content_tool_line(index)).unwrap();
+    }
+    let row = SessionObservation::Row(TranscriptRow::assistant("behind tools"));
+    sender.send(row.clone()).unwrap();
+    sender.send(park.clone()).unwrap();
+    let events: Vec<_> = receiver.try_iter().collect();
+    assert!(events.contains(&park));
+    assert!(
+        events.contains(&ahead),
+        "a tool line queued ahead of a row is not spent"
+    );
+    assert!(
+        !events.contains(&row),
+        "the row is spent before any tool line"
+    );
+    assert!(sender.transcript_resnapshot_required());
+
+    let (sender, receiver) = observation_channel::<Core>();
+    let agent = TranscriptScope::Agent("child".into());
+    let patch = SessionObservation::TranscriptPatch(TranscriptPatch {
+        scope: agent.clone(),
+        from_revision: 0,
+        to_revision: 1,
+        upserts: Vec::new(),
+        deletes: Vec::new(),
+    });
+    sender.send(patch.clone()).unwrap();
+    for index in 1..OBSERVATION_QUEUE_CAPACITY {
+        sender
+            .send(SessionObservation::Row(TranscriptRow::assistant(format!(
+                "root {index}"
+            ))))
+            .unwrap();
+    }
+    assert!(!sender.transcript_resnapshot_required());
+    assert!(!sender.transcript_resnapshot_required_for(&agent));
+    sender.send(park).unwrap();
+    assert!(
+        sender.transcript_resnapshot_required_for(&agent),
+        "spending the agent patch marks that scope"
+    );
+    assert!(
+        !sender.transcript_resnapshot_required(),
+        "an agent patch does not mark the root"
+    );
+    let events: Vec<_> = receiver.try_iter().collect();
+    assert!(!events.contains(&patch));
+    assert!(events.contains(&SessionObservation::Row(TranscriptRow::assistant("root 1"))));
+}
+
+fn assert_unspent_credential_wait(
+    label: &str,
+    wait: &SessionObservation<Core>,
+    filler: fn(usize) -> SessionObservation<Core>,
+) {
+    let (sender, receiver) = observation_channel::<Core>();
+    for index in 0..OBSERVATION_QUEUE_CAPACITY {
+        sender.send(filler(index)).unwrap();
+    }
+    assert!(
+        sender.send(wait.clone()).is_err(),
+        "{label} is not spent to admit a credential wait"
+    );
+    assert!(!sender.transcript_resnapshot_required(), "{label}");
+    assert!(
+        !receiver
+            .try_iter()
+            .any(|event| matches!(event, SessionObservation::CredentialWait { .. })),
+        "{label}"
+    );
+}
