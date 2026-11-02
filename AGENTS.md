@@ -38,11 +38,11 @@ just steps GROUPS         # exactly those comma-separated groups, in canonical o
 just check                # Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel+serial, contracts, tooling
 just platform             # per install: fmt, clippy, builds, parallel, serial, durability
 just full                 # every group: check, plus variants, rustdoc, durability and the publish dry run
-just fmt                  # cargo fmt --all
+just fmt                  # cargo fmt, then ruff format on the checked Python paths
 just clippy               # workspace clippy, then each supported package alone
 just nextest ARGS         # pinned cargo nextest under the isolated test environment
 just publish [--execute]  # crates.io cohort dry run; --execute uploads
-just dev-tools ARGS       # pinned nextest and cargo-deny; `deny` is the dependency audit
+just dev-tools ARGS       # pinned cargo-nextest, cargo-deny and ruff; `deny` is the dependency audit
 just build PROFILE        # debug, release, maintainer or profiling; no snapshot and no PATH change
 just install FLAVOR       # release (plain) or maintainer (dogfood) immutable snapshot on PATH
 just musl native          # Linux x86_64 musl platform tier, static PIE via rust-lld

@@ -51,8 +51,13 @@ publish *ARGS:
 dev-tools *ARGS:
     tools/gate/dev-tools.sh {{ARGS}}
 
+[doc("cargo fmt, then ruff format on the checked Python paths")]
 fmt:
-    cargo fmt --all
+    root="$(pwd -P)"; \
+    source tools/gate/dev-tools-prefix.sh; \
+    export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"; \
+    cargo fmt --all; \
+    ruff format tools tests/tooling tests/live eval
 
 # Workspace clippy, then each supported package alone. Same invocations as static.
 [doc("workspace clippy, then each supported package alone")]

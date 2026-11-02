@@ -1350,14 +1350,6 @@ def cargo_command(
     return command
 
 
-def facade_profiles(_manifests: dict[str, dict[str, object]]) -> list[tuple[str, ...]]:
-    """Return the facade compile profiles: none, full, composition, claude.
-
-    Closures, not these compiles, witness every public feature.
-    """
-    return [(), ("full",), ("composition",), ("claude",)]
-
-
 def compiler_diagnostics(stdout: str) -> list[str]:
     """Return the rendered rustc warnings and errors in Cargo's JSON messages."""
     rendered = []

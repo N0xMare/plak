@@ -63,7 +63,7 @@ vendor-clis:
 pmux:
     eval/scripts/harbor.sh fetch-pmux
 
-[doc("run one Harbor evaluation")]
+[doc("paid Harbor evaluation")]
 eval *ARGS:
     eval/scripts/harbor.sh eval {{ARGS}}
 
@@ -76,16 +76,16 @@ view:
 summarize *ARGS:
     eval/scripts/summarize.py {{ARGS}}
 
-[doc("Harbor smoke")]
+[doc("paid Harbor smoke")]
 smoke *ARGS:
     eval/scripts/smoke.sh {{ARGS}}
 
 # Rung A: plumbing (local tiny tasks) then cheap TB 2.1 A/B. Paid, not just check.
-[doc("Rung A plumbing, then a cheap Terminal-Bench 2.1 A/B")]
+[doc("paid Rung A plumbing, then a cheap Terminal-Bench 2.1 A/B")]
 rung-a *ARGS:
     eval/scripts/rung-a.sh {{ARGS}}
 
 # Rung B: one TB 4.0 task to prove wiring. Never the 66-task campaign.
-[doc("Rung B: one Terminal-Bench 4.0 task")]
+[doc("paid Rung B: one Terminal-Bench 4.0 task")]
 rung-b *ARGS:
     eval/scripts/rung-b.sh {{ARGS}}

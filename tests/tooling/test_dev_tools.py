@@ -257,5 +257,69 @@ if sys.argv[1:] == ['nextest', '--version']:
         self.assertEqual(self.calls(), [])
 
 
+class ClippySupportedPackageTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+        bindir = self.base / "bin"
+        bindir.mkdir()
+        cargo = bindir / "cargo"
+        cargo.write_text("#!/bin/sh\nexit 0\n")
+        cargo.chmod(0o755)
+        self.env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ["PATH"])
+
+    def test_the_real_list_matches_manifest_classes(self):
+        result = subprocess.run(
+            ["bash", str(ROOT / "tools/gate/clippy.sh")],
+            cwd=ROOT,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("== clippy: plak alone ==", result.stdout)
+        gate = (ROOT / "tools/gate/dev-check.sh").read_text()
+        clippy = (ROOT / "tools/gate/clippy.sh").read_text()
+        self.assertIn(
+            "supported_packages=(plakous plakous-agent plakous-model plakous-tools plak)",
+            gate,
+        )
+        self.assertIn(
+            "packages=(plakous plakous-agent plakous-model plakous-tools plak)",
+            clippy,
+        )
+
+    def test_a_drifting_list_fails_before_cargo(self):
+        root = self.base / "repo"
+        script = root / "tools/gate/clippy.sh"
+        script.parent.mkdir(parents=True)
+        text = (ROOT / "tools/gate/clippy.sh").read_text()
+        text = text.replace(
+            "packages=(plakous plakous-agent plakous-model plakous-tools plak)",
+            "packages=(alpha)",
+        )
+        script.write_text(text)
+        script.chmod(0o755)
+        (root / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/alpha"]\n')
+        member = root / "crates/alpha/Cargo.toml"
+        member.parent.mkdir(parents=True)
+        member.write_text(
+            '[package]\nname = "beta"\n\n[package.metadata.plakous]\nclass = "supported"\n'
+        )
+        result = subprocess.run(
+            ["bash", str(script)],
+            cwd=root,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("do not match manifest class supported", result.stderr)
+        self.assertNotIn("== clippy ==", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

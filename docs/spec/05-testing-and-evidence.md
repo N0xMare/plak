@@ -896,7 +896,8 @@ the durable owner so tests can inspect its nonce and compatibility state without
 exposing live fields. The full agent suite and real executor-stack witness remain
 required after runtime module moves.
 
-`just fmt` is the formatter. `just clippy` runs the static group's clippy
+`just fmt` is the formatter: `cargo fmt --all`, then `ruff format` over
+`tools/`, `tests/tooling`, `tests/live` and `eval/`. `just clippy` runs the static group's clippy
 invocations: the workspace, then each supported package alone. Rustdoc is `just steps rustdoc`.
 The three nextest lanes are `just steps tests-parallel,tests-serial,tests-durability`.
 `cargo-nextest` is required by every tier: if it is absent the gate exits 2 rather than falling back to `cargo test`, because a plain
