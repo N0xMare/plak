@@ -64,7 +64,7 @@ pub(super) enum JobsWaitPlan {
 
 /// Named processes must be the caller's own promoted jobs in this session.
 pub(super) fn admit_awaited_jobs(
-    jobs: Option<&plakous::tools::JoinedProcessSessions>,
+    jobs: Option<&plakous::tools::JoinedSessionsPort>,
     request: &AwaitRequest,
 ) -> Result<(), TopologyError> {
     if request.agents == AwaitAgents::Unwatched && request.processes.is_empty() {
@@ -80,7 +80,7 @@ pub(super) fn admit_awaited_jobs(
             "process ids must not repeat",
         ));
     }
-    let owned = jobs.map_or_else(Vec::new, plakous::tools::JoinedProcessSessions::jobs);
+    let owned = jobs.map_or_else(Vec::new, plakous::tools::JoinedSessionsPort::jobs);
     let missing = request
         .processes
         .iter()
@@ -119,13 +119,13 @@ fn job_id(job: &plakous::tools::JobView) -> String {
 
 /// Whether a named process is terminal, or already gone from the service.
 pub(super) fn named_job_settled(
-    jobs: Option<&plakous::tools::JoinedProcessSessions>,
+    jobs: Option<&plakous::tools::JoinedSessionsPort>,
     named: &[String],
 ) -> bool {
     if named.is_empty() {
         return false;
     }
-    let views = jobs.map_or_else(Vec::new, plakous::tools::JoinedProcessSessions::jobs);
+    let views = jobs.map_or_else(Vec::new, plakous::tools::JoinedSessionsPort::jobs);
     named.iter().any(|id| {
         views
             .iter()
@@ -135,13 +135,13 @@ pub(super) fn named_job_settled(
 }
 
 pub(super) fn await_job_rows(
-    jobs: Option<&plakous::tools::JoinedProcessSessions>,
+    jobs: Option<&plakous::tools::JoinedSessionsPort>,
     named: &[String],
 ) -> Vec<AwaitJobRow> {
     if named.is_empty() {
         return Vec::new();
     }
-    let views = jobs.map_or_else(Vec::new, plakous::tools::JoinedProcessSessions::jobs);
+    let views = jobs.map_or_else(Vec::new, plakous::tools::JoinedSessionsPort::jobs);
     named
         .iter()
         .map(|id| {
@@ -411,7 +411,7 @@ impl TopologyTool {
         let service = self.driver.job_service(&caller);
         if service
             .as_ref()
-            .is_some_and(plakous::tools::JoinedProcessSessions::has_unreported_terminal_job)
+            .is_some_and(plakous::tools::JoinedSessionsPort::has_unreported_terminal_job)
         {
             return Ok(JobsWaitPlan::Processes(Vec::new()));
         }

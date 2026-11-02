@@ -321,4 +321,6 @@ pub use internal::{
 };
 
 /// Session-owned process observations and optional host registry.
-pub use plakous_tools::{JobConfig, JobHost, JobOwner, JobStatus, JobStopReason, JobView};
+pub use plakous_tools::{
+    JobConfig, JobHost, JobOwner, JobStatus, JobStopReason, JobView, JoinedSessionsPort,
+};

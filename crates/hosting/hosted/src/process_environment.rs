@@ -1,13 +1,25 @@
 //! Host workspace policy resolution; core tools only enforces the supplied facts.
 
 use crate::{CliFailure, CliResult};
-use plakous::tools::HostProcessOptions;
+use plakous::tools::{HostProcessOptions, LocalWorkspaceProbe, ProbeError, WorkspaceProbe};
 use std::path::{Path, PathBuf};
 
+/// The one refusal for a workspace probe that cannot answer: construction
+/// fails closed rather than act on a path that only looks absent.
+pub(crate) fn probe_unavailable(error: ProbeError) -> CliFailure {
+    CliFailure::new(format!("workspace could not be inspected: {error}"))
+}
+
 pub(crate) fn options(workspace: &Path) -> CliResult<HostProcessOptions> {
+    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
     let relative = PathBuf::from(".plak/bin");
     let directory = workspace.join(&relative);
-    let shim_present = directory.join("git").is_file() || directory.join("jj").is_file();
+    let shim_present = probe
+        .is_file(&directory.join("git"))
+        .map_err(probe_unavailable)?
+        || probe
+            .is_file(&directory.join("jj"))
+            .map_err(probe_unavailable)?;
     // Tool tier does not identify a copy: read-only children inherit their
     // parent's workspace, including an ordinary checkout without a shim.
     let known_copy = crate::git_redirect_fence::is_minted_occupancy_copy(workspace);

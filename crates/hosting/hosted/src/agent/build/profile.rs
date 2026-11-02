@@ -206,6 +206,7 @@ pub(crate) fn enroll_product_instructions(
     skills_listing: Option<&RegisteredContextSource>,
 ) -> CliResult<(HarnessProfileSpec, Vec<ResolvedContextSourceFact>)> {
     let discovery = plakous::prompts::instructions::discover_instruction_sources(
+        &plakous::prompts::instructions::LocalInstructionSourceReader,
         product_home,
         workspace_root,
         cwd,

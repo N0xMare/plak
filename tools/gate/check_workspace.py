@@ -114,6 +114,7 @@ SUPPORTED_COMPILE_FIXTURE_FILES = {
             "src/lifecycle_configuration.rs",
             "src/local_composition.rs",
             "src/main.rs",
+            "src/prompts.rs",
             "src/providers.rs",
             "src/sessions.rs",
         }
@@ -1246,6 +1247,13 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "JobView",
         "JobStopReason",
         "JoinedProcessSessions",
+        # A registry holds each owner's service through its port, and a host
+        # asks workspace-path questions through the workspace probe, so either
+        # can be answered where the workspace lives (spec 01 section 8.5).
+        "JoinedSessionsPort",
+        "LocalWorkspaceProbe",
+        "ProbeError",
+        "WorkspaceProbe",
         "plan_restoration_note",
         # The composition owns the evaluator-worker port; the product supplies
         # its implementation through plakous-compose.
@@ -1369,6 +1377,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "discover_instruction_sources",
         "discover_skill_roots",
         "discover_skills",
+        "InstructionSourceReader",
+        "LocalInstructionSourceReader",
         "openrouter_direct_base_instructions",
         "Skill",
         "SkillDiscovery",

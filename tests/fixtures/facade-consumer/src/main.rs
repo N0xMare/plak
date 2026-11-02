@@ -10,6 +10,7 @@ mod custom_tool;
 mod inventory;
 mod lifecycle;
 mod local_composition;
+mod prompts;
 mod providers;
 mod sessions;
 
@@ -25,6 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     local_composition::surface_is_nameable();
     sessions::surface_is_nameable();
     providers::surface_is_nameable();
+    prompts::consumer_reader_drives_discovery()?;
     inventory_workflows().await?;
     lifecycle::run().await?;
     Ok(())

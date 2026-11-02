@@ -192,7 +192,7 @@ impl plakous::tools::JobHost for RecoverDuringJobStop {
         &self,
         _: plakous::model::SessionId,
         _: plakous::model::BranchId,
-    ) -> Option<plakous::tools::JoinedProcessSessions> {
+    ) -> Option<plakous::tools::JoinedSessionsPort> {
         self.driver
             .mutate_and_settle(|tree| {
                 let attempt = tree.attempt(&self.child).unwrap().attempt_id.clone();
@@ -215,8 +215,8 @@ impl plakous::tools::JobHost for RecoverDuringJobStop {
     fn attach(
         &self,
         _: plakous::tools::JobOwner,
-        fresh: plakous::tools::JoinedProcessSessions,
-    ) -> Result<plakous::tools::JoinedProcessSessions, plakous::tools::ExecutionBackendError> {
+        fresh: plakous::tools::JoinedSessionsPort,
+    ) -> Result<plakous::tools::JoinedSessionsPort, plakous::tools::ExecutionBackendError> {
         Ok(fresh)
     }
 }
@@ -289,7 +289,7 @@ async fn settling_unrelated_effects_does_not_stop_historical_attempt_jobs() {
     .unwrap();
 }
 
-struct JobCheckingCanceller(plakous::tools::JoinedProcessSessions);
+struct JobCheckingCanceller(plakous::tools::JoinedSessionsPort);
 
 struct LateJobCanceller {
     driver: TreeDriver,
@@ -297,7 +297,7 @@ struct LateJobCanceller {
     path: std::path::PathBuf,
     job: Mutex<
         Option<(
-            plakous::tools::JoinedProcessSessions,
+            plakous::tools::JoinedSessionsPort,
             plakous::sessions::OpenedSession,
         )>,
     >,

@@ -1,5 +1,6 @@
 //! Runtime bindings and provider configuration.
 
+use crate::process_environment::probe_unavailable;
 use crate::tools::ProductToolExtensions;
 use crate::{CliFailure, CliResult};
 use plakous_host_protocol::status::AttachFailure;
@@ -39,8 +40,9 @@ use plakous::subscriptions::{
     NativeProvider, NativeToolMode, ResolvedProvider, native_provider_route_selection,
 };
 use plakous::tools::{
-    CodexMinimalLocalCodeModeV1, CompositionRuntime, ProductJavaScriptCompositionV1,
-    PythonPtcPresentationV1, PythonPtcV1, plan_restoration_note,
+    CodexMinimalLocalCodeModeV1, CompositionRuntime, LocalWorkspaceProbe,
+    ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1, WorkspaceProbe,
+    plan_restoration_note,
 };
 use std::io::Write;
 use std::num::NonZeroU32;
@@ -377,7 +379,7 @@ pub(super) async fn api_session_runtime_binding_with_owner(
         &parent.state_roots,
         &parent.workspace_root,
         api_skills_presentation(parent.target, parent.composition),
-    ))?;
+    )?)?;
     install_occupancy_fence(&parent.cwd)?;
     match parent.target {
         crate::binding::ApiTarget::OpenRouter { wire } => {
@@ -659,7 +661,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         &workspace_root,
         provider,
         product_sdk,
-    ))?;
+    )?)?;
     install_occupancy_fence(&cwd)?;
     product_extensions.connect_retrieval(resolved.retrieval_port())?;
     product_extensions.connect_image_gen(resolved.image_gen_port())?;
@@ -746,11 +748,16 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             "resolved provider tool configuration does not match the product registry",
         ));
     }
-    let physical_root = std::fs::canonicalize(&workspace_root)
-        .map_err(|_| CliFailure::new("recorded workspace root could not be resolved"))?;
+    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let physical_root = probe
+        .canonicalize(&workspace_root)
+        .map_err(probe_unavailable)?
+        .ok_or_else(|| CliFailure::new("recorded workspace root could not be resolved"))?;
     ensure_workspace_excludes_product_state(&physical_root, state_roots.paths())?;
-    let physical_cwd = std::fs::canonicalize(&cwd)
-        .map_err(|_| CliFailure::new("workspace current directory could not be resolved"))?;
+    let physical_cwd = probe
+        .canonicalize(&cwd)
+        .map_err(probe_unavailable)?
+        .ok_or_else(|| CliFailure::new("workspace current directory could not be resolved"))?;
     let relative_cwd = physical_cwd.strip_prefix(&physical_root).map_err(|_| {
         CliFailure::new("workspace current directory is outside the recorded workspace root")
     })?;
@@ -1096,7 +1103,7 @@ fn native_node_skills(
     workspace_root: &Path,
     provider: NativeProvider,
     product_sdk: bool,
-) -> crate::skills::NodeSkills {
+) -> CliResult<crate::skills::NodeSkills> {
     use plakous::prompts::skills::SkillsPresentation;
     let presentation = match provider {
         _ if product_sdk => SkillsPresentation::Neutral,
@@ -1115,17 +1122,17 @@ fn node_skills(
     state_roots: &crate::agent::ProductStateRoots,
     workspace_root: &Path,
     presentation: plakous::prompts::skills::SkillsPresentation,
-) -> crate::skills::NodeSkills {
+) -> CliResult<crate::skills::NodeSkills> {
     let skills = crate::skills::NodeSkills::discover(
         state_roots.skills(),
         state_roots.skills_mode(),
         workspace_root,
         presentation,
-    );
+    )?;
     if let Some(notice) = skills.notice() {
         state_roots.push_skill_notice(notice);
     }
-    skills
+    Ok(skills)
 }
 
 /// The skills listing family of one API target: the pack its route wears.

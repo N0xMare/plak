@@ -15,8 +15,8 @@ use plakous::model::{ConfiguredLanguageModel, ConfiguredTool, ContextAdmissionRe
 use plakous::sessions::SessionRuntimeBinding;
 use plakous::tools::CodingPresentationExt as _;
 use plakous::tools::{
-    CodexMinimalLocalCodeModeV1, CodingPresentation, CompiledSurface,
-    ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1,
+    CodexMinimalLocalCodeModeV1, CodingPresentation, CompiledSurface, LocalWorkspaceProbe,
+    ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1, WorkspaceProbe,
 };
 
 use super::policy::{
@@ -74,10 +74,15 @@ pub(crate) fn runtime_binding(
         session_id = spec.plan_state_authority,
     )
     .entered();
-    let physical_root = std::fs::canonicalize(spec.workspace_root)
-        .map_err(|_| CliFailure::new("recorded workspace root could not be resolved"))?;
-    let physical_cwd = std::fs::canonicalize(spec.cwd)
-        .map_err(|_| CliFailure::new("workspace current directory could not be resolved"))?;
+    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let physical_root = probe
+        .canonicalize(spec.workspace_root)
+        .map_err(crate::process_environment::probe_unavailable)?
+        .ok_or_else(|| CliFailure::new("recorded workspace root could not be resolved"))?;
+    let physical_cwd = probe
+        .canonicalize(spec.cwd)
+        .map_err(crate::process_environment::probe_unavailable)?
+        .ok_or_else(|| CliFailure::new("workspace current directory could not be resolved"))?;
     let relative_cwd = physical_cwd.strip_prefix(&physical_root).map_err(|_| {
         CliFailure::new("workspace current directory is outside the recorded workspace root")
     })?;

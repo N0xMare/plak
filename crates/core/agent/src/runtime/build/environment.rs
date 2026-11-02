@@ -4,6 +4,7 @@ use super::{
     ReconstructiveComponent, ResolvedContextSourceFact, ResolvedHarnessPlan, RuntimeComponentKind,
     ToolRuntime, WorkspacePolicy, profile_construction_error, runtime_component,
 };
+use plakous_tools::ExecutionBackendDescriptor;
 
 #[cfg(test)]
 mod tests;
@@ -12,8 +13,9 @@ const JOB_CONFIG_ENVIRONMENT_TAG: &[u8] = b"\0plakous-agent/job-limits-v1\0";
 
 pub(super) fn stable_workspace_environment_digest(
     workspace: &WorkspacePolicy,
+    backend: &ExecutionBackendDescriptor,
 ) -> Result<Digest, AgentError> {
-    let bytes = stable_workspace_environment_bytes(workspace)?;
+    let bytes = stable_workspace_environment_bytes(workspace, backend)?;
     Digest::sha256(
         DigestDomain::ExecutionEnvironment,
         1,
@@ -58,7 +60,12 @@ pub fn compile_explicit_runtime_profile(
         .iter()
         .map(|definition| definition.name().as_str().to_owned())
         .collect();
-    let environment_digest = stable_workspace_environment_digest(workspace)?;
+    // An explicit profile is compiled before any environment exists; the
+    // builder's backend is the host backend (spec 01 §12).
+    let environment_digest = stable_workspace_environment_digest(
+        workspace,
+        &ExecutionBackendDescriptor::current_host(),
+    )?;
     crate::compile_explicit_profile(
         spec,
         model,
@@ -73,11 +80,12 @@ pub fn compile_explicit_runtime_profile(
 
 pub(in crate::runtime) fn stable_runtime_environment_component(
     workspace: &WorkspacePolicy,
+    backend: &ExecutionBackendDescriptor,
     local_composition: Option<&LocalCompositionConstruction>,
     provider_configuration: &CompiledProviderConfiguration,
     job_config: plakous_tools::JobConfig,
 ) -> Result<ReconstructiveComponent, AgentError> {
-    let mut bytes = stable_workspace_environment_bytes(workspace)?;
+    let mut bytes = stable_workspace_environment_bytes(workspace, backend)?;
     let Some(local_composition) = local_composition else {
         append_job_config(&mut bytes, job_config);
         return runtime_component(RuntimeComponentKind::ExecutionEnvironment, bytes);
@@ -243,8 +251,11 @@ pub(in crate::runtime) fn live_job_config(
     })
 }
 
+/// The run-stable workspace facts: the workspace OS the backend descriptor
+/// names, then the canonical root and cwd.
 pub(in crate::runtime) fn stable_workspace_environment_bytes(
     workspace: &WorkspacePolicy,
+    backend: &ExecutionBackendDescriptor,
 ) -> Result<Vec<u8>, AgentError> {
     let root = workspace.root().as_os_str().as_encoded_bytes();
     let cwd = workspace.cwd().as_os_str().as_encoded_bytes();
@@ -266,7 +277,7 @@ pub(in crate::runtime) fn stable_workspace_environment_bytes(
             .saturating_add(cwd.len()),
     );
     bytes.extend_from_slice(b"plakous-agent/workspace-environment-v1\0");
-    bytes.extend_from_slice(std::env::consts::OS.as_bytes());
+    bytes.extend_from_slice(backend.operating_system().as_bytes());
     bytes.push(0);
     bytes.extend_from_slice(b"host-path-policy-only\0");
     bytes.extend_from_slice(&root_len.to_be_bytes());

@@ -1,7 +1,7 @@
 //! Process services retained across same-branch owner replacement.
 
 use plakous::tools::{
-    ExecutionBackendError, JobHost, JobHostCapacity, JobOutputRoot, JobOwner, JoinedProcessSessions,
+    ExecutionBackendError, JobHost, JobHostCapacity, JobOutputRoot, JobOwner, JoinedSessionsPort,
 };
 use plakous_host_protocol::views::{ProcessStatus, ProcessView};
 use std::{
@@ -93,7 +93,7 @@ fn release_stopping_rows(stopping: &mut HashMap<String, usize>, rows: &[String])
 
 #[derive(Default)]
 pub(crate) struct JobRegistry {
-    services: Mutex<HashMap<BranchKey, JoinedProcessSessions>>,
+    services: Mutex<HashMap<BranchKey, JoinedSessionsPort>>,
     capacity: JobHostCapacity,
     events: Arc<Mutex<JobQueue>>,
     owners: Mutex<ProcessOwners>,
@@ -116,8 +116,8 @@ struct UserStops {
 }
 
 enum UserStopTarget {
-    One(JoinedProcessSessions, u32),
-    All(JoinedProcessSessions),
+    One(JoinedSessionsPort, u32),
+    All(JoinedSessionsPort),
 }
 
 struct AttributedJobHost {
@@ -133,7 +133,7 @@ impl JobHost for AttributedJobHost {
         &self,
         session: plakous::model::SessionId,
         branch: plakous::model::BranchId,
-    ) -> Option<JoinedProcessSessions> {
+    ) -> Option<JoinedSessionsPort> {
         self.registry.service(session, branch)
     }
 
@@ -143,8 +143,8 @@ impl JobHost for AttributedJobHost {
     fn attach(
         &self,
         owner: JobOwner,
-        fresh: JoinedProcessSessions,
-    ) -> Result<JoinedProcessSessions, ExecutionBackendError> {
+        fresh: JoinedSessionsPort,
+    ) -> Result<JoinedSessionsPort, ExecutionBackendError> {
         let service = self.registry.attach(owner, fresh)?;
         let key = (owner.session_id, owner.branch_id);
         let mut owners = self
@@ -558,10 +558,7 @@ impl JobRegistry {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        services
-            .iter()
-            .flat_map(JoinedProcessSessions::jobs)
-            .collect()
+        services.iter().flat_map(JoinedSessionsPort::jobs).collect()
     }
     pub(crate) fn running_count(&self) -> usize {
         let live = {
@@ -573,7 +570,7 @@ impl JobRegistry {
             let live = services.keys().copied().collect::<BTreeSet<_>>();
             let count = services
                 .values()
-                .map(JoinedProcessSessions::running_job_count)
+                .map(JoinedSessionsPort::running_job_count)
                 .sum();
             (live, count)
         };
@@ -725,7 +722,7 @@ impl JobHost for JobRegistry {
         &self,
         session: plakous::model::SessionId,
         branch: plakous::model::BranchId,
-    ) -> Option<JoinedProcessSessions> {
+    ) -> Option<JoinedSessionsPort> {
         self.services
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -747,8 +744,8 @@ impl JobHost for JobRegistry {
     fn attach(
         &self,
         owner: JobOwner,
-        fresh: JoinedProcessSessions,
-    ) -> Result<JoinedProcessSessions, ExecutionBackendError> {
+        fresh: JoinedSessionsPort,
+    ) -> Result<JoinedSessionsPort, ExecutionBackendError> {
         // The first open sweeps the whole root: never under the services lock.
         let output_root = self.output_root();
         let mut services = self

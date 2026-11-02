@@ -1,8 +1,11 @@
 //! Neutral session-owned process observations and host ownership seam.
 
-use crate::{ExecutionBackendError, JoinedProcessSessions};
+use crate::ExecutionBackendError;
 use plakous_model::{AgentId, BranchId, SessionId, Timestamp};
 use std::time::Duration;
+
+mod port;
+pub use port::JoinedSessionsPort;
 
 /// Shared admission bound for at most 128 running processes per host.
 pub type JobHostCapacity = crate::JoinedProcessHostCapacity;
@@ -133,12 +136,13 @@ pub struct JobOwner {
 
 /// Optional host-owned registry. Without it the agent privately owns its service.
 ///
-/// A host may transfer the same service on a same-branch reopen. It must stop
-/// foreground sessions before returning transferred authority, and must not
-/// transfer services across branches.
+/// A host holds each owner's service as a [`JoinedSessionsPort`]. It may
+/// transfer the same service on a same-branch reopen. It must stop foreground
+/// sessions before returning transferred authority, and must not transfer
+/// services across branches.
 pub trait JobHost: Send + Sync {
     /// Reads only the service owned by this exact runtime session and branch.
-    fn service(&self, session: SessionId, branch: BranchId) -> Option<JoinedProcessSessions>;
+    fn service(&self, session: SessionId, branch: BranchId) -> Option<JoinedSessionsPort>;
     /// Observes terminal process snapshots immediately before committed notice
     /// consumption removes them. Observation grants no process authority.
     fn observe_terminal(&self, _owner: JobOwner, _jobs: &[JobView]) {}
@@ -150,6 +154,6 @@ pub trait JobHost: Send + Sync {
     fn attach(
         &self,
         owner: JobOwner,
-        fresh: JoinedProcessSessions,
-    ) -> Result<JoinedProcessSessions, ExecutionBackendError>;
+        fresh: JoinedSessionsPort,
+    ) -> Result<JoinedSessionsPort, ExecutionBackendError>;
 }

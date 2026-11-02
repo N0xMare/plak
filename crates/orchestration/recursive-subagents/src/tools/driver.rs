@@ -75,8 +75,8 @@ fn probe_checkout_sizes(
     cache: &mut std::collections::BTreeMap<String, CheckoutSize>,
     inventory: Vec<(String, std::path::PathBuf, u64, u64, u64)>,
     now: u64,
-    mut walk: impl FnMut(&std::path::Path) -> std::io::Result<u64>,
-) -> std::collections::BTreeMap<String, u64> {
+    mut walk: impl FnMut(&std::path::Path) -> Result<Option<u64>, plakous::tools::ProbeError>,
+) -> Result<std::collections::BTreeMap<String, u64>, plakous::tools::ProbeError> {
     cache.retain(|id, _| inventory.iter().any(|(current, ..)| current == id));
     let mut sizes = std::collections::BTreeMap::new();
     for (id, path, generation, retry_at, trim_epoch) in inventory {
@@ -84,7 +84,9 @@ fn probe_checkout_sizes(
             .get(&id)
             .is_some_and(|size| size.reusable(&path, generation, now, retry_at, trim_epoch))
         {
-            let Ok(bytes) = walk(&path) else {
+            // An unmeasured copy is left out; a probe that cannot answer
+            // ends the pass rather than reclaim on partial sizes.
+            let Some(bytes) = walk(&path)? else {
                 continue;
             };
             cache.insert(
@@ -102,19 +104,7 @@ fn probe_checkout_sizes(
             sizes.insert(id, size.bytes);
         }
     }
-    sizes
-}
-
-fn directory_bytes(path: &std::path::Path) -> std::io::Result<u64> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.is_dir() {
-        return Ok(metadata.len());
-    }
-    let mut bytes = metadata.len();
-    for entry in std::fs::read_dir(path)? {
-        bytes = bytes.saturating_add(directory_bytes(&entry?.path())?);
-    }
-    Ok(bytes)
+    Ok(sizes)
 }
 
 impl TreeDriver {
@@ -206,7 +196,18 @@ impl TreeDriver {
         let cache = Arc::clone(&self.checkout_sizes);
         let sizes = tokio::task::spawn_blocking(move || {
             let mut cache = cache.lock().map_err(|_| Self::lock_poisoned())?;
-            let sizes = probe_checkout_sizes(&mut cache, inventory, now, directory_bytes);
+            let sizes = probe_checkout_sizes(&mut cache, inventory, now, |path| {
+                plakous::tools::WorkspaceProbe::tree_bytes(
+                    &plakous::tools::LocalWorkspaceProbe,
+                    path,
+                )
+            })
+            .map_err(|error| {
+                TopologyError::new(
+                    TopologyErrorCode::MintUnavailable,
+                    format!("copy sizes could not be probed: {error}"),
+                )
+            })?;
             Ok::<_, TopologyError>(sizes)
         })
         .await
@@ -425,7 +426,7 @@ impl TreeDriver {
         }
     }
 
-    pub(super) fn job_service(&self, agent: &str) -> Option<plakous::tools::JoinedProcessSessions> {
+    pub(super) fn job_service(&self, agent: &str) -> Option<plakous::tools::JoinedSessionsPort> {
         let locator = self
             .read(|tree| tree.node(agent).ok()?.session_locator.clone())
             .ok()??;
@@ -1026,9 +1027,10 @@ mod reclamation_probe_tests {
                 now,
                 |_| {
                     walks += 1;
-                    Ok(bytes)
+                    Ok(Some(bytes))
                 },
             )
+            .unwrap()
         };
         let before = probe(0, 0, 2048);
         assert!(before.values().sum::<u64>() > 1024);
@@ -1056,9 +1058,10 @@ mod reclamation_probe_tests {
                 now,
                 |_| {
                     walks += 1;
-                    Ok(123)
+                    Ok(Some(123))
                 },
-            );
+            )
+            .unwrap();
             assert_eq!(sizes.get("workspace"), Some(&123));
         }
         assert_eq!(walks, 3);

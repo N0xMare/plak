@@ -745,9 +745,12 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                         )
                         .unwrap(),
                     },
-                    environment.joined_process_sessions().unwrap(),
+                    plakous::tools::JoinedSessionsPort::local(
+                        environment.joined_process_sessions().unwrap(),
+                    ),
                 )
                 .unwrap();
+            let service = service.as_local().cloned().unwrap();
             let job = service
                 .start(
                     plakous::tools::JoinedProcessStartRequest::new(

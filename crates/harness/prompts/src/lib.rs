@@ -37,3 +37,6 @@ pub mod vocabulary;
 
 #[cfg(test)]
 mod surface_fixture;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "test fixture")]
+mod test_readers;

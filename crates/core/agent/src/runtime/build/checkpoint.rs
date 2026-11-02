@@ -372,6 +372,7 @@ pub(in crate::runtime) fn runtime_manifest_binding_and_tools(
     )?;
     let environment = stable_runtime_environment_component(
         workspace,
+        tools.environment().descriptor().backend(),
         local_composition,
         provider_configuration,
         live_job_config(tools)?,

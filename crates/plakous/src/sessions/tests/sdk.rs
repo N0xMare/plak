@@ -396,14 +396,14 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
 
 struct SdkJobHost(plakous_tools::JobOutputRoot);
 impl plakous_tools::JobHost for SdkJobHost {
-    fn service(&self, _: SessionId, _: BranchId) -> Option<plakous_tools::JoinedProcessSessions> {
+    fn service(&self, _: SessionId, _: BranchId) -> Option<plakous_tools::JoinedSessionsPort> {
         None
     }
     fn attach(
         &self,
         owner: plakous_tools::JobOwner,
-        fresh: plakous_tools::JoinedProcessSessions,
-    ) -> Result<plakous_tools::JoinedProcessSessions, plakous_tools::ExecutionBackendError> {
+        fresh: plakous_tools::JoinedSessionsPort,
+    ) -> Result<plakous_tools::JoinedSessionsPort, plakous_tools::ExecutionBackendError> {
         fresh.bind_job_outputs(self.0.clone(), owner.session_id, owner.branch_id);
         Ok(fresh)
     }

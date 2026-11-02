@@ -33,7 +33,10 @@ pub(in crate::runtime) fn resolve_construction_harness_plan(
     // Plan compilation must use run-stable workspace facts, never the
     // run-scoped execution-environment allocation identity. Recovery reopens
     // mint a new RunId and would otherwise invalidate plan digests.
-    let environment_digest = stable_workspace_environment_digest(builder.workspace.as_ref())?;
+    let environment_digest = stable_workspace_environment_digest(
+        builder.workspace.as_ref(),
+        tools.environment().descriptor().backend(),
+    )?;
 
     let plan = if let Some(plan) = builder.harness_plan.as_ref() {
         let model_facts = compiler_model_facts_from_model(

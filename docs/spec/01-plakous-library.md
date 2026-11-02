@@ -5439,7 +5439,19 @@ discovers Agent Skills under explicit roots, renders the per-family listing
 and registers it as one context source (`plak.skills.v1`), narrows a discovery to
 the skills a frozen Claude listing names, and loads one listed skill again
 with the same validation; it reads no environment, and the product supplies
-the roots (spec 02 §6.1.1).
+the roots (spec 02 §6.1.1). `AGENTS.md` discovery
+(`plakous::prompts::instructions`), skill discovery and a skill's load reach
+files only through an `InstructionSourceReader`. A reader gives raw, bounded
+answers about single paths: a resolution (`Resolved`, `NotFound`,
+`Unresolvable`), a directory answer, and per file `Missing`, `NotRegular`,
+`Unsafe`, `Unreadable`, `TooLarge` or at most `limit + 1` bytes, one entry per
+directory of an `AGENTS.md` chain. Discovery keeps every bound, the aggregate
+budget, UTF-8, ids, labels and skill validation, and checks each answer
+against its request: a chain of the wrong length, a read over its limit or a
+listing entry that is not one name is refused (`SourceReadError::InvalidAnswer`,
+or skipped for a listing entry), never trusted. `LocalInstructionSourceReader`
+reads the embedding process's filesystem with the same descriptor-anchored,
+no-follow, non-blocking opens, and is the reader the product passes today.
 
 `edit_files` takes a nonempty bounded `ops` array. Each operation has an `op`
 tag: `patch` takes a Codex `patch` envelope; `replace` takes `path`, `old`,
@@ -5580,6 +5592,37 @@ The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
 escaping or replaced required directories fail closed rather than omit the prefix.
 This is path-policy validation, not an atomic exec or hostile-shim-content fence.
+
+Tool operations reach the workspace through the sealed backend, with two
+exceptions: the files pack's skill-root read exception, which opens files under
+the enrolled skill roots directly, and the hosted `Skill` load, which reads
+through an `InstructionSourceReader`. The few
+workspace-path questions a host asks outside tool operations, before and around
+construction, go through `plakous::tools::WorkspaceProbe`: the physical path of a
+recorded root or cwd (`canonicalize`, which is also the existence check), whether
+a copy-shim file is installed (`is_file`), and the bytes under a copy
+(`tree_bytes`, without following links). `LocalWorkspaceProbe` answers from the
+embedding process's filesystem; it is today's only implementation, so a probe
+answer and a backend answer always describe the same filesystem. The probe is a
+port, not authority: it grants nothing a tool could use, and the product-state
+exclusion and copy-layout rules applied to its answers stay with the host.
+Every probe and reader answer is fallible with a distinct `Unavailable` error
+(`ProbeError::Unavailable`, `SourceReadError::Unavailable`) that is never an
+"absent" answer: session construction, spawn, exact resume, instruction and
+skill discovery and the copy-size pass fail closed on it, so nothing is skipped
+and then frozen into a session. Falling back to the recorded path applies only
+where a path does not resolve, as before. Callers resolve paths before taking
+a tree lock: the Read/Grep stamp and copy-base lookups read the recorded rows,
+resolve them outside the lock and then match. Both ports are synchronous in
+this step; they become async in the next part of the runner split, together
+with an async version-control port, once session construction is async.
+The run-stable workspace facts that plan compilation and the runtime
+environment component bind (`plakous-agent/workspace-environment-v1`) name the
+operating system of the execution backend's descriptor
+(`ExecutionBackendDescriptor::operating_system`), not the agent process's.
+`ExecutionBackendDescriptor::current_host()` is the descriptor every host
+backend allocated in the process presents; it is comparison data, and for the
+host backend these bytes, the plan digests and every descriptor are unchanged.
 
 An explicit joined-process shell profile enrolls both its absolute invocation
 name and its canonical filesystem object, plus its fixed argument prefix.
@@ -9538,6 +9581,21 @@ or a moved head is the usual lookup or stale-locator refusal.
 
 `AgentBuilder::job_host` optionally accepts a `JobHost` registry. Without one,
 the agent privately owns its process service and jobs stop when it drops.
+A registry holds, returns and transfers each owner's service as a
+`JoinedSessionsPort`, never as the concrete service, so a service that lives
+with a remote runner can stand behind the same handle. A port is attached for
+one `JobOwner` and found again by that owner's session and branch. Every port
+today is the in-process `JoinedProcessSessions` (`JoinedSessionsPort::local`,
+`as_local`) with that service's exact operation semantics; the agent adopts
+only an in-process service into its environment and refuses construction if
+`attach` returns another. A remote service becomes a second variant of the
+handle, not a caller-implemented trait: its read accessors (`jobs`, the counts
+and flags, the terminal generation and its change watch, `terminal_jobs_since`,
+`session_for_number`, `leftover`) are served from a host-side mirror kept
+current by the runner's job events, which also feed `observe_jobs`; the
+effects (`stop_with_grace`, `stop_jobs`, `stop_foreground`,
+`disown_leftovers`) are forwarded and become async, and the capacity and
+output-root bindings are forwarded once at attach.
 After committing a terminal notice's consumption and immediately before
 removing its process snapshot, the driver calls `JobHost::observe_terminal`
 with the exact owner and terminal `JobView` rows. The default is a no-op.
@@ -9605,8 +9663,21 @@ Portable export refuses unsettled process rows with the distinct typed
 resume and send a prompt to deliver the OutcomeUnknown notices before exporting;
 merely reopening and closing cannot establish terminal evidence.
 `SessionRuntimeBinding::with_job_host` attaches the same registry to session
-workflows. `plakous::tools::JoinedProcessSessions` and its joined request/status
-types are nameable so consumers can implement `JobHost` using only the facade.
+workflows. `plakous::tools::JoinedSessionsPort`, `JoinedProcessSessions` and its
+joined request/status types are nameable so consumers can implement `JobHost`
+using only the facade. `plakous::tools::WorkspaceProbe`, `LocalWorkspaceProbe`
+and `ProbeError` are nameable the same way. `plakous::prompts::instructions`
+names `InstructionSourceReader`, `LocalInstructionSourceReader` and the answer
+types (`SourceResolution`, `DirectoryAnswer`, `DirectoryRefusal`,
+`InstructionChainEntry`, `SourceFile`, `SourceEntryKind`, `SourceReadError`),
+so a consumer can supply its own reader. Discovery takes the reader first:
+`discover_instruction_sources(reader, product_home, workspace_root, cwd)`
+(its error gains `InstructionDiscoveryError::Reader`),
+`skills::discover_skills(reader, workspace_root, roots)` and
+`skills::discover_skill_roots(reader, workspace_root, roots)`, both returning
+`Result<SkillDiscovery, SourceReadError>`, and `Skill::load(reader)`, whose
+diagnostic gains `SkillProblem::Reader`. The facade-consumer fixture pins a
+consumer-implemented reader through both discoveries and a load.
 `JoinedProcessSessions::job_terminal_changes()` subscribes to process-local
 terminal-change hints before a host polls the service. Hosts re-read terminal
 job generations after notification; the hint itself is not durable authority.

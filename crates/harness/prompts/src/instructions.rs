@@ -1,16 +1,22 @@
 //! Bounded Plak-owned discovery of model-visible instruction files.
 //!
-//! Filesystem access ends here. The returned immutable bytes and identities are
-//! suitable for enrollment through the public Plakous context-source facade.
+//! Discovery reads only through an [`InstructionSourceReader`]; every bound,
+//! scope and digest is decided here. The returned immutable bytes and
+//! identities are suitable for enrollment through the public Plakous
+//! context-source facade.
 
+use std::ffi::OsString;
 use std::fmt;
-use std::fs::File;
-use std::io::{self, Read as _};
 use std::path::{Component, Path, PathBuf};
 
 use plakous_agent::{ProfileError, RegisteredContextSource};
 use plakous_model::{hex_lower, sha256_bytes};
-use rustix::fs::{Mode, OFlags};
+
+mod reader;
+pub use reader::{
+    DirectoryAnswer, DirectoryRefusal, InstructionChainEntry, InstructionSourceReader,
+    LocalInstructionSourceReader, SourceEntryKind, SourceFile, SourceReadError, SourceResolution,
+};
 
 /// The one instruction file name discovery looks for.
 pub const INSTRUCTION_FILE_NAME: &str = "AGENTS.md";
@@ -231,6 +237,8 @@ pub enum InstructionDiscoveryError {
         /// The path that was refused.
         path: PathBuf,
     },
+    /// The reader could not answer, or answered outside its contract.
+    Reader(SourceReadError),
 }
 
 impl fmt::Display for InstructionDiscoveryError {
@@ -277,6 +285,7 @@ impl fmt::Display for InstructionDiscoveryError {
                 "could not inspect instruction path {}",
                 path.display()
             ),
+            Self::Reader(error) => error.fmt(formatter),
         }
     }
 }
@@ -284,22 +293,27 @@ impl fmt::Display for InstructionDiscoveryError {
 impl std::error::Error for InstructionDiscoveryError {}
 
 /// Discovers the optional product-global file followed by the workspace
-/// root-to-cwd `AGENTS.md` chain. All returned paths are physical absolute
-/// paths and all reads are anchored to no-follow directory descriptors.
+/// root-to-cwd `AGENTS.md` chain through `reader`. All returned paths are
+/// physical absolute paths and all reads are anchored to no-follow directory
+/// descriptors. Every bound, the aggregate budget, UTF-8, ids and labels are
+/// decided here from the reader's raw answers; a reader that cannot answer,
+/// or answers outside its contract, fails discovery.
 ///
 /// # Errors
 ///
 /// Returns the bound that refused: an out-of-workspace cwd, a walk deeper than
 /// [`MAX_WORKSPACE_DEPTH`], an over-long or unsafe path, a non-regular file,
 /// content over [`MAX_DISCOVERED_CONTENT_BYTES`], more than
-/// [`MAX_DISCOVERED_SOURCES`] files, invalid UTF-8, or an I/O failure.
+/// [`MAX_DISCOVERED_SOURCES`] files, invalid UTF-8, an I/O failure, or the
+/// reader's [`SourceReadError`].
 pub fn discover_instruction_sources(
+    reader: &dyn InstructionSourceReader,
     product_home: Option<&Path>,
     workspace_root: &Path,
     cwd: &Path,
 ) -> Result<InstructionDiscovery, InstructionDiscoveryError> {
-    let root = canonical_directory(workspace_root)?;
-    let cwd = canonical_directory(cwd)?;
+    let root = canonical_directory(reader, workspace_root)?;
+    let cwd = canonical_directory(reader, cwd)?;
     let relative = cwd.strip_prefix(&root).map_err(|_| {
         InstructionDiscoveryError::InvalidWorkspaceBoundary {
             root: root.clone(),
@@ -317,16 +331,14 @@ pub fn discover_instruction_sources(
     let mut remaining = MAX_DISCOVERED_CONTENT_BYTES;
 
     if let Some(home) = product_home {
-        match std::fs::canonicalize(home) {
-            Ok(physical_home) => {
+        match reader
+            .canonicalize(home)
+            .map_err(InstructionDiscoveryError::Reader)?
+        {
+            SourceResolution::Resolved(physical_home) => {
                 check_path_bound(&physical_home)?;
-                let home_directory = open_absolute_directory(&physical_home)?;
-                if let Some(content) = read_optional_instruction(
-                    &home_directory,
-                    &physical_home.join(INSTRUCTION_FILE_NAME),
-                    remaining,
-                )? {
-                    remaining -= content.len();
+                let global = read_chain(reader, &physical_home, &[], &mut remaining)?;
+                if let Some(content) = global.into_iter().flatten().next() {
                     sources.push(source(
                         GLOBAL_SOURCE_ID.to_owned(),
                         InstructionScope::Global,
@@ -334,18 +346,17 @@ pub fn discover_instruction_sources(
                     ));
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err(InstructionDiscoveryError::UnsafePath { path: home.into() }),
+            SourceResolution::NotFound => {}
+            SourceResolution::Unresolvable => {
+                return Err(InstructionDiscoveryError::UnsafePath { path: home.into() });
+            }
         }
     }
 
-    let mut directory = open_absolute_directory(&root)?;
-    let mut physical_directory = root.clone();
+    let chain = read_chain(reader, &root, &components, &mut remaining)?;
     let mut relative_directory = PathBuf::new();
-    for index in 0..=components.len() {
-        let path = physical_directory.join(INSTRUCTION_FILE_NAME);
-        if let Some(content) = read_optional_instruction(&directory, &path, remaining)? {
-            remaining -= content.len();
+    for (index, content) in chain.into_iter().enumerate() {
+        if let Some(content) = content {
             let scope = InstructionScope::Workspace {
                 relative_directory: relative_directory.clone(),
             };
@@ -356,8 +367,6 @@ pub fn discover_instruction_sources(
             ));
         }
         if let Some(component) = components.get(index) {
-            directory = open_child_directory(&directory, component, &physical_directory)?;
-            physical_directory.push(component);
             relative_directory.push(component);
         }
     }
@@ -369,111 +378,126 @@ pub fn discover_instruction_sources(
     Ok(InstructionDiscovery { sources })
 }
 
-fn canonical_directory(path: &Path) -> Result<PathBuf, InstructionDiscoveryError> {
-    let canonical = std::fs::canonicalize(path)
-        .map_err(|_| InstructionDiscoveryError::Io { path: path.into() })?;
+fn canonical_directory(
+    reader: &dyn InstructionSourceReader,
+    path: &Path,
+) -> Result<PathBuf, InstructionDiscoveryError> {
+    let SourceResolution::Resolved(canonical) = reader
+        .canonicalize(path)
+        .map_err(InstructionDiscoveryError::Reader)?
+    else {
+        return Err(InstructionDiscoveryError::Io { path: path.into() });
+    };
     check_path_bound(&canonical)?;
-    let directory = open_absolute_directory(&canonical)?;
-    directory
-        .metadata()
-        .map_err(|_| InstructionDiscoveryError::Io {
-            path: canonical.clone(),
-        })?
-        .is_dir()
-        .then_some(canonical)
-        .ok_or_else(|| InstructionDiscoveryError::UnsafePath { path: path.into() })
+    match reader
+        .anchored_directory(&canonical)
+        .map_err(InstructionDiscoveryError::Reader)?
+    {
+        DirectoryAnswer::Directory => Ok(canonical),
+        DirectoryAnswer::NotDirectory => {
+            Err(InstructionDiscoveryError::UnsafePath { path: path.into() })
+        }
+        DirectoryAnswer::Refused(refusal) => Err(refused_directory(refusal, &canonical)),
+    }
 }
 
-fn normal_components(path: &Path) -> Result<Vec<std::ffi::OsString>, InstructionDiscoveryError> {
+/// Reads one chain through `reader` and validates every answer in walk order:
+/// the chain's shape, each file path's bound, the per-read limit, the
+/// aggregate budget `remaining` (spent only by accepted content) and UTF-8.
+fn read_chain(
+    reader: &dyn InstructionSourceReader,
+    start: &Path,
+    components: &[OsString],
+    remaining: &mut usize,
+) -> Result<Vec<Option<String>>, InstructionDiscoveryError> {
+    let limit = *remaining;
+    let entries = reader
+        .read_instruction_chain(start, components, limit)
+        .map_err(InstructionDiscoveryError::Reader)?;
+    let complete = entries.len() == components.len() + 1
+        && entries
+            .iter()
+            .all(|entry| matches!(entry, InstructionChainEntry::File(_)));
+    let stopped = entries.len() <= components.len() + 1
+        && entries.split_last().is_some_and(|(last, before)| {
+            matches!(last, InstructionChainEntry::Unopened(_))
+                && before
+                    .iter()
+                    .all(|entry| matches!(entry, InstructionChainEntry::File(_)))
+        });
+    if !complete && !stopped {
+        return Err(InstructionDiscoveryError::Reader(
+            SourceReadError::InvalidAnswer,
+        ));
+    }
+    let mut contents = Vec::with_capacity(entries.len());
+    let mut directory = start.to_path_buf();
+    for (index, entry) in entries.into_iter().enumerate() {
+        let file = match entry {
+            InstructionChainEntry::File(file) => file,
+            InstructionChainEntry::Unopened(refusal) => {
+                return Err(refused_directory(refusal, &directory));
+            }
+        };
+        let path = directory.join(INSTRUCTION_FILE_NAME);
+        check_path_bound(&path)?;
+        contents.push(validated_content(file, path, limit, remaining)?);
+        if let Some(component) = components.get(index) {
+            directory.push(component);
+        }
+    }
+    Ok(contents)
+}
+
+fn validated_content(
+    file: SourceFile,
+    path: PathBuf,
+    limit: usize,
+    remaining: &mut usize,
+) -> Result<Option<String>, InstructionDiscoveryError> {
+    let too_large = || InstructionDiscoveryError::ContentTooLarge {
+        max_bytes: MAX_DISCOVERED_CONTENT_BYTES,
+    };
+    let bytes = match file {
+        SourceFile::Missing => return Ok(None),
+        SourceFile::Unsafe => return Err(InstructionDiscoveryError::UnsafePath { path }),
+        SourceFile::NotRegular => return Err(InstructionDiscoveryError::NotRegularFile { path }),
+        SourceFile::Unreadable => return Err(InstructionDiscoveryError::Io { path }),
+        SourceFile::TooLarge => return Err(too_large()),
+        SourceFile::Bytes(bytes) => bytes,
+    };
+    if bytes.len() > limit.saturating_add(1) {
+        return Err(InstructionDiscoveryError::Reader(
+            SourceReadError::InvalidAnswer,
+        ));
+    }
+    if bytes.len() > *remaining {
+        return Err(too_large());
+    }
+    let content =
+        String::from_utf8(bytes).map_err(|_| InstructionDiscoveryError::InvalidUtf8 { path })?;
+    *remaining -= content.len();
+    Ok(Some(content))
+}
+
+fn refused_directory(refusal: DirectoryRefusal, directory: &Path) -> InstructionDiscoveryError {
+    match refusal {
+        DirectoryRefusal::Unsafe { path } => InstructionDiscoveryError::UnsafePath { path },
+        DirectoryRefusal::Unreadable => InstructionDiscoveryError::Io {
+            path: directory.into(),
+        },
+    }
+}
+
+fn normal_components(path: &Path) -> Result<Vec<OsString>, InstructionDiscoveryError> {
     path.components()
         .map(|component| match component {
             Component::Normal(value) => Ok(value.to_os_string()),
-            Component::CurDir => Ok(std::ffi::OsString::new()),
+            Component::CurDir => Ok(OsString::new()),
             _ => Err(InstructionDiscoveryError::UnsafePath { path: path.into() }),
         })
         .filter(|value| value.as_ref().is_ok_and(|part| !part.is_empty()) || value.is_err())
         .collect()
-}
-
-fn open_absolute_directory(path: &Path) -> Result<File, InstructionDiscoveryError> {
-    if !path.is_absolute() {
-        return Err(InstructionDiscoveryError::UnsafePath { path: path.into() });
-    }
-    let mut directory =
-        File::open("/").map_err(|_| InstructionDiscoveryError::Io { path: path.into() })?;
-    let mut traversed = PathBuf::from("/");
-    for component in path.components() {
-        match component {
-            Component::RootDir => {}
-            Component::Normal(value) => {
-                directory = open_child_directory(&directory, value, &traversed)?;
-                traversed.push(value);
-            }
-            _ => return Err(InstructionDiscoveryError::UnsafePath { path: path.into() }),
-        }
-    }
-    Ok(directory)
-}
-
-fn open_child_directory(
-    parent: &File,
-    name: &std::ffi::OsStr,
-    parent_path: &Path,
-) -> Result<File, InstructionDiscoveryError> {
-    rustix::fs::openat(
-        parent,
-        name,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map(File::from)
-    .map_err(|_| InstructionDiscoveryError::UnsafePath {
-        path: parent_path.join(name),
-    })
-}
-
-fn read_optional_instruction(
-    directory: &File,
-    path: &Path,
-    remaining: usize,
-) -> Result<Option<String>, InstructionDiscoveryError> {
-    check_path_bound(path)?;
-    let descriptor = match rustix::fs::openat(
-        directory,
-        INSTRUCTION_FILE_NAME,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
-        Mode::empty(),
-    ) {
-        Ok(descriptor) => descriptor,
-        Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
-        Err(_) => return Err(InstructionDiscoveryError::UnsafePath { path: path.into() }),
-    };
-    let mut file = File::from(descriptor);
-    if !file
-        .metadata()
-        .map_err(|_| InstructionDiscoveryError::Io { path: path.into() })?
-        .is_file()
-    {
-        return Err(InstructionDiscoveryError::NotRegularFile { path: path.into() });
-    }
-    let limit = remaining
-        .checked_add(1)
-        .ok_or(InstructionDiscoveryError::ContentTooLarge {
-            max_bytes: MAX_DISCOVERED_CONTENT_BYTES,
-        })?;
-    let mut bytes = Vec::new();
-    file.by_ref()
-        .take(limit as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| InstructionDiscoveryError::Io { path: path.into() })?;
-    if bytes.len() > remaining {
-        return Err(InstructionDiscoveryError::ContentTooLarge {
-            max_bytes: MAX_DISCOVERED_CONTENT_BYTES,
-        });
-    }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|_| InstructionDiscoveryError::InvalidUtf8 { path: path.into() })
 }
 
 fn check_path_bound(path: &Path) -> Result<(), InstructionDiscoveryError> {

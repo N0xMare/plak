@@ -6,17 +6,17 @@
 use super::*;
 
 #[derive(Default)]
-struct RetainedJobHost(Mutex<Option<plakous_tools::JoinedProcessSessions>>);
+struct RetainedJobHost(Mutex<Option<plakous_tools::JoinedSessionsPort>>);
 
 impl plakous_tools::JobHost for RetainedJobHost {
-    fn service(&self, _: SessionId, _: BranchId) -> Option<plakous_tools::JoinedProcessSessions> {
+    fn service(&self, _: SessionId, _: BranchId) -> Option<plakous_tools::JoinedSessionsPort> {
         lock_mutex(&self.0).clone()
     }
     fn attach(
         &self,
         _: plakous_tools::JobOwner,
-        fresh: plakous_tools::JoinedProcessSessions,
-    ) -> Result<plakous_tools::JoinedProcessSessions, plakous_tools::ExecutionBackendError> {
+        fresh: plakous_tools::JoinedSessionsPort,
+    ) -> Result<plakous_tools::JoinedSessionsPort, plakous_tools::ExecutionBackendError> {
         let mut held = lock_mutex(&self.0);
         let service = held.get_or_insert(fresh);
         service.stop_foreground()?;

@@ -890,21 +890,21 @@ async fn until_calls(deliverer: &StubDeliverer, count: usize) {
 }
 
 #[derive(Default)]
-struct FixtureJobHost(Mutex<Option<plakous::tools::JoinedProcessSessions>>);
+struct FixtureJobHost(Mutex<Option<plakous::tools::JoinedSessionsPort>>);
 
 impl plakous::tools::JobHost for FixtureJobHost {
     fn service(
         &self,
         _: plakous::model::SessionId,
         _: plakous::model::BranchId,
-    ) -> Option<plakous::tools::JoinedProcessSessions> {
+    ) -> Option<plakous::tools::JoinedSessionsPort> {
         self.0.lock().unwrap().clone()
     }
     fn attach(
         &self,
         _: plakous::tools::JobOwner,
-        fresh: plakous::tools::JoinedProcessSessions,
-    ) -> Result<plakous::tools::JoinedProcessSessions, plakous::tools::ExecutionBackendError> {
+        fresh: plakous::tools::JoinedSessionsPort,
+    ) -> Result<plakous::tools::JoinedSessionsPort, plakous::tools::ExecutionBackendError> {
         *self.0.lock().unwrap() = Some(fresh.clone());
         Ok(fresh)
     }
@@ -915,7 +915,7 @@ async fn install_running_job(
     caller: &str,
     root: &Path,
 ) -> (
-    plakous::tools::JoinedProcessSessions,
+    plakous::tools::JoinedSessionsPort,
     plakous::sessions::OpenedSession,
 ) {
     use plakous::sessions::*;

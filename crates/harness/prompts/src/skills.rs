@@ -12,13 +12,14 @@
 //! is a candidate for the read exception outside the workspace (spec 04 §2.1).
 
 use std::fmt;
-use std::fs::File;
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use plakous_agent::{ProfileError, RegisteredContextSource};
 use plakous_model::{hex_lower, sha256_bytes};
-use rustix::fs::{Mode, OFlags};
+
+use crate::instructions::{
+    InstructionSourceReader, SourceEntryKind, SourceFile, SourceReadError, SourceResolution,
+};
 
 mod front_matter;
 mod listing;
@@ -145,19 +146,29 @@ impl Skill {
         self.file.parent().unwrap_or(&self.root)
     }
 
-    /// Loads this listed skill now: its file is read and validated again, and
-    /// a skill that is no longer valid, or no longer this skill, is refused.
+    /// Loads this listed skill now through `reader`: its file is read and
+    /// validated again, and a skill that is no longer valid, or no longer this
+    /// skill, is refused.
     ///
     /// # Errors
     ///
     /// Returns the diagnostic that would now keep the skill out of a listing.
-    pub fn load(&self) -> Result<LoadedSkill, SkillDiagnostic> {
+    pub fn load(
+        &self,
+        reader: &dyn InstructionSourceReader,
+    ) -> Result<LoadedSkill, SkillDiagnostic> {
         let diagnose = |problem| SkillDiagnostic {
             path: self.directory().to_path_buf(),
             problem,
         };
-        let text = read_skill_text(self.scope, &self.root, &self.name, MAX_SKILL_FILE_BYTES)
-            .map_err(diagnose)?;
+        let text = read_skill_text(
+            reader,
+            self.scope,
+            &self.root,
+            &self.name,
+            MAX_SKILL_FILE_BYTES,
+        )
+        .map_err(diagnose)?;
         let Some(valid) = validated(&text, &self.name).map_err(diagnose)? else {
             return Err(diagnose(SkillProblem::NotModelInvocable));
         };
@@ -218,6 +229,9 @@ pub enum SkillProblem {
     },
     /// The skill now sets `disable-model-invocation: true`.
     NotModelInvocable,
+    /// The reader could not answer, or answered outside its contract. Only a
+    /// load reports this; discovery fails instead.
+    Reader(SourceReadError),
 }
 
 /// One candidate discovery did not list, and why.
@@ -305,6 +319,9 @@ impl fmt::Display for SkillDiagnostic {
             ),
             SkillProblem::NotModelInvocable => {
                 write!(formatter, "skill {path} sets disable-model-invocation")
+            }
+            SkillProblem::Reader(error) => {
+                write!(formatter, "skill {path} could not be read: {error}")
             }
         }
     }
@@ -400,16 +417,24 @@ impl SkillDiscovery {
     }
 }
 
-/// Discovers skills under `roots`, in order. A missing root is not an error;
-/// every other problem is a diagnostic, never a failure, so one malformed
-/// skill does not stop a session. A project root is admitted only when its
-/// canonical path stays inside the canonical `workspace_root`.
-#[must_use]
-pub fn discover_skills(workspace_root: &Path, roots: &[SkillRoot]) -> SkillDiscovery {
-    let mut discovery = discover_skill_roots(workspace_root, roots);
+/// Discovers skills under `roots`, in order, through `reader`. A missing root
+/// is not an error; every other problem is a diagnostic, never a failure, so
+/// one malformed skill does not stop a session. A project root is admitted
+/// only when its canonical path stays inside the canonical `workspace_root`.
+///
+/// # Errors
+///
+/// Returns the reader's [`SourceReadError`] when it cannot answer or answers
+/// outside its contract: an unreachable root is never listed as empty.
+pub fn discover_skills(
+    reader: &dyn InstructionSourceReader,
+    workspace_root: &Path,
+    roots: &[SkillRoot],
+) -> Result<SkillDiscovery, SourceReadError> {
+    let mut discovery = discover_skill_roots(reader, workspace_root, roots)?;
     for index in 0..discovery.roots.len() {
         let root = discovery.roots[index].clone();
-        let Some(names) = discovery.root_entries(&root.path) else {
+        let Some(names) = discovery.root_entries(reader, &root.path)? else {
             continue;
         };
         for (position, name) in names.iter().enumerate() {
@@ -419,21 +444,18 @@ pub fn discover_skills(workspace_root: &Path, roots: &[SkillRoot]) -> SkillDisco
                     later_roots: discovery.roots.len() - index - 1,
                 };
                 discovery.diagnose(&root.path, problem);
-                return discovery;
+                return Ok(discovery);
             }
             let candidate = root.path.join(name);
-            let Ok(metadata) = candidate.symlink_metadata() else {
-                continue;
-            };
-            if metadata.is_symlink() {
-                if root.scope == SkillScope::Project {
+            match reader.entry_kind(&candidate)? {
+                None | Some(SourceEntryKind::Other) => continue,
+                Some(SourceEntryKind::Link) if root.scope == SkillScope::Project => {
                     discovery.diagnose(&candidate, SkillProblem::LinkedPath);
                     continue;
                 }
-            } else if !metadata.is_dir() {
-                continue;
+                Some(SourceEntryKind::Link | SourceEntryKind::Directory) => {}
             }
-            match read_listed(root.scope, &root.path, name) {
+            match read_listed(reader, root.scope, &root.path, name) {
                 Ok(None) => {}
                 Ok(Some(skill)) => {
                     if discovery
@@ -446,24 +468,35 @@ pub fn discover_skills(workspace_root: &Path, roots: &[SkillRoot]) -> SkillDisco
                         discovery.skills.push(skill);
                     }
                 }
+                Err(SkillProblem::Reader(error)) => return Err(error),
                 Err(problem) => discovery.diagnose(&candidate, problem),
             }
         }
     }
-    discovery
+    Ok(discovery)
 }
 
 /// The canonical roots alone, without reading any skill: what an exact
 /// reopen needs for its read exception.
-#[must_use]
-pub fn discover_skill_roots(workspace_root: &Path, roots: &[SkillRoot]) -> SkillDiscovery {
+///
+/// # Errors
+///
+/// Returns the reader's [`SourceReadError`] when it cannot answer.
+pub fn discover_skill_roots(
+    reader: &dyn InstructionSourceReader,
+    workspace_root: &Path,
+    roots: &[SkillRoot],
+) -> Result<SkillDiscovery, SourceReadError> {
     let mut discovery = SkillDiscovery::default();
-    let workspace = std::fs::canonicalize(workspace_root).ok();
+    let workspace = match reader.canonicalize(workspace_root)? {
+        SourceResolution::Resolved(path) => Some(path),
+        SourceResolution::NotFound | SourceResolution::Unresolvable => None,
+    };
     for root in roots {
-        let canonical = match std::fs::canonicalize(root.path()) {
-            Ok(path) if path.is_dir() => path,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Ok(_) | Err(_) => {
+        let canonical = match reader.canonicalize(root.path())? {
+            SourceResolution::Resolved(path) if reader.is_directory(&path)? => path,
+            SourceResolution::NotFound => continue,
+            SourceResolution::Resolved(_) | SourceResolution::Unresolvable => {
                 discovery.diagnose(root.path(), SkillProblem::UnreadableRoot);
                 continue;
             }
@@ -484,7 +517,7 @@ pub fn discover_skill_roots(workspace_root: &Path, roots: &[SkillRoot]) -> Skill
             path: canonical,
         });
     }
-    discovery
+    Ok(discovery)
 }
 
 impl SkillDiscovery {
@@ -495,32 +528,42 @@ impl SkillDiscovery {
         });
     }
 
-    /// Every entry name under one root, dot entries skipped, sorted by byte
-    /// order and then capped at [`MAX_ROOT_ENTRIES`].
-    fn root_entries(&mut self, root: &Path) -> Option<Vec<String>> {
-        let Ok(entries) = std::fs::read_dir(root) else {
+    /// Every entry name under one root, dot entries and anything that is not
+    /// one plain name skipped, sorted by byte order without duplicates and
+    /// then capped at [`MAX_ROOT_ENTRIES`].
+    fn root_entries(
+        &mut self,
+        reader: &dyn InstructionSourceReader,
+        root: &Path,
+    ) -> Result<Option<Vec<String>>, SourceReadError> {
+        let Some(entries) = reader.directory_entries(root)? else {
             self.diagnose(root, SkillProblem::UnreadableRoot);
-            return None;
+            return Ok(None);
         };
         let mut names = Vec::new();
         for entry in entries {
-            let Ok(entry) = entry else {
-                self.diagnose(root, SkillProblem::UnreadableRoot);
-                return None;
-            };
-            if let Some(name) = entry.file_name().to_str()
+            if let Some(name) = entry.to_str()
                 && !name.starts_with('.')
+                && is_one_name(name)
             {
                 names.push(name.to_owned());
             }
         }
         names.sort();
+        names.dedup();
         if names.len() > MAX_ROOT_ENTRIES {
             names.truncate(MAX_ROOT_ENTRIES);
             self.diagnose(root, SkillProblem::TooManyEntries);
         }
-        Some(names)
+        Ok(Some(names))
     }
+}
+
+/// Whether `name` is exactly one normal path component.
+fn is_one_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }
 
 /// A skill a `Skill` call loaded: its base directory and body.
@@ -586,8 +629,13 @@ fn validated(text: &str, directory_name: &str) -> Result<Option<Validated>, Skil
     }))
 }
 
-fn read_listed(scope: SkillScope, root: &Path, name: &str) -> Result<Option<Skill>, SkillProblem> {
-    let text = read_skill_text(scope, root, name, MAX_FRONT_MATTER_BYTES)?;
+fn read_listed(
+    reader: &dyn InstructionSourceReader,
+    scope: SkillScope,
+    root: &Path,
+    name: &str,
+) -> Result<Option<Skill>, SkillProblem> {
+    let text = read_skill_text(reader, scope, root, name, MAX_FRONT_MATTER_BYTES)?;
     let Some(front) = front_matter::leading_block(&text) else {
         if text.len() >= MAX_FRONT_MATTER_BYTES {
             return Err(SkillProblem::FrontMatterTooLarge);
@@ -611,45 +659,39 @@ fn read_listed(scope: SkillScope, root: &Path, name: &str) -> Result<Option<Skil
 /// never blocks. Over `limit`, the `Skill` tool's whole-file read refuses and
 /// discovery's front-matter read keeps the prefix.
 fn read_skill_text(
+    reader: &dyn InstructionSourceReader,
     scope: SkillScope,
     root: &Path,
     name: &str,
     limit: usize,
 ) -> Result<String, SkillProblem> {
     let path = root.join(name).join(SKILL_FILE_NAME);
-    let canonical = std::fs::canonicalize(&path).map_err(|_| SkillProblem::MissingSkillFile)?;
+    let SourceResolution::Resolved(canonical) =
+        reader.canonicalize(&path).map_err(SkillProblem::Reader)?
+    else {
+        return Err(SkillProblem::MissingSkillFile);
+    };
     if !canonical.starts_with(root) {
         return Err(SkillProblem::OutsideRoot);
     }
     if scope == SkillScope::Project && canonical != path {
         return Err(SkillProblem::LinkedPath);
     }
-    if !std::fs::symlink_metadata(&canonical).is_ok_and(|metadata| metadata.is_file()) {
-        return Err(SkillProblem::MissingSkillFile);
-    }
-    let descriptor = rustix::fs::open(
-        &canonical,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|_| SkillProblem::MissingSkillFile)?;
-    let file = File::from(descriptor);
-    let Ok(metadata) = file.metadata() else {
-        return Err(SkillProblem::MissingSkillFile);
-    };
-    if !metadata.is_file() {
-        return Err(SkillProblem::MissingSkillFile);
-    }
     // Discovery refuses what the `Skill` tool could not load, so every listed
     // skill is loadable.
-    if metadata.len() > MAX_SKILL_FILE_BYTES as u64 {
-        return Err(SkillProblem::TooLarge);
-    }
+    let mut bytes = match reader
+        .read_file(&canonical, MAX_SKILL_FILE_BYTES as u64, limit)
+        .map_err(SkillProblem::Reader)?
+    {
+        SourceFile::Bytes(bytes) if bytes.len() <= limit + 1 => bytes,
+        SourceFile::Bytes(_) => return Err(SkillProblem::Reader(SourceReadError::InvalidAnswer)),
+        SourceFile::TooLarge => return Err(SkillProblem::TooLarge),
+        SourceFile::Missing
+        | SourceFile::NotRegular
+        | SourceFile::Unsafe
+        | SourceFile::Unreadable => return Err(SkillProblem::MissingSkillFile),
+    };
     let whole = limit == MAX_SKILL_FILE_BYTES;
-    let mut bytes = Vec::new();
-    file.take(limit as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| SkillProblem::MissingSkillFile)?;
     if bytes.len() > limit {
         if whole {
             return Err(SkillProblem::TooLarge);

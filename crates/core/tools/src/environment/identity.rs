@@ -331,7 +331,11 @@ pub(super) struct ExecutionBackendDescriptorWire {
 }
 
 impl ExecutionBackendDescriptor {
-    pub(super) fn current_host() -> Self {
+    /// The descriptor every [`HostExecutionBackend`](crate::HostExecutionBackend)
+    /// allocated in this process presents. It is comparison data, not
+    /// authority.
+    #[must_use]
+    pub fn current_host() -> Self {
         let mut descriptor =
             Self::host_for_platform(std::env::consts::OS, HostPathFormat::current());
         descriptor.containment = ExecutionContainmentDescriptor::current_host();

@@ -9,6 +9,7 @@ pub(crate) fn surface_is_nameable() {
     let _ = std::any::type_name::<TurnResult>();
     let _ = std::any::type_name::<plakous_agent::JobView>();
     let _ = std::any::type_name::<plakous_agent::JobOwner>();
+    let _ = std::any::type_name::<plakous_agent::JoinedSessionsPort>();
     let _ = plakous_agent::AgentEventKind::JobPromoted { number: 1 };
     let _ = plakous_agent::AgentEventKind::JobFinished { number: 1 };
 }

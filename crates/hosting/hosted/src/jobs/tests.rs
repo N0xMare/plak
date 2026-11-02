@@ -3,7 +3,8 @@ use plakous::model::{AgentId, BranchId, CancellationToken, RunId, SessionId};
 use plakous::tools::{
     ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
     ExecutionOperationControl, JobStatus, JobStopReason, JoinedProcessCommand,
-    JoinedProcessShellProfile, JoinedProcessStartRequest, JoinedProcessTerminalMode,
+    JoinedProcessSessions, JoinedProcessShellProfile, JoinedProcessStartRequest,
+    JoinedProcessTerminalMode,
 };
 use std::{path::Path, str::FromStr, time::Duration};
 
@@ -16,14 +17,14 @@ fn attributed_host_looks_up_only_the_exact_session_branch() -> TestResult {
     let owner = owner("00000000-0000-0000-0000-000000000702")?;
     let host = registry.for_agent("root", "s");
     let service = host.attach(owner, sessions(root.path())?)?;
-    let id = start(&service)?;
+    let id = start(service.local())?;
     let found = host
         .service(owner.session_id, owner.branch_id)
         .ok_or("missing service")?;
-    assert!(found.retains_session(id));
+    assert!(found.local().retains_session(id));
     let foreign = BranchId::from_str("00000000-0000-0000-0000-000000000705")?;
     assert!(host.service(owner.session_id, foreign).is_none());
-    service.stop(id, JobStopReason::User)?;
+    service.local().stop(id, JobStopReason::User)?;
     Ok(())
 }
 
@@ -35,9 +36,9 @@ fn recent_terminal_rows_stay_with_their_source_branch() -> TestResult {
     let second = owner("00000000-0000-0000-0000-000000000705")?;
     let host = registry.for_agent("root", "s");
     let service = host.attach(first, sessions(root.path())?)?;
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
-    service.stop(id, JobStopReason::User)?;
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
+    service.local().stop(id, JobStopReason::User)?;
     host.observe_terminal(first, &service.jobs());
     assert_eq!(registry.snapshot().len(), 1);
     host.attach(second, sessions(root.path())?)?;
@@ -58,17 +59,20 @@ fn parked_child_jobs_remain_visible_with_owner_and_hud_count() -> TestResult {
     let child_owner = owner("00000000-0000-0000-0000-000000000705")?;
     let host = registry.for_agent("c7", "s");
     let service = host.attach(child_owner, sessions(root.path())?)?;
-    plakous_tools::internal::set_job_owner(&service, child_owner.agent_id.to_string());
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
-    plakous_tools::internal::close_job_admission(&service, &child_owner.agent_id.to_string());
+    plakous_tools::internal::set_job_owner(service.local(), child_owner.agent_id.to_string());
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
+    plakous_tools::internal::close_job_admission(
+        service.local(),
+        &child_owner.agent_id.to_string(),
+    );
     drop(host);
     assert_eq!(registry.running_count(), 1);
     let rows = registry.snapshot();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].owner, "c7");
     assert_eq!(rows[0].status, ProcessStatus::Running);
-    service.stop(id, JobStopReason::AttemptEnded)?;
+    service.local().stop(id, JobStopReason::AttemptEnded)?;
     assert_eq!(registry.running_count(), 0);
     assert_eq!(registry.snapshot()[0].owner, "c7");
     assert_eq!(registry.snapshot()[0].status, ProcessStatus::Stopped);
@@ -86,8 +90,8 @@ fn child_attached_before_root_remains_in_the_idle_snapshot() -> TestResult {
     let service = registry
         .for_agent("c1", "s")
         .attach(child_owner, sessions(root.path())?)?;
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
     assert_eq!(registry.snapshot()[0].owner, "c1");
     registry.for_agent("root", "s").attach(
         owner("00000000-0000-0000-0000-000000000702")?,
@@ -98,7 +102,7 @@ fn child_attached_before_root_remains_in_the_idle_snapshot() -> TestResult {
     assert_eq!(rows[0].owner, "c1");
     assert_eq!(rows[0].status, ProcessStatus::Running);
     assert_eq!(registry.running_count(), 1);
-    service.stop(id, JobStopReason::AttemptEnded)?;
+    service.local().stop(id, JobStopReason::AttemptEnded)?;
     assert_eq!(registry.running_count(), 0);
     assert_eq!(registry.snapshot()[0].owner, "c1");
     assert_eq!(registry.snapshot()[0].status, ProcessStatus::Stopped);
@@ -116,14 +120,14 @@ fn same_session_root_fork_keeps_the_child_and_drops_the_old_root_slice() -> Test
         owner("00000000-0000-0000-0000-000000000702")?,
         sessions(root.path())?,
     )?;
-    let root_job = start(&first)?;
-    plakous_tools::internal::promote(&first, root_job)?;
+    let root_job = start(first.local())?;
+    plakous_tools::internal::promote(first.local(), root_job)?;
     let child = registry.for_agent("c1", "s").attach(
         owner("00000000-0000-0000-0000-000000000708")?,
         sessions(root.path())?,
     )?;
-    let child_job = start(&child)?;
-    plakous_tools::internal::promote(&child, child_job)?;
+    let child_job = start(child.local())?;
+    plakous_tools::internal::promote(child.local(), child_job)?;
     root_host.attach(
         owner("00000000-0000-0000-0000-000000000705")?,
         sessions(root.path())?,
@@ -148,8 +152,8 @@ fn same_session_root_fork_keeps_the_child_and_drops_the_old_root_slice() -> Test
         registry.snapshot().iter().all(|row| row.owner != "c1"),
         "another session's root does not take this child"
     );
-    child.stop(child_job, JobStopReason::AttemptEnded)?;
-    first.stop(root_job, JobStopReason::SessionExit)?;
+    child.local().stop(child_job, JobStopReason::AttemptEnded)?;
+    first.local().stop(root_job, JobStopReason::SessionExit)?;
     Ok(())
 }
 
@@ -160,11 +164,14 @@ fn recent_terminal_hook_captures_before_any_product_poll() -> TestResult {
     let owner = owner("00000000-0000-0000-0000-000000000702")?;
     let host = registry.for_agent("c3", "s");
     let service = host.attach(owner, sessions(root.path())?)?;
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
-    service.stop(id, JobStopReason::User)?;
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
+    service.local().stop(id, JobStopReason::User)?;
     host.observe_terminal(owner, &service.jobs());
-    plakous_tools::internal::consume_jobs(&service, &[JoinedProcessSessions::job_number(id)]);
+    plakous_tools::internal::consume_jobs(
+        service.local(),
+        &[JoinedProcessSessions::job_number(id)],
+    );
     let rows = registry.snapshot();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].owner, "c3");
@@ -178,11 +185,11 @@ fn recent_terminal_hook_captures_before_any_product_poll() -> TestResult {
 fn a_job_retired_before_its_user_stop_is_not_a_failure() -> TestResult {
     let root = tempfile::tempdir()?;
     let service = sessions(root.path())?;
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
     let number = JoinedProcessSessions::job_number(id);
-    service.stop(id, JobStopReason::User)?;
-    plakous_tools::internal::consume_jobs(&service, &[number]);
+    service.local().stop(id, JobStopReason::User)?;
+    plakous_tools::internal::consume_jobs(service.local(), &[number]);
     assert!(service.session_for_number(number).is_none());
     let stopped = service.stop_with_grace(id, JobStopReason::User, USER_STOP_GRACE);
     assert!(stopped.is_err());
@@ -203,8 +210,8 @@ fn processes_stop_exact_identity_and_stop_all_are_user_attributed() -> TestResul
         sessions(root.path())?,
     )?;
     for service in [&first, &second] {
-        let id = start(service)?;
-        plakous_tools::internal::promote(service, id)?;
+        let id = start(service.local())?;
+        plakous_tools::internal::promote(service.local(), id)?;
     }
     let rows = registry.snapshot();
     assert_eq!(rows.len(), 2);
@@ -248,7 +255,7 @@ fn user_stop_grants_the_term_grace_without_blocking_the_caller() -> TestResult {
         sessions(root.path())?,
     )?;
     let job = start_script(
-        &service,
+        service.local(),
         &format!(
             "trap 'touch {termed}; while [ ! -e {release} ]; do sleep 0.01; done; \
                  touch {graced}; exit 0' TERM; touch {ready}; while :; do sleep 0.01; done",
@@ -258,7 +265,7 @@ fn user_stop_grants_the_term_grace_without_blocking_the_caller() -> TestResult {
             graced = graced.display(),
         ),
     )?;
-    plakous_tools::internal::promote(&service, job)?;
+    plakous_tools::internal::promote(service.local(), job)?;
     // The shell must install its TERM trap before the stop; on a slow shell start
     // the signal would otherwise take the default action.
     let started = Instant::now();
@@ -299,14 +306,17 @@ fn recent_terminal_snapshot_survives_notice_consumption_and_expires() -> TestRes
     let registry = JobRegistry::default();
     let owner = owner("00000000-0000-0000-0000-000000000702")?;
     let service = registry.attach(owner, sessions(root.path())?)?;
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
     let now = Instant::now();
     assert_eq!(registry.snapshot_at(now).len(), 1);
-    service.stop(id, JobStopReason::User)?;
+    service.local().stop(id, JobStopReason::User)?;
     let stopped = registry.snapshot_at(now);
     assert_eq!(stopped[0].status, ProcessStatus::Stopped);
-    plakous_tools::internal::consume_jobs(&service, &[JoinedProcessSessions::job_number(id)]);
+    plakous_tools::internal::consume_jobs(
+        service.local(),
+        &[JoinedProcessSessions::job_number(id)],
+    );
     assert_eq!(
         registry.snapshot_at(now + Duration::from_secs(299)).len(),
         1
@@ -343,8 +353,8 @@ fn child_reattach_under_another_tree_stays_with_its_tree() -> TestResult {
     root_s1.attach(keyed(S1, A)?, sessions(root.path())?)?;
     let child_host = registry.for_agent("c1", S1);
     let child = child_host.attach(keyed(C1S, C1B)?, sessions(root.path())?)?;
-    let job = start(&child)?;
-    plakous_tools::internal::promote(&child, job)?;
+    let job = start(child.local())?;
+    plakous_tools::internal::promote(child.local(), job)?;
     assert_eq!(registry.snapshot().len(), 1);
     registry
         .for_agent("root", S2)
@@ -358,7 +368,7 @@ fn child_reattach_under_another_tree_stays_with_its_tree() -> TestResult {
     root_s1.attach(keyed(S1, A)?, sessions(root.path())?)?;
     assert_eq!(registry.snapshot().len(), 1);
     assert_eq!(registry.snapshot()[0].owner, "c1");
-    child.stop(job, JobStopReason::AttemptEnded)?;
+    child.local().stop(job, JobStopReason::AttemptEnded)?;
     Ok(())
 }
 
@@ -370,8 +380,8 @@ fn first_root_of_another_tree_does_not_claim_a_child() -> TestResult {
     let child = registry
         .for_agent("c1", S1)
         .attach(keyed(C1S, C1B)?, sessions(root.path())?)?;
-    let job = start(&child)?;
-    plakous_tools::internal::promote(&child, job)?;
+    let job = start(child.local())?;
+    plakous_tools::internal::promote(child.local(), job)?;
     registry
         .for_agent("root", S2)
         .attach(keyed(S2, X)?, sessions(root.path())?)?;
@@ -382,7 +392,7 @@ fn first_root_of_another_tree_does_not_claim_a_child() -> TestResult {
     let rows = registry.snapshot();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].owner, "c1");
-    child.stop(job, JobStopReason::AttemptEnded)?;
+    child.local().stop(job, JobStopReason::AttemptEnded)?;
     Ok(())
 }
 
@@ -397,8 +407,8 @@ fn same_tree_branch_after_a_detour_keeps_the_child() -> TestResult {
     let child = registry
         .for_agent("c1", S1)
         .attach(keyed(C1S, C1B)?, sessions(root.path())?)?;
-    let job = start(&child)?;
-    plakous_tools::internal::promote(&child, job)?;
+    let job = start(child.local())?;
+    plakous_tools::internal::promote(child.local(), job)?;
     registry
         .for_agent("root", S2)
         .attach(keyed(S2, X)?, sessions(root.path())?)?;
@@ -408,7 +418,7 @@ fn same_tree_branch_after_a_detour_keeps_the_child() -> TestResult {
     let rows = registry.snapshot();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].owner, "c1");
-    child.stop(job, JobStopReason::AttemptEnded)?;
+    child.local().stop(job, JobStopReason::AttemptEnded)?;
     Ok(())
 }
 
@@ -423,8 +433,8 @@ fn stop_user_does_not_reach_another_trees_jobs() -> TestResult {
     let child = registry
         .for_agent("c1", S1)
         .attach(keyed(C1S, C1B)?, sessions(root.path())?)?;
-    let job = start(&child)?;
-    plakous_tools::internal::promote(&child, job)?;
+    let job = start(child.local())?;
+    plakous_tools::internal::promote(child.local(), job)?;
     let id = registry.snapshot()[0].id.clone();
     registry
         .for_agent("root", S2)
@@ -435,7 +445,7 @@ fn stop_user_does_not_reach_another_trees_jobs() -> TestResult {
     registry.stop_user(None)?;
     registry.settle_user_stops();
     assert_eq!(registry.running_count(), 1);
-    child.stop(job, JobStopReason::AttemptEnded)?;
+    child.local().stop(job, JobStopReason::AttemptEnded)?;
     Ok(())
 }
 
@@ -453,8 +463,8 @@ fn owner_maps_shrink_after_retired_children() -> TestResult {
         let service = registry
             .for_agent(format!("c{n}"), S1)
             .attach(keyed(C1S, &branch)?, sessions(root.path())?)?;
-        plakous_tools::internal::set_job_owner(&service, format!("c{n}"));
-        plakous_tools::internal::close_job_admission(&service, &format!("c{n}"));
+        plakous_tools::internal::set_job_owner(service.local(), format!("c{n}"));
+        plakous_tools::internal::close_job_admission(service.local(), &format!("c{n}"));
     }
     assert_eq!(registry.running_count(), 0);
     let services = registry
@@ -472,9 +482,9 @@ fn owner_maps_shrink_after_retired_children() -> TestResult {
     let kept = registry
         .for_agent("c1", S1)
         .attach(keyed(C1S, C1B)?, sessions(root.path())?)?;
-    let job = start(&kept)?;
-    plakous_tools::internal::promote(&kept, job)?;
-    kept.stop(job, JobStopReason::User)?;
+    let job = start(kept.local())?;
+    plakous_tools::internal::promote(kept.local(), job)?;
+    kept.local().stop(job, JobStopReason::User)?;
     let child_key = (SessionId::from_str(C1S)?, BranchId::from_str(C1B)?);
     let now = Instant::now();
     assert_eq!(registry.snapshot_at(now).len(), 1);
@@ -518,14 +528,30 @@ fn owner(branch: &str) -> TestResult<JobOwner> {
     })
 }
 
-fn sessions(root: &Path) -> TestResult<JoinedProcessSessions> {
-    Ok(ExecutionEnvironment::host(
-        ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000704")?),
-        root,
-        ".",
-        ExecutionEnvironmentConfig::default(),
-    )?
-    .joined_process_sessions()?)
+fn sessions(root: &Path) -> TestResult<JoinedSessionsPort> {
+    Ok(JoinedSessionsPort::local(
+        ExecutionEnvironment::host(
+            ExecutionEnvironmentScope::Run(RunId::from_str(
+                "00000000-0000-0000-0000-000000000704",
+            )?),
+            root,
+            ".",
+            ExecutionEnvironmentConfig::default(),
+        )?
+        .joined_process_sessions()?,
+    ))
+}
+
+/// The in-process service behind a registry port, which these tests drive
+/// directly.
+trait Local {
+    fn local(&self) -> &JoinedProcessSessions;
+}
+
+impl Local for JoinedSessionsPort {
+    fn local(&self) -> &JoinedProcessSessions {
+        self.as_local().expect("registry ports are in-process")
+    }
 }
 
 fn start(service: &JoinedProcessSessions) -> TestResult<plakous::tools::JoinedProcessSessionId> {
@@ -603,10 +629,11 @@ fn attached_services_spool_promoted_jobs_under_the_bound_root() -> TestResult {
     registry.set_output_root(state.path().join("jobs"));
     let branch = "00000000-0000-0000-0000-000000000702";
     let service = registry.attach(owner(branch)?, sessions(root.path())?)?;
-    let job = start(&service)?;
-    plakous_tools::internal::promote(&service, job)?;
+    let job = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), job)?;
     let number = JoinedProcessSessions::job_number(job);
     let path = service
+        .local()
         .job_output_file(number)
         .ok_or("promotion issued no output file")?
         .path;
@@ -624,17 +651,19 @@ fn attached_services_spool_promoted_jobs_under_the_bound_root() -> TestResult {
         .ok_or("unexpected file name")?;
     assert_eq!(service_hex.len(), 16);
     assert!(path.is_file());
-    service.stop(job, JobStopReason::Model)?;
+    service.local().stop(job, JobStopReason::Model)?;
     // Without a bound root nothing is spooled and nothing is issued.
     let unbound = JobRegistry::default();
     let service = unbound.attach(owner(branch)?, sessions(root.path())?)?;
-    let job = start(&service)?;
-    plakous_tools::internal::promote(&service, job)?;
+    let job = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), job)?;
     assert_eq!(
-        service.job_output_file(JoinedProcessSessions::job_number(job)),
+        service
+            .local()
+            .job_output_file(JoinedProcessSessions::job_number(job)),
         None
     );
-    service.stop(job, JobStopReason::Model)?;
+    service.local().stop(job, JobStopReason::Model)?;
     Ok(())
 }
 
@@ -647,10 +676,13 @@ fn terminal_events_retry_after_observation_saturation() -> TestResult {
         owner("00000000-0000-0000-0000-000000000702")?,
         sessions(root.path())?,
     )?;
-    let job = start(&service)?;
-    plakous_tools::internal::promote(&service, job)?;
-    service.stop(job, JobStopReason::Model)?;
-    plakous_tools::internal::consume_jobs(&service, &[JoinedProcessSessions::job_number(job)]);
+    let job = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), job)?;
+    service.local().stop(job, JobStopReason::Model)?;
+    plakous_tools::internal::consume_jobs(
+        service.local(),
+        &[JoinedProcessSessions::job_number(job)],
+    );
     let (wire, received) = plakous_host_protocol::observation_channel::<Core>();
     for _ in 0..plakous_host_protocol::limits::OBSERVATION_QUEUE_CAPACITY {
         wire.send(SessionObservation::JobPromoted {
@@ -684,8 +716,8 @@ fn terminal_events_retry_after_observation_saturation() -> TestResult {
 fn lifecycle_queue_reserves_terminal_capacity_before_promotion() -> TestResult {
     let root = tempfile::tempdir()?;
     let service = sessions(root.path())?;
-    let job = start(&service)?;
-    plakous_tools::internal::promote(&service, job)?;
+    let job = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), job)?;
     let mut view = service.jobs().remove(0);
     let mut queue = JobQueue::default();
     let key = (
@@ -705,7 +737,7 @@ fn lifecycle_queue_reserves_terminal_capacity_before_promotion() -> TestResult {
     }
     assert_eq!(queue.pending.len(), JOB_EVENT_CAPACITY);
     assert!(queue.terminals.is_empty());
-    service.stop(job, JobStopReason::Model)?;
+    service.local().stop(job, JobStopReason::Model)?;
     Ok(())
 }
 
@@ -717,10 +749,13 @@ fn terminal_consumed_before_host_poll_still_emits_in_order() -> TestResult {
         owner("00000000-0000-0000-0000-000000000702")?,
         sessions(root.path())?,
     )?;
-    let job = start(&service)?;
-    plakous_tools::internal::promote(&service, job)?;
-    service.stop(job, JobStopReason::Model)?;
-    plakous_tools::internal::consume_jobs(&service, &[JoinedProcessSessions::job_number(job)]);
+    let job = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), job)?;
+    service.local().stop(job, JobStopReason::Model)?;
+    plakous_tools::internal::consume_jobs(
+        service.local(),
+        &[JoinedProcessSessions::job_number(job)],
+    );
     assert_eq!(registry.views(), [] as [plakous_tools::JobView; 0]);
     let mut observed = Vec::new();
     registry.publish_pending(|phase, _key, job| {
@@ -752,7 +787,7 @@ fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> Tes
     let key = owner("00000000-0000-0000-0000-000000000702")?;
     let original = registry.attach(key, sessions(root.path())?)?;
     let shell = JoinedProcessShellProfile::new("/bin/sh", [String::from("-c")])?;
-    let id = original.start(
+    let id = original.local().start(
         JoinedProcessStartRequest::new(
             JoinedProcessCommand::shell(shell, "sleep 30 & exit 0")?,
             ".",
@@ -770,7 +805,7 @@ fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> Tes
         );
         std::thread::sleep(Duration::from_millis(2));
     }
-    plakous_tools::internal::promote(&original, id)?;
+    plakous_tools::internal::promote(original.local(), id)?;
     let views = original.jobs();
     assert!(registry.is_leftover(&views[0]));
     let replacement = registry.attach(
@@ -783,10 +818,10 @@ fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> Tes
     assert_eq!(replacement.leftover(id), Some((Some(0), 1)));
     assert_eq!(replacement.running_job_count(), 1);
     let cold = sessions(root.path())?;
-    plakous_tools::internal::restore_job_terminals(&cold, &views);
+    plakous_tools::internal::restore_job_terminals(cold.local(), &views);
     assert_eq!(cold.jobs()[0].status, JobStatus::OutcomeUnknown);
     assert_eq!(cold.running_job_count(), 0);
-    assert!(!cold.retains_session(id));
+    assert!(!cold.local().retains_session(id));
     cold.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
     assert_eq!(replacement.running_job_count(), 1);
     replacement.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
@@ -799,16 +834,21 @@ fn same_branch_transfer_stops_foreground_and_preserves_promoted_service() -> Tes
     let registry = JobRegistry::default();
     let key = owner("00000000-0000-0000-0000-000000000702")?;
     let original = registry.attach(key, sessions(root.path())?)?;
-    let foreground = start(&original)?;
-    let job = start(&original)?;
-    plakous_tools::internal::promote(&original, job)?;
+    let foreground = start(original.local())?;
+    let job = start(original.local())?;
+    plakous_tools::internal::promote(original.local(), job)?;
     let next_owner = JobOwner {
         agent_id: AgentId::from_str("00000000-0000-0000-0000-000000000706")?,
         ..key
     };
     let replacement = registry.attach(next_owner, sessions(root.path())?)?;
-    assert!(original.joined_terminal_status(foreground).is_some());
-    assert!(replacement.retains_session(job));
+    assert!(
+        original
+            .local()
+            .joined_terminal_status(foreground)
+            .is_some()
+    );
+    assert!(replacement.local().retains_session(job));
     assert_eq!(replacement.jobs()[0].status, JobStatus::Running);
     drop(original);
     replacement.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
@@ -823,13 +863,13 @@ fn different_branch_never_receives_source_handles() -> TestResult {
         owner("00000000-0000-0000-0000-000000000702")?,
         sessions(root.path())?,
     )?;
-    let job = start(&original)?;
-    plakous_tools::internal::promote(&original, job)?;
+    let job = start(original.local())?;
+    plakous_tools::internal::promote(original.local(), job)?;
     let replacement = registry.attach(
         owner("00000000-0000-0000-0000-000000000705")?,
         sessions(root.path())?,
     )?;
-    assert!(!replacement.retains_session(job));
+    assert!(!replacement.local().retains_session(job));
     original.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
     Ok(())
 }
@@ -840,8 +880,8 @@ fn transition_refusal_counts_only_running_jobs_and_does_not_stop_them() -> TestR
     let registry = JobRegistry::default();
     let key = owner("00000000-0000-0000-0000-000000000702")?;
     let service = registry.attach(key, sessions(root.path())?)?;
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
     assert_eq!(
         registry
             .transition_refusal(key.session_id, key.branch_id)
@@ -865,16 +905,16 @@ fn released_empty_slice_is_pruned_but_pending_notices_and_running_jobs_are_retai
     let registry = JobRegistry::default();
     let key = owner("00000000-0000-0000-0000-000000000702")?;
     let service = registry.attach(key, sessions(root.path())?)?;
-    plakous_tools::internal::set_job_owner(&service, key.agent_id.to_string());
-    let id = start(&service)?;
-    plakous_tools::internal::promote(&service, id)?;
-    plakous_tools::internal::close_job_admission(&service, &key.agent_id.to_string());
+    plakous_tools::internal::set_job_owner(service.local(), key.agent_id.to_string());
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
+    plakous_tools::internal::close_job_admission(service.local(), &key.agent_id.to_string());
     assert_eq!(registry.running_count(), 1);
     assert_eq!(registry.services.lock().map_err(|_| "registry")?.len(), 1);
     service.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
     assert_eq!(registry.running_count(), 0);
     assert_eq!(registry.services.lock().map_err(|_| "registry")?.len(), 1);
-    plakous_tools::internal::consume_jobs(&service, &[service.jobs()[0].number]);
+    plakous_tools::internal::consume_jobs(service.local(), &[service.jobs()[0].number]);
     assert_eq!(registry.running_count(), 0);
     assert!(registry.services.lock().map_err(|_| "registry")?.is_empty());
     Ok(())
@@ -890,8 +930,8 @@ async fn host_release_stops_all_registered_slices() -> TestResult {
         "00000000-0000-0000-0000-000000000705",
     ] {
         let service = registry.attach(owner(branch)?, sessions(root.path())?)?;
-        let job = start(&service)?;
-        plakous_tools::internal::promote(&service, job)?;
+        let job = start(service.local())?;
+        plakous_tools::internal::promote(service.local(), job)?;
         services.push(service);
     }
     registry.stop_all(Duration::from_millis(200)).await?;
@@ -908,25 +948,25 @@ async fn host_release_stops_all_registered_slices() -> TestResult {
 fn terminal_admission_gate_and_stale_owner_cleanup_are_fenced() -> TestResult {
     let root = tempfile::tempdir()?;
     let service = sessions(root.path())?;
-    plakous_tools::internal::set_job_owner(&service, "old-owner".to_owned());
-    let job = start(&service)?;
-    plakous_tools::internal::promote(&service, job)?;
-    let foreground = start(&service)?;
-    plakous_tools::internal::close_job_admission(&service, "old-owner");
-    assert!(plakous_tools::internal::promote(&service, foreground).is_err());
-    assert!(start(&service).is_err());
+    plakous_tools::internal::set_job_owner(service.local(), "old-owner".to_owned());
+    let job = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), job)?;
+    let foreground = start(service.local())?;
+    plakous_tools::internal::close_job_admission(service.local(), "old-owner");
+    assert!(plakous_tools::internal::promote(service.local(), foreground).is_err());
+    assert!(start(service.local()).is_err());
     service.stop_foreground()?;
-    plakous_tools::internal::set_job_owner(&service, "new-owner".to_owned());
-    plakous_tools::internal::close_job_admission(&service, "old-owner");
+    plakous_tools::internal::set_job_owner(service.local(), "new-owner".to_owned());
+    plakous_tools::internal::close_job_admission(service.local(), "old-owner");
     plakous_tools::internal::stop_jobs_for_owner(
-        &service,
+        service.local(),
         "old-owner",
         JobStopReason::SessionExit,
         Duration::from_millis(200),
     )?;
     assert_eq!(service.jobs()[0].status, JobStatus::Running);
-    let replacement_job = start(&service)?;
-    plakous_tools::internal::promote(&service, replacement_job)?;
+    let replacement_job = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), replacement_job)?;
     service.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
     Ok(())
 }
@@ -963,17 +1003,19 @@ fn child_owned_terminal_yields_no_process_row_and_root_lineage_yields_one() -> T
     )?;
     // A still-running sibling keeps the terminal job's id distinct from the
     // child's, which has its own service counter.
-    let kept = start(&predecessor)?;
-    plakous_tools::internal::promote(&predecessor, kept)?;
-    let predecessor_job = start(&predecessor)?;
-    plakous_tools::internal::promote(&predecessor, predecessor_job)?;
+    let kept = start(predecessor.local())?;
+    plakous_tools::internal::promote(predecessor.local(), kept)?;
+    let predecessor_job = start(predecessor.local())?;
+    plakous_tools::internal::promote(predecessor.local(), predecessor_job)?;
     // The root's own fork/rebind moves the current root key. The job stays
     // on the predecessor branch, which is still the root's lineage.
     let current = root_host.attach(
         owner("00000000-0000-0000-0000-000000000705")?,
         sessions(root.path())?,
     )?;
-    predecessor.stop(predecessor_job, JobStopReason::Model)?;
+    predecessor
+        .local()
+        .stop(predecessor_job, JobStopReason::Model)?;
     let predecessor_id = format!("p{}", JoinedProcessSessions::job_number(predecessor_job));
 
     let child_host = registry.for_agent("c7", "s");
@@ -981,9 +1023,9 @@ fn child_owned_terminal_yields_no_process_row_and_root_lineage_yields_one() -> T
         owner("00000000-0000-0000-0000-000000000708")?,
         sessions(root.path())?,
     )?;
-    let child_job = start(&child)?;
-    plakous_tools::internal::promote(&child, child_job)?;
-    child.stop(child_job, JobStopReason::User)?;
+    let child_job = start(child.local())?;
+    plakous_tools::internal::promote(child.local(), child_job)?;
+    child.local().stop(child_job, JobStopReason::User)?;
     let child_id = format!("p{}", JoinedProcessSessions::job_number(child_job));
     assert_ne!(predecessor_id, child_id);
 
@@ -993,9 +1035,9 @@ fn child_owned_terminal_yields_no_process_row_and_root_lineage_yields_one() -> T
     let (observed, rows) = drain_job_events(&registry, &mut events);
     let (_, again) = drain_job_events(&registry, &mut events);
 
-    let current_job = start(&current)?;
-    plakous_tools::internal::promote(&current, current_job)?;
-    current.stop(current_job, JobStopReason::Model)?;
+    let current_job = start(current.local())?;
+    plakous_tools::internal::promote(current.local(), current_job)?;
+    current.local().stop(current_job, JobStopReason::Model)?;
     let current_id = format!("p{}", JoinedProcessSessions::job_number(current_job));
     let (current_observed, current_rows) = drain_job_events(&registry, &mut events);
     predecessor.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;

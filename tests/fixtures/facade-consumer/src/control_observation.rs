@@ -29,6 +29,9 @@ pub(crate) fn surface_is_nameable() {
     let _ = std::any::type_name::<plakous::tools::JobHostCapacity>();
     let _ = std::any::type_name::<plakous::tools::JobOwner>();
     let _ = std::any::type_name::<plakous::tools::JoinedProcessSessions>();
+    let _ = std::any::type_name::<plakous::tools::JoinedSessionsPort>();
+    let _ = std::any::type_name::<plakous::tools::LocalWorkspaceProbe>();
+    let _ = std::any::type_name::<&dyn plakous::tools::WorkspaceProbe>();
     let _ = std::any::type_name::<plakous::tools::JoinedProcessSessionId>();
     let _ = std::any::type_name::<plakous::tools::JoinedProcessStartRequest>();
     let _ = std::any::type_name::<plakous::tools::JoinedProcessCommand>();
@@ -63,15 +66,15 @@ impl plakous::tools::JobHost for HostRegistry {
         &self,
         _: plakous::model::SessionId,
         _: plakous::model::BranchId,
-    ) -> Option<plakous::tools::JoinedProcessSessions> {
+    ) -> Option<plakous::tools::JoinedSessionsPort> {
         None
     }
 
     fn attach(
         &self,
         _owner: plakous::tools::JobOwner,
-        fresh: plakous::tools::JoinedProcessSessions,
-    ) -> Result<plakous::tools::JoinedProcessSessions, plakous::tools::ExecutionBackendError> {
+        fresh: plakous::tools::JoinedSessionsPort,
+    ) -> Result<plakous::tools::JoinedSessionsPort, plakous::tools::ExecutionBackendError> {
         fresh.stop_foreground()?;
         Ok(fresh)
     }

@@ -49,6 +49,7 @@ impl Fixture {
             &self.workspace,
             SkillsPresentation::Claude,
         )
+        .unwrap()
     }
 }
 
@@ -83,7 +84,8 @@ fn every_node_registers_skill_while_skills_are_on_and_only_claude_presents_it() 
             SkillsMode::New,
             &fixture.workspace,
             presentation,
-        );
+        )
+        .unwrap();
         assert!(node.tool_registration().unwrap().is_some());
         assert!(!node.presented());
     }
@@ -93,7 +95,8 @@ fn every_node_registers_skill_while_skills_are_on_and_only_claude_presents_it() 
             SkillsMode::Inherited(inherited),
             &fixture.workspace,
             SkillsPresentation::Codex,
-        );
+        )
+        .unwrap();
         assert_eq!(node.tool_registration().unwrap().is_some(), registered);
     }
     let off = fixture.discover(false, None);
@@ -118,10 +121,15 @@ fn a_reopen_follows_what_the_session_froze_not_the_setting() {
     assert!(reopened_off.listing_source().unwrap().is_none());
     assert!(reopened_off.notice().is_none());
     assert_eq!(
-        skill_result(reopened_off.discovery.skills(), "deploy", None)
-            .unwrap()
-            .lines()
-            .next(),
+        skill_result(
+            reopened_off.discovery.skills(),
+            &LocalInstructionSourceReader,
+            "deploy",
+            None
+        )
+        .unwrap()
+        .lines()
+        .next(),
         Some("Launching skill: deploy")
     );
 
@@ -164,7 +172,13 @@ fn the_skill_tool_loads_exactly_the_listed_skills() {
     let node = fixture.discover(true, None);
     let skills = node.discovery.skills();
     assert_eq!(
-        skill_result(skills, "deploy", Some(" prod ")).unwrap(),
+        skill_result(
+            skills,
+            &LocalInstructionSourceReader,
+            "deploy",
+            Some(" prod ")
+        )
+        .unwrap(),
         format!(
             "Launching skill: deploy\n\nBase directory for this skill: {}\n\n# Deploy\n\nRun scripts/release.sh.\n\nARGUMENTS: prod",
             fixture.user().join("deploy").display()
@@ -176,16 +190,16 @@ fn the_skill_tool_loads_exactly_the_listed_skills() {
         &DEPLOY.replace("deploy", "later"),
     );
     assert_eq!(
-        skill_result(skills, "later", None).unwrap_err(),
+        skill_result(skills, &LocalInstructionSourceReader, "later", None).unwrap_err(),
         "Unknown skill: later"
     );
     assert_eq!(
-        skill_result(skills, "missing", None).unwrap_err(),
+        skill_result(skills, &LocalInstructionSourceReader, "missing", None).unwrap_err(),
         "Unknown skill: missing"
     );
     fs::write(fixture.user().join("deploy/SKILL.md"), "now invalid").unwrap();
     assert!(
-        skill_result(skills, "deploy", None)
+        skill_result(skills, &LocalInstructionSourceReader, "deploy", None)
             .unwrap_err()
             .starts_with("Unknown skill: deploy (skill "),
     );
@@ -206,9 +220,17 @@ fn a_skill_cut_by_the_listing_bound_is_not_loadable() {
     let node = fixture.discover(true, None);
     let loadable = node.discovery.listed_skills(SkillsPresentation::Claude);
     let cut = node.discovery.skills()[loadable.len()].name().to_owned();
-    assert!(skill_result(loadable, loadable[0].name(), None).is_ok());
+    assert!(
+        skill_result(
+            loadable,
+            &LocalInstructionSourceReader,
+            loadable[0].name(),
+            None
+        )
+        .is_ok()
+    );
     assert_eq!(
-        skill_result(loadable, &cut, None).unwrap_err(),
+        skill_result(loadable, &LocalInstructionSourceReader, &cut, None).unwrap_err(),
         format!("Unknown skill: {cut}")
     );
 }

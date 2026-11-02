@@ -704,7 +704,8 @@ pub(crate) mod suite {
             crate::skills::SkillsMode::New,
             root,
             presentation,
-        );
+        )
+        .expect("skills discover");
         let listing = skills
             .listing_source()
             .expect("skills listing")
@@ -1047,7 +1048,8 @@ pub(crate) mod suite {
             crate::skills::SkillsMode::New,
             Path::new("/nonexistent/workspace"),
             skills_presentation(spec),
-        );
+        )
+        .expect("skills discover");
         occupancy_extras(spec, tools)
             .with_skills(&skills)
             .expect("skills extension")

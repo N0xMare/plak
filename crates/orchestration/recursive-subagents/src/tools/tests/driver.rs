@@ -381,7 +381,7 @@ fn scratch_and_refused_folds_do_not_publish_workspace_generation() {
             .unwrap()
             .agent_id;
         let counter = tree
-            .generation_counter_for_root(&tree.node(&child).unwrap().path)
+            .generation_counter_for_root(&tree.node(&child).unwrap().path, &tree.workspace_paths())
             .unwrap();
         let store = Arc::new(SecondSaveStore {
             inner: MemoryTreeStore::new(),

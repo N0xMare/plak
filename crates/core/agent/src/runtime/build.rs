@@ -1090,15 +1090,22 @@ fn attach_job_environment(
         .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
     plakous_tools::internal::seed_job_counter(&fresh_sessions, builder.job_counter_seed);
     let job_sessions = if let Some(host) = &builder.job_host {
-        host.attach(
-            plakous_tools::JobOwner {
-                session_id,
-                branch_id,
-                agent_id,
-            },
-            fresh_sessions,
-        )
-        .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?
+        let port = host
+            .attach(
+                plakous_tools::JobOwner {
+                    session_id,
+                    branch_id,
+                    agent_id,
+                },
+                plakous_tools::JoinedSessionsPort::local(fresh_sessions),
+            )
+            .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
+        port.as_local().cloned().ok_or_else(|| {
+            AgentError::new(
+                AgentErrorKind::InvalidInput,
+                "job host returned a process service this environment cannot adopt",
+            )
+        })?
     } else {
         fresh_sessions
     };

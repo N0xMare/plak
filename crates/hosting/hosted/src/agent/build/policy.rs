@@ -300,6 +300,7 @@ pub(crate) fn stamped_workspace_policy(
     let mut policy = WorkspacePolicy::host(physical_root, relative_cwd)
         .map_err(|_| CliFailure::new("workspace policy could not be initialized"))?;
     if let Some(stamp) = crate::topology_runtime::generation_stamp_for_workspace_root(physical_root)
+        .map_err(crate::process_environment::probe_unavailable)?
     {
         policy = policy.with_generation_stamp(stamp);
     }
@@ -310,7 +311,9 @@ pub(in crate::agent) fn install_occupancy_fence(copy: &Path) -> CliResult<()> {
     if crate::git_redirect_fence::is_minted_occupancy_copy(copy)
         && let Err(error) = crate::git_redirect_fence::install_for_copy(
             copy,
-            crate::topology_runtime::workspace_base_for_root(copy).as_deref(),
+            crate::topology_runtime::workspace_base_for_root(copy)
+                .map_err(crate::process_environment::probe_unavailable)?
+                .as_deref(),
         )
     {
         return Err(CliFailure::new(format!(

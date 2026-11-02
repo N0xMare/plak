@@ -809,7 +809,10 @@ async fn compile_branch_target(
     let source_tools = source_manifest.tools();
     let target_registry = tool_registry_descriptor(tool_manifest.registry())?;
     let source_registry = tool_registry_descriptor(source_tools.registry())?;
-    let target_workspace = stable_workspace_environment_bytes(&request.builder.workspace)?;
+    let target_workspace = stable_workspace_environment_bytes(
+        &request.builder.workspace,
+        tools.environment().descriptor().backend(),
+    )?;
     let exact_tool_continuity = target_registry
         .interface_identity()
         .map_err(tool_descriptor_error)?

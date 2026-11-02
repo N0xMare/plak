@@ -1,4 +1,5 @@
 use super::*;
+use crate::instructions::LocalInstructionSourceReader;
 use std::fs;
 
 fn skill_file(name: &str, description: &str) -> String {
@@ -39,6 +40,15 @@ impl Fixture {
         self.home.join(USER_SKILLS_DIRECTORY)
     }
 
+    fn discover(&self) -> SkillDiscovery {
+        discover_skills(
+            &LocalInstructionSourceReader,
+            &self.workspace,
+            &self.roots(),
+        )
+        .unwrap()
+    }
+
     fn roots(&self) -> Vec<SkillRoot> {
         vec![
             SkillRoot::project(&self.workspace),
@@ -50,7 +60,7 @@ impl Fixture {
 #[test]
 fn missing_roots_list_nothing_and_report_nothing() {
     let fixture = Fixture::new();
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(discovery.skills(), [] as [Skill; 0]);
     assert_eq!(discovery.roots(), [] as [DiscoveredRoot; 0]);
     assert_eq!(discovery.diagnostics(), [] as [SkillDiagnostic; 0]);
@@ -88,7 +98,7 @@ fn project_skills_come_first_in_name_order_and_win_a_shared_name() {
     fs::create_dir_all(fixture.user().join(".hidden")).unwrap();
     fs::write(fixture.user().join("notes.txt"), "not a skill").unwrap();
 
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     let listed = discovery
         .skills()
         .iter()
@@ -150,7 +160,7 @@ fn front_matter_scalars_are_read_and_descriptions_become_one_line() {
         "literal",
         "---\nname: literal\ndescription: |\n  First line.\n  Second line.\n---\n",
     );
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     let descriptions = discovery
         .skills()
         .iter()
@@ -205,7 +215,7 @@ fn invalid_skills_are_reported_and_left_out_without_failing_discovery() {
     fs::create_dir_all(root.join("binary")).unwrap();
     fs::write(root.join("binary").join(SKILL_FILE_NAME), [0xff, 0xfe]).unwrap();
 
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(
         discovery
             .skills()
@@ -298,7 +308,7 @@ fn a_skill_linked_out_of_its_root_is_refused_and_one_inside_is_listed() {
     write_skill(&fixture.user(), "real", &skill_file("real", "Real."));
     std::os::unix::fs::symlink(&outside, fixture.user().join("escape")).unwrap();
 
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(
         discovery
             .skills()
@@ -321,7 +331,7 @@ fn discovery_bounds_the_listed_skills() {
         write_skill(&fixture.project(), &name, &skill_file(&name, "d"));
     }
     write_skill(&fixture.user(), "unread", &skill_file("unread", "d"));
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(discovery.skills().len(), MAX_LISTED_SKILLS);
     let full = discovery.diagnostics().last().unwrap();
     assert_eq!(
@@ -347,7 +357,7 @@ fn two_skills(fixture: &Fixture) -> SkillDiscovery {
         "commit",
         &skill_file("commit", "Write commits."),
     );
-    discover_skills(&fixture.workspace, &fixture.roots())
+    fixture.discover()
 }
 
 #[test]
@@ -408,7 +418,7 @@ fn the_listing_is_byte_bounded_with_an_omission_line() {
         let name = format!("s{index:02}");
         write_skill(&fixture.project(), &name, &skill_file(&name, &description));
     }
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(discovery.skills().len(), 20);
     let claude = render_skills_listing(SkillsPresentation::Claude, discovery.skills()).unwrap();
     assert!(claude.len() <= MAX_SKILL_LISTING_BYTES + 200);
@@ -455,7 +465,7 @@ fn a_project_root_that_resolves_outside_the_workspace_is_refused() {
         fixture.workspace.join(".agents/skills"),
     )
     .unwrap();
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(discovery.skills(), [] as [Skill; 0]);
     assert_eq!(discovery.roots(), [] as [DiscoveredRoot; 0]);
     assert_eq!(
@@ -492,7 +502,7 @@ fn a_project_root_lists_only_paths_the_workspace_read_can_open() {
     fs::create_dir_all(fixture.workspace.join(".agents")).unwrap();
     std::os::unix::fs::symlink(&real, fixture.workspace.join(".agents/skills")).unwrap();
 
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     let listed = discovery
         .skills()
         .iter()
@@ -521,7 +531,7 @@ fn a_fifo_skill_file_is_refused_without_blocking() {
             .unwrap();
         assert!(status.success());
     }
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(discovery.skills(), [] as [Skill; 0]);
     assert_eq!(
         discovery
@@ -545,7 +555,7 @@ fn a_skill_that_disables_model_invocation_is_not_listed_or_loaded() {
         "---\nname: manual\ndescription: Only by hand.\ndisable-model-invocation: true\n---\n",
     );
     write_skill(&fixture.project(), "auto", &skill_file("auto", "Auto."));
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(
         discovery
             .skills()
@@ -562,7 +572,10 @@ fn a_skill_that_disables_model_invocation_is_not_listed_or_loaded() {
     )
     .unwrap();
     assert_eq!(
-        discovery.skills()[0].load().unwrap_err().problem(),
+        discovery.skills()[0]
+            .load(&LocalInstructionSourceReader)
+            .unwrap_err()
+            .problem(),
         &SkillProblem::NotModelInvocable
     );
 }
@@ -597,7 +610,7 @@ fn the_front_matter_subset_reads_the_common_yaml_spellings() {
         "after",
         "---\nname: after\ndescription: 'quoted' trailing\n---\n",
     );
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(
         discovery
             .skills()
@@ -652,7 +665,7 @@ fn the_entry_cap_keeps_the_first_names_in_byte_order() {
         &last,
         &skill_file(&last, "Past the cap."),
     );
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(
         discovery
             .skills()
@@ -680,7 +693,7 @@ fn discovery_refuses_an_unloadable_file_and_load_revalidates_the_whole_file() {
         ),
     );
     write_skill(&fixture.user(), "small", &skill_file("small", "Small."));
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     let [small] = discovery.skills() else {
         panic!("{:?}", discovery.skills());
     };
@@ -688,7 +701,7 @@ fn discovery_refuses_an_unloadable_file_and_load_revalidates_the_whole_file() {
         discovery.diagnostics()[0].problem(),
         &SkillProblem::TooLarge
     );
-    let loaded = small.load().unwrap();
+    let loaded = small.load(&LocalInstructionSourceReader).unwrap();
     assert_eq!(loaded.name(), "small");
     assert_eq!(loaded.directory(), fixture.user().join("small"));
     assert_eq!(loaded.body(), "# small\n\nSteps.\n");
@@ -698,7 +711,10 @@ fn discovery_refuses_an_unloadable_file_and_load_revalidates_the_whole_file() {
     )
     .unwrap();
     assert_eq!(
-        small.load().unwrap_err().problem(),
+        small
+            .load(&LocalInstructionSourceReader)
+            .unwrap_err()
+            .problem(),
         &SkillProblem::NameMismatch {
             name: "other".to_owned()
         }
@@ -714,13 +730,16 @@ fn an_invalid_project_skill_leaves_the_user_skill_of_that_name_listed() {
         "deploy",
         &skill_file("deploy", "User deploy."),
     );
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     let [listed] = discovery.skills() else {
         panic!("{:?}", discovery.skills());
     };
     assert_eq!(listed.scope(), SkillScope::User);
     assert_eq!(
-        listed.load().unwrap().directory(),
+        listed
+            .load(&LocalInstructionSourceReader)
+            .unwrap()
+            .directory(),
         fixture.user().join("deploy")
     );
 }
@@ -744,13 +763,18 @@ fn a_frozen_listing_keeps_only_the_skills_it_named() {
         "commit",
         &skill_file("commit", "Reworded."),
     );
-    let mut now = discover_skills(&fixture.workspace, &fixture.roots());
+    let mut now = fixture.discover();
     now.retain_listed_in(&frozen);
     assert_eq!(
         now.skills().iter().map(Skill::name).collect::<Vec<_>>(),
         ["deploy"]
     );
-    let roots_only = discover_skill_roots(&fixture.workspace, &fixture.roots());
+    let roots_only = discover_skill_roots(
+        &LocalInstructionSourceReader,
+        &fixture.workspace,
+        &fixture.roots(),
+    )
+    .unwrap();
     assert_eq!(roots_only.skills(), [] as [Skill; 0]);
     assert_eq!(roots_only.roots().len(), 2);
 }
@@ -763,7 +787,7 @@ fn skills_cut_by_the_listing_bound_are_not_listed_skills() {
         let name = format!("s{index:02}");
         write_skill(&fixture.project(), &name, &skill_file(&name, &description));
     }
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     let listed = discovery.listed_skills(SkillsPresentation::Claude);
     let rendered = render_skills_listing(SkillsPresentation::Claude, discovery.skills()).unwrap();
     assert!(listed.len() < discovery.skills().len());
@@ -790,7 +814,7 @@ fn disable_model_invocation_takes_the_yaml_core_booleans_only() {
             ),
         );
     }
-    let discovery = discover_skills(&fixture.workspace, &fixture.roots());
+    let discovery = fixture.discover();
     assert_eq!(
         discovery
             .skills()
@@ -802,5 +826,107 @@ fn disable_model_invocation_takes_the_yaml_core_booleans_only() {
     assert_eq!(
         discovery.diagnostics()[0].problem(),
         &SkillProblem::FrontMatter("has a disable-model-invocation that is not true or false")
+    );
+}
+
+/// Skills are discovered and loaded only through the reader: a project root
+/// that exists only where the reader answers is listed under its remote
+/// canonical path and loads from there.
+#[test]
+fn skills_are_discovered_and_loaded_only_through_the_reader() {
+    use crate::test_readers::{RUNNER_ROOT, RemappedReader};
+
+    let fixture = Fixture::new();
+    write_skill(
+        &fixture.project(),
+        "deploy",
+        &skill_file("deploy", "Ship it."),
+    );
+    let base = fixture.workspace.parent().unwrap();
+    let reader = RemappedReader::new(base);
+    let remote_workspace = Path::new(RUNNER_ROOT).join("repo");
+    assert!(!remote_workspace.exists());
+
+    let discovery = discover_skills(
+        &reader,
+        &remote_workspace,
+        &[SkillRoot::project(&remote_workspace)],
+    )
+    .unwrap();
+    assert_eq!(discovery.diagnostics(), [] as [SkillDiagnostic; 0]);
+    let [skill] = discovery.skills() else {
+        panic!("one remote skill is listed");
+    };
+    assert_eq!(skill.name(), "deploy");
+    assert_eq!(
+        skill.file(),
+        remote_workspace
+            .join(PROJECT_SKILLS_DIRECTORY)
+            .join("deploy")
+            .join(SKILL_FILE_NAME)
+    );
+    let loaded = skill.load(&reader).unwrap();
+    assert_eq!(loaded.directory(), skill.directory());
+    assert!(loaded.body().contains("Steps."));
+    assert_eq!(
+        skill
+            .load(&LocalInstructionSourceReader)
+            .unwrap_err()
+            .problem(),
+        &SkillProblem::MissingSkillFile
+    );
+}
+
+/// An unavailable reader fails discovery and loading closed: nothing is
+/// listed as empty and then frozen. Over-long reads are refused, and a
+/// listing's duplicate or non-name entries are never read.
+#[test]
+fn a_misbehaving_reader_fails_skills_closed() {
+    use crate::test_readers::{Misbehavior, ScriptedReader};
+
+    let fixture = Fixture::new();
+    write_skill(
+        &fixture.project(),
+        "deploy",
+        &skill_file("deploy", "Ship it."),
+    );
+    let discover = |misbehavior| {
+        discover_skills(
+            &ScriptedReader(misbehavior),
+            &fixture.workspace,
+            &fixture.roots(),
+        )
+    };
+    assert_eq!(
+        discover(Misbehavior::Unavailable),
+        Err(SourceReadError::Unavailable)
+    );
+    assert_eq!(
+        discover_skill_roots(
+            &ScriptedReader(Misbehavior::Unavailable),
+            &fixture.workspace,
+            &fixture.roots(),
+        ),
+        Err(SourceReadError::Unavailable)
+    );
+    assert_eq!(
+        discover(Misbehavior::OverReads),
+        Err(SourceReadError::InvalidAnswer)
+    );
+    let listed = discover(Misbehavior::MalformedListing).unwrap();
+    assert_eq!(
+        listed.skills().iter().map(Skill::name).collect::<Vec<_>>(),
+        ["deploy"]
+    );
+    assert_eq!(listed.diagnostics(), [] as [SkillDiagnostic; 0]);
+
+    let discovery = fixture.discover();
+    let skill = &discovery.skills()[0];
+    assert_eq!(
+        skill
+            .load(&ScriptedReader(Misbehavior::Unavailable))
+            .unwrap_err()
+            .problem(),
+        &SkillProblem::Reader(SourceReadError::Unavailable)
     );
 }

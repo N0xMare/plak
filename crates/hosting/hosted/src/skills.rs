@@ -15,6 +15,7 @@ use plakous::agent::RegisteredContextSource;
 use plakous::model::{
     ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolName, ToolOutputContract,
 };
+use plakous::prompts::instructions::{InstructionSourceReader, LocalInstructionSourceReader};
 use plakous::prompts::skills::{
     Skill, SkillDiscovery, SkillRoot, SkillScope, SkillsPresentation, discover_skill_roots,
     discover_skills,
@@ -101,31 +102,56 @@ pub(crate) enum SkillsMode<'a> {
 }
 
 /// One node's skills, discovered once when its tools are built.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct NodeSkills {
     presentation: SkillsPresentation,
     on: bool,
     new_construction: bool,
     discovery: Arc<SkillDiscovery>,
+    /// Where the skill files are read, at discovery and at every `Skill` load.
+    reader: Arc<dyn InstructionSourceReader>,
+}
+
+impl std::fmt::Debug for NodeSkills {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NodeSkills")
+            .field("presentation", &self.presentation)
+            .field("on", &self.on)
+            .field("new_construction", &self.new_construction)
+            .field("discovery", &self.discovery)
+            .finish_non_exhaustive()
+    }
 }
 
 impl NodeSkills {
+    /// Discovers the node's skills.
+    ///
+    /// # Errors
+    /// Fails when the reader cannot answer, so an unreachable skills root is
+    /// never frozen into the session as an empty listing.
     pub(crate) fn discover(
         setting: &SkillsSetting,
         mode: SkillsMode<'_>,
         workspace_root: &Path,
         presentation: SkillsPresentation,
-    ) -> Self {
+    ) -> CliResult<Self> {
         let roots = setting.roots(workspace_root);
-        let fresh = |on: bool| Self {
-            presentation,
-            on,
-            new_construction: true,
-            discovery: Arc::new(if on {
-                discover_skills(workspace_root, &roots)
-            } else {
-                SkillDiscovery::default()
-            }),
+        let reader: Arc<dyn InstructionSourceReader> = Arc::new(LocalInstructionSourceReader);
+        let unreadable =
+            |error| CliFailure::new(format!("skills could not be discovered: {error}"));
+        let fresh = |on: bool| {
+            Ok(Self {
+                presentation,
+                on,
+                new_construction: true,
+                discovery: Arc::new(if on {
+                    discover_skills(reader.as_ref(), workspace_root, &roots).map_err(unreadable)?
+                } else {
+                    SkillDiscovery::default()
+                }),
+                reader: Arc::clone(&reader),
+            })
         };
         let frozen = match mode {
             SkillsMode::New => return fresh(setting.enabled),
@@ -134,20 +160,22 @@ impl NodeSkills {
         };
         let discovery = if frozen.on && presentation == SkillsPresentation::Claude {
             // The tool may load exactly what the frozen listing names.
-            let mut discovery = discover_skills(workspace_root, &roots);
+            let mut discovery =
+                discover_skills(reader.as_ref(), workspace_root, &roots).map_err(unreadable)?;
             discovery.retain_listed_in(frozen.listing.as_deref().unwrap_or_default());
             discovery
         } else if frozen.on || frozen.listing.is_some() {
-            discover_skill_roots(workspace_root, &roots)
+            discover_skill_roots(reader.as_ref(), workspace_root, &roots).map_err(unreadable)?
         } else {
             SkillDiscovery::default()
         };
-        Self {
+        Ok(Self {
             presentation,
             on: frozen.on,
             new_construction: false,
             discovery: Arc::new(discovery),
-        }
+            reader,
+        })
     }
 
     /// Whether `Skill` is presented: the node's skills are on and it speaks
@@ -207,7 +235,7 @@ impl NodeSkills {
         } else {
             self.discovery.skills().into()
         };
-        skill_tool_registration(loadable).map(Some)
+        skill_tool_registration(loadable, Arc::clone(&self.reader)).map(Some)
     }
 }
 
@@ -220,7 +248,10 @@ pub(crate) const SKILL_TOOL_NAME: &str = "Skill";
 const MAX_SKILL_RESULT_BYTES: usize = 200 * 1024;
 const ISSUER: &[u8] = b"plak.skills";
 
-fn skill_tool_registration(skills: Arc<[Skill]>) -> CliResult<ToolRegistration> {
+fn skill_tool_registration(
+    skills: Arc<[Skill]>,
+    reader: Arc<dyn InstructionSourceReader>,
+) -> CliResult<ToolRegistration> {
     let invalid = |_| CliFailure::new("Skill tool definition is invalid");
     let definition = ToolDefinition::new(
         ToolName::new(SKILL_TOOL_NAME).map_err(invalid)?,
@@ -256,13 +287,14 @@ fn skill_tool_registration(skills: Arc<[Skill]>) -> CliResult<ToolRegistration> 
         ToolExecutorBindingIdentity::new(1, &[ISSUER, SKILL_TOOL_NAME.as_bytes()])
             .map_err(|_| CliFailure::new("Skill binding identity is invalid"))?,
         definition,
-        Arc::new(SkillTool { skills }),
+        Arc::new(SkillTool { skills, reader }),
     )
     .nested_eligible())
 }
 
 struct SkillTool {
     skills: Arc<[Skill]>,
+    reader: Arc<dyn InstructionSourceReader>,
 }
 
 #[derive(Deserialize)]
@@ -290,7 +322,12 @@ impl ToolExecutor for SkillTool {
             let name = name.strip_prefix('/').unwrap_or(name);
             let subject: String = name.chars().take(100).collect();
             context.progress().report(&subject, None, None)?;
-            match skill_result(&self.skills, name, args.args.as_deref()) {
+            match skill_result(
+                &self.skills,
+                self.reader.as_ref(),
+                name,
+                args.args.as_deref(),
+            ) {
                 Ok(text) => ToolOutcome::success_text(text),
                 Err(message) => ToolOutcome::failure_text(message),
             }
@@ -301,13 +338,18 @@ impl ToolExecutor for SkillTool {
 /// The result text Claude Code's `Skill` produces: the launch line, the base
 /// directory, the skill body, and any arguments. Only a listed skill loads,
 /// and only while it is still valid.
-fn skill_result(skills: &[Skill], name: &str, args: Option<&str>) -> Result<String, String> {
+fn skill_result(
+    skills: &[Skill],
+    reader: &dyn InstructionSourceReader,
+    name: &str,
+    args: Option<&str>,
+) -> Result<String, String> {
     let listed = skills
         .iter()
         .find(|skill| skill.name() == name)
         .ok_or_else(|| format!("Unknown skill: {name}"))?;
     let loaded = listed
-        .load()
+        .load(reader)
         .map_err(|diagnostic| format!("Unknown skill: {name} ({diagnostic})"))?;
     let mut text = format!(
         "Launching skill: {}\n\nBase directory for this skill: {}\n\n{}",

@@ -11,7 +11,10 @@
 compile_error!("plakous-tools requires a unix target (spec 06 supported platforms)");
 
 mod jobs;
-pub use jobs::{JobConfig, JobHost, JobHostCapacity, JobOwner, JobStatus, JobStopReason, JobView};
+pub use jobs::{
+    JobConfig, JobHost, JobHostCapacity, JobOwner, JobStatus, JobStopReason, JobView,
+    JoinedSessionsPort,
+};
 
 mod admission;
 mod capabilities;
@@ -37,6 +40,7 @@ mod retrieval;
 mod schema;
 mod standard_identity;
 mod visual_read;
+mod workspace_probe;
 
 pub use admission::*;
 pub use capabilities::*;
@@ -60,6 +64,7 @@ pub use registry::*;
 pub use retrieval::*;
 pub use schema::*;
 pub use standard_identity::*;
+pub use workspace_probe::{LocalWorkspaceProbe, ProbeError, WorkspaceProbe};
 
 #[cfg(test)]
 pub(crate) mod test_support {

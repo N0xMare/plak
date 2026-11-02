@@ -19,7 +19,7 @@ use shutdown::shutdown_runtime;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -29,6 +29,7 @@ use futures_util::FutureExt;
 
 use plakous::agent::{Agent, CommandId, TurnControl, TurnResultHandle};
 use plakous::model::TurnId;
+use plakous::tools::{LocalWorkspaceProbe, ProbeError, WorkspaceProbe};
 
 use crate::tools::TreeDriver;
 use crate::tree::{ProductAgentTree, TopologyObserver, TreeStore};
@@ -741,38 +742,76 @@ pub fn lookup(tree_id: &str) -> Option<Arc<ProductTopologyRuntime>> {
     process_hub().lookup(tree_id)
 }
 
-/// Observational Read/Grep stamp for a session workspace root, if a hub tree owns it.
-pub fn generation_stamp_for_workspace_root(root: &Path) -> Option<Arc<AtomicU64>> {
-    for runtime in process_hub().runtimes() {
-        if let Ok(Some(stamp)) = runtime
-            .driver()
-            .read(|tree| tree.generation_counter_for_root(root))
-        {
-            return Some(stamp);
-        }
-    }
-    None
+/// `path` resolved through `probe`; a path that does not resolve keeps its
+/// recorded form. Called outside every tree lock.
+fn resolved_or_recorded(probe: &dyn WorkspaceProbe, path: &Path) -> Result<PathBuf, ProbeError> {
+    Ok(probe
+        .canonicalize(path)?
+        .unwrap_or_else(|| path.to_path_buf()))
 }
 
-/// Recorded mint base for a copy owned by an attached tree.
-pub fn workspace_base_for_root(root: &Path) -> Option<String> {
-    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+/// Observational Read/Grep stamp for a session workspace root, if a hub tree
+/// owns it. Paths are resolved between two short tree reads, never under the
+/// tree lock.
+///
+/// # Errors
+/// Returns [`ProbeError::Unavailable`] when the workspace cannot be probed.
+pub fn generation_stamp_for_workspace_root(
+    root: &Path,
+) -> Result<Option<Arc<AtomicU64>>, ProbeError> {
+    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let root = resolved_or_recorded(probe, root)?;
     for runtime in process_hub().runtimes() {
-        if let Ok(Some(base)) = runtime.driver().read(|tree| {
-            tree.workspaces()
-                .values()
-                .filter(|row| {
-                    let path =
-                        std::fs::canonicalize(&row.path).unwrap_or_else(|_| row.path.clone());
-                    root == path || root.starts_with(path)
-                })
-                .max_by_key(|row| row.path.components().count())
-                .and_then(|row| row.base_commit.clone())
-        }) {
-            return Some(base);
+        let Ok(rows) = runtime.driver().read(ProductAgentTree::workspace_paths) else {
+            continue;
+        };
+        let resolved = rows
+            .into_iter()
+            .map(|(id, path)| Ok((id, resolved_or_recorded(probe, &path)?)))
+            .collect::<Result<Vec<_>, ProbeError>>()?;
+        if let Ok(Some(stamp)) = runtime
+            .driver()
+            .read(|tree| tree.generation_counter_for_root(&root, &resolved))
+        {
+            return Ok(Some(stamp));
         }
     }
-    None
+    Ok(None)
+}
+
+/// Recorded mint base for a copy owned by an attached tree. Paths are
+/// resolved after the tree read, never under the tree lock.
+///
+/// # Errors
+/// Returns [`ProbeError::Unavailable`] when the workspace cannot be probed.
+pub fn workspace_base_for_root(root: &Path) -> Result<Option<String>, ProbeError> {
+    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let root = resolved_or_recorded(probe, root)?;
+    for runtime in process_hub().runtimes() {
+        let Ok(rows) = runtime.driver().read(|tree| {
+            tree.workspaces()
+                .values()
+                .map(|row| (row.path.clone(), row.base_commit.clone()))
+                .collect::<Vec<_>>()
+        }) else {
+            continue;
+        };
+        let mut matching = Vec::new();
+        for (path, base) in rows {
+            let resolved = resolved_or_recorded(probe, &path)?;
+            if root == resolved || root.starts_with(resolved) {
+                matching.push((path, base));
+            }
+        }
+        if let Some(base) = matching
+            .into_iter()
+            .max_by_key(|(path, _)| path.components().count())
+            .and_then(|(_, base)| base)
+        {
+            return Ok(Some(base));
+        }
+    }
+    Ok(None)
 }
 
 /// Inserts a working copy over an in-memory store, or returns the occupant

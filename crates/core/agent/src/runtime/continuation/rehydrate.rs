@@ -75,6 +75,7 @@ pub(in crate::runtime) fn runtime_revalidation_witness(
     )?;
     let environment = stable_runtime_environment_component(
         workspace,
+        tools.environment().descriptor().backend(),
         local_composition,
         provider_configuration,
         crate::runtime::build::live_job_config(tools)?,

@@ -1360,17 +1360,33 @@ impl ProductAgentTree {
         }
     }
 
+    /// Every workspace row's id and recorded path, in row order: what a
+    /// caller resolves through its workspace probe, outside the tree lock,
+    /// before [`Self::generation_counter_for_root`].
+    #[must_use]
+    pub fn workspace_paths(&self) -> Vec<(String, PathBuf)> {
+        self.workspaces
+            .values()
+            .map(|row| (row.workspace_id.clone(), row.path.clone()))
+            .collect()
+    }
+
     /// Shared observational counter for Read/Grep stamps. Prefer the longest
     /// matching workspace path so minted copies do not inherit the launch root.
-    pub fn generation_counter_for_root(&self, root: &Path) -> Option<Arc<AtomicU64>> {
-        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    /// `root` and `resolved` (each row id with its path) were resolved before
+    /// the tree lock was taken; the tree itself does no I/O here.
+    #[must_use]
+    pub fn generation_counter_for_root(
+        &self,
+        root: &Path,
+        resolved: &[(String, PathBuf)],
+    ) -> Option<Arc<AtomicU64>> {
         let mut best: Option<(&str, usize)> = None;
-        for row in self.workspaces.values() {
-            let path = std::fs::canonicalize(&row.path).unwrap_or_else(|_| row.path.clone());
-            if root == path || root.starts_with(&path) {
+        for (id, path) in resolved {
+            if root == path || root.starts_with(path) {
                 let depth = path.components().count();
                 if best.is_none_or(|(_, current)| depth >= current) {
-                    best = Some((row.workspace_id.as_str(), depth));
+                    best = Some((id.as_str(), depth));
                 }
             }
         }

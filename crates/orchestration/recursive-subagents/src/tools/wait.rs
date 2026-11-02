@@ -148,7 +148,7 @@ impl TopologyTool {
         }
         let generation = jobs.as_ref().map_or(
             0,
-            plakous::tools::JoinedProcessSessions::job_terminal_generation,
+            plakous::tools::JoinedSessionsPort::job_terminal_generation,
         );
         let _waiting = MailConsumerGuard {
             driver: self.driver.clone(),
@@ -172,7 +172,7 @@ impl TopologyTool {
             let jobs = self.driver.job_service(&caller);
             let mut job_changes = jobs
                 .as_ref()
-                .map(plakous::tools::JoinedProcessSessions::job_terminal_changes);
+                .map(plakous::tools::JoinedSessionsPort::job_terminal_changes);
             // the wait stays poll-driven. The notifier is
             // subscribed before the poll so a settle, seal, question, mail, or
             // steer that lands during it still wakes the next park instead of
@@ -333,7 +333,7 @@ impl TopologyTool {
         operation_id: &str,
         presented: &R,
         request: &AwaitRequest,
-        jobs: Option<&plakous::tools::JoinedProcessSessions>,
+        jobs: Option<&plakous::tools::JoinedSessionsPort>,
         mut output: AwaitOutput,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         output.jobs = await_job_rows(jobs, &request.processes);

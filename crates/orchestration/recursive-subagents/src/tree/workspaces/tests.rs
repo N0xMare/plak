@@ -254,6 +254,7 @@ fn mutate_completion_bumps_its_fork_generation() {
                 .unwrap()
                 .path
                 .as_path(),
+            &tree.workspace_paths(),
         )
         .expect("fork stamp");
     assert_eq!(counter.load(Ordering::SeqCst), 0);

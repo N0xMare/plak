@@ -2122,10 +2122,10 @@ fn minted_child_session_root_cannot_read_parent_seed() {
     std::fs::create_dir_all(&minted).expect("minted");
     std::fs::write(minted.join("CHILD.txt"), "child\n").expect("child");
     assert_eq!(
-        child_session_workspace_root(launch.path(), launch.path()),
+        child_session_workspace_root(launch.path(), launch.path()).expect("inherit root"),
         launch.path()
     );
-    let fenced = child_session_workspace_root(launch.path(), &minted);
+    let fenced = child_session_workspace_root(launch.path(), &minted).expect("fenced root");
     assert_eq!(fenced, minted);
     let policy = WorkspacePolicy::host(&fenced, Path::new(".")).expect("policy");
     assert!(policy.resolve_existing("CHILD.txt").is_ok());

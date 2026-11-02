@@ -383,9 +383,16 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     // A source this host left (a clear, fork or rebind) may still be
     // releasing its attachment; read its record only after the join.
     let next = load_settled_source(executor, config, events, session_id, waited)?;
-    let requested = std::fs::canonicalize(&config.cwd).unwrap_or_else(|_| config.cwd.clone());
-    let recorded =
-        std::fs::canonicalize(&next.workspace_root).unwrap_or_else(|_| next.workspace_root.clone());
+    let probe: &dyn plakous::tools::WorkspaceProbe = &plakous::tools::LocalWorkspaceProbe;
+    let unavailable = crate::process_environment::probe_unavailable;
+    let requested = probe
+        .canonicalize(&config.cwd)
+        .map_err(unavailable)?
+        .unwrap_or_else(|| config.cwd.clone());
+    let recorded = probe
+        .canonicalize(&next.workspace_root)
+        .map_err(unavailable)?
+        .unwrap_or_else(|| next.workspace_root.clone());
     if requested != recorded
         || !exact_resume_target_matches(&config.session, &next, &config.model_id)
     {

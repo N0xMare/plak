@@ -818,7 +818,7 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
             SpawnParent::Api(parent) => &parent.workspace_root,
         },
         &child_path,
-    );
+    )?;
     let selected_effort = crate::runtime::effort_from_record(effort)?;
     let child = ApiTopologyParent {
         created_output_bound,
@@ -979,7 +979,7 @@ pub async fn spawned_child_spec(
         ),
     };
     let child_path = PathBuf::from(path);
-    let workspace_root = child_session_workspace_root(&workspace_root_base, &child_path);
+    let workspace_root = child_session_workspace_root(&workspace_root_base, &child_path)?;
     let account = account.filter(|value| !value.is_empty());
     let tuple_id = tuple_id.filter(|value| !value.is_empty());
     let effort = effort.filter(|value| !value.is_empty());
@@ -1111,20 +1111,25 @@ fn child_tool_mode_label(mode: Option<plakous::subscriptions::NativeToolMode>) -
 /// Child `WorkspacePolicy` root is that POSIX copy only.
 /// Inherit on the caller copy keeps the parent root; a minted/existing distinct
 /// copy is fenced to `child_path` so `../` cannot reach parent or siblings.
+/// A probe that cannot answer fails the spawn.
 pub(in crate::agent) fn child_session_workspace_root(
     parent_root: &Path,
     child_path: &Path,
-) -> PathBuf {
+) -> crate::CliResult<PathBuf> {
     if parent_root == child_path {
-        return parent_root.to_path_buf();
+        return Ok(parent_root.to_path_buf());
     }
-    match (
-        std::fs::canonicalize(parent_root),
-        std::fs::canonicalize(child_path),
-    ) {
-        (Ok(parent), Ok(child)) if parent == child => parent_root.to_path_buf(),
-        _ => child_path.to_path_buf(),
-    }
+    let probe: &dyn plakous::tools::WorkspaceProbe = &plakous::tools::LocalWorkspaceProbe;
+    let unavailable = crate::process_environment::probe_unavailable;
+    Ok(
+        match (
+            probe.canonicalize(parent_root).map_err(unavailable)?,
+            probe.canonicalize(child_path).map_err(unavailable)?,
+        ) {
+            (Some(parent), Some(child)) if parent == child => parent_root.to_path_buf(),
+            _ => child_path.to_path_buf(),
+        },
+    )
 }
 
 /// The child's first prompt: the spawn brief alone, or the brief plus a mail
