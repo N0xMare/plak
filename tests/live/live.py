@@ -2074,6 +2074,13 @@ def pin_composition(home: Path, composition: str) -> None:
         path.write_text(text.replace(needle, f'composition = "{composition}"\n'))
 
 
+# Process environment from before `isolate_test_environment`. A `plak` child
+# is built from this snapshot so it does not inherit the gate TMPDIR (a
+# `--fresh` gate empties it) or the empty git config. None until a driver
+# isolates; a second isolate keeps the first snapshot.
+_plak_child_source: dict[str, str] | None = None
+
+
 def test_environment() -> dict[str, str]:
     """The four variables from `tools/gate/test-env.sh` over the current environment."""
     # __file__, not ROOT: live tests patch ROOT to a capture workspace.
@@ -2085,8 +2092,26 @@ def test_environment() -> dict[str, str]:
 
 
 def isolate_test_environment() -> None:
-    """Point this driver at the isolated test home, scratch and git config."""
+    """Point this driver at the isolated test home, scratch and git config.
+
+    The helper stays on this process, for fixture git and scratch. A `plak`
+    child keeps the environment from before the first call (`plak_child_source`).
+    """
+    global _plak_child_source
+    if _plak_child_source is None:
+        _plak_child_source = dict(os.environ)
     os.environ.update(test_environment())
+
+
+def plak_child_source() -> dict[str, str]:
+    """The environment a `plak` child inherits.
+
+    After `isolate_test_environment`, this is the process environment from
+    before that call. Otherwise it is a copy of the current environment.
+    """
+    if _plak_child_source is None:
+        return dict(os.environ)
+    return dict(_plak_child_source)
 
 
 def fixture_git_env() -> dict[str, str]:
@@ -2094,7 +2119,8 @@ def fixture_git_env() -> dict[str, str]:
 
     An operator's global `commit.gpgsign` or hooks would otherwise run inside
     fixture setup. Returned for git only; a driver that calls
-    `isolate_test_environment` also applies it to the process.
+    `isolate_test_environment` also applies it to the process. It is not the
+    `plak` child's environment.
     """
     return test_environment()
 
@@ -2353,7 +2379,7 @@ class Env:
         # product-supported file store. Drop all supported API-key variables;
         # this harness intentionally authenticates only through that store.
         dropped |= set(API_KEY_ENV.values())
-        source = source if source is not None else os.environ
+        source = plak_child_source() if source is None else source
         env = {key: value for key, value in source.items() if key not in dropped}
         env["PLAK_HOME"] = str(self.home)
         capture_dir = (

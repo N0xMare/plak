@@ -759,9 +759,13 @@ suite inherit them. An operator's global
 `commit.gpgsign`, hooks path, aliases or identity cannot reach a fixture. A test
 that commits sets its identity on its own command (`-c user.name=...
 -c user.email=...`) or in its fixture repository's local config, never through
-the global config. The live drivers give their own fixture git the same
-isolation. A driver that applies the helper also exports it for that process;
-the `plak` child still sets its own `PLAK_HOME`. `just nextest` exports all four.
+the global config. The live drivers give their own fixture git and scratch the same isolation.
+`isolate_test_environment` snapshots the process environment, then exports the
+helper onto the driver. A `plak` child is built from that snapshot
+(`Env.environ`'s `source`, and the other child launches), so it does not
+inherit the per-checkout `TMPDIR` (a `--fresh` gate empties that directory)
+or the empty git config. The child still sets its own `PLAK_HOME`. `just nextest`
+exports all four for the test process.
 
 | Layer | Command | What it proves |
 | --- | --- | --- |

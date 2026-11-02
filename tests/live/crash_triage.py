@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -107,7 +106,9 @@ def rehearsal_verdict(text: str) -> str | None:
 
 
 def inspect(binary: Path, repo: Path, home: Path, session: str) -> str:
-    env = dict(os.environ)
+    import live
+
+    env = live.plak_child_source()
     env["PLAK_HOME"] = str(home)
     for key in (
         "PLAK_TEST_FAULTS",

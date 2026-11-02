@@ -1401,7 +1401,7 @@ def _session_command(
     binary: Path, home: Path, args: list[str], timeout: float
 ) -> tuple[int, str, str]:
     """`plak session …` against `home`. A dead binary or a timeout is the channel failing."""
-    env = os.environ.copy()
+    env = live.plak_child_source()
     env["PLAK_HOME"] = str(home)
     env.pop("PLAK_TEST_FAULTS", None)
     try:

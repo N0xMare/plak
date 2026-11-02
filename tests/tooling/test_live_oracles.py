@@ -206,6 +206,37 @@ class LiveOracleTests(unittest.TestCase):
             self.assertEqual(copied.read_text(), "fixture-value\n")
             self.assertEqual(copied.stat().st_mode & 0o777, 0o600)
 
+    def test_isolated_driver_keeps_gate_env_off_the_plak_child(self):
+        saved_environ = os.environ.copy()
+        saved_source = live._plak_child_source
+        try:
+            os.environ["TMPDIR"] = "/operator/tmp"
+            os.environ["GIT_CONFIG_GLOBAL"] = "/operator/gitconfig"
+            os.environ.pop("GIT_CONFIG_NOSYSTEM", None)
+            live._plak_child_source = None
+            gate = {
+                "TMPDIR": "/gate/tmp",
+                "PLAK_HOME": "/gate/tmp/plak-isolated-home",
+                "GIT_CONFIG_GLOBAL": "/gate/tmp/gitconfig",
+                "GIT_CONFIG_NOSYSTEM": "1",
+            }
+            with patch.object(live.subprocess, "check_output", return_value=json.dumps(gate)):
+                live.isolate_test_environment()
+                live.isolate_test_environment()
+            self.assertEqual(os.environ["TMPDIR"], "/gate/tmp")
+            self.assertEqual(os.environ["GIT_CONFIG_NOSYSTEM"], "1")
+            base = self.capture_workspace
+            child = live.Env(base / "plak", base / "home", base).environ()
+            self.assertEqual(child["TMPDIR"], "/operator/tmp")
+            self.assertEqual(child["GIT_CONFIG_GLOBAL"], "/operator/gitconfig")
+            self.assertNotIn("GIT_CONFIG_NOSYSTEM", child)
+            self.assertEqual(child["PLAK_HOME"], str(base / "home"))
+            self.assertNotEqual(child["PLAK_HOME"], gate["PLAK_HOME"])
+        finally:
+            os.environ.clear()
+            os.environ.update(saved_environ)
+            live._plak_child_source = saved_source
+
     def test_environment_removes_override(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

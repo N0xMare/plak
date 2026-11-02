@@ -344,7 +344,7 @@ def session_log(env: live.Env, home: Path, repo: Path, session: str) -> list[dic
     """`plak session log <id> --json`: the session's narrative, unchanged."""
     child = {
         key: value
-        for key, value in os.environ.items()
+        for key, value in live.plak_child_source().items()
         if key not in ("PLAK_TEST_FAULTS", "PLAK_TEST_EXCHANGE_CAPTURE_DIR")
     }
     child["PLAK_HOME"] = str(home)
@@ -818,7 +818,7 @@ class Features:
             raise ScenarioFailure(HARNESS, "gh auth token returned no token")
         child = {
             key: value
-            for key, value in os.environ.items()
+            for key, value in live.plak_child_source().items()
             if key not in ("PLAK_TEST_FAULTS", "PLAK_TEST_EXCHANGE_CAPTURE_DIR")
         }
         child["PLAK_HOME"] = str(home)
@@ -978,7 +978,7 @@ class Features:
         """The stored login's generation, from `plak doctor`; a refresh bumps it."""
         child = {
             key: value
-            for key, value in os.environ.items()
+            for key, value in live.plak_child_source().items()
             if key not in ("PLAK_TEST_EXCHANGE_CAPTURE_DIR", "PLAK_TEST_FAULTS")
         }
         doctor_home = self.env.artifacts / "doctor-home"
