@@ -68,6 +68,26 @@ for entry in "${order[@]}"; do selection+=(-p "${entry%% *}"); done
 echo "== publish order (${#order[@]} crates) =="
 printf '  %s\n' "${order[@]}"
 
+# The body is the staged tree, lock, toolchain, cohort, Cargo environment and
+# Cargo config, captured once before packaging. A later dry run or `--gate`
+# reuses a receipt of that same body. `--execute` always verifies fresh. A
+# miss, or any doubt, falls through and verifies. The receipt is written only
+# after verification, from this body, and lives beside the gate target rather
+# than in the package directory this script wipes.
+receipt="$target_dir/gate-evidence/package-verification"
+body="$scratch/verification-body.json"
+if ! python3 "$root/tools/release/package_verification_cache.py" capture \
+  --stage "$stage" --order "$scratch/order" --body "$body"; then
+  echo "publish: verification inputs could not be fingerprinted; verifying fresh" >&2
+  rm -f "$body"
+fi
+if [[ "$mode" != execute && -f "$body" ]] && python3 "$root/tools/release/package_verification_cache.py" hit \
+  --body "$body" --receipt "$receipt"; then
+  echo "publish: verification cache hit; skipping packaging and verification"
+  echo "== ok: $mode reused the recorded verification of ${#order[@]} crates; nothing uploaded =="
+  exit 0
+fi
+
 # One invocation packages the cohort: Cargo resolves the members against a
 # local overlay of the packages it just built and verifies each in order.
 # Cargo unpacks overlay packages into the cargo home under name-version and
@@ -95,6 +115,10 @@ done
 python3 "$root/tools/release/prefetch_packages.py" "$scratch/inputs" "${archives[@]}"
 echo "== cargo package --locked (offline verification) =="
 CARGO_NET_OFFLINE=true cargo package --locked "${selection[@]}"
+if [[ -f "$body" ]] && ! python3 "$root/tools/release/package_verification_cache.py" record \
+  --body "$body" --receipt "$receipt"; then
+  echo "publish: verification succeeded but the receipt was not recorded" >&2
+fi
 
 if [[ "$mode" != execute ]]; then
   echo "== ok: $mode packaged and verified ${#order[@]} crates; nothing uploaded =="

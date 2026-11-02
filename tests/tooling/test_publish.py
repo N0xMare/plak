@@ -41,9 +41,11 @@ CARGO_SHIM = r'''
 import io, json, os, sys, tarfile, tomllib
 from pathlib import Path
 args = sys.argv[1:]
-if args[:1] == ["metadata"]:
+if args[:1] == ["metadata"] or args == ["--version"]:
     os.execv(os.environ["REAL_CARGO"], [os.environ["REAL_CARGO"], *args])
 manifest = Path("bin/plak/Cargo.toml")
+if args[:1] == ["package"] and "--no-verify" not in args and os.environ.get("FAKE_VERIFY_FAIL") == "1":
+    sys.exit(1)
 with open(os.environ["FAKE_CARGO_LOG"], "a") as log:
     log.write(json.dumps(dict(
         args=args, cwd=os.getcwd(), target_dir=os.environ.get("CARGO_TARGET_DIR"),
@@ -129,6 +131,7 @@ class PublishScriptTests(unittest.TestCase):
             "tools/release/prefetch_packages.py",
             "tools/release/gate_evidence.py",
             "tools/release/offline_first.py",
+            "tools/release/package_verification_cache.py",
             "tools/gate/cargo_key.py",
             "tools/gate/vcs_listing.py",
             "tools/gate/check_workspace.py",
@@ -199,6 +202,10 @@ class PublishScriptTests(unittest.TestCase):
         )
         sleep.chmod(0o700)
         self.sleeps = base / "sleeps"
+        # Bytecode and cargo output are not part of the staged tree. Without
+        # this, a gate run's __pycache__ dirties the fixture and changes the
+        # next staged-tree hash.
+        (self.repo / ".gitignore").write_text("__pycache__/\n*.pyc\ntarget/\n", encoding="utf-8")
         self.git("init", "-q")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "fixture")
@@ -438,6 +445,9 @@ class PublishScriptTests(unittest.TestCase):
     def test_a_stale_index_entry_is_refreshed_and_the_offline_step_retried(self) -> None:
         for step in ("package", "fetch"):
             with self.subTest(step=step):
+                # Each iteration must exercise Cargo. A matching receipt from the
+                # previous iteration would otherwise skip verification.
+                (self.target / "gate-evidence" / "package-verification").unlink(missing_ok=True)
                 self.env["FAKE_STALE_INDEX"] = step
                 result, calls = self.publish("--gate")
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -585,6 +595,69 @@ class PublishScriptTests(unittest.TestCase):
         self.assertIn("exceeds the 900s maximum", result.stderr)
         self.assertFalse(self.sleeps.exists())
         self.assertEqual(len([c for c in calls if c["args"][0] == "publish"]), 1)
+
+    def test_a_matching_verification_is_reused_until_the_tree_changes(self) -> None:
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        receipt = self.target / "gate-evidence" / "package-verification"
+        self.assertTrue(receipt.is_file(), result.stdout)
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.prefetch_calls, [])
+        self.assertIn("verification cache hit", result.stdout)
+        self.assertIn("nothing uploaded", result.stdout)
+        self.commit({"crates/zeta/src/lib.rs": "// changed\n"})
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assert_packaged_in_order(calls[0])
+
+    def test_a_corrupt_receipt_verifies_fresh(self) -> None:
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = self.target / "gate-evidence" / "package-verification"
+        receipt.write_text("{", encoding="utf-8")
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+
+    def test_a_failed_verification_writes_no_receipt_and_the_next_run_packages(self) -> None:
+        self.env["FAKE_VERIFY_FAIL"] = "1"
+        result, calls = self.publish("--gate")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+        receipt = self.target / "gate-evidence" / "package-verification"
+        self.assertFalse(receipt.exists())
+        del self.env["FAKE_VERIFY_FAIL"]
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(receipt.is_file())
+
+    def test_execute_verifies_even_when_a_receipt_matches(self) -> None:
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        tokens = {
+            "CARGO_REGISTRY_TOKEN": "e6-fixture-registry-token",
+            "CARGO_REGISTRIES_MIRROR_TOKEN": "e6-fixture-mirror-token",
+        }
+        self.env.update(tokens)
+        # A token is not part of the body: the same tree still matches.
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+        self.assertIn("verification cache hit", result.stdout)
+        self.record_evidence()
+        result, calls = self.publish("--execute")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_packaged_in_order(calls[0])
+        self.assertNotIn("verification cache hit", result.stdout)
+        receipt = (self.target / "gate-evidence" / "package-verification").read_bytes()
+        for value in tokens.values():
+            self.assertNotIn(value.encode(), receipt)
 
 
 class PublishRetryTests(unittest.TestCase):

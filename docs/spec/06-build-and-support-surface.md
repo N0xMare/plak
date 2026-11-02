@@ -1363,11 +1363,32 @@ offline. An explicit `CARGO_NET_OFFLINE=true` remains authoritative during
 prefetch as well. No separate warm-up is needed. The verification target directory holds
 a debug build per crate selection and is roughly 20 GB.
 
+A dry run and `--gate` skip that packaging and verification when
+`<target>/gate-evidence/package-verification` matches the body captured before
+packaging. Every body field is a SHA-256: of the staged tree (each entry in path
+order with its kind: a regular file's bytes and executable bit, a symlink's
+`readlink` text, a directory); of `Cargo.lock` (absence is its own value); of
+the toolchain (`cargo --version` and `rustc -vV`); of the cohort name/version
+list; of the canonical JSON of the same Cargo environment as the
+workspace-check cache (every `CARGO_*` variable except the four terminal
+decoration variables and the credential variables, plus `RUSTC`, `RUSTFLAGS`
+and `RUSTUP_TOOLCHAIN`); and of the lstat identities of `$CARGO_HOME/config.toml`,
+`$CARGO_HOME/config` and every ancestor `.cargo/config.toml` and `.cargo/config`
+of the stage through `/`. Neither the body nor the receipt holds an environment
+value, so a registry token never reaches either. The receipt stores that body
+plus a SHA-256 of its canonical JSON. It is written only after offline
+verification succeeds, from the body captured before packaging, beside the gate
+target rather than inside the verification directory the script clears. A
+missing, unreadable, non-object or checksum-mismatched receipt verifies fresh,
+including a valid JSON object whose field changed without its checksum. A
+failed verification writes no receipt. `--execute` ignores the receipt and
+always verifies fresh; a successful verification still refreshes the receipt.
+
 | Invocation | Preconditions | Effect |
 | --- | --- | --- |
-| `tools/release/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` or a tree that differs from it only in documentation (below) | Package and verify; nothing uploaded |
-| `tools/release/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification |
-| `tools/release/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
+| `tools/release/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` or a tree that differs from it only in documentation (below) | Package and verify, or reuse a matching verification receipt (above); nothing uploaded |
+| `tools/release/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification, unless the verification receipt matches |
+| `tools/release/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | Always verifies fresh, ignoring the receipt. Then `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
 
 Publication dry runs and `--execute` use `tools/release/review_expiry.py` to
 read the review date and deadline of all seven compiled surfaces (the three
