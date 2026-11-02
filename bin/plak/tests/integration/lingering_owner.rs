@@ -112,11 +112,14 @@ fn wait_for_the_refusal(agent: &AgentProcess, before: usize) -> Vec<Value> {
 
 #[test]
 fn a_lingering_owner_past_its_lease_changes_nothing_of_the_new_owner() {
+    // Three seconds stays above the parallel lane's scheduler noise. The 30 s
+    // constant is proved without waiting by `the_production_lease_is_thirty_seconds`.
     let fixture = Fixture::new(&json!({
         "version": 1,
         "repeat_last_step": true,
         "steps": [{"output": {"text": ANSWER}}]
-    }));
+    }))
+    .with_session_lease_seconds(3);
     let mut stale = AgentProcess::start(&fixture, &[]);
     let hello = stale.wait_for("hello", |record| record["kind"] == "hello");
     let session = hello["session_id"].as_str().expect("session id").to_owned();

@@ -331,3 +331,19 @@ pub struct AgentConfig {
     /// When true, the driver may start Scheduled compact after a committed tool group.
     pub(in crate::runtime) scheduled_compaction_enabled: bool,
 }
+
+#[cfg(test)]
+mod default_bounds {
+    use super::AgentConfig;
+    use std::time::Duration;
+
+    /// The production joined-cleanup bound. Tests that would wait it out set a
+    /// shorter config; this is the unhooked proof of the constant.
+    #[test]
+    fn the_default_model_cleanup_bound_is_thirty_seconds() {
+        assert_eq!(
+            AgentConfig::default().model_cleanup_timeout,
+            Duration::from_secs(30)
+        );
+    }
+}

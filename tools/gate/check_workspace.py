@@ -4836,13 +4836,16 @@ def _check_workspace() -> int:
             "plakous-hosted/test-support",
             "plakous-recursive-subagents-store/commit-trace",
             "plakous/test-clock",
+            "plakous/test-hooks",
         ]:
             # The offline model selector must reach the binary through exactly
             # the harness and hosted injection edges. The third edge traces
             # the existing tree-store dependency without a harness -> tree ->
-            # recursive-subagents -> harness dev-dependency cycle.
+            # recursive-subagents -> harness dev-dependency cycle. test-clock
+            # and test-hooks are the facade seams that edge enables.
             errors.append(
                 "plak test-hooks must enable exactly the offline crash harness, "
+                "plakous/test-clock, plakous/test-hooks, "
                 "plakous-hosted/test-support and tree-store/commit-trace"
             )
 
@@ -4926,6 +4929,7 @@ def _check_workspace() -> int:
             "openai",
             "openrouter",
             "sessions-sqlite",
+            "test-hooks",
             "web-fetch",
             "xai",
         }

@@ -42,6 +42,8 @@ class CrashSweepTests(unittest.TestCase):
                     "CARGO_TARGET_DIR": "custom-target",
                     "CARGO_BUILD_TARGET": "host-triple",
                     "PLAK_CRASH_SWEEP_SHAPES": "final_only",
+                    "PLAK_TEST_SESSION_LEASE_SECONDS": "1",
+                    "PLAK_TEST_CELL_HELLO_MS": "1",
                 },
             ),
         ):
@@ -78,6 +80,8 @@ class CrashSweepTests(unittest.TestCase):
             self.assertEqual(env["CARGO_TARGET_DIR"], "custom-target")
             self.assertEqual(env["CARGO_BUILD_TARGET"], "host-triple")
             self.assertEqual(env["PLAK_CRASH_SWEEP_STRICT"], "1")
+            self.assertNotIn("PLAK_TEST_SESSION_LEASE_SECONDS", env)
+            self.assertNotIn("PLAK_TEST_CELL_HELLO_MS", env)
             self.assertEqual(env["PLAK_CRASH_SWEEP_JOBS"], "8")
             self.assertEqual(env["PLAK_CRASH_SWEEP_SHAPES"], "code_mode_cell_final")
 

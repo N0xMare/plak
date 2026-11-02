@@ -45,6 +45,23 @@ pub const MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
 pub const WORKER_SHUTDOWN_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long a spawned worker has to send `Hello` and receive `Configure`.
 pub const WORKER_HELLO_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Production bound, unless a `test-hooks` build sets `PLAK_TEST_CELL_HELLO_MS`.
+fn hello_timeout() -> Duration {
+    if let Some(bound) = hello_override(crate::test_hooks::cell_hello_millis().as_deref()) {
+        return bound;
+    }
+    WORKER_HELLO_TIMEOUT
+}
+
+/// A positive millisecond bound of at most 30 000. Anything else keeps the production constant.
+fn hello_override(value: Option<&str>) -> Option<Duration> {
+    let millis = value?.trim().parse::<u64>().ok()?;
+    if millis == 0 || millis > 30_000 {
+        return None;
+    }
+    Some(Duration::from_millis(millis))
+}
 const QUEUE_ITEMS: usize = 64;
 /// Outstanding host commands a queue holds before it is a genuine resource limit.
 ///
@@ -185,7 +202,7 @@ impl CellClient {
         expected: WorkerIdentity,
         engine: EngineConfig,
     ) -> Result<Self, CellStartupError> {
-        Self::spawn_within(program, expected, engine, WORKER_HELLO_TIMEOUT, None).await
+        Self::spawn_within(program, expected, engine, hello_timeout(), None).await
     }
 
     /// Starts the Python worker with SDK type checking enabled.
@@ -197,7 +214,7 @@ impl CellClient {
             program,
             crate::MONTY_WORKER,
             EngineConfig::MONTY,
-            WORKER_HELLO_TIMEOUT,
+            hello_timeout(),
             Some(stubs),
         )
         .await

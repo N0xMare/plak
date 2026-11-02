@@ -93,6 +93,10 @@ class JjToolsTests(unittest.TestCase):
                 'run',
                 side_effect=lambda command, **kwargs: calls.append((command, dict(kwargs['env']))),
             ),
+            patch.dict(
+                jj_tools.os.environ,
+                {'PLAK_TEST_SESSION_LEASE_SECONDS': '1', 'PLAK_TEST_CELL_HELLO_MS': '1'},
+            ),
         ):
             prefix = Path(temporary).resolve()
             for version in jj_tools.VERSIONS:
@@ -106,6 +110,8 @@ class JjToolsTests(unittest.TestCase):
                 self.assertIn('--all-features', command)
                 self.assertEqual(command[-2:], ['-E', 'test(jj)'])
                 self.assertEqual(env['PLAK_TEST_JJ'], str(prefix / 'jj' / version / 'jj'))
+                self.assertNotIn('PLAK_TEST_SESSION_LEASE_SECONDS', env)
+                self.assertNotIn('PLAK_TEST_CELL_HELLO_MS', env)
             for command, _ in calls[1::2]:
                 self.assertEqual(command[-1], 'tests/tooling/test_vcs_listing.py')
 

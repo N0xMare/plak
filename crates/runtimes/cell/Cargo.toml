@@ -17,6 +17,10 @@ exclude.workspace = true
 layer = "engine"
 class = "published-internal"
 
+[features]
+# Handshake deadline override for the repository gate. Not in `default`.
+test-hooks = []
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

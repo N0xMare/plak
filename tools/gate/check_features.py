@@ -627,7 +627,9 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plakous", "mcp", "plakous-mcp/client"),
     ("plakous", "test-clock", "plakous-openai?/test-clock"),
     ("plakous", "test-clock", "plakous-openrouter?/test-clock"),
+    ("plakous", "test-hooks", "plakous-cell?/test-hooks"),
     ("plak", "test-hooks", "plakous/test-clock"),
+    ("plak", "test-hooks", "plakous/test-hooks"),
     ("plakous", "claude", "plakous-anthropic/native-auth"),
     ("plakous", "codex", "plakous-auth/http-refresh"),
     ("plakous", "grok", "plakous-auth/http-refresh"),
@@ -703,7 +705,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "12692a8c10a6033ffd8c99be9fd192fb9d76cbd41de571b36aabdc8720bebce5",
     "plakous-js-runtime": "fd22d2bf42bb470f5ed7ec3a852aa0472c1fdafa2ced4641a4a4f42c0a4bdd2a",
-    "plakous": "9fcc30ead4e835ae04717259203f321f06e335395d8dfab310806d01837c11f5",
+    "plakous": "c8ee0fd5d604c74b39b92a6b6f1f600eea7a52a02211f9ea8fcfea5fa343b886",
     "plakous-agent": "da735f6245070e0109928b93c49b8ed1353df48ed5e887b19472bc31d2b32671",
     "plakous-anthropic": "1b02db17b7b8447f9f0abd665616ffbf380c1a6c1e41c192cdc0f075e3cf1c5f",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
@@ -711,7 +713,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-chat-completions": "aa09b0d79b7b98c14f6f00f0290ba06cb13cc984ce43459bdd3b375269f8c362",
     "plakous-exchange": "89dc4c8e0cdd7cce6b65b60599e54a385e8ed5bcbc56176c34f2b77d41c91e97",
     "plakous-http": "ddb50db1f8b854c21b80b72732aaeb08956364aec0aac8fc2505544cd085b7e1",
-    "plakous-cell": "9dec57ce162f3258e4145ec2702e3a1c333faa4c221fe67b9f73296affbea620",
+    "plakous-cell": "95f1b945609f1311c36501e26299df396c7cfce8021f1807b5c82e5f174de232",
     "plakous-mcp": "7a863ed2e848f697dce4d643a0d6b581bc0aa962297204865c89a3c277f6c36c",
     "plakous-messages": "30cb4595eb111ef7184ff61bd83fa4351a4fa2401fd2906be0c9409af9a9155b",
     "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
@@ -812,6 +814,7 @@ TEST_ONLY_DEPENDENCY_FEATURES = {
     ("plak", "test-hooks"): (
         ("plakous-http", "fault-injection"),
         ("plakous", "test-clock"),
+        ("plakous", "test-hooks"),
         ("plakous-openai", "test-clock"),
         ("plakous-openrouter", "test-clock"),
         ("plakous-store", "commit-trace"),
@@ -865,6 +868,11 @@ def validate_test_only_dependency_features() -> list[str]:
                 errors.append(
                     f"{package} [{','.join(profile) or 'default'}]: test-clock is test-only"
                 )
+    for profile in ((), ("full",)):
+        if "test-hooks" in resolved_dependency_features("plakous", profile, "plakous"):
+            errors.append(f"plakous [{','.join(profile) or 'default'}]: test-hooks is test-only")
+    if "test-hooks" in resolved_dependency_features("plakous-cell", (), "plakous-cell"):
+        errors.append("plakous-cell [default]: test-hooks is test-only")
     # The Grok and Claude review-anchored clocks reach only offline test
     # builds (facade dev-dependencies): no plak build, `test-hooks` live
     # smoke builds included, may resolve them.
@@ -1175,7 +1183,14 @@ def optional_features(manifest: dict[str, object]) -> list[str]:
     features = manifest.get("features", {})
     if not isinstance(features, dict):
         return []
-    return sorted(name for name in features if name not in {"default", "full", "test-clock"})
+    hidden = {"default", "full", "test-clock"}
+    # The facade and cell deadline seams are hidden the same way as test-clock.
+    # plak and plakous-py-worker keep a public test-hooks feature.
+    package = manifest.get("package")
+    name = package.get("name") if isinstance(package, dict) else None
+    if name in {"plakous", "plakous-cell"}:
+        hidden.add("test-hooks")
+    return sorted(feature for feature in features if feature not in hidden)
 
 
 def workspace_package_names(root: Path = ROOT) -> set[str]:

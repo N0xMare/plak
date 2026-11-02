@@ -435,7 +435,8 @@ reason = "Capability registry, grouped interactive identity/carry helpers, looku
 
 [workspace.metadata.plakous.cfg.plakous]
 feature-ceiling = 65
-reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth."
+env-sites = ["src/test_session_lease.rs"]
+reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The test-hooks session lease override is the only environment read, and other builds do not compile it."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]
 feature-ceiling = 22
@@ -445,6 +446,10 @@ reason = "Native beta classification and its HTTP hook stay feature-gated; share
 feature-ceiling = 18
 env-ceiling = 0
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-cell]
+env-sites = ["src/test_hooks.rs"]
+reason = "The test-hooks cell handshake override is the only environment read. Other builds do not compile that module."
 
 [workspace.metadata.plakous.cfg.plakous-compose]
 feature-ceiling = 7

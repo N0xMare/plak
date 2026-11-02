@@ -41,6 +41,7 @@ TEST_HOOKS_FEATURE = (
     "# lifecycles are testable. Never in `default`, never in a release build.\n"
     "test-hooks = [\n"
     '    "plakous/test-clock",\n'
+    '    "plakous/test-hooks",\n'
     f'    "dep:{HARNESS}",\n'
     '    "plakous-hosted/test-support",\n'
     '    "plakous-recursive-subagents-store/commit-trace",\n'

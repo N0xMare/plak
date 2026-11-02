@@ -93,6 +93,10 @@ pub struct ScriptPlan {
     /// Override the operator decision deadline for expiry cells.
     #[serde(default)]
     pub effect_decision_timeout_ms: Option<u64>,
+    /// Shorten the joined model-cleanup bound. The production default is 30 s;
+    /// a script sets this only so a test does not wait that bound out.
+    #[serde(default)]
+    pub model_cleanup_timeout_ms: Option<u64>,
     /// Make a `stall_ms` deaf to the call's cancellation token.
     ///
     /// **This changes the state a cut lands on, which is the whole point.** A

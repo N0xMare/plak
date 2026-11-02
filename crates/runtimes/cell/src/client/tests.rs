@@ -2,6 +2,20 @@ use super::*;
 use crate::protocol::QUICKJS_WORKER;
 use std::os::unix::fs::PermissionsExt as _;
 
+#[test]
+fn the_hello_bound_stays_thirty_seconds_unless_a_positive_override_is_parsed() {
+    assert_eq!(WORKER_HELLO_TIMEOUT, Duration::from_secs(30));
+    assert!(hello_override(None).is_none());
+    assert!(hello_override(Some("0")).is_none());
+    assert!(hello_override(Some("nope")).is_none());
+    assert!(hello_override(Some("30001")).is_none());
+    assert_eq!(
+        hello_override(Some("200")),
+        Some(Duration::from_millis(200))
+    );
+    assert_eq!(hello_override(Some("30000")), Some(Duration::from_secs(30)));
+}
+
 /// A worker that writes `opening` and then sleeps.
 fn worker(directory: &Path, opening: &[u8]) -> std::path::PathBuf {
     let bytes = directory.join("opening.bin");

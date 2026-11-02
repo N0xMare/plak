@@ -34,12 +34,16 @@ export PLAK_HOME="$isolated"
 export GIT_CONFIG_GLOBAL="$TMPDIR/gitconfig"
 export GIT_CONFIG_NOSYSTEM=1
 
+# A leaked override would shorten every test. The shell snippet unsets them in
+# the caller; `-- command` unsets them before the command.
 if [[ ${#cmd[@]} -gt 0 ]]; then
+  unset PLAK_TEST_SESSION_LEASE_SECONDS PLAK_TEST_CELL_HELLO_MS
   exec "${cmd[@]}"
 fi
 if [[ "$mode" == json ]]; then
   python3 -c 'import json, os; print(json.dumps({k: os.environ[k] for k in ("TMPDIR", "PLAK_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")}))'
   exit 0
 fi
+printf 'unset PLAK_TEST_SESSION_LEASE_SECONDS PLAK_TEST_CELL_HELLO_MS\n'
 printf 'TMPDIR=%q\nPLAK_HOME=%q\nGIT_CONFIG_GLOBAL=%q\nGIT_CONFIG_NOSYSTEM=%q\n' \
   "$TMPDIR" "$PLAK_HOME" "$GIT_CONFIG_GLOBAL" "$GIT_CONFIG_NOSYSTEM"

@@ -21,6 +21,7 @@ pub(super) struct Fixture {
     pub(super) root: PathBuf,
     workspace_override: Option<PathBuf>,
     preserve: AtomicBool,
+    session_lease_seconds: Option<u64>,
 }
 
 static FIXTURE_ORDINAL: AtomicU32 = AtomicU32::new(0);
@@ -39,6 +40,7 @@ impl Fixture {
             root,
             workspace_override: None,
             preserve: AtomicBool::new(false),
+            session_lease_seconds: None,
         };
         std::fs::create_dir_all(fixture.home().join("agents")).expect("home");
         std::fs::create_dir_all(fixture.workspace()).expect("workspace");
@@ -93,6 +95,13 @@ impl Fixture {
         self.root.join("script.json")
     }
 
+    /// Shortens the product session lease for tests that wait out expiry.
+    /// The production constant stays 30 s; this only sets the debug-build hook.
+    pub(super) fn with_session_lease_seconds(mut self, seconds: u64) -> Self {
+        self.session_lease_seconds = Some(seconds);
+        self
+    }
+
     pub(super) fn preserve(&self) {
         self.preserve.store(true, Ordering::Relaxed);
     }
@@ -110,6 +119,9 @@ impl Fixture {
             .env("PLAK_TEST_MODEL", "offline-loopback-v1")
             .env("PLAK_TEST_SCRIPT", self.script())
             .env("PLAK_TEST_EVIDENCE", self.root.join("evidence.jsonl"));
+        if let Some(seconds) = self.session_lease_seconds {
+            command.env("PLAK_TEST_SESSION_LEASE_SECONDS", seconds.to_string());
+        }
         forward_coverage_environment(&mut command);
         std::fs::create_dir_all(self.root.join("tmp")).expect("tmp");
         command

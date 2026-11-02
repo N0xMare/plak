@@ -172,6 +172,28 @@ const SESSION_LEASE_SECONDS: NonZeroU64 = match NonZeroU64::new(30) {
     None => NonZeroU64::MIN,
 };
 
+/// The facade lease. A `test-hooks` build may shorten it with
+/// `PLAK_TEST_SESSION_LEASE_SECONDS` (a whole second from 1 through 30).
+/// Other builds ignore the variable. The stored duration is whole seconds.
+fn session_lease_seconds() -> NonZeroU64 {
+    if let Some(seconds) = lease_seconds_override(
+        crate::test_session_lease::session_lease_seconds_override().as_deref(),
+    ) {
+        return seconds;
+    }
+    SESSION_LEASE_SECONDS
+}
+
+/// Accepts `1..=30`. Anything else, including absence, keeps the production lease.
+fn lease_seconds_override(value: Option<&str>) -> Option<NonZeroU64> {
+    let seconds = value?.trim().parse::<u64>().ok()?;
+    if (1..=SESSION_LEASE_SECONDS.get()).contains(&seconds) {
+        NonZeroU64::new(seconds)
+    } else {
+        None
+    }
+}
+
 /// Exact current runtime construction request.
 ///
 /// The builder is never allowed to replace persisted history, plan, model, or
@@ -311,7 +333,7 @@ impl AgentSessions {
         let feed = Arc::new(feed::FeedNotifier::default());
         let store = feed::NotifyingStore::wrap(store, Arc::clone(&feed));
         let runtime =
-            DurableSessionRuntime::current(Arc::clone(&store), durability, SESSION_LEASE_SECONDS)
+            DurableSessionRuntime::current(Arc::clone(&store), durability, session_lease_seconds())
                 .map_err(|error| runtime_error(&error))?;
         Ok(Self {
             store,
@@ -505,6 +527,34 @@ impl ExactSource {
 
     fn recovery_report(&self) -> Option<RecoveryRequiredReport> {
         RecoveryRequiredReport::from_checkpoint(self.locator, &self.checkpoint)
+    }
+}
+
+#[cfg(test)]
+mod lease_override {
+    use std::num::NonZeroU64;
+
+    use super::{SESSION_LEASE_SECONDS, lease_seconds_override};
+
+    #[test]
+    fn the_production_lease_is_thirty_seconds() {
+        assert_eq!(SESSION_LEASE_SECONDS.get(), 30);
+    }
+
+    #[test]
+    fn only_a_shorter_whole_second_override_is_accepted() {
+        assert!(lease_seconds_override(None).is_none());
+        assert!(lease_seconds_override(Some("0")).is_none());
+        assert!(lease_seconds_override(Some("31")).is_none());
+        assert!(lease_seconds_override(Some("nope")).is_none());
+        assert_eq!(
+            lease_seconds_override(Some("1")).map(NonZeroU64::get),
+            Some(1)
+        );
+        assert_eq!(
+            lease_seconds_override(Some(" 30 ")).map(NonZeroU64::get),
+            Some(30)
+        );
     }
 }
 

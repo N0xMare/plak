@@ -999,9 +999,16 @@ pub(super) fn scripted_tool_policy(script: &ScriptPlan) -> Arc<dyn ToolPolicy> {
 pub(super) fn scripted_agent_config(script: &ScriptPlan) -> plakous::agent::AgentConfig {
     let config = plakous::agent::AgentConfig::default()
         .with_observation_budget_cap_bytes(script.observation_budget_cap_bytes);
-    script.effect_decision_timeout_ms.map_or(config, |timeout| {
+    let config = script.effect_decision_timeout_ms.map_or(config, |timeout| {
         config.with_effect_decision_timeout(std::time::Duration::from_millis(timeout))
-    })
+    });
+    // Zero is not a bound; leave the production 30 s default in place.
+    script
+        .model_cleanup_timeout_ms
+        .filter(|timeout| *timeout > 0)
+        .map_or(config, |timeout| {
+            config.with_model_cleanup_timeout(std::time::Duration::from_millis(timeout))
+        })
 }
 
 /// The scripted binding that attaches a real Code Mode profile.

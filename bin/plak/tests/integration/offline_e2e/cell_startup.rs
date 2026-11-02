@@ -12,6 +12,11 @@ fn refused_worker(body: &str, cause: &str) {
     std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).expect("executable");
     let mut command = fixture.command();
     command.arg("agent").env("PLAK_JS_HOST", &worker);
+    // The production 30 s constant is asserted by the cell crate. This wait
+    // uses a debug-build override so the serial lane does not sleep it out.
+    if cause == "hello" {
+        command.env("PLAK_TEST_CELL_HELLO_MS", "200");
+    }
     let mut agent = AgentProcess::start_command(command, true);
     agent.wait_for("ready", |record| record["kind"] == "ready");
     let started = Instant::now();
@@ -22,7 +27,8 @@ fn refused_worker(body: &str, cause: &str) {
                 .as_str()
                 .is_some_and(|text| text.contains("agent turn failed"))
     });
-    assert!(started.elapsed() < Duration::from_secs(35));
+    let bound = if cause == "hello" { 5 } else { 35 };
+    assert!(started.elapsed() < Duration::from_secs(bound));
     agent.wait_for("idle after failure", |record| {
         record["kind"] == "busy" && record["busy"] == false
     });
@@ -47,7 +53,7 @@ fn refused_worker(body: &str, cause: &str) {
     }));
     assert!(output.contains(cause), "{output}");
     if cause == "hello" {
-        assert!(output.contains("did not answer within 30 s"), "{output}");
+        assert!(output.contains("did not answer within 0.2 s"), "{output}");
         assert!(
             output.contains("retry if the host is overloaded"),
             "{output}"

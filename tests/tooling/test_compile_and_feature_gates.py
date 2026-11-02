@@ -790,6 +790,30 @@ class FeatureGateTests(unittest.TestCase):
             "test-clock",
             feature_gate.optional_features({"features": {"test-clock": [], "auth": []}}),
         )
+        self.assertNotIn(
+            "test-hooks",
+            feature_gate.optional_features(
+                {
+                    "package": {"name": "plakous"},
+                    "features": {"test-hooks": [], "auth": []},
+                }
+            ),
+        )
+        self.assertNotIn(
+            "test-hooks",
+            feature_gate.optional_features(
+                {
+                    "package": {"name": "plakous-cell"},
+                    "features": {"test-hooks": []},
+                }
+            ),
+        )
+        self.assertIn(
+            "test-hooks",
+            feature_gate.optional_features(
+                {"package": {"name": "plak"}, "features": {"test-hooks": [], "auth": []}}
+            ),
+        )
 
     def test_no_plak_build_resolves_the_anchored_provider_clocks(self) -> None:
         def features(package, profile, dependency):

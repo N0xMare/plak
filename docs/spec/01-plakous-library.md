@@ -202,6 +202,9 @@ and returns one shared cleanup result. Finalization attempts each remaining
 queued settlement and every owned cleanup stage even if an earlier dependency
 panics or returns an error: composition session, composition integration, tool
 tasks, joined lease heartbeat, lease release, store flush, and event close.
+Joining a cancelled model operation waits at most the configured model-cleanup
+bound, which defaults to 30 s. A scripted test may set a shorter bound; the
+default itself is asserted without waiting.
 A persistent in-memory terminal installation failure reaches the explicit
 result failure channel and cannot skip later roots or cleanup; an ordinary
 store refusal alone does not imply this failure. Cleanup failures remain
@@ -1140,7 +1143,11 @@ reported as a takeover. Start admission that refuses
 because authority was lost or expired is a definite `Session` failure, because
 nothing was started; only a loss after dispatch remains `OutcomeUnknown`.
 
-Lease heartbeats schedule renewal starts one-third of the lease duration apart.
+The facade grants a 30 s session lease. `test-hooks` builds may set
+`PLAK_TEST_SESSION_LEASE_SECONDS` to a whole second from 1 through 30; other
+builds ignore it. The stored duration is whole seconds, so a test that waits
+out expiry cannot go below one second. Lease heartbeats schedule renewal
+starts one-third of the lease duration apart.
 A delayed acknowledgement does not add another full interval before renewal:
 when the interval has elapsed, the next renewal starts immediately, without
 replaying missed ticks. A heartbeat renewal that fails transiently (the store
@@ -7176,7 +7183,10 @@ Startup returns a typed `CellStartupError`
 naming the cause and asking to reinstall the matching `plakous-js-host` or
 `plakous-py-host`. A deadline failure instead says the worker did not answer
 within 30 s and advises retrying if the host is overloaded, otherwise
-reinstalling the matching worker. Worker-supplied revision, engine and adapter
+reinstalling the matching worker. `test-hooks` builds honor
+`PLAK_TEST_CELL_HELLO_MS` as a positive millisecond replacement for that
+bound, at most 30 000; other builds ignore it. The production constant stays 30 s, and one
+test asserts that constant without setting the variable. Worker-supplied revision, engine and adapter
 strings echoed in refusal diagnostics are capped at 64 UTF-8 bytes each.
 No cell source is dispatched: the outer tool and root turn
 fail definitively, rather than waiting for cell events or requiring recovery.

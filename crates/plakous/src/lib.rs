@@ -365,6 +365,15 @@ pub mod construction;
 /// leases, compare-and-swap operations, object graphs, and SQL remain private.
 pub mod sessions;
 
+#[cfg(feature = "test-hooks")]
+mod test_session_lease;
+#[cfg(not(feature = "test-hooks"))]
+mod test_session_lease {
+    pub(crate) fn session_lease_seconds_override() -> Option<String> {
+        None
+    }
+}
+
 #[cfg(any(feature = "anthropic", feature = "claude"))]
 mod anthropic_retrieval;
 #[cfg(feature = "openrouter")]

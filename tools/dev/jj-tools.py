@@ -82,6 +82,9 @@ def compat(prefix: Path) -> None:
     script = root / 'tools' / 'gate' / 'test-env.sh'
     env = os.environ.copy()
     env.update(json.loads(subprocess.check_output([str(script), '--json'], text=True)))
+    # test-env.sh unsets these only in a shell or a command it runs itself.
+    for name in ('PLAK_TEST_SESSION_LEASE_SECONDS', 'PLAK_TEST_CELL_HELLO_MS'):
+        env.pop(name, None)
     for version in VERSIONS:
         binary = (prefix / 'jj' / version / 'jj').resolve()
         if not binary.is_file():

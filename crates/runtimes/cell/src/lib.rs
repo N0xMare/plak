@@ -12,6 +12,14 @@ mod protocol;
 mod session;
 mod startup;
 mod stored;
+#[cfg(feature = "test-hooks")]
+mod test_hooks;
+#[cfg(not(feature = "test-hooks"))]
+mod test_hooks {
+    pub(crate) fn cell_hello_millis() -> Option<String> {
+        None
+    }
+}
 
 pub use stored::{StoredValueDepthError, validate_stored_values};
 

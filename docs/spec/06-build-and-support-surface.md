@@ -294,7 +294,17 @@ predicates must gate a module declaration (including disabled-module swaps).
 empty and lists reviewed environment-reading boundary files. Plak's boundary
 files are `environment.rs`, `home/paths.rs` and `home/secrets.rs`; the tools
 child-environment builder and workspace VCS environment files are reviewed
-library exceptions. Imported environment readers, including aliases and
+library exceptions. Test-hooks-only deadline overrides are the same kind of
+exception: `plakous` reads `PLAK_TEST_SESSION_LEASE_SECONDS` only in
+`test_session_lease.rs`, and `plakous-cell` reads `PLAK_TEST_CELL_HELLO_MS`
+only in `test_hooks.rs`. Only `test-hooks` builds compile those modules.
+`plak/test-hooks` enables `plakous/test-hooks`, which enables
+`plakous-cell/test-hooks` when the cell client is already linked. The hello
+override accepts 1 through 30 000 milliseconds and no more.
+Those two `test-hooks` features are hidden from the 2n+3 closure witnesses,
+the same way `test-clock` is. `plak/test-hooks` and
+`plakous-py-worker/test-hooks` stay in their package witnesses.
+Imported environment readers, including aliases and
 function items, are inventoried as well as direct calls.
 
 Test-seam features (`test-support`, `test-hooks`, `commit-trace`,
@@ -384,6 +394,7 @@ called out explicitly.
 | `plak` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
 | `plakous` | `composition`, `composition-python` | Code Mode and JavaScript through the engine-free cell client; Python profiles additionally require `composition-python`. Neither links credential, HTTP, subscription, or interpreter machinery |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
+| `plakous`, `plakous-cell` | `test-hooks` | Deadline overrides for the repository gate: `PLAK_TEST_SESSION_LEASE_SECONDS` (1 through 30 seconds) and `PLAK_TEST_CELL_HELLO_MS` (1 through 30 000 milliseconds). Absent from `default` and `full`. `plak/test-hooks` enables the facade feature, which enables the cell feature only when the cell client is already linked. Other builds do not compile the environment reads |
 | `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 §2.8). Enabled only by the repository harness crate, so `plak/test-hooks` is its one product edge; `check_features.py` refuses it in a default `plak` |
 | `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
 | `plakous-store` | `commit-trace` | Repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 §2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by Plak through the offline-crash harness under `test-hooks` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` for all three stores. |
@@ -456,7 +467,8 @@ Package selections are never cross-multiplied. These witnesses bound gate
 cost; they do not claim an exhaustive power-set proof. Named external-closure
 exclusions are checked independently. Hidden repository-only `test-clock` is
 not public, is excluded from these witnesses, and never enters `full` or the
-product default/maintainer release closures.
+product default/maintainer release closures. The `plakous` and `plakous-cell`
+`test-hooks` features are hidden the same way.
 The one named-variant table is `NAMED_VARIANTS` in `check_features.py`:
 `headless` is default minus `tui` and `clipboard`; `api` is default minus
 `codex`, `grok` and `claude`; `minimal` is exactly `tui,openrouter,git-cli`.
@@ -1409,7 +1421,9 @@ prints remaining days as a non-failing informational note instead. Neither
 `just check` nor `just full` has a time-dependent review-window precondition.
 The hidden `test-clock` feature is excluded from supported feature closures
 and inventory, and checked absent from default, maintainer and release builds;
-only dev-dependencies or repository `test-hooks` enable it.
+only dev-dependencies or repository `test-hooks` enable it. The `plakous` and
+`plakous-cell` `test-hooks` features are excluded from those closures the same
+way.
 
 On a colocated JJ root, `just full` records the Git tree of snapshotted `@`
 at start and end, refuses conflicted `@`, and requires equal trees. `@` need

@@ -653,6 +653,7 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
             serde_json::from_value::<ScriptPlan>(json!({
                 "version": 1,
                 "stall_ignores_cancellation": true,
+                "model_cleanup_timeout_ms": 50,
                 "steps": [{"stream": [{"gate": gate.script()}], "output": {"text": "late actor result"}}]
             }))
             .unwrap(),
