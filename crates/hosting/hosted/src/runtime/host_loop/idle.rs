@@ -86,17 +86,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 });
             }
             let mut acknowledgement = None;
-            let deferred = self.interrupt_state.borrow_mut().take_deferred();
-            let received = deferred
-                .map_or_else(|| self.actions.recv_timeout(IDLE_OBSERVE_POLL_INTERVAL), Ok)
-                .map(|delivery| {
-                    if let Some(started) = delivery.started() {
-                        let _ = self.events.send(started);
-                    }
-                    let (action, guard) = delivery.into_parts();
-                    acknowledgement = Some(guard);
-                    action
-                });
+            let received = crate::intent_dispatch::take_next(&self.interrupt_state, || {
+                self.actions.recv_timeout(IDLE_OBSERVE_POLL_INTERVAL)
+            })
+            .map(|delivery| {
+                if let Some(started) = delivery.started() {
+                    let _ = self.events.send(started);
+                }
+                let (action, guard) = delivery.into_parts();
+                acknowledgement = Some(guard);
+                action
+            });
             let cancels_resume =
                 received.is_ok() && !matches!(&received, Ok(UserAction::ResyncTranscript { .. }));
             let cancelled_resume = cancels_resume && self.pending_resume.is_some();

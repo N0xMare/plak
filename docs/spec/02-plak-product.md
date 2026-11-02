@@ -135,6 +135,19 @@ the tree, never touches the tree's tasks: they are released with the tree's
 last root lease, except work that owns a child's session or runtime
 authority, which runs until it returns (chapter 03 §16).
 
+The attached host's idle loop, a running turn's drive loop and its workflows
+take operator intents in one order and by one classification. (A session
+blocked on recovery first gates the actions that need its reopen, and the
+detached shell loop has its own handling.) Each pass takes one action: an
+action a workflow deferred first, in arrival order, then the mailbox.
+Interrupt is urgent: a running turn requests its cancel and a workflow
+observes it at its next checkpoint.
+Quit keeps its arrival order behind work already accepted, but preparation
+never starts a turn ahead of it. Clear, compact, resume, fork, tool
+invocation, attach retry and recover are idle-only: a running turn answers
+them with an "available when idle" note. A workflow defers every intent but
+Interrupt. Everything else is handled idle or with a turn running.
+
 **What the operator sees about a turn is what the feed says.** The host never
 publishes a turn's outcome from its own memory. A terminal result, an
 abandonment, a capacity stop, a rejection and a compaction settlement each reach

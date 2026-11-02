@@ -38,7 +38,8 @@ use std::fmt;
 use std::future::Future;
 use std::time::Duration;
 
-use crate::surface_protocol::{UserAction, UserActionDelivery, UserActionReceiver};
+use crate::intent_dispatch::{DispatchPhase, Disposition, IntentClass};
+use crate::surface_protocol::{UserActionDelivery, UserActionReceiver};
 use plakous::agent::{ControlError, ControlErrorKind};
 use plakous::application::{ApplicationExecutor, ApplicationExecutorError};
 
@@ -112,10 +113,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
     pub(crate) fn poll(self) {
         while let Ok(delivery) = self.actions.try_recv() {
             let mut state = self.state.borrow_mut();
-            if matches!(&*delivery, UserAction::Interrupt) {
-                state.interrupted = true;
-            } else {
-                state.deferred.push_back(delivery);
+            match IntentClass::of(&*delivery).disposition(DispatchPhase::Workflow) {
+                Disposition::ObserveInterrupt => state.interrupted = true,
+                _ => state.deferred.push_back(delivery),
             }
         }
     }
@@ -142,7 +142,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
             || state
                 .deferred
                 .iter()
-                .any(|delivery| matches!(&**delivery, UserAction::Quit))
+                .any(|delivery| IntentClass::of(&**delivery) == IntentClass::Quit)
             || self.actions.abandon_and_release_requested()
     }
 

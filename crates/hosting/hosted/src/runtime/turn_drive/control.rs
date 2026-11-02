@@ -10,6 +10,7 @@ use super::{
     reject_draft, reject_stale_queue_action, remove_mutable, request_subscription_usage_service,
     resolve_approval_intent, settle_cancel, surface,
 };
+use crate::intent_dispatch::{DispatchPhase, Disposition, IntentClass, take_next};
 use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
 };
@@ -65,13 +66,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         if self.takes_actions() {
             let mut acknowledgement = None;
             let mut command_reply = false;
-            let received = self
-                .host
-                .deferred
-                .borrow_mut()
-                .take_deferred()
-                .map_or_else(|| self.host.actions.try_recv(), Ok)
-                .map(|delivery| {
+            let received =
+                take_next(self.host.deferred, || self.host.actions.try_recv()).map(|delivery| {
                     if let Some(started) = delivery.started() {
                         command_reply = matches!(&started, ContentEvent::IntentStarted(Some(_)));
                         let _ = self.host.events.send(started);
@@ -97,12 +93,36 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         Err(TryRecvError::Empty)
                     }
                 }
+                Ok(action) => match IntentClass::of(&action).disposition(DispatchPhase::Busy) {
+                    Disposition::RefuseWhileBusy { noun } => {
+                        note_idle_only(self.host.events, noun);
+                        Err(TryRecvError::Empty)
+                    }
+                    _ => Ok(action),
+                },
                 other => other,
             };
             match received {
                 Ok(UserAction::StopProcesses { .. }) => {
                     unreachable!("process intents handled above")
                 }
+                // The table refused these above; were one reclassified, a
+                // running turn still has no handler for it and refuses it.
+                Ok(
+                    action @ (UserAction::ClearSession
+                    | UserAction::Compact
+                    | UserAction::ResumeSession { .. }
+                    | UserAction::ResumeSessionHandoff { .. }
+                    | UserAction::ForkSession { .. }
+                    | UserAction::InvokeTool { .. }
+                    | UserAction::RetryAttach
+                    | UserAction::Recover),
+                ) => note_idle_only(
+                    self.host.events,
+                    IntentClass::of(&action)
+                        .idle_only_noun()
+                        .unwrap_or("this action"),
+                ),
                 Ok(UserAction::Quit) | Err(TryRecvError::Disconnected) => {
                     self.host.quit_started_at.get_or_insert_with(Instant::now);
                     flush_assistant_delta(
@@ -503,8 +523,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         ),
                     }
                 }
-                Ok(UserAction::ClearSession) => note_idle_only(self.host.events, "clear"),
-                Ok(UserAction::Compact) => note_idle_only(self.host.events, "compact"),
                 Ok(UserAction::RefreshTemplates) => {
                     surface::publish_template_readiness(
                         self.host.surface.as_deref(),
@@ -531,10 +549,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         );
                     }
                 }
-                Ok(UserAction::ResumeSession { .. } | UserAction::ResumeSessionHandoff { .. }) => {
-                    note_idle_only(self.host.events, "resume");
-                }
-                Ok(UserAction::ForkSession { .. }) => note_idle_only(self.host.events, "fork"),
                 // The one product-intent arm; see the idle loop's twin.
                 Ok(UserAction::Extension(intent)) => {
                     if surface::needs_usage(self.host.surface.as_deref(), &intent) {
@@ -646,9 +660,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         self.host.last_tree_revision,
                     );
                 }
-                Ok(UserAction::InvokeTool { .. }) => {
-                    note_idle_only(self.host.events, "invoke_tool");
-                }
                 // Readiness is a read, so it stays truthful mid-turn; every
                 // credential mutation waits for the idle boundary.
                 Ok(UserAction::RefreshReadiness) => {
@@ -658,14 +669,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         self.host.events,
                     );
                 }
-                Ok(UserAction::RetryAttach) => {
-                    note_idle_only(self.host.events, "binding");
-                }
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.host.events.resync_transcript(&scope);
-                }
-                Ok(UserAction::Recover) => {
-                    note_idle_only(self.host.events, "recover");
                 }
                 Err(TryRecvError::Empty) => {}
             }

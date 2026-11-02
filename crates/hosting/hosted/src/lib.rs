@@ -93,6 +93,7 @@ pub(crate) use plakous_workspace::git_redirect_fence;
 pub use plakous_workspace::occupancy_vcs;
 pub use plakous_workspace::occupancy_vcs::maintenance as workspace_maintenance;
 pub use plakous_workspace::{JJ_CLI_SUPPORTED, JJ_LIB_VERSION, built_jj_library_version};
+pub(crate) mod intent_dispatch;
 pub(crate) mod interrupt;
 pub mod openrouter;
 pub mod product_observation;

@@ -483,10 +483,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         // A one-shot's initial prompt belongs after the recovered turn, not
         // in its busy follow-up queue. Keep its delivery/provenance intact.
         let initial_prompt = if one_shot.is_some() && self.opened.has_recovered_turn() {
-            self.interrupt_state
-                .borrow_mut()
-                .take_deferred()
-                .or_else(|| self.actions.try_recv().ok())
+            crate::intent_dispatch::take_next(&self.interrupt_state, || self.actions.try_recv())
+                .ok()
         } else {
             None
         };
