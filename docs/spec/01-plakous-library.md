@@ -6530,7 +6530,8 @@ sent. A transport may opt into the Codex wrapped-503 401 (§7.2). That refusal
 is retried as the upstream 503, honoring `Retry-After`, and the claimed
 refresh is not run. A transport may also claim a proven contract refusal
 (§7.2) as its route's remedy text; that refusal ends the side request with no
-retry or claimed refresh. Each family still owns its request builder, typed
+retry or claimed refresh. A 401 or 403 is never offered as one and keeps the
+credential-rejection path. Each family still owns its request builder, typed
 replay allowlist, provider status interpretation and result collector. Retrieval
 normalizes to one outcome (text, ordered sources, usage and the successful
 exchange count) at the facade, without changing model-visible retrieval text.

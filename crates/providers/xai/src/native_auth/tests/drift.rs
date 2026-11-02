@@ -88,6 +88,7 @@ async fn foreign_oidc_issuer_refuses_a_browser_callback_before_the_code_exchange
         endpoint.client,
         endpoint.origin.trim_end_matches('/'),
     )?;
+    let (settle, mut settled) = oneshot::channel::<()>();
     let peer = tokio::spawn(async move {
         let (tcp, _) = endpoint.listener.accept().await?;
         let mut stream = endpoint.acceptor.accept(tcp).await?;
@@ -103,13 +104,20 @@ async fn foreign_oidc_issuer_refuses_a_browser_callback_before_the_code_exchange
         );
         stream.write_all(&reply).await?;
         stream.shutdown().await?;
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), endpoint.listener.accept())
-                .await
-                .is_err(),
-            "discovery mismatch dispatched the code exchange"
-        );
-        TestResult::Ok(())
+        // Every later connection until the login settles would be a code
+        // exchange; count them instead of waiting out a quiet period.
+        let mut later = 0_usize;
+        loop {
+            tokio::select! {
+                biased;
+                accepted = endpoint.listener.accept() => {
+                    accepted?;
+                    later += 1;
+                }
+                _ = &mut settled => break,
+            }
+        }
+        TestResult::Ok(later)
     });
     let login = manager.begin_remote_browser_login()?;
     let parsed = Url::parse(login.authorization_url())?;
@@ -122,6 +130,12 @@ async fn foreign_oidc_issuer_refuses_a_browser_callback_before_the_code_exchange
         .await
         .err()
         .ok_or("foreign issuer admitted")?;
+    settle.send(()).map_err(|()| "discovery peer ended early")?;
+    assert_eq!(
+        peer.await??,
+        0,
+        "discovery mismatch dispatched the code exchange"
+    );
     assert!(matches!(
         failure,
         XaiNativeAuthError::CompatibilityDrift(CompatibilityDrift::Endpoint { field: "issuer" })
@@ -129,7 +143,6 @@ async fn foreign_oidc_issuer_refuses_a_browser_callback_before_the_code_exchange
     assert!(failure.to_string().contains("install a newer build"));
     assert!(!failure.to_string().contains("foreign.invalid"));
     assert!(manager.core.store.load()?.is_none());
-    peer.await??;
     Ok(())
 }
 

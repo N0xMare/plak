@@ -537,7 +537,10 @@ async fn other_401s_and_routes_without_the_opt_in_stay_credential_rejections() -
     Ok(())
 }
 
-/// Claims a 426 as a contract refusal and renews any 401.
+const CONTRACT_REMEDY: &str = "fixture contract is out of date; install a newer build";
+const GATED_BODY: &str = r#"{"error":"contract-gate: please run the vendor update command"}"#;
+
+/// Claims every refusal whose body carries `contract-gate`, renewing any 401.
 struct ContractGated {
     inner: OptIn,
 }
@@ -553,37 +556,63 @@ impl ResponsesImageTransport for ContractGated {
     fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
         self.inner.credential_rejected()
     }
-    fn contract_refusal(&self, status: u16, _: &[u8]) -> Option<String> {
-        (status == 426).then(|| "fixture contract is out of date; install a newer build".to_owned())
+    fn contract_refusal(&self, _: u16, body: &[u8]) -> Option<String> {
+        body.windows(13)
+            .any(|window| window == b"contract-gate")
+            .then(|| CONTRACT_REMEDY.to_owned())
     }
 }
 
 #[tokio::test]
 async fn an_image_contract_refusal_is_forwarded_as_the_routes_remedy() -> TestResult {
-    let peer = peer(vec![
-        http_response(
-            426,
-            "",
-            r#"{"error":"please run the vendor update command"}"#,
-        ),
-        image_response(),
-    ])
-    .await?;
+    // 429 is the one refusal an image request otherwise retries.
+    for status in [426, 400, 429, 503] {
+        let peer = peer(vec![
+            http_response(status, "retry-after: 0\r\n", GATED_BODY),
+            image_response(),
+        ])
+        .await?;
+        let transport = ContractGated {
+            inner: opt_in(peer.origin.clone(), false, true),
+        };
+        let error = run(&transport, &generation(ResponsesImageFlavor::Xai))
+            .await
+            .err()
+            .ok_or_else(|| format!("HTTP {status}: a contract refusal succeeded"))?;
+        assert_eq!(
+            error.kind(),
+            ResponsesRetrievalErrorKind::Rejected,
+            "{status}"
+        );
+        assert_eq!(error.status(), Some(status));
+        assert_eq!(error.message(), CONTRACT_REMEDY);
+        assert_eq!(error.physical_requests(), 1, "{status}");
+        assert_eq!(transport.inner.inner.authorized.load(Ordering::SeqCst), 1);
+        assert_eq!(transport.inner.refreshes.load(Ordering::SeqCst), 0);
+    }
+    let renewed = peer(vec![http_response(401, "", GATED_BODY), image_response()]).await?;
     let transport = ContractGated {
-        inner: opt_in(peer.origin.clone(), false, true),
+        inner: opt_in(renewed.origin.clone(), false, true),
+    };
+    assert_eq!(
+        run(&transport, &generation(ResponsesImageFlavor::Xai)).await?,
+        PNG
+    );
+    assert_eq!(transport.inner.refreshes.load(Ordering::SeqCst), 1);
+    assert_eq!(transport.inner.inner.authorized.load(Ordering::SeqCst), 2);
+
+    let forbidden = peer(vec![http_response(403, "", GATED_BODY)]).await?;
+    let transport = ContractGated {
+        inner: opt_in(forbidden.origin.clone(), false, true),
     };
     let error = run(&transport, &generation(ResponsesImageFlavor::Xai))
         .await
         .err()
-        .ok_or("a contract refusal succeeded")?;
-    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Rejected);
-    assert_eq!(error.status(), Some(426));
-    assert_eq!(
-        error.message(),
-        "fixture contract is out of date; install a newer build"
-    );
+        .ok_or("a 403 image succeeded")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unauthorized);
+    assert_eq!(error.status(), Some(403));
+    assert_ne!(error.message(), CONTRACT_REMEDY);
     assert_eq!(error.physical_requests(), 1);
-    assert_eq!(transport.inner.inner.authorized.load(Ordering::SeqCst), 1);
     assert_eq!(transport.inner.refreshes.load(Ordering::SeqCst), 0);
     Ok(())
 }

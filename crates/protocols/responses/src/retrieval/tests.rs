@@ -1004,29 +1004,46 @@ impl ResponsesRetrievalTransport for ContractGated {
     }
 }
 
+async fn run_gated(transport: &ContractGated) -> TestResult<ResponsesRetrievalOutcome> {
+    let client = Client::new_http1(Limits::default())?;
+    Ok(run_responses_retrieval(
+        &client,
+        transport,
+        &openai_search(),
+        &CancellationToken::new(),
+        limits(),
+    )
+    .await?)
+}
+
+async fn gated_error(transport: &ContractGated) -> TestResult<ResponsesRetrievalError> {
+    let client = Client::new_http1(Limits::default())?;
+    run_responses_retrieval(
+        &client,
+        transport,
+        &openai_search(),
+        &CancellationToken::new(),
+        limits(),
+    )
+    .await
+    .err()
+    .ok_or_else(|| "a refused side request succeeded".into())
+}
+
+const GATED_BODY: &str = r#"{"error":"contract-gate: please run the vendor update command"}"#;
+
 #[tokio::test]
 async fn a_claimed_contract_refusal_is_final_and_replaces_the_provider_text() -> TestResult {
-    let gated = r#"{"error":"contract-gate: please run the vendor update command"}"#;
-    for status in [426, 400, 401, 429, 503] {
+    for status in [426, 400, 429, 503] {
         let refused = peer(vec![
-            http_response(status, "retry-after: 0\r\n", gated),
+            http_response(status, "retry-after: 0\r\n", GATED_BODY),
             sse_response(&answered_search()),
         ])
         .await?;
         let transport = ContractGated {
             inner: opt_in(refused.origin.clone(), false, true),
         };
-        let client = Client::new_http1(Limits::default())?;
-        let error = run_responses_retrieval(
-            &client,
-            &transport,
-            &post_search(),
-            &CancellationToken::new(),
-            limits(),
-        )
-        .await
-        .err()
-        .ok_or_else(|| format!("HTTP {status}: a contract refusal succeeded"))?;
+        let error = gated_error(&transport).await?;
         assert_eq!(
             error.kind(),
             ResponsesRetrievalErrorKind::Rejected,
@@ -1042,20 +1059,35 @@ async fn a_claimed_contract_refusal_is_final_and_replaces_the_provider_text() ->
     let transport = ContractGated {
         inner: opt_in(unclaimed.origin.clone(), false, true),
     };
-    let client = Client::new_http1(Limits::default())?;
-    let error = run_responses_retrieval(
-        &client,
-        &transport,
-        &post_search(),
-        &CancellationToken::new(),
-        limits(),
-    )
-    .await
-    .err()
-    .ok_or("an unclaimed 426 succeeded")?;
     assert_eq!(
-        error.message(),
+        gated_error(&transport).await?.message(),
         "the provider refused the side request (HTTP 426, error: upgrade)"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn credential_refusals_are_never_offered_as_contract_refusals() -> TestResult {
+    let renewed = peer(vec![
+        http_response(401, "", GATED_BODY),
+        sse_response(&answered_search()),
+    ])
+    .await?;
+    let transport = ContractGated {
+        inner: opt_in(renewed.origin.clone(), false, true),
+    };
+    assert_eq!(run_gated(&transport).await?.text, "Rust 1.99 shipped.");
+    assert_eq!(transport.inner.refreshes.load(Ordering::SeqCst), 1);
+    assert_eq!(transport.inner.inner.authorized.load(Ordering::SeqCst), 2);
+
+    let forbidden = peer(vec![http_response(403, "", GATED_BODY)]).await?;
+    let transport = ContractGated {
+        inner: opt_in(forbidden.origin.clone(), false, true),
+    };
+    let error = gated_error(&transport).await?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unauthorized);
+    assert_eq!(error.status(), Some(403));
+    assert_ne!(error.message(), CONTRACT_REMEDY);
+    assert_eq!(error.physical_requests(), 1);
     Ok(())
 }

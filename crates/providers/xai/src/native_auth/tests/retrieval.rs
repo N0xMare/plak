@@ -101,6 +101,12 @@ struct Session {
 }
 
 async fn session() -> TestResult<Session> {
+    session_with(true).await
+}
+
+/// A session whose model either carries the fixture context contract or the
+/// release one, which a renewal after a claimed refresh can reproduce.
+async fn session_with(fixture_contract: bool) -> TestResult<Session> {
     let temp = tempdir()?;
     let auth = mock_peer().await?;
     let manager = manager(&temp, &auth)?;
@@ -123,14 +129,18 @@ async fn session() -> TestResult<Session> {
     )?;
     let gate = subscription_gate(4)?;
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let model = subscription_model_with_gate(
-        resolved,
-        inference.client.clone(),
-        Arc::new(Recording {
-            inner: Arc::clone(&gate),
-            events: Arc::clone(&events),
-        }),
-    )?;
+    let recording = Arc::new(Recording {
+        inner: Arc::clone(&gate),
+        events: Arc::clone(&events),
+    });
+    let model = if fixture_contract {
+        subscription_model_with_gate(resolved, inference.client.clone(), recording)?
+    } else {
+        Arc::new(
+            XaiLanguageModel::new(resolved, inference.client.clone())?
+                .with_subscription_request_gate(recording)?,
+        )
+    };
     Ok(Session {
         _temp: temp,
         auth,
@@ -287,6 +297,88 @@ async fn a_supergrok_side_request_version_gate_is_final_with_the_newer_build_rem
         )));
     }
     session.auth.shutdown().await?;
+    session.inference.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unrelated_supergrok_426_keeps_the_generic_side_request_detail() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let session = session().await?;
+    session
+        .inference
+        .responses
+        .send(raw_response(
+            "426 Upgrade Required",
+            "application/json",
+            r#"{"error":"unrelated refusal"}"#,
+        ))
+        .await?;
+    let error = session
+        .model
+        .retrieval()
+        .retrieve(x_search(), &plakous_model::CancellationToken::new())
+        .await
+        .err()
+        .ok_or("an unrelated 426 succeeded")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Rejected);
+    assert_eq!(error.status(), Some(426));
+    assert_eq!(
+        error.message(),
+        "the provider refused the side request (HTTP 426, error: unrelated refusal)"
+    );
+    assert_eq!(session.inference.requests.lock().await.len(), 1);
+    session.auth.shutdown().await?;
+    session.inference.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_supergrok_side_request_401_takes_one_claimed_refresh_and_is_reissued() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let session = session_with(false).await?;
+    // Even the proven version-gate sentence on a 401 stays a credential refusal.
+    let gate = r#"{"error":"Your Grok CLI version (0.2.93) is outdated. Please update to version 1.0.13 or later via `grok update` or the installation documentation."}"#;
+    session
+        .inference
+        .responses
+        .send(raw_response("401 Unauthorized", "application/json", gate))
+        .await?;
+    session
+        .inference
+        .responses
+        .send(raw_response("200 OK", "text/event-stream", x_search_sse()))
+        .await?;
+    session
+        .auth
+        .responses
+        .send(response(&token_response(
+            "search-access-two",
+            "search-refresh-two",
+            &id_token("search-subject", None)?,
+        )))
+        .await?;
+    session
+        .auth
+        .responses
+        .send(response(&jwks(TEST_KID)))
+        .await?;
+    enqueue_admitted_catalog(&session.auth).await?;
+    let outcome = session
+        .model
+        .retrieval()
+        .retrieve(x_search(), &plakous_model::CancellationToken::new())
+        .await?;
+    assert_eq!(outcome.text, "Rust 1.99 is out.");
+    assert_eq!(token_post_count(&session.auth.requests.lock().await), 1);
+    let requests = session.inference.requests.lock().await.clone();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        String::from_utf8_lossy(&requests[1])
+            .to_ascii_lowercase()
+            .contains("authorization: bearer search-access-two")
+    );
+    session.auth.abort_join().await?;
     session.inference.shutdown().await?;
     Ok(())
 }

@@ -3016,12 +3016,17 @@ wrapped-503 401 as a 503 without a claimed refresh, on both the JSON retrieval
 and image policies, and that every other 401 body and a transport without the
 opt-in still take the claimed-refresh path; an ordinary image 503 is still not
 retried. They also pin that a transport-claimed contract refusal on retrieval
-and image requests ends after one physical request with its remedy text, its
-status and no claimed refresh, whatever the status, while an unclaimed refusal
-keeps the provider's bounded detail. SuperGrok search and image requests pin
-the Grok 426 version gate over loopback TLS, and a Claude OAuth web search pins
-the 400 sent-beta rejection, each with the newer-build remedy and no provider
-update advice. The
+and image requests (HTTP 426, 400, 429 and 503) ends after one physical request
+with its remedy text, its status and no claimed refresh, while an unclaimed
+refusal keeps the provider's bounded detail, a 401 is never offered to the
+transport and still takes the claimed refresh, and a 403 stays a credential
+refusal. SuperGrok search and image requests pin the Grok 426 version gate over
+loopback TLS, and a Claude OAuth web search pins the 400 sent-beta rejection,
+each with the newer-build remedy and no provider update advice. Their
+negatives are pinned too: a SuperGrok 426 with another body keeps the generic
+detail, a SuperGrok 401 still runs one claimed refresh, a Claude OAuth 400
+naming an unsent beta keeps the generic detail, and the xAI and Anthropic API
+routes claim neither shape. The
 SuperGrok and Codex executors pin over loopback TLS their path, OAuth headers,
 body and one authorized inference permit (acquired before its dispatch
 authorization), and that a logged-out or changed login refuses before the

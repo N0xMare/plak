@@ -1768,6 +1768,32 @@ fn api_side_request_uses_the_session_model_and_lowest_adaptive_effort() -> TestR
     Ok(())
 }
 
+#[test]
+fn api_side_requests_never_claim_the_claude_beta_rejection() -> TestResult {
+    use plakous_messages::MessagesRetrievalTransport as _;
+    let (_, retrieval) = AnthropicLanguageModel::configured_with_retrieval(
+        static_key_source("offline-only")?,
+        "fixture-account",
+        &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
+        b"",
+        behavior()?,
+        NonZeroU64::new(64_000).ok_or("window")?,
+        None,
+    )?;
+    // A beta the Claude OAuth route sends; the API route must not claim it.
+    let beta = "effort-2025-11-24";
+    let body = serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "message": format!("Unexpected value(s) `{beta}` for the `anthropic-beta` header."),
+        },
+    })
+    .to_string();
+    assert_eq!(retrieval.contract_refusal(400, body.as_bytes()), None);
+    Ok(())
+}
+
 fn key_grant(
     key: &str,
 ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError> {

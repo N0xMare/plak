@@ -1146,3 +1146,60 @@ async fn a_revoked_key_refuses_the_side_request_before_the_socket() -> TestResul
     peer.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn the_api_route_never_claims_the_grok_version_gate_as_contract_drift() -> TestResult {
+    let sentence = "Your Grok CLI version (0.2.93) is outdated. Please update to version 1.0.13 or later via `grok update` or the installation documentation.";
+    let body = serde_json::json!({ "error": sentence }).to_string();
+    let refusal = format!(
+        "HTTP/1.1 426 Upgrade Required\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let expected = format!("the provider refused the side request (HTTP 426, error: {sentence})");
+    for side in ["search", "image"] {
+        let (client, origin, peer) = endpoint(refusal.clone().into_bytes()).await?;
+        let model = Arc::new(XaiPlatformModel::with_local_transport(
+            authority(),
+            Arc::new(Source::new()),
+            NonZeroU64::new(65_536).unwrap(),
+            selected(ReasoningEffort::Low)?,
+            clock(),
+            client,
+            origin,
+        )?);
+        let result = if side == "search" {
+            model
+                .retrieval(None)
+                .retrieve(x_search_query(), &CancellationToken::new())
+                .await
+                .map(drop)
+        } else {
+            let images = model.images();
+            images
+                .generate(&images.request("a red square"), &CancellationToken::new())
+                .await
+                .map(drop)
+        };
+        let error = result.err().ok_or("a 426 side request succeeded")?;
+        assert_eq!(
+            error.kind(),
+            ResponsesRetrievalErrorKind::Rejected,
+            "{side}"
+        );
+        assert_eq!(error.status(), Some(426), "{side}");
+        assert_eq!(error.message(), expected, "{side}");
+        let wire = peer.await??;
+        let path = if side == "search" {
+            "post /v1/responses "
+        } else {
+            "post /v1/images/generations "
+        };
+        assert!(
+            String::from_utf8_lossy(&wire)
+                .to_ascii_lowercase()
+                .starts_with(path),
+            "{side}"
+        );
+    }
+    Ok(())
+}
