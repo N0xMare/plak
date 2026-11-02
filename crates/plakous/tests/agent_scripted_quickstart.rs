@@ -294,7 +294,7 @@ fn scripted_configuration(
 }
 
 /// Request shape the agent produces for the first prompt under the fixed id
-/// sequence: AgentId(1), SessionId(2), BranchId(3), RunId(4) at build; TurnId(5),
+/// sequence: DriverInstanceId(1), SessionId(2), BranchId(3), RunId(4) at build; TurnId(5),
 /// user EntryId(6), AttemptId(7) at prompt.
 fn expected_first_request(configuration: &CompiledProviderConfiguration) -> ModelRequest {
     let user = ConversationItem::new(

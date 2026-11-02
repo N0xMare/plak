@@ -76,8 +76,8 @@ use crate::{
     compiler_model_facts_from_model,
 };
 use plakous_model::{
-    AgentId, BranchId, CachePolicy, CanonicalHistory, Capability, CapabilityRequirement, Clock,
-    CompiledProviderConfiguration, ConfiguredLanguageModel, Digest, DigestDomain,
+    BranchId, CachePolicy, CanonicalHistory, Capability, CapabilityRequirement, Clock,
+    CompiledProviderConfiguration, ConfiguredLanguageModel, Digest, DigestDomain, DriverInstanceId,
     EffectiveProviderConfigurationId, EventId, GenerationLimits, IdGenerator, InstructionBlock,
     InstructionSource, LanguageModel, LocalDurabilityDisposition, ModelErrorTarget, ModelId,
     NativeOptions, ProjectedToolPresentationV2, ReasoningEffortDisposition, ReasoningPolicy, RunId,
@@ -996,7 +996,7 @@ fn validate_construction_inputs(
 }
 
 struct ConstructionIdentities {
-    agent: AgentId,
+    agent: DriverInstanceId,
     session: SessionId,
     branch: BranchId,
     run: RunId,
@@ -1009,7 +1009,7 @@ fn construction_identities(
     bootstrap: Option<&DurableRuntimeBootstrap>,
     restored_frame: Option<&RestoredContinuationFrame>,
 ) -> Result<ConstructionIdentities, AgentError> {
-    let agent_id = AgentId::generate(builder.clock.as_ref(), builder.ids.as_ref())
+    let agent_id = DriverInstanceId::generate(builder.clock.as_ref(), builder.ids.as_ref())
         .map_err(|error| AgentError::from_identity(&error))?;
     let (session_id, branch_id, run_id) = if let Some(bootstrap) = bootstrap {
         let session = bootstrap.branch.head().session();
@@ -1067,7 +1067,7 @@ fn install_visual_read(
 fn attach_job_environment(
     builder: &AgentBuilder,
     bootstrap: Option<&DurableRuntimeBootstrap>,
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     session_id: SessionId,
     branch_id: BranchId,
     run_id: RunId,

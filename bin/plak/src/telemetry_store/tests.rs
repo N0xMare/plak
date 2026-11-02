@@ -12,7 +12,7 @@ use plakous::agent::{
     TelemetryObservationKind, TelemetryTerminalStatus, TurnUsage,
 };
 use plakous::model::{
-    AgentId, AttemptId, BranchId, CallId, RunId, SessionId, Timestamp, TurnId, Usage,
+    AttemptId, BranchId, CallId, DriverInstanceId, RunId, SessionId, Timestamp, TurnId, Usage,
 };
 use uuid::Uuid;
 
@@ -23,7 +23,7 @@ pub(super) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 pub(super) fn fixture_context() -> TestResult<TelemetryContext> {
     Ok(TelemetryContext::new(
-        AgentId::try_from(Uuid::from_u128(1))?,
+        DriverInstanceId::try_from(Uuid::from_u128(1))?,
         SessionId::try_from(Uuid::from_u128(2))?,
         BranchId::try_from(Uuid::from_u128(3))?,
         RunId::try_from(Uuid::from_u128(4))?,
@@ -658,7 +658,7 @@ fn product_observations_land_in_product_events() -> TestResult {
         TelemetryItem::Product(ProductObservation::ResourceSample {
             at: wall_timestamp(),
             session_id,
-            agent_id: Some(AgentId::try_from(Uuid::from_u128(1))?),
+            agent_id: Some(DriverInstanceId::try_from(Uuid::from_u128(1))?),
             phase: ResourceSamplePhase::TurnStarted,
             child_kind: None,
             rss_bytes: Some(1024),
@@ -734,7 +734,7 @@ fn replay_loss_rows_are_content_free_and_pruned_with_their_session() -> TestResu
             at: Timestamp::new(1, 0)?,
             session_id,
             branch_id: BranchId::try_from(Uuid::from_u128(32))?,
-            agent_id: AgentId::try_from(Uuid::from_u128(33))?,
+            agent_id: DriverInstanceId::try_from(Uuid::from_u128(33))?,
             turn_id: TurnId::try_from(Uuid::from_u128(34))?,
             next_attempt,
             max_attempts: 4,
@@ -890,13 +890,13 @@ fn child_exited_sample_persists_child_kind() -> TestResult {
     use plakous::agent::{
         ChildProcessKind, TelemetryContext, TelemetryObservation, TelemetryObservationKind,
     };
-    use plakous::model::{AgentId, BranchId, RunId, SessionId, Timestamp};
+    use plakous::model::{BranchId, DriverInstanceId, RunId, SessionId, Timestamp};
 
     let (_guard, paths) = PlakPaths::isolated_test_home();
     paths.ensure_layout().map_err(|error| error.to_string())?;
     let mut store = TelemetryStore::open(&paths)?;
     let session_id = SessionId::try_from(Uuid::from_u128(42))?;
-    let agent_id = AgentId::try_from(Uuid::from_u128(43))?;
+    let agent_id = DriverInstanceId::try_from(Uuid::from_u128(43))?;
     let branch_id = BranchId::try_from(Uuid::from_u128(44))?;
     let run_id = RunId::try_from(Uuid::from_u128(45))?;
     let context = TelemetryContext::new(agent_id, session_id, branch_id, run_id);
@@ -964,7 +964,7 @@ fn prune_by_age_removes_whole_old_sessions() -> TestResult {
 
 fn session_context(session: SessionId) -> TestResult<TelemetryContext> {
     Ok(TelemetryContext::new(
-        AgentId::try_from(Uuid::from_u128(1))?,
+        DriverInstanceId::try_from(Uuid::from_u128(1))?,
         session,
         BranchId::try_from(Uuid::from_u128(3))?,
         RunId::try_from(Uuid::from_u128(4))?,

@@ -26,11 +26,11 @@ use crate::{
 use admitted_round::AdmittedRound;
 use futures_util::FutureExt;
 use plakous_model::{
-    AgentId, AttemptId, CancellationToken, Clock, CompiledProviderConfiguration, ConversationItem,
-    ConversationView, Digest, EntryId, IdGenerator, LanguageModel, ModelError, ModelErrorPhase,
-    ModelErrorTarget, ModelOperationRoot, ModelOperationScope, ModelRequest, ModelResponse, RunId,
-    StableRequestPrefix, ToolCallBlock, ToolEffect, ToolResultBlock, TurnId, Usage,
-    ValidatedRequestPlan,
+    AttemptId, CancellationToken, Clock, CompiledProviderConfiguration, ConversationItem,
+    ConversationView, Digest, DriverInstanceId, EntryId, IdGenerator, LanguageModel, ModelError,
+    ModelErrorPhase, ModelErrorTarget, ModelOperationRoot, ModelOperationScope, ModelRequest,
+    ModelResponse, RunId, StableRequestPrefix, ToolCallBlock, ToolEffect, ToolResultBlock, TurnId,
+    Usage, ValidatedRequestPlan,
 };
 use plakous_tools::{ProgressSink, ToolInvocation, ToolProjectionReceiptV2, ToolRuntimeErrorKind};
 use std::collections::{BTreeMap, VecDeque};
@@ -82,7 +82,7 @@ pub use turn::OPERATION_BUDGET_WRAP_UP_NOTE;
     reason = "independent per-turn recovery and paid-fold guards must persist separately"
 )]
 struct Driver {
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     model: Arc<dyn LanguageModel>,
     provider_configuration: Arc<CompiledProviderConfiguration>,
     /// Present only for a model resolved against windowed evidence.

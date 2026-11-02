@@ -24,9 +24,9 @@ pub(crate) use observation::{
     normalized_tool_failure,
 };
 use plakous_model::{
-    AgentId, BranchId, CancellationToken, CanonicalHistory, Clock, CompiledProviderConfiguration,
-    ContentBlock, ContextCapacityFailure, ConversationView, Digest, IdGenerator, InstructionBlock,
-    LanguageModel, ModelErrorTarget, ModelResponse, RunId, RuntimeModelAuthority,
+    BranchId, CancellationToken, CanonicalHistory, Clock, CompiledProviderConfiguration,
+    ContentBlock, ContextCapacityFailure, ConversationView, Digest, DriverInstanceId, IdGenerator,
+    InstructionBlock, LanguageModel, ModelErrorTarget, ModelResponse, RunId, RuntimeModelAuthority,
     SealedFamilyArtifactCandidate, SessionId, StableRequestPrefix, ToolResultBlock, TurnId,
     ValidatedRequestPlan,
 };
@@ -211,7 +211,7 @@ struct PreparedAgent {
     harness_plan: ResolvedHarnessPlan,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGenerator>,
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     session_id: SessionId,
     branch_id: BranchId,
     run_id: RunId,
@@ -257,7 +257,7 @@ struct AgentInner {
     job_runtime: tokio::runtime::Handle,
     job_sessions: plakous_tools::JoinedProcessSessions,
     job_release_mode: Arc<Mutex<JobReleaseMode>>,
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     session_id: SessionId,
     branch_id: BranchId,
     harness_plan: ResolvedHarnessPlan,

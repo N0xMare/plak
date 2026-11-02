@@ -1,5 +1,5 @@
 use super::*;
-use plakous::model::{AgentId, BranchId, CancellationToken, RunId, SessionId};
+use plakous::model::{BranchId, CancellationToken, DriverInstanceId, RunId, SessionId};
 use plakous::tools::{
     ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
     ExecutionOperationControl, JobStatus, JobStopReason, JoinedProcessCommand,
@@ -143,7 +143,7 @@ fn same_session_root_fork_keeps_the_child_and_drops_the_old_root_slice() -> Test
     let other = JobOwner {
         session_id: SessionId::from_str("00000000-0000-0000-0000-000000000709")?,
         branch_id: BranchId::from_str("00000000-0000-0000-0000-00000000070a")?,
-        agent_id: AgentId::from_str("00000000-0000-0000-0000-000000000703")?,
+        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000703")?,
     };
     registry
         .for_agent("root", "other")
@@ -332,7 +332,7 @@ fn keyed(session: &str, branch: &str) -> TestResult<JobOwner> {
     Ok(JobOwner {
         session_id: SessionId::from_str(session)?,
         branch_id: BranchId::from_str(branch)?,
-        agent_id: AgentId::from_str("00000000-0000-0000-0000-000000000703")?,
+        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000703")?,
     })
 }
 
@@ -524,7 +524,7 @@ fn owner(branch: &str) -> TestResult<JobOwner> {
     Ok(JobOwner {
         session_id: SessionId::from_str("00000000-0000-0000-0000-000000000701")?,
         branch_id: BranchId::from_str(branch)?,
-        agent_id: AgentId::from_str("00000000-0000-0000-0000-000000000703")?,
+        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000703")?,
     })
 }
 
@@ -810,7 +810,7 @@ fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> Tes
     assert!(registry.is_leftover(&views[0]));
     let replacement = registry.attach(
         JobOwner {
-            agent_id: AgentId::from_str("00000000-0000-0000-0000-000000000706")?,
+            agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000706")?,
             ..key
         },
         sessions(root.path())?,
@@ -838,7 +838,7 @@ fn same_branch_transfer_stops_foreground_and_preserves_promoted_service() -> Tes
     let job = start(original.local())?;
     plakous_tools::internal::promote(original.local(), job)?;
     let next_owner = JobOwner {
-        agent_id: AgentId::from_str("00000000-0000-0000-0000-000000000706")?,
+        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000706")?,
         ..key
     };
     let replacement = registry.attach(next_owner, sessions(root.path())?)?;

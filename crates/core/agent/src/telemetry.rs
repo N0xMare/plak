@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use plakous_model::{
-    AgentId, AttemptId, BranchId, CallId, RunId, SessionId, Timestamp, TurnId, Usage,
+    AttemptId, BranchId, CallId, DriverInstanceId, RunId, SessionId, Timestamp, TurnId, Usage,
 };
 use thiserror::Error;
 
@@ -121,7 +121,7 @@ pub trait TelemetrySink: Send + Sync + 'static {
 )]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TelemetryContext {
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     session_id: SessionId,
     branch_id: BranchId,
     run_id: RunId,
@@ -134,7 +134,7 @@ impl TelemetryContext {
     /// Creates an agent-scoped context.
     #[must_use]
     pub const fn new(
-        agent_id: AgentId,
+        agent_id: DriverInstanceId,
         session_id: SessionId,
         branch_id: BranchId,
         run_id: RunId,
@@ -173,7 +173,7 @@ impl TelemetryContext {
 
     /// Returns the agent identity.
     #[must_use]
-    pub const fn agent_id(self) -> AgentId {
+    pub const fn agent_id(self) -> DriverInstanceId {
         self.agent_id
     }
 

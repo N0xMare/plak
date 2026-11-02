@@ -176,7 +176,7 @@ fn process_wait_uses_its_result_after_timeout_exit_race() {
             JobOwner {
                 session_id: locator.session_id(),
                 branch_id: locator.branch_id(),
-                agent_id: plakous::model::AgentId::try_from(uuid).unwrap(),
+                agent_id: plakous::model::DriverInstanceId::try_from(uuid).unwrap(),
             },
             &[JobView {
                 number: 7,

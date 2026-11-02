@@ -15,8 +15,8 @@ use super::types::{
 };
 use crate::feed::FeedSeq;
 use plakous_model::{
-    AgentId, AttemptId, BranchId, CallId, Clock, EventId, IdGenerator, RunId, SessionId, Timestamp,
-    TurnId,
+    AttemptId, BranchId, CallId, Clock, DriverInstanceId, EventId, IdGenerator, RunId, SessionId,
+    Timestamp, TurnId,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::panic::AssertUnwindSafe;
@@ -106,7 +106,7 @@ pub(crate) struct EventHub {
 }
 
 struct EventHubInner {
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     session_id: SessionId,
     branch_id: BranchId,
     run_id: RunId,
@@ -153,7 +153,7 @@ impl EventHub {
         reason = "all event scope and resource bindings are explicit"
     )]
     pub(crate) fn new(
-        agent_id: AgentId,
+        agent_id: DriverInstanceId,
         session_id: SessionId,
         branch_id: BranchId,
         run_id: RunId,

@@ -12,9 +12,9 @@ use crate::control::CompactionSummary;
 use crate::session::SessionWorkflowId;
 use crate::{AgentErrorKind, EffectDecisionRef, TurnUsage};
 use plakous_model::{
-    AgentId, AttemptId, BlockStart, BlockStarted, BranchId, CallId, ContextInputParts,
-    DataClassification, Digest, EventId, ModelEvent, RunId, SessionId, Timestamp,
-    ToolCallerLineage, ToolName, TurnId,
+    AttemptId, BlockStart, BlockStarted, BranchId, CallId, ContextInputParts, DataClassification,
+    Digest, DriverInstanceId, EventId, ModelEvent, RunId, SessionId, Timestamp, ToolCallerLineage,
+    ToolName, TurnId,
 };
 use plakous_tools::{
     EffectDecisionPrompt, RegisteredToolId, ToolExecutorId, ToolExposureBinding, ToolInvocation,
@@ -638,7 +638,7 @@ pub struct AgentEvent {
     pub(super) event_id: EventId,
     pub(super) session_id: SessionId,
     pub(super) branch_id: BranchId,
-    pub(super) agent_id: AgentId,
+    pub(super) agent_id: DriverInstanceId,
     pub(super) run_id: RunId,
     pub(super) turn_id: Option<TurnId>,
     pub(super) attempt_id: Option<AttemptId>,

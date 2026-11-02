@@ -15,8 +15,8 @@ use crate::{
     TurnUsage, ViewAttachment, ViewError, ViewRequest,
 };
 use plakous_model::{
-    AgentId, BranchId, ContextCapacityFailure, ConversationView, ModelError, ModelErrorKind,
-    ModelId, ModelResponse, SessionId, StableRequestPrefix, TurnId,
+    BranchId, ContextCapacityFailure, ConversationView, DriverInstanceId, ModelError,
+    ModelErrorKind, ModelId, ModelResponse, SessionId, StableRequestPrefix, TurnId,
 };
 use std::fmt;
 use std::sync::atomic::Ordering;
@@ -336,7 +336,7 @@ impl Agent {
     }
     /// Returns the stable agent identity.
     #[must_use]
-    pub fn id(&self) -> AgentId {
+    pub fn id(&self) -> DriverInstanceId {
         self.inner.agent_id
     }
 

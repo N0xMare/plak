@@ -7,7 +7,7 @@ use plakous::agent::{
     TelemetryContext, TelemetryObservation, TelemetryObservationKind, TelemetryTerminalStatus,
 };
 use plakous::model::{
-    AgentId, AttemptId, BranchId, CallId, RunId, SessionId, Timestamp, TurnId, Usage,
+    AttemptId, BranchId, CallId, DriverInstanceId, RunId, SessionId, Timestamp, TurnId, Usage,
 };
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 fn observation() -> TestResult<TelemetryObservation> {
     Ok(TelemetryObservation::new(
         TelemetryContext::new(
-            AgentId::try_from(Uuid::from_u128(1))?,
+            DriverInstanceId::try_from(Uuid::from_u128(1))?,
             SessionId::try_from(Uuid::from_u128(2))?,
             BranchId::try_from(Uuid::from_u128(3))?,
             RunId::try_from(Uuid::from_u128(4))?,
@@ -53,7 +53,7 @@ fn every_runtime_retry_is_enqueued_once_with_its_own_context() -> TestResult {
     );
     for id in [1, 99] {
         let context = TelemetryContext::new(
-            AgentId::try_from(Uuid::from_u128(id))?,
+            DriverInstanceId::try_from(Uuid::from_u128(id))?,
             SessionId::try_from(Uuid::from_u128(id + 100))?,
             BranchId::try_from(Uuid::from_u128(3))?,
             RunId::try_from(Uuid::from_u128(4))?,
@@ -100,7 +100,7 @@ fn child_retry_is_logged_with_host_route_and_size_even_without_analytics() -> Te
         .with_writer(move || writer.clone())
         .finish();
     let context = TelemetryContext::new(
-        AgentId::try_from(Uuid::from_u128(99))?,
+        DriverInstanceId::try_from(Uuid::from_u128(99))?,
         SessionId::try_from(Uuid::from_u128(2))?,
         BranchId::try_from(Uuid::from_u128(3))?,
         RunId::try_from(Uuid::from_u128(4))?,

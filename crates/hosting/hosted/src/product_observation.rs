@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use plakous::model::{
-    AgentId, BranchId, ModelRetryCause, ModelRetryLoss, SessionId, Timestamp, TurnId,
+    BranchId, DriverInstanceId, ModelRetryCause, ModelRetryLoss, SessionId, Timestamp, TurnId,
 };
 
 use crate::agent_tree_protocol::NodeStatus;
@@ -256,7 +256,7 @@ pub enum ProductObservation {
         at: Timestamp,
         session_id: SessionId,
         branch_id: BranchId,
-        agent_id: AgentId,
+        agent_id: DriverInstanceId,
         turn_id: TurnId,
         next_attempt: u32,
         max_attempts: u32,
@@ -316,7 +316,7 @@ pub enum ProductObservation {
     ResourceSample {
         at: Timestamp,
         session_id: SessionId,
-        agent_id: Option<AgentId>,
+        agent_id: Option<DriverInstanceId>,
         phase: ResourceSamplePhase,
         child_kind: Option<ChildKind>,
         rss_bytes: Option<u64>,

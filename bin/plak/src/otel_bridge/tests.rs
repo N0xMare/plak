@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex};
 use opentelemetry::trace::{Event, SpanId, TraceId};
 use opentelemetry_sdk::trace::{SpanData, SpanProcessor};
 use plakous::agent::{TelemetryContext, TurnUsage};
-use plakous::model::{AgentId, AttemptId, BranchId, CallId, RunId, SessionId, TurnId, Usage};
+use plakous::model::{
+    AttemptId, BranchId, CallId, DriverInstanceId, RunId, SessionId, TurnId, Usage,
+};
 use uuid::Uuid;
 
 use super::*;
@@ -48,7 +50,7 @@ impl SpanProcessor for CaptureProcessor {
 
 fn fixture_context() -> TelemetryContext {
     TelemetryContext::new(
-        AgentId::try_from(Uuid::from_u128(0x11)).expect("agent"),
+        DriverInstanceId::try_from(Uuid::from_u128(0x11)).expect("agent"),
         SessionId::try_from(Uuid::from_u128(0x22)).expect("session"),
         BranchId::try_from(Uuid::from_u128(0x33)).expect("branch"),
         RunId::try_from(Uuid::from_u128(0x44)).expect("run"),

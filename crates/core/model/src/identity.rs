@@ -286,7 +286,10 @@ macro_rules! opaque_uuid {
     };
 }
 
-opaque_uuid!(AgentId, "An opaque agent identity.");
+opaque_uuid!(
+    DriverInstanceId,
+    "An opaque identity of one agent driver construction; scopes late cleanup."
+);
 opaque_uuid!(SessionId, "An opaque model-session identity.");
 opaque_uuid!(BranchId, "An opaque conversation-branch identity.");
 opaque_uuid!(RunId, "An opaque run identity.");

@@ -1,7 +1,7 @@
 //! Neutral session-owned process observations and host ownership seam.
 
 use crate::ExecutionBackendError;
-use plakous_model::{AgentId, BranchId, SessionId, Timestamp};
+use plakous_model::{BranchId, DriverInstanceId, SessionId, Timestamp};
 use std::time::Duration;
 
 mod port;
@@ -131,7 +131,7 @@ pub struct JobOwner {
     /// Runtime branch.
     pub branch_id: BranchId,
     /// Agent attribution.
-    pub agent_id: AgentId,
+    pub agent_id: DriverInstanceId,
 }
 
 /// Optional host-owned registry. Without it the agent privately owns its service.

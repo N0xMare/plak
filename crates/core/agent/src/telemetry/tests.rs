@@ -28,7 +28,7 @@ impl TelemetrySink for ScriptedSink {
 fn observation() -> TestResult<TelemetryObservation> {
     Ok(TelemetryObservation::new(
         TelemetryContext::new(
-            AgentId::try_from(Uuid::from_u128(1))?,
+            DriverInstanceId::try_from(Uuid::from_u128(1))?,
             SessionId::try_from(Uuid::from_u128(2))?,
             BranchId::try_from(Uuid::from_u128(3))?,
             RunId::try_from(Uuid::from_u128(4))?,

@@ -2,7 +2,7 @@ use super::{AgentSessionsError, AgentSessionsErrorKind, SessionOperationId};
 use plakous_agent::internal::facade_support::{
     AgentSessionEndpoint, WeakAgentSessionEndpoint, agent_session_endpoint,
 };
-use plakous_agent::{Agent, AgentId};
+use plakous_agent::{Agent, DriverInstanceId};
 use plakous_model::{BranchId, SessionId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -31,14 +31,14 @@ impl SessionBranchKey {
 
 #[derive(Clone)]
 struct ActiveDriver {
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     endpoint: WeakAgentSessionEndpoint,
 }
 
 pub(super) struct DriverRegistration {
     operation_id: SessionOperationId,
     branch: SessionBranchKey,
-    agent_id: AgentId,
+    agent_id: DriverInstanceId,
     registry: Arc<DriverRegistry>,
 }
 

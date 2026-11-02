@@ -780,7 +780,7 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                     plakous::tools::JobOwner {
                         session_id: locator.session_id(),
                         branch_id: locator.branch_id(),
-                        agent_id: plakous::model::AgentId::from_str(
+                        agent_id: plakous::model::DriverInstanceId::from_str(
                             "00000000-0000-0000-0000-000000000707",
                         )
                         .unwrap(),

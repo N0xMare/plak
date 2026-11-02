@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use plakous_model::{
-    AgentId, AttemptId, BranchId, CallId, CheckpointId, ContextStatus, Digest, EventId,
+    AttemptId, BranchId, CallId, CheckpointId, ContextStatus, Digest, DriverInstanceId, EventId,
     SafeDiagnostic, SessionId, TurnId,
 };
 use plakous_tools::{EffectDecisionAuditId, ToolPolicyDenial};
@@ -54,7 +54,7 @@ impl CommandId {
     }
 
     pub(crate) fn transient(
-        agent_id: AgentId,
+        agent_id: DriverInstanceId,
         nonce: &AtomicU64,
         operation: &str,
     ) -> Result<Self, ControlError> {
@@ -922,7 +922,7 @@ impl WeakAgentSessionEndpoint {
 /// Exact-turn convenience capability routed through the closed command path.
 #[derive(Clone)]
 pub struct TurnControl {
-    pub(crate) agent_id: AgentId,
+    pub(crate) agent_id: DriverInstanceId,
     pub(crate) turn_id: TurnId,
     pub(crate) shared: Arc<TurnShared>,
     pub(crate) controls: mpsc::Sender<ActorControl>,

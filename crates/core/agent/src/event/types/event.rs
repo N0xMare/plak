@@ -1,7 +1,8 @@
 use super::{
-    AgentEvent, AgentEventKind, AgentId, Arc, AttemptId, BranchId, CallId, DataClassification,
-    EventCursor, EventDeliveryClass, EventId, EventOrigin, EventScope, EventSequence,
-    EventVisibility, NormalizedModelEventKind, RunId, SessionId, Timestamp, TurnId, fmt,
+    AgentEvent, AgentEventKind, Arc, AttemptId, BranchId, CallId, DataClassification,
+    DriverInstanceId, EventCursor, EventDeliveryClass, EventId, EventOrigin, EventScope,
+    EventSequence, EventVisibility, NormalizedModelEventKind, RunId, SessionId, Timestamp, TurnId,
+    fmt,
 };
 
 impl AgentEvent {
@@ -31,7 +32,7 @@ impl AgentEvent {
 
     /// Returns the agent identity.
     #[must_use]
-    pub const fn agent_id(&self) -> AgentId {
+    pub const fn agent_id(&self) -> DriverInstanceId {
         self.agent_id
     }
 

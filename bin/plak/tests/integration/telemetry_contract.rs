@@ -292,14 +292,14 @@ fn job_telemetry_kinds() -> Vec<plakous::agent::TelemetryObservationKind> {
 #[test]
 fn jobs_telemetry_records_only_closed_classifications_and_numeric_hints() {
     use plakous::agent::{TelemetryContext, TelemetryObservation};
-    use plakous::model::{AgentId, BranchId, RunId, SessionId, Timestamp, TurnId};
+    use plakous::model::{BranchId, DriverInstanceId, RunId, SessionId, Timestamp, TurnId};
     use uuid::Uuid;
 
     let (_guard, paths) = PlakPaths::isolated_test_home();
     paths.ensure_layout().unwrap();
     let mut store = TelemetryStore::open(&paths).unwrap();
     let context = TelemetryContext::new(
-        AgentId::try_from(Uuid::from_u128(1)).unwrap(),
+        DriverInstanceId::try_from(Uuid::from_u128(1)).unwrap(),
         SessionId::try_from(Uuid::from_u128(2)).unwrap(),
         BranchId::try_from(Uuid::from_u128(3)).unwrap(),
         RunId::try_from(Uuid::from_u128(4)).unwrap(),
@@ -390,7 +390,7 @@ fn model_finished_persists_served_endpoint_and_cost() {
         TelemetryContext, TelemetryObservation, TelemetryObservationKind, TelemetryTerminalStatus,
     };
     use plakous::model::{
-        AgentId, AttemptId, BranchId, RunId, ServedBy, SessionId, Timestamp, TurnId, Usage,
+        AttemptId, BranchId, DriverInstanceId, RunId, ServedBy, SessionId, Timestamp, TurnId, Usage,
     };
     use uuid::Uuid;
 
@@ -404,7 +404,7 @@ fn model_finished_persists_served_endpoint_and_cost() {
     let attempt_unknown = AttemptId::try_from(Uuid::from_u128(0x103)).expect("attempt");
     let timestamp = Timestamp::new(1_700_000_000, 0).expect("timestamp");
     let base = TelemetryContext::new(
-        AgentId::try_from(Uuid::from_u128(0x104)).expect("agent"),
+        DriverInstanceId::try_from(Uuid::from_u128(0x104)).expect("agent"),
         session_id,
         BranchId::try_from(Uuid::from_u128(0x105)).expect("branch"),
         RunId::try_from(Uuid::from_u128(0x106)).expect("run"),

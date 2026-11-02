@@ -1,7 +1,7 @@
 //! Shared observation fixtures, compiled only for tests.
 use super::*;
 use plakous_model::{
-    AgentId, AttemptId, BranchId, EventId, FixedClock, ModelEvent, OutputLocation, RunId,
+    AttemptId, BranchId, DriverInstanceId, EventId, FixedClock, ModelEvent, OutputLocation, RunId,
     SequenceIdGenerator, SessionId, TextDelta, Timestamp, TurnId,
 };
 use std::{error::Error, sync::Arc};
@@ -29,7 +29,7 @@ pub(super) fn fixture_with_run(
     )?);
     let close_event_id = EventId::generate(&FixedClock::new(timestamp), event_ids.as_ref())?;
     let hub = EventHub::new(
-        AgentId::try_from(Uuid::from_u128(1))?,
+        DriverInstanceId::try_from(Uuid::from_u128(1))?,
         SessionId::try_from(Uuid::from_u128(2))?,
         BranchId::try_from(Uuid::from_u128(3))?,
         RunId::try_from(Uuid::from_u128(run))?,
