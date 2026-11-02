@@ -1663,10 +1663,11 @@ PRODUCT_ACCOUNT_NAME_EXEMPTIONS: dict[SourceKey, set[str]] = {
     # `ToolProjectionLoweringV2::{CodexExecCommand, GrokRunTerminalCommand,
     # ClaudeBash, ...}` is durable: a persisted projection descriptor records
     # the lowering identity, so the variant names are wire format. Lowering and
-    # raising match those identities to produce each vocabulary's shapes.
+    # raising match those identities to produce each vocabulary's shapes. The
+    # `grok` and `claude` module names are those same identities.
     ("plakous-tools", "src/exposure/projection.rs"): {"codex", "grok", "claude"},
     ("plakous-tools", "src/exposure/lowering.rs"): {"claude"},
-    ("plakous-tools", "src/exposure/raising.rs"): {"claude"},
+    ("plakous-tools", "src/exposure/raising.rs"): {"claude", "grok"},
     ("plakous-tools", "src/exposure/raising/claude.rs"): {"claude"},
     # The Codex patch envelope's canonical name and the Claude `Bash`
     # observation bound -- both compared on reopen.

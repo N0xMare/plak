@@ -156,8 +156,8 @@ impl ProcessToolProjectionKind {
         let shell = |description| text::bound_description(description, job_config, self, true);
         let bound = |description| text::bound_description(description, job_config, self, false);
         match self {
-            // The action sentence (read / wait / stop) is on `bash` only.
-            // `wait` and `stop` carry the bound budget and the lifetime contract.
+            // The action sentence and the job-lifetime contract are on `bash`
+            // only. `wait` and `stop` carry the bound budget and not the contract.
             Self::PiBash => Ok(vec![
                 ProjectedProcessTool::new(
                     "bash",

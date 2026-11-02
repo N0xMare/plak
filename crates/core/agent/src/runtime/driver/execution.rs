@@ -6,8 +6,8 @@ use crate::runtime::driver::{
     ProgressForwardingGuard, ToolDispatchTelemetry,
 };
 use crate::runtime::observation::{
-    ObservationClip, canonical_tool_result_item, clip_tool_result, normalized_tool_failure,
-    tool_call_observation, tool_result_content_bytes,
+    ObservationClip, canonical_tool_result_item, clip_observed_tool_result,
+    normalized_tool_failure, tool_call_observation, tool_result_content_bytes,
 };
 use crate::runtime::terminal::{
     actor_panic_error, cancelled_error, lock_mutex, tool_terminal_status,
@@ -328,7 +328,7 @@ async fn execute_read_only_tool(
         .ok()
         .and_then(plakous_tools::internal::process_session_update);
     *lock_mutex(&process_session_update_slot) = process_session_update;
-    let (result, presentation_subject) = match &execution_outcome {
+    let (result, presentation_subject, raised) = match &execution_outcome {
         Ok(outcome) => {
             let raised = tool_presentation
                 .raise(projection_receipt.as_ref(), outcome.clone())
@@ -337,12 +337,12 @@ async fn execute_read_only_tool(
             let result = raised
                 .to_model_result(&invocation)
                 .map_err(|error| AgentError::from_tool(&error))?;
-            (result, presentation_subject)
+            (result, presentation_subject, Some(raised))
         }
         Err(error) if error.kind() == ToolRuntimeErrorKind::Cancelled => {
             return Err(cancelled_error());
         }
-        Err(error) => (normalized_tool_failure(&call, error)?, None),
+        Err(error) => (normalized_tool_failure(&call, error)?, None, None),
     };
     let output_bytes = tool_result_content_bytes(&result);
     let dispatched = dispatch_observer.emit_finished(
@@ -354,9 +354,13 @@ async fn execute_read_only_tool(
     if let Some(error) = dispatch_observer.take_error() {
         return Err(error);
     }
-    Ok(ToolExecutionResult::new(result, dispatched)
+    let execution = ToolExecutionResult::new(result, dispatched)
         .with_presentation_subject(presentation_subject)
-        .with_value(value))
+        .with_value(value);
+    Ok(match &raised {
+        Some(raised) => execution.with_raised_shape(raised),
+        None => execution,
+    })
 }
 
 pub(super) fn publish_tool_progress(
@@ -437,7 +441,8 @@ pub(in crate::runtime) fn canonicalize_observed_tool_execution(
     budget: &mut crate::runtime::observation::budget::ObservationBudget,
 ) -> Result<(ConversationItem, Option<ObservationClip>), AgentError> {
     let presentation_subject = execution.presentation_subject.clone();
-    let (result, clip) = clip_tool_result(execution.result, budget)?;
+    let (result, clip) =
+        clip_observed_tool_result(execution.result, budget, execution.observation_shape)?;
     let item = canonical_tool_result_item(result_entry_id, result)?
         .with_presentation_subject(presentation_subject.as_deref());
     Ok((item, clip))

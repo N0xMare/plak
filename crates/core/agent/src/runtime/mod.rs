@@ -741,6 +741,10 @@ pub(crate) struct ToolExecutionResult {
     /// Omitted from the operation-evidence encoding when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) presentation_subject: Option<String>,
+    /// What the raising program made of the result, for the observation cut.
+    /// Ephemeral: a result reconciled from evidence is cut as generic text.
+    #[serde(skip)]
+    pub(in crate::runtime) observation_shape: observation::budget::ObservationShape,
 }
 
 impl ToolExecutionResult {
@@ -750,7 +754,16 @@ impl ToolExecutionResult {
             result,
             dispatched,
             presentation_subject: None,
+            observation_shape: observation::budget::ObservationShape::Text,
         }
+    }
+
+    /// Records what the raising program rendered, from the raised outcome.
+    fn with_raised_shape(mut self, raised: &plakous_tools::ToolOutcome) -> Self {
+        if plakous_tools::internal::raised_plain_file_read(raised) {
+            self.observation_shape = observation::budget::ObservationShape::PlainFileRead;
+        }
+        self
     }
 
     fn with_presentation_subject(mut self, subject: Option<String>) -> Self {

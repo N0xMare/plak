@@ -1159,6 +1159,13 @@ fn every_process_description_states_default_numeric_job_bounds() -> TestResult {
                     .description()
                     .contains("Read with get_command_or_subagent_output");
             assert_eq!(action, shell, "{}: {}", tool.name(), tool.description());
+            assert_eq!(
+                tool.description()
+                    .contains(PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT),
+                shell,
+                "{} repeats the job-lifetime sentence",
+                tool.name()
+            );
             if tool.name().as_str() == "bash" {
                 assert!(
                     tool.description()
@@ -1187,9 +1194,17 @@ fn every_process_description_states_non_default_numeric_job_bounds() -> TestResu
                     .contains("foreground budget: 47 seconds (47000 ms)")
             );
             assert!(tool.description().contains("hard runtime cap: 3 hours"));
-            assert!(
+            let starter = matches!(
+                tool.name().as_str(),
+                "bash" | "exec_command" | "run_terminal_command" | "Bash"
+            );
+            assert_eq!(
                 tool.description()
-                    .contains(PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT)
+                    .contains(PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT),
+                starter,
+                "{} repeats the job-lifetime sentence: {}",
+                tool.name(),
+                tool.description()
             );
             assert!(!tool.description().contains("default 30000 ms"));
             assert!(!tool.description().contains("10 hours"));

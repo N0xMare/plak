@@ -393,7 +393,9 @@ fn nested_cell_raising(
             entry.target().clone(),
         );
     }
-    let description = if entry.lowering() == ToolProjectionLoweringV2::ClaudeReadFile {
+    let description = if entry.lowering() == ToolProjectionLoweringV2::GrokReadFile {
+        plakous_tool_files::PLAKOUS_GROK_READ_CELL_DESCRIPTION
+    } else if entry.lowering() == ToolProjectionLoweringV2::ClaudeReadFile {
         "Read a UTF-8 workspace file using file_path, offset and limit. Returns a JSON string with content (exact file text including line endings), offset, lines, eof, next_offset (null at EOF), and optional workspace_generation. Use JSON.parse(await tools.Read({...})).content in JavaScript or json.loads(await Read({...}))[\"content\"] in Python. Metadata is not file content; reject observation_truncated=true and check eof before treating the result as the entire file."
     } else {
         entry.description()

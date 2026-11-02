@@ -117,13 +117,22 @@ impl WorkspacePolicy {
     /// # Errors
     ///
     /// Returns a workspace-policy error when the path is invalid, absent, or
-    /// resolves outside the canonical workspace root.
+    /// resolves outside the canonical workspace root. An absent path is the
+    /// backend's `path does not exist: <relative path>` refusal.
     pub fn resolve_existing(&self, path: impl AsRef<Path>) -> Result<PathBuf, ToolRuntimeError> {
         let relative = self.relative_input(path)?;
-        let resolved = canonicalize_safe(
-            &self.root.join(relative),
-            "workspace path could not be resolved",
-        )?;
+        let resolved = std::fs::canonicalize(self.root.join(&relative)).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return crate::backend_runtime_error(crate::environment::workspace_path_not_found(
+                    &relative,
+                ));
+            }
+            ToolRuntimeError::from_sensitive_source(
+                ToolRuntimeErrorKind::WorkspacePolicy,
+                "workspace path could not be resolved",
+                &error,
+            )
+        })?;
         self.ensure_contained(resolved)
     }
 

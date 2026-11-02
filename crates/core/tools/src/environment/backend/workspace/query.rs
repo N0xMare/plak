@@ -216,6 +216,7 @@ pub(super) fn list_repository_query_paths(
         skipped_oversize: 0,
         skipped_changed: 0,
         entries_skipped,
+        lossy_lines: 0,
         stop_reason,
     })
 }
@@ -389,6 +390,7 @@ pub(super) fn scan_repository_query_files(
         skipped_oversize,
         skipped_changed,
         entries_skipped,
+        lossy_lines: 0,
         stop_reason,
     })
 }

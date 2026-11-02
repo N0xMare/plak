@@ -886,7 +886,23 @@ An existing `full output: <path>` line survives both clipping and withholding,
 including process `output` fields, multi-process `tasks` pages and one raised
 `{"result": string}` wrapper. When the allowance cannot hold the log, its
 smallest withheld notice still keeps the path and process status/identifiers.
-A paged file read stays head-first, because it continues from `next_offset`. A
+A paged file read stays head-first, because it continues from `next_offset`.
+Both read shapes keep whole lines from the head and rewrite their metadata to
+describe them: `lines` counts the lines shown, `eof` is false, `next_offset`
+continues after the last line shown, and `observation_truncated` is added
+(`observation_truncated: true` in the neutral JSON read). A cut that keeps
+every line keeps the page's own metadata. The Grok Direct plain read (§9.2)
+also keeps its metadata line, drops `final_newline`, and, when no line fits,
+puts the capacity-exhaustion guidance before the metadata line, so the model
+is not told to re-read the same over-budget page. The plain-read cut is chosen
+by provenance, not by text: the Grok `read_file` raising program marks its
+raised outcome as a plain file read, the runtime carries that mark (not
+persisted) to the observation cut, and only a marked result is parsed as a
+plain read. Any other text whose last line happens to match the read metadata
+grammar is cut by the text and locator rules above. A result reconciled from
+journaled evidence after a restart carries no mark and is cut as text. A
+read's lines are file content, never a `full output:` locator, so a withheld
+read keeps no such line. A
 completed tool exchange that still exceeds next-round admission is shrunk by
 splitting what remains of the overflow's text budget fairly across its
 results: a result at or under the shared cap keeps its whole body, larger ones
@@ -4976,8 +4992,8 @@ The SuperGrok `read_file` presentation advertises the canonical maximum of
 advertises the canonical 4,096-entry `head_limit` maximum.
 
 A Direct presentation that raises canonical text into a `{"result": string}`
-object (`text_result_object_v1`, including the Claude cat-n and pi read
-programs) is constructed only over an output schema that admits every such
+object (`text_result_object_v1`, including the Claude cat-n, pi read and
+Grok plain-metadata read programs) is constructed only over an output schema that admits every such
 object: closed, with exactly the one string property `result`. Raising then
 never fails on size: every result the canonical output contract admits raises,
 bounded by that contract (the wrapper escapes it once more), not by the
@@ -5610,12 +5626,15 @@ The hard session runtime cap defaults to ten hours and is separately bound at
 construction and rebind. Exact reopen uses stored values, not live config.
 Every process tool description, including read/await/stop tools and nested
 JavaScript, Python and native Code Mode catalogs, states the actual bound
-foreground budget in seconds and milliseconds and hard runtime cap in hours,
-plus background continuation with the process id and automatic completion
-reporting. The shell tool (`exec_command`, `run_terminal_command`, `Bash`,
-`bash`) also names that route's read, wait and stop actions. Read, await and
-stop tools, including a claimed entry's copy of the budget tail, do not
-repeat that action sentence. Compilation
+foreground budget in seconds and milliseconds and hard runtime cap in hours.
+The job-lifetime sentence — a still-running command continues in the background
+with its id, completion is reported automatically, and the job survives the
+turn until explicit stop, session release, attempt end or the hard cap — appears
+once per family, on the process-starting tool (`exec_command`,
+`run_terminal_command`, `Bash`, `bash`). Read, await, stop and `write_stdin`
+do not repeat it. The shell tool also names that route's read, wait and stop
+actions. Read, await and stop tools, including a claimed entry's copy of the
+budget tail, do not repeat that action sentence. Compilation
 and candidate admission receive the bound `JobConfig`; durable descriptor
 reconstruction receives the restored construction values, not product defaults.
 Codex's `yield_time_ms` argument description uses that same bound default,
@@ -5832,13 +5851,13 @@ its text. That text is ordinary tool-result and notice history, so
 it is persisted and exported like any other history. Admission is not: the
 issued set and the recorded (device, inode) are process-local service state,
 durable job rows, export documents and carry never contain them, and a restart
-does not re-issue them. Reads follow chapter 04 §2.1.
+does not re-issue them. Reads and searches follow chapter 04 §2.1.
 
 `JoinedProcessSessions::spill_output` issues the same kind of file for one
 finished tool result too large to keep inline (an MCP result over 256 KiB of
 text): it takes the next job number, so no later job reuses the path, writes
 the complete text under the same exclusive create and 64 MiB bound, and marks
-the file consumed at once, so it is readable through the read exception and
+the file consumed at once, so it is readable and searchable through the job-output exception and
 then retained and swept like a consumed job's file. It returns nothing when no
 jobs root is bound or the budget has no room; the caller then keeps only the
 head and tail and says the full output was not retained.
@@ -6859,8 +6878,20 @@ File reads have one neutral JSON result: `content` is the exact selected UTF-8
 file text (including LF, CRLF, and final-newline presence), with `offset`,
 `lines`, `eof`, nullable `next_offset`, and optional `workspace_generation`.
 Local JS/Python nested calls return that JSON string unchanged; programs parse
-it and use `content`, rather than parsing a presentation header. Claude Direct
-alone renders the neutral result as cat-n text inside its JSON result wrapper,
+it and use `content`, rather than parsing a presentation header. Grok Direct
+raises the neutral result to the file text verbatim plus one metadata line
+(`offset=<n> lines=<n> eof=<true|false> next_offset=<n|null>`, then
+`clipped_lines=<n>`, `lossy=true`, `workspace_generation=<n>` and
+`final_newline=false`, each only when set, in that order) inside its JSON
+result wrapper. The string is not itself JSON and has no line numbers. A
+non-empty file text that does not end in a newline gets one separator newline
+before that metadata line and the `final_newline=false` field, so removing the
+metadata line, and that separator when the field is present, recovers the
+selected text exactly (LF, CRLF and final-newline presence included). An
+observation cut adds `observation_truncated=true` (§4).
+Nested Grok `read_file` keeps the neutral JSON string and the parsing
+instructions. Claude Direct
+renders the neutral result as cat-n text inside its JSON result wrapper,
 preserving original LF, CRLF, and final-newline presence. For a complete result,
 removing only each line-number prefix recovers the selected file bytes. The lossless raising
 program has its own versioned projection identity; nested raw JSON and other
@@ -6868,7 +6899,8 @@ tool identities do not change. Nested Claude Read uses the
 neutral JSON contract and its corresponding description. A runtime observation
 cut preserves valid JSON, marks `observation_truncated: true`, and keeps the
 cut marker outside `content`; consumers must not treat a cut observation as
-complete file content. Page metadata describes the original read slice. A read
+complete file content. A cut rewrites the page metadata to the whole lines
+it kept (`lines`, `eof: false`, `next_offset` after the last kept line; §4). A read
 resumes exact slices of the same file content until it holds the requested
 lines, up to the 16 MiB workspace file bound, so any line of a large log is
 reachable by `offset`. One page holds at most 2,000 lines and continues at
@@ -8505,11 +8537,12 @@ allowance its estimated headroom derives (§4).
 Each result is additionally capped at the canonical semantic-JSON maximum
 string size minus 4096 bytes of envelope reserve, using the existing exact
 omitted-bytes clipping marker. Every cut fits its bound; only a bound below
-256 bytes may be exceeded, by at most the marker, the wrapped withheld notice
-or a small structured skeleton. A full-output path is also retained when its
+256 bytes may be exceeded, by at most the marker, the wrapped withheld notice,
+a small structured skeleton, or a withheld plain read's guidance and metadata
+line. A full-output path is also retained when its
 minimal notice and process fields exceed the allowance; the canonical
-per-result bound still applies. A cut keeps structure where it fits: a file read stays
-head-first with `observation_truncated`, a process result keeps its fields
+per-result bound still applies. A cut keeps structure where it fits: a file read (the neutral
+JSON or the Grok plain-text read) stays head-first with `observation_truncated`, a process result keeps its fields
 around a clipped `output`, and a raised `{"result": string}` presentation stays
 one valid object whose wrapped text is cut as an observation of its own (so a
 read or process result nested in it keeps its structure; a deeper wrapper is cut

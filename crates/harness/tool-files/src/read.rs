@@ -4,12 +4,14 @@ use crate::text::{
 use plakous_model::{ToolConcurrency, ToolDefinition, ToolEffect};
 use plakous_tools::object_schema;
 use plakous_tools::standard_definition;
-use plakous_tools::{
-    ExecutionBackendErrorKind, ToolContext, ToolExecutor, ToolFuture, ToolInvocation, ToolOutcome,
-    ToolRuntimeError, ToolRuntimeErrorKind, WorkspaceReadSliceRequest,
-};
 use plakous_tools::{MAX_STANDARD_TEXT_BYTES, READ_FILE_CAPABILITY_NAME};
-use plakous_tools::{backend_runtime_error, decode_arguments, operation_control};
+use plakous_tools::{
+    ToolContext, ToolExecutor, ToolFuture, ToolInvocation, ToolOutcome, ToolRuntimeError,
+    ToolRuntimeErrorKind, WorkspaceReadSliceRequest,
+};
+use plakous_tools::{
+    backend_runtime_error, decode_arguments, job_output_runtime_error, operation_control,
+};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
@@ -409,21 +411,6 @@ fn drop_cut_utf8_tail(bytes: &mut Vec<u8>) {
         && std::str::from_utf8(&bytes[lead..]).is_err_and(|error| error.error_len().is_none())
     {
         bytes.truncate(lead);
-    }
-}
-
-/// Job output refusals are policy refusals, including a replaced file and a
-/// non-private directory.
-fn job_output_runtime_error(error: plakous_tools::ExecutionBackendError) -> ToolRuntimeError {
-    match error.kind() {
-        ExecutionBackendErrorKind::IdentityMismatch | ExecutionBackendErrorKind::Denied => {
-            ToolRuntimeError::new(
-                ToolRuntimeErrorKind::WorkspacePolicy,
-                error.message().as_str(),
-            )
-            .with_proven_no_effect(true)
-        }
-        _ => backend_runtime_error(error),
     }
 }
 

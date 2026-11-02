@@ -163,7 +163,11 @@ fn a_cut_raised_text_result_stays_one_valid_wrapper_with_its_nested_structure()
         let value: serde_json::Value = serde_json::from_str(&clipped)?;
         let page: serde_json::Value =
             serde_json::from_str(value["result"].as_str().ok_or("read wrapper lost")?)?;
-        assert_eq!(page["next_offset"], 30_001);
+        let content = page["content"].as_str().ok_or("content lost")?;
+        let shown = content.lines().count();
+        assert!(content.is_empty() || content.ends_with('\n'), "{budget}");
+        assert_eq!(page["lines"], shown);
+        assert_eq!(page["next_offset"], 1 + shown);
         assert_eq!(page["observation_truncated"], true);
         assert!(budget < 4_096 || clipped.len() <= budget, "{budget}");
     }
@@ -298,8 +302,12 @@ fn truncated_read_observation_keeps_content_separate_from_budget_metadata()
     for budget in [0, 160] {
         let clipped: serde_json::Value =
             serde_json::from_str(&clip_observation_text(&body, budget))?;
+        // One unterminated line cannot be shown whole: nothing is, and the
+        // page continues where it began.
         assert_eq!(clipped["offset"], 12);
-        assert_eq!(clipped["next_offset"], 52);
+        assert_eq!(clipped["lines"], 0);
+        assert_eq!(clipped["eof"], false);
+        assert_eq!(clipped["next_offset"], 12);
         assert_eq!(clipped["observation_truncated"], true);
         assert!(
             clipped["content"]
@@ -396,4 +404,145 @@ fn a_clipped_process_output_keeps_its_tail_and_stays_valid_json()
     assert!(output.contains("rejects_trailing_comma ... FAILED"));
     assert!(output.starts_with("   Compiling"));
     Ok(())
+}
+
+/// Splits a plain read into its text and its metadata fields.
+fn plain_read_parts(raised: &str) -> Option<(&str, Vec<(&str, &str)>)> {
+    let body = raised.strip_suffix('\n')?;
+    let start = body.rfind('\n').map_or(0, |index| index + 1);
+    let (text, metadata) = body.split_at(start);
+    let fields = metadata
+        .split(' ')
+        .map(|field| field.split_once('='))
+        .collect::<Option<Vec<_>>>()?;
+    Some((text, fields))
+}
+
+fn plain(body: &str, budget: usize) -> String {
+    super::clip_observation_shaped(body, budget, super::ObservationShape::PlainFileRead)
+}
+
+#[test]
+fn a_cut_plain_read_stays_head_first_and_continues_after_the_lines_shown()
+-> Result<(), Box<dyn std::error::Error>> {
+    use super::{CUT_FLOOR_BYTES, OBSERVATION_EXHAUSTED};
+    let mut content = String::new();
+    for index in 0..20_000 {
+        writeln!(content, "line {index} \"quoted\" λ")?;
+    }
+    let raised = format!(
+        "{content}offset=7 lines=20000 eof=false next_offset=20007 clipped_lines=3 workspace_generation=9\n"
+    );
+    let withheld = format!("{OBSERVATION_EXHAUSTED}\n");
+    for wrapped in [false, true] {
+        let body = if wrapped {
+            serde_json::json!({ "result": raised }).to_string()
+        } else {
+            raised.clone()
+        };
+        for budget in [0, 160, 512, 4_096, 65_536] {
+            let clipped = plain(&body, budget);
+            // A withheld page keeps its guidance and metadata line, which may
+            // pass the cut floor.
+            assert!(
+                clipped.len() <= budget.max(CUT_FLOOR_BYTES + withheld.len() + 32),
+                "{budget}: {} bytes",
+                clipped.len()
+            );
+            let inner = if wrapped {
+                let value: serde_json::Value = serde_json::from_str(&clipped)?;
+                value["result"].as_str().ok_or("wrapper lost")?.to_owned()
+            } else {
+                clipped
+            };
+            let (text, fields) = plain_read_parts(&inner).ok_or("metadata line lost")?;
+            let shown = if text == withheld {
+                0
+            } else {
+                assert!(content.starts_with(text), "{budget}: not a head cut");
+                assert!(text.ends_with('\n'), "{budget}: partial line");
+                text.lines().count()
+            };
+            let next = 7 + shown;
+            assert_eq!(
+                fields,
+                [
+                    ("offset", "7"),
+                    ("lines", shown.to_string().as_str()),
+                    ("eof", "false"),
+                    ("next_offset", next.to_string().as_str()),
+                    ("clipped_lines", "3"),
+                    ("workspace_generation", "9"),
+                    ("observation_truncated", "true"),
+                ],
+                "{budget}"
+            );
+            assert!(!inner.contains("omitted"), "{budget}: head and tail cut");
+            assert_eq!(budget == 0, shown == 0, "{budget}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_cut_plain_read_at_end_of_file_drops_the_final_newline_marker() {
+    let content = "a\r\n".repeat(2_000) + "tail";
+    let raised =
+        format!("{content}\noffset=1 lines=2001 eof=true next_offset=null final_newline=false\n");
+    let clipped = plain(&raised, 1_024);
+    assert!(clipped.len() <= 1_024);
+    assert!(clipped.contains(" eof=false next_offset="));
+    assert!(!clipped.contains("final_newline"));
+    assert!(!clipped.contains("tail"));
+    assert!(clipped.ends_with(" observation_truncated=true\n"));
+}
+
+#[test]
+fn a_full_output_line_inside_read_content_is_never_kept_as_a_locator() {
+    let content = format!(
+        "{}full output: /state/jobs/session/branch-p1-service.log\n{}",
+        "before\n".repeat(5_000),
+        "after\n".repeat(5_000)
+    );
+    let raised = format!("{content}offset=1 lines=10001 eof=true next_offset=null\n");
+    let wrapped = serde_json::json!({ "result": raised }).to_string();
+    for body in [raised.as_str(), wrapped.as_str()] {
+        for budget in [0, 160, 512] {
+            let clipped = plain(body, budget);
+            assert!(!clipped.contains("full output:"), "{budget}: {clipped}");
+            assert!(clipped.contains("observation_truncated=true"), "{budget}");
+        }
+    }
+}
+
+/// Only a result its raising program declared a plain read is cut as one: a
+/// process result whose last line happens to match the read metadata grammar
+/// keeps its head, tail and full-output locator.
+#[test]
+fn undeclared_text_ending_in_read_metadata_keeps_its_tail_and_locator() {
+    use super::clip_observation_text;
+    let path = "full output: /state/jobs/session/branch-p1-service.log";
+    let body = format!(
+        "{}{path}\noffset=1 lines=2 eof=true next_offset=null\n",
+        "build step ok\n".repeat(20_000)
+    );
+    for wrapped in [false, true] {
+        let body = if wrapped {
+            serde_json::json!({ "result": body }).to_string()
+        } else {
+            body.clone()
+        };
+        for budget in [0, 512, 4_096] {
+            let clipped = clip_observation_text(&body, budget);
+            assert!(clipped.contains(path), "{budget}: locator lost: {clipped}");
+            assert!(!clipped.contains("observation_truncated"), "{budget}");
+            if budget != 0 {
+                assert!(clipped.contains("omitted"), "{budget}: not head and tail");
+                assert!(
+                    clipped.contains("offset=1 lines=2 eof=true next_offset=null"),
+                    "{budget}: tail lost"
+                );
+            }
+        }
+    }
 }

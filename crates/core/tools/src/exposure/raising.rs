@@ -4,6 +4,7 @@ use plakous_model::ToolResultPart;
 use serde::{Deserialize, Serialize};
 
 use self::claude::{claude_background_notice, claude_cat_n_from_canonical_read};
+use self::grok::grok_text_from_canonical_read;
 use self::pi::{pi_background_notice, pi_text_from_canonical_read};
 use super::projection::{
     ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionRaisingV2,
@@ -14,6 +15,7 @@ use crate::{
 };
 
 mod claude;
+mod grok;
 mod pi;
 
 /// Raises one canonical process result into the projection's shared shape.
@@ -167,14 +169,27 @@ pub(super) fn raise_read_observation(
             "read observation is not one text value",
         ));
     };
-    let numbered = if entry.lowering == ToolProjectionLoweringV2::PiRead {
-        pi_text_from_canonical_read(text.text())?
-    } else {
-        claude_cat_n_from_canonical_read(text.text())?
+    let numbered = match entry.lowering {
+        ToolProjectionLoweringV2::PiRead => pi_text_from_canonical_read(text.text())?,
+        ToolProjectionLoweringV2::GrokReadFile => grok_text_from_canonical_read(text.text())?,
+        ToolProjectionLoweringV2::ClaudeReadFile => claude_cat_n_from_canonical_read(text.text())?,
+        _ => {
+            return Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Execution,
+                "read observation raising is not enrolled",
+            ));
+        }
     };
     let update = outcome.process_session_update();
     if entry.raising() == ToolProjectionRaisingV2::TextResultObjectV1 {
-        return raise_text_result_object_from_result(&numbered, update);
+        let raised = raise_text_result_object_from_result(&numbered, update)?;
+        return Ok(
+            if entry.lowering == ToolProjectionLoweringV2::GrokReadFile {
+                raised.into_plain_file_read()
+            } else {
+                raised
+            },
+        );
     }
     // TextBlock forbids empty strings for Identity raising. Direct wraps an empty
     // result above; nested RawUtf8 bypasses this projection and retains neutral JSON.

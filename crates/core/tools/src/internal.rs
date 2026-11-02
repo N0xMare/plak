@@ -241,6 +241,12 @@ pub fn process_session_update(outcome: &ToolOutcome) -> Option<ProcessSessionUpd
     outcome.process_session_update()
 }
 
+/// Whether a raising program rendered this outcome as a plain-text file read:
+/// the selected text, then one read metadata line.
+pub fn raised_plain_file_read(outcome: &ToolOutcome) -> bool {
+    outcome.is_plain_file_read()
+}
+
 #[derive(Default)]
 pub struct ProcessQuietPollState {
     pub completion_notices: bool,

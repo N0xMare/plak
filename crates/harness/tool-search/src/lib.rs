@@ -9,6 +9,7 @@
     reason = "doc comments name exact provider tool identifiers"
 )]
 
+mod issued;
 mod list_entries;
 mod text;
 
@@ -16,6 +17,10 @@ pub use text::{
     PLAKOUS_GROK_GREP_DESCRIPTION, PLAKOUS_GROK_LIST_DIR_DESCRIPTION,
     PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION, PLAKOUS_TOOL_SEARCH_REQUIRES_GLOB,
     PLAKOUS_TOOL_SEARCH_REQUIRES_QUERY, PLAKOUS_TOOL_SEARCH_RESULT_BOUND,
+};
+use text::{
+    PLAKOUS_TOOL_SEARCH_NO_MATCHES, PLAKOUS_TOOL_SEARCH_NO_MATCHES_SEARCHED,
+    search_lossy_lines_note, search_no_entries_at_offset,
 };
 
 use std::collections::BTreeMap;
@@ -258,40 +263,40 @@ async fn execute_regex_search(
     } else {
         RepositoryMatchCase::AsciiInsensitive
     };
-    let mut query = RepositoryQuery::regex(
-        query_root(context, &args.path)?,
-        pattern,
-        match_case,
-        limits,
-    )
-    .map_err(|error| {
-        ToolRuntimeError::new(
-            ToolRuntimeErrorKind::InvalidArguments,
-            error.message().as_str(),
-        )
-    })?;
-    if let Some(glob) = args.filename_glob.clone() {
-        query = query.with_path_glob(glob).map_err(backend_runtime_error)?;
-    }
-    let result = context
-        .environment()
-        .query_repository(query, operation_control(context))
-        .await
-        .map_err(backend_runtime_error)?;
+    let (result, job_output) = regex_query(context, args, pattern, match_case, limits).await?;
     context.check_cancelled()?;
-    let entries = regex_entries(context, &result, before, after, counts_only, paths_only)?;
+    let issued_lines = if job_output && (before != 0 || after != 0) && !counts_only && !paths_only {
+        Some(issued::lines_around_hits(context, &args.path, result.matches(), before, after).await?)
+    } else {
+        None
+    };
+    let entries = regex_entries(
+        context,
+        &result,
+        before,
+        after,
+        counts_only,
+        paths_only,
+        issued_lines.as_ref(),
+    )?;
     let mut output = BoundedSearchResult::new(STANDARD_SEARCH_RESULT_BYTES - 1024);
     let stamp = generation_stamp_prefix(context);
     let mut clipped = false;
+    let mut written = 0_usize;
     let mut presented = want_value.then(Vec::new);
-    for entry in entries.into_iter().skip(offset).take(head_limit) {
+    for entry in entries.iter().skip(offset).take(head_limit) {
         if writeln!(output, "{}", entry.text).is_err() {
             clipped = true;
             break;
         }
+        written += 1;
         if let Some(presented) = &mut presented {
-            presented.push(entry.hits);
+            presented.push(entry.hits.clone());
         }
+    }
+    if written == 0 && !clipped {
+        writeln!(output, "{}", empty_page(&result, entries.len(), offset))
+            .map_err(|_| search_result_bound_error())?;
     }
     let mut notes = search_limit_notes(&result, match_cap, STANDARD_SEARCH_REGEX_RESULT_BYTES);
     if clipped {
@@ -313,6 +318,72 @@ async fn execute_regex_search(
         result.matches().len(),
         result.incomplete(),
     )
+}
+
+/// The line a regex page with no entries carries, so it is never empty. It
+/// does not claim no matches beside a header that names unsearched files.
+fn empty_page(
+    result: &plakous_tools::RepositoryQueryResult,
+    entries: usize,
+    offset: usize,
+) -> String {
+    if entries != 0 {
+        return search_no_entries_at_offset(offset, entries);
+    }
+    let unsearched = result.skipped_oversize()
+        + result.skipped_binary()
+        + result.skipped_changed()
+        + result.entries_skipped();
+    if unsearched != 0 || result.incomplete() {
+        PLAKOUS_TOOL_SEARCH_NO_MATCHES_SEARCHED.to_owned()
+    } else {
+        PLAKOUS_TOOL_SEARCH_NO_MATCHES.to_owned()
+    }
+}
+
+/// Runs one regex query: an admitted job-output file, or a workspace walk.
+/// The flag says the result came from a job-output file.
+async fn regex_query(
+    context: &ToolContext,
+    args: &SearchArgs,
+    pattern: &str,
+    match_case: RepositoryMatchCase,
+    limits: RepositoryQueryLimits,
+) -> Result<(plakous_tools::RepositoryQueryResult, bool), ToolRuntimeError> {
+    if let Some(result) = issued::search_issued(
+        context,
+        &args.path,
+        Some(pattern),
+        true,
+        match_case,
+        args.filename_glob.as_deref(),
+        limits,
+    )
+    .await?
+    {
+        return Ok((result, true));
+    }
+    let mut query = RepositoryQuery::regex(
+        query_root(context, &args.path)?,
+        pattern,
+        match_case,
+        limits,
+    )
+    .map_err(|error| {
+        ToolRuntimeError::new(
+            ToolRuntimeErrorKind::InvalidArguments,
+            error.message().as_str(),
+        )
+    })?;
+    if let Some(glob) = args.filename_glob.clone() {
+        query = query.with_path_glob(glob).map_err(backend_runtime_error)?;
+    }
+    let result = context
+        .environment()
+        .query_repository(query, operation_control(context))
+        .await
+        .map_err(backend_runtime_error)?;
+    Ok((result, false))
 }
 
 /// The first 4096 bytes of a value's query, cut on a character boundary.
@@ -426,6 +497,7 @@ fn regex_entries(
     after: usize,
     counts_only: bool,
     paths_only: bool,
+    issued_lines: Option<&BTreeMap<usize, String>>,
 ) -> Result<Vec<RegexEntry>, ToolRuntimeError> {
     let mut entries = Vec::new();
     let mut by_file: Vec<(&Path, Vec<&plakous_tools::RepositoryQueryMatch>)> = Vec::new();
@@ -459,7 +531,18 @@ fn regex_entries(
                 });
             }
         } else {
-            append_context_lines(context, path, &hits, before, after, &mut entries, first_hit)?;
+            append_context_lines(
+                context,
+                path,
+                &hits,
+                &mut entries,
+                &ContextWindow {
+                    before,
+                    after,
+                    first_hit,
+                    issued_lines,
+                },
+            )?;
         }
         first_hit = end_hit;
     }
@@ -498,6 +581,9 @@ fn search_limit_notes(
             result.entries_skipped()
         ));
     }
+    if result.lossy_lines() != 0 {
+        notes.push(search_lossy_lines_note(result.lossy_lines()));
+    }
     if let Some(reason) = result.stop_reason() {
         let reason = match reason {
             RepositoryQueryStopReason::Matches => {
@@ -522,32 +608,70 @@ fn search_limit_notes(
     notes
 }
 
+/// Context lines around regex hits, plus where those hits sit in the result.
+struct ContextWindow<'a> {
+    before: usize,
+    after: usize,
+    first_hit: usize,
+    /// The lines around the hits of a job-output file, already read.
+    issued_lines: Option<&'a BTreeMap<usize, String>>,
+}
+
+/// A row's line within the bound a match row keeps, cut on a character
+/// boundary and marked ` …` when cut, so one long context line cannot fill
+/// the page before its match.
+fn bounded_row_line(line: &str) -> std::borrow::Cow<'_, str> {
+    if line.len() <= STANDARD_SEARCH_MATCH_BYTES {
+        return std::borrow::Cow::Borrowed(line);
+    }
+    let cut = line.floor_char_boundary(STANDARD_SEARCH_MATCH_BYTES);
+    std::borrow::Cow::Owned(format!("{} …", &line[..cut]))
+}
+
+/// One file's lines, whole or only those around its hits.
+enum FileLines<'a> {
+    Whole(Vec<&'a str>),
+    Around(&'a BTreeMap<usize, String>),
+}
+
+impl FileLines<'_> {
+    fn get(&self, index: usize) -> Option<&str> {
+        match self {
+            Self::Whole(lines) => lines.get(index).copied(),
+            Self::Around(lines) => lines.get(&index).map(String::as_str),
+        }
+    }
+}
+
 /// Emits ripgrep-style match (`:`) and context (`-`) lines for one file.
 fn append_context_lines(
     context: &ToolContext,
     path: &Path,
     hits: &[&plakous_tools::RepositoryQueryMatch],
-    before: usize,
-    after: usize,
     entries: &mut Vec<RegexEntry>,
-    first_hit: usize,
+    window: &ContextWindow<'_>,
 ) -> Result<(), ToolRuntimeError> {
-    let resolved = context.workspace().resolve_existing(path)?;
-    let bytes = fs::read(&resolved).map_err(|_| {
-        ToolRuntimeError::new(
-            ToolRuntimeErrorKind::Execution,
-            "grep could not reread a matching file for context",
-        )
-    })?;
-    let text = String::from_utf8_lossy(&bytes);
-    let file_lines: Vec<&str> = text.lines().collect();
+    let owned;
+    let file_lines = if let Some(lines) = window.issued_lines {
+        FileLines::Around(lines)
+    } else {
+        let resolved = context.workspace().resolve_existing(path)?;
+        let bytes = fs::read(&resolved).map_err(|_| {
+            ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Execution,
+                "grep could not reread a matching file for context",
+            )
+        })?;
+        owned = String::from_utf8_lossy(&bytes).into_owned();
+        FileLines::Whole(owned.lines().collect())
+    };
     let file_display = path.to_string_lossy();
     let mut emitted = BTreeMap::<usize, char>::new();
     for hit in hits {
         let line_index = usize::try_from(hit.line().saturating_sub(1)).unwrap_or(usize::MAX);
-        let start = line_index.saturating_sub(before);
-        let end = line_index.saturating_add(after + 1).min(file_lines.len());
-        for index in start..end {
+        let start = line_index.saturating_sub(window.before);
+        let end = line_index.saturating_add(window.after + 1);
+        for index in (start..end).filter(|index| file_lines.get(*index).is_some()) {
             let marker = if index == line_index { ':' } else { '-' };
             emitted
                 .entry(index)
@@ -560,11 +684,13 @@ fn append_context_lines(
         }
     }
     for (index, marker) in emitted {
-        let line = file_lines.get(index).copied().unwrap_or_default();
+        let line = bounded_row_line(file_lines.get(index).unwrap_or_default());
         let hit = hits
             .binary_search_by_key(&(index as u64 + 1), |hit| hit.line())
             .ok();
-        let hits = hit.map_or(0..0, |hit| first_hit + hit..first_hit + hit + 1);
+        let hits = hit.map_or(0..0, |hit| {
+            window.first_hit + hit..window.first_hit + hit + 1
+        });
         entries.push(RegexEntry {
             text: format!("{file_display}{marker}{}{marker}{line}", index + 1),
             hits,
@@ -678,7 +804,6 @@ impl ToolExecutor for SearchRepositoryTool {
             } else {
                 repository_query_limits(&args, STANDARD_SEARCH_MATCHES)?
             };
-            let root = query_root(&context, &args.path)?;
             // A filename-glob listing ignores its query: its identity is the
             // glob under the searched root.
             let wanted_query = if !invocation.want_value() {
@@ -690,42 +815,64 @@ impl ToolExecutor for SearchRepositoryTool {
             } else {
                 args.query.clone()
             };
-            let query = if args.paths_only.unwrap_or(false) {
-                let glob = args.filename_glob.ok_or_else(|| {
-                    ToolRuntimeError::new(
+            let match_case = if args.case_sensitive.unwrap_or(false) {
+                RepositoryMatchCase::Sensitive
+            } else {
+                RepositoryMatchCase::AsciiInsensitive
+            };
+            let pattern = if args.paths_only.unwrap_or(false) {
+                if args.filename_glob.is_none() {
+                    return Err(ToolRuntimeError::new(
                         ToolRuntimeErrorKind::InvalidArguments,
                         PLAKOUS_TOOL_SEARCH_REQUIRES_GLOB,
-                    )
-                })?;
-                RepositoryQuery::glob(root, glob, limits).map_err(backend_runtime_error)?
+                    ));
+                }
+                None
             } else {
-                let needle = args.query.ok_or_else(|| {
+                Some(args.query.as_deref().ok_or_else(|| {
                     ToolRuntimeError::new(
                         ToolRuntimeErrorKind::InvalidArguments,
                         PLAKOUS_TOOL_SEARCH_REQUIRES_QUERY,
                     )
-                })?;
-                let mut query = RepositoryQuery::new(
-                    root,
-                    needle.into_bytes(),
-                    if args.case_sensitive.unwrap_or(false) {
-                        RepositoryMatchCase::Sensitive
-                    } else {
-                        RepositoryMatchCase::AsciiInsensitive
-                    },
-                    limits,
-                )
-                .map_err(backend_runtime_error)?;
-                if let Some(glob) = args.filename_glob {
-                    query = query.with_path_glob(glob).map_err(backend_runtime_error)?;
-                }
-                query
+                })?)
             };
-            let result = context
-                .environment()
-                .query_repository(query, operation_control(&context))
-                .await
-                .map_err(backend_runtime_error)?;
+            let job_output = issued::search_issued(
+                &context,
+                &args.path,
+                pattern,
+                false,
+                match_case,
+                args.filename_glob.as_deref(),
+                limits,
+            )
+            .await?;
+            let result = if let Some(result) = job_output {
+                result
+            } else {
+                let root = query_root(&context, &args.path)?;
+                let query = if let Some(needle) = pattern {
+                    let mut query =
+                        RepositoryQuery::new(root, needle.as_bytes().to_vec(), match_case, limits)
+                            .map_err(backend_runtime_error)?;
+                    if let Some(glob) = args.filename_glob.clone() {
+                        query = query.with_path_glob(glob).map_err(backend_runtime_error)?;
+                    }
+                    query
+                } else {
+                    let glob = args.filename_glob.clone().ok_or_else(|| {
+                        ToolRuntimeError::new(
+                            ToolRuntimeErrorKind::InvalidArguments,
+                            PLAKOUS_TOOL_SEARCH_REQUIRES_GLOB,
+                        )
+                    })?;
+                    RepositoryQuery::glob(root, glob, limits).map_err(backend_runtime_error)?
+                };
+                context
+                    .environment()
+                    .query_repository(query, operation_control(&context))
+                    .await
+                    .map_err(backend_runtime_error)?
+            };
             context.check_cancelled()?;
             let stamp = generation_stamp_prefix(&context);
             let header = search_notes_header(
@@ -975,16 +1122,16 @@ static SEARCH_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "search.search_repository",
         PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION,
-        "3484b387e9918a7d4fc28e44ab457950d504c8a2ad33f95bae8fd6f578017c1f",
+        "3dc9f1f582d9d1cd5a1b00f35cdaa90d15246d1f6c718baf2c09de85d18143e8",
     ),
     PromptPin::new(
         "search.grok.grep",
         PLAKOUS_GROK_GREP_DESCRIPTION,
-        "7bf816477c14ebbc3c39d1a36d48dc5f3899cb0f5c24eba457e3a6269cd710c6",
+        "878e1e504a9d4343966a4eb3c5ec12b45ebf846e74f9d27ef050dfcd1a5823f6",
     ),
     PromptPin::new(
         "search.grok.list_dir",
         PLAKOUS_GROK_LIST_DIR_DESCRIPTION,
-        "65e9c798849978cb0433bfcd031e586d40bf44a5b0f74ae6a45fbd8aae1d6b89",
+        "cd94b4cbdcb325d712a1604e11140570e86b46e14c340698412690890ec6d773",
     ),
 ];

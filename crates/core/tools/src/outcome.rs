@@ -109,6 +109,9 @@ pub struct ToolOutcome {
     wait_fact: Option<WaitFact>,
     /// Bounded, redacted label for a host surface. Never part of [`Self::to_model_result`].
     presentation_subject: Option<Arc<str>>,
+    /// Set by a raising program that renders a file read as plain text plus
+    /// one metadata line, so an observation cut can keep it head-first.
+    plain_file_read: bool,
 }
 
 impl fmt::Debug for ToolOutcome {
@@ -122,6 +125,7 @@ impl fmt::Debug for ToolOutcome {
             .field("process_telemetry", &self.process_telemetry)
             .field("wait_fact", &self.wait_fact)
             .field("presentation_subject", &self.presentation_subject)
+            .field("plain_file_read", &self.plain_file_read)
             .field("parts", &"<redacted>")
             .field("value", &self.value.as_ref().map(|_| "<redacted>"))
             .finish()
@@ -189,6 +193,18 @@ impl ToolOutcome {
         self
     }
 
+    /// Marks this raised outcome as a plain-text file read (text, then one
+    /// read metadata line).
+    #[must_use]
+    pub(crate) const fn into_plain_file_read(mut self) -> Self {
+        self.plain_file_read = true;
+        self
+    }
+
+    pub(crate) const fn is_plain_file_read(&self) -> bool {
+        self.plain_file_read
+    }
+
     /// The host-only presentation subject, when one was attached.
     #[must_use]
     pub fn presentation_subject(&self) -> Option<&str> {
@@ -245,6 +261,7 @@ impl ToolOutcome {
             process_telemetry: None,
             wait_fact: None,
             presentation_subject: None,
+            plain_file_read: false,
         })
     }
 
@@ -310,6 +327,7 @@ impl ToolOutcome {
                 process_telemetry: None,
                 wait_fact: None,
                 presentation_subject: None,
+                plain_file_read: false,
             },
         }
     }
@@ -343,6 +361,7 @@ impl ToolOutcome {
                 process_telemetry: None,
                 wait_fact: None,
                 presentation_subject: None,
+                plain_file_read: false,
             },
         }
     }

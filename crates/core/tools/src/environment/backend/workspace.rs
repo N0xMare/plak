@@ -30,10 +30,13 @@ use super::{
     WorkspaceMutationTransactionResult, WorkspaceReadCursor, WorkspaceReadSlice,
     WorkspaceReadSliceRequest, WorkspaceReplacement, backend_error, conflict_error, io_error, lock,
     recovery_required_error, resource_error, validate_relative_path, workspace_error,
+    workspace_path_not_found,
 };
+mod admitted;
 mod aliases;
 mod query;
 
+pub use admitted::{AdmittedTextQuery, AdmittedTextScan, AdmittedTextSearch, search_admitted_text};
 use query::{
     RepositoryQueryWalk, list_repository_query_paths, retain_repository_query_glob_matches,
     scan_repository_query_files, walk_repository_query_directories,
@@ -83,10 +86,7 @@ pub(super) fn workspace_descriptor_path(
 fn workspace_open_error(relative: &Path, errno: Errno) -> ExecutionBackendError {
     let path = relative.display();
     let error = match errno {
-        Errno::NOENT => backend_error(
-            ExecutionBackendErrorKind::NotFound,
-            format!("path does not exist: {path}"),
-        ),
+        Errno::NOENT => workspace_path_not_found(relative),
         // A component of the path is not a directory, so the path can name
         // nothing and nothing can be created beneath it: a write refuses here
         // rather than reading it as a create.
@@ -721,6 +721,7 @@ fn empty_repository_query_result(entries_skipped: usize) -> RepositoryQueryResul
         skipped_oversize: 0,
         skipped_changed: 0,
         entries_skipped,
+        lossy_lines: 0,
         stop_reason: None,
     }
 }
@@ -1477,19 +1478,15 @@ fn publish_replacement_file(
 /// the same `NotADirectory` a workspace open reports. Anything else is the
 /// filesystem refusing for a reason of its own and stays an I/O failure.
 fn resolve_component_error(path: &Path, error: &std::io::Error) -> ExecutionBackendError {
-    let path = path.display();
     let refusal = match error.kind() {
-        std::io::ErrorKind::NotFound => backend_error(
-            ExecutionBackendErrorKind::NotFound,
-            format!("path does not exist: {path}"),
-        ),
+        std::io::ErrorKind::NotFound => workspace_path_not_found(path),
         std::io::ErrorKind::NotADirectory => backend_error(
             ExecutionBackendErrorKind::NotADirectory,
-            format!("a parent component is not a directory: {path}"),
+            format!("a parent component is not a directory: {}", path.display()),
         ),
         _ => backend_error(
             ExecutionBackendErrorKind::Io,
-            format!("workspace path could not be resolved: {path}"),
+            format!("workspace path could not be resolved: {}", path.display()),
         ),
     };
     refusal.with_proven_no_effect(true)

@@ -765,9 +765,11 @@ fn exact_process_projection_schemas_are_v2_bound_goldens() -> Result<(), ToolRun
         )
     );
     assert!(
-        codex[1]
+        !codex[1]
             .description()
-            .contains("Background jobs survive the turn")
+            .contains(PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT),
+        "write_stdin repeats the job-lifetime sentence: {}",
+        codex[1].description()
     );
     assert_eq!(
         codex[0].schema().document().value().as_ref(),

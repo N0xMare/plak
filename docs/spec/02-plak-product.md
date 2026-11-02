@@ -6693,11 +6693,14 @@ and its `task_id` schema does not name `interrupt_agent`;
 Claude retains `wait_agent` and `interrupt_agent` for agents. The Claude `Bash`
 description names `Edit` and `Write` and the `TaskStop` description names agent
 tools as "when presented", so a tier-filtered child or a leaf without agent
-tools is not told it has them. Process tool descriptions
-(`exec_command`, `write_stdin`, `run_terminal_command`, `Bash`) state that
-still-running processes continue in the background with an id; completion is
-reported automatically. Background jobs survive root-turn and cell cleanup,
-and stop only on explicit stop, runtime release, attempt end or the hard cap.
+tools is not told it has them. The process-starting tool of each family (`exec_command`,
+`run_terminal_command`, `Bash`, pi `bash`) states once that still-running
+processes continue in the background with an id, that completion is reported
+automatically, and that background jobs survive root-turn and cell cleanup and
+stop only on explicit stop, runtime release, attempt end or the hard cap.
+`write_stdin`, Grok's output and kill tools, pi's `wait` and `stop`, and
+Claude's `TaskStop` state the numeric foreground budget and hard cap and do
+not repeat that sentence.
 
 OpenRouter wears the pi pack on every protocol (Chat, Messages, Responses):
 Plak declares the library's one generic presentation for every custom
@@ -6762,11 +6765,31 @@ compiled choose the root, hub or assignee wording.
 
 
 Read results separate exact file `content` from JSON pagination metadata. Grok
-reads expose that result; Claude Direct renders cat-n text (text
+Direct `read_file` returns that text verbatim and then one metadata line
+(`offset=<n> lines=<n> eof=<true|false> next_offset=<n|null>`, with
+`clipped_lines`, `lossy`, `workspace_generation` and `final_newline=false` only
+when set; `final_newline=false` marks text that does not end in a newline, whose
+separator before the metadata line is not file content). A page cut to fit the
+context adds `observation_truncated=true` and continues `next_offset` after the
+lines shown. It has no line numbers. The Direct `{ "result": string }` wrapper remains; the string is
+not itself JSON. Nested JS and Python cells still receive the neutral JSON
+string and the parsing instructions. Claude Direct renders cat-n text (text
 only for a text file, and an image part for PNG, JPEG, GIF and WebP; a
 program cell refuses images) and pi's `read` the plain lines with its continuation line, while
 local composition receives the neutral JSON string and explicit parsing
-instructions. Grok `read_file` defaults to 1,000 lines and accepts at most
+instructions. Grok `read_file`, `write`, `search_replace`, `grep` and
+`list_dir` accept a workspace-relative path or an absolute path inside the
+workspace, and refuse a path outside it or one that contains `..`. Grok
+`read_file` and `grep` also accept exactly a `full output:` path the read
+exception admits (chapter 04 §2.1); `write`, `search_replace` and `list_dir`
+do not. A missing
+`list_dir` path fails with `path does not exist: <workspace-relative path>`, as
+a read of it does. A Grok `grep` (or regex search) that matches nothing returns
+`No matches found.`, or `No matches in the files searched.` when its header
+names files or entries that were not searched; an `offset` past every entry
+says so with the entry count. Context rows (`-A`, `-B`, `-C`) keep at most the
+4 KiB a match row keeps, marked ` …` when cut. Grok `read_file`
+defaults to 1,000 lines and accepts at most
 2,000 per call, matching its canonical executor. Line selection preserves CRLF
 and final-newline presence.
 Grok `grep` accepts a `head_limit` of at most 4,096 entries, matching its

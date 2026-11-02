@@ -1939,7 +1939,7 @@ mod suite {
     const LIFECYCLE_RENDER_PINS: &[(&str, &str)] = &[
         (
             "tool-results",
-            "c28b932bb6d109e9223423e7d894fe94fb431d658de2ddb6ebbf914ca20683ac",
+            "677dd30850d29730e5c9ddef8826dbc5d0136bad50d00353ca510cdecc2aa61f",
         ),
         (
             "compaction",

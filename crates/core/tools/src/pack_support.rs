@@ -86,6 +86,27 @@ pub fn backend_runtime_error(error: ExecutionBackendError) -> ToolRuntimeError {
         .with_proven_no_effect(error.proven_no_effect())
 }
 
+/// Maps a failed read of an issued job output file. A refused spelling, a
+/// replaced file and a non-private directory are policy refusals with no
+/// effect; anything else maps as [`backend_runtime_error`] does.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the helper is used directly as a Result::map_err conversion boundary"
+)]
+#[must_use]
+pub fn job_output_runtime_error(error: ExecutionBackendError) -> ToolRuntimeError {
+    match error.kind() {
+        ExecutionBackendErrorKind::IdentityMismatch | ExecutionBackendErrorKind::Denied => {
+            ToolRuntimeError::new(
+                ToolRuntimeErrorKind::WorkspacePolicy,
+                error.message().as_str(),
+            )
+            .with_proven_no_effect(true)
+        }
+        _ => backend_runtime_error(error),
+    }
+}
+
 /// One execution error for content a tool could not construct.
 #[must_use]
 pub fn content_runtime_error(error: impl std::error::Error + 'static) -> ToolRuntimeError {

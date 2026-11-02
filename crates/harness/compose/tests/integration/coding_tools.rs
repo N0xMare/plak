@@ -912,6 +912,31 @@ async fn search_list_dir_accepts_absolute_path_under_workspace_root() -> TestRes
     .await?;
     assert_eq!(listed.kind(), ToolOutcomeKind::Success);
     assert!(text(&listed)?.contains("inside.txt"));
+    // A missing path names its workspace-relative spelling, as a read does.
+    for spelling in [
+        String::from("missing-dir/inner"),
+        path.join("missing-dir/inner").display().to_string(),
+    ] {
+        let missing = execute(
+            &registry,
+            Arc::new(ExecutionEnvironment::host(
+                ExecutionEnvironmentScope::Run(ids(0x85)?.run),
+                workspace.path(),
+                ".",
+                ExecutionEnvironmentConfig::default(),
+            )?),
+            ids(0x86)?,
+            "search_repository",
+            &serde_json::json!({"path": spelling, "query": "", "list_directory": true}).to_string(),
+        )
+        .await;
+        let error = require_error(missing, "a missing directory was listed")?;
+        assert_eq!(
+            runtime_error_kind(error.as_ref()),
+            Some(ToolRuntimeErrorKind::WorkspacePolicy)
+        );
+        assert_eq!(error.to_string(), "path does not exist: missing-dir/inner");
+    }
     Ok(())
 }
 
@@ -1244,6 +1269,518 @@ async fn read_file_admits_exactly_an_issued_job_output_file() -> TestResult {
     );
     sessions.join_all()?;
     Ok(())
+}
+
+struct IssuedGrepHarness {
+    workspace: tempfile::TempDir,
+    state: tempfile::TempDir,
+    registry: plakous_tools::FrozenToolRegistry,
+    projection: plakous_tools::ToolProjectionMap,
+    environment: Arc<ExecutionEnvironment>,
+    sessions: plakous_tools::JoinedProcessSessions,
+    number: u32,
+    path: String,
+}
+
+/// One Grok search projection over a live issued job-output file.
+#[cfg(unix)]
+async fn issued_grep_harness(call: u8) -> TestResult<IssuedGrepHarness> {
+    let workspace = tempfile::tempdir()?;
+    let state = tempfile::tempdir()?;
+    let registry = standard_coding_registry()?;
+    let projection = grok_search_projection(registry.clone())?;
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(ids(call)?.run),
+        workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    let (sessions, number, path) = issued_job_output(&environment, state.path()).await?;
+    assert!(!path.starts_with(&workspace.path().display().to_string()));
+    Ok(IssuedGrepHarness {
+        workspace,
+        state,
+        registry,
+        projection,
+        environment,
+        sessions,
+        number,
+        path,
+    })
+}
+
+/// A projected tool call that must fail, naming `needle` in the error.
+#[cfg(unix)]
+async fn expect_exposed_refusal(
+    harness: &IssuedGrepHarness,
+    environment: &Arc<ExecutionEnvironment>,
+    call: u8,
+    tool: &str,
+    arguments: String,
+    needle: &str,
+) -> TestResult {
+    let outcome = execute_exposed(
+        &harness.registry,
+        &harness.projection,
+        Arc::clone(environment),
+        ids(call)?,
+        tool,
+        &arguments,
+    )
+    .await;
+    let Err(error) = outcome else {
+        return Err(format!("{tool} accepted a refused path").into());
+    };
+    assert!(error.to_string().contains(needle), "{error}");
+    Ok(())
+}
+
+/// Grok `grep` and canonical search admit exactly the issued job-output path
+/// `read_file` admits.
+#[cfg(unix)]
+#[tokio::test]
+async fn grep_admits_exactly_an_issued_job_output_file() -> TestResult {
+    let harness = issued_grep_harness(0xc3).await?;
+    let found = execute_exposed(
+        &harness.registry,
+        &harness.projection,
+        Arc::clone(&harness.environment),
+        ids(0xc3)?,
+        "grep",
+        &serde_json::json!({"pattern": "second", "path": harness.path}).to_string(),
+    )
+    .await?;
+    let rendered = text(&found)?;
+    assert!(
+        rendered.contains(&format!("{}:2:second", harness.path)),
+        "{rendered}"
+    );
+
+    let literal = execute(
+        &harness.registry,
+        Arc::clone(&harness.environment),
+        ids(0xc5)?,
+        "search_repository",
+        &serde_json::json!({"query": "second", "path": harness.path}).to_string(),
+    )
+    .await?;
+    let literal_text = text(&literal)?;
+    assert!(
+        literal_text.contains(&format!("{}:2:1:second", harness.path)),
+        "{literal_text}"
+    );
+    harness.sessions.join_all()?;
+    Ok(())
+}
+
+/// A job log of about 3 MiB: needles on its first line, on a line that
+/// straddles the first read slice, in its middle and on its unterminated last
+/// line. Returns the log and each needle's one-based line number and text.
+fn large_job_log() -> (String, Vec<(usize, String)>) {
+    let slice = usize::try_from(plakous_tools::MAX_STANDARD_TEXT_BYTES).unwrap_or(usize::MAX);
+    let mut lines = vec![String::from("needle-start build begins")];
+    let mut bytes = lines[0].len() + 1;
+    let mut fill_to = |lines: &mut Vec<String>, target: usize| {
+        while bytes + 200 < target {
+            let text = format!("compiling unit {:08} {} ok", lines.len(), ".".repeat(60));
+            bytes += text.len() + 1;
+            lines.push(text);
+        }
+        let pad = target - bytes - 1;
+        lines.push("p".repeat(pad));
+        bytes += pad + 1;
+    };
+    fill_to(&mut lines, slice - 5);
+    lines.push(String::from("needle-boundary crosses the first slice"));
+    fill_to(&mut lines, 3 * 512 * 1024);
+    lines.push(String::from("needle-middle error: unit failed"));
+    fill_to(&mut lines, 3 * 1024 * 1024);
+    lines.push(String::from("needle-end exit 101"));
+    let needles = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("needle-"))
+        .map(|(index, line)| (index + 1, line.clone()))
+        .collect();
+    (lines.join("\n"), needles)
+}
+
+/// A Grok search projection over one issued 3 MiB job log.
+#[cfg(unix)]
+struct LargeLogHarness {
+    workspace: tempfile::TempDir,
+    _state: tempfile::TempDir,
+    registry: plakous_tools::FrozenToolRegistry,
+    projection: plakous_tools::ToolProjectionMap,
+    environment: Arc<ExecutionEnvironment>,
+    sessions: plakous_tools::JoinedProcessSessions,
+    log: String,
+    needles: Vec<(usize, String)>,
+    path: String,
+}
+
+#[cfg(unix)]
+impl LargeLogHarness {
+    fn new(call: u8) -> TestResult<Self> {
+        let (log, needles) = large_job_log();
+        assert!(log.len() > 3 * 1024 * 1024 && needles.len() == 4);
+        Self::with_log(call, log.as_bytes(), needles)
+    }
+
+    /// The harness over one issued file holding `log`.
+    fn with_log(call: u8, log: &[u8], needles: Vec<(usize, String)>) -> TestResult<Self> {
+        let workspace = tempfile::tempdir()?;
+        let state = tempfile::tempdir()?;
+        fs::write(workspace.path().join("notes.txt"), b"nothing here\n")?;
+        let registry = standard_coding_registry()?;
+        let projection = grok_search_projection(registry.clone())?;
+        let environment = Arc::new(ExecutionEnvironment::host(
+            ExecutionEnvironmentScope::Run(ids(call)?.run),
+            workspace.path(),
+            ".",
+            ExecutionEnvironmentConfig::default(),
+        )?);
+        let sessions = environment.joined_process_sessions()?;
+        sessions.bind_job_outputs(
+            plakous_tools::JobOutputRoot::open(&state.path().join("jobs"))?,
+            plakous_model::SessionId::from_str("00000000-0000-0000-0000-0000000000b0")?,
+            plakous_model::BranchId::from_str("00000000-0000-0000-0000-0000000000c0")?,
+        );
+        let path = sessions
+            .spill_output(log)
+            .ok_or("the log was not issued")?
+            .path;
+        let log = String::from_utf8_lossy(log).into_owned();
+        Ok(Self {
+            workspace,
+            _state: state,
+            registry,
+            projection,
+            environment,
+            sessions,
+            log,
+            needles,
+            path,
+        })
+    }
+
+    /// One Grok `grep` call's canonical text.
+    async fn grep(&self, call: u8, arguments: serde_json::Value) -> TestResult<String> {
+        let outcome = execute_exposed(
+            &self.registry,
+            &self.projection,
+            Arc::clone(&self.environment),
+            ids(call)?,
+            "grep",
+            &arguments.to_string(),
+        )
+        .await?;
+        Ok(text(&outcome)?.to_owned())
+    }
+}
+
+/// `grep` and `search_repository` search an issued log over the 1 MiB
+/// workspace-file bound whole, matching a line split across read slices.
+#[cfg(unix)]
+#[tokio::test]
+async fn search_streams_a_large_issued_job_output_file() -> TestResult {
+    let harness = LargeLogHarness::new(0xca)?;
+    let path = &harness.path;
+    let all = harness
+        .grep(
+            0xca,
+            serde_json::json!({"pattern": "needle-", "path": path}),
+        )
+        .await?;
+    let mut rows = String::new();
+    for (line, text) in &harness.needles {
+        writeln!(rows, "{path}:{line}:{text}")?;
+    }
+    // A stamped workspace prefixes its generation; nothing else precedes the rows.
+    assert!(all.ends_with(&rows) && !all.contains("incomplete"), "{all}");
+
+    let literal = execute(
+        &harness.registry,
+        Arc::clone(&harness.environment),
+        ids(0xcb)?,
+        "search_repository",
+        &serde_json::json!({"query": "needle-", "path": path}).to_string(),
+    )
+    .await?;
+    let literal = text(&literal)?;
+    assert!(
+        literal.starts_with(&format!(
+            "matches=4 files_considered=1 files_scanned=1 bytes_scanned={} skipped_binary=0 skipped_oversize=0 incomplete=false\n",
+            harness.log.len()
+        )),
+        "{literal}"
+    );
+    for (line, text) in &harness.needles {
+        assert!(
+            literal.contains(&format!("{path}:{line}:1:{text}\n")),
+            "{literal}"
+        );
+    }
+    harness.sessions.join_all()?;
+    Ok(())
+}
+
+/// `head_limit` stops a job-log search early, context lines are read back
+/// from the log, and a search that matches nothing says so.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_large_issued_log_search_pages_reads_context_and_names_no_matches() -> TestResult {
+    let harness = LargeLogHarness::new(0xcc)?;
+    let (path, needles) = (&harness.path, &harness.needles);
+    let first_two = harness
+        .grep(
+            0xcc,
+            serde_json::json!({"pattern": "needle-", "path": path, "head_limit": 2}),
+        )
+        .await?;
+    assert!(
+        first_two.starts_with("[incomplete=true; match bound: stopped after 2 matches"),
+        "{first_two}"
+    );
+    assert!(first_two.contains(&needles[1].1) && !first_two.contains(&needles[2].1));
+
+    let context = harness
+        .grep(
+            0xcd,
+            serde_json::json!({"pattern": "needle-(middle|end)", "path": path, "-C": 1}),
+        )
+        .await?;
+    let lines = harness.log.split('\n').collect::<Vec<_>>();
+    let (middle, end) = (needles[2].0, needles[3].0);
+    let mut expected = String::new();
+    for line in [middle - 1, middle, middle + 1, end - 1, end] {
+        let marker = if line == middle || line == end {
+            ':'
+        } else {
+            '-'
+        };
+        writeln!(expected, "{path}{marker}{line}{marker}{}", lines[line - 1])?;
+    }
+    assert!(context.ends_with(&expected), "{context}");
+
+    let none = harness
+        .grep(
+            0xce,
+            serde_json::json!({"pattern": "absent-needle", "path": path}),
+        )
+        .await?;
+    assert!(none.ends_with("No matches found.\n"), "{none}");
+    let empty = harness
+        .grep(0xcf, serde_json::json!({"pattern": "absent-needle"}))
+        .await?;
+    assert!(empty.ends_with("No matches found.\n"), "{empty}");
+    harness.sessions.join_all()?;
+    Ok(())
+}
+
+/// A context line longer than the page bound is cut like a match row, so the
+/// match beside it is still shown: in an issued log and in a workspace file.
+#[cfg(unix)]
+#[tokio::test]
+async fn grep_context_rows_are_bounded_like_match_rows() -> TestResult {
+    let progress = "=".repeat(400 * 1024);
+    let log = format!("{progress}\nneedle-after-progress\n{progress}\n");
+    let harness = LargeLogHarness::with_log(0xd0, log.as_bytes(), Vec::new())?;
+    fs::write(harness.workspace.path().join("progress.log"), &log)?;
+    for (call, path) in [(0xd0, harness.path.as_str()), (0xd1, "progress.log")] {
+        let rendered = harness
+            .grep(
+                call,
+                serde_json::json!({"pattern": "needle-after", "path": path, "-C": 1}),
+            )
+            .await?;
+        assert!(
+            !rendered.contains("output stopped"),
+            "{call}: page bound hit"
+        );
+        let rows = rendered
+            .lines()
+            .filter(|row| row.starts_with(path))
+            .collect::<Vec<_>>();
+        let cut = format!("{} …", "=".repeat(4 * 1024));
+        assert_eq!(
+            rows,
+            [
+                format!("{path}-1-{cut}"),
+                format!("{path}:2:needle-after-progress"),
+                format!("{path}-3-{cut}"),
+            ],
+            "{call}"
+        );
+    }
+    harness.sessions.join_all()?;
+    Ok(())
+}
+
+/// A stray invalid byte in a job log is matched lossily and noted; it neither
+/// hides the log nor drops the matches around it.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_invalid_byte_in_a_job_log_is_matched_lossily() -> TestResult {
+    let mut log = b"needle-one\n".to_vec();
+    log.extend_from_slice(b"needle-two \xff\xfe stray\n");
+    log.extend_from_slice(b"needle-three\n");
+    let harness = LargeLogHarness::with_log(0xd2, &log, Vec::new())?;
+    let path = &harness.path;
+    let rendered = harness
+        .grep(
+            0xd2,
+            serde_json::json!({"pattern": "needle-", "path": path}),
+        )
+        .await?;
+    assert!(
+        rendered.starts_with(
+            "[incomplete=false; 1 lines with invalid UTF-8 were matched with U+FFFD]\n"
+        ),
+        "{rendered}"
+    );
+    for row in [
+        format!("{path}:1:needle-one"),
+        format!("{path}:2:needle-two \u{fffd}\u{fffd} stray"),
+        format!("{path}:3:needle-three"),
+    ] {
+        assert!(rendered.contains(&row), "{row}: {rendered}");
+    }
+    // A workspace binary file is still skipped, and an empty page beside that
+    // note does not claim no matches.
+    fs::write(harness.workspace.path().join("blob.bin"), b"\xff\xfe")?;
+    let none = harness
+        .grep(0xd3, serde_json::json!({"pattern": "absent-needle"}))
+        .await?;
+    assert!(none.contains("were not searched"), "{none}");
+    assert!(
+        none.ends_with("No matches in the files searched.\n"),
+        "{none}"
+    );
+    harness.sessions.join_all()?;
+    Ok(())
+}
+
+/// The same search refuses another agent, an earlier process, an arbitrary
+/// outside path, and a directory listing of the issued file.
+#[cfg(unix)]
+#[tokio::test]
+async fn grep_refuses_unissued_and_listed_job_output_paths() -> TestResult {
+    let harness = issued_grep_harness(0xc3).await?;
+    let sibling = harness
+        .path
+        .replace(&format!("-p{}-", harness.number), "-p999-");
+    fs::write(&sibling, b"sibling-needle\n")?;
+    expect_exposed_refusal(
+        &harness,
+        &harness.environment,
+        0xc6,
+        "grep",
+        serde_json::json!({"pattern": "sibling", "path": sibling}).to_string(),
+        "was issued by an earlier process or another agent",
+    )
+    .await?;
+
+    let restarted = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(ids(0xc7)?.run),
+        harness.workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    let later = restarted.joined_process_sessions()?;
+    later.bind_job_outputs(
+        plakous_tools::JobOutputRoot::open(&harness.state.path().join("jobs"))?,
+        plakous_model::SessionId::from_str("00000000-0000-0000-0000-0000000000b0")?,
+        plakous_model::BranchId::from_str("00000000-0000-0000-0000-0000000000c0")?,
+    );
+    plakous_tools::internal::seed_job_counter(&later, harness.number + 1);
+    expect_exposed_refusal(
+        &harness,
+        &restarted,
+        0xc7,
+        "grep",
+        serde_json::json!({"pattern": "second", "path": harness.path}).to_string(),
+        "was issued by an earlier process or another agent",
+    )
+    .await?;
+
+    let outside = harness.state.path().join("not-a-job.txt");
+    fs::write(&outside, b"outside-needle\n")?;
+    expect_exposed_refusal(
+        &harness,
+        &harness.environment,
+        0xc8,
+        "grep",
+        serde_json::json!({"pattern": "outside", "path": outside}).to_string(),
+        "outside the workspace",
+    )
+    .await?;
+    expect_exposed_refusal(
+        &harness,
+        &harness.environment,
+        0xc9,
+        "list_dir",
+        serde_json::json!({"target_directory": harness.path}).to_string(),
+        "outside the workspace",
+    )
+    .await?;
+    harness.sessions.join_all()?;
+    Ok(())
+}
+
+fn grok_search_projection(
+    registry: plakous_tools::FrozenToolRegistry,
+) -> TestResult<plakous_tools::ToolProjectionMap> {
+    use plakous_compose::CodingPresentationExt as _;
+    let effective = serde_json::from_value(serde_json::to_value(Digest::sha256(
+        DigestDomain::EffectiveProviderConfiguration,
+        5,
+        &[b"grok-search-projection"],
+    )?)?)?;
+    let target = plakous_tools::ProviderModelProjectionIdentityV2::new(
+        plakous_model::IntegrationClass::Standard,
+        "xai.grok.responses",
+        "xai.grok_subscription",
+        "xai.grok.direct.v1",
+        "responses-family",
+        "grok-test",
+        "grok-test",
+        effective,
+        1,
+    )?;
+    Ok(plakous_tools::CodingPresentation::Grok.projection_map(
+        plakous_tools::JobConfig::default(),
+        registry,
+        target,
+    )?)
+}
+
+async fn execute_exposed(
+    registry: &plakous_tools::FrozenToolRegistry,
+    projection: &plakous_tools::ToolProjectionMap,
+    environment: Arc<ExecutionEnvironment>,
+    ids: Ids,
+    tool: &str,
+    arguments: &str,
+) -> TestResult<ToolOutcome> {
+    let request = ToolInvocationRequest::new(
+        ids.run,
+        ids.turn,
+        ids.attempt,
+        ids.call,
+        ToolName::new(tool)?,
+        ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::default())?,
+        Arc::<str>::from(arguments),
+    );
+    let (invocation, _) = projection.prepare(request)?.into_parts();
+    execute_invocation(
+        registry,
+        environment,
+        ids,
+        invocation,
+        CancellationToken::new(),
+    )
+    .await
 }
 
 #[cfg(unix)]
@@ -2108,6 +2645,79 @@ async fn read_pages_past_the_slice_bound_clips_long_lines_and_caps_a_page() -> T
     assert!(read.content.len() <= 262_144);
     assert_eq!(read.next_offset, Some(1 + read.lines));
     assert!(!read.eof);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn grok_direct_read_returns_file_text_and_one_metadata_line() -> TestResult {
+    use plakous_compose::CodingPresentationExt as _;
+    let workspace = tempfile::tempdir()?;
+    fs::write(workspace.path().join("seed.txt"), "one\ntwo")?;
+    let mut builder = ToolRegistryBuilder::default();
+    plakous_tools::register_packs(
+        &plakous_compose::standard_coding_packs_in_memory()?,
+        &mut builder,
+    )?;
+    let registry = builder.freeze();
+    let effective = serde_json::from_value(serde_json::to_value(Digest::sha256(
+        DigestDomain::EffectiveProviderConfiguration,
+        5,
+        &[b"grok-direct-read"],
+    )?)?)?;
+    let target = plakous_tools::ProviderModelProjectionIdentityV2::new(
+        plakous_model::IntegrationClass::Standard,
+        "xai.grok.responses",
+        "xai.grok_subscription",
+        "xai.grok.direct.v1",
+        "responses-family",
+        "grok-test",
+        "grok-test",
+        effective,
+        1,
+    )?;
+    let projection = plakous_tools::CodingPresentation::Grok.projection_map(
+        plakous_tools::JobConfig::default(),
+        registry.clone(),
+        target,
+    )?;
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(ids(0x95)?.run),
+        workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    let call = ids(0x95)?;
+    let (invocation, receipt) = projection
+        .prepare(ToolInvocationRequest::new(
+            call.run,
+            call.turn,
+            call.attempt,
+            call.call,
+            ToolName::new("read_file")?,
+            ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::default())?,
+            r#"{"target_file":"seed.txt"}"#,
+        ))?
+        .into_parts();
+    let outcome = execute_invocation(
+        &registry,
+        environment,
+        call,
+        invocation,
+        CancellationToken::new(),
+    )
+    .await?;
+    let raised = projection.raise(&receipt.ok_or("missing read receipt")?, outcome)?;
+    let presented: serde_json::Value = serde_json::from_str(text(&raised)?)?;
+    assert_eq!(
+        presented["result"],
+        "one\ntwo\noffset=1 lines=2 eof=true next_offset=null final_newline=false\n"
+    );
+    let description = projection
+        .by_exposed(&ToolName::new("read_file")?)
+        .ok_or("read_file missing")?
+        .description();
+    assert!(!description.contains("JSON.parse"));
     Ok(())
 }
 

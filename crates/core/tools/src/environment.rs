@@ -49,6 +49,7 @@ pub use limits::{
 };
 pub use process_options::HostProcessOptions;
 
+pub(crate) use backend::workspace_path_not_found;
 pub use backend::*;
 
 /// Stable category for execution-environment construction failures.

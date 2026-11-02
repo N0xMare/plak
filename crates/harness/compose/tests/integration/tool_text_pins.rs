@@ -40,7 +40,7 @@ use plakous_tools::PromptDigest;
 
 /// The concatenated digest of every string this module owns.
 const CODING_PROMPTS_DIGEST: &str =
-    "a6bb968cbcefdcfc61c4d0d9fbe51d296cafe11cf4edac4940440c0894435cbd";
+    "81f531ab86b6338bdf6d31aeb0926d05bef167c3d7f3904faa0df19fe10b2a0d";
 #[test]
 fn coding_prompts_digest_is_stable() {
     let combined = [
@@ -66,6 +66,8 @@ fn coding_prompts_digest_is_stable() {
     assert!(PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION.contains("head_limit"));
     assert!(PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION.contains("counts_only"));
     assert!(PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION.contains("offset"));
+    assert!(PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION.contains("`full output:`"));
+    assert!(PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION.contains("earlier process"));
     assert!(PLAKOUS_TOOL_APPLY_PATCH_DESCRIPTION.contains("Codex *** Begin Patch"));
     assert!(PLAKOUS_TOOL_WRITE_STDIN_DESCRIPTION.contains("returns the output that follows"));
     assert!(PLAKOUS_TOOL_WRITE_STDIN_DESCRIPTION.contains("Background jobs survive the turn"));
@@ -99,7 +101,7 @@ fn codex_prompts_digest_is_stable() {
 
 /// The concatenated digest of every string this module owns.
 const GROK_PROMPTS_DIGEST: &str =
-    "158bb753a988816c7daad029f280519f948ccaf4bbfc4d43e8f2c953a8bc23fd";
+    "8ddfba6cef018332c9c42d0018ca666ef17bceaf5a952a19011317fd9457a9a7";
 #[test]
 fn grok_prompts_digest_is_stable() {
     let combined = [
@@ -120,7 +122,19 @@ fn grok_prompts_digest_is_stable() {
     assert!(PLAKOUS_GROK_RUN_TERMINAL_COMMAND_DESCRIPTION.contains("read_file"));
     assert!(PLAKOUS_GROK_READ_DESCRIPTION.contains("`full output:`"));
     assert!(PLAKOUS_GROK_READ_DESCRIPTION.contains("run_terminal_command"));
+    assert!(PLAKOUS_GROK_READ_DESCRIPTION.contains(
+        "workspace-relative or absolute inside the workspace; paths outside the workspace and `..` are refused"
+    ));
+    assert!(!PLAKOUS_GROK_READ_DESCRIPTION.contains("JSON.parse"));
+    assert!(!PLAKOUS_GROK_READ_DESCRIPTION.contains("absolute paths"));
+    assert!(PLAKOUS_GROK_READ_DESCRIPTION.contains("one metadata line"));
+    assert!(plakous_tool_files::PLAKOUS_GROK_READ_CELL_DESCRIPTION.contains("JSON.parse"));
+    assert!(PLAKOUS_TOOL_READ_FILE_DESCRIPTION.contains("JSON.parse"));
     assert!(combined.contains("regular expressions"));
+    assert!(PLAKOUS_GROK_GREP_DESCRIPTION.contains("`full output:`"));
+    assert!(PLAKOUS_GROK_GREP_DESCRIPTION.contains("run_terminal_command"));
+    assert!(PLAKOUS_GROK_GREP_DESCRIPTION.contains("earlier process"));
+    assert!(!PLAKOUS_GROK_LIST_DIR_DESCRIPTION.contains("`full output:`"));
     assert!(combined.starts_with("Run a one-shot `/bin/sh -c` command"));
     assert!(!combined.contains("background: true"));
     assert!(!combined.contains("multiline mode is unsupported"));

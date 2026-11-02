@@ -488,6 +488,10 @@ impl ToolProjectionExposureV2 {
             (ToolProjectionLoweringV2::PiRead, ToolProjectionRaisingV2::Identity) => {
                 "pi_read_identity_v1"
             }
+            (
+                ToolProjectionLoweringV2::GrokReadFile,
+                ToolProjectionRaisingV2::TextResultObjectV1,
+            ) => "grok_read_plain_metadata_text_result_object_v1",
             (ToolProjectionLoweringV2::PiBash, ToolProjectionRaisingV2::ProcessResult) => {
                 "pi_background_notice_text_v1"
             }
@@ -1103,7 +1107,9 @@ impl ToolProjectionMap {
         }
         if matches!(
             entry.lowering,
-            ToolProjectionLoweringV2::ClaudeReadFile | ToolProjectionLoweringV2::PiRead
+            ToolProjectionLoweringV2::ClaudeReadFile
+                | ToolProjectionLoweringV2::PiRead
+                | ToolProjectionLoweringV2::GrokReadFile
         ) && entry.raising != ToolProjectionRaisingV2::RawUtf8V1
             && outcome.kind() == crate::ToolOutcomeKind::Success
         {

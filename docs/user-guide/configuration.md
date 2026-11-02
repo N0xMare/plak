@@ -636,7 +636,7 @@ model's effective input window at four text bytes per token, bounded to
 32-256 KiB and never exceeding available context headroom. This is automatic,
 not a configuration key. Truncated process pages name their private output
 file with `full output: <path>`, including foreground commands; the model can
-read that file for details. Small untruncated foreground commands do not
+read or search that file for details. Small untruncated foreground commands do not
 create output files. File creation and retention are best-effort, as for
 background job output.
 

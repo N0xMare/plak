@@ -64,7 +64,7 @@ pub(crate) fn bound_description(
     kind: crate::ProcessToolProjectionKind,
     actions: bool,
 ) -> String {
-    let actions = if actions {
+    let action_tail = if actions {
         match kind {
             crate::ProcessToolProjectionKind::CodexUnifiedExec => {
                 " Read: exec_command with session_id, no cmd; wait/read: write_stdin with empty chars; stop: write_stdin with chars exactly \\u0003."
@@ -98,8 +98,15 @@ pub(crate) fn bound_description(
             },
         );
     let description = description.trim_end();
+    // The lifetime sentence is stated once, on the process-starting tool.
+    // Read, await and stop tools keep the numeric budget and do not repeat it.
+    let contract = if actions {
+        format!(" {PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT}")
+    } else {
+        String::new()
+    };
     format!(
-        "{description} {LIFETIME_TAIL_LEAD} {} seconds ({} ms); hard runtime cap: {} hours. {PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT}{actions}",
+        "{description} {LIFETIME_TAIL_LEAD} {} seconds ({} ms); hard runtime cap: {} hours.{contract}{action_tail}",
         config.foreground_seconds(),
         config.foreground_seconds() * 1000,
         config.max_runtime_hours(),

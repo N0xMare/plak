@@ -301,12 +301,30 @@ whole line. A read never goes past the 64 MiB content bound plus its trailing
 line, and a file longer than that never reads as complete. A page cut inside
 a line drops the incomplete UTF-8 sequence (at most three bytes) the cut left
 at its end before decoding, so `lossy` reports only invalid file bytes. The
-exception grants reads only; no write, edit, search or listing tool accepts
-these paths. Process tools can read the same files
-anyway (§2.2); the exception exists so a pack without a shell-read habit can
-follow the `full output: <path>` line its own tools print. The Claude `Read`
-description, Grok `read_file`, and the canonical `read_file` description state
-the exception and its earlier-process refusal.
+exception grants reads and searches only. Canonical `search_repository` and
+Grok `grep` admit a path with the same check as read (`read_job_output`: a
+byte-equal issued path, or a typed refusal for any other spelling under the
+jobs root, with every other spelling falling through to containment) and search
+that one file with the ordinary repository matcher. The search streams the file
+through `read_job_output` in 768 KiB slices up to the same 64 MiB content bound
+(plus its trailing line) a read has, under the 256 MiB scanned-byte bound, so
+the 1 MiB per-file search bound for workspace files does not apply; a line that
+spans two slices is matched whole, and the match bound (`head_limit` plus
+`offset`) and retained-result bound stop the stream early. Context lines are
+read back the same way. A line holding invalid UTF-8 is matched with U+FFFD in
+place of the invalid bytes and counted in a `lines with invalid UTF-8 were
+matched with U+FFFD` header note, so a stray byte neither hides the log nor
+drops matches already found; workspace files with invalid UTF-8 are still
+skipped as binary. Every row, match or context, keeps at most 4 KiB of its
+line and is marked ` …` when cut, so a long neighbouring line cannot fill the
+page before its match. A match from the stream is not identified: its content
+identity is that of empty content, which names no file and is not an edit or
+read precondition. They do not walk the jobs root. Write, edit and listing tools still refuse these paths. Process tools can
+read the same files anyway (§2.2); the exception exists so a pack without a
+shell-read habit can follow the `full output: <path>` line its own tools print.
+The Claude `Read` description, Grok `read_file`, Grok `grep`, and the canonical
+`read_file` and `search_repository` descriptions state the exception and its
+earlier-process refusal.
 
 **The skill-root read exception.** The other is a regular file under the
 session's user skill root, `~/.agents/skills` (chapter 02 §6.1.1). The project

@@ -880,7 +880,7 @@ pub(super) fn present_effect_result(
         .as_mut()
         .ok()
         .and_then(plakous_tools::ToolOutcome::take_value);
-    let (result, subject) = match outcome {
+    let (result, subject, raised) = match outcome {
         Ok(outcome) => {
             let raised = presentation
                 .raise(receipt, outcome.clone())
@@ -890,13 +890,18 @@ pub(super) fn present_effect_result(
                     .to_model_result(invocation)
                     .map_err(|error| AgentError::from_tool(&error))?,
                 raised.presentation_subject().map(str::to_owned),
+                Some(raised),
             )
         }
-        Err(error) => (normalized_tool_failure(call, error)?, None),
+        Err(error) => (normalized_tool_failure(call, error)?, None, None),
     };
-    Ok(ToolExecutionResult::new(result, dispatched)
+    let execution = ToolExecutionResult::new(result, dispatched)
         .with_presentation_subject(subject)
-        .with_value(value))
+        .with_value(value);
+    Ok(match &raised {
+        Some(raised) => execution.with_raised_shape(raised),
+        None => execution,
+    })
 }
 
 /// The source-ordered tool slots of a batch paused at its pending effect decision.

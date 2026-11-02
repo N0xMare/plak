@@ -326,6 +326,15 @@ pub(super) fn clip_tool_result(
     result: ToolResultBlock,
     budget: &mut budget::ObservationBudget,
 ) -> Result<(ToolResultBlock, Option<ObservationClip>), AgentError> {
+    clip_observed_tool_result(result, budget, budget::ObservationShape::Text)
+}
+
+/// [`clip_tool_result`] for a result whose raising program declared its shape.
+pub(super) fn clip_observed_tool_result(
+    result: ToolResultBlock,
+    budget: &mut budget::ObservationBudget,
+    shape: budget::ObservationShape,
+) -> Result<(ToolResultBlock, Option<ObservationClip>), AgentError> {
     // A nested call's result goes to the evaluator cell, not to the model:
     // only the cell's composed answer is observed, clipped and announced, so
     // a nested result neither charges the budget nor clips.
@@ -371,7 +380,7 @@ pub(super) fn clip_tool_result(
             ToolResultPart::Text(text) => {
                 let body = text.text();
                 if *remaining == 0 {
-                    let clipped = clip_observation_text(body, 0);
+                    let clipped = clip_observation_shaped(body, 0, shape);
                     dropped = dropped.saturating_add(observation_bytes(body.len()));
                     parts.push(ToolResultPart::Text(
                         TextBlock::new(clipped, text.phase()).map_err(|_| {
@@ -387,7 +396,8 @@ pub(super) fn clip_tool_result(
                     continue;
                 }
                 let before = *remaining;
-                let (clipped, next_remaining) = budgeted_observation_text(body, *remaining);
+                let clipped = clip_observation_shaped(body, *remaining, shape);
+                let next_remaining = remaining.saturating_sub(clipped.len());
                 *remaining = next_remaining;
                 // Budget consumed is how much of the original survived. The
                 // clipped string also carries a truncation notice, so its own
@@ -1056,7 +1066,7 @@ pub(super) fn validate_pending_effect_decision(
 
 pub(in crate::runtime) mod budget;
 mod history_json;
-use budget::{OBSERVATION_EXHAUSTED, budgeted_observation_text, clip_observation_text};
+use budget::{OBSERVATION_EXHAUSTED, clip_observation_shaped};
 
 #[cfg(test)]
 mod tests;

@@ -25,6 +25,9 @@ pub use deterministic::{
     RecordedLiteralProcess, RecordedServiceProcess,
 };
 mod workspace;
+pub use workspace::{
+    AdmittedTextQuery, AdmittedTextScan, AdmittedTextSearch, search_admitted_text,
+};
 use workspace::{
     WorkspaceSnapshotCache, mutate_workspace_sync, query_repository_sync, read_workspace_sync,
     run_filesystem_blocking,
@@ -940,6 +943,14 @@ fn backend_error(
     message: impl AsRef<str>,
 ) -> ExecutionBackendError {
     ExecutionBackendError::new(kind, message)
+}
+
+/// The refusal for a workspace-relative path that names nothing.
+pub(crate) fn workspace_path_not_found(relative: &Path) -> ExecutionBackendError {
+    backend_error(
+        ExecutionBackendErrorKind::NotFound,
+        format!("path does not exist: {}", relative.display()),
+    )
 }
 
 fn invalid_request(message: &'static str) -> ExecutionBackendError {

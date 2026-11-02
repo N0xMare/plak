@@ -775,6 +775,10 @@ impl RepositoryQueryMatch {
         self.truncated
     }
     /// Returns the exact identity of the complete matched file contents.
+    ///
+    /// A match from an admitted job-output stream, which is never held whole,
+    /// is not identified: it carries the identity of empty content, which
+    /// names no file and must not be used as an edit or read precondition.
     #[must_use]
     pub const fn content(&self) -> WorkspaceContentIdentity {
         self.content
@@ -807,6 +811,7 @@ pub struct RepositoryQueryResult {
     pub(super) skipped_oversize: usize,
     pub(super) skipped_changed: usize,
     pub(super) entries_skipped: usize,
+    pub(super) lossy_lines: u64,
     pub(super) stop_reason: Option<RepositoryQueryStopReason>,
 }
 impl RepositoryQueryResult {
@@ -854,6 +859,13 @@ impl RepositoryQueryResult {
     #[must_use]
     pub const fn entries_skipped(&self) -> usize {
         self.entries_skipped
+    }
+    /// Returns the number of lines matched with invalid UTF-8 replaced by
+    /// U+FFFD. Only an admitted job-output stream matches lossily; a workspace
+    /// file with invalid UTF-8 is skipped as binary instead.
+    #[must_use]
+    pub const fn lossy_lines(&self) -> u64 {
+        self.lossy_lines
     }
     /// Reports whether a resource bound prevented an exhaustive result.
     #[must_use]
