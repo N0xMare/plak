@@ -98,11 +98,17 @@ pub enum StorageAdmission {
 
 /// Durable product session records with compare-and-swap commits.
 pub trait SessionRecordStore: Send + Sync {
-    /// Binds a read-only operator interruption signal; it cannot acknowledge
-    /// an intent or authorize a write.
-    fn set_storage_interrupt(&self, _probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>) {}
+    /// This store as one session writes through it: a write parked on a
+    /// storage outage through the returned handle stops waiting once `probe`
+    /// reports the operator's interrupt. The probe is read-only: it cannot
+    /// acknowledge an intent or authorize a write. Other handles on the same
+    /// store keep their own probe.
+    fn with_storage_interrupt(
+        self: std::sync::Arc<Self>,
+        probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> std::sync::Arc<dyn SessionRecordStore>;
 
-    /// Whether the operator interrupted a parked write.
+    /// Whether the operator interrupted a write parked through this handle.
     fn storage_wait_cancelled(&self) -> bool {
         false
     }
@@ -696,6 +702,14 @@ mod memory {
     }
 
     impl SessionRecordStore for MemoryStore {
+        /// Memory writes never park, so there is no wait to interrupt.
+        fn with_storage_interrupt(
+            self: std::sync::Arc<Self>,
+            _probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+        ) -> std::sync::Arc<dyn SessionRecordStore> {
+            self
+        }
+
         fn storage_admission(&self) -> StorageAdmission {
             StorageAdmission::Available
         }

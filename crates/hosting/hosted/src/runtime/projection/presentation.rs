@@ -23,8 +23,14 @@ pub(crate) struct PresentingStore {
 }
 
 impl SessionRecordStore for PresentingStore {
-    fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
-        self.inner.set_storage_interrupt(probe);
+    fn with_storage_interrupt(
+        self: Arc<Self>,
+        probe: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Arc<dyn SessionRecordStore> {
+        Arc::new(Self {
+            inner: Arc::clone(&self.inner).with_storage_interrupt(probe),
+            usage: Arc::clone(&self.usage),
+        })
     }
     fn storage_wait_cancelled(&self) -> bool {
         self.inner.storage_wait_cancelled()

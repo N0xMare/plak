@@ -30,9 +30,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         config
             .state_roots
             .bind_storage_shutdown(actions.storage_shutdown_probe());
-        config
+        config.store = config
             .store
-            .set_storage_interrupt(storage_interrupt.clone());
+            .clone()
+            .with_storage_interrupt(storage_interrupt.clone());
         let pending_usage = std::sync::Arc::new(std::sync::Mutex::new(
             super::super::projection::presentation::ProcessUsage::default(),
         ));

@@ -97,8 +97,8 @@ fn cancelled_product_publication_retains_queue_identity_and_recovers_with_an_aut
         .unwrap();
     let cancelled = Arc::new(AtomicBool::new(false));
     let signal = cancelled.clone();
-    store.set_storage_interrupt(Arc::new(move || signal.load(Ordering::Acquire)));
-    let writer = store.clone();
+    let writer = Arc::new(store.clone())
+        .with_storage_interrupt(Arc::new(move || signal.load(Ordering::Acquire)));
     session.title = Some("not committed".into());
     let task = std::thread::spawn(move || writer.save(&mut session));
     while !store.storage_unavailable() {
@@ -119,6 +119,66 @@ fn cancelled_product_publication_retains_queue_identity_and_recovers_with_an_aut
     assert_eq!(
         store.load(&original.id).unwrap().store_revision,
         original.store_revision
+    );
+}
+
+/// The operator interrupt belongs to the handle a session writes through:
+/// interrupting one session's parked write leaves another session's write on
+/// the same store parked until storage returns.
+#[test]
+fn a_storage_interrupt_stops_only_the_handle_it_was_given_to() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let mut store = SqliteSessionStore::new(PlakPaths::explicit(root.path().join("product")));
+    store.capacity_retry_interval = std::time::Duration::from_millis(10);
+    let mut first = queued(root.path());
+    let mut second = queued(root.path());
+    store.save(&mut first).unwrap();
+    store.save(&mut second).unwrap();
+    let full = Arc::new(AtomicBool::new(true));
+    let fault = full.clone();
+    store
+        .with_store::<_, String>(|backend| {
+            backend.capacity_fault = Some(fault);
+            Ok(())
+        })
+        .unwrap();
+    let probe = |flag: &Arc<AtomicBool>| {
+        let flag = Arc::clone(flag);
+        Arc::new(move || flag.load(Ordering::Acquire)) as Arc<dyn Fn() -> bool + Send + Sync>
+    };
+    let interrupt_first = Arc::new(AtomicBool::new(false));
+    let interrupt_second = Arc::new(AtomicBool::new(false));
+    let first_writer = Arc::new(store.clone()).with_storage_interrupt(probe(&interrupt_first));
+    let second_writer = Arc::new(store.clone()).with_storage_interrupt(probe(&interrupt_second));
+    first.title = Some("interrupted".into());
+    second.title = Some("waits for storage".into());
+    let first_task = std::thread::spawn(move || first_writer.save(&mut first));
+    let second_task = std::thread::spawn(move || second_writer.save(&mut second).map(|()| second));
+    while !store.storage_unavailable() {
+        std::thread::yield_now();
+    }
+
+    interrupt_first.store(true, Ordering::Release);
+    let error = first_task.join().unwrap().unwrap_err();
+    assert_eq!(
+        error.refusal(),
+        Some(plakous_hosted::error::StoreRefusal::StorageFull)
+    );
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert!(
+        !second_task.is_finished(),
+        "the other session's write stays parked"
+    );
+
+    full.store(false, Ordering::Release);
+    let saved = second_task.join().unwrap().unwrap();
+    assert_eq!(
+        store.load(&saved.id).unwrap().title.as_deref(),
+        Some("waits for storage")
     );
 }
 

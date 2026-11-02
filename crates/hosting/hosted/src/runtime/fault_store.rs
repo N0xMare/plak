@@ -58,11 +58,14 @@ pub(crate) trait StoreFaults: Send + Sync {
 
 pub(crate) struct FaultStore<F> {
     pub(super) inner: Arc<dyn SessionRecordStore>,
-    pub(crate) faults: F,
+    pub(crate) faults: Arc<F>,
 }
 impl<F> FaultStore<F> {
     pub(crate) fn new(inner: Arc<dyn SessionRecordStore>, faults: F) -> Self {
-        Self { inner, faults }
+        Self {
+            inner,
+            faults: Arc::new(faults),
+        }
     }
 }
 
@@ -81,10 +84,16 @@ impl FaultStore<RefuseAll> {
     }
 }
 
-impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
-    fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
+impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
+    fn with_storage_interrupt(
+        self: Arc<Self>,
+        probe: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Arc<dyn SessionRecordStore> {
         self.faults.set_storage_interrupt(probe.clone());
-        self.inner.set_storage_interrupt(probe);
+        Arc::new(Self {
+            inner: Arc::clone(&self.inner).with_storage_interrupt(probe),
+            faults: Arc::clone(&self.faults),
+        })
     }
     fn storage_wait_cancelled(&self) -> bool {
         self.faults.storage_wait_cancelled() || self.inner.storage_wait_cancelled()

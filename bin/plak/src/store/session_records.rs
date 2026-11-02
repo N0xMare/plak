@@ -25,7 +25,8 @@ pub struct SqliteSessionStore {
     paths: PlakPaths,
     connection: Arc<Mutex<Option<crate::store::ProductStore>>>,
     storage_override: Option<plakous_hosted::session_store::StorageAdmission>,
-    storage_interrupt: Arc<Mutex<Option<StorageInterrupt>>>,
+    /// This handle's operator interrupt; other handles keep their own.
+    storage_interrupt: Option<StorageInterrupt>,
     storage_waiting: Arc<std::sync::atomic::AtomicBool>,
     capacity_retry_interval: std::time::Duration,
     #[cfg(test)]
@@ -45,7 +46,7 @@ impl SqliteSessionStore {
         Self {
             paths,
             connection: Arc::new(Mutex::new(None)),
-            storage_interrupt: Arc::default(),
+            storage_interrupt: None,
             storage_waiting: Arc::default(),
             capacity_retry_interval: std::time::Duration::from_secs(5),
             #[cfg(test)]
@@ -153,19 +154,18 @@ impl SqliteSessionStore {
 }
 
 impl SessionRecordStore for SqliteSessionStore {
-    fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
-        *self
-            .storage_interrupt
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(probe);
+    fn with_storage_interrupt(
+        self: Arc<Self>,
+        probe: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Arc<dyn SessionRecordStore> {
+        Arc::new(Self {
+            storage_interrupt: Some(probe),
+            ..(*self).clone()
+        })
     }
 
     fn storage_wait_cancelled(&self) -> bool {
-        self.storage_interrupt
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .is_some_and(|probe| probe())
+        self.storage_interrupt.as_ref().is_some_and(|probe| probe())
     }
 
     fn recover_storage(&self) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
