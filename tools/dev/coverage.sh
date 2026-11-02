@@ -11,7 +11,9 @@ export PATH="$(plak_dev_tools_prefix "$PWD")/bin:$PATH"
 tools/gate/dev-tools.sh check
 command -v cargo-llvm-cov >/dev/null || { echo "install: cargo install cargo-llvm-cov" >&2; exit 1; }
 mkdir -p target/llvm-cov
-eval "$(tools/gate/test-env.sh)"
+# Assign first. `eval "$(test-env.sh)"` ignores a failing helper under set -e.
+test_env="$(tools/gate/test-env.sh)"
+eval "$test_env"
 export TMPDIR PLAK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 export CARGO_TARGET_DIR="$PWD/target/llvm-cov"
 export CARGO_INCREMENTAL=0

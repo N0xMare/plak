@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Offline test environment: per-checkout TMPDIR, isolated PLAK_HOME, empty git config.
 #
-#   eval "$(tools/gate/test-env.sh [--fresh])"   # assignments for the current shell
+#   test_env="$(tools/gate/test-env.sh [--fresh])"; eval "$test_env"
 #   tools/gate/test-env.sh [--fresh] -- command  # export, then replace this process
 #   tools/gate/test-env.sh [--fresh] --json      # one JSON object for Python
 #

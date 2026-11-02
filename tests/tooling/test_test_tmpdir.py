@@ -234,6 +234,46 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             ["nextest", "-E", "package(plakous-model)", "list"],
         )
 
+    def test_eval_of_test_env_does_not_fail_open(self):
+        failing = self.base / "fail-env.sh"
+        failing.write_text("#!/bin/bash\necho boom >&2\nexit 9\n")
+        failing.chmod(0o755)
+        closed = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'set -euo pipefail; test_env="$("$1")"; eval "$test_env"; echo OPEN',
+                "closed",
+                str(failing),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(closed.returncode, 9, closed.stderr)
+        self.assertNotIn("OPEN", closed.stdout)
+        opened = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'set -euo pipefail; eval "$("$1")"; echo OPEN',
+                "opened",
+                str(failing),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(opened.returncode, 0, opened.stderr)
+        self.assertIn("OPEN", opened.stdout)
+        for relative in (
+            "tools/gate/dev-check.sh",
+            "tools/dev/coverage.sh",
+            "tools/perf/perf-smoke.sh",
+        ):
+            text = (ROOT / relative).read_text()
+            self.assertNotIn('eval "$(tools/gate/test-env.sh', text)
+            self.assertIn('test_env="$(tools/gate/test-env.sh', text)
+            self.assertIn('eval "$test_env"', text)
+
 
 if __name__ == "__main__":
     unittest.main()

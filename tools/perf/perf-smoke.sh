@@ -19,7 +19,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 # Fixture scratch, isolated product home and git config (spec 05 §1).
-eval "$(tools/gate/test-env.sh)"
+# Assign first. `eval "$(test-env.sh)"` ignores a failing helper under set -e.
+test_env="$(tools/gate/test-env.sh)"
+eval "$test_env"
 export TMPDIR PLAK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 
 # A `python3` on PATH may be a shim that cannot run (this repository has met

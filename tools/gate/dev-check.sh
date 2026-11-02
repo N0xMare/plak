@@ -48,7 +48,9 @@ bash tools/gate/dev-tools.sh check
 # (a global commit.gpgsign made fixture commits spawn gpg). A test that needs
 # an identity sets it on its own command or repository. Hand-run nextest is
 # `just nextest`, which keeps PLAK_HOME exported.
-eval "$(tools/gate/test-env.sh --fresh)"
+# Assign first. `eval "$(test-env.sh)"` ignores a failing helper under set -e.
+test_env="$(tools/gate/test-env.sh --fresh)"
+eval "$test_env"
 export TMPDIR GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 isolated_home=$PLAK_HOME
 unset PLAK_HOME
