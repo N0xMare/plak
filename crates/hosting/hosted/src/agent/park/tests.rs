@@ -268,7 +268,12 @@ async fn fixture_with_probe(
     runtime
         .try_occupy_live(
             child.clone(),
-            Box::new(ProductLiveChild::new(attached, turn, control)),
+            Box::new(ProductLiveChild::new(
+                &crate::TaskSet::new(),
+                attached,
+                turn,
+                control,
+            )),
         )
         .await
         .map_err(|_| "live slot refused")

@@ -10,6 +10,9 @@ use tokio::sync::watch;
 #[derive(Default)]
 pub struct NetworkWatch {
     routes: Mutex<BTreeMap<RouteId, Weak<NetworkTask>>>,
+    /// Probes are shared by every subscriber, so the service owns them, not
+    /// whichever session or tree subscribed first.
+    tasks: crate::TaskSet,
 }
 
 struct NetworkTask {
@@ -46,7 +49,7 @@ impl NetworkWatch {
         });
         routes.insert(probe.route().clone(), Arc::downgrade(&task));
         let cancellation = task.cancellation.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn(async move {
             let mut backoff = Duration::from_secs(5);
             loop {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -71,7 +74,7 @@ impl NetworkWatch {
     }
     /// Waits for exact-route readiness, or a bounded fallback when the model
     /// has no probe. Cancellation releases this subscriber, not other waiters.
-    pub async fn wait(
+    pub(crate) async fn wait(
         &self,
         probe: Option<ReachabilityProbe>,
         fallback: Duration,

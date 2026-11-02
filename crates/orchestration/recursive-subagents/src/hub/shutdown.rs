@@ -72,7 +72,14 @@ pub(super) async fn shutdown_runtime(
     runtime: Arc<ProductTopologyRuntime>,
 ) -> Result<(), TopologyShutdownError> {
     let mut failure = close_runtime_admission(&runtime).await;
+    let tasks = runtime.driver.tasks();
     join_runtime_children(runtime, &mut failure).await;
+    // The tree's tasks end with the tree, never with one root's release: what
+    // the bounded joins above left running is aborted and joined here.
+    if !tasks.close(HOST_SHUTDOWN_DETACH_TIMEOUT).await {
+        tracing::warn!(target: "plak.topology", remaining = tasks.len(),
+            "tree tasks did not stop within their join bound");
+    }
     if failure.tree_failure.is_none() && failure.child_failures.is_empty() {
         Ok(())
     } else {
@@ -153,7 +160,10 @@ async fn join_runtime_children(
             })
             .collect::<Vec<_>>()
     };
-    let startup_task = tokio::spawn(startup_results_owned(startups.clone()));
+    let startup_task = runtime
+        .driver
+        .tasks()
+        .spawn(startup_results_owned(startups.clone()));
     let startup_abort = startup_task.abort_handle();
     let retirements = {
         let mut live = runtime.live.lock().await;

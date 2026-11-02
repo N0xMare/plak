@@ -1225,8 +1225,9 @@ pub(crate) fn start_tree_recovery_pass(
         .read(|tree| tree.session_recovery_targets().len())
         .unwrap_or(0);
     let pass_runtime = Arc::clone(&runtime);
+    let tasks = runtime.driver().tasks();
     let request = runtime.start_recovery_pass(|| {
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             let mut report = run_tree_recovery_pass(&tree_id).await;
             while pass_runtime.finish_recovery_pass() {
                 let again = run_tree_recovery_pass(&tree_id).await;

@@ -144,7 +144,7 @@ fn spawn_operator_child_recover<P: plakous_host_protocol::ProtocolExtension>(
     let task_runtime = std::sync::Arc::clone(&runtime);
     let task_session = session.clone();
     let task_events = events.clone();
-    let task = tokio::spawn(async move {
+    let task = runtime.driver().tasks().spawn(async move {
         let send = |event| {
             let _ = task_events.send(event);
         };
@@ -496,7 +496,7 @@ async fn signal_retirement(runtime: &ProductTopologyRuntime, ids: &[String]) {
             });
     }
     let join = runtime.begin_cancel_live_many(ids).await;
-    tokio::spawn(async move {
+    runtime.driver().tasks().spawn(async move {
         let report = join.await;
         if let Some(error) = report.first_failure {
             // The release owner persists and requests recovery for its fault.

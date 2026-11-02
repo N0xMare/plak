@@ -26,6 +26,11 @@ pub struct TreeDriver {
     pub(super) job_host: Arc<Mutex<Option<Arc<dyn plakous::tools::JobHost>>>>,
     retirement_recovery: Arc<Mutex<Option<RetirementRecovery>>>,
     retirement_tasks: Arc<Mutex<tokio::task::JoinSet<()>>>,
+    /// The tree's own tasks: they outlive any one root's release.
+    tasks: crate::task_set::TaskSet,
+    /// Work that owns a child's authority, kept apart from `tasks`; see
+    /// [`Self::spawn_release_owner`].
+    release_owners: crate::task_set::TaskSet,
     pub(crate) retirement_faults: tokio::sync::broadcast::Sender<(String, String)>,
     pub(super) observer: Option<Arc<dyn TopologyObserver>>,
     next_reclaim_probe: Arc<Mutex<u64>>,
@@ -167,6 +172,8 @@ impl TreeDriver {
             job_host: Arc::new(Mutex::new(None)),
             retirement_recovery: Arc::new(Mutex::new(None)),
             retirement_tasks: Arc::default(),
+            tasks: crate::task_set::TaskSet::new(),
+            release_owners: crate::task_set::TaskSet::new(),
             retirement_faults: tokio::sync::broadcast::channel(64).0,
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
@@ -343,7 +350,34 @@ impl TreeDriver {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         while tasks.try_join_next().is_some() {}
-        tasks.spawn(work);
+        self.release_owners.spawn_into(&mut tasks, work);
+    }
+
+    /// The tree's own task set, for work that owns no child session:
+    /// projections, join observers, recovery passes. No root's release
+    /// touches it; the shutdown of the tree's last root lease closes it.
+    pub fn tasks(&self) -> crate::task_set::TaskSet {
+        self.tasks.clone()
+    }
+
+    /// Spawns work that owns a child's session or runtime authority until it
+    /// returns: startup and resume owners and their cleanups, turn waiters,
+    /// follow-up deliveries, retirement release workers. No root's release
+    /// and no tree shutdown aborts it. Shutdown bounds its join only on
+    /// retirement completions and on cancelled startups, and leaves every
+    /// other owner running detached. Process-exit abandonment aborts
+    /// retirement workers; the other owners end with the process's executor
+    /// (spec 03 section 16).
+    pub fn spawn_release_owner<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.release_owners.spawn(future)
+    }
+
+    pub(crate) fn release_owners(&self) -> crate::task_set::TaskSet {
+        self.release_owners.clone()
     }
 
     /// Joins tool-side receipt, job-stop and effect settlement after child release.

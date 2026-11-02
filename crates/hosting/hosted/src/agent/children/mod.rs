@@ -100,3 +100,5 @@ use super::{
 mod reopen_error_tests;
 #[cfg(test)]
 mod retirement_tests;
+#[cfg(test)]
+mod startup_owner_tests;

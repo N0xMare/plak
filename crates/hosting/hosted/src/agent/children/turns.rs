@@ -166,11 +166,12 @@ pub(in crate::agent) async fn start_child_turn_as(
             return Err(ChildStartFailure::SlotOccupied(error));
         }
         Err(error) => {
-            // Release the rejected attachment independently of its caller.
+            // Release the rejected attachment independently of its caller, as a
+            // release owner tree shutdown does not abort.
             let owner = runtime.clone();
             let id = agent_id.to_owned();
             let released_attempt = expected_attempt.clone();
-            tokio::spawn(async move {
+            runtime.driver().spawn_release_owner(async move {
                 if attached.release_opened().await.is_err() {
                     let _ = owner.record_then_apply(&id, |tree| {
                         tree.record_host_retirement_for_attempt(
@@ -189,7 +190,7 @@ pub(in crate::agent) async fn start_child_turn_as(
     let caller = StartupCaller::new(runtime.clone(), agent_id.to_owned(), startup.clone());
     let owner = runtime.clone();
     let id = agent_id.to_owned();
-    let task = tokio::spawn(async move {
+    let task = runtime.driver().spawn_release_owner(async move {
         start_child_turn_owned_with_ack(
             &owner,
             &id,
@@ -388,9 +389,11 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             }
         };
         let submission = match agent.command(command).await {
-            Ok(submission) => {
-                crate::runtime::child_projection::ChildAdmission::new(submission, agent)
-            }
+            Ok(submission) => crate::runtime::child_projection::ChildAdmission::new(
+                &runtime.driver().tasks(),
+                submission,
+                agent,
+            ),
             Err(error) => {
                 let message = format!("child turn start was refused: {error}");
                 release_startup(runtime, agent_id, startup, attached).await;
@@ -594,13 +597,19 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     let feed = ChildFeedSource::of(&attached);
     let projection = submission.projection.take().unwrap_or_else(|| {
         crate::runtime::child_projection::ChildTurnProjection::recovered(
+            &runtime.driver().tasks(),
             Some(agent.clone()),
             turn_id,
         )
     });
-    let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
-        crate::agent::live::ProductLiveChild::admitted(attached, turn_id, control, projection),
-    );
+    let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
+        Box::new(crate::agent::live::ProductLiveChild::admitted(
+            &runtime.driver().tasks(),
+            attached,
+            turn_id,
+            control,
+            projection,
+        ));
     startup.set_stage(ChildStartupStage::Registering);
     let accepted = matches!(
         submission.acknowledgement.disposition(),

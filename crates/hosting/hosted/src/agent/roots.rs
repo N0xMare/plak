@@ -189,6 +189,10 @@ pub struct ProductStateRoots {
     telemetry: Arc<Mutex<Option<Arc<dyn ProductTelemetry>>>>,
     telemetry_unavailable_logged: Arc<Mutex<bool>>,
     extra_telemetry_sink: Arc<Mutex<Option<Arc<dyn ExtraTelemetrySink>>>>,
+    /// The task set of the session these roots were handed to: the
+    /// attachment's own background work spawns into it. Tree work uses the
+    /// tree's sets instead.
+    session_tasks: crate::TaskSet,
 }
 
 impl ProductStateRoots {
@@ -208,6 +212,18 @@ impl ProductStateRoots {
                 .as_ref()
                 .is_some_and(|probe| probe())
         })
+    }
+
+    /// These roots as one session hands them out: what they spawn belongs to
+    /// `tasks`.
+    pub(crate) fn with_session_tasks(mut self, tasks: crate::TaskSet) -> Self {
+        self.session_tasks = tasks;
+        self
+    }
+
+    /// The task set of the session these roots belong to.
+    pub(crate) fn session_tasks(&self) -> &crate::TaskSet {
+        &self.session_tasks
     }
 
     pub(crate) fn with_child_runtime_factory(
@@ -271,6 +287,7 @@ impl ProductStateRoots {
             telemetry: Arc::new(Mutex::new(None)),
             telemetry_unavailable_logged: Arc::new(Mutex::new(false)),
             extra_telemetry_sink: Arc::new(Mutex::new(None)),
+            session_tasks: crate::TaskSet::new(),
         })
     }
 
@@ -563,6 +580,7 @@ impl ProductStateRoots {
             telemetry: Arc::new(Mutex::new(None)),
             telemetry_unavailable_logged: Arc::new(Mutex::new(false)),
             extra_telemetry_sink: Arc::new(Mutex::new(None)),
+            session_tasks: crate::TaskSet::new(),
         }
     }
 

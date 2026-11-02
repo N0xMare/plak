@@ -22,14 +22,14 @@ pub(crate) struct ChildAdmission {
 }
 
 impl ChildAdmission {
-    pub(crate) fn new(submission: TurnSubmission, agent: &Agent) -> Self {
+    pub(crate) fn new(tasks: &crate::TaskSet, submission: TurnSubmission, agent: &Agent) -> Self {
         let acknowledgement = submission.acknowledgement().clone();
         let result = submission.result().cloned();
         let mut turn = submission.into_turn();
         let control = turn.as_ref().map(Turn::control);
         let projection = turn
             .as_mut()
-            .map(|turn| ChildTurnProjection::admitted(turn, agent));
+            .map(|turn| ChildTurnProjection::admitted(tasks, turn, agent));
         Self {
             acknowledgement,
             result,
@@ -119,20 +119,21 @@ mod perf;
 mod tests;
 
 impl ChildTurnProjection {
-    pub(crate) fn admitted(turn: &mut Turn, agent: &Agent) -> Self {
+    pub(crate) fn admitted(tasks: &crate::TaskSet, turn: &mut Turn, agent: &Agent) -> Self {
         match turn.take_events() {
             Ok(events) => Self::start(
+                tasks,
                 turn.id(),
                 Some(agent.clone()),
                 std::future::ready(Some(Source::Admission(events))),
             ),
-            Err(_) => Self::recovered(Some(agent.clone()), turn.id()),
+            Err(_) => Self::recovered(tasks, Some(agent.clone()), turn.id()),
         }
     }
 
-    pub(crate) fn recovered(agent: Option<Agent>, turn: TurnId) -> Self {
+    pub(crate) fn recovered(tasks: &crate::TaskSet, agent: Option<Agent>, turn: TurnId) -> Self {
         let initial_agent = agent.clone();
-        Self::start(turn, agent, async move {
+        Self::start(tasks, turn, agent, async move {
             recover(initial_agent.as_ref(), turn).await
         })
     }
@@ -142,6 +143,7 @@ impl ChildTurnProjection {
         reason = "Child projection coordinates the bounded face stream, committed history catch-up, and cancellation lifetime in one task."
     )]
     fn start(
+        tasks: &crate::TaskSet,
         turn: TurnId,
         agent: Option<Agent>,
         source: impl Future<Output = Option<Source>> + Send + 'static,
@@ -163,7 +165,7 @@ impl ChildTurnProjection {
             }),
         });
         let observed = Arc::clone(&observation);
-        let task = tokio::spawn(async move {
+        let task = tasks.spawn(async move {
             if let Some(mut source) = source.await {
                 let mut gap = false;
                 loop {

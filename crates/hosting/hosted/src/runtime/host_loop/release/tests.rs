@@ -13,6 +13,47 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+struct DropFlag(Arc<AtomicBool>);
+
+impl Drop for DropFlag {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn release_aborts_and_joins_every_task_the_session_spawned() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    host.config.store.save(&mut host.config.session).unwrap();
+    host.project();
+    let tasks = host.executor.tasks().clone();
+    let running = tasks.len();
+    assert!(running > 0, "the live projector runs as a session task");
+    // Work started through the session's roots belongs to the same set.
+    let dropped = Arc::new(AtomicBool::new(false));
+    let flag = DropFlag(Arc::clone(&dropped));
+    let roots = host.config.state_roots.clone();
+    host.executor
+        .block_on(async move {
+            roots.session_tasks().spawn(async move {
+                let _flag = flag;
+                std::future::pending::<()>().await;
+            });
+        })
+        .unwrap();
+    assert_eq!(tasks.len(), running + 1);
+
+    host.release().unwrap();
+
+    assert!(tasks.is_closed(), "release closed the session's task set");
+    assert!(tasks.is_empty(), "no session task outlives release");
+    assert!(dropped.load(Ordering::SeqCst));
+}
+
 #[test]
 fn quit_projection_stages_share_the_original_deadline() {
     use crate::runtime::test_support::SlowProjection;

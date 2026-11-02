@@ -113,23 +113,25 @@ pub(crate) struct LiveProjector {
     applied: watch::Receiver<Applied>,
     generation: u64,
     reported: u64,
+    tasks: crate::TaskSet,
     task: tokio::task::JoinHandle<Option<SessionViews>>,
 }
 
 impl LiveProjector {
-    /// Spawns the task on the current runtime. Call it inside the host's
-    /// executor.
-    pub(crate) fn spawn() -> Self {
+    /// Spawns the task as one of the session's `tasks`. Call it inside the
+    /// host's executor.
+    pub(crate) fn spawn(tasks: &crate::TaskSet) -> Self {
         let (requests, receiver) = watch::channel(None);
         let (report, applied) = watch::channel(Applied::default());
         let wake = Arc::new(Notify::new());
-        let task = tokio::spawn(run(receiver, Arc::clone(&wake), report));
+        let task = tasks.spawn(run(receiver, Arc::clone(&wake), report));
         Self {
             requests,
             wake,
             applied,
             generation: 0,
             reported: 0,
+            tasks: tasks.clone(),
             task,
         }
     }
@@ -164,7 +166,7 @@ impl LiveProjector {
     /// the host's executor.
     fn restart(&mut self) {
         let generation = self.generation;
-        *self = Self::spawn();
+        *self = Self::spawn(&self.tasks);
         self.generation = generation;
         self.reported = generation;
     }
@@ -329,7 +331,7 @@ async fn run(
                     let wake = Arc::clone(&wake);
                     // A lost subscription ends the forwarder; the next request
                     // resubscribes.
-                    forwarder = Some(tokio::spawn(async move {
+                    forwarder = Some(next.target.roots.session_tasks().spawn(async move {
                         while feed.changed().await.is_ok() {
                             wake.notify_one();
                         }

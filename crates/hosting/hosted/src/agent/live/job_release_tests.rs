@@ -75,6 +75,7 @@ async fn slow_follow_up_allows_list_steer_and_close_without_losing_or_duplicatin
         };
         let turn = session.agent().prompt("start").await.unwrap();
         let child = ProductLiveChild::new(
+            &crate::TaskSet::new(),
             AttachedCodingSession {
                 output_bound_rederived: None,
                 reachability_probe: None,
@@ -258,9 +259,14 @@ async fn terminal_release_fixture(child: bool) {
         topology_owner: None,
     };
     let locator = if child {
-        let released = Box::new(ProductLiveChild::new(attached, result.turn_id(), control))
-            .release(runtime.driver().clone())
-            .await;
+        let released = Box::new(ProductLiveChild::new(
+            &crate::TaskSet::new(),
+            attached,
+            result.turn_id(),
+            control,
+        ))
+        .release(runtime.driver().clone())
+        .await;
         assert!(released.failure.is_none(), "{:?}", released.failure);
         let feed = released.feed.as_ref().unwrap();
         assert!(feed.records.iter().any(|record| matches!(

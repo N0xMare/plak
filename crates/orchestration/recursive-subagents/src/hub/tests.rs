@@ -363,6 +363,43 @@ async fn overlapping_root_leases_keep_the_hub() {
     assert!(lookup(&tree_id).is_none());
 }
 
+/// The tree's task set ends with the tree, not with a root: releasing one
+/// root lease (as a rebind predecessor does once its successor holds one)
+/// leaves the tree's child tasks running, and the last lease's shutdown
+/// aborts and joins them before it returns.
+#[tokio::test]
+async fn the_trees_tasks_end_with_its_last_root_lease_not_with_a_root() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let runtime = insert_root(
+        tree_id.clone(),
+        bootstrap(&tree_id, root.path().to_path_buf()),
+        None,
+    )
+    .unwrap();
+    process_hub().acquire_root_lease(&tree_id).unwrap();
+    process_hub().acquire_root_lease(&tree_id).unwrap();
+    let tasks = runtime.driver().tasks();
+    let child = tasks.spawn(std::future::pending::<()>());
+
+    release_root_lease(&tree_id).await.unwrap();
+    tokio::task::yield_now().await;
+    assert!(lookup(&tree_id).is_some());
+    assert!(
+        !child.is_finished(),
+        "a root's release never aborts the tree's children"
+    );
+    assert!(!tasks.is_closed());
+
+    release_root_lease(&tree_id).await.unwrap();
+    assert!(lookup(&tree_id).is_none());
+    assert!(
+        tasks.is_closed() && tasks.is_empty(),
+        "the last lease joined the tree's tasks"
+    );
+    assert!(child.await.unwrap_err().is_cancelled());
+}
+
 #[tokio::test]
 async fn child_release_does_not_drop_hub() {
     let tree_id = unique_tree_id();
@@ -1466,7 +1503,7 @@ async fn late_retirement(failure: Option<String>) {
 fn retirement_release_is_not_wrapped_in_timeout() {
     let source = include_str!("registry.rs");
     let worker = source
-        .split("let task = tokio::spawn(async move {")
+        .split("let task = owners.spawn(async move {")
         .nth(1)
         .unwrap()
         .split("let retirement = Retirement {")
@@ -1768,6 +1805,108 @@ async fn shutdown_deadline_bounds_joiners_but_keeps_release_owner() {
             assert_eq!(tree.node("root").unwrap().session_locator.as_deref(), None);
         })
         .unwrap();
+}
+
+/// The last lease's shutdown closes the tree's task set, aborting and
+/// joining work that owns no child (projections, join observers), but a
+/// release worker stuck past the shutdown bound keeps its child's runtime
+/// authority and runs until it returns.
+#[tokio::test(start_paused = true)]
+async fn last_lease_shutdown_joins_tree_work_but_keeps_a_stuck_release_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = Arc::new(ProductTopologyRuntime::new(
+        bootstrap("shutdown-retained", root.path().to_path_buf()),
+        memory_store(),
+        Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+        None,
+    ));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    assert!(
+        runtime
+            .try_occupy_live("root".into(), Box::new(barrier_child(&entered, &finish)))
+            .await
+            .is_ok()
+    );
+    let tree_tasks = runtime.driver().tasks();
+    let tree_work =
+        ["projection", "join observer"].map(|_| tree_tasks.spawn(std::future::pending::<()>()));
+    let owner = runtime.clone();
+    let cancel = tokio::spawn(async move { owner.cancel_live("root").await });
+    entered.notified().await;
+    let completion = runtime.live.lock().await.retiring["root"]
+        .completion
+        .clone();
+
+    let result = shutdown_runtime(runtime.clone()).await.unwrap_err();
+
+    assert_eq!(result.child_failures.len(), 1);
+    assert!(tree_tasks.is_closed() && tree_tasks.is_empty());
+    for task in tree_work {
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+    let release_owners = runtime.driver().release_owners();
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert!(
+        !release_owners.is_empty(),
+        "the stuck release worker still runs"
+    );
+    finish.notify_one();
+    completion
+        .await
+        .expect("the release worker returns on its own");
+    cancel.await.unwrap().unwrap();
+    assert!(release_owners.is_empty());
+}
+
+/// Process-exit abandonment is what aborts a stuck release worker.
+#[tokio::test(start_paused = true)]
+async fn process_exit_abandonment_aborts_a_stuck_release_owner() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let runtime = insert_root(
+        tree_id.clone(),
+        bootstrap(&tree_id, root.path().to_path_buf()),
+        None,
+    )
+    .unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    assert!(
+        runtime
+            .try_occupy_live("root".into(), Box::new(barrier_child(&entered, &finish)))
+            .await
+            .is_ok()
+    );
+    let owner = runtime.clone();
+    let cancel = tokio::spawn(async move { owner.cancel_live("root").await });
+    entered.notified().await;
+    let completion = runtime.live.lock().await.retiring["root"]
+        .completion
+        .clone();
+
+    let _agents = abandon_live_agents(&tree_id).await;
+
+    assert_eq!(
+        completion.await,
+        Err("child retirement worker was aborted".to_owned())
+    );
+    let _ = cancel.await;
+    assert!(runtime.driver().release_owners().is_empty());
+    force_release(&tree_id).await;
+}
+
+fn barrier_child(
+    entered: &Arc<tokio::sync::Notify>,
+    finish: &Arc<tokio::sync::Notify>,
+) -> BarrierChild {
+    BarrierChild {
+        panic_on_release: false,
+        failure: None,
+        turn: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+        entered: Arc::clone(entered),
+        finish: Arc::clone(finish),
+    }
 }
 
 #[tokio::test]

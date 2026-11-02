@@ -114,7 +114,12 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
         Some(
             executor
                 .block_on(async {
-                    super::credential_wait::CredentialNotices::start(agent, account, events.clone())
+                    super::credential_wait::CredentialNotices::start(
+                        config.state_roots.session_tasks(),
+                        agent,
+                        account,
+                        events.clone(),
+                    )
                 })
                 .map_err(|_| CliFailure::new("application execution failed"))?,
         )

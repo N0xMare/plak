@@ -45,7 +45,10 @@ pub(in crate::agent) async fn rejoin_recovered_start(
         Ok(admitted) => admitted,
         Err(error) => {
             let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
-                attached, turn, control,
+                &runtime.driver().tasks(),
+                attached,
+                turn,
+                control,
             ))
             .cancel_and_release(runtime.driver().clone(), None)
             .await;
@@ -83,7 +86,10 @@ pub(in crate::agent) async fn rejoin_recovered_start(
         Ok(_) => {}
         Err(error) => {
             let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
-                attached, turn, control,
+                &runtime.driver().tasks(),
+                attached,
+                turn,
+                control,
             ))
             .cancel_and_release(runtime.driver().clone(), None)
             .await;
@@ -146,9 +152,13 @@ async fn occupy_recovered_turn(
     registration: &mut Option<TurnWaiterRegistration>,
 ) -> Result<TurnId, String> {
     let feed = ChildFeedSource::of(&attached);
-    let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
-        crate::agent::live::ProductLiveChild::new(attached, turn, control),
-    );
+    let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
+        Box::new(crate::agent::live::ProductLiveChild::new(
+            &runtime.driver().tasks(),
+            attached,
+            turn,
+            control,
+        ));
     match runtime.try_occupy_live(agent_id.clone(), child).await {
         Ok(turn_id) => {
             if let Some(registration) = registration.take() {
@@ -1083,6 +1093,7 @@ pub(super) async fn reconcile_reopened_child_results(
         let session_id = session.locator().session_id();
         let release = if let Some(recovered) = recovered {
             Box::new(crate::agent::live::ProductLiveChild::new(
+                &runtime.driver().tasks(),
                 *session,
                 recovered.turn_id(),
                 recovered.control(),

@@ -82,12 +82,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         {
             let store = self.host.projection_store.clone();
             let id = self.host.session.id.clone();
-            self.queue_refresh = Some(QueueRefresh {
-                expected: self.host.session.queue_commands.clone(),
-                task: tokio::spawn(async move {
-                    super::super::projection::queue_join(&store, &id).await
-                }),
-            });
+            self.queue_refresh =
+                Some(QueueRefresh {
+                    expected: self.host.session.queue_commands.clone(),
+                    task: self.host.roots.session_tasks().spawn(async move {
+                        super::super::projection::queue_join(&store, &id).await
+                    }),
+                });
         }
     }
 

@@ -103,6 +103,8 @@ pub struct ProductLiveChild {
         >,
     >,
     observation: Option<crate::runtime::child_projection::ChildTurnProjection>,
+    /// The tree's task set, which this child's projections run in.
+    tasks: crate::TaskSet,
     delivery: Arc<tokio::sync::RwLock<()>>,
     delivery_serial: Arc<tokio::sync::Mutex<()>>,
 }
@@ -110,33 +112,42 @@ pub struct ProductLiveChild {
 impl ProductLiveChild {
     /// One live child on its running turn, with no follow-up queued.
     #[must_use]
-    pub fn new(attached: AttachedCodingSession, turn_id: TurnId, control: TurnControl) -> Self {
+    pub fn new(
+        tasks: &crate::TaskSet,
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+    ) -> Self {
         let observation = crate::runtime::child_projection::ChildTurnProjection::recovered(
+            tasks,
             attached.agent().cloned(),
             turn_id,
         );
-        Self::admitted(attached, turn_id, control, observation)
+        Self::admitted(tasks, attached, turn_id, control, observation)
     }
 
     pub(crate) fn admitted(
+        tasks: &crate::TaskSet,
         attached: AttachedCodingSession,
         turn_id: TurnId,
         control: TurnControl,
         observation: crate::runtime::child_projection::ChildTurnProjection,
     ) -> Self {
-        Self::with_observation(attached, turn_id, control, Some(observation))
+        Self::with_observation(tasks, attached, turn_id, control, Some(observation))
     }
 
     /// A throwaway cancellation/release owner, without presentation or tasks.
     pub(crate) fn without_observation(
+        tasks: &crate::TaskSet,
         attached: AttachedCodingSession,
         turn_id: TurnId,
         control: TurnControl,
     ) -> Self {
-        Self::with_observation(attached, turn_id, control, None)
+        Self::with_observation(tasks, attached, turn_id, control, None)
     }
 
     fn with_observation(
+        tasks: &crate::TaskSet,
         attached: AttachedCodingSession,
         turn_id: TurnId,
         control: TurnControl,
@@ -148,6 +159,7 @@ impl ProductLiveChild {
             control,
             follow_ups: Arc::default(),
             observation,
+            tasks: tasks.clone(),
             delivery: Arc::default(),
             delivery_serial: Arc::default(),
         }
@@ -166,6 +178,7 @@ impl ProductLiveChild {
         let turn_id = self.turn_id;
         let follow_ups = Arc::clone(&self.follow_ups);
         let serial = Arc::clone(&self.delivery_serial);
+        let tasks = self.tasks.clone();
         Box::pin(async move {
             let _delivery = delivery.map_err(|_| TURN_ENDED.to_owned())?;
             let _serial = serial.lock().await;
@@ -181,7 +194,7 @@ impl ProductLiveChild {
                     }
                 })?;
             let mut submission =
-                crate::runtime::child_projection::ChildAdmission::new(submission, &agent);
+                crate::runtime::child_projection::ChildAdmission::new(&tasks, submission, &agent);
             #[cfg(test)]
             super::park::hooks::after_follow_up_admission(&agent.id().to_string()).await;
             acknowledged.await;
@@ -223,7 +236,7 @@ impl ProductLiveChild {
             .await
             .map_err(|error| error.to_string())?;
         let mut submission =
-            crate::runtime::child_projection::ChildAdmission::new(submission, agent);
+            crate::runtime::child_projection::ChildAdmission::new(&self.tasks, submission, agent);
         acknowledged.await;
         if crate::agent::ledger::consumed_below_retention(
             driver,
@@ -275,6 +288,7 @@ impl ProductLiveChild {
         } else if self.turn_id != turn_id {
             self.observation = Some(
                 crate::runtime::child_projection::ChildTurnProjection::recovered(
+                    &self.tasks,
                     Some(agent.clone()),
                     turn_id,
                 ),

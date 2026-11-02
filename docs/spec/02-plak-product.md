@@ -127,6 +127,14 @@ terminal host failure: the parent is still released before that failure
 returns. Hosted worker joins carry the typed terminal result; ordinary
 diagnostic events do not determine success.
 
+Every background task the attachment starts belongs to its task set; every
+task started for the agent tree's children belongs to the tree's own set.
+Release aborts and joins the attachment's set, so no attachment task outlives
+release. A root's release, including a predecessor's under a rebind that keeps
+the tree, never touches the tree's tasks: they are released with the tree's
+last root lease, except work that owns a child's session or runtime
+authority, which runs until it returns (chapter 03 §16).
+
 **What the operator sees about a turn is what the feed says.** The host never
 publishes a turn's outcome from its own memory. A terminal result, an
 abandonment, a capacity stop, a rejection and a compaction settlement each reach

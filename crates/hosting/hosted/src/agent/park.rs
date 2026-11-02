@@ -736,7 +736,7 @@ async fn start_reopened_resume(
     let id = agent_id.to_owned();
     // The startup reservation belongs to this task, not the global reattach
     // lock. Interrupt and hub shutdown can cancel and join its session release.
-    tokio::spawn(async move {
+    runtime.driver().spawn_release_owner(async move {
         let ready = super::children::wait_resume_gate(
             owner.driver(),
             None,
@@ -973,8 +973,9 @@ async fn rejoin_turn(
     let sessions = Arc::clone(&attached.sessions);
     let session_id = attached.locator().session_id();
     let feed = super::children::ChildFeedSource::of(&attached);
-    let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
-        Box::new(super::live::ProductLiveChild::new(attached, turn, control));
+    let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
+        super::live::ProductLiveChild::new(&runtime.driver().tasks(), attached, turn, control),
+    );
     match (begun, admitted) {
         (true, Ok(_)) => {}
         (false, _) => {

@@ -197,7 +197,7 @@ async fn cancel_interrupted_children(
         return report.first_failure.map_or(Ok(()), Err);
     }
     let join = runtime.begin_cancel_live_many(interrupted).await;
-    tokio::spawn(async move {
+    runtime.driver().tasks().spawn(async move {
         if let Some(error) = join.await.first_failure {
             tracing::error!(target: "plak.topology", error, "interrupted child retirement failed");
         }

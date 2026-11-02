@@ -133,7 +133,7 @@ impl ProductChildSessionBinder {
             let worker_startup = startup.clone();
             let worker_runtime = runtime.clone();
             let mut worker = StartupWorker::new(runtime.clone(), agent_id.clone(), startup.clone());
-            let task = tokio::spawn(async move {
+            let task = runtime.driver().spawn_release_owner(async move {
                 let result = async {
                     let created =
                         match Box::pin(create_spawned_child_session(&parent, &start, deadline))
@@ -254,15 +254,15 @@ impl Drop for StartupWorker {
         if !self.armed {
             return;
         }
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        if tokio::runtime::Handle::try_current().is_err() {
             tracing::error!(target: "plak.topology", agent_id = %self.agent_id,
                 "startup owner dropped without a runtime; cleanup cannot be spawned");
             return;
-        };
+        }
         let runtime = self.runtime.clone();
         let agent_id = self.agent_id.clone();
         let startup = self.startup.clone();
-        handle.spawn(async move {
+        self.runtime.driver().spawn_release_owner(async move {
             runtime
                 .finish_startup(&agent_id, &startup, Self::failure())
                 .await;
@@ -271,7 +271,8 @@ impl Drop for StartupWorker {
 }
 
 // Dropping a nested tool future also requests cancellation. The worker itself
-// is never aborted: an acknowledgement may still arrive after its caller left.
+// is a release owner that neither its caller nor tree shutdown aborts: an
+// acknowledgement may still arrive after its caller left.
 pub(super) struct StartupCaller {
     pub(super) runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
     pub(super) agent_id: String,
@@ -317,12 +318,12 @@ impl Drop for StartupCaller {
         let runtime = self.runtime.clone();
         let agent_id = self.agent_id.clone();
         let startup = self.startup.clone();
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        if tokio::runtime::Handle::try_current().is_err() {
             tracing::error!(target: "plak.topology", agent_id = %self.agent_id,
                 "startup caller dropped without a runtime; cleanup cannot be spawned");
             return;
-        };
-        handle.spawn(async move {
+        }
+        self.runtime.driver().spawn_release_owner(async move {
             runtime.cancel_startup(&agent_id, &startup).await;
         });
     }

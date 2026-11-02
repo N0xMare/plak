@@ -274,9 +274,9 @@ impl AttachedCodingSession {
         Arc::clone(&self.sessions)
     }
 
-    pub(crate) fn schedule_passive_checkpoint(&self) {
+    pub(crate) fn schedule_passive_checkpoint(&self, tasks: &crate::TaskSet) {
         let sessions = Arc::clone(&self.sessions);
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             let _ = sessions.passive_checkpoint().await;
         });
     }

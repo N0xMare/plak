@@ -11,8 +11,14 @@ pub(super) struct CredentialNotices<P: plakous_host_protocol::ProtocolExtension>
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> CredentialNotices<P> {
-    pub(super) fn start(agent: Agent, account: String, events: super::Sender<P>) -> Self {
+    pub(super) fn start(
+        tasks: &crate::TaskSet,
+        agent: Agent,
+        account: String,
+        events: super::Sender<P>,
+    ) -> Self {
         Self::observe(
+            tasks,
             move || {
                 matches!(
                     agent.credential_wait(),
@@ -25,6 +31,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> CredentialNotices<P> {
     }
 
     fn observe(
+        tasks: &crate::TaskSet,
         probe: impl Fn() -> bool + Send + 'static,
         account: String,
         events: super::Sender<P>,
@@ -32,7 +39,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> CredentialNotices<P> {
         let state = Arc::new(Mutex::new(Some(false)));
         let observed = Arc::clone(&state);
         let sender = events.clone();
-        let task = tokio::spawn(async move {
+        let task = tasks.spawn(async move {
             loop {
                 let current = probe();
                 {
@@ -106,6 +113,7 @@ mod tests {
         let flag = Arc::new(AtomicBool::new(true));
         let probe = Arc::clone(&flag);
         let _notices = CredentialNotices::observe(
+            &crate::TaskSet::new(),
             move || probe.load(Ordering::Acquire),
             "claude".to_owned(),
             events.clone(),

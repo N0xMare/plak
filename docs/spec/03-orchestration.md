@@ -4606,6 +4606,18 @@ fault evidence, while release workers retain ownership until they return and
 may publish their released locator afterward. No new recovery pass starts on
 the closed hub. Explicit process-exit abandonment, not ordinary joined shutdown,
 aborts these workers.
+Every task the tree runs for its children belongs to the tree, never to a
+root, so no root's release touches it. Work that owns a child's session or
+runtime authority until it returns (startup and resume owners and their
+cleanups, turn waiters, follow-up deliveries, release workers and the
+retirement tasks they own) is tracked as the tree's release owners, which no
+shutdown aborts. Shutdown bounds its join only on retirement completions and
+on cancelled startups, as above, and leaves the other owners running
+detached. Process-exit abandonment aborts release workers; the other owners
+end with the exiting process's executor. The rest (projections, join
+observers, recovery passes) is the tree's task set: after the joins above,
+the shutdown of the last root lease closes it, aborting what still runs and
+joining it for at most 250 ms.
 Admission checks active and retiring slots under the same mutex as the closed
 flag. Batch cancellation starts and joins siblings concurrently; its report retains
 input order, while independent retirement workers may publish in completion order.

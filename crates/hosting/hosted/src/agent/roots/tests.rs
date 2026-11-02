@@ -366,3 +366,72 @@ async fn a_hub_hit_asks_the_roots_for_no_store() {
     let home = tempfile::tempdir().unwrap();
     crate::topology_runtime::test_support::hub_hit_opens_no_store(home.path().to_path_buf()).await;
 }
+
+/// The tree a root attaches runs its children's work in its own task set,
+/// not the root session's: the session's close leaves it, and the tree's
+/// last root lease joins it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_root_attach_keeps_the_trees_tasks_apart_from_the_session() {
+    let home = tempfile::tempdir().unwrap();
+    let session = crate::TaskSet::new();
+    let roots =
+        ProductStateRoots::with_doubles(home.path().to_path_buf(), home.path().join("state"))
+            .with_session_tasks(session.clone());
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    let _published = roots
+        .tree_store()
+        .unwrap()
+        .save(&crate::topology_runtime::test_support::bootstrap(
+            &tree_id,
+            home.path().to_path_buf(),
+        ))
+        .unwrap();
+    let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
+        created_output_bound: None,
+        workspace_root: home.path().to_path_buf(),
+        cwd: home.path().to_path_buf(),
+        plan_state_authority: tree_id.clone(),
+        composition: crate::binding::CompositionSelection::Direct,
+        topology_tree_id: None,
+        topology_caller_id: None,
+        state_roots: roots,
+        model: "offline-model".into(),
+        effort: None,
+        target: crate::binding::ApiTarget::OpenRouter {
+            wire: crate::binding::ResolvedProtocol::Chat,
+        },
+        scheduled_compaction: true,
+        max_model_rounds: 8,
+        topology_enabled: true,
+        product_home: Some(home.path().to_path_buf()),
+        tool_selection: crate::tool_plan::NodeToolSelection::default(),
+    });
+    let mut owner = None;
+    crate::agent::build::topology_extensions_if_enabled(
+        &parent,
+        "offline-model",
+        crate::topology_runtime::TopologyHubAttach::AttachRoot,
+        true,
+        &mut owner,
+    )
+    .unwrap();
+    assert_eq!(owner.as_deref(), Some(tree_id.as_str()));
+    let tree = crate::topology_runtime::lookup(&tree_id).unwrap();
+    let child = tree.driver().tasks().spawn(std::future::pending::<()>());
+    assert_eq!(session.len(), 0, "the tree's work is not the session's");
+
+    assert!(session.close(std::time::Duration::from_secs(5)).await);
+    tokio::task::yield_now().await;
+    assert!(
+        !child.is_finished(),
+        "the session's close leaves the tree's work"
+    );
+
+    crate::topology_runtime::release_root_lease(&tree_id)
+        .await
+        .unwrap();
+    let tree_tasks = tree.driver().tasks();
+    assert!(tree_tasks.is_closed() && tree_tasks.is_empty());
+    assert!(child.await.unwrap_err().is_cancelled());
+}

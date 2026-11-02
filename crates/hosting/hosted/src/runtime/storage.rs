@@ -12,19 +12,21 @@ pub(super) struct StorageNotices(tokio::task::JoinHandle<()>);
 
 impl StorageNotices {
     pub(super) fn start<P: plakous_host_protocol::ProtocolExtension>(
+        tasks: &crate::TaskSet,
         agent: Agent,
         store: Arc<dyn SessionRecordStore>,
         events: super::Sender<P>,
     ) -> Self {
-        Self::observe(store, events, move || agent.storage_unavailable())
+        Self::observe(tasks, store, events, move || agent.storage_unavailable())
     }
 
     fn observe<P: plakous_host_protocol::ProtocolExtension>(
+        tasks: &crate::TaskSet,
         store: Arc<dyn SessionRecordStore>,
         events: super::Sender<P>,
         probe: impl Fn() -> bool + Send + 'static,
     ) -> Self {
-        Self(tokio::spawn(async move {
+        Self(tasks.spawn(async move {
             let mut waiting = false;
             loop {
                 let unavailable = probe() || store.storage_unavailable();
@@ -67,6 +69,7 @@ mod tests {
         let full = Arc::new(AtomicBool::new(true));
         let probe = full.clone();
         let _notices = StorageNotices::observe(
+            &crate::TaskSet::new(),
             Arc::new(crate::session_store::MemoryStore::new()),
             events.clone(),
             move || probe.load(Ordering::Acquire),

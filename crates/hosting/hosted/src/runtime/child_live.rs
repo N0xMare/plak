@@ -259,6 +259,7 @@ impl ChildObservers {
     /// no session store answer at once with a note and open nothing.
     pub(super) async fn open_agent_view<P: plakous_host_protocol::ProtocolExtension>(
         &mut self,
+        tasks: &crate::TaskSet,
         runtime: &ProductTopologyRuntime,
         sessions: Option<Arc<AgentSessions>>,
         session_id: &str,
@@ -312,7 +313,7 @@ impl ChildObservers {
             })
             .unwrap_or(false);
         self.start_agent_view(
-            task_tools, session_id, agent_id, locator, sessions, live, events,
+            tasks, task_tools, session_id, agent_id, locator, sessions, live, events,
         );
     }
 
@@ -331,6 +332,7 @@ impl ChildObservers {
     )]
     fn start_agent_view<P: plakous_host_protocol::ProtocolExtension>(
         &mut self,
+        tasks: &crate::TaskSet,
         task_tools: bool,
         session_id: &str,
         agent_id: &str,
@@ -352,8 +354,9 @@ impl ChildObservers {
             last_good: Arc::new(Mutex::new(None)),
             task_tools,
         };
+        let tasks = tasks.clone();
         let serve: ServeAgent = Box::new(move |live, generation, replace| {
-            tokio::spawn(serve_agent(
+            tasks.spawn(serve_agent(
                 ServeContext {
                     generation,
                     ..context.clone()
@@ -375,6 +378,7 @@ impl ChildObservers {
 
     pub(super) async fn action<P: plakous_host_protocol::ProtocolExtension>(
         &mut self,
+        tasks: &crate::TaskSet,
         runtime: &ProductTopologyRuntime,
         sessions: Option<Arc<AgentSessions>>,
         session_id: &str,
@@ -383,7 +387,7 @@ impl ChildObservers {
     ) {
         match action {
             UserAction::OpenAgentTranscript { agent_id } => {
-                self.open_agent_view(runtime, sessions, session_id, agent_id, events)
+                self.open_agent_view(tasks, runtime, sessions, session_id, agent_id, events)
                     .await;
             }
             UserAction::CloseAgentTranscript => {

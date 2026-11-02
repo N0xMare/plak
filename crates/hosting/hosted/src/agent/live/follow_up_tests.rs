@@ -386,6 +386,7 @@ impl Fixture {
             })
             .unwrap();
         let live = ProductLiveChild::new(
+            &crate::TaskSet::new(),
             AttachedCodingSession {
                 output_bound_rederived: None,
                 reachability_probe: None,

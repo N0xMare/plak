@@ -92,7 +92,7 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     quit_started_at: Option<Instant>,
     quit_abandoned_turn: bool,
     quit_job_stops: Option<tokio::task::JoinHandle<Result<(), String>>>,
-    executor: ApplicationExecutor,
+    executor: session_executor::SessionExecutor,
     log: Option<SessionLog>,
     stderr_buf: Vec<u8>,
     interrupt_state: RefCell<InterruptWatchState<P>>,
@@ -139,6 +139,7 @@ mod recover;
 mod release;
 mod restored;
 mod run_until_idle;
+mod session_executor;
 pub(in crate::runtime) mod transient;
 pub(in crate::runtime) mod wake;
 
@@ -192,7 +193,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if self.live.is_none() {
             self.live = self
                 .executor
-                .block_on(async { super::projection::live::LiveProjector::spawn() })
+                .block_on(async {
+                    super::projection::live::LiveProjector::spawn(self.executor.tasks())
+                })
                 .ok();
         }
         if self.config.session.store_revision != 0
@@ -526,8 +529,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.commit_notice_intents();
             self.project();
             if !passive_checkpoint_scheduled && self.actions.is_promptable() {
+                let tasks = self.executor.tasks();
                 self.executor
-                    .block_on(async { self.opened.schedule_passive_checkpoint() })
+                    .block_on(async { self.opened.schedule_passive_checkpoint(tasks) })
                     .map_err(|_| CliFailure::new("application execution failed"))?;
                 passive_checkpoint_scheduled = true;
             }

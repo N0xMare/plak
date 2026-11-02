@@ -605,6 +605,7 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "c1",
@@ -661,6 +662,7 @@ pub(in crate::runtime) fn start_attach_probe(
     let sender: Sender = Sender::over(wire);
     let mut observers = ChildObservers::default();
     observers.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "attach-order",
@@ -708,6 +710,7 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     let sender: Sender = Sender::over(wire);
     let mut observers = ChildObservers::default();
     observers.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "lagged-face",
@@ -855,7 +858,11 @@ pub(in crate::runtime) async fn fixture_with(
         .unwrap()
         .into_parts();
     let mut turn = agent.prompt("live").await.unwrap();
-    let owner = super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent);
+    let owner = super::super::child_projection::ChildTurnProjection::admitted(
+        &crate::TaskSet::new(),
+        &mut turn,
+        &agent,
+    );
     (
         root,
         sessions,
@@ -1027,6 +1034,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "c1",
@@ -1082,8 +1090,11 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     assert!(received.try_recv().is_err(), "the turn's end re-sends once");
 
     let mut follow_up = agent.prompt("again").await.unwrap();
-    let next_projection =
-        super::super::child_projection::ChildTurnProjection::admitted(&mut follow_up, &agent);
+    let next_projection = super::super::child_projection::ChildTurnProjection::admitted(
+        &crate::TaskSet::new(),
+        &mut follow_up,
+        &agent,
+    );
     observations.sync_children(vec![(
         "c1".to_owned(),
         follow_up.id(),
@@ -1100,6 +1111,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     let (tree_id, runtime) = test_runtime(root.path());
     observations
         .action(
+            &crate::TaskSet::new(),
             &runtime,
             Some(Arc::clone(&sessions)),
             "s1",
@@ -1132,6 +1144,7 @@ async fn another_session_drops_the_agent_view() {
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "c1",
@@ -1190,6 +1203,7 @@ async fn unknown_root_unbound_and_another_trees_agents_answer_with_a_note() {
     for agent_id in ["nope", "root", unbound.as_str(), foreign.as_str()] {
         observations
             .action(
+                &crate::TaskSet::new(),
                 &runtime,
                 Some(Arc::clone(&sessions)),
                 "s1",
@@ -1232,6 +1246,7 @@ async fn turn_end_resend_holds_the_finished_turn() {
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "c1",
@@ -1310,6 +1325,7 @@ async fn a_commit_while_the_view_opens_is_in_its_rows() {
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "c-commit",
@@ -1401,6 +1417,7 @@ async fn close_and_session_switch_retire_the_views_generation() {
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "c1",
@@ -1425,6 +1442,7 @@ async fn close_and_session_switch_retire_the_views_generation() {
     assert!(observations.agent_view.is_none());
     assert!(!observations.gate.send_if_current(open, || true));
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s2",
         "c1",
@@ -1576,8 +1594,11 @@ async fn an_in_flight_call_attaches_running_and_settles_before_turn_end() {
     };
     let agent = attached.agent().clone();
     let mut turn = agent.prompt("live").await.unwrap();
-    let projection =
-        super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent);
+    let projection = super::super::child_projection::ChildTurnProjection::admitted(
+        &crate::TaskSet::new(),
+        &mut turn,
+        &agent,
+    );
     tokio::time::timeout(Duration::from_secs(10), started.notified())
         .await
         .expect("the tool starts");
@@ -1593,6 +1614,7 @@ async fn an_in_flight_call_attaches_running_and_settles_before_turn_end() {
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
     observations.start_agent_view(
+        &crate::TaskSet::new(),
         false,
         "s1",
         "c-held",

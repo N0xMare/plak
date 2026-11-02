@@ -57,6 +57,7 @@ async fn root_transient_waits_for_exact_route_and_cancels_probe() {
         }
     });
     let pending = PendingResume::spawn(
+        &crate::TaskSet::new(),
         "session".into(),
         plan(ResumeGate::Network, "connection unavailable"),
         Some(probe),
@@ -85,6 +86,7 @@ async fn root_transient_waits_for_exact_route_and_cancels_probe() {
         }
     });
     let pending = PendingResume::spawn(
+        &crate::TaskSet::new(),
         "session".into(),
         plan(ResumeGate::Network, "connection unavailable"),
         Some(probe),
@@ -103,7 +105,12 @@ async fn root_transient_delay_and_no_probe_fallback_use_paused_time() {
         ResumeGate::Network,
         ResumeGate::Delay(Duration::from_secs(30)),
     ] {
-        let pending = PendingResume::spawn("session".into(), plan(gate, "temporary failure"), None);
+        let pending = PendingResume::spawn(
+            &crate::TaskSet::new(),
+            "session".into(),
+            plan(gate, "temporary failure"),
+            None,
+        );
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(29)).await;
         assert!(!pending.ready.load(Ordering::Acquire));

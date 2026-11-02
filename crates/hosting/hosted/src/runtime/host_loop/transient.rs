@@ -17,13 +17,18 @@ pub(super) struct PendingResume {
 }
 
 impl PendingResume {
-    fn spawn(session_id: String, plan: ResumePlan, probe: Option<ReachabilityProbe>) -> Self {
+    fn spawn(
+        tasks: &crate::TaskSet,
+        session_id: String,
+        plan: ResumePlan,
+        probe: Option<ReachabilityProbe>,
+    ) -> Self {
         let ready = Arc::new(AtomicBool::new(false));
         let cancellation = CancellationToken::new();
         let signal = ready.clone();
         let cancel = cancellation.clone();
         let gate = plan.gate;
-        let task = tokio::spawn(async move {
+        let task = tasks.spawn(async move {
             let reached = transient::wait_gate(
                 gate,
                 probe,
@@ -99,10 +104,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         };
         let session_id = self.config.session.id.clone();
         let probe = self.opened.reachability_probe();
-        let Ok(pending) = self
-            .executor
-            .block_on(async { PendingResume::spawn(session_id, plan, probe) })
-        else {
+        let Ok(pending) = self.executor.block_on(async {
+            PendingResume::spawn(self.executor.tasks(), session_id, plan, probe)
+        }) else {
             return false;
         };
         self.pending_resume = Some(pending);

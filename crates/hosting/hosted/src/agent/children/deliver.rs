@@ -150,6 +150,7 @@ impl ProductMailDeliverer {
             };
             if let Some(recovered) = recovered {
                 let child = crate::agent::live::ProductLiveChild::without_observation(
+                    &self.runtime.driver().tasks(),
                     attached,
                     recovered.turn_id(),
                     recovered.control(),
@@ -380,7 +381,9 @@ impl ProductMailDeliverer {
                 child.feed(cursor),
             )
         };
-        tokio::spawn(delivery)
+        self.runtime
+            .driver()
+            .spawn_release_owner(delivery)
             .await
             .map_err(|_| "follow-up delivery task failed".to_owned())?
             .map_err(turn_ended_or)?;

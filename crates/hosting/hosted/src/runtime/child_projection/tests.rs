@@ -49,6 +49,7 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(0xc8)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
@@ -102,6 +103,7 @@ async fn a_late_in_flight_face_keeps_exact_counters_after_the_event_prefix_is_ev
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
@@ -211,6 +213,7 @@ async fn faces_do_not_keep_a_retired_child_projection_alive() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (_sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
@@ -241,6 +244,7 @@ async fn late_attach_keeps_a_running_call_after_its_event_prefix_is_evicted() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(0xc9)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
@@ -300,7 +304,7 @@ async fn queued_follow_up_has_no_branch_sequence_gap_or_gap_qualified_rows() {
         .await
         .unwrap();
     let mut expected_events = submission.turn().unwrap().subscribe().unwrap();
-    let mut admitted = ChildAdmission::new(submission, agent);
+    let mut admitted = ChildAdmission::new(&crate::TaskSet::new(), submission, agent);
     let owner = admitted.projection.take().unwrap();
     first.release();
     next.entered().await;
@@ -368,6 +372,7 @@ async fn structural_source_lag_reattaches_without_closing_the_observation() {
     gate.release();
     next.entered().await;
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn.id(),
         Some(attached.agent().clone()),
         std::future::ready(Some(Source::Recovered(initial))),
@@ -432,7 +437,8 @@ async fn recovered_terminal_turn_closes_without_waiting_for_another_event() {
     .await;
     let id = turn.id();
     turn.result().await.unwrap();
-    let owner = ChildTurnProjection::recovered(Some(attached.agent().clone()), id);
+    let owner =
+        ChildTurnProjection::recovered(&crate::TaskSet::new(), Some(attached.agent().clone()), id);
     observed(&owner.observation, |state| state.closed).await;
     assert!(owner.observation.snapshot().terminal);
     attached.release().await.unwrap();
@@ -458,6 +464,7 @@ async fn a_reduced_commit_between_the_two_attaches_is_delivered_once_without_a_g
     // actual canonical rows still come from the live agent's history attachment.
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn.id(),
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
@@ -556,6 +563,7 @@ async fn explicit_droppable_loss_marks_one_gap_without_retiring_the_child() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
@@ -629,7 +637,8 @@ async fn failed_admission_receiver_recovers_without_losing_the_admitted_result()
     }
     // The original receiver was taken by the first owner; a second take must
     // now fail subscriber admission. Presentation still cannot reject the turn.
-    let fallback = ChildTurnProjection::admitted(&mut turn, attached.agent());
+    let fallback =
+        ChildTurnProjection::admitted(&crate::TaskSet::new(), &mut turn, attached.agent());
     assert!(!fallback.observation.snapshot().terminal);
     drop(held);
     gate.release();
@@ -651,6 +660,7 @@ async fn fixed_burst_face_lag_resyncs_once_and_follows_the_terminal() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
+        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),

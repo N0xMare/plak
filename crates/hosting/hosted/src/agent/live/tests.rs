@@ -66,7 +66,8 @@ fn throwaway_release_owner_needs_no_entered_runtime_or_observation_task() {
         )
     });
     assert!(tokio::runtime::Handle::try_current().is_err());
-    let child = ProductLiveChild::without_observation(attached, turn, control);
+    let child =
+        ProductLiveChild::without_observation(&crate::TaskSet::new(), attached, turn, control);
     assert!(child.host_observation().is_none());
     executor.block_on(child.attached.release_opened()).unwrap();
 }
@@ -135,6 +136,7 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
     let control = first.turn().unwrap().control();
     first.result().unwrap().clone().result().await.unwrap();
     let mut child = ProductLiveChild::new(
+        &crate::TaskSet::new(),
         AttachedCodingSession {
             output_bound_rederived: None,
             reachability_probe: None,

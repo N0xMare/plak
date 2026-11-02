@@ -241,6 +241,7 @@ async fn a_spawned_read_posts_exactly_one_answer_naming_the_request() {
     // A private gate: `spawn` uses the process-wide one, which host-loop tests
     // also take when they note the attached session.
     attached(&session, CALL).spawn_on(
+        &crate::TaskSet::new(),
         None,
         crate::runtime::Sender::over(sender),
         super::ReadGate::new(),
@@ -578,12 +579,23 @@ async fn one_in_flight_read_answers_once_and_the_wait_queue_caps_at_busy() {
     let permit = gate.reads.try_acquire().expect("hold the loader");
     let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = crate::runtime::Sender::over(sender);
-    attached(&session, CALL).spawn_on(None, events.clone(), Arc::clone(&gate));
+    attached(&session, CALL).spawn_on(
+        &crate::TaskSet::new(),
+        None,
+        events.clone(),
+        Arc::clone(&gate),
+    );
     // The same call is already in flight: no second answer.
-    attached(&session, CALL).spawn_on(None, events.clone(), Arc::clone(&gate));
+    attached(&session, CALL).spawn_on(
+        &crate::TaskSet::new(),
+        None,
+        events.clone(),
+        Arc::clone(&gate),
+    );
     for index in 0..super::MAX_WAITING_READS {
         let call_id = format!("00000000-0000-4000-8000-{index:012x}");
         CallDetailRequest::resolve(&MemoryRows::new(), &session, call_id, None).spawn_on(
+            &crate::TaskSet::new(),
             None,
             events.clone(),
             Arc::clone(&gate),
@@ -594,6 +606,7 @@ async fn one_in_flight_read_answers_once_and_the_wait_queue_caps_at_busy() {
         super::MAX_WAITING_READS + 8
     );
     CallDetailRequest::resolve(&MemoryRows::new(), &session, overflow.clone(), None).spawn_on(
+        &crate::TaskSet::new(),
         None,
         events,
         Arc::clone(&gate),
@@ -620,6 +633,7 @@ async fn a_queued_read_is_dropped_when_its_session_is_no_longer_attached() {
     let permit = gate.reads.try_acquire().expect("hold the loader");
     let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     attached(&session, CALL).spawn_on(
+        &crate::TaskSet::new(),
         None,
         crate::runtime::Sender::over(sender),
         Arc::clone(&gate),

@@ -525,6 +525,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         &session_id,
                     ) {
                         request.spawn(
+                            self.host.roots.session_tasks(),
                             self.host.roots.runtime_sessions().ok(),
                             self.host.events.clone(),
                         );
@@ -611,6 +612,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             .last_tree_revision
                             .child_live
                             .action(
+                                self.host.roots.session_tasks(),
                                 &runtime,
                                 self.host.roots.runtime_sessions().ok(),
                                 &self.host.session.id,

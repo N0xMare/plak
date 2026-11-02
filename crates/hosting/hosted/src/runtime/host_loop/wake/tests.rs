@@ -573,6 +573,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                                 .try_occupy_live(
                                     child.clone(),
                                     Box::new(crate::agent::live::ProductLiveChild::new(
+                                        &crate::TaskSet::new(),
                                         attached,
                                         turn_id,
                                         turn.control(),

@@ -144,19 +144,21 @@ impl CallDetailRequest {
         }
     }
 
-    /// Runs the read as a task on the current runtime and publishes its one
+    /// Runs the read as one of the session's `tasks` and publishes its one
     /// answer; returns at once. A duplicate or a full wait queue does not
     /// start a task (the full queue answers `busy` here, on the caller).
     pub(crate) fn spawn<P: plakous_host_protocol::ProtocolExtension>(
         self,
+        tasks: &crate::TaskSet,
         sessions: Option<Arc<AgentSessions>>,
         events: Sender<P>,
     ) {
-        self.spawn_on(sessions, events, process_gate());
+        self.spawn_on(tasks, sessions, events, process_gate());
     }
 
     fn spawn_on<P: plakous_host_protocol::ProtocolExtension>(
         self,
+        tasks: &crate::TaskSet,
         sessions: Option<Arc<AgentSessions>>,
         events: Sender<P>,
         gate: Arc<ReadGate>,
@@ -179,7 +181,7 @@ impl CallDetailRequest {
                 }));
             }
             Admit::Ready(generation) => {
-                tokio::spawn(async move {
+                tasks.spawn(async move {
                     let _guard = Inflight {
                         gate: Arc::clone(&gate),
                         key: key.clone(),

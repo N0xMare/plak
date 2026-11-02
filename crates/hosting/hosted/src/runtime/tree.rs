@@ -795,6 +795,7 @@ pub(super) fn dispatch_topology_navigator_sync<P: plakous_host_protocol::Protoco
                 .set_jobs(std::sync::Arc::clone(roots.job_registry()));
             push.child_live
                 .action(
+                    roots.session_tasks(),
                     &runtime,
                     roots.runtime_sessions().ok(),
                     &session.id,

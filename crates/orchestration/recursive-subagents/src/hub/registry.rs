@@ -72,7 +72,8 @@ impl LiveChildTable {
         let (dispatched, dispatch) = tokio::sync::oneshot::channel();
         // Spawn before yielding the admission lock: no caller cancellation can
         // strand an extracted child between reservation and task ownership.
-        let task = tokio::spawn(async move {
+        let owners = driver.release_owners();
+        let task = owners.spawn(async move {
             let started = tokio::time::Instant::now();
             let mut release_returned = false;
             let mut cleanup_failure = None;

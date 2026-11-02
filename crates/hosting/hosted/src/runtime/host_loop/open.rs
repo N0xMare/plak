@@ -53,8 +53,12 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         config.runtime_factory.clone().configure(&mut config);
         let log = SessionLog::open(&config.home, &config.session.id).ok();
         let mut stderr_buf = Vec::new();
-        let executor = ApplicationExecutor::new()
+        let executor = super::session_executor::SessionExecutor::new()
             .map_err(|_| CliFailure::new("application executor construction failed"))?;
+        config.state_roots = config
+            .state_roots
+            .clone()
+            .with_session_tasks(executor.tasks().clone());
 
         // compact, rebind and fork observe Interrupt/Quit between
         // their provider round-trips. Ordinary actions drained while reaching the
@@ -491,6 +495,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                 executor
                     .block_on(async {
                         super::super::storage::StorageNotices::start(
+                            executor.tasks(),
                             agent,
                             config.store.clone(),
                             events.clone(),

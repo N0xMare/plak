@@ -252,8 +252,12 @@ async fn retiring_a_live_child_advances_its_session_locator() {
     ));
     live.lock().await.insert_for_test(
         "c1".to_owned(),
-        Box::new(live::ProductLiveChild::new(created, turn_id, control))
-            as Box<dyn plakous_hosted::topology_runtime::LiveChildHandle>,
+        Box::new(live::ProductLiveChild::new(
+            &plakous_recursive_subagents::task_set::TaskSet::default(),
+            created,
+            turn_id,
+            control,
+        )) as Box<dyn plakous_hosted::topology_runtime::LiveChildHandle>,
     );
     retire_live_child(&driver_over(&tree), &live, "c1", turn_id).await;
     assert!(live.lock().await.is_empty());

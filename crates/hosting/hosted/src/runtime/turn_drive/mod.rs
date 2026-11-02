@@ -67,7 +67,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
         let tree_id = super::topology_state::durable_tree_id(self.rows, self.session);
         let root_owner = self.job_agent.id().to_string();
         let registry = self.roots.job_registry().clone();
-        *self.quit_job_stops = Some(tokio::spawn(async move {
+        *self.quit_job_stops = Some(self.roots.session_tasks().spawn(async move {
             let agents = crate::topology_runtime::abandon_live_agents(&tree_id).await;
             for agent in &agents {
                 agent.begin_job_stop();

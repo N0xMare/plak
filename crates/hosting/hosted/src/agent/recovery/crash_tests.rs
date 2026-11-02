@@ -390,9 +390,13 @@ impl Fixture {
             topology_owner: None,
         };
         let released = Arc::new(tokio::sync::Notify::new());
-        let live: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
-            crate::agent::live::ProductLiveChild::new(attached, turn, control),
-        );
+        let live: Box<dyn crate::topology_runtime::LiveChildHandle> =
+            Box::new(crate::agent::live::ProductLiveChild::new(
+                &crate::TaskSet::new(),
+                attached,
+                turn,
+                control,
+            ));
         let live = if matches!(mode, "retire-unpublished" | "retire-tool") {
             Box::new(UnpublishedRelease {
                 inner: live,

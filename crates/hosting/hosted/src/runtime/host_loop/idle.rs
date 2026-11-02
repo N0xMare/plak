@@ -581,9 +581,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     ) {
                         // Only enters the runtime to spawn the read; the answer
                         // arrives as its own observation.
+                        let tasks = self.executor.tasks();
                         if let Err(error) = self
                             .executor
-                            .block_on(async move { request.spawn(sessions, events) })
+                            .block_on(async move { request.spawn(tasks, sessions, events) })
                         {
                             let _ = self.events.send(ContentEvent::CallDetail(
                                 crate::call_detail::unavailable(

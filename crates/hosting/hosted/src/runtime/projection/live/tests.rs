@@ -105,7 +105,7 @@ fn coalescing_a_b_a_during_a_pass_preserves_new_settled_rows() {
     let _unblock = UnblockOnDrop(Arc::clone(&pause));
     let mut live = executor
         .block_on(async {
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             live.tick(target.clone());
             live.applied
                 .wait_for(|applied| applied.generation == 1)
@@ -199,7 +199,7 @@ fn a_failed_live_page_drops_its_views_and_the_next_pass_reloads() {
     store.delete_views(&target.product_id);
     executor
         .block_on(async {
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             let reads = store.view_read_count();
             live.tick(target.clone());
             live.applied
@@ -219,7 +219,7 @@ fn a_failed_live_page_drops_its_views_and_the_next_pass_reloads() {
                 "the failed page cannot retain mutated views"
             );
             assert_eq!(actual, expected);
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             live.tick(target.clone());
             live.applied
                 .wait_for(|applied| applied.generation == 1)
@@ -293,7 +293,7 @@ fn a_facade_read_failure_on_page_two_reloads_the_last_committed_page() {
                 emit_settled: Arc::new(|_| {}),
             };
             let reads = store.view_read_count();
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             live.tick(target.clone());
             live.applied
                 .wait_for(|applied| applied.generation == 1)
@@ -596,7 +596,7 @@ fn settling_keeps_the_task_and_resyncs_after_a_refused_pass() {
     store.delete_views(&id);
     executor
         .block_on(async {
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             refuse.store(true, Ordering::SeqCst);
             let reads = store.view_read_count();
             assert_eq!(
@@ -640,7 +640,7 @@ fn a_stopped_task_is_restarted_by_the_next_settle_with_one_cold_load() {
     let rebuilt = rebuilt(&executor, &store, &target);
     executor
         .block_on(async {
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
             let calls = emitted.lock().unwrap().clone();
             assert_eq!(calls.len(), 1, "the turn's tool call: {calls:?}");
@@ -682,7 +682,9 @@ fn a_settle_after_another_writer_moved_the_cursor_reloads_once() {
     super::super::tests::run_prompts(config, &["first tool call"]);
     let (target, emitted) = recording_target(root.path(), &store, &id);
     let executor = plakous::application::ApplicationExecutor::new().unwrap();
-    let mut live = executor.block_on(async { LiveProjector::spawn() }).unwrap();
+    let mut live = executor
+        .block_on(async { LiveProjector::spawn(&crate::TaskSet::new()) })
+        .unwrap();
     executor
         .block_on(live.settle(target.clone()))
         .unwrap()
@@ -730,7 +732,7 @@ fn a_settle_whose_task_stops_before_replying_restarts_it_once() {
     let rebuilt = rebuilt(&executor, &store, &target);
     executor
         .block_on(async {
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             arm_stops(&id, 1);
             let reads = store.view_read_count();
             assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
@@ -773,7 +775,7 @@ fn aborting_after_a_settle_request_restarts_once_but_not_after_a_second_stop() {
         .unwrap();
     runtime.block_on(async {
         for second_stop in [false, true] {
-            let mut live = LiveProjector::spawn();
+            let mut live = LiveProjector::spawn(&crate::TaskSet::new());
             let abort = live.task.abort_handle();
             arm_stops(&id, usize::from(second_stop));
             let reads = store.view_read_count();

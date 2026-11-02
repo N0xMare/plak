@@ -19,6 +19,7 @@ async fn streaming_children_and_faces_cost() {
             let turn = TurnId::try_from(uuid::Uuid::from_u128(100 + child as u128)).unwrap();
             let (sender, receiver) = tokio::sync::mpsc::channel(1);
             let owner = ChildTurnProjection::start(
+                &crate::TaskSet::new(),
                 turn,
                 None,
                 std::future::ready(Some(Source::Fixture(receiver))),

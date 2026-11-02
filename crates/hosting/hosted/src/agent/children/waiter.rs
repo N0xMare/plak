@@ -99,7 +99,8 @@ impl Drop for TurnWaiterRegistration {
 /// The waiter owns the driver it was registered with: its saves and settles
 /// go to the store the hub bound, whether or not the hub still lists this
 /// tree when the turn ends (a root that quit releases the hub entry while a
-/// child turn can still be unwinding).
+/// child turn can still be unwinding). It runs as a release owner, which the
+/// tree's shutdown does not abort.
 #[allow(
     clippy::too_many_lines,
     reason = "The child waiter owns observation, transient recovery, result publication, and terminal release for exactly one bound attempt."
@@ -114,7 +115,7 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
     let driver = registration.driver.clone();
     let agent_id = registration.agent_id.clone();
     let attempt = registration.attempt.clone();
-    tokio::spawn(async move {
+    registration.driver.clone().spawn_release_owner(async move {
         let _registration = registration;
         let mut pending = Some(result);
         // What the last wake carried, so leftovers cannot wake forever.
