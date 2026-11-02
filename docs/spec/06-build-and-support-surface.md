@@ -1311,6 +1311,12 @@ into the Plak sidecar or snapshot roots; independent files and links remain.
 
 The repository ships no Cargo linker configuration: `.cargo/config.toml` sets only
 the resolver, and ordinary product builds link with the toolchain default.
+The dev profile already keeps line tables only (`debug = "line-tables-only"`,
+dependencies carry no debug info), which is what backtraces need to name a
+source line. The pinned toolchain rejects `linker-flavor=gnu-lld-cc` and
+`link-self-contained=+linker` unless `-Z unstable-options` is also passed, so
+GNU host builds, debug included, stay on the toolchain linker. rust-lld remains
+the musl linker's default (§6.1), not a GNU host setting.
 The native musl qualification script selects the environment's compiler/linker
 and defaults to rust-lld for static PIE as described in §6.1. A
 contributor who wants faster Linux links configures `clang` plus `mold` for

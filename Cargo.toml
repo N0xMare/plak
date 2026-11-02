@@ -388,6 +388,8 @@ duration_suboptimal_units = "allow"
 # Line tables keep panics and backtraces pointing at source lines in workspace
 # code; dependencies carry no debug info. Full debug info cost build and link
 # time and tens of gigabytes of `target/debug` for no use in the gate.
+# GNU host builds stay on the toolchain linker: the pinned toolchain's
+# `gnu-lld-cc` flavor is unstable (spec 06 §6.4).
 [profile.dev]
 debug = "line-tables-only"
 
