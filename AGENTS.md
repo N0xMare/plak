@@ -131,9 +131,9 @@ relying on another workspace member's feature unification. Native routes
 (`codex`, `grok`, `claude`), API exports, evaluators,
 MCP and local page fetch are independent at the facade boundary. Persisted route
 and tool vocabulary stays readable even when its runtime is omitted.
-The feature checker compiles six library profiles without workspace feature
-unification: facade none, `full`, `composition` and `claude`; hosted none and
-all-features. It
+The feature checker compiles seven library profiles without workspace feature
+unification: facade none, `full`, `composition`, `claude` and `openai`; hosted
+none and all-features. It
 requires locally declared UUID generation features, including for test code.
 It validates 2n+3 feature closures per package (none, each singleton, full
 minus each feature, default and full), with a reviewed cap of 24 public

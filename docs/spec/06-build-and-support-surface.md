@@ -493,11 +493,19 @@ export without `.git`), the checker reports a cache bypass and queries Cargo
 directly; no cache is read or written.
 
 Closures prove dependency edges, not that the code compiles. Without
-`--build`, the checker therefore also runs `cargo check --lib` on six
-profiles: `plakous` with no features, with `full`, with `composition` alone
-and with `claude` alone (one native route), and `plakous-hosted` with no
-features and with `--all-features`. Hosted defaults are compiled through the
-supported Plak default resolution. A rustc warning or error in any workspace
+`--build`, the checker therefore also runs `cargo check --lib` on seven
+profiles. Five are facade resolutions, each un-unified:
+
+- no features: the always-on facade, with no optional route or evaluator;
+- `full`: every public facade feature together;
+- `composition` alone: the Code Mode and JavaScript cell client, and no provider;
+- `claude` alone: one native subscription route (Anthropic native auth);
+- `openai` alone: the OpenAI API route, including the `cfg(feature = "openai")`
+  paths in `responses_retrieval.rs`, without a native-auth route beside it.
+
+`plakous-hosted` is compiled with no features and with `--all-features`.
+Hosted defaults are compiled through the supported Plak default resolution,
+not as another profile. A rustc warning or error in any workspace
 crate of that profile fails it. Cargo's
 fingerprints are its cache: an unchanged profile is a no-op, and a facade or
 dependency source change rechecks only the affected crates. Hosted profiles

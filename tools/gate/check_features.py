@@ -21,9 +21,9 @@ closure Cargo reports, the packages a named feature profile must not reach.
 This is what makes the facade's evaluator decoupling provable: `composition`
 buys Code Mode and the JavaScript sidecar and nothing else.
 
-Without `--build`, six `cargo check --lib` profiles prove feature-conditioned
-code: facade none, `full`, `composition` and `claude`; hosted none and
-`--all-features`. A rustc warning or error fails the run. Every public
+Without `--build`, seven `cargo check --lib` profiles prove feature-conditioned
+code: facade none, `full`, `composition`, `claude` and `openai`; hosted none
+and `--all-features`. A rustc warning or error fails the run. Every public
 feature still has its closure witness.
 """
 
@@ -1398,9 +1398,12 @@ def macos_unwind_size_note(diagnostic: dict[str, object]) -> bool:
 def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
     """The compile resolutions for one library, named and as Cargo arguments.
 
-    Facade: no features, `full`, `composition` alone, and `claude` alone.
-    Hosted: no features, and `--all-features`. Hosted defaults are compiled
-    with the supported Plak default resolution, not as a seventh profile.
+    Facade: no features, `full`, `composition` alone, `claude` alone (one
+    native route) and `openai` alone (the API route, including
+    `responses_retrieval`'s `cfg(feature = "openai")` paths, without a
+    native-auth route beside it). Hosted: no features, and `--all-features`.
+    Hosted defaults are compiled with the supported Plak default resolution,
+    not as another profile.
     """
     lib = ["--lib", "--message-format=json"]
     if package == FACADE:
@@ -1411,6 +1414,7 @@ def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
                 ("full", ("full",)),
                 ("composition", ("composition",)),
                 ("claude", ("claude",)),
+                ("openai", ("openai",)),
             )
         ]
     if package == "plakous-hosted":
@@ -1434,7 +1438,7 @@ def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
 
 
 def check_facade_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT) -> list[str]:
-    """Compile the facade's four representative resolutions."""
+    """Compile the facade's five representative resolutions."""
     return check_library_profiles(manifests, FACADE, root)
 
 
