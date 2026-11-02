@@ -1,12 +1,30 @@
 //! The program a start runs, as a content-free label for measurement.
 //!
-//! The label is a basename in `[A-Za-z0-9._+-]`, at most 64 bytes and not all
-//! digits, or `other`. Assignments, wrappers and their options, quotes and
-//! directories are skipped or stripped; anything else that could carry a
-//! value, a path or an argument becomes `other`.
+//! The label is a basename in `[A-Za-z0-9._+-]`, at most 32 bytes, not all
+//! digits and not shaped like a credential, or `other`. Assignments, wrappers
+//! and their options, quotes and directories are skipped or stripped; anything
+//! else that could carry a value, a secret, a path or an argument becomes
+//! `other`.
 
 const OTHER: &str = "other";
-const MAX_PROGRAM_BYTES: usize = 64;
+const MAX_PROGRAM_BYTES: usize = 32;
+/// Prefixes of common issued tokens and access keys.
+const SECRET_PREFIXES: [&str; 12] = [
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_",
+    "glpat-",
+    "sk-",
+    "xox",
+    "AKIA",
+    "ASIA",
+    "AIza",
+];
+/// A letter-and-digit run this long reads as a key, not a program name.
+const SECRET_RUN_BYTES: usize = 16;
 
 /// Classifies the first program a shell command line runs.
 pub(crate) fn shell_program(command: &str) -> String {
@@ -51,11 +69,26 @@ fn label(name: &str) -> String {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
         && !name.bytes().all(|byte| byte.is_ascii_digit())
         && !name.starts_with('-')
+        && !secret_shaped(name)
     {
         name.to_owned()
     } else {
         OTHER.to_owned()
     }
+}
+
+/// A known token prefix, or a long run mixing letters and digits.
+fn secret_shaped(name: &str) -> bool {
+    SECRET_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || name
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|run| {
+                run.len() >= SECRET_RUN_BYTES
+                    && run.bytes().any(|byte| byte.is_ascii_digit())
+                    && run.bytes().any(|byte| byte.is_ascii_alphabetic())
+            })
 }
 
 fn unquote(word: &str) -> Option<&str> {
@@ -162,6 +195,28 @@ mod tests {
     }
 
     #[test]
+    fn a_token_shaped_word_is_never_a_label() {
+        for command in [
+            "ghp_abcdefghijklmnopqrstuvwxyz0123456789 --x",
+            "gho_shortish run",
+            "sk-proj-abc def",
+            "xoxb-1234-abcd post",
+            "AKIAIOSFODNN7EXAMPLE",
+            "a1b2c3d4e5f6a7b8c9d0 --flag",
+            "deploy-9f86d081884c7d659a2feaa0c55ad015 now",
+        ] {
+            assert_eq!(shell_program(command), "other", "{command:?}");
+        }
+        for (command, expected) in [
+            ("x86_64-linux-gnu-gcc -c a.c", "x86_64-linux-gnu-gcc"),
+            ("python3.12 -V", "python3.12"),
+            ("skopeo inspect", "skopeo"),
+        ] {
+            assert_eq!(shell_program(command), expected, "{command}");
+        }
+    }
+
+    #[test]
     fn skips_wrappers_and_their_options() {
         for (command, expected) in [
             ("sudo -u postgres psql", "psql"),
@@ -193,7 +248,7 @@ mod tests {
             "--version",
             "prog$(id)",
             "~/bin/a:b",
-            "a-very-long-program-name-that-goes-on-and-on-past-sixty-four-bytes-x",
+            "a-very-long-program-name-past-32-bytes",
         ] {
             assert_eq!(shell_program(command), "other", "{command:?}");
         }

@@ -99,8 +99,9 @@ pub struct FileReadValue {
 /// Content search matches in presented order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchHitsValue {
-    /// The query or pattern as the call named it: its first 4096 bytes, cut
-    /// on a character boundary.
+    /// The query or pattern as the call named it, or for a filename-glob
+    /// listing the searched path and the glob joined by `/`: its first 4096
+    /// bytes, cut on a character boundary.
     pub query: String,
     /// The matches the result kept.
     pub hits: Vec<SearchHit>,
@@ -210,9 +211,9 @@ pub struct ProcessValue {
     pub truncated: bool,
     /// The issued job-output file holding the full output, when there is one.
     pub full_output: Option<String>,
-    /// For a start, the program its command runs: a basename of at most 64
-    /// bytes in `[A-Za-z0-9._+-]`, or `other`. Never an argument, path or
-    /// assignment. `None` for any later observation.
+    /// For a start, the program its command runs: a basename of at most 32
+    /// bytes in `[A-Za-z0-9._+-]`, or `other`. Never an argument, path,
+    /// assignment or credential-shaped word. `None` for any later observation.
     pub program: Option<String>,
 }
 

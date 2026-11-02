@@ -312,6 +312,11 @@ impl Agent {
     }
 
     #[cfg(test)]
+    pub(crate) fn measurement_state_for_test(&self) -> (bool, bool) {
+        self.inner.measurement_state
+    }
+
+    #[cfg(test)]
     pub(super) fn abort_driver_for_test(&self) {
         self.inner.driver_abort.abort();
     }

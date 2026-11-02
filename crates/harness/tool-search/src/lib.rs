@@ -679,10 +679,17 @@ impl ToolExecutor for SearchRepositoryTool {
                 repository_query_limits(&args, STANDARD_SEARCH_MATCHES)?
             };
             let root = query_root(&context, &args.path)?;
-            let wanted_query = invocation
-                .want_value()
-                .then(|| args.query.clone())
-                .flatten();
+            // A filename-glob listing ignores its query: its identity is the
+            // glob under the searched root.
+            let wanted_query = if !invocation.want_value() {
+                None
+            } else if args.paths_only.unwrap_or(false) {
+                args.filename_glob
+                    .as_deref()
+                    .map(|glob| format!("{}/{glob}", args.path.display()))
+            } else {
+                args.query.clone()
+            };
             let query = if args.paths_only.unwrap_or(false) {
                 let glob = args.filename_glob.ok_or_else(|| {
                     ToolRuntimeError::new(
@@ -744,7 +751,13 @@ impl ToolExecutor for SearchRepositoryTool {
                 write_entries_skipped(&mut output, result.entries_skipped())?;
                 let outcome =
                     ToolOutcome::success_text(format!("{stamp}{header}{}", output.finish()))?;
-                return Ok(outcome);
+                return with_search_hits(
+                    outcome,
+                    wanted_query.as_deref(),
+                    result.matches().iter().skip(offset).take(head_limit),
+                    result.matches().len(),
+                    result.incomplete(),
+                );
             }
             let mut output = BoundedSearchResult::new(STANDARD_SEARCH_RESULT_BYTES);
             writeln!(

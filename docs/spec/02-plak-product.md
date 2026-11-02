@@ -6951,11 +6951,14 @@ never written, so digests join within one process's driver and not across
 `/reload` or a reopen, and a driver without randomness stores no digest.
 `range_first_line` and `range_lines` are the page a read returned, and
 `page_partial` is 1 when that page stops before the end of the file or cut
-lines, or a search or listing cut results or stopped its walk.
+lines, or a search or listing cut results (in its text or its typed value)
+or stopped its walk.
 `observation_clipped_bytes` is set on the call's row when the observation
 budget cut its result. A process start stores `command_class`, a program
-label of at most 64 bytes in `[A-Za-z0-9._+-]` (assignments, wrappers and a
-leading `cd DIR &&` are skipped) or `other`, never the command line. A wait
+label of at most 32 bytes in `[A-Za-z0-9._+-]` (assignments, wrappers and a
+leading `cd DIR &&` are skipped) or `other`, never the command line. A first
+word shaped like a credential (a known token prefix or a long run mixing
+letters and digits) is `other`. A wait
 stores `wait_count`, `wait_kind` (`agent` when any child agent was watched,
 else `process`) and `wait_outcome` (`completed`, `timeout`, `mail`,
 `interrupted` or `cancelled`); a process poll that returns while its process

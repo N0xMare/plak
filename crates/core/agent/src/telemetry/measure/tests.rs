@@ -151,8 +151,19 @@ fn process_start_keeps_only_a_closed_program_label() {
     ] {
         assert_eq!(class(leak).as_deref(), Some("other"), "{leak:?}");
     }
-    assert!(ProgramBasename::from_basename("a".repeat(65).as_str()).is_none());
-    assert!(ProgramBasename::from_basename(&"a".repeat(64)).is_some());
+    assert!(ProgramBasename::from_basename("a".repeat(33).as_str()).is_none());
+    assert!(ProgramBasename::from_basename(&"a".repeat(32)).is_some());
+    for token in [
+        "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        "ghp_abcdef",
+        "sk-proj-x",
+        "xoxb-1",
+        "AKIAIOSFODNN7EXAMPLE",
+        "a1b2c3d4e5f6a7b8c9d0",
+    ] {
+        assert!(ProgramBasename::from_basename(token).is_none(), "{token}");
+        assert_eq!(class(Some(token)).as_deref(), Some("other"), "{token}");
+    }
 }
 
 #[test]

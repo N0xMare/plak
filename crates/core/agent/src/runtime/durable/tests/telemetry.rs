@@ -525,9 +525,11 @@ async fn runtime_telemetry_turn_compaction_finished_carries_turn_context() -> Te
                         && measurement.context_window_tokens == Some(1_000_000)
                         && measurement.threshold_tokens.is_some()
                         && measurement.occupancy_tokens.is_some()
+                        && measurement.idle_gap.is_some()
                 )
             }),
-            "missing CompactionFinished with window, threshold, and occupancy"
+            "missing CompactionFinished with window, threshold, occupancy, and the idle gap \
+             since the round before its paid call"
         );
         let turn_finished = observations.iter().find_map(|observation| {
             let TelemetryObservationKind::TurnFinished {
@@ -759,6 +761,218 @@ async fn runtime_telemetry_measures_the_real_canonical_tools_without_content() -
     assert_eq!(
         high_water.ok_or("missing TurnFinished")?,
         prepared.iter().copied().max()
+    );
+    Ok(())
+}
+
+/// Records whether each call asked its executor for a typed value.
+struct WantValueProbe(Arc<Mutex<Vec<(String, bool)>>>);
+
+impl plakous_tools::ToolExecutor for WantValueProbe {
+    fn execute(
+        self: Arc<Self>,
+        invocation: ToolInvocation,
+        _context: plakous_tools::ToolContext,
+    ) -> plakous_tools::ToolFuture {
+        lock_mutex(&self.0).push((
+            invocation.identity().name().as_str().to_owned(),
+            invocation.want_value(),
+        ));
+        Box::pin(async { ToolOutcome::success_text("probed") })
+    }
+}
+
+fn want_value_registry(seen: &Arc<Mutex<Vec<(String, bool)>>>) -> TestResult<FrozenToolRegistry> {
+    let mut registry = ToolRegistryBuilder::default();
+    for (name, field, effect) in [
+        ("process_session_start", "command", ToolEffect::Mutating),
+        ("read_file", "path", ToolEffect::ReadOnly),
+    ] {
+        let definition = ToolDefinition::new(
+            ToolName::new(name)?,
+            "1.0.0",
+            "Record the value request.",
+            ToolInputContract::structured(json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {field: {"type": "string"}},
+                "required": [field],
+                "additionalProperties": false
+            }))?,
+            ToolOutputContract::model_content(128, 4_096)?,
+            ToolConcurrency::Serial,
+            effect,
+        )?;
+        registry.register(ToolRegistration::new(
+            RegisteredToolId::new(format!("probe.{name}"))?,
+            ToolExecutorId::new(format!("probe.{name}.executor"))?,
+            plakous_tools::ToolExecutorBindingIdentity::new(1, &[name.as_bytes()])?,
+            definition,
+            Arc::new(WantValueProbe(Arc::clone(seen))),
+        ))?;
+    }
+    Ok(registry.freeze())
+}
+
+/// Runs one prompt whose rounds make `calls`, reporting to `telemetry`.
+async fn scripted_tool_turn(
+    create: &str,
+    workspace: Arc<WorkspacePolicy>,
+    registry: FrozenToolRegistry,
+    calls: Vec<(usize, &'static str, String)>,
+    telemetry: Arc<TelemetryEmitter>,
+    config: AgentConfig,
+) -> TestResult<Agent> {
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            1,
+            0x7e3_0000,
+            false,
+        )
+        .with_scripted_tool_calls(calls),
+    );
+    let authority = model.authority.clone();
+    let runtime_model: Arc<dyn LanguageModel> = model.clone();
+    let configured = configured_test_model(
+        runtime_model,
+        descriptor,
+        authority,
+        &registry,
+        LocalDurabilityDisposition::DurableRequired,
+        ContextAdmissionRequirement::AnyBounded,
+    )?;
+    let agent = sessions
+        .create(
+            create,
+            AgentBuilder::new(configured, registry, workspace)
+                .request_policy(AgentRequestPolicy::new(
+                    GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
+                    ReasoningPolicy::Disabled,
+                ))
+                .tool_policy(Arc::new(AlwaysAllowPolicy))
+                .identity_sources(
+                    Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
+                    Arc::new(SystemIdGenerator),
+                )
+                .config(config)
+                .telemetry(telemetry),
+        )
+        .await?;
+    let result = agent.prompt("call the tools").await?.result().await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    Ok(agent)
+}
+
+/// Without a sink no executor is asked for a value, no salt is drawn and no
+/// footprint is measured; with one, the measured capabilities ask.
+#[tokio::test]
+async fn disabled_telemetry_asks_no_executor_for_a_value() -> TestResult {
+    for enabled in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let telemetry = if enabled {
+            Arc::new(TelemetryEmitter::enabled(Arc::new(
+                RecordingTelemetrySink {
+                    observations: Mutex::new(Vec::new()),
+                },
+            )))
+        } else {
+            Arc::new(TelemetryEmitter::disabled())
+        };
+        let agent = scripted_tool_turn(
+            if enabled {
+                "create:want-value-enabled"
+            } else {
+                "create:want-value-disabled"
+            },
+            Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
+            want_value_registry(&seen)?,
+            vec![
+                (0, "read_file", json!({"path": "a.txt"}).to_string()),
+                (
+                    1,
+                    "process_session_start",
+                    json!({"command": "true"}).to_string(),
+                ),
+            ],
+            telemetry,
+            AgentConfig::default(),
+        )
+        .await?;
+        assert_eq!(agent.measurement_state_for_test(), (enabled, enabled));
+        agent.shutdown().await?;
+        assert_eq!(
+            *lock_mutex(&seen),
+            [
+                ("read_file".to_owned(), enabled),
+                ("process_session_start".to_owned(), enabled),
+            ]
+        );
+    }
+    Ok(())
+}
+
+/// A real read over the observation budget is clipped before the model sees
+/// it, and that call alone gets one clip observation with its ids.
+#[tokio::test]
+async fn a_read_over_the_observation_budget_reports_one_clip() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    std::fs::write(
+        directory.path().join("large.txt"),
+        "0123456789 abcdefghij klmnopqrst uvwxyz\n".repeat(150),
+    )?;
+    let sink = Arc::new(RecordingTelemetrySink {
+        observations: Mutex::new(Vec::new()),
+    });
+    let agent = scripted_tool_turn(
+        "create:telemetry-clip",
+        Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
+        real_measured_registry()?,
+        vec![(0, "read_file", json!({"path": "large.txt"}).to_string())],
+        Arc::new(TelemetryEmitter::enabled(sink.clone())),
+        AgentConfig::default().with_observation_budget_cap_bytes(Some(2_048)),
+    )
+    .await?;
+    agent.shutdown().await?;
+    let observations = lock_mutex(&sink.observations).clone();
+    let clips: Vec<_> = observations
+        .iter()
+        .filter_map(|observation| match observation.kind() {
+            TelemetryObservationKind::ToolObservationClipped { bytes_dropped, .. } => {
+                Some((observation.context(), bytes_dropped))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(clips.len(), 1, "{clips:?}");
+    let (context, bytes_dropped) = clips[0];
+    assert!(bytes_dropped > 0);
+    let read = observations
+        .iter()
+        .find(|observation| {
+            matches!(
+                observation.kind(),
+                TelemetryObservationKind::ToolFinished { .. }
+            )
+        })
+        .ok_or("missing ToolFinished")?
+        .context();
+    assert!(context.turn_id().is_some() && context.call_id().is_some());
+    assert_eq!(
+        (context.turn_id(), context.call_id()),
+        (read.turn_id(), read.call_id())
     );
     Ok(())
 }

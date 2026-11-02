@@ -193,6 +193,11 @@ impl PreparedAgent {
                 .is_empty();
         let credential_wait = Arc::new(Mutex::new(None));
         let telemetry_enabled = self.telemetry.is_enabled();
+        let access_salt = telemetry_enabled.then(fresh_access_salt).flatten();
+        let request_footprint = telemetry_enabled
+            .then(|| super::observation::request_footprint(&self.stable_request_prefix));
+        #[cfg(test)]
+        let measurement_state = (access_salt.is_some(), request_footprint.is_some());
         let driver = Driver {
             credential_wait: Arc::clone(&credential_wait),
             job_sessions: self.job_sessions,
@@ -272,9 +277,8 @@ impl PreparedAgent {
             local_composition: CompositionSlot::from(self.local_composition.map(|construction| {
                 CompositionOwner::new(construction, self.interpreter_observation.clone())
             })),
-            access_salt: telemetry_enabled.then(fresh_access_salt).flatten(),
-            request_footprint: telemetry_enabled
-                .then(|| super::observation::request_footprint(&self.stable_request_prefix)),
+            access_salt,
+            request_footprint,
             last_provider_request_at: None,
         };
         let panic_events = events.clone();
@@ -322,6 +326,8 @@ impl PreparedAgent {
                 abandoned_turn: self.abandoned_turn,
                 #[cfg(test)]
                 driver_abort,
+                #[cfg(test)]
+                measurement_state,
             }),
         }
     }

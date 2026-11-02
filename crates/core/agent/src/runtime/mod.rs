@@ -273,6 +273,9 @@ struct AgentInner {
     abandoned_turn: Option<AbandonedTurnReport>,
     #[cfg(test)]
     driver_abort: tokio::task::AbortHandle,
+    /// Whether the driver drew a digest salt and measured the request footprint.
+    #[cfg(test)]
+    measurement_state: (bool, bool),
 }
 
 /// Cheap cloneable capability for one private agent actor.

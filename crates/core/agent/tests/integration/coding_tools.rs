@@ -234,6 +234,7 @@ async fn typed_reads_searches_and_listings_are_demand_driven_and_keep_exact_text
                 );
             }
             ExecutionValue::SearchHits(value) => {
+                assert_eq!(value.query, "alpha");
                 assert_eq!(value.hits.len(), 1);
                 assert_eq!(value.hits[0].text, "alpha");
                 assert_eq!(value.hits[0].line, 1);
@@ -245,6 +246,7 @@ async fn typed_reads_searches_and_listings_are_demand_driven_and_keep_exact_text
                 }
             }
             ExecutionValue::Listing(value) => {
+                assert_eq!(value.path, ".");
                 assert_eq!(value.entries.len(), 1);
                 assert_eq!(value.entries[0].path, "source.txt");
                 assert_eq!(value.entries[0].kind, ListedEntryKind::File);
@@ -411,7 +413,7 @@ async fn regex_values_follow_count_path_and_context_windows() -> TestResult {
 }
 
 #[tokio::test]
-async fn content_values_report_clipped_lines_and_glob_paths_have_no_value() -> TestResult {
+async fn content_values_report_clipped_lines_and_glob_paths_name_their_glob() -> TestResult {
     use plakous_tools::ExecutionValue;
     let workspace = tempfile::tempdir()?;
     fs::write(
@@ -443,7 +445,7 @@ async fn content_values_report_clipped_lines_and_glob_paths_have_no_value() -> T
         .prepare(request(
             call_ids,
             "search_repository",
-            r#"{"path":".","query":"","paths_only":true,"filename_glob":"*.txt"}"#,
+            r#"{"path":".","query":"ignored","paths_only":true,"filename_glob":"*.txt"}"#,
         )?)?
         .with_want_value(true);
     let mut outcome = Box::pin(execute_prepared_read_only(
@@ -453,7 +455,15 @@ async fn content_values_report_clipped_lines_and_glob_paths_have_no_value() -> T
     ))
     .await?;
     assert!(outcome.joined_text().contains("long.txt"));
-    assert!(outcome.take_value().is_none());
+    // A glob listing ignores its query: its identity is the glob under the
+    // searched path, and its hits are the listed paths.
+    let Some(ExecutionValue::SearchHits(value)) = outcome.take_value() else {
+        return Err("missing glob hits".into());
+    };
+    assert_eq!(value.query, "./*.txt");
+    assert_eq!(value.hits.len(), 1);
+    assert_eq!(value.hits[0].path, "long.txt");
+    assert_eq!((value.hits_cut, value.incomplete), (0, false));
     Ok(())
 }
 

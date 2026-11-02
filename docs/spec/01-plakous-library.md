@@ -4873,7 +4873,9 @@ capabilities. A value requested only for measurement never reaches a
 composition cell that did not ask for one. Existing direct and text-only
 composition calls request none while telemetry is disabled. Search and listing
 values carry the query (its first 4096 bytes) and the listed path as the call
-named them, and a process start's value carries its program label (below).
+named them; a filename-glob listing (`paths_only`), whose query is ignored,
+carries the searched path and the glob joined by `/` and its matched paths as
+hits. A process start's value carries its program label (below).
 The first task joiner moves the value out of the stored outcome; later joiners
 receive the same text without a value. The driver takes the value before
 cloning presentation evidence and carries it on the serial or parallel
@@ -4888,12 +4890,12 @@ from an incomplete traversal. File reads keep the existing bounded page;
 file changes preflight their value bound before mutation. This in-memory
 producer bound is separate from canonical-part byte limits.
 Successful file reads, patches, content searches (including regex searches),
-directory listings, plan replacements, and single-session process observations
-produce values when demanded. Regex values contain the hits in the presented
+glob-only path queries, directory listings, plan replacements, and
+single-session process observations produce values when demanded. Regex values contain the hits in the presented
 window: count/path rows select files, while content/context rows select their
 matching lines. Omitted-hit counts count known matching lines, not files or
-displayed context rows. Glob-only path queries, process awaits across sessions,
-`stop_job`, and failures produce no value even when demanded.
+displayed context rows. Process awaits across sessions, `stop_job`, and
+failures produce no value even when demanded.
 No current presentation consumes these values.
 
 ### 8.2 Registry, exposure, and presentations
@@ -9112,8 +9114,8 @@ capability name, its execution value and its wait fact. It never reads
 arguments, result text or presented tool names, and does no measurement work
 while the emitter has no sink. A read keeps the page's first line and line
 count and is partial when the page stops before the end of the file or cut or
-clipped lines. A search or listing is partial when it cut results or did not
-finish its walk. Reads, searches and listings carry a SHA-256 digest of a
+clipped lines. A search or listing is partial when it cut results, in its text
+or its typed value, or did not finish its walk. Reads, searches and listings carry a SHA-256 digest of a
 per-driver random salt, a NUL and the lexically normalized path or query
 (backslashes become slashes, empty and `.` components drop). The salt is drawn
 once per driver when telemetry is enabled, never persisted, and absent when
@@ -9123,8 +9125,11 @@ records its program label: the process adapter skips leading `NAME=value`
 assignments, the `sudo`, `env`, `time`, `nice`, `nohup`, `command`, `exec` and
 `timeout` wrappers with their options and operands, and a leading `cd DIR &&`
 or `cd DIR;`, strips balanced quotes and the directory, and keeps a basename of
-at most 64 bytes in `[A-Za-z0-9._+-]` that is neither all digits nor an option;
-anything else is `other`. The driver re-checks the label against the same set.
+at most 32 bytes in `[A-Za-z0-9._+-]` that is neither all digits, an option,
+nor shaped like a credential (a common token or access-key prefix such as
+`ghp_`, `sk-`, `xox` or `AKIA`, or a run of 16 or more bytes mixing letters and
+digits); anything else is `other`. The driver re-checks the label against the
+same rules.
 A single-session poll or write is a process wait over one target; it ended on
 its deadline while the observed process still runs or left processes behind,
 and completed otherwise, including a process its own timer killed.

@@ -15,10 +15,26 @@ use plakous_tools::{
 
 use super::TelemetryTerminalStatus;
 
-const PROGRAM_BYTES: usize = 64;
+const PROGRAM_BYTES: usize = 32;
+/// Prefixes of common issued tokens and access keys.
+const SECRET_PREFIXES: [&str; 12] = [
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_",
+    "glpat-",
+    "sk-",
+    "xox",
+    "AKIA",
+    "ASIA",
+    "AIza",
+];
 
-/// A process start's program: a basename in `[A-Za-z0-9._+-]`, at most 64
-/// bytes, not all digits and not an option, or `other`.
+/// A process start's program: a basename in `[A-Za-z0-9._+-]`, at most 32
+/// bytes, not all digits, not an option and not shaped like a credential, or
+/// `other`.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct ProgramBasename {
     len: u8,
@@ -35,7 +51,8 @@ impl ProgramBasename {
                 byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-')
             })
             && !name.bytes().all(|byte| byte.is_ascii_digit())
-            && !name.starts_with('-');
+            && !name.starts_with('-')
+            && !secret_shaped(name);
         if !valid {
             return None;
         }
@@ -58,6 +75,20 @@ impl ProgramBasename {
     pub fn as_str(&self) -> &str {
         std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("other")
     }
+}
+
+/// A known token prefix, or a run of 16 or more bytes mixing letters and digits.
+fn secret_shaped(name: &str) -> bool {
+    SECRET_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || name
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|run| {
+                run.len() >= 16
+                    && run.bytes().any(|byte| byte.is_ascii_digit())
+                    && run.bytes().any(|byte| byte.is_ascii_alphabetic())
+            })
 }
 
 impl std::fmt::Debug for ProgramBasename {
@@ -128,7 +159,8 @@ pub struct ToolMeasurement {
     /// Lines in that page.
     pub range_lines: Option<u64>,
     /// The result is part of more: a read short of the end of the file or with
-    /// lines cut, or a search or listing that cut results or stopped its walk.
+    /// lines cut, or a search or listing that cut results (in its text or its
+    /// typed value) or stopped its walk.
     pub page_partial: Option<bool>,
     /// A process start's program.
     pub command_class: Option<ProgramBasename>,
