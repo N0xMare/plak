@@ -72,6 +72,15 @@ if "--version" in sys.argv:
 raise SystemExit(0)
 ''',
         )
+        self.executable(
+            "rustup",
+            r'''import json, os, sys
+with open(os.environ["DEV_TOOLS_CALLS"], "a") as log:
+    log.write(json.dumps(dict(args=sys.argv[1:], env_names=[])) + "\n")
+if sys.argv[1:] != ["target", "add", "wasm32-unknown-unknown"]:
+    raise SystemExit(9)
+''',
+        )
 
     def executable(self, name, source, directory=None):
         directory = directory or self.bin
@@ -193,6 +202,7 @@ raise SystemExit(0)
                 ["install", "--locked", "--root", prefix, "--version", "0.17.3", "ruff"],
                 ["tools/gate/check_public_compile.py", "--fetch"],
                 ["tools/dev/jj-tools.py", "install", prefix],
+                ["target", "add", "wasm32-unknown-unknown"],
             ],
         )
         self.assertTrue(all(call["env_names"] == ["CARGO_TARGET_DIR"] for call in calls[:3]))

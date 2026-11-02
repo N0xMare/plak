@@ -48,9 +48,14 @@ cargo install --locked plak plakous-js-runtime plakous-py-worker
   identity. Restricted access fails closed; see the
   [store contract](../spec/01-plakous-library.md#51-the-store-port).
 - To run the test gate: `just dev-tools install` puts the pinned cargo-nextest,
-  cargo-deny and ruff into the repository-local `.dev-tools/bin` and prefetches the
-  locked public compile-contract dependencies. Installation needs network
-  access; subsequent compile-contract gates stay offline.
+  cargo-deny and ruff into the repository-local `.dev-tools/bin`, adds the
+  `wasm32-unknown-unknown` rustc target to the pinned toolchain (the gate
+  compiles the portable crates for it; it is not a supported product target)
+  and prefetches the locked public compile-contract dependencies. Installation
+  needs network access; subsequent compile-contract gates stay offline. A
+  checkout set up before the gate checked that target re-runs
+  `just dev-tools install`; without the target the `builds` group fails and
+  says so.
 
 ### Build
 

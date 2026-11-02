@@ -50,6 +50,8 @@ docker run --rm --platform linux/amd64 --pull never --network none \
     export PATH=/qual/tools:$PATH CARGO_TARGET_DIR=/qual/target/artifacts CARGO_NET_OFFLINE=true
     export CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
     rustc -V; rustc -Vv | grep "^host:"; cargo nextest --version; python3 -V
-    bash tools/gate/dev-check.sh "$@"' sh "$@" || status=$?
+    # The preloaded image has no wasm32-unknown-unknown target and no network:
+    # the gate skips that one check and names the skip (spec 06 section 7.5).
+    bash tools/gate/dev-check.sh --qual-container "$@"' sh "$@" || status=$?
 echo "EXIT $status"
 exit "$status"

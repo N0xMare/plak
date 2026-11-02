@@ -26,7 +26,9 @@ history, never prerequisite reading, and never cited as authority.
 
 MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
-cargo-nextest, cargo-deny and ruff. Worker branches iterate and finish with
+cargo-nextest, cargo-deny and ruff and the `wasm32-unknown-unknown` rustc
+target the `builds` group checks the portable crates for; an existing setup
+re-runs it to add that target. Worker branches iterate and finish with
 `just fast <packages>` plus the groups their change needs. The integration
 batch, install and publication gates are spec 06 §8.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
@@ -72,7 +74,8 @@ offline first, online only for missing cache inputs, the workspace and feature
 structure checkers, clippy -D warnings on the workspace and on each supported
 package alone),
 `builds` (default-feature, each supported package alone in its own default
-resolution, and maintainer-feature builds, rustc warnings denied),
+resolution, and maintainer-feature builds, plus a `wasm32-unknown-unknown`
+library check of the portable crate set, rustc warnings denied),
 `variants` (named headless/API/minimal builds and an admission fixture, clippy
 with warnings denied, and feature-admission/read-only-store contracts; full only),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`

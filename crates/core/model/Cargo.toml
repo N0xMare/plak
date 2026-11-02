@@ -39,6 +39,12 @@ sha2.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["serde", "v7"] }
 
+# uuid 1.28 links getrandom for v7 on every target except this one, where it
+# refuses to compile unless js, rng-getrandom, or rng-rand is on. js is its
+# WebCrypto backend and is not enabled for native builds.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+
 [dev-dependencies]
 futures = { workspace = true, features = ["executor", "std"] }
 nix.workspace = true

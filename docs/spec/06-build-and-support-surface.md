@@ -48,6 +48,10 @@ pins channel `1.99.0` with the `minimal` profile plus `clippy` and `rustfmt`, so
 the ordinary development build is the MSRV build and there is no separate MSRV
 job. `.clippy.toml` repeats the MSRV so lint suggestions stay inside it.
 `.cargo/config.toml` sets `resolver.incompatible-rust-versions = "fallback"`.
+`rust-toolchain.toml` lists no extra targets. `wasm32-unknown-unknown` is
+installed by `just dev-tools install` (section 7.5), not by that file: listing
+it there would make rustup try to download it on every toolchain entry,
+including the offline musl qualification image.
 
 Two targets are supported, and one near neighbour is explicitly not:
 
@@ -58,6 +62,8 @@ Two targets are supported, and one near neighbour is explicitly not:
 | `x86_64-apple-darwin` | Not supported. Process tools and Code Mode fail closed |
 
 Anything else is unsupported: it may compile, and compiling is not support.
+`wasm32-unknown-unknown` is not a supported product target. The `builds` group
+checks it only for the portable crate set (section 7.5).
 
 The ordinary release commands use the selected Cargo target (the host target
 by default); a Linux build without `--target` produces GNU/Linux binaries, and
@@ -751,7 +757,9 @@ just dev-tools install
 
 `tools/gate/dev-tools.sh install` installs exactly cargo-nextest 0.9.100,
 cargo-deny 0.19.0 and ruff 0.17.3 into the repository-local `.dev-tools/bin`,
-which the gate puts first on `PATH`. `just nextest` and
+which the gate puts first on `PATH`. It also adds the `wasm32-unknown-unknown`
+rustc target for the pinned toolchain (section 7.5) and does not put that
+target in `rust-toolchain.toml`. `just nextest` and
 `tools/dev/coverage.sh` prepend that same prefix and run
 `dev-tools.sh check-nextest` before cargo nextest. That check does not require
 ruff. It prefers the pinned cargo-nextest from the prefix; without one, a newer
@@ -868,6 +876,12 @@ Provide the executable musl cargo-nextest 0.9.100 and ruff 0.17.3 in
 substitute for them. The image's `nextest` target exports both binaries.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.
+The preloaded image does not include the `wasm32-unknown-unknown` rustc
+target. `musl-check.sh` passes `--qual-container` to the gate, and the
+`builds` group's wasm check then skips instead of failing the tier; the run
+names the skip in its final summary and records no gate evidence (section 7.5).
+When a later image includes the target, the check runs. The image is not
+rebuilt for this check.
 `tools/musl/image.Dockerfile` is the recipe: built from a `git archive` of a
 commit, its default target is the image, tagged `plak-qual-base:` plus the first
 eight hex digits of its image ID, and its `nextest` target exports the musl
@@ -1434,7 +1448,9 @@ in linked Git or secondary JJ workspaces; their package dry run still uses
 the shared VCS listing. Copies reuse the launch's `.dev-tools` when they have
 none of their own. Install/relink builds likewise require a `.git` directory.
 The evidence file is written only by a passing `just full` that began and
-ended on the same clean Git tree or unconflicted colocated JJ tree (chapter 05 §1).
+ended on the same clean Git tree or unconflicted colocated JJ tree (chapter 05 §1)
+and skipped no check; a run that skipped one (section 7.5) writes neither
+evidence file.
 `tools/release/gate_evidence.py verify` accepts that evidence for tree T at
 HEAD when T is HEAD's tree, or when the plumbing delta
 (`git diff-tree -r --no-renames --ignore-submodules=none T HEAD^{tree}`, which
@@ -1769,6 +1785,122 @@ range: `filedescriptor`, `jsonwebtoken`, `nix`, `portable-pty`, `rusqlite`,
 `serde_json_canonicalizer`, `tracing`, `vt100`, the OpenTelemetry family, and
 the external `monty-proto` / `monty-types` / `monty-alloc` at
 `=1.2.0`.
+
+### 7.5 Portable crates
+
+`PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
+list. It starts as `plakous-model`. A crate joins that tuple only in the change
+that makes its normal dependency closure pass the fence below and its library
+check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
+claim: `wasm32-unknown-unknown` stays an unsupported product target (section 2).
+`check_workspace.py --portable-crates` prints the list, one name per line, and
+does nothing else.
+
+The `static` group runs the fence inside `check_workspace.py`. For each listed
+crate it runs `cargo tree --offline --locked --target wasm32-unknown-unknown`
+over the normal closure (`-e normal`) twice: the crate's default features, then
+`--all-features`. The fence resolves that target, never the host: a dependency
+behind `cfg(not(target_arch = "wasm32"))` is outside the closure and allowed,
+and one behind `cfg(target_arch = "wasm32")` is inside it and checked. Cargo
+resolves the target without the rustc target being installed, so the fence
+needs no `just dev-tools install`. Dev-dependencies and build-dependencies are
+outside the normal closure, so a dev-only native crate does not fail the
+fence. A proc-macro and its own dependencies run on the host and are skipped.
+A hit names the portable crate, the resolution, the offending dependency and
+the path that pulls it in, for example
+`plakous-model [default]: nix v0.28.0 via plakous-model -> helper -> nix`.
+An unparsed tree line or a tree that does not start at the crate fails closed.
+The same dependency is reported once per resolution.
+
+The ban is this reviewed list, not a scan of `Cargo.lock`:
+
+- Tokio features `fs`, `net`, `process`, `rt-multi-thread` and `signal`. Tokio
+  with any other feature set is allowed.
+- The crates `errno`, `filedescriptor`, `hyper`, `hyper-util`, `libc`,
+  `linux-raw-sys`, `mio`, `nix`, `notify`, `portable-pty`, `redox_syscall`,
+  `reqwest`, `rusqlite`, `rustix`, `serial2` and `socket2`.
+
+`libc` is banned. `wasm32-unknown-unknown` has no C library, and nothing in the
+wasm resolution needs it: `getrandom` and `cpufeatures` pull it only on native
+hosts, and those edges are outside the target closure. `notify` is banned
+before it is a dependency. Extending the ban amends this section and the
+constants together.
+
+The library check is in the `builds` group, not `static`. It is a compile with
+rustc warnings denied, and `builds` runs on both supported platforms, including
+the platform tier, which skips the platform-independent structure checkers.
+`static` stays free of target compilation. After the default, per-package and
+maintainer builds, the group checks each listed crate:
+
+```text
+cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown
+```
+
+`-D warnings` is applied by the same helper as the other builds in the group.
+The command sets `CARGO_BUILD_TARGET` to `wasm32-unknown-unknown` for itself
+only, so a musl lane's target does not redirect it and the command does not
+leave that target set. A crate whose default features are portable is checked
+with those defaults. `plakous-model` defaults are empty, so its check passes
+no `--no-default-features`. A crate whose defaults are not portable is checked
+without them, and that choice is recorded in this section when it joins the
+list.
+
+The check proves that the listed libraries compile for the target, and nothing
+more: no test, binary or `wasm-bindgen` glue runs there. These runtime hazards
+are known and accepted for now; their APIs do not change with this check:
+
+- `std::time::SystemTime::now` and `std::time::Instant::now` panic on
+  `wasm32-unknown-unknown`. In `plakous-model`, `now_unix_secs`,
+  `now_unix_millis` and `SystemClock` (`identity.rs`) read `SystemTime`, and
+  `SystemSubscriptionGateClock` (`subscription_limit.rs`) reads `Instant`. A
+  wasm host injects its own `Clock` and `SubscriptionGateClock`.
+- `ReachabilityProbe` takes a `std::time::Instant` deadline in its signature,
+  so a wasm caller cannot construct one without a substitute clock.
+- `uuid`'s `js` feature calls `globalThis.crypto.getRandomValues` through
+  `wasm-bindgen`. A v7 identifier generated in a host without the generated
+  JavaScript glue or without `globalThis.crypto` fails at run time.
+
+`uuid` 1.28 with the `v7` feature links `getrandom` on every target except
+`cfg(all(target_arch = "wasm32", target_os = "unknown"))`, where it refuses to
+compile unless `js`, `rng-getrandom` or `rng-rand` is enabled. `plakous-model`
+enables `uuid`'s `js` feature only as a target dependency for that cfg. `js`
+is uuid's WebCrypto backend and does not use `getrandom` there, so the tree
+sets no `getrandom_backend` cfg. Native resolutions do not enable `js` and do
+not link `wasm-bindgen`. The target-dependency table is part of the reviewed
+manifest security-surface digest.
+
+The target is not listed in `rust-toolchain.toml`. Listing it would make rustup
+try to download it whenever the toolchain is selected, including inside the
+offline musl image. `just dev-tools install` runs
+`rustup target add wasm32-unknown-unknown` for the pinned toolchain. A gate
+whose rustc lacks the target fails and names that install, with one exception.
+The gate probes the target as the directory
+`$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown/lib`, so it needs
+no `rustup` on `PATH`. The preloaded qualification image
+`plak-qual-base:11162b86` has no network and does not include the target, and
+the image is not rebuilt for this check. `tools/musl/musl-check.sh` passes the
+leading gate argument `--qual-container`, which nothing else passes; an
+environment variable cannot select it. With that argument and the target
+absent, the builds group prints
+
+```text
+skip wasm32-unknown-unknown: the preloaded musl qualification image does not include this rustc target (spec 06 section 7.5)
+```
+
+and continues. The skip is carried to the end of the run: the final summary,
+pass or fail, repeats it as
+
+```text
+== skipped: wasm32-unknown-unknown portable check (spec 06 §7.5) ==
+```
+
+and a run with a skip writes neither `gate-evidence/full` nor
+`gate-evidence/package` (section 6.5), even on a clean git tree; it prints
+`== no evidence: a check was skipped ==` instead. The container mounts an
+export without `.git`, so it records no evidence in any case. With the
+argument and the target present, the check runs. The native musl platform
+tier does not pass the argument, so it runs the check. The skip is that one
+missing rustc target, not a waiver of the fence or of the supported platforms.
 
 ## 8. Repository settings
 

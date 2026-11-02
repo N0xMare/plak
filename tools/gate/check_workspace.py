@@ -14,7 +14,10 @@ What stays hardcoded here, on purpose: the security pins (environment reads,
 process commands and imports, macro allowlists, forbidden identifiers), the
 approved `plakous::` symbols per host/bin package, the neutral-core provider
 name exemptions, the retired-source pins, the consumer fixture inventories, the
-rquickjs / tracing linkage pins, and the tracked-file hygiene patterns. Every path-bearing pin is keyed by package
+rquickjs / tracing linkage pins, the tracked-file hygiene patterns, and the
+portable-crate set with its native-only denylist (spec 06 section 7.5).
+`PORTABLE_CRATES` is the only list of crates that must stay portable; it grows
+one crate at a time. Every path-bearing pin is keyed by package
 name plus a package-relative path, so a package move never edits them.
 """
 
@@ -4005,6 +4008,175 @@ def package_sources(package: Package, repository: Path = ROOT) -> tuple[dict[str
     return by_path, errors
 
 
+# The only portable-crate list. Grow it one crate at a time, in the same change
+# that makes that crate's normal closure portable and its library check clean
+# for wasm32-unknown-unknown (spec 06 section 7.5). `--portable-crates` prints it.
+PORTABLE_CRATES = ("plakous-model",)
+# The fence resolves this target, not the host: cfg(target_arch = "wasm32")
+# dependencies are in the closure and cfg(not(...)) ones are not.
+PORTABLE_TARGET = "wasm32-unknown-unknown"
+# Tokio itself is allowed. These features are native runtimes and OS effects.
+BANNED_TOKIO_FEATURES = frozenset({"fs", "net", "process", "rt-multi-thread", "signal"})
+# Reviewed against Cargo.lock. `notify` is banned before it is a dependency.
+# `libc` is banned: the target has no C library, and nothing in the wasm
+# resolution needs it (getrandom and cpufeatures pull it only on native hosts).
+BANNED_NATIVE_CRATES = frozenset(
+    {
+        "errno",
+        "filedescriptor",
+        "hyper",
+        "hyper-util",
+        "libc",
+        "linux-raw-sys",
+        "mio",
+        "nix",
+        "notify",
+        "portable-pty",
+        "redox_syscall",
+        "reqwest",
+        "rusqlite",
+        "rustix",
+        "serial2",
+        "socket2",
+    }
+)
+_TREE_LINE = re.compile(
+    r"^(?P<depth>\d+)(?P<body>.+?) feats=\[(?P<features>[^\]]*)\](?P<duplicate> \(\*\))?$"
+)
+_PACKAGE_BODY = re.compile(
+    r"^(?P<name>\S+) v(?P<version>\S+)(?P<proc_macro> \(proc-macro\))?(?: \(.+\))?$"
+)
+
+
+class _TreeNode(NamedTuple):
+    depth: int
+    name: str
+    version: str
+    features: tuple[str, ...]
+    duplicate: bool
+    proc_macro: bool = False
+
+
+def portable_tree_args(package: str, *, all_features: bool) -> list[str]:
+    """Cargo tree arguments for one portable crate's normal closure."""
+    args = [
+        "-p",
+        package,
+        "-e",
+        "normal",
+        "--target",
+        PORTABLE_TARGET,
+        "--locked",
+        "--prefix",
+        "depth",
+        "--format",
+        "{p} feats=[{f}]",
+    ]
+    if all_features:
+        args.append("--all-features")
+    return args
+
+
+def parse_feature_tree(output: str) -> tuple[list[_TreeNode], list[str]]:
+    """Parse `cargo tree --prefix depth --format '{p} feats=[{f}]'`."""
+    nodes: list[_TreeNode] = []
+    errors: list[str] = []
+    for line_number, line in enumerate(output.splitlines(), 1):
+        if not line.strip():
+            continue
+        match = _TREE_LINE.match(line)
+        body = _PACKAGE_BODY.match(match.group("body")) if match else None
+        if match is None or body is None:
+            errors.append(f"unparsed cargo tree line {line_number}: {line}")
+            continue
+        features = tuple(part for part in match.group("features").split(",") if part)
+        nodes.append(
+            _TreeNode(
+                depth=int(match.group("depth")),
+                name=body.group("name"),
+                version=body.group("version"),
+                features=features,
+                duplicate=match.group("duplicate") is not None,
+                proc_macro=body.group("proc_macro") is not None,
+            )
+        )
+    return nodes, errors
+
+
+def native_offense(node: _TreeNode) -> str | None:
+    """Return the offending dependency text, or None when the node is portable."""
+    if node.name in BANNED_NATIVE_CRATES:
+        return f"{node.name} v{node.version}"
+    if node.name == "tokio":
+        banned = sorted(set(node.features) & BANNED_TOKIO_FEATURES)
+        if banned:
+            label = "feature" if len(banned) == 1 else "features"
+            return f"tokio v{node.version} {label} {', '.join(banned)}"
+    return None
+
+
+def closure_findings(package: str, resolution: str, nodes: list[_TreeNode]) -> list[str]:
+    """Name each banned dependency once, with the path that pulls it in.
+
+    A proc-macro and everything below it are built for the host, not the
+    portable target, so that subtree is outside the fence.
+    """
+    if not nodes or nodes[0].depth != 0 or nodes[0].name != package:
+        return [f"{package} [{resolution}]: cargo tree did not start at the crate"]
+    stack: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    findings: list[str] = []
+    host_depth: int | None = None
+    for node in nodes:
+        if host_depth is not None and node.depth > host_depth:
+            continue
+        host_depth = None
+        while stack and stack[-1][0] >= node.depth:
+            stack.pop()
+        if node.proc_macro:
+            host_depth = node.depth
+            continue
+        path = [*(item[1] for item in stack), node.name]
+        stack.append((node.depth, node.name))
+        offense = native_offense(node)
+        if offense is None or offense in seen:
+            continue
+        seen.add(offense)
+        findings.append(f"{package} [{resolution}]: {offense} via {' -> '.join(path)}")
+    return findings
+
+
+def portable_closure_errors(workspace: Workspace) -> list[str]:
+    """Fail when a portable crate's normal closure is native-only.
+
+    Default features and `--all-features` are both checked, each resolved for
+    `PORTABLE_TARGET` (Cargo needs no installed target for that).
+    Dev-dependencies and build-dependencies are not part of the normal closure.
+    """
+    lock = workspace.root / "Cargo.lock"
+    try:
+        lock.read_bytes()
+    except OSError as error:
+        return [f"Cargo.lock: {error}"]
+    errors: list[str] = []
+    for package in PORTABLE_CRATES:
+        if package not in workspace.packages:
+            errors.append(f"{package}: portable crate is not a workspace member")
+            continue
+        for resolution, all_features in (("default", False), ("all-features", True)):
+            output = cargo_tree_output(
+                workspace.root, portable_tree_args(package, all_features=all_features), errors
+            )
+            if output is None:
+                continue
+            nodes, parse_errors = parse_feature_tree(output)
+            if parse_errors:
+                errors.extend(f"{package} [{resolution}]: {item}" for item in parse_errors)
+                continue
+            errors.extend(closure_findings(package, resolution, nodes))
+    return errors
+
+
 def cargo_tree_output(root: Path, spec: list[str], errors: list[str]) -> str | None:
     """Fail closed with Cargo's diagnostic rather than treating failure as absence."""
     command = ["cargo", "tree", "--offline", *spec]
@@ -4990,6 +5162,7 @@ def _check_workspace() -> int:
             errors.append(f"product-account waiver {name!r} does not name a neutral package")
 
     errors.extend(rquickjs_linkage_errors(ROOT))
+    errors.extend(portable_closure_errors(workspace))
     linkage_errors, linkage_note = artifact_linkage_errors(ROOT)
     errors.extend(linkage_errors)
 
@@ -5411,6 +5584,13 @@ def check_root(root: Path) -> int:
 
 def main() -> int:
     """Run the workspace checks, skipping them when the recorded reads are unchanged."""
+    if sys.argv[1:] == ["--portable-crates"]:
+        for name in PORTABLE_CRATES:
+            print(name)
+        return 0
+    if sys.argv[1:]:
+        print("usage: check_workspace.py [--portable-crates]", file=sys.stderr)
+        return 2
     return check_root(ROOT)
 
 

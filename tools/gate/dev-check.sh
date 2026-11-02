@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Developer gate: check (default), fast iteration, platform, full.
-# Usage: tools/gate/dev-check.sh [--fast [PACKAGE...] | --platform | --full |
-#                            --steps GROUP[,GROUP...]]
+# Usage: tools/gate/dev-check.sh [--qual-container] [--fast [PACKAGE...] |
+#                            --platform | --full | --steps GROUP[,GROUP...]]
 # --steps selects exactly the named groups, in canonical order.
+# --qual-container is passed only by tools/musl/musl-check.sh (spec 06 section 7.5).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
@@ -15,6 +16,10 @@ platform_groups=static,builds,tests-parallel,tests-serial,tests-durability
 tier=check
 selection=$check_groups
 packages=()
+# The musl qualification image lacks the wasm target; only that container may
+# skip the wasm check, and a run that skips records no evidence.
+qual_container=false
+if [[ "${1:-}" == --qual-container ]]; then qual_container=true; shift; fi
 case "${1:-}" in
   --fast) tier=fast; selection=static,tests-parallel; shift; packages=("$@"); set -- ;;
   --platform) tier=platform; selection=$platform_groups; shift ;;
@@ -22,7 +27,7 @@ case "${1:-}" in
   --steps)
     tier=steps; selection="${2:-}"; shift
     if [[ $# -gt 0 ]]; then shift; fi ;;
-  -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
 esac
 if [[ $# -gt 0 ]]; then echo "unknown argument: $1" >&2; exit 2; fi
 if [[ -z "$selection" || "$selection" == ,* || "$selection" == *, || "$selection" == *,,* ]]; then
@@ -430,6 +435,42 @@ run_lane() {
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
 
+# The rustc target for the portable-crate library check (spec 06 section 7.5).
+# Not inherited from CARGO_BUILD_TARGET: a musl lane must not redirect it.
+wasm_portability_target=wasm32-unknown-unknown
+
+wasm_target_installed() {
+  local sysroot
+  sysroot="$(rustc --print sysroot)" || return 1
+  [[ -d "$sysroot/lib/rustlib/$1/lib" ]]
+}
+
+run_wasm_portability_checks() {
+  local triple="$wasm_portability_target" crates crate
+  if ! wasm_target_installed "$triple"; then
+    if [[ "$qual_container" == true ]]; then
+      echo "skip ${triple}: the preloaded musl qualification image does not include this rustc target (spec 06 section 7.5)"
+      printf '%s\n' "${triple} portable check (spec 06 §7.5)" >>"$skip_record"
+      return 0
+    fi
+    echo "error: rustc target ${triple} is not installed for the pinned toolchain; run \`just dev-tools install\`" >&2
+    return 1
+  fi
+  crates="$(python3 tools/gate/check_workspace.py --portable-crates)" || return 1
+  if [[ -z "${crates//[[:space:]]/}" ]]; then
+    echo "error: the portable crate set is empty" >&2
+    return 1
+  fi
+  while IFS= read -r crate; do
+    [[ -n "$crate" ]] || continue
+    echo "== wasm: ${crate} (${triple}) =="
+    # Override the process target for this command only, including the rustflags
+    # the warning-denial helper selects for that triple.
+    CARGO_BUILD_TARGET="$triple" run_build_denying_warnings \
+      cargo check --locked -p "$crate" --lib --target "$triple"
+  done <<<"$crates"
+}
+
 run_group() {
   case "$1" in
     static)
@@ -477,7 +518,8 @@ run_group() {
       done
       echo "== maintainer features =="
       run_build_denying_warnings cargo build --locked -p plak --features maintainer --bins ${target_args[@]+"${target_args[@]}"}
-      python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;
+      python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug"
+      run_wasm_portability_checks ;;
     variants)
       # Release-candidate evidence (`just full` or an explicit variants step).
       # The integration batch does not build these reduced resolutions.
@@ -536,10 +578,15 @@ fi
 
 failed_groups=""
 gate_status=0
+# A group appends one line per skipped check to skip_record; the run keeps
+# them in skipped_checks for the summary and the evidence decision.
+skip_record=''
+skipped_checks=''
 run_timed() {
   local group=$1 started status worker_state
   echo "== group: $group =="
   started=$SECONDS
+  skip_record="$(mktemp)"
   # A subshell keeps set -e fail-fast inside the group; the parent records the
   # status and goes on to the next group. Prepared worker paths survive a
   # failed lane so later lanes reuse the same build.
@@ -559,6 +606,8 @@ run_timed() {
   py_host="$(sed -n '1p' "$worker_state")"
   js_host="$(sed -n '2p' "$worker_state")"
   rm -f "$worker_state"
+  if [[ -s "$skip_record" ]]; then skipped_checks+="$(cat "$skip_record")"$'\n'; fi
+  rm -f "$skip_record"
   echo "== time: $group $((SECONDS - started)) s =="
   if [[ "$status" -ne 0 ]]; then
     failed_groups="${failed_groups:+$failed_groups }$group"
@@ -571,11 +620,16 @@ for group in "${all_groups[@]}"; do
     run_timed "$group"
   fi
 done
+while IFS= read -r skipped; do
+  if [[ -n "$skipped" ]]; then echo "== skipped: $skipped =="; fi
+done <<<"$skipped_checks"
 if [[ "$gate_status" -ne 0 ]]; then
   echo "== failed groups: $failed_groups =="
   exit "$gate_status"
 fi
-if [[ -n "$evidence_tree" ]]; then
+if [[ -n "$evidence_tree" && -n "$skipped_checks" ]]; then
+  echo "== no evidence: a check was skipped ==" >&2
+elif [[ -n "$evidence_tree" ]]; then
   if [[ "$(python3 tools/gate/vcs_listing.py evidence-tree)" == "$evidence_tree" ]]; then
     mkdir -p "$target_dir/gate-evidence"
     printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/package"

@@ -85,7 +85,10 @@ class DevCheckWorkerTests(unittest.TestCase):
                 ):
                     self.assertEqual(
                         any(
-                            s[0].endswith(checker) and '--product-builds' not in s for s in scripts
+                            s[0].endswith(checker)
+                            and '--product-builds' not in s
+                            and '--portable-crates' not in s
+                            for s in scripts
                         ),
                         tier != ('--platform',),
                     )
@@ -115,6 +118,10 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
         self.worker = self.root / "custom target" / "host-triple" / "debug" / "plakous-py-host"
+        # The gate probes the wasm target in the sysroot; other rustc calls are real.
+        self.sysroot = self.root / 'sysroot'
+        (self.sysroot / 'lib/rustlib/wasm32-unknown-unknown/lib').mkdir(parents=True)
+        real_rustc = shutil.which('rustc')
         self.env = dict(
             os.environ,
             PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
@@ -122,6 +129,8 @@ class DevCheckWorkerTests(unittest.TestCase):
             GATE_WORKER=str(self.worker),
             CARGO_TARGET_DIR=str(self.root / 'custom target'),
             CARGO_BUILD_TARGET='host-triple',
+            GATE_SYSROOT=str(self.sysroot),
+            GATE_REAL_RUSTC=real_rustc or '',
         )
         self.env.pop('PLAK_PY_HOST', None)
         self.env.pop('PLAK_JS_HOST', None)
@@ -207,6 +216,20 @@ if failure:
     raise SystemExit(failure)
 if sys.argv[1].endswith('changed_packages.py'):
     print(os.environ.get('GATE_CHANGED', ''), end='')
+if sys.argv[1].endswith('check_workspace.py') and '--portable-crates' in sys.argv:
+    print('plakous-model')
+''',
+        )
+        self.executable(
+            'rustc',
+            r'''import os, sys
+if sys.argv[1:] == ['--print', 'sysroot']:
+    print(os.environ['GATE_SYSROOT'])
+    raise SystemExit(0)
+real = os.environ['GATE_REAL_RUSTC']
+if not real:
+    raise SystemExit(127)
+os.execv(real, [real, *sys.argv[1:]])
 ''',
         )
 
@@ -305,7 +328,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         if '-D warnings' in ambient:
             return
         for call in calls:
-            if call['args'][0] == 'build':
+            if call['args'][0] == 'build' or self.is_wasm_check(call):
                 continue
             self.assertNotIn(
                 '-D warnings',
@@ -335,6 +358,10 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     @staticmethod
     def lanes(calls):
         return [c for c in calls if c['args'][:2] == ['nextest', 'run']]
+
+    @staticmethod
+    def is_wasm_check(call):
+        return call['args'][0] == 'check' and 'wasm32-unknown-unknown' in call['args']
 
     @staticmethod
     def profiles(calls):
@@ -478,7 +505,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             [c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-            ['fmt', 'fetch', *CLIPPIES, *['build'] * len(BUILDS), 'test'],
+            ['fmt', 'fetch', *CLIPPIES, *['build'] * len(BUILDS), 'check', 'test'],
         )
         builds = [c['args'] for c in calls if c['args'][0] == 'build']
         self.assertIn('--workspace', builds[0])
@@ -501,7 +528,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ['-C link-arg=-fuse-ld=mold -D warnings'] * len(BUILDS),
         )
         for call in calls:
-            if call['args'][0] == 'build':
+            if call['args'][0] == 'build' or self.is_wasm_check(call):
                 continue
             self.assertEqual(call['rustflags'], '-C link-arg=-fuse-ld=mold', call['args'][:3])
 
@@ -517,7 +544,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         )
         self.assertTrue(all(c['target_rustflags'] == '-C link-arg=-fuse-ld=mold' for c in builds))
         for call in calls:
-            if call['args'][0] == 'build':
+            if call['args'][0] == 'build' or self.is_wasm_check(call):
                 continue
             self.assertEqual(
                 call['target_rustflags'], '-C link-arg=-fuse-ld=mold', call['args'][:3]
@@ -647,6 +674,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 'fetch',
                 *CLIPPIES,
                 *['build'] * len(BUILDS),
+                'check',
                 *['doc'] * (1 + len(SUPPORTED)),
                 'test',
                 'nextest',
@@ -680,7 +708,16 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
         self.assertEqual(
             order,
-            ['fmt', *CLIPPIES, *['build'] * len(BUILDS), 'test', 'nextest', 'nextest', 'nextest'],
+            [
+                'fmt',
+                *CLIPPIES,
+                *['build'] * len(BUILDS),
+                'check',
+                'test',
+                'nextest',
+                'nextest',
+                'nextest',
+            ],
         )
         self.assertEqual(self.profiles(calls), ['offline', 'serial', 'durability'])
         checks = [c['args'] for c in calls if c['args'][0] == 'build']
@@ -692,7 +729,12 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             'run_tooling_tests.py',
         ):
             self.assertFalse(
-                any(s[0].endswith(checker) and '--product-builds' not in s for s in scripts)
+                any(
+                    s[0].endswith(checker)
+                    and '--product-builds' not in s
+                    and '--portable-crates' not in s
+                    for s in scripts
+                )
             )
         self.assertEqual(sum('--product-builds' in s for s in scripts), 0)
         for call in calls:
@@ -750,6 +792,12 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(result.returncode, 0, result.stderr)
         for call in calls:
             args = call['args']
+            if args[0] == 'check' and 'wasm32-unknown-unknown' in args:
+                with self.subTest(args=args):
+                    self.assertEqual(args[args.index('--target') + 1], 'wasm32-unknown-unknown')
+                    self.assertEqual(call['target'], 'wasm32-unknown-unknown')
+                    self.assertIn('-D warnings', call.get('rustflags') or '')
+                continue
             if args[0] in {'clippy', 'build', 'check', 'doc', 'test'} or args[:2] == [
                 'nextest',
                 'run',
@@ -762,9 +810,62 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.env.pop('CARGO_BUILD_TARGET')
         result, calls, _ = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
+        wasm = [call for call in calls if self.is_wasm_check(call)]
+        self.assertEqual(len(wasm), 1)
+        self.assertNotIn('--target', wasm[0]['args'][: wasm[0]['args'].index('--target')])
         for call in calls:
+            if self.is_wasm_check(call):
+                self.assertEqual(
+                    call['args'][call['args'].index('--target') + 1], 'wasm32-unknown-unknown'
+                )
+                continue
             self.assertNotIn('--target', call['args'])
             self.assertNotIn('', call['args'])
+
+    WASM_SKIP = '== skipped: wasm32-unknown-unknown portable check (spec 06 §7.5) =='
+
+    def test_missing_wasm_target_fails_the_builds_group(self):
+        shutil.rmtree(self.sysroot / 'lib/rustlib/wasm32-unknown-unknown')
+        # An environment variable is not the container flag.
+        self.env['PLAK_QUAL_CONTAINER'] = '1'
+        result, calls, _ = self.run_gate('--steps', 'builds')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('just dev-tools install', result.stderr)
+        self.assertNotIn('skip wasm32-unknown-unknown:', result.stdout)
+        self.assertNotIn(self.WASM_SKIP, result.stdout)
+        self.assertIn('failed groups: builds', result.stdout)
+        self.assertFalse(any(self.is_wasm_check(call) for call in calls))
+
+    def test_the_container_flag_runs_the_wasm_check_when_the_target_exists(self):
+        result, calls, _ = self.run_gate('--qual-container', '--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len([c for c in calls if self.is_wasm_check(c)]), 1)
+        self.assertNotIn('skipped:', result.stdout)
+
+    def test_musl_container_skips_a_missing_wasm_target_and_names_it_last(self):
+        shutil.rmtree(self.sysroot / 'lib/rustlib/wasm32-unknown-unknown')
+        result, calls, _ = self.run_gate('--qual-container', '--steps', 'builds')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            'skip wasm32-unknown-unknown: the preloaded musl qualification image does not include this rustc target',
+            result.stdout,
+        )
+        self.assertFalse(any(self.is_wasm_check(call) for call in calls))
+        self.assertEqual(len([c for c in calls if c['args'][0] == 'build']), len(BUILDS))
+        summary = result.stdout.splitlines()[-2:]
+        self.assertEqual(summary, [self.WASM_SKIP, '== ok: steps gate passed =='])
+
+    def test_a_skipped_full_run_on_a_clean_tree_records_no_evidence(self):
+        shutil.rmtree(self.sysroot / 'lib/rustlib/wasm32-unknown-unknown')
+        self.commit_fixture()
+        result, _, _ = self.run_gate('--qual-container', '--full')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(self.WASM_SKIP, result.stdout.splitlines())
+        self.assertIn('no evidence: a check was skipped', result.stderr)
+        self.assertNotIn('evidence: full gate passed', result.stdout)
+        self.assertNotIn('evidence: package group passed', result.stdout)
+        self.assertFalse(self.evidence.exists())
+        self.assertFalse(self.package_evidence.exists())
 
     def test_fast_tier_runs_the_parallel_lane_over_touched_packages_and_dependents(self):
         self.env['GATE_CHANGED'] = 'plakous-model\nplak\n'

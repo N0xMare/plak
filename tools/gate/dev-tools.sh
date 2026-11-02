@@ -72,7 +72,9 @@ case "${1:-check}" in
     CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$ruff_version" ruff
     python3 tools/gate/check_public_compile.py --fetch
     python3 tools/dev/jj-tools.py install "$prefix"
-    printf 'Installed verification tools in %s/bin; just check and just dev-tools deny use this prefix.\n' "$prefix"
+    command -v rustup >/dev/null 2>&1 || fail 'rustup is required to install the wasm32-unknown-unknown target; install the repository-pinned Rust toolchain'
+    rustup target add wasm32-unknown-unknown
+    printf 'Installed verification tools in %s/bin and the rustc target wasm32-unknown-unknown; just check and just dev-tools deny use this prefix.\n' "$prefix"
     ;;
   -h|--help)
     printf 'usage: dev-tools.sh check|check-nextest|install|deny\n'

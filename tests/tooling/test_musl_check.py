@@ -110,7 +110,8 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         command = args[args.index('-c') + 1]
         self.assertIn('CARGO_BUILD_TARGET=x86_64-unknown-linux-musl', command)
         self.assertIn('CARGO_NET_OFFLINE=true', command)
-        self.assertIn('bash tools/gate/dev-check.sh "$@"', command)
+        self.assertIn('bash tools/gate/dev-check.sh --qual-container "$@"', command)
+        self.assertNotIn('PLAK_QUAL_CONTAINER', command)
         self.assertEqual(args[-2:], ['sh', '--full'])
         self.assertIn('EXIT 0', result.stdout)
 

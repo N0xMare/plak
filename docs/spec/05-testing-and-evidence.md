@@ -593,7 +593,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 | Group (canonical order) | Coverage |
 | --- | --- |
 | `static` | fmt, then `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/` (root `pyproject.toml` is tool config only; `vendor/` and `eval/datasets` stay excluded), then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings |
-| `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build. All deny rustc warnings |
+| `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build; then `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each portable crate (chapter 06 §7.5). All deny rustc warnings. The musl qualification container (`--qual-container`) skips only that wasm check when its preloaded image has no such rustc target; the final summary names the skip and the run records no gate evidence |
 | `variants` | Reduced Plak resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): headless is default minus `tui` and `clipboard`; api is default minus `codex`, `grok` and `claude`; minimal is exactly `tui`, `openrouter` and `git-cli`; the admission fixture is default minus `tui`, `clipboard`, `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plak processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
 | `rustdoc` | Workspace all-features rustdoc, then each supported package alone with default features; denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
@@ -621,8 +621,10 @@ on the same clean git tree writes that tree id to
 `$CARGO_TARGET_DIR/gate-evidence/full` (default `target/`), the evidence
 `tools/release/publish.sh` requires. Any passing run that includes the package group
 on a clean tree (full, or `--steps` naming `package`) writes its tree id to
-`gate-evidence/package` beside it. Chapter 06 §6.5 says which later trees that
-evidence still covers. `--steps` runs exactly its named groups, in canonical order,
+`gate-evidence/package` beside it. A run that skipped a check (today only the
+musl qualification container's wasm check, chapter 06 §7.5) names each skip as
+`== skipped: <check> ==` in its final summary and writes neither file.
+Chapter 06 §6.5 says which later trees that evidence still covers. `--steps` runs exactly its named groups, in canonical order,
 rejects unknown or empty groups, and implies no other group; test groups still
 prepare their real Monty-worker prerequisite. Independent runners must use
 separate checkout, target and temporary roots. Each group prints a
@@ -682,7 +684,18 @@ features across members, so neither sees the closure a crates.io consumer or
 the release `cargo build -p plak` resolves (for example `plakous-workspace`
 without `jj-lib`); a feature-gated slip in any of them fails the gate. The
 per-package builds run before the maintainer build, whose `plak` the linkage
-check reads. All of these builds deny rustc warnings. The `static` group lints
+check reads. All of these builds deny rustc warnings. The same group then
+checks each portable crate's library for `wasm32-unknown-unknown`, warnings
+denied (chapter 06 §7.5). That step is a compile, so it lives in `builds`
+rather than `static`: the platform tier runs `builds` and skips the
+platform-independent structure checkers. `static` is where the portable-crate
+dependency fence runs, inside `check_workspace.py`, resolving
+`wasm32-unknown-unknown` rather than the host. The musl qualification
+container (`dev-check.sh --qual-container`, passed only by `musl-check.sh`)
+skips that check when the preloaded image lacks the rustc target, names the
+skip in the final summary and records no gate evidence; the native musl
+platform tier never skips it. The check proves compilation only (chapter 06
+§7.5 lists the known runtime hazards). The `static` group lints
 the same per-package resolutions with clippy, all targets included, so a lint
 or a test that compiles only in a package's own default closure (a constant
 gated behind a feature its default build lacks, a test helper only a
@@ -714,8 +727,10 @@ Apple Silicon. The native musl lane defaults to
 container before publication (chapter 06 §6.1). Both musl scripts set
 `CARGO_BUILD_TARGET` to `x86_64-unknown-linux-musl`; the gate passes an
 explicit `--target` to every compile and nextest invocation, and subprocess
-Cargo checks inherit that target. A GNU-host gate does not qualify the
-supported musl platform.
+Cargo checks inherit that target. The portable-crate wasm library check is
+the exception: it sets `CARGO_BUILD_TARGET` and `--target` to
+`wasm32-unknown-unknown` for that command only (chapter 06 §7.5). A GNU-host
+gate does not qualify the supported musl platform.
 
 `tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
 `tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
@@ -772,10 +787,11 @@ exports all four for the test process.
 | Formatting | `cargo fmt --all --check` | The tree is byte-identical to `rustfmt` output under the pinned toolchain |
 | Lints | `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` | Every target of every package, all features on, no warnings. The workspace lint table denies `missing_docs`, `unwrap_used`, `expect_used`, `dbg_macro`, `todo`, `unimplemented`, and broken intra-doc links, and forbids `unsafe_code` |
 | Default feature builds | `cargo build --locked --workspace --lib --bins` and `cargo build --locked -p plak --features maintainer --bins`, each with `-D warnings` on the rustflags Cargo passes | Check, platform and full tiers, after clippy: default-feature libraries and binaries compile and link, as does the maintainer installer's Plak feature set, without test hooks or all-features unification hiding missing dependencies. Rustc warnings in those closures are errors; clippy remains the `--all-features` lint |
+| Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --portable-crates`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown` (chapter 06 §7.5). Currently that set is `plakous-model`, whose empty default features are portable. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip and the run records no gate evidence |
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked`, then `cargo doc -p <package> --no-deps --locked` for each supported package in its own default resolution | Rustdoc builds every package's documentation with its own lints denied (a default resolution can expose a link the all-features run hides): broken intra-doc links, links from public documentation into private items, and bare URLs are errors. Runs after clippy and before the tests |
 | Offline tests | `cargo nextest run --locked --workspace --all-features --profile offline`, then `--profile serial` and `--profile durability` with `--test-threads=1` | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
-| Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions |
+| Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 §7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
 | Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of seven profiles (facade none, `full`, `composition`, `claude` and `openai`; hosted none and all-features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plak` and present under `test-hooks` |
 | Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per `tests/tooling` module, four at a time |
 
