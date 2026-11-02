@@ -3903,8 +3903,8 @@ is one row.
 The **window is always the authenticated catalog's own `contextWindow`**,
 recorded as `ReferenceClientEnvelope` plus `CapacityRule::ProviderReservedInput`
 with `reported_context_window` equal to the admitted input. No reviewed
-constant caps or raises it. Today the catalog reports 500k for `grok-4.5`,
-`grok-4.6` and `grok-4.7-build-fast` and 256k for `grok-4.7`. A catalog row
+constant caps or raises it. The window is whatever the account's catalog row
+reports at attach; this chapter pins no value for it. A catalog row
 that reports no window (or zero) has no contract: the model is not offered and
 cannot be opened, rather than running against a guessed window. Aliases,
 public model pages, synthetic tests and foreign-route observations never admit

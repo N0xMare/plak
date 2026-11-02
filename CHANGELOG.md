@@ -5,6 +5,62 @@ package shares one version. `0.0.x` releases carry no API, wire or
 persisted-format compatibility promise; the session export document is the
 one cross-build carrier (a build imports its own and the previous version).
 
+## Unreleased
+
+### Plak
+
+- `plak session --help` names the export versions from the build's own
+  constants: it writes 11 and imports 11 and 10.
+- Text and thinking streamed by a model request that is retried, refused, cut
+  by the output limit or folded for context are dimmed or dropped from the live
+  transcript back to the start of that request. Earlier requests of the same
+  turn keep their text.
+- Copying a thinking lead copies its rail, glyph, summary and meta, and a
+  selection edge on part of a wide grapheme takes the whole grapheme.
+- A full observation mailbox keeps a credential wait's park and clear notices;
+  it drops streaming text or transcript content that the next resnapshot
+  repairs instead.
+- Telemetry records content-free measurement facts: each child's template,
+  salted per-session digests of read, search and list targets with the page
+  returned, a program label for shell calls (credential-shaped words become
+  `other`), wait targets and outcomes, the context window beside prepared
+  input, compaction trigger facts, the first request's footprint, the turn's
+  prepared-input high water and idle gaps. `plak telemetry status --views`
+  lists queries for them.
+
+### Plakous
+
+- A Messages `model_context_window_exceeded` stop fails the stream and takes
+  the context-limit overflow fold when nothing hosted ran, on Anthropic and
+  OpenRouter.
+- A programmatic tool call cut by `max_tokens` ends the request as an effect
+  that needs reconciliation; deferred programmatic calls flush only once the
+  stop reason is known.
+- Subscription side requests (SuperGrok web and X search and images, Claude
+  OAuth web search and page fetch) report a reviewed version gate or sent-beta
+  rejection as contract drift with the newer-build remedy. A 401 or 403 keeps
+  the credential path.
+- Tool measurement uses typed execution values and the new `WaitFact` only,
+  and does no work when telemetry is disabled.
+
+### Persisted formats
+
+- Telemetry store schema 21 (`telemetry-v21.sqlite3`, disposable). The state
+  key (`r26.e34.p35.t9`) and the export document (v11) are unchanged.
+
+### Development
+
+- Development tooling lives under `tools/<area>/` beside the recipe modules
+  that run it. Reference configs moved to `docs/reference-config/` and config
+  scenarios to `tests/fixtures/config-scenarios/`; CONTRIBUTING and SECURITY
+  moved to `.github/`; formatter, lint and audit configs use `.rustfmt.toml`,
+  `.clippy.toml` and `.config/deny.toml`.
+- The static group compiles seven library feature profiles instead of every
+  singleton, still validating every feature closure, and checks maintainer
+  Python with ruff 0.17.3.
+- One test-environment helper and one build entry point serve every recipe;
+  `just nextest` runs cargo-nextest under the gate's environment.
+
 ## 0.0.3
 
 ### Plak
