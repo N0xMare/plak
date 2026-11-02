@@ -265,8 +265,8 @@ canonical read executor, which Claude `Read`, Grok `read_file` and the
 OpenRouter `read` lower onto, admits a path only if it byte-equals an issued
 path; nothing is normalized. Claude `Read` of a PNG, JPEG, GIF or WebP,
 and Codex `view_image`, use the same workspace path admission for ordinary
-files. Job-output paths stay on the text read. `view_image` has no job-output
-exception. Any other path that lexically starts with
+files. Job-output paths and skill-root paths (below) stay on the text read.
+`view_image` has neither exception. Any other path that lexically starts with
 `<jobs root>/` (a sibling, a parent spelling, another agent's or another
 session's file, or a path issued by an earlier process before a restart or
 `/reload`) is refused without any I/O as `WorkspacePolicy`: `job output file

@@ -6587,7 +6587,8 @@ resource-limit failure (`tool invocation failed: workspace file exceeds the
 hard content identity limit`), for an image and any other file alike. A
 build without image decoding refuses instead of returning the raw file.
 Neither success records a text-read observation, so it does not authorize a
-later whole-file write. Job-output paths stay on the text read.
+later whole-file write. Job-output and skill-root paths (chapter 04 §2.1) stay
+on the text read.
 
 A template's hosted-retrieval tools append after the pack, in the order
 `web_search`, `web_fetch`, `x_search`, under the vocabulary's names: Claude
@@ -6782,7 +6783,8 @@ instructions. Grok `read_file`, `write`, `search_replace`, `grep` and
 workspace, and refuse a path outside it or one that contains `..`. Grok
 `read_file` and `grep` also accept exactly a `full output:` path the read
 exception admits (chapter 04 §2.1); `write`, `search_replace` and `list_dir`
-do not. A missing
+do not. `read_file` alone also reads a file under the user skill root
+(§6.1.1). A missing
 `list_dir` path fails with `path does not exist: <workspace-relative path>`, as
 a read of it does. A Grok `grep` (or regex search) that matches nothing returns
 `No matches found.`, or `No matches in the files searched.` when its header
@@ -7076,7 +7078,8 @@ increase. The Codex native-PTC single-agent default additionally leaves at least
 150 approximate tokens below its family budget (at most 5,350 for GPT-6,
 3,850 for the earlier base). `view_image` is not offered on that outer
 surface or inside the cell: native Codex shows it only inside the cell, and
-this version does not, because a cell cannot return an image result. Its compact cell wording keeps
+this version does not, because a cell cannot return an image result. The
+native-PTC compact cell wording keeps
 yield/output defaults and the process catalog's foreground/background lifetime
 facts. Non-mutating child catalogs omit file-writing presentations before
 instruction assembly. Family editing sentences, including the vendored Codex
