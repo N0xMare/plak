@@ -80,6 +80,60 @@ async fn foreign_oidc_token_endpoint_refuses_before_token_or_device_dispatch() -
 }
 
 #[tokio::test]
+async fn foreign_oidc_issuer_refuses_a_browser_callback_before_the_code_exchange() -> TestResult {
+    let endpoint = plakous_test_support::native_auth::test_endpoint().await?;
+    let temp = tempdir()?;
+    let manager = XaiNativeAuthManager::open_test_slot(
+        private_store(&temp)?,
+        endpoint.client,
+        endpoint.origin.trim_end_matches('/'),
+    )?;
+    let peer = tokio::spawn(async move {
+        let (tcp, _) = endpoint.listener.accept().await?;
+        let mut stream = endpoint.acceptor.accept(tcp).await?;
+        let request = plakous_test_support::native_auth::read_request(&mut stream).await?;
+        assert!(request.starts_with(b"GET /.well-known/openid-configuration "));
+        let mut document = oidc_document();
+        document["issuer"] = json!("https://foreign.invalid");
+        let reply = plakous_test_support::native_auth::response(
+            "200 OK",
+            "application/json",
+            document.to_string().as_bytes(),
+            "",
+        );
+        stream.write_all(&reply).await?;
+        stream.shutdown().await?;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), endpoint.listener.accept())
+                .await
+                .is_err(),
+            "discovery mismatch dispatched the code exchange"
+        );
+        TestResult::Ok(())
+    });
+    let login = manager.begin_remote_browser_login()?;
+    let parsed = Url::parse(login.authorization_url())?;
+    let pairs = parsed.query_pairs().collect::<BTreeMap<_, _>>();
+    let state = pairs.get("state").ok_or("browser state")?;
+    let failure = login
+        .complete(&format!(
+            "http://127.0.0.1:56121/callback?code=must-not-exchange&state={state}"
+        ))
+        .await
+        .err()
+        .ok_or("foreign issuer admitted")?;
+    assert!(matches!(
+        failure,
+        XaiNativeAuthError::CompatibilityDrift(CompatibilityDrift::Endpoint { field: "issuer" })
+    ));
+    assert!(failure.to_string().contains("install a newer build"));
+    assert!(!failure.to_string().contains("foreign.invalid"));
+    assert!(manager.core.store.load()?.is_none());
+    peer.await??;
+    Ok(())
+}
+
+#[tokio::test]
 async fn refresh_accepts_a_differing_granted_scope() -> TestResult {
     let peer = mock_peer().await?;
     let temp = tempdir()?;
