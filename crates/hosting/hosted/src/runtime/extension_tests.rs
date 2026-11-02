@@ -12,7 +12,10 @@ use plakous_host_protocol::views::ProviderSection;
 use plakous_host_protocol::{Core, ProtocolExtension};
 use std::sync::{Arc, Mutex};
 
-struct ProbeSurface(Arc<Mutex<Vec<(SurfacePhase, bool)>>>);
+struct ProbeSurface {
+    phases: Arc<Mutex<Vec<(SurfacePhase, bool)>>>,
+    release: std::path::PathBuf,
+}
 impl SurfaceHandler<TestExtension> for ProbeSurface {
     fn needs_usage(&self, _: &ProbeIntent) -> bool {
         true
@@ -24,17 +27,27 @@ impl SurfaceHandler<TestExtension> for ProbeSurface {
         events: &Sender<TestExtension>,
     ) -> SurfaceEffect {
         assert_eq!(facts.queue_len, 0);
-        self.0
+        self.phases
             .lock()
             .unwrap()
             .push((facts.phase, facts.attached_one_shot));
         events.send(ContentEvent::Extension(ProbeObservation::UsageObserved));
+        // Unblock the provider from this dispatch. The one-shot observer can
+        // miss the coalesced prefix delta; the gate must not wait on that read.
+        if facts.phase == SurfacePhase::Busy {
+            std::fs::write(&self.release, "release").unwrap();
+        }
         SurfaceEffect::default()
     }
     fn publish_template_readiness(&self, _: &[ProviderSection], _: &Sender<TestExtension>) {}
     fn readiness_read(&self) -> super::ReadinessRead {
         Box::new(|| Ok((Vec::new(), Vec::new())))
     }
+}
+
+fn provider_outcome_parked(evidence: &std::path::Path) -> bool {
+    std::fs::read(evidence)
+        .is_ok_and(|bytes| String::from_utf8_lossy(&bytes).contains("provider_outcome_one"))
 }
 
 fn gated<P: ProtocolExtension>(root: &std::path::Path) -> (HostConfig<P>, std::path::PathBuf) {
@@ -97,26 +110,38 @@ fn independent_extension_is_dispatched_with_busy_facts_inside_one_shot() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, release) = gated::<TestExtension>(root.path());
     let phases = Arc::new(Mutex::new(Vec::new()));
-    config.surface = Some(Box::new(ProbeSurface(phases.clone())));
+    let evidence = root.path().join("events.jsonl");
+    config.surface = Some(Box::new(ProbeSurface {
+        phases: phases.clone(),
+        release: release.clone(),
+    }));
     let store = config.store.clone();
     let id = config.session.id.clone();
     let mut observed = false;
-    let result = OneShot::run(
-        config,
-        "inspect while busy".into(),
-        |event, actions| match event {
-            Some(HostEvent::AssistantDelta(text)) if text == "prefix " => {
+    let mut sent = false;
+    let result = OneShot::run(config, "inspect while busy".into(), |event, actions| {
+        // The prefix delta is coalesced and droppable. The fsynced outcome
+        // row is written before the provider parks, while the turn is busy.
+        if !sent && provider_outcome_parked(&evidence) {
+            actions
+                .send(UserAction::Extension(ProbeIntent::InspectUsage))
+                .unwrap();
+            sent = true;
+        }
+        match event {
+            Some(HostEvent::AssistantDelta(text)) if !sent && text == "prefix " => {
                 actions
                     .send(UserAction::Extension(ProbeIntent::InspectUsage))
                     .unwrap();
+                sent = true;
             }
             Some(HostEvent::Extension(ProbeObservation::UsageObserved)) => {
                 observed = true;
-                std::fs::write(&release, "release").unwrap();
+                let _ = std::fs::write(&release, "release");
             }
             _ => {}
-        },
-    )
+        }
+    })
     .unwrap();
     assert!(observed);
     assert_eq!(*phases.lock().unwrap(), vec![(SurfacePhase::Busy, true)]);
@@ -293,7 +318,10 @@ fn independent_extension_uses_the_interactive_host_and_bounded_observations() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, release) = gated::<TestExtension>(root.path());
     let phases = Arc::new(Mutex::new(Vec::new()));
-    config.surface = Some(Box::new(ProbeSurface(phases.clone())));
+    config.surface = Some(Box::new(ProbeSurface {
+        phases: phases.clone(),
+        release: root.path().join("probe-release"),
+    }));
     let store = config.store.clone();
     let id = config.session.id.clone();
     let mut worker = InteractiveWorker {
@@ -337,7 +365,10 @@ fn idle_one_shot_configuration_publishes_usage_then_dispatches_independent_exten
     let (mut config, _) = fresh_injected_attached_host_for::<TestExtension>(root.path());
     config.attached_one_shot = true;
     let facts = Arc::new(Mutex::new(Vec::new()));
-    config.surface = Some(Box::new(ProbeSurface(facts.clone())));
+    config.surface = Some(Box::new(ProbeSurface {
+        phases: facts.clone(),
+        release: root.path().join("probe-release"),
+    }));
     let (actions, events, worker) = super::spawn_host_worker(config).unwrap();
     // Discard startup projections so only this intent can satisfy the ordering assertion.
     let _ = events.try_iter().collect::<Vec<_>>();

@@ -935,20 +935,40 @@ fn same_kind<P: ProtocolExtension>(
     }
 }
 
+/// Park, clear, lifecycle, and job edges are the record a face must not lose.
+fn retained_edge<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
+    matches!(
+        event,
+        SessionObservation::ModelRefusal { .. }
+            | SessionObservation::TurnLifecycle(_)
+            | SessionObservation::JobStarted { .. }
+            | SessionObservation::JobPromoted { .. }
+            | SessionObservation::JobTerminal { .. }
+            | SessionObservation::CredentialWait { .. }
+    )
+}
+
 fn state_eviction<P: ProtocolExtension>(queue: &VecDeque<SessionObservation<P>>) -> Option<usize> {
     let terminal_error = queue.iter().rposition(terminal_error_event);
     queue.iter().enumerate().find_map(|(index, event)| {
-        (!latest_state_event(event)
-            && Some(index) != terminal_error
-            && !matches!(
-                event,
-                SessionObservation::ModelRefusal { .. }
-                    | SessionObservation::TurnLifecycle(_)
-                    | SessionObservation::JobStarted { .. }
-                    | SessionObservation::JobPromoted { .. }
-                    | SessionObservation::JobTerminal { .. }
-            ))
-        .then_some(index)
+        (!latest_state_event(event) && Some(index) != terminal_error && !retained_edge(event))
+            .then_some(index)
+    })
+}
+
+/// A credential park and its clear both have to land. A streaming delta is the
+/// only expendable slot: a latest-state snapshot is superseded only by its own
+/// newer value, and a retained edge is never a victim.
+fn credential_wait_victim<P: ProtocolExtension>(
+    queue: &VecDeque<SessionObservation<P>>,
+) -> Option<usize> {
+    queue.iter().position(|queued| {
+        matches!(
+            queued,
+            SessionObservation::AssistantDelta(_)
+                | SessionObservation::ReasoningDelta { .. }
+                | SessionObservation::TranscriptStream { .. }
+        )
     })
 }
 
@@ -965,6 +985,7 @@ fn eviction_index<P: ProtocolExtension>(
     } else if matches!(event, SessionObservation::AssistantDone) {
         queue.iter().position(|queued| {
             !latest_state_event(queued)
+                && !retained_edge(queued)
                 && !matches!(
                     queued,
                     SessionObservation::AssistantDone
@@ -982,6 +1003,7 @@ fn eviction_index<P: ProtocolExtension>(
             .or_else(|| {
                 queue.iter().position(|queued| {
                     !latest_state_event(queued)
+                        && !retained_edge(queued)
                         && !matches!(
                             queued,
                             SessionObservation::ModelRefusal { .. }
@@ -1000,6 +1022,7 @@ fn eviction_index<P: ProtocolExtension>(
                 queue.iter().position(|queued| {
                     !latest_state_event(queued)
                         && !replaceable_diagnostic_event(queued)
+                        && !retained_edge(queued)
                         && !matches!(
                             queued,
                             SessionObservation::AssistantDone
@@ -1013,8 +1036,13 @@ fn eviction_index<P: ProtocolExtension>(
             })
     } else if admission_event(event) {
         queue.iter().position(|queued| {
-            !admission_event(queued) && !terminal_error_event(queued) && !latest_state_event(queued)
+            !admission_event(queued)
+                && !terminal_error_event(queued)
+                && !latest_state_event(queued)
+                && !retained_edge(queued)
         })
+    } else if matches!(event, SessionObservation::CredentialWait { .. }) {
+        credential_wait_victim(queue)
     } else {
         None
     }
@@ -1103,7 +1131,10 @@ impl<P: ProtocolExtension> ObservationSender<P> {
 
     /// Bounded delivery that never waits for renderer capacity. Mutex ownership
     /// is short; at saturation required final/state events evict only a
-    /// replaceable transcript/delta/progress observation. Latest-state variants
+    /// replaceable transcript/delta/progress observation. A credential-wait
+    /// park and its clear are retained the same way: saturation may drop a
+    /// streaming delta to admit one, and neither wait is itself an eviction
+    /// candidate. A latest-state snapshot is not spent to make room. Latest-state variants
     /// supersede only their own older value, and the newest error remains until
     /// the renderer can observe it alongside the terminal state.
     ///

@@ -4826,7 +4826,10 @@ fallback is waiting for the model. The HUD never carries a tool subject,
 stream-token badge, stop button, duplicate turn clock, or send-now sentence.
 `CredentialWait { account }` is a live host
 observation (`credential_wait` in JSONL); `None` clears it without terminalizing
-the turn. The named login command is a live `settings` notice, not persisted
+the turn. A saturated observation mailbox admits a credential park and its
+clear by dropping a streaming delta. It never evicts a queued credential wait,
+and it does not drop a latest-state snapshot to make room. The named login
+command is a live `settings` notice, not persisted
 recovery authority. The host observes root waits through the turn event stream
 and idle compaction waits through the agent's read-only live wait scope. Operator
 interruption also ends an idle compaction's credential wait.

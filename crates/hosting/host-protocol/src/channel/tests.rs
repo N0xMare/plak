@@ -1122,3 +1122,89 @@ fn patches_never_merge_across_raw_or_same_scope_stream_appends() {
         );
     }
 }
+
+#[test]
+fn saturated_deltas_keep_credential_wait_park_and_clear() {
+    let (sender, receiver) = observation_channel::<Core>();
+    for index in 0..OBSERVATION_QUEUE_CAPACITY {
+        sender
+            .send(SessionObservation::ReasoningDelta {
+                location_key: index.to_string(),
+                text: "x".into(),
+            })
+            .unwrap();
+    }
+    assert!(
+        sender
+            .send(SessionObservation::AssistantDelta("no room".into()))
+            .is_err()
+    );
+    let park = SessionObservation::CredentialWait {
+        account: Some("codex".into()),
+    };
+    let clear = SessionObservation::CredentialWait { account: None };
+    sender.send(park.clone()).unwrap();
+    sender.send(clear.clone()).unwrap();
+    sender.send(SessionObservation::SetBusy(true)).unwrap();
+    let events: Vec<_> = receiver.try_iter().collect();
+    let waits: Vec<_> = events
+        .iter()
+        .filter(|event| matches!(event, SessionObservation::CredentialWait { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(waits, vec![park, clear]);
+}
+
+#[test]
+fn saturated_snapshots_are_not_spent_and_a_queued_wait_survives_them() {
+    use crate::intent::{Never, ObservationExtension, ProtocolExtension};
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct Snap(u16);
+    impl ObservationExtension for Snap {
+        fn latest_state(&self) -> bool {
+            true
+        }
+        fn same_kind(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+        fn kind_label(&self) -> &'static str {
+            "snap"
+        }
+    }
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct Ext;
+    impl ProtocolExtension for Ext {
+        type Intent = Never;
+        type Observation = Snap;
+    }
+
+    let (sender, receiver) = observation_channel::<Ext>();
+    for index in 0..OBSERVATION_QUEUE_CAPACITY {
+        sender
+            .send(SessionObservation::Extension(Snap(
+                u16::try_from(index).unwrap(),
+            )))
+            .unwrap();
+    }
+    let park = SessionObservation::CredentialWait {
+        account: Some("codex".into()),
+    };
+    assert!(
+        sender.send(park.clone()).is_err(),
+        "a latest-state snapshot is not spent to admit a credential wait"
+    );
+    assert!(receiver.try_recv().is_ok(), "the snapshot queue was full");
+    sender.send(park.clone()).unwrap();
+    assert!(
+        sender
+            .send(SessionObservation::Extension(Snap(u16::MAX)))
+            .is_err(),
+        "a queued credential wait is not an eviction candidate"
+    );
+    let waits: Vec<_> = receiver
+        .try_iter()
+        .filter(|event| matches!(event, SessionObservation::CredentialWait { .. }))
+        .collect();
+    assert_eq!(waits, vec![park]);
+}

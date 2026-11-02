@@ -62,21 +62,22 @@ pub(super) fn stopped_preparation(
     let wake = started.clone();
     let ready = release.clone();
     let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    // The stop is posted on the host thread inside the step. A second runtime
+    // only releases the step, so the checkpoint does not race the send.
     let control = std::thread::spawn(move || {
         executor.block_on(wake.notified()).unwrap();
-        actions
-            .send(if quit {
-                UserAction::Quit
-            } else {
-                UserAction::Interrupt
-            })
-            .unwrap();
         ready.notify_one();
     });
+    let stop = if quit {
+        UserAction::Quit
+    } else {
+        UserAction::Interrupt
+    };
     preparation::hooks::HOOK.with(|slot| {
         *slot.borrow_mut() = Some((
             stage,
             Box::pin(async move {
+                actions.send(stop).unwrap();
                 if stage == preparation::Stage::Refresh {
                     use crate::runtime::startup::{
                         native_refresh_tests::AwaitingNativeModel, refresh_native_authority,
