@@ -137,8 +137,13 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', dev)
         justfile = (ROOT / "Justfile").read_text()
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)
-        self.assertIn("tools/gate/test-env.sh -- cargo nextest", justfile)
+        self.assertIn("[positional-arguments]", justfile)
+        self.assertIn('tools/gate/test-env.sh -- cargo nextest "$@"', justfile)
+        self.assertIn("plak_dev_tools_prefix", justfile)
         self.assertNotIn("\ntest:\n", justfile)
+        coverage = (ROOT / "tools/dev/coverage.sh").read_text()
+        self.assertIn("plak_dev_tools_prefix", coverage)
+        self.assertIn("dev-tools.sh check", coverage)
 
     def test_test_env_exports_home_and_empty_git_config(self):
         script = ROOT / "tools/gate/test-env.sh"
@@ -159,6 +164,75 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertEqual(gitconfig, scratch / "gitconfig")
         self.assertEqual(gitconfig.read_text(), "")
         self.assertEqual(values["GIT_CONFIG_NOSYSTEM"], "1")
+
+    def test_nextest_filter_expression_reaches_cargo_as_one_argument(self):
+        copy = self.base / "repo"
+        for relative in (
+            "Justfile",
+            "tools/musl/musl.just",
+            "tests/live/live.just",
+            "tools/perf/perf.just",
+            "tools/prompts/prompts.just",
+            "tools/tui/tui.just",
+            "tools/dev/dev.just",
+            "eval/harbor.just",
+            "tools/gate/test-env.sh",
+            "tools/gate/test-tmpdir.sh",
+            "tools/gate/dev-tools.sh",
+            "tools/gate/dev-tools-prefix.sh",
+        ):
+            destination = copy / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, destination)
+            if destination.suffix == ".sh":
+                destination.chmod(0o755)
+        bindir = copy / ".dev-tools/bin"
+        bindir.mkdir(parents=True)
+        log = copy / "cargo-argv.jsonl"
+        cargo = bindir / "cargo"
+        cargo.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, sys\n"
+            "if sys.argv[1:3] == ['nextest', '--version']:\n"
+            "    print('cargo-nextest 0.9.100')\n"
+            "    raise SystemExit(0)\n"
+            "with open(os.environ['CARGO_ARGV_LOG'], 'a') as handle:\n"
+            "    handle.write(json.dumps(sys.argv) + '\\n')\n"
+            "raise SystemExit(0)\n"
+        )
+        cargo.chmod(0o755)
+        ruff = bindir / "ruff"
+        ruff.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "if '--version' in sys.argv:\n"
+            "    print('ruff 0.17.3')\n"
+            "raise SystemExit(0)\n"
+        )
+        ruff.chmod(0o755)
+        result = subprocess.run(
+            ["just", "nextest", "-E", "package(plakous-model)", "list"],
+            cwd=copy,
+            env=dict(
+                os.environ,
+                CARGO_ARGV_LOG=str(log),
+                PLAK_TEST_TMPDIR=str(self.base / "nextest-tmp"),
+            ),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("syntax error", result.stderr)
+        import json
+
+        recorded = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(len(recorded), 1)
+        self.assertTrue(recorded[0][0].endswith("/cargo"), recorded[0][0])
+        self.assertEqual(
+            recorded[0][1:],
+            ["nextest", "-E", "package(plakous-model)", "list"],
+        )
 
 
 if __name__ == "__main__":

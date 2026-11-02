@@ -721,8 +721,10 @@ supported musl platform.
 `tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
 0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. `dev-check.sh`
 (with `--fresh`), `just dev coverage`, `perf-smoke.sh`, `crash-sweep.py`,
-`jj-tools.py compat` and the live drivers use it. `just nextest` runs cargo
-nextest under it. On Linux the selector is a per-checkout
+`jj-tools.py compat` and the live drivers use it. `just nextest` runs the
+pinned cargo-nextest under it and passes recipe arguments as positional
+parameters, so a filter expression reaches nextest as one argument. On Linux
+the selector is a per-checkout
 directory under `/dev/shm`; on macOS a per-checkout directory under
 `/private/tmp`, so neither lies under the operator's `HOME`, where a spawned
 binary's project discovery could reach the real `~/.plak`. The directory is

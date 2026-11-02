@@ -689,7 +689,10 @@ just dev-tools install
 
 `tools/gate/dev-tools.sh install` installs exactly cargo-nextest 0.9.100,
 cargo-deny 0.19.0 and ruff 0.17.3 into the repository-local `.dev-tools/bin`,
-which the gate puts first on `PATH`. The prefix sits outside `target/` so
+which the gate puts first on `PATH`. `just nextest` and
+`tools/dev/coverage.sh` prepend that same prefix and run `dev-tools.sh check`
+before cargo nextest, so a hand run does not pick up a different
+cargo-nextest already on `PATH`. The prefix sits outside `target/` so
 `cargo clean` does not remove it; its install build artifacts go to
 `.dev-tools/build`. Installation also prefetches all locked public
 compile-contract fixture dependencies (chapter 05 §1.1), so subsequent contract

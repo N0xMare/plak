@@ -60,9 +60,15 @@ clippy:
     tools/gate/clippy.sh
 
 # cargo nextest with the isolated test environment (spec 05 §1).
+# Positional arguments: an unquoted {{ARGS}} splice breaks on `-E 'package(x)'`.
+[positional-arguments]
 [doc("cargo nextest under the isolated test environment")]
 nextest *ARGS:
-    tools/gate/test-env.sh -- cargo nextest {{ARGS}}
+    root="$(pwd -P)"; \
+    source tools/gate/dev-tools-prefix.sh; \
+    export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"; \
+    tools/gate/dev-tools.sh check; \
+    tools/gate/test-env.sh -- cargo nextest "$@"
 
 # Build plak and its workers without installing a snapshot or touching PATH.
 # profile: debug, release, maintainer, or profiling.

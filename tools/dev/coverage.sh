@@ -6,6 +6,9 @@
 # Uses its own CARGO_TARGET_DIR so it never invalidates the normal build.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source tools/gate/dev-tools-prefix.sh
+export PATH="$(plak_dev_tools_prefix "$PWD")/bin:$PATH"
+tools/gate/dev-tools.sh check
 command -v cargo-llvm-cov >/dev/null || { echo "install: cargo install cargo-llvm-cov" >&2; exit 1; }
 mkdir -p target/llvm-cov
 eval "$(tools/gate/test-env.sh)"
