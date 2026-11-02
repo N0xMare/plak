@@ -45,6 +45,8 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Security
 
+- pulldown-cmark is 0.13.6 (RUSTSEC-2026-0433, quadratic parsing of nested
+  image wikilinks). Plak never enables wikilinks, so it was not exposed.
 - The build audit also waives RUSTSEC-2026-0429 for zip 8.6.0. Like
   RUSTSEC-2026-0367, -0368 and -0369 it concerns only `ZipArchive::extract`,
   which the Monty type checker's in-memory typeshed reader never calls.
