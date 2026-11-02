@@ -533,6 +533,15 @@ async fn grok_output_over_a_child_is_the_await_with_its_receipt_and_replay() {
     assert_eq!(inner["timed_out"], true);
     assert_eq!(inner["woke_by"], "timeout");
     assert_eq!(inner["agents"][0]["agent_id"], "c1");
+    // The topology envelope keeps the typed wait fact of the await it wraps.
+    assert_eq!(
+        snapshot.wait_fact(),
+        Some(plakous::tools::WaitFact::new(
+            1,
+            0,
+            plakous::tools::WaitWake::Timeout
+        ))
+    );
     assert!(driver.tree.lock().unwrap().operations().is_empty());
     {
         let mut tree = driver.tree.lock().unwrap();

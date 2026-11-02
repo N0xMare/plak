@@ -34,7 +34,11 @@ impl ExecutionValue {
         let heap = match self {
             Self::FileRead(value) => value.path.capacity().saturating_add(value.text.capacity()),
             Self::SearchHits(value) => value.hits.iter().fold(
-                value.hits.capacity().saturating_mul(size_of::<SearchHit>()),
+                value
+                    .hits
+                    .capacity()
+                    .saturating_mul(size_of::<SearchHit>())
+                    .saturating_add(value.query.capacity()),
                 |bytes, hit| {
                     bytes
                         .saturating_add(hit.path.capacity())
@@ -45,7 +49,8 @@ impl ExecutionValue {
                 value
                     .entries
                     .capacity()
-                    .saturating_mul(size_of::<ListedEntry>()),
+                    .saturating_mul(size_of::<ListedEntry>())
+                    .saturating_add(value.path.capacity()),
                 |bytes, entry| bytes.saturating_add(entry.path.capacity()),
             ),
             Self::FileChanges(value) => value.changes.iter().fold(
@@ -59,7 +64,8 @@ impl ExecutionValue {
                 .status
                 .capacity()
                 .saturating_add(value.output.capacity())
-                .saturating_add(value.full_output.as_ref().map_or(0, String::capacity)),
+                .saturating_add(value.full_output.as_ref().map_or(0, String::capacity))
+                .saturating_add(value.program.as_ref().map_or(0, String::capacity)),
             Self::Plan(_) => 0,
         };
         size_of::<Self>().saturating_add(heap)
@@ -93,6 +99,9 @@ pub struct FileReadValue {
 /// Content search matches in presented order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchHitsValue {
+    /// The query or pattern as the call named it: its first 4096 bytes, cut
+    /// on a character boundary.
+    pub query: String,
     /// The matches the result kept.
     pub hits: Vec<SearchHit>,
     /// Known matching lines not retained, including those outside the
@@ -118,6 +127,8 @@ pub struct SearchHit {
 /// Directory entries in walk order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListingValue {
+    /// The listed directory as the call named it.
+    pub path: String,
     /// The entries the result kept.
     pub entries: Vec<ListedEntry>,
     /// Entries found beyond the ones kept.
@@ -199,6 +210,10 @@ pub struct ProcessValue {
     pub truncated: bool,
     /// The issued job-output file holding the full output, when there is one.
     pub full_output: Option<String>,
+    /// For a start, the program its command runs: a basename of at most 64
+    /// bytes in `[A-Za-z0-9._+-]`, or `other`. Never an argument, path or
+    /// assignment. `None` for any later observation.
+    pub program: Option<String>,
 }
 
 /// The plan revision after a replacement.

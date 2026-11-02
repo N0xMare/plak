@@ -518,10 +518,16 @@ async fn runtime_telemetry_turn_compaction_finished_carries_turn_context() -> Te
             observations.iter().any(|observation| {
                 matches!(
                     observation.kind(),
-                    TelemetryObservationKind::CompactionFinished { .. }
-                ) && observation.context().turn_id().is_some()
+                    TelemetryObservationKind::CompactionFinished {
+                        measurement,
+                        ..
+                    } if observation.context().turn_id().is_some()
+                        && measurement.context_window_tokens == Some(1_000_000)
+                        && measurement.threshold_tokens.is_some()
+                        && measurement.occupancy_tokens.is_some()
+                )
             }),
-            "missing CompactionFinished with turn context"
+            "missing CompactionFinished with window, threshold, and occupancy"
         );
         let turn_finished = observations.iter().find_map(|observation| {
             let TelemetryObservationKind::TurnFinished {
@@ -537,6 +543,351 @@ async fn runtime_telemetry_turn_compaction_finished_carries_turn_context() -> Te
         turn_finished.ok_or("missing TurnFinished compaction compartments")?;
     }
     agent.shutdown().await?;
+    Ok(())
+}
+
+fn real_measured_registry() -> TestResult<FrozenToolRegistry> {
+    use plakous_tools::ToolPack as _;
+    let mut registrations = plakous_tool_files::FilesToolPack.registrations()?;
+    registrations.extend(plakous_tool_search::SearchToolPack.registrations()?);
+    registrations.push(plakous_tool_search::SearchToolPack::list_entries_registration()?);
+    registrations.extend(Arc::new(ProcessSessionTools::posix_sh()?).registrations()?);
+    // The Direct exposure lists tools by name; the configured tools must match.
+    registrations.sort_by(|left, right| left.name().cmp(right.name()));
+    let mut registry = ToolRegistryBuilder::default();
+    for registration in registrations {
+        registry.register(registration)?;
+    }
+    Ok(registry.freeze())
+}
+
+fn tool_measurements(observations: &[TelemetryObservation]) -> Vec<crate::ToolMeasurement> {
+    observations
+        .iter()
+        .filter_map(|observation| match observation.kind() {
+            TelemetryObservationKind::ToolFinished { measurement, .. } => Some(measurement),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The canonical read, search, listing and process tools run for real; every
+/// fact comes from their typed values, and no path, query or command text
+/// reaches an observation.
+#[tokio::test]
+async fn runtime_telemetry_measures_the_real_canonical_tools_without_content() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    std::fs::create_dir(directory.path().join("secret-dir"))?;
+    std::fs::write(
+        directory.path().join("secret-dir/notes.txt"),
+        "one\ntwo\nthree needle-secret\nfour\nfive\n",
+    )?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let sink = Arc::new(RecordingTelemetrySink {
+        observations: Mutex::new(Vec::new()),
+    });
+    let telemetry = Arc::new(TelemetryEmitter::enabled(sink.clone()));
+    let descriptor = durable_test_descriptor("test.route")?;
+    let process_start = json!({
+        "command": "PGPASSWORD=hunter2 sleep 3",
+        "workdir": ".",
+        "login": false,
+        "tty": false,
+        "keep_stdin_open": false,
+        "yield_time_ms": 250,
+        "max_output_bytes": 4096
+    });
+    let process_poll = json!({
+        "session_id": 1,
+        "yield_time_ms": 0,
+        "max_output_bytes": 4096,
+        "max_output_records": 16
+    });
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            1,
+            0x6ea5,
+            false,
+        )
+        .with_context_tokens_from_prepare(0, 4_321)
+        .with_scripted_tool_calls([
+            (
+                0,
+                "read_file",
+                json!({"path": "secret-dir/notes.txt", "offset": 2, "limit": 2}).to_string(),
+            ),
+            (
+                1,
+                "read_file",
+                json!({"path": "./secret-dir//notes.txt"}).to_string(),
+            ),
+            (
+                2,
+                "search_repository",
+                json!({"query": "needle-secret", "path": "."}).to_string(),
+            ),
+            (3, "list_entries", json!({"path": "secret-dir"}).to_string()),
+            (4, "process_session_start", process_start.to_string()),
+            (5, "process_session_poll", process_poll.to_string()),
+        ]),
+    );
+    let authority = model.authority.clone();
+    let runtime_model: Arc<dyn LanguageModel> = model.clone();
+    let registry = real_measured_registry()?;
+    let configured = configured_test_model(
+        runtime_model,
+        descriptor,
+        authority,
+        &registry,
+        LocalDurabilityDisposition::DurableRequired,
+        ContextAdmissionRequirement::AnyBounded,
+    )
+    .map_err(|error| format!("configure: {error}"))?;
+    let agent = sessions
+        .create(
+            "create:telemetry-measurement",
+            AgentBuilder::new(configured, registry, Arc::clone(&workspace))
+                .request_policy(AgentRequestPolicy::new(
+                    GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
+                    ReasoningPolicy::Disabled,
+                ))
+                .tool_policy(Arc::new(AlwaysAllowPolicy))
+                .identity_sources(
+                    Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
+                    Arc::new(SystemIdGenerator),
+                )
+                .telemetry(telemetry),
+        )
+        .await
+        .map_err(|error| format!("create: {error}"))?;
+    let result = agent
+        .prompt("measure the tools")
+        .await
+        .map_err(|error| format!("prompt: {error}"))?
+        .result()
+        .await
+        .map_err(|error| format!("result: {error}"))?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    agent.shutdown().await?;
+    let observations = lock_mutex(&sink.observations).clone();
+    let rendered = format!("{observations:?}");
+    for secret in ["secret", "hunter2", "PGPASSWORD", "notes", "needle"] {
+        assert!(!rendered.contains(secret), "{secret} reached telemetry");
+    }
+    let tools = tool_measurements(&observations);
+    assert_eq!(tools.len(), 6, "{tools:?}");
+    let (partial, whole) = (tools[0], tools[1]);
+    assert!(partial.access_digest.is_some());
+    assert_eq!(partial.access_digest, whole.access_digest, "./a//b is a/b");
+    assert_eq!(partial.range_first_line, Some(2));
+    assert_eq!(partial.range_lines, Some(2));
+    assert_eq!(
+        partial.page_partial,
+        Some(true),
+        "the page stops before EOF"
+    );
+    assert_eq!(whole.range_first_line, Some(1));
+    assert_eq!(whole.page_partial, Some(false));
+    let (search, listing) = (tools[2], tools[3]);
+    assert!(search.access_digest.is_some() && listing.access_digest.is_some());
+    assert_ne!(search.access_digest, partial.access_digest);
+    assert_eq!(search.page_partial, Some(false));
+    assert_eq!(listing.page_partial, Some(false));
+    let start = tools[4];
+    assert_eq!(
+        start.command_class.map(|class| class.as_str().to_owned()),
+        Some("sleep".to_owned())
+    );
+    assert!(start.wait_kind.is_none() && start.access_digest.is_none());
+    let poll = tools[5];
+    assert_eq!(poll.wait_count, Some(1));
+    assert_eq!(poll.wait_kind, Some(crate::WaitTargetKind::Process));
+    assert_eq!(
+        poll.wait_outcome,
+        Some(crate::WaitOutcome::Timeout),
+        "a poll that returns while the process runs ended on its deadline"
+    );
+    let models: Vec<_> = observations
+        .iter()
+        .filter_map(|observation| match observation.kind() {
+            TelemetryObservationKind::ModelFinished { measurement, .. } => Some(measurement),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(models.len(), 7);
+    assert!(
+        models
+            .iter()
+            .all(|measurement| measurement.context_window_tokens == Some(1_000_000))
+    );
+    assert!(models[0].instruction_bytes.is_some() && models[0].tool_schema_bytes.is_some());
+    assert!(models[0].tool_schema_bytes > Some(0));
+    assert!(models[1..].iter().all(|measurement| {
+        measurement.instruction_bytes.is_none() && measurement.tool_schema_bytes.is_none()
+    }));
+    assert_eq!(models[0].idle_gap, None, "the driver's first request");
+    assert!(
+        models[1..]
+            .iter()
+            .all(|measurement| measurement.idle_gap.is_some())
+    );
+    let prepared: Vec<u64> = models
+        .iter()
+        .filter_map(|measurement| measurement.prepared_input_tokens)
+        .collect();
+    let high_water = observations.iter().find_map(|observation| {
+        let TelemetryObservationKind::TurnFinished {
+            prepared_input_high_water,
+            ..
+        } = observation.kind()
+        else {
+            return None;
+        };
+        Some(prepared_input_high_water)
+    });
+    assert_eq!(
+        high_water.ok_or("missing TurnFinished")?,
+        prepared.iter().copied().max()
+    );
+    Ok(())
+}
+
+/// Content-filter and output-limit retries take the round back; the turn's
+/// first attempt still records the request footprint exactly once.
+#[tokio::test]
+async fn a_retried_first_round_records_its_footprint_once() -> TestResult {
+    let sink = Arc::new(RecordingTelemetrySink {
+        observations: Mutex::new(Vec::new()),
+    });
+    let telemetry = Arc::new(TelemetryEmitter::enabled(sink.clone()));
+    let (result, _) = provider_outcome_tests::scripted_turn_with(
+        "create:telemetry-retried-footprint",
+        provider_outcome_tests::retried_then_answered()?,
+        Some(telemetry),
+    )
+    .await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    let models: Vec<_> = lock_mutex(&sink.observations)
+        .iter()
+        .filter_map(|observation| match observation.kind() {
+            TelemetryObservationKind::ModelFinished { measurement, .. } => Some(measurement),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(models.len(), 3);
+    assert_eq!(
+        models
+            .iter()
+            .filter(|measurement| measurement.instruction_bytes.is_some())
+            .count(),
+        1
+    );
+    assert!(models[0].instruction_bytes.is_some());
+    Ok(())
+}
+
+/// A scheduling check that defers stages nothing: a later manual compaction
+/// records the route window and no threshold or occupancy.
+#[tokio::test]
+async fn manual_compaction_after_a_deferred_fence_check_records_no_threshold() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let sink = Arc::new(RecordingTelemetrySink {
+        observations: Mutex::new(Vec::new()),
+    });
+    let descriptor = durable_test_descriptor("test.route")?;
+    // Small measured occupancy: every scheduling check measures and defers.
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            0x7e1_0000,
+            false,
+        )
+        .with_context_tokens_from_prepare(0, 1_000),
+    );
+    let agent = sessions
+        .create(
+            "create:telemetry-manual-after-deferred",
+            durable_artifact_test_builder(Arc::clone(&workspace), model)
+                .with_scheduled_compaction_enabled(true)
+                .telemetry(Arc::new(TelemetryEmitter::enabled(sink.clone()))),
+        )
+        .await?;
+    // Every prompt after the first runs the pre-turn scheduling check, which
+    // measures the context and defers.
+    for prompt in [
+        "older replaceable intent",
+        "middle intent",
+        "latest protected intent",
+    ] {
+        let result = agent.prompt(prompt).await?.result().await?;
+        assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    }
+    assert!(
+        !lock_mutex(&sink.observations)
+            .iter()
+            .any(|observation| matches!(
+                observation.kind(),
+                TelemetryObservationKind::CompactionFinished { .. }
+            )),
+        "the scheduling checks measured and deferred"
+    );
+    let source = DurableSessionAddress::new(
+        agent.session_id(),
+        agent.branch_id(),
+        agent.checkpoint().id(),
+    );
+    let (builder, _model) = recovery_compaction_fixture(
+        Arc::clone(&workspace),
+        plakous_test_support::ScriptedRecoveryState::new(),
+        CompactionFixtureOutcome::Summary,
+        None,
+    )?;
+    agent
+        .session_endpoint()
+        .compact_session(AgentCompactSessionRequest::new(
+            "compact:telemetry-manual".to_owned(),
+            source.session_id,
+            source.branch_id,
+            source.checkpoint_id,
+            AgentCompactionReason::Manual,
+            builder,
+        ))
+        .await
+        .map_err(|error| format!("compact rejected: {error:?}"))?;
+    agent.shutdown().await?;
+    let manual = lock_mutex(&sink.observations)
+        .iter()
+        .find_map(|observation| match observation.kind() {
+            TelemetryObservationKind::CompactionFinished {
+                reason: CompactionEventReason::Manual,
+                measurement,
+                ..
+            } => Some(measurement),
+            _ => None,
+        })
+        .ok_or("missing manual CompactionFinished")?;
+    assert_eq!(manual.context_window_tokens, Some(1_000_000));
+    assert_eq!(manual.threshold_tokens, None);
+    assert_eq!(manual.occupancy_tokens, None);
     Ok(())
 }
 

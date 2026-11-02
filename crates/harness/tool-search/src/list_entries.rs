@@ -13,7 +13,7 @@ impl ListEntriesTool {
     pub(super) fn new() -> Result<(ToolDefinition, Self), ToolRuntimeError> {
         Ok((
             standard_definition(
-                "list_entries",
+                plakous_tools::LIST_ENTRIES_CAPABILITY_NAME,
                 "List repository files and directories using workspace-root ignore rules. depth defaults to 1; glob is relative to path. Symlinks are not followed.",
                 object_schema(
                     json!({
@@ -87,7 +87,10 @@ impl ToolExecutor for ListEntriesTool {
             if !invocation.want_value() {
                 return Ok(outcome);
             }
+            let mut listed = args.path.display().to_string();
+            listed.shrink_to_fit();
             let count = super::bounded_value_count::<plakous_tools::ListedEntry>(
+                listed.capacity(),
                 result
                     .matches()
                     .iter()
@@ -109,6 +112,7 @@ impl ToolExecutor for ListEntriesTool {
                 .collect();
             outcome.with_value(plakous_tools::ExecutionValue::Listing(
                 plakous_tools::ListingValue {
+                    path: listed,
                     entries,
                     entries_cut: result.matches().len().saturating_sub(count) as u64,
                     incomplete: result.incomplete(),

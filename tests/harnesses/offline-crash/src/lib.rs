@@ -38,10 +38,10 @@ pub use fixture::{
     scripted_code_mode_runtime_binding, scripted_code_mode_runtime_binding_with_extensions,
     scripted_compaction_runtime_binding, scripted_compaction_runtime_binding_with_finish,
     scripted_pi_runtime_binding, scripted_runtime_binding, scripted_runtime_binding_with_cursor,
-    scripted_runtime_binding_with_extensions, scripted_topology_runtime_binding,
-    scripted_topology_runtime_binding_with_clock, terminal_failure_runtime_binding,
-    text_blocks_runtime_binding, text_runtime_binding, text_runtime_binding_for_target,
-    text_runtime_binding_with_finish, topology_runtime_binding,
+    scripted_runtime_binding_with_extensions, scripted_runtime_binding_with_telemetry,
+    scripted_topology_runtime_binding, scripted_topology_runtime_binding_with_clock,
+    terminal_failure_runtime_binding, text_blocks_runtime_binding, text_runtime_binding,
+    text_runtime_binding_for_target, text_runtime_binding_with_finish, topology_runtime_binding,
 };
 use fixture::{probe_fixture, run_fixture, write_reply};
 use protocol::{ChildReply, ControlCommand, PROTOCOL_VERSION};

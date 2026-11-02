@@ -19,6 +19,8 @@ pub const APPLY_PATCH_CAPABILITY_NAME: &str = "apply_patch";
 pub const INSPECT_IMAGE_CAPABILITY_NAME: &str = "inspect_image";
 /// Canonical bounded repository-search capability.
 pub const SEARCH_REPOSITORY_CAPABILITY_NAME: &str = "search_repository";
+/// Canonical ignore-aware repository-listing capability.
+pub const LIST_ENTRIES_CAPABILITY_NAME: &str = "list_entries";
 /// Canonical optimistically revisioned plan-replacement capability.
 pub const UPDATE_PLAN_CAPABILITY_NAME: &str = "update_plan";
 /// Canonical Codex freeform patch-envelope capability. Durable: the Codex

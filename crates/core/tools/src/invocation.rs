@@ -182,8 +182,10 @@ impl ToolInvocation {
         }
     }
 
-    /// Requests an ephemeral typed result for a value-consuming nested caller.
-    /// Ordinary and text-only composition calls leave this disabled.
+    /// Requests an ephemeral typed result for a value-consuming nested caller,
+    /// or for a host measuring the call from its typed facts. Ordinary and
+    /// text-only calls leave this disabled; the model result is the same
+    /// either way.
     #[must_use]
     pub const fn with_want_value(mut self, want_value: bool) -> Self {
         self.want_value = want_value;

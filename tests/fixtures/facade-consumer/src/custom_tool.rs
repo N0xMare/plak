@@ -7,7 +7,7 @@ use plakous::model::{
 };
 use plakous::tools::{
     FrozenToolRegistry, RegisteredToolId, ToolContext, ToolExecutor, ToolExecutorId, ToolFuture,
-    ToolInvocation, ToolOutcome, ToolRegistration, ToolRegistryBuilder,
+    ToolInvocation, ToolOutcome, ToolRegistration, ToolRegistryBuilder, WaitFact, WaitWake,
 };
 
 struct ConsumerTool;
@@ -44,4 +44,16 @@ pub(crate) fn register_custom_tool() -> Result<FrozenToolRegistry, Box<dyn std::
     let mut builder = ToolRegistryBuilder::default();
     builder.register(registration)?;
     Ok(builder.freeze())
+}
+
+/// A waiting tool reports what it waited on and how the wait ended as a typed
+/// fact beside its result; hosts measure from the fact, never the text.
+pub(crate) fn wait_fact_rides_an_outcome() -> Result<(), Box<dyn std::error::Error>> {
+    let outcome = ToolOutcome::success_text("waited")?
+        .with_wait_fact(WaitFact::new(1, 2, WaitWake::Interrupted));
+    let fact = outcome.wait_fact().ok_or("wait fact")?;
+    assert_eq!((fact.agents, fact.processes), (1, 2));
+    assert_eq!(fact.wake, WaitWake::Interrupted);
+    assert!(ToolOutcome::success_text("plain")?.wait_fact().is_none());
+    Ok(())
 }

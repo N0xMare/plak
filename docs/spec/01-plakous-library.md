@@ -4866,7 +4866,14 @@ Executors can additionally attach an ephemeral `ExecutionValue` to a
 `ToolOutcome`: `FileRead`, `SearchHits`, `Listing`, `FileChanges`,
 `Process`, or `Plan`. `ToolInvocation::want_value()` defaults to false;
 the executor builds the typed payload only when requested by an in-process
-consumer. Existing direct and text-only composition calls do not request it.
+consumer or by a driver whose telemetry emitter has a sink, which requests it
+only for the canonical `read_file`, `search_repository`, `list_entries`,
+`process_session_start`, `process_session_poll` and `process_session_write`
+capabilities. A value requested only for measurement never reaches a
+composition cell that did not ask for one. Existing direct and text-only
+composition calls request none while telemetry is disabled. Search and listing
+values carry the query (its first 4096 bytes) and the listed path as the call
+named them, and a process start's value carries its program label (below).
 The first task joiner moves the value out of the stored outcome; later joiners
 receive the same text without a value. The driver takes the value before
 cloning presentation evidence and carries it on the serial or parallel
@@ -9091,24 +9098,63 @@ base and replaces them with checked terminal usage when observed. These
 numbers are presentation observations, never checkpoint authority or session
 export data. Tool adapters may attach a neutral
 await receipt through `ToolOutcome::with_wait_observation`; the topology adapter
-supplies its typed wake classification, without topology entering L0.
+supplies its typed wake classification, without topology entering L0. A
+waiting tool also attaches a `WaitFact` (`ToolOutcome::with_wait_fact`): the
+child agents and processes it watched and a closed `WaitWake` (`settled`,
+`mail`, `timeout`, `interrupted`) it reads from its own typed result. The
+topology adapter maps its settled and process wakes to `settled`, mail to
+`mail`, timeout to `timeout`, and steer and notice to `interrupted`; a
+multi-process await reports `timeout` while any awaited process still runs or
+leaves processes behind. Wrapping a receipt keeps its fact.
+
+The driver measures a finished call from typed facts only: its canonical
+capability name, its execution value and its wait fact. It never reads
+arguments, result text or presented tool names, and does no measurement work
+while the emitter has no sink. A read keeps the page's first line and line
+count and is partial when the page stops before the end of the file or cut or
+clipped lines. A search or listing is partial when it cut results or did not
+finish its walk. Reads, searches and listings carry a SHA-256 digest of a
+per-driver random salt, a NUL and the lexically normalized path or query
+(backslashes become slashes, empty and `.` components drop). The salt is drawn
+once per driver when telemetry is enabled, never persisted, and absent when
+the system has no randomness; then no digest is recorded. Digests therefore
+join within one driver lifetime, not across a reopen or reload. A process start
+records its program label: the process adapter skips leading `NAME=value`
+assignments, the `sudo`, `env`, `time`, `nice`, `nohup`, `command`, `exec` and
+`timeout` wrappers with their options and operands, and a leading `cd DIR &&`
+or `cd DIR;`, strips balanced quotes and the directory, and keeps a basename of
+at most 64 bytes in `[A-Za-z0-9._+-]` that is neither all digits nor an option;
+anything else is `other`. The driver re-checks the label against the same set.
+A single-session poll or write is a process wait over one target; it ended on
+its deadline while the observed process still runs or left processes behind,
+and completed otherwise, including a process its own timer killed.
 
 `TelemetryObservationKind` is lifecycle-only:
 
 - `TurnStarted { queue_time, origin }`;
 - `TurnFinished { elapsed, status, usage, model_wall, tool_wall,
-  compaction_wall, model_attempts, tool_calls, compactions }`, where each
+  compaction_wall, model_attempts, tool_calls, compactions,
+  prepared_input_high_water }`, where each
   compartment wall sums finished operation durations within the turn, so
-  concurrent tool calls may exceed turn elapsed;
+  concurrent tool calls may exceed turn elapsed. The high water is the largest
+  prepared-input token figure observed on the turn, or absent when no attempt
+  measured one;
 - `ModelReresolved { accepted }`, a model past its admitted evidence window
   re-resolved between model operations (§7.4); `accepted` is false when the
   turn ended on a refused or failed resolution. The product does not persist
   it;
 - `ModelStarted`, `ModelFirstEvent { elapsed }` (time to first token), and
-  `ModelFinished { elapsed, status, usage, served_by, output_deltas }` (time to
+  `ModelFinished { elapsed, status, usage, served_by, output_deltas,
+  measurement }` (time to
   last byte). The delta count covers text, reasoning and tool input in the
-  final physical response; discarded retries reset it. It is observational,
-  not history or admission authority;
+  final physical response; discarded retries reset it. `measurement` carries
+  the route descriptor's context window, the attempt's prepared-input upper
+  bound, the idle gap since this driver's previous provider request (taken once
+  before any retry, absent for the driver's first request), and, only on the
+  turn's first model attempt, the UTF-8 byte length of the stable instruction
+  text and the serialized configured-tool input schemas, measured once per
+  driver. A retried first round does not record them again. It is
+  observational, not history or admission authority;
 - `PromptCacheDiagnosis { reason, missed_input_tokens }`, a Messages
   `message_start.diagnostics.cache_miss_reason` (§7.2). `reason` is the closed
   class `model_changed`, `system_changed`, `tools_changed`,
@@ -9116,7 +9162,7 @@ supplies its typed wake classification, without topology entering L0.
   `missed_input_tokens` is an optional non-negative integer, absent when the
   provider omitted the count. The observation carries no provider message id
   and no raw unknown spelling. Malformed diagnostics are not an observation.
-  The product persists that pair in telemetry schema 20, with the count
+  The product persists that pair in telemetry schema 21, with the count
   column nullable, and does not project it to OTEL. Turn model rounds and
   compaction provider streams both record it. It is not canonical usage;
 - `ModelArtifactPrefixDrift { fields }`, a model round whose stable request
@@ -9126,7 +9172,15 @@ supplies its typed wake classification, without topology entering L0.
   replays the artifact when only `tool-choice` differs and prepares any other
   drift fresh. The product does not persist it;
 - `ToolStarted { tool }` (exact presented name as a bounded opaque token) and
-  `ToolFinished { elapsed, status, output_bytes }`;
+  `ToolFinished { elapsed, status, output_bytes, measurement }`. The
+  `ToolMeasurement` is content-free: for a read, search or listing the salted
+  digest, a read's page range and whether the result is partial; for a process
+  start its program label; for a wait its target count, kind (`agent` when any
+  child agent was watched, else `process`) and outcome (`completed`,
+  `timeout`, `mail`, `interrupted`, or `cancelled` when the call was
+  cancelled). Paths, queries, arguments and result text never enter the
+  observation. `ToolObservationClipped { bytes_kept, bytes_dropped }` follows
+  in the call's context when the observation budget cut that call's result;
 - `JobPromoted { tool, nested, hint_source, hint_ms }`, `JobWaited { tool }`,
   `JobPreempted { kind }`, and `JobNoticesDelivered { point, count }`. All
   classifications are closed neutral enums: operations `start`, `poll`,
@@ -9140,9 +9194,14 @@ supplies its typed wake classification, without topology entering L0.
   preview. These observations are optional analytics, not job or checkpoint
   authority;
 - `CompactionStarted { reason }` and `CompactionFinished { elapsed, outcome,
-  reason, refusal, tokens_before, tokens_after, usage }`, whose token figures are the
+  reason, refusal, tokens_before, tokens_after, usage, measurement }`, whose token figures are the
   §10.3 unanchored estimate of the source and successor (the envelope bound
-  only when no parts were measured);
+  only when no parts were measured). `measurement` is the route window, the
+  trigger and occupancy of the context status that decided this compaction,
+  and the idle gap before its paid call. The deciding fence passes its status
+  explicitly; endpoint, manual, overflow and capacity-pressure compactions that
+  no status decided leave trigger and occupancy absent, and nothing measured
+  by an earlier deferred check carries over;
 - `DurabilityFinished { elapsed, status }` and
   `DurabilityAttemptFinished { elapsed, attempt, outcome }`;
 - `RetentionFinished { elapsed, status, pruned_checkpoints }`, emitted after an automatic history prune (§4)
@@ -9172,7 +9231,7 @@ busy, stale, unavailable, invalid_input, or rejected) in `CompactionFinished`,
 and retains the measured source tokens even when the ladder cannot commit.
 The exact bounded diagnostic remains in the session event's `detail`, never
 in the content-incapable telemetry sink. The product persists the refusal class
-in telemetry schema 20 and projects it to OTEL.
+in telemetry schema 21 and projects it to OTEL.
 
 Driver shutdown emits content-free `DurabilityAttemptFinished` phase timings
 for tool drain, job-terminal publication, heartbeat join, lease release and

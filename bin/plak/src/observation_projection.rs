@@ -84,6 +84,7 @@ pub(crate) enum RowKind {
     ModelFinished,
     ToolStarted,
     ToolFinished,
+    ToolObservationClipped,
     CompactionStarted,
     CompactionFinished,
     UnpairedCompactionFinished,
@@ -111,6 +112,20 @@ pub(crate) struct Projection {
 pub(crate) enum Output {
     Rows,
     Span,
+}
+
+fn token_cell(value: Option<u64>) -> Option<i64> {
+    value.map(|tokens| i64::try_from(tokens).unwrap_or(i64::MAX))
+}
+
+fn digest_hex(bytes: [u8; 32]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(64);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0xf) as usize] as char);
+    }
+    out
 }
 
 #[allow(
@@ -223,6 +238,7 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
             model_attempts,
             tool_calls,
             compactions,
+            prepared_input_high_water,
             usage,
         } => {
             projection.row = 'row: {
@@ -248,6 +264,7 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                         Cell::from(i64::from(model_attempts)),
                         Cell::from(i64::from(tool_calls)),
                         Cell::from(i64::from(compactions)),
+                        Cell::from(token_cell(prepared_input_high_water)),
                     ],
                     fallback: None,
                 })
@@ -401,6 +418,7 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
             usage,
             served_by,
             output_deltas,
+            measurement,
         } => {
             projection.row = 'row: {
                 if output != Output::Rows {
@@ -444,6 +462,11 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                         Cell::from(cost_micros),
                         Cell::from(cost_status),
                         Cell::from(fingerprint),
+                        Cell::from(token_cell(measurement.context_window_tokens)),
+                        Cell::from(token_cell(measurement.instruction_bytes)),
+                        Cell::from(token_cell(measurement.tool_schema_bytes)),
+                        Cell::from(token_cell(measurement.prepared_input_tokens)),
+                        Cell::from(measurement.idle_gap.map(row_duration_ns)),
                     ],
                     fallback: None,
                 })
@@ -541,6 +564,7 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
             elapsed,
             status,
             output_bytes,
+            measurement,
         } => {
             projection.row = 'row: {
                 if output != Output::Rows {
@@ -563,6 +587,26 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                         Cell::from(row_duration_ns(elapsed)),
                         Cell::from(terminal_status_text(status)),
                         Cell::from(i64::try_from(output_bytes).unwrap_or(i64::MAX)),
+                        Cell::from(measurement.access_digest.map(digest_hex)),
+                        Cell::from(token_cell(measurement.range_first_line)),
+                        Cell::from(token_cell(measurement.range_lines)),
+                        Cell::from(measurement.page_partial),
+                        Cell::from(
+                            measurement
+                                .command_class
+                                .map(|name| name.as_str().to_owned()),
+                        ),
+                        Cell::from(measurement.wait_count),
+                        Cell::from(
+                            measurement
+                                .wait_kind
+                                .map(plakous::agent::WaitTargetKind::as_str),
+                        ),
+                        Cell::from(
+                            measurement
+                                .wait_outcome
+                                .map(plakous::agent::WaitOutcome::as_str),
+                        ),
                     ],
                     fallback: None,
                 })
@@ -625,6 +669,7 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
             tokens_before,
             tokens_after,
             usage,
+            measurement,
         } => {
             projection.row = 'row: {
                 if output != Output::Rows {
@@ -658,6 +703,10 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                         Cell::from(id_text(context.agent_id())),
                         Cell::from(turn_id.clone()),
                         Cell::from(refusal.map(CompactionRefusalReason::as_str)),
+                        Cell::from(token_cell(measurement.context_window_tokens)),
+                        Cell::from(token_cell(measurement.threshold_tokens)),
+                        Cell::from(token_cell(measurement.occupancy_tokens)),
+                        Cell::from(measurement.idle_gap.map(row_duration_ns)),
                     ],
                     fallback: Some(vec![
                         Cell::from(id_text(context.session_id())),
@@ -679,6 +728,10 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                         Cell::from(cost_micros),
                         Cell::from(cost_status),
                         Cell::from(refusal.map(CompactionRefusalReason::as_str)),
+                        Cell::from(token_cell(measurement.context_window_tokens)),
+                        Cell::from(token_cell(measurement.threshold_tokens)),
+                        Cell::from(token_cell(measurement.occupancy_tokens)),
+                        Cell::from(measurement.idle_gap.map(row_duration_ns)),
                     ]),
                 })
             };
@@ -1010,6 +1063,26 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                             missed_input_tokens
                                 .map(|tokens| i64::try_from(tokens).unwrap_or(i64::MAX)),
                         ),
+                    ],
+                    fallback: None,
+                })
+            };
+        }
+
+        TelemetryObservationKind::ToolObservationClipped { bytes_dropped, .. } => {
+            projection.row = 'row: {
+                if output != Output::Rows {
+                    break 'row None;
+                }
+                let (Some(turn_id), Some(call_id)) = (context.turn_id(), context.call_id()) else {
+                    break 'row None;
+                };
+                Some(Row {
+                    kind: RowKind::ToolObservationClipped,
+                    values: vec![
+                        Cell::from(id_text(turn_id)),
+                        Cell::from(id_text(call_id)),
+                        Cell::from(i64::try_from(bytes_dropped).unwrap_or(i64::MAX)),
                     ],
                     fallback: None,
                 })

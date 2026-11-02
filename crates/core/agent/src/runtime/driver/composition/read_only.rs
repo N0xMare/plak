@@ -326,6 +326,7 @@ impl Driver {
                 turn_shared: Arc::clone(&command.shared),
                 dispatch_witness,
                 process_session_update,
+                access_salt: self.access_salt,
             };
             Ok((evaluation_operation, edge_operation, edge_binding, request))
         }

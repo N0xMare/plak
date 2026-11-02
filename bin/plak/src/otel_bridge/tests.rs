@@ -174,6 +174,7 @@ fn turn_finished_exports_span() {
                 model_attempts: 2,
                 tool_calls: 3,
                 compactions: 1,
+                prepared_input_high_water: None,
             },
         ),
     );
@@ -414,6 +415,7 @@ fn model_finished_exports_served_endpoint_and_cost() {
                     plakous::model::ServedBy::new("deepinfra/turbo").expect("endpoint"),
                 ),
                 output_deltas: 0,
+                measurement: plakous::agent::ModelMeasurement::absent(),
             },
         ),
     );
@@ -443,6 +445,7 @@ fn model_finished_exports_span_with_parent() {
                 usage: Some(Usage::new(1, 2, 3, 4, 5)),
                 served_by: None,
                 output_deltas: 0,
+                measurement: plakous::agent::ModelMeasurement::absent(),
             },
         ),
     );
@@ -488,6 +491,7 @@ fn model_first_event_then_finished_attaches_ttft() {
                 usage: None,
                 served_by: None,
                 output_deltas: 0,
+                measurement: plakous::agent::ModelMeasurement::absent(),
             },
         ),
     );
@@ -515,6 +519,7 @@ fn tool_finished_exports_span() {
                 elapsed: Duration::from_nanos(8),
                 status: TelemetryTerminalStatus::Cancelled,
                 output_bytes: 99,
+                measurement: plakous::agent::ToolMeasurement::absent(),
             },
         ),
     );
@@ -545,6 +550,7 @@ fn compaction_finished_exports_synthetic_span() {
                 tokens_before: Some(100),
                 tokens_after: Some(40),
                 usage: Some(Usage::new(6, 7, 8, 9, 10)),
+                measurement: plakous::agent::CompactionMeasurement::absent(),
             },
         ),
     );
@@ -703,6 +709,7 @@ fn ttft_cache_evicts_oldest_entry() {
                     usage: None,
                     served_by: None,
                     output_deltas: 0,
+                    measurement: plakous::agent::ModelMeasurement::absent(),
                 },
             ),
         );

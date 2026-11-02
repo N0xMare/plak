@@ -50,6 +50,8 @@ async fn inventory_workflows() -> Result<(), Box<dyn std::error::Error>> {
     inventory::agent_event_and_cursor_serde_round_trip();
     inventory::auth_module_exists_without_existing_login();
     inventory::curated_agent_telemetry_surface_is_importable();
+    inventory::telemetry_measurements_are_content_free_values();
+    custom_tool::wait_fact_rides_an_outcome()?;
     inventory::curated_provider_namespaces_are_nameable_without_unqualified_lanes();
     inventory::openrouter_facade_is_custom_bounded_and_redacted()?;
     inventory::curated_subscription_models_are_nameable();

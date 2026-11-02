@@ -1086,6 +1086,15 @@ async fn steer_wakes_wait_without_mail_or_a_durable_receipt() {
     let output = outcome_json(&result);
     assert_eq!(output["woke_by"], "steer");
     assert_eq!(output["mail"], json!([]));
+    let fact = result.wait_fact().unwrap();
+    assert_eq!(fact.wake, plakous::tools::WaitWake::Interrupted);
+    assert_eq!(
+        (fact.agents, fact.processes),
+        (
+            u32::try_from(output["agents"].as_array().unwrap().len()).unwrap(),
+            0
+        )
+    );
     assert!(driver.tree.lock().unwrap().operations().is_empty());
 }
 
@@ -1110,6 +1119,10 @@ async fn notice_wakes_wait_without_mail_or_a_durable_receipt() {
         .unwrap();
     let output = outcome_json(&result);
     assert_eq!(output["woke_by"], "notice");
+    assert_eq!(
+        result.wait_fact().map(|fact| fact.wake),
+        Some(plakous::tools::WaitWake::Interrupted)
+    );
     assert_eq!(output["mail"], json!([]));
     assert!(driver.tree.lock().unwrap().operations().is_empty());
 }
@@ -1151,7 +1164,12 @@ async fn parked_hub_wait_is_the_only_consumer_of_a_child_question() {
         tokio::join!(send.send_with("hub-question".into(), &arguments), pending);
     let receipt = receipt.unwrap();
     assert_eq!(receipt.kind(), ToolOutcomeKind::Success);
-    let output = outcome_json(&outcome.unwrap());
+    let outcome = outcome.unwrap();
+    assert_eq!(
+        outcome.wait_fact().map(|fact| fact.wake),
+        Some(plakous::tools::WaitWake::Mail)
+    );
+    let output = outcome_json(&outcome);
     assert_eq!(output["woke_by"], "mail");
     assert_eq!(output["mail"][0]["body"], "which file?");
     assert!(deliverer.calls.lock().unwrap().is_empty());

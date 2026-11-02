@@ -1102,6 +1102,38 @@ pub(crate) fn curated_agent_telemetry_surface_is_importable() {
     let _ = TelemetryEmitter::disabled();
 }
 
+/// Measurement facts ride the telemetry observations as content-free,
+/// non-exhaustive values: constructors, closed labels and a program label that
+/// refuses anything that could carry a value or a path.
+pub(crate) fn telemetry_measurements_are_content_free_values() {
+    use plakous::agent::{
+        CompactionMeasurement, ModelMeasurement, ProgramBasename, ToolMeasurement, WaitOutcome,
+        WaitTargetKind,
+    };
+    use std::time::Duration;
+
+    let wait = ToolMeasurement::wait(2, WaitTargetKind::Agent, WaitOutcome::Interrupted);
+    assert_eq!(wait.wait_kind.map(WaitTargetKind::as_str), Some("agent"));
+    assert_eq!(wait.wait_outcome.map(WaitOutcome::as_str), Some("interrupted"));
+    let read = ToolMeasurement::access(Some([7; 32]), Some((1, 20)), true);
+    assert_eq!((read.range_first_line, read.page_partial), (Some(1), Some(true)));
+    let cargo = ProgramBasename::from_basename("cargo").map(ToolMeasurement::command);
+    assert_eq!(
+        cargo.and_then(|measured| measured.command_class).map(|class| class.as_str().len()),
+        Some(5)
+    );
+    for refused in ["PGPASSWORD=hunter2", "/usr/bin/cargo", "a b", "1234", "--flag", ""] {
+        assert!(ProgramBasename::from_basename(refused).is_none(), "{refused}");
+    }
+    assert_eq!(ToolMeasurement::absent().access_digest, None);
+    let model = ModelMeasurement::new(Some(1_000), Some(10), Some((3, 4)), None);
+    assert_eq!(model.tool_schema_bytes, Some(4));
+    assert_eq!(ModelMeasurement::absent().idle_gap, None);
+    let compaction = CompactionMeasurement::new(Some(1_000), Some(800), Some(900), Some(Duration::ZERO));
+    assert_eq!(compaction.occupancy_tokens, Some(900));
+    assert_eq!(CompactionMeasurement::absent().threshold_tokens, None);
+}
+
 /// Provider namespaces are explicit facade inventories. Nameability means the
 /// integration is supported at the stated qualification level; it never turns
 /// offline-only API lanes into admitted or exact live-qualified routes.

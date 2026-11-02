@@ -169,7 +169,7 @@ impl Driver {
                     )?;
 
                     publish_observation_clip(
-                        &command.shared.events,
+                        &command.shared,
                         command.turn_id,
                         attempt_id,
                         call.call_id(),
@@ -210,7 +210,7 @@ impl Driver {
                     )?;
 
                     publish_observation_clip(
-                        &command.shared.events,
+                        &command.shared,
                         command.turn_id,
                         attempt_id,
                         call.call_id(),
@@ -343,6 +343,8 @@ impl Driver {
                             command.cancellation.is_cancelled() || self.shutdown.is_cancelled(),
                         ),
                         0,
+                        None,
+                        None,
                     );
                     if let Some(error) = observer.take_error() {
                         return Err(error);
@@ -356,7 +358,7 @@ impl Driver {
                 .map_or(TelemetryTerminalStatus::Failed, |result| {
                     tool_result_telemetry_status(result, self.shutdown.is_cancelled())
                 });
-            observer.emit_finished(status, output_bytes);
+            observer.emit_finished(status, output_bytes, None, None);
             if let Some(error) = observer.take_error() {
                 return Err(error);
             }
@@ -532,7 +534,7 @@ impl Driver {
             )?;
 
             publish_observation_clip(
-                &command.shared.events,
+                &command.shared,
                 command.turn_id,
                 attempt_id,
                 call.call_id(),
@@ -604,7 +606,7 @@ impl Driver {
                 )?;
 
                 publish_observation_clip(
-                    &command.shared.events,
+                    &command.shared,
                     command.turn_id,
                     attempt_id,
                     call.call_id(),
@@ -1004,7 +1006,11 @@ impl Driver {
             invocation,
             projection_receipt,
         } = prepared;
-        let invocation = invocation.with_want_value(want_value);
+        // Telemetry measures a few canonical capabilities from their typed
+        // values; the value never reaches a consumer that did not ask for it.
+        let measured = self.telemetry.is_enabled()
+            && crate::telemetry::measures_capability(invocation.identity().name().as_str());
+        let invocation = invocation.with_want_value(want_value || measured);
         let audit_identity = ToolAuditIdentity::from_invocation(&invocation);
         let authorization =
             Box::pin(self.authorize_tool(command, call, invocation.clone())).await?;
@@ -1201,6 +1207,7 @@ impl Driver {
                     turn_shared: Arc::clone(&command.shared),
                     dispatch_witness,
                     process_session_update,
+                    access_salt: self.access_salt,
                 },
             )));
         }
@@ -1313,7 +1320,7 @@ impl Driver {
                     ) {
                         Ok((item, clip)) => {
                             publish_observation_clip(
-                                &command.shared.events,
+                                &command.shared,
                                 command.turn_id,
                                 attempt_id,
                                 execution.call.call_id(),

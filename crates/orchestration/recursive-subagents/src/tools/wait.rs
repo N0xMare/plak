@@ -27,6 +27,21 @@ pub(super) fn leave_wait_facts(operation_id: &str, outcome: &ToolOutcome) -> boo
     yielded
 }
 
+/// The content-free wait fact of one await: how many children and processes
+/// it watched and what ended it.
+fn await_wait_fact(output: &AwaitOutput) -> plakous::tools::WaitFact {
+    use crate::tree::WaitWakeReason;
+    use plakous::tools::WaitWake;
+    let wake = match output.woke_by {
+        WaitWakeReason::Settled | WaitWakeReason::Process => WaitWake::Settled,
+        WaitWakeReason::Mail => WaitWake::Mail,
+        WaitWakeReason::Timeout => WaitWake::Timeout,
+        WaitWakeReason::Steer | WaitWakeReason::Notice => WaitWake::Interrupted,
+    };
+    let count = |rows: usize| u32::try_from(rows).unwrap_or(u32::MAX);
+    plakous::tools::WaitFact::new(count(output.agents.len()), count(output.jobs.len()), wake)
+}
+
 impl TopologyTool {
     #[cfg(test)]
     pub(super) async fn wait_with(&self, value: &Value) -> Result<ToolOutcome, ToolRuntimeError> {
@@ -250,6 +265,9 @@ impl TopologyTool {
                         value["notice"] = json!(reason);
                         let mut result = ToolOutcome::success_text(value.to_string())?
                             .with_wait_observation(true);
+                        if let Some(fact) = outcome.wait_fact() {
+                            result = result.with_wait_fact(fact);
+                        }
                         if let Some(subject) = outcome.presentation_subject() {
                             result = result.with_presentation_subject(subject);
                         }
@@ -321,11 +339,13 @@ impl TopologyTool {
         output.jobs = await_job_rows(jobs, &request.processes);
         output.fit_budget();
         let subject = output.presentation_subject();
-        let outcome =
-            ToolOutcome::success_text(json!(output).to_string()).map(|outcome| match subject {
+        let fact = await_wait_fact(&output);
+        let outcome = ToolOutcome::success_text(json!(output).to_string())
+            .map(|outcome| match subject {
                 Some(subject) => outcome.with_presentation_subject(subject),
                 None => outcome,
-            });
+            })
+            .map(|outcome| outcome.with_wait_fact(fact));
         if outcome.is_ok()
             && let Err(error) =
                 self.commit_wait_receipt(tree, caller, operation_id, presented, &output)

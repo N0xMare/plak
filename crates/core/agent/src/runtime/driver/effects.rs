@@ -105,6 +105,7 @@ impl Driver {
                 emitter: Arc::clone(&self.telemetry),
                 context: telemetry_context,
                 clock: Arc::clone(&self.clock),
+                access_salt: self.access_salt,
             },
             Arc::clone(&dispatch_witness),
         ));
@@ -206,6 +207,11 @@ impl Driver {
         observer.emit_finished(
             tool_terminal_status(&outcome, self.shutdown.is_cancelled()),
             output_bytes,
+            exact
+                .as_ref()
+                .ok()
+                .and_then(|execution| execution.value.as_ref()),
+            outcome.as_ref().ok(),
         );
         let evidence = completed_tool_outcome_component(&exact, result_entry_id)?;
         let terminal = if !dispatched {
@@ -256,7 +262,7 @@ impl Driver {
             &mut self.observation_budget,
         )?;
         publish_observation_clip(
-            &command.shared.events,
+            &command.shared,
             command.turn_id,
             attempt_id,
             call_id,

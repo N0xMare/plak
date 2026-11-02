@@ -659,6 +659,9 @@ struct TurnTelemetryCompartments {
     model_attempts: u32,
     tool_calls: u32,
     compactions: u32,
+    prepared_input_high_water: Option<u64>,
+    /// The turn's first model attempt has recorded its request footprint.
+    first_attempt_measured: bool,
 }
 
 /// Stable typed identity of an unresolved root operation requiring recovery.
@@ -803,6 +806,7 @@ mod execution_value_tests {
                 output: "not persisted".into(),
                 truncated: false,
                 full_output: None,
+                program: None,
             }),
         ));
         let bytes = serde_json::to_vec(&typed)?;

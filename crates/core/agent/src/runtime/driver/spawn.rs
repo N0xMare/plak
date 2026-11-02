@@ -17,6 +17,14 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as AsyncMutex, mpsc, watch};
+
+/// A fresh digest salt, or none when the system has no randomness to give.
+fn fresh_access_salt() -> Option<[u8; 32]> {
+    let mut salt = [0; 32];
+    getrandom::fill(&mut salt).ok()?;
+    Some(salt)
+}
+
 impl PreparedAgent {
     #[allow(
         clippy::too_many_lines,
@@ -184,6 +192,7 @@ impl PreparedAgent {
                 .history()
                 .is_empty();
         let credential_wait = Arc::new(Mutex::new(None));
+        let telemetry_enabled = self.telemetry.is_enabled();
         let driver = Driver {
             credential_wait: Arc::clone(&credential_wait),
             job_sessions: self.job_sessions,
@@ -263,6 +272,10 @@ impl PreparedAgent {
             local_composition: CompositionSlot::from(self.local_composition.map(|construction| {
                 CompositionOwner::new(construction, self.interpreter_observation.clone())
             })),
+            access_salt: telemetry_enabled.then(fresh_access_salt).flatten(),
+            request_footprint: telemetry_enabled
+                .then(|| super::observation::request_footprint(&self.stable_request_prefix)),
+            last_provider_request_at: None,
         };
         let panic_events = events.clone();
         let storage_pause =

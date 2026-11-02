@@ -97,6 +97,7 @@ impl ProcessExecutionResult {
                     .sessions
                     .job_output_file(JoinedProcessSessions::job_number(self.session_id))
                     .map(|file| file.path),
+                program: None,
             })
         });
         let mut canonical = json!({
@@ -303,6 +304,10 @@ impl ToolExecutor for ProcessSessionTools {
             let canonical =
                 canonical_operation(identity.name().as_str(), identity.tool_id().as_str())?;
             let mut value = invocation.arguments().value().as_ref().clone();
+            let program = (invocation.want_value()
+                && canonical == CanonicalProcessOperationV2::Start)
+                .then(|| start_program(exec, &value))
+                .flatten();
             let (operation, hint_source) = process_observation_labels(canonical, &mut value);
             if canonical == CanonicalProcessOperationV2::Poll {
                 validate_canonical_poll_shape(&value)?;
@@ -376,6 +381,7 @@ impl ToolExecutor for ProcessSessionTools {
                             promotion_hint.map(|hint| (hint, *preempt.borrow())),
                             invocation.want_value(),
                         )
+                        .and_then(|outcome| with_start_program(outcome, program))
                         .map(|outcome| {
                             classify_process_outcome(outcome, operation, hint_source, yielded)
                         })
@@ -401,6 +407,33 @@ impl ToolExecutor for ProcessSessionTools {
                 Err(error) => Err(error),
             }
         })
+    }
+}
+
+/// The program a start runs, from its own canonical arguments.
+fn start_program(exec: bool, arguments: &serde_json::Value) -> Option<String> {
+    if exec {
+        let program = arguments.get("argv")?.as_array()?.first()?.as_str()?;
+        return Some(crate::program::argv_program(program));
+    }
+    let command = arguments.get("command")?.as_str()?;
+    Some(crate::program::shell_program(command))
+}
+
+fn with_start_program(
+    mut outcome: ToolOutcome,
+    program: Option<String>,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    let Some(program) = program else {
+        return Ok(outcome);
+    };
+    match outcome.take_value() {
+        Some(plakous_tools::ExecutionValue::Process(mut value)) => {
+            value.program = Some(program);
+            outcome.with_value(plakous_tools::ExecutionValue::Process(value))
+        }
+        Some(other) => outcome.with_value(other),
+        None => Ok(outcome),
     }
 }
 

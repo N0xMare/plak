@@ -31,6 +31,7 @@ fn observation() -> TestResult<TelemetryObservation> {
             usage: Some(Usage::new(11, 12, 13, 14, 15)),
             served_by: None,
             output_deltas: 0,
+            measurement: plakous::agent::ModelMeasurement::absent(),
         },
     ))
 }

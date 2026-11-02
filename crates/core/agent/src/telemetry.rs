@@ -1,5 +1,7 @@
 //! Application-owned, opt-in, content-incapable telemetry observations.
 
+mod measure;
+
 use std::fmt;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,6 +14,12 @@ use plakous_model::{
 use thiserror::Error;
 
 use crate::{CompactionEventOutcome, CompactionEventReason, TurnUsage};
+
+pub use measure::{
+    CompactionMeasurement, ModelMeasurement, ProgramBasename, ToolMeasurement, WaitOutcome,
+    WaitTargetKind,
+};
+pub(crate) use measure::{measure_tool_call, measures_capability};
 
 /// Exact presented tool name in a fixed-size, copyable telemetry observation.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -439,6 +447,8 @@ pub enum TelemetryObservationKind {
         tool_calls: u32,
         /// Count of finished compactions attributed to the turn.
         compactions: u32,
+        /// Largest prepared-input upper bound observed for the turn.
+        prepared_input_high_water: Option<u64>,
     },
     /// A model past its admitted evidence window was re-resolved between
     /// model operations. `accepted` is false when the fresh resolution was
@@ -491,6 +501,8 @@ pub enum TelemetryObservationKind {
         served_by: Option<plakous_model::ServedBy>,
         /// Output delta events in the final physical response, excluding replay loss.
         output_deltas: u64,
+        /// Window, prepared input, first-attempt footprint, and idle gap.
+        measurement: ModelMeasurement,
     },
     /// A local tool dispatch began.
     ToolStarted {
@@ -505,6 +517,17 @@ pub enum TelemetryObservationKind {
         status: TelemetryTerminalStatus,
         /// Byte length of the tool result handed back to the model (never content).
         output_bytes: u64,
+        /// Read, search, list, process-start, or wait facts. No path, query,
+        /// or argument.
+        measurement: ToolMeasurement,
+    },
+    /// The observation budget cut a finished call's result before the model
+    /// saw it. The call's context names it; the counts are bytes, never content.
+    ToolObservationClipped {
+        /// Result bytes the model saw.
+        bytes_kept: u64,
+        /// Result bytes the budget removed.
+        bytes_dropped: u64,
     },
     /// A compaction workflow began.
     CompactionStarted {
@@ -528,6 +551,9 @@ pub enum TelemetryObservationKind {
         tokens_after: Option<u64>,
         /// Paid compaction call usage when the dialect reported it.
         usage: Option<Usage>,
+        /// Window, threshold, occupancy, and idle gap. Threshold and occupancy
+        /// are absent when no context status decided the compaction.
+        measurement: CompactionMeasurement,
     },
     /// A required-durability operation reached a terminal state.
     DurabilityFinished {
@@ -1028,6 +1054,11 @@ impl TelemetryEmitter {
             increment(&self.panics);
             *lock(&self.retry_sink) = None;
         }
+    }
+
+    /// Whether a sink is attached. Measurement work is skipped without one.
+    pub(crate) fn is_enabled(&self) -> bool {
+        lock(&self.sink).is_some()
     }
 
     /// Returns a current health snapshot.

@@ -362,6 +362,7 @@ pub fn scripted_compaction_runtime_binding_with_finish(
             script,
             ScriptedOperation::Compact(finish),
             extensions,
+            None,
         )?
     };
     Ok(runtime.with_compaction_output_limit()?)

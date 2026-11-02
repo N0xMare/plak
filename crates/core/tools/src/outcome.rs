@@ -28,6 +28,45 @@ pub enum ToolOutcomeKind {
     OutcomeUnknown,
 }
 
+/// How a wait ended, as the waiting tool classified its own result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum WaitWake {
+    /// Every waited-on target reached a terminal state.
+    Settled,
+    /// Mail for the waiter ended the wait.
+    Mail,
+    /// The deadline passed with a target still running.
+    Timeout,
+    /// Steering or a notice cut the wait short.
+    Interrupted,
+}
+
+/// What one wait waited on and how it ended: counts and a closed label,
+/// never an id, an output or a message.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct WaitFact {
+    /// Child agents the wait watched.
+    pub agents: u32,
+    /// Processes the wait watched.
+    pub processes: u32,
+    /// What ended it.
+    pub wake: WaitWake,
+}
+
+impl WaitFact {
+    /// One wait over `agents` children and `processes` processes.
+    #[must_use]
+    pub const fn new(agents: u32, processes: u32, wake: WaitWake) -> Self {
+        Self {
+            agents,
+            processes,
+            wake,
+        }
+    }
+}
+
 /// Hard retained-content limits for a terminal outcome.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolOutcomeLimits {
@@ -67,6 +106,7 @@ pub struct ToolOutcome {
     retained_bytes: usize,
     process_session_update: Option<crate::internal::ProcessSessionUpdate>,
     pub(crate) process_telemetry: Option<crate::internal::ProcessTelemetry>,
+    wait_fact: Option<WaitFact>,
     /// Bounded, redacted label for a host surface. Never part of [`Self::to_model_result`].
     presentation_subject: Option<Arc<str>>,
 }
@@ -80,6 +120,7 @@ impl fmt::Debug for ToolOutcome {
             .field("retained_bytes", &self.retained_bytes)
             .field("process_session_update", &self.process_session_update)
             .field("process_telemetry", &self.process_telemetry)
+            .field("wait_fact", &self.wait_fact)
             .field("presentation_subject", &self.presentation_subject)
             .field("parts", &"<redacted>")
             .field("value", &self.value.as_ref().map(|_| "<redacted>"))
@@ -121,6 +162,20 @@ impl ToolOutcome {
             yielded,
         });
         self
+    }
+
+    /// Attaches what a wait waited on and how it ended, classified by the
+    /// waiting tool from its own typed result.
+    #[must_use]
+    pub fn with_wait_fact(mut self, fact: WaitFact) -> Self {
+        self.wait_fact = Some(fact);
+        self
+    }
+
+    /// The wait fact a waiting tool attached, if any.
+    #[must_use]
+    pub const fn wait_fact(&self) -> Option<WaitFact> {
+        self.wait_fact
     }
 
     /// Attaches a host-only presentation subject.
@@ -188,6 +243,7 @@ impl ToolOutcome {
             retained_bytes,
             process_session_update: None,
             process_telemetry: None,
+            wait_fact: None,
             presentation_subject: None,
         })
     }
@@ -252,6 +308,7 @@ impl ToolOutcome {
                 retained_bytes: 0,
                 process_session_update: None,
                 process_telemetry: None,
+                wait_fact: None,
                 presentation_subject: None,
             },
         }
@@ -284,6 +341,7 @@ impl ToolOutcome {
                 retained_bytes: 0,
                 process_session_update,
                 process_telemetry: None,
+                wait_fact: None,
                 presentation_subject: None,
             },
         }

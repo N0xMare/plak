@@ -77,6 +77,50 @@ SELECT
 FROM v_tool_success v
 GROUP BY v.agent_id
 ORDER BY success_pct DESC;
+
+-- Repeated reads, searches and listings of one target in a session. access_digest
+-- is a per-driver salted digest of the normalized path or query, never the text.
+SELECT session_id, access_digest, COUNT(*) AS reads,
+       SUM(page_partial) AS partial_pages,
+       SUM(observation_clipped_bytes IS NOT NULL) AS clipped
+FROM tool_calls
+WHERE access_digest IS NOT NULL
+GROUP BY session_id, access_digest
+HAVING COUNT(*) > 1
+ORDER BY reads DESC;
+
+-- Process program mix per model. command_class is a closed program label, never arguments.
+SELECT s.tuple_id AS model, s.origin, s.template, t.command_class, COUNT(*) AS starts
+FROM tool_calls t
+JOIN v_session_models s ON s.session_id = t.session_id
+WHERE t.command_class IS NOT NULL
+GROUP BY s.tuple_id, s.origin, s.template, t.command_class
+ORDER BY starts DESC;
+
+-- Occupancy at compaction, beside the route window and the trigger that decided it.
+SELECT session_id, turn_id, reason, context_window_tokens, threshold_tokens, occupancy_tokens,
+       ROUND(100.0 * occupancy_tokens / NULLIF(context_window_tokens, 0), 2) AS occupancy_pct,
+       idle_gap_ns / 1e9 AS idle_gap_s
+FROM compactions
+WHERE finished_at IS NOT NULL
+ORDER BY finished_at DESC
+LIMIT 20;
+
+-- Wait outcomes. Elapsed is the whole call; kind and outcome are closed labels.
+SELECT session_id, wait_kind, wait_outcome, COUNT(*) AS waits,
+       SUM(wait_count) AS targets, AVG(elapsed_ns) / 1e6 AS avg_elapsed_ms
+FROM tool_calls
+WHERE wait_kind IS NOT NULL
+GROUP BY session_id, wait_kind, wait_outcome
+ORDER BY waits DESC;
+
+-- First-attempt request footprint and idle gap per model attempt.
+SELECT session_id, turn_id, context_window_tokens, prepared_input_tokens,
+       instruction_bytes, tool_schema_bytes, idle_gap_ns / 1e9 AS idle_gap_s
+FROM model_attempts
+WHERE finished_at IS NOT NULL
+ORDER BY finished_at DESC
+LIMIT 20;
 ";
 
 #[derive(Debug, Clone)]

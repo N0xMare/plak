@@ -772,8 +772,8 @@ A local analytics store; nothing leaves your machine.
 ```
 $ plak telemetry status
 Telemetry store
-  Path           /home/you/.plak/telemetry/telemetry-v17.sqlite3
-  Schema version 17
+  Path           /home/you/.plak/telemetry/telemetry-v21.sqlite3
+  Schema version 21
   Size on disk    507904 bytes
   Retention       536870912 bytes, 90 days
   Write errors    0
@@ -787,7 +787,11 @@ tool_calls            21
 ```
 
 `plak telemetry status --views` prints the recommended read-only SQL to paste
-into `plak telemetry sql "<query>"` (add `--json` for machine output). The
+into `plak telemetry sql "<query>"` (add `--json` for machine output). Those
+queries include repeated reads in a session (a salted digest, never the path),
+the mix of programs started (a closed program label such as `cargo` or
+`other`, never arguments or paths), occupancy at compaction, wait outcomes, and
+each turn's first-request footprint with the idle gap before each request. The
 `v_replay_loss` view lists retry and declined-retry correlation ids, proposed
 next attempts, cause/phase, and the closed `declined_reason` when no replay
 was dispatched. A declined `ModelRetry` has zero delay and does not discard

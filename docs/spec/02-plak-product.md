@@ -249,7 +249,7 @@ launch directory — the cwd of the process, resolved once.
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
-  telemetry/telemetry-v20.sqlite3 disposable analytics, schema 20
+  telemetry/telemetry-v21.sqlite3 disposable analytics, schema 21
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
 ```
@@ -6942,7 +6942,38 @@ turn **and** call id rather than call id alone, because a nested composition
 call id is a digest of the nested request and repeats across turns and sessions
 for identical
 nested calls. `tool_calls.tool_name` is the exact presented tool alias, or the
-canonical name when no alias exists. Clean commits write one `durability_attempts` row with attempt kind
+canonical name when no alias exists. Measurement columns on the same row are
+content-free and come from Plakous typed facts (spec 01 §11.2): no path, query,
+argument, identifier, output or message body is a column. A read, search or
+listing stores `access_digest` (64 hex characters), the SHA-256 of a per-driver
+random salt, a NUL and the lexically normalized path or query; the salt is
+never written, so digests join within one process's driver and not across
+`/reload` or a reopen, and a driver without randomness stores no digest.
+`range_first_line` and `range_lines` are the page a read returned, and
+`page_partial` is 1 when that page stops before the end of the file or cut
+lines, or a search or listing cut results or stopped its walk.
+`observation_clipped_bytes` is set on the call's row when the observation
+budget cut its result. A process start stores `command_class`, a program
+label of at most 64 bytes in `[A-Za-z0-9._+-]` (assignments, wrappers and a
+leading `cd DIR &&` are skipped) or `other`, never the command line. A wait
+stores `wait_count`, `wait_kind` (`agent` when any child agent was watched,
+else `process`) and `wait_outcome` (`completed`, `timeout`, `mail`,
+`interrupted` or `cancelled`); a process poll that returns while its process
+runs is a `timeout`, and one whose process its own timer killed is
+`completed`. `model_attempts` stores `context_window_tokens` from the route
+descriptor beside `prepared_input_tokens`, and `idle_gap_ns`, the time since
+the same driver's previous provider request taken before any retry (null for
+its first). `instruction_bytes` and `tool_schema_bytes` are the UTF-8 length
+of the stable instruction text and the serialized configured-tool input
+schemas, set only on the turn's first attempt, even when that round is
+retried. `turns.prepared_input_high_water` is the largest prepared-input
+figure observed on that turn. `compactions` stores `context_window_tokens`,
+`threshold_tokens` and `occupancy_tokens` of the context status that decided
+the compaction, and `idle_gap_ns` before its paid call; a compaction no
+status decided (manual, endpoint, provider overflow, capacity pressure before
+a measurement) leaves threshold and occupancy null. None of these facts is
+admission or recovery authority, and none is an OTEL
+attribute. Clean commits write one `durability_attempts` row with attempt kind
 `durability_finished`; a successful initial-commit attempt is not also recorded. Failed initial
 attempts and acknowledgement recovery keep their separate attempt rows.
 `model_attempts.served_path_fingerprint` is an opaque `dpt-v1` token: text,
@@ -7030,7 +7061,7 @@ prose enters the row. The cause column is unconstrained SQL `TEXT`, populated
 by `ModelRetryCause::kind()`: its closed spelling set is `http_status`, `connect`,
 `record_rejected_in_transit`, `transport_after_send`, and `stream_interrupted`.
 The new string value requires no column of its own. The disposable store is
-schema 20. Request host, route and body size are log fields, not SQL columns.
+schema 21. Request host, route and body size are log fields, not SQL columns.
 The bounded writer has the same best-effort drop behavior
 as other analytics; these rows are not recovery authority. `v_replay_loss` is
 the canned view printed by `plak telemetry status --views`, including declined
@@ -7075,8 +7106,12 @@ provenance view as a TEMP view after the attach — a persistent view cannot
 reference an attached schema. A file that is not there is skipped rather than
 failing the query. The product and subagents stores may contain prompt text;
 SQL is an operator inspection surface, not a content-free export. The provenance
-view selects only locator, model/account/effort/composition columns. Blob columns
-render as a byte count, never as content.
+view selects locator, model/account/effort/composition, and, for a spawned
+child, its frozen `template` name (null on a root row). Blob columns
+render as a byte count, never as content. `--views` also prints the
+measurement queries: repeated reads per session (by digest, never by path),
+program mix per model and template, occupancy at compaction, wait outcomes,
+and the first-attempt footprint with its idle gap.
 
 `plak telemetry prune` deletes **whole sessions, oldest first**, never rows
 within a session: sessions are ordered by their oldest activity across the
@@ -7104,7 +7139,7 @@ that cannot yet shrink.
 
 Two asymmetries are worth stating. `telemetry sql` is strictly read-only, while
 `telemetry status` opens the current per-schema file for writing, creating
-schema 20 from scratch when absent. Existing older telemetry files are left
+schema 21 from scratch when absent. Existing older telemetry files are left
 untouched and are not imported; telemetry is disposable. Only explicit
 `state prune-legacy` inventories and removes older-schema and unversioned
 telemetry files and their SQLite sidecars, under the same lock, path-safety and

@@ -94,6 +94,15 @@ async fn scripted_turn(
     create: &str,
     scenarios: Vec<ModelScenario>,
 ) -> TestResult<(TurnResult, Vec<ProviderOutcome>)> {
+    scripted_turn_with(create, scenarios, None).await
+}
+
+/// [`scripted_turn`] with an optional telemetry emitter.
+pub(super) async fn scripted_turn_with(
+    create: &str,
+    scenarios: Vec<ModelScenario>,
+    telemetry: Option<Arc<TelemetryEmitter>>,
+) -> TestResult<(TurnResult, Vec<ProviderOutcome>)> {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let descriptor = durable_test_descriptor("test.route")?;
@@ -126,6 +135,10 @@ async fn scripted_turn(
             Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
             Arc::new(SystemIdGenerator),
         );
+    let builder = match telemetry {
+        Some(telemetry) => builder.telemetry(telemetry),
+        None => builder,
+    };
     let sessions = DurableSessionRuntime::current(
         Arc::new(TestCreateStore::default()),
         RuntimeDurability::Required,
@@ -141,20 +154,22 @@ async fn scripted_turn(
     Ok((result, outcomes))
 }
 
+/// A content-filtered first round, its output-limit retry, then an answer.
+pub(super) fn retried_then_answered() -> TestResult<Vec<ModelScenario>> {
+    Ok(vec![
+        failed_attempt(Usage::new(5, 1, 0, 0, 0), content_filtered())?,
+        failed_attempt(
+            Usage::new(7, 2, 0, 0, 0),
+            ModelError::new(ModelErrorKind::OutputLimit, "truncated mid call"),
+        )?,
+        text_answer(0xA2_0001, Usage::new(11, 3, 0, 0, 0))?,
+    ])
+}
+
 #[tokio::test]
 async fn retries_are_decided_and_recorded_with_budgets_and_partial_usage() -> TestResult {
-    let (result, outcomes) = scripted_turn(
-        "create:provider-outcome-retries",
-        vec![
-            failed_attempt(Usage::new(5, 1, 0, 0, 0), content_filtered())?,
-            failed_attempt(
-                Usage::new(7, 2, 0, 0, 0),
-                ModelError::new(ModelErrorKind::OutputLimit, "truncated mid call"),
-            )?,
-            text_answer(0xA2_0001, Usage::new(11, 3, 0, 0, 0))?,
-        ],
-    )
-    .await?;
+    let (result, outcomes) =
+        scripted_turn("create:provider-outcome-retries", retried_then_answered()?).await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(
         outcomes

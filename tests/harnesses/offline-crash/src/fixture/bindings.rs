@@ -754,6 +754,7 @@ pub fn scripted_artifact_runtime_binding(
         script,
         ScriptedOperation::ArtifactTurn(Arc::new(AtomicU64::new(1))),
         Vec::new(),
+        None,
     )
 }
 
@@ -799,13 +800,36 @@ pub fn scripted_runtime_binding_with_extensions(
     cursor: Arc<AtomicU64>,
     extensions: Vec<ToolRegistration>,
 ) -> HarnessResult<SessionRuntimeBinding> {
-    scripted_runtime_binding_with_cursor_inner(
+    scripted_runtime_binding_with_telemetry(workspace, controller, script, cursor, extensions, None)
+}
+
+/// [`scripted_runtime_binding_with_extensions`] reporting to the host's
+/// telemetry emitter, as a product binding does.
+///
+/// # Errors
+///
+/// As [`scripted_runtime_binding_with_extensions`].
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the caller hands the script's ownership to the binding it builds"
+)]
+pub fn scripted_runtime_binding_with_telemetry(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: Arc<ScriptPlan>,
+    cursor: Arc<AtomicU64>,
+    extensions: Vec<ToolRegistration>,
+    telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
+) -> HarnessResult<SessionRuntimeBinding> {
+    let binding = scripted_runtime_binding_with_cursor_inner(
         workspace,
         controller,
         &script,
         ScriptedOperation::Turn(cursor),
         extensions,
-    )
+        telemetry,
+    )?;
+    Ok(binding)
 }
 
 pub(super) fn scripted_runtime_binding_with_cursor_inner(
@@ -814,6 +838,7 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
     script: &Arc<ScriptPlan>,
     operation: ScriptedOperation,
     extensions: Vec<ToolRegistration>,
+    telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-loopback-account";
     let descriptor = if matches!(&operation, ScriptedOperation::ArtifactTurn(_)) {
@@ -826,7 +851,14 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
         if !extensions.is_empty() {
             return Err("scripted process tools take no host tool extensions".into());
         }
-        return scripted_process_runtime_binding(workspace, model, &descriptor, account, script);
+        return scripted_process_runtime_binding(
+            workspace,
+            model,
+            &descriptor,
+            account,
+            script,
+            telemetry,
+        );
     }
     let definition = ToolDefinition::new(
         ToolName::new("loopback_effect")?,
@@ -881,6 +913,10 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
     } else {
         builder
     };
+    let builder = match telemetry {
+        Some(telemetry) => builder.telemetry(telemetry),
+        None => builder,
+    };
     Ok(SessionRuntimeBinding::new(builder))
 }
 
@@ -897,6 +933,7 @@ fn scripted_process_runtime_binding(
     descriptor: &ResolvedModelDescriptor,
     account: &[u8],
     script: &ScriptPlan,
+    telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let process = Arc::new(ProcessSessionTools::posix_sh()?);
     let plan_state = Arc::new(InMemoryPlanState::with_identity(PlanStateIdentity::new(
@@ -943,6 +980,10 @@ fn scripted_process_runtime_binding(
         builder.with_scheduled_compaction_enabled(true)
     } else {
         builder
+    };
+    let builder = match telemetry {
+        Some(telemetry) => builder.telemetry(telemetry),
+        None => builder,
     };
     Ok(SessionRuntimeBinding::new(builder))
 }

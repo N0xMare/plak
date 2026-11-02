@@ -1106,9 +1106,21 @@ impl ProcessSessionTools {
                 *control.preempt().borrow(),
                 plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
             );
+        let unsettled = tasks
+            .iter()
+            .any(|task| task["status"] == "running" || task["status"] == "leftover");
+        let wake = if yielded {
+            plakous_tools::WaitWake::Interrupted
+        } else if unsettled {
+            plakous_tools::WaitWake::Timeout
+        } else {
+            plakous_tools::WaitWake::Settled
+        };
+        let targets = u32::try_from(tasks.len()).unwrap_or(u32::MAX);
         let outcome = ToolOutcome::success_text(
             serde_json::to_string(&json!({"tasks":tasks})).map_err(projection_arguments)?,
-        )?;
+        )?
+        .with_wait_fact(plakous_tools::WaitFact::new(0, targets, wake));
         let outcome = if any_promoted {
             plakous_tools::internal::with_process_telemetry(
                 outcome,

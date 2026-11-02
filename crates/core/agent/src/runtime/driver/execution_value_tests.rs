@@ -146,6 +146,7 @@ async fn execute(effect: ToolEffect, attach: bool) -> TestResult<ToolExecutionRe
         turn_shared: shared,
         dispatch_witness: Arc::new(AtomicBool::new(false)),
         process_session_update: Arc::new(Mutex::new(None)),
+        access_salt: None,
     }))
     .await?)
 }

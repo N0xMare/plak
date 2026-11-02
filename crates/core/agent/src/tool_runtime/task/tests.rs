@@ -16,6 +16,7 @@ async fn only_first_joiner_takes_the_executor_value_without_copying() -> Result<
             output,
             truncated: false,
             full_output: None,
+            program: None,
         }))
     });
     let task = Arc::new(TokioTask::new());

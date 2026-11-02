@@ -69,7 +69,7 @@ async fn process_values_are_demand_driven_and_leave_canonical_text_unchanged()
             CallId::from_str("00000000-0000-0000-0000-000000000583")?,
             ToolName::new(PROCESS_SESSION_CAPABILITY_NAME)?,
             ToolCorrelation::default(),
-            r#"{"command":"printf typed-output","workdir":".","login":false,"tty":false,"keep_stdin_open":false,"yield_time_ms":1000,"max_output_bytes":4096}"#,
+            r#"{"command":"PGPASSWORD=hunter2 printf typed-output","workdir":".","login":false,"tty":false,"keep_stdin_open":false,"yield_time_ms":1000,"max_output_bytes":4096}"#,
         ))?.with_want_value(want_value);
         let mut outcome =
             execute_process_invocation(&registry, environment.clone(), invocation).await?;
@@ -82,6 +82,7 @@ async fn process_values_are_demand_driven_and_leave_canonical_text_unchanged()
                 assert!(value.session_id.is_none());
                 assert!(!value.truncated);
                 assert!(value.full_output.is_none());
+                assert_eq!(value.program.as_deref(), Some("printf"));
             }
             None if !want_value => (),
             _ => return Err("unexpected process value".into()),
@@ -416,6 +417,14 @@ async fn await_chatty_terminal_deduplicates_and_reports_consumed_jobs() -> Resul
     let value: Value = serde_json::from_str(&outcome.joined_text())?;
     assert_eq!(value["tasks"][0]["status"], "exited");
     assert_eq!(value["tasks"].as_array().ok_or("tasks")?.len(), 1);
+    assert_eq!(
+        outcome.wait_fact(),
+        Some(plakous_tools::WaitFact::new(
+            0,
+            1,
+            plakous_tools::WaitWake::Settled
+        ))
+    );
     assert_eq!(value["tasks"][0]["exit_code"], 0);
     assert!(
         value["tasks"][0]["output"]

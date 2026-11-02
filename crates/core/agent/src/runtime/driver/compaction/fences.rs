@@ -21,9 +21,9 @@ use crate::runtime::{ArtifactTransition, OperationId, PromptCommand};
 use crate::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason, AgentError,
     AgentErrorKind, AgentEventKind, CompactionEventOutcome, CompactionEventReason,
-    CompactionMeasure, CompactionVerdict, DurableOperationKind, DurableOperationState,
-    EventContext, MAX_RUNTIME_RECORDS, MeasuredFit, SEGMENT_PRESSURE_SEGMENTS,
-    SEGMENT_REFUSAL_SEGMENTS, TelemetryObservationKind,
+    CompactionMeasure, CompactionMeasurement, CompactionVerdict, DurableOperationKind,
+    DurableOperationState, EventContext, MAX_RUNTIME_RECORDS, MeasuredFit,
+    SEGMENT_PRESSURE_SEGMENTS, SEGMENT_REFUSAL_SEGMENTS, TelemetryObservationKind,
 };
 use plakous_model::{
     ContextHistoryPlan, ContextStatus, ConversationItem, ModelError, ModelErrorKind,
@@ -50,6 +50,7 @@ impl Driver {
                         tokens_before: None,
                         tokens_after: None,
                         usage: None,
+                        measurement: self.compaction_measurement(None),
                     },
                 );
                 None
@@ -218,17 +219,18 @@ impl Driver {
         let pressure = self.observation_budget.capacity_exhausted();
         if pressure && !self.turn_budgets.pressure_fold_spent {
             return self
-                .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure)
+                .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure, None)
                 .await;
         }
         let Some(status) = self.measure_scheduling_context(command).await else {
             if pressure {
                 return self
-                    .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure)
+                    .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure, None)
                     .await;
             }
-            return self.compact_for_segment_pressure(command, None).await;
+            return self.compact_for_segment_pressure(command, None, None).await;
         };
+        let measurement = Some(self.compaction_measurement(Some(&status)));
         let verdict = tool_group_fence_verdict(
             status.kind(),
             self.anchored_occupied_tokens(&status),
@@ -239,12 +241,14 @@ impl Driver {
         if !verdict.is_due() {
             if pressure {
                 return self
-                    .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure)
+                    .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure, measurement)
                     .await;
             }
-            return self.compact_for_segment_pressure(command, None).await;
+            return self
+                .compact_for_segment_pressure(command, None, measurement)
+                .await;
         }
-        self.run_turn_fence_compaction(command, FenceTrigger::Occupancy)
+        self.run_turn_fence_compaction(command, FenceTrigger::Occupancy, measurement)
             .await
     }
 
@@ -267,6 +271,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
         pending_user_input: Option<UserInput>,
+        measurement: Option<CompactionMeasurement>,
     ) -> Result<TurnCompactionOutcome, AgentError> {
         if self.committed_segment_count() < SEGMENT_PRESSURE_SEGMENTS
             || !self.paid_fold_admissible(true)
@@ -274,8 +279,13 @@ impl Driver {
         {
             return Ok(TurnCompactionOutcome::Deferred);
         }
-        self.run_turn_compaction(command, FenceTrigger::SegmentPressure, pending_user_input)
-            .await
+        self.run_turn_compaction(
+            command,
+            FenceTrigger::SegmentPressure,
+            pending_user_input,
+            measurement,
+        )
+        .await
     }
 
     /// Refuses the next round once the committed head holds
@@ -351,7 +361,7 @@ impl Driver {
         }
         self.reresolve_expired_model(command).await?;
         self.refresh_paid_fold_backoff(command.turn_id);
-        self.run_turn_fence_compaction(command, FenceTrigger::ProviderOverflow)
+        self.run_turn_fence_compaction(command, FenceTrigger::ProviderOverflow, None)
             .await
             .map(|outcome| outcome.committed())
     }
@@ -377,10 +387,11 @@ impl Driver {
         let pending_user_input =
             || Some(command.input.clone()).filter(|input| !input.parts().is_empty());
         let Some(status) = self.measure_scheduling_context(command).await else {
-            self.compact_for_segment_pressure(command, pending_user_input())
+            self.compact_for_segment_pressure(command, pending_user_input(), None)
                 .await?;
             return Ok(());
         };
+        let measurement = Some(self.compaction_measurement(Some(&status)));
         // A session without a host idle fence (a child) is compacted here at the
         // same anchored occupancy trigger. A host fence that already folded left
         // the successor unanchored, and one that failed after dispatch is not
@@ -409,14 +420,19 @@ impl Driver {
         let occupancy = verdict.occupancy() && !failed_paid_fold;
         let headroom = verdict.observation_headroom() && !failed_paid_fold;
         if !verdict.overflow() && !occupancy && !headroom {
-            self.compact_for_segment_pressure(command, pending_user_input())
+            self.compact_for_segment_pressure(command, pending_user_input(), measurement)
                 .await?;
             return Ok(());
         }
         // Seal against committed intent before the follow-up changes the cut.
         // The pending prompt participates in the retained-tail fit check only.
         if !self
-            .run_turn_compaction(command, FenceTrigger::Occupancy, pending_user_input())
+            .run_turn_compaction(
+                command,
+                FenceTrigger::Occupancy,
+                pending_user_input(),
+                measurement,
+            )
             .await?
             .committed()
             && self.turn_budgets.paid_fold_spent
@@ -433,8 +449,10 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
         trigger: FenceTrigger,
+        measurement: Option<CompactionMeasurement>,
     ) -> Result<TurnCompactionOutcome, AgentError> {
-        self.run_turn_compaction(command, trigger, None).await
+        self.run_turn_compaction(command, trigger, None, measurement)
+            .await
     }
 
     #[allow(
@@ -446,6 +464,7 @@ impl Driver {
         command: &PromptCommand,
         trigger: FenceTrigger,
         pending_user_input: Option<UserInput>,
+        measurement: Option<CompactionMeasurement>,
     ) -> Result<TurnCompactionOutcome, AgentError> {
         let checkpoint = self.authority.checkpoint();
         let canonical = checkpoint.manifest().canonical();
@@ -516,6 +535,7 @@ impl Driver {
             request,
             CompactOrigin::TurnFence { trigger },
             &mut committed_detail,
+            measurement,
         ))
         .await;
         self.last_compaction_diagnostic = Some(format!(

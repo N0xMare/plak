@@ -17,6 +17,7 @@ mod jobs;
 mod output;
 mod pack;
 mod pi;
+mod program;
 mod projection;
 #[cfg(all(test, unix))]
 mod quiet_poll;

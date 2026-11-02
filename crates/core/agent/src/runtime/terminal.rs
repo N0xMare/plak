@@ -245,6 +245,52 @@ impl TurnShared {
         }
     }
 
+    /// Records that the observation budget cut one call's result.
+    pub(super) fn record_observation_clip(
+        &self,
+        attempt_id: plakous_model::AttemptId,
+        call_id: plakous_model::CallId,
+        bytes_kept: u64,
+        bytes_dropped: u64,
+    ) {
+        let Some(telemetry) = &self.telemetry else {
+            return;
+        };
+        let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            telemetry.emitter.emit(TelemetryObservation::new(
+                telemetry
+                    .context
+                    .with_attempt(attempt_id)
+                    .with_call(call_id),
+                telemetry.clock.now(),
+                TelemetryObservationKind::ToolObservationClipped {
+                    bytes_kept,
+                    bytes_dropped,
+                },
+            ));
+        }));
+    }
+
+    /// True exactly once per turn: for its first model attempt.
+    pub(super) fn take_first_attempt(&self) -> bool {
+        self.telemetry.as_ref().is_some_and(|telemetry| {
+            let mut compartments = lock_mutex(&telemetry.compartments);
+            !std::mem::replace(&mut compartments.first_attempt_measured, true)
+        })
+    }
+
+    pub(super) fn record_prepared_input(&self, tokens: u64) {
+        if let Some(telemetry) = &self.telemetry {
+            let mut compartments = lock_mutex(&telemetry.compartments);
+            compartments.prepared_input_high_water = Some(
+                compartments
+                    .prepared_input_high_water
+                    .unwrap_or(0)
+                    .max(tokens),
+            );
+        }
+    }
+
     pub(super) fn is_terminal(&self) -> bool {
         let TurnLifecycle::Admitted(lifecycle) = &self.lifecycle;
         matches!(
@@ -491,6 +537,7 @@ impl TurnShared {
                     model_attempts: compartments.model_attempts,
                     tool_calls: compartments.tool_calls,
                     compactions: compartments.compactions,
+                    prepared_input_high_water: compartments.prepared_input_high_water,
                 },
             ));
         }));

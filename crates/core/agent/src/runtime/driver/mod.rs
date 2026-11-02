@@ -187,6 +187,14 @@ struct Driver {
     /// prepared it, kept so the round dispatches it instead of preparing the
     /// same request again.
     admitted_round: Option<Box<AdmittedRound>>,
+    /// Per-driver salt for access digests, drawn only when telemetry is
+    /// enabled. Never persisted; `None` stores no digest.
+    access_salt: Option<[u8; 32]>,
+    /// Instruction and tool schema bytes of the stable request prefix,
+    /// measured once when telemetry is enabled.
+    request_footprint: Option<(u64, u64)>,
+    /// When this driver last sent a provider request, for the idle gap.
+    last_provider_request_at: Option<tokio::time::Instant>,
 }
 
 impl Driver {
@@ -388,6 +396,7 @@ pub(in crate::runtime) struct ToolDispatchTelemetry {
     emitter: Arc<TelemetryEmitter>,
     context: TelemetryContext,
     clock: Arc<dyn Clock>,
+    access_salt: Option<[u8; 32]>,
 }
 
 pub(in crate::runtime) struct ActorToolDispatchObserver {
@@ -401,6 +410,7 @@ pub(in crate::runtime) struct ActorToolDispatchObserver {
     telemetry: Arc<TelemetryEmitter>,
     telemetry_context: TelemetryContext,
     clock: Arc<dyn Clock>,
+    access_salt: Option<[u8; 32]>,
     started: Mutex<Option<tokio::time::Instant>>,
     dispatch_witness: Arc<AtomicBool>,
     error: Mutex<Option<AgentError>>,
@@ -506,6 +516,7 @@ pub(in crate::runtime) struct IndexedReadOnlyRequest {
     turn_shared: Arc<TurnShared>,
     dispatch_witness: Arc<AtomicBool>,
     process_session_update: Arc<Mutex<Option<plakous_tools::internal::ProcessSessionUpdate>>>,
+    access_salt: Option<[u8; 32]>,
 }
 
 pub(in crate::runtime) type IndexedToolFuture =

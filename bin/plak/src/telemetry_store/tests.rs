@@ -115,6 +115,7 @@ fn presented_tool_and_delta_fingerprint_are_recorded() -> TestResult {
                 usage: Some(Usage::new(10, 20, 0, 0, 0)),
                 served_by: None,
                 output_deltas: 4,
+                measurement: plakous::agent::ModelMeasurement::absent(),
             },
         )),
     ])?;
@@ -181,6 +182,7 @@ pub(super) fn all_observations() -> TestResult<Vec<TelemetryObservation>> {
                 model_attempts: 1,
                 tool_calls: 1,
                 compactions: 0,
+                prepared_input_high_water: None,
             },
         ),
         TelemetryObservation::new(context, timestamp, TelemetryObservationKind::ModelStarted),
@@ -200,6 +202,7 @@ pub(super) fn all_observations() -> TestResult<Vec<TelemetryObservation>> {
                 usage: Some(Usage::new(21, 22, 23, 24, 25)),
                 served_by: None,
                 output_deltas: 0,
+                measurement: plakous::agent::ModelMeasurement::absent(),
             },
         ),
         TelemetryObservation::new(
@@ -216,6 +219,15 @@ pub(super) fn all_observations() -> TestResult<Vec<TelemetryObservation>> {
                 elapsed: Duration::from_millis(50),
                 status: TelemetryTerminalStatus::Completed,
                 output_bytes: 128,
+                measurement: plakous::agent::ToolMeasurement::absent(),
+            },
+        ),
+        TelemetryObservation::new(
+            context,
+            timestamp,
+            TelemetryObservationKind::ToolObservationClipped {
+                bytes_kept: 64,
+                bytes_dropped: 64,
             },
         ),
         TelemetryObservation::new(
@@ -236,6 +248,7 @@ pub(super) fn all_observations() -> TestResult<Vec<TelemetryObservation>> {
                 tokens_before: Some(100),
                 tokens_after: Some(40),
                 usage: Some(Usage::new(1, 2, 3, 4, 5)),
+                measurement: plakous::agent::CompactionMeasurement::absent(),
             },
         ),
         TelemetryObservation::new(
@@ -338,6 +351,7 @@ fn turn_finished_cannot_write_projected_usage() -> TestResult {
             model_attempts: 1,
             tool_calls: 0,
             compactions: 0,
+            prepared_input_high_water: None,
         },
     ))])?;
     assert_eq!(store.query_i64("SELECT cost_micros FROM turns"), None);
@@ -360,6 +374,7 @@ fn same_call_id_in_two_turns_keeps_two_tool_rows() -> TestResult {
                 elapsed: Duration::from_millis(5),
                 status: TelemetryTerminalStatus::Completed,
                 output_bytes: 1,
+                measurement: plakous::agent::ToolMeasurement::absent(),
             },
         ))
     };
@@ -510,6 +525,7 @@ fn compaction_finished_without_start_inserts_finished_only_row() -> TestResult {
             tokens_before: None,
             tokens_after: None,
             usage: None,
+            measurement: plakous::agent::CompactionMeasurement::absent(),
         },
     ))])?;
     assert_eq!(store.count_rows("compactions"), 1);
@@ -566,6 +582,7 @@ fn compaction_cost_tracks_reported_completed_and_unknown_responses() -> TestResu
                     tokens_before: None,
                     tokens_after: None,
                     usage,
+                    measurement: plakous::agent::CompactionMeasurement::absent(),
                 },
             )),
         ])?;
@@ -748,7 +765,7 @@ fn replay_loss_rows_are_content_free_and_pruned_with_their_session() -> TestResu
         store.query_i64("SELECT COUNT(*) FROM v_replay_loss"),
         Some(2)
     );
-    assert_eq!(store.query_i64("PRAGMA user_version"), Some(20));
+    assert_eq!(store.query_i64("PRAGMA user_version"), Some(21));
     assert_eq!(
         store.query_i64(
             "SELECT COUNT(*) FROM model_retries WHERE cause_kind = 'record_rejected_in_transit'"
@@ -1331,7 +1348,7 @@ fn writer_leaves_legacy_and_other_schema_files_untouched() -> TestResult {
         drop(connection);
         let before = std::fs::read(&database)?;
         let store = TelemetryStore::open(&paths)?;
-        assert_eq!(store.query_i64("PRAGMA user_version"), Some(20));
+        assert_eq!(store.query_i64("PRAGMA user_version"), Some(21));
         assert_eq!(
             store.query_i64("SELECT count(*) FROM sqlite_master WHERE name = 'evidence'"),
             Some(0)
@@ -1541,6 +1558,7 @@ fn compaction_refusal_reason_is_persisted_with_and_without_a_start() -> TestResu
                 tokens_before: Some(38_000),
                 tokens_after: None,
                 usage: None,
+                measurement: plakous::agent::CompactionMeasurement::absent(),
             },
         ))])?;
     }
@@ -1548,5 +1566,163 @@ fn compaction_refusal_reason_is_persisted_with_and_without_a_start() -> TestResu
         "SELECT count(*) FROM compactions WHERE refusal_reason = 'rejected' AND tokens_before = 38000", [], |row| row.get(0),
     )?;
     assert_eq!(count, 2);
+    Ok(())
+}
+
+#[test]
+fn measurement_columns_hold_typed_facts_and_clips_update_their_call() -> TestResult {
+    use plakous::agent::{
+        CompactionMeasurement, ModelMeasurement, ProgramBasename, ToolMeasurement, WaitOutcome,
+        WaitTargetKind,
+    };
+    let (_guard, paths) = PlakPaths::isolated_test_home();
+    paths.ensure_layout().map_err(|error| error.to_string())?;
+    let mut store = TelemetryStore::open(&paths)?;
+    let context = fixture_context()?;
+    let at = fixture_timestamp()?;
+    let digest = [0xab; 32];
+    let tool = |call: u128, measurement| -> TestResult<TelemetryItem> {
+        Ok(TelemetryItem::Agent(TelemetryObservation::new(
+            context.with_call(CallId::try_from(Uuid::from_u128(call))?),
+            at,
+            TelemetryObservationKind::ToolFinished {
+                elapsed: Duration::from_millis(4),
+                status: TelemetryTerminalStatus::Completed,
+                output_bytes: 12,
+                measurement,
+            },
+        )))
+    };
+    store.write_batch(&[
+        TelemetryItem::Agent(TelemetryObservation::new(
+            context,
+            at,
+            TelemetryObservationKind::TurnFinished {
+                elapsed: Duration::from_millis(20),
+                status: TelemetryTerminalStatus::Completed,
+                usage: TurnUsage::new(Usage::new(1, 2, 0, 0, 0), 2, 1, 3)?,
+                model_wall: Duration::from_millis(1),
+                tool_wall: Duration::from_millis(1),
+                compaction_wall: Duration::from_millis(1),
+                model_attempts: 2,
+                tool_calls: 3,
+                compactions: 1,
+                prepared_input_high_water: Some(4_321),
+            },
+        )),
+        TelemetryItem::Agent(TelemetryObservation::new(
+            context,
+            at,
+            TelemetryObservationKind::ModelFinished {
+                elapsed: Duration::from_millis(10),
+                status: TelemetryTerminalStatus::Completed,
+                usage: Some(Usage::new(9, 1, 0, 0, 0)),
+                served_by: None,
+                output_deltas: 0,
+                measurement: ModelMeasurement::new(
+                    Some(1_000_000),
+                    Some(4_321),
+                    Some((128, 256)),
+                    Some(Duration::from_secs(5)),
+                ),
+            },
+        )),
+        tool(
+            7,
+            ToolMeasurement::access(Some(digest), Some((10, 20)), true),
+        )?,
+        tool(
+            8,
+            ToolMeasurement::command(ProgramBasename::from_basename("rg").ok_or("label")?),
+        )?,
+        tool(
+            9,
+            ToolMeasurement::wait(2, WaitTargetKind::Agent, WaitOutcome::Interrupted),
+        )?,
+        TelemetryItem::Agent(TelemetryObservation::new(
+            context.with_call(CallId::try_from(Uuid::from_u128(7))?),
+            at,
+            TelemetryObservationKind::ToolObservationClipped {
+                bytes_kept: 100,
+                bytes_dropped: 900,
+            },
+        )),
+        TelemetryItem::Agent(TelemetryObservation::new(
+            context,
+            at,
+            TelemetryObservationKind::CompactionStarted {
+                reason: CompactionEventReason::Scheduled,
+            },
+        )),
+        TelemetryItem::Agent(TelemetryObservation::new(
+            context,
+            at,
+            TelemetryObservationKind::CompactionFinished {
+                refusal: None,
+                elapsed: Duration::from_millis(7),
+                outcome: CompactionEventOutcome::Committed,
+                reason: CompactionEventReason::Scheduled,
+                tokens_before: Some(900),
+                tokens_after: Some(100),
+                usage: None,
+                measurement: CompactionMeasurement::new(
+                    Some(1_000_000),
+                    Some(800_000),
+                    Some(900_000),
+                    Some(Duration::from_secs(2)),
+                ),
+            },
+        )),
+    ])?;
+    let row = |sql: &str| store.query_text(sql);
+    assert_eq!(
+        store.query_i64("SELECT prepared_input_high_water FROM turns"),
+        Some(4_321)
+    );
+    assert_eq!(
+        row(
+            "SELECT context_window_tokens || ',' || prepared_input_tokens || ',' || \
+             instruction_bytes || ',' || tool_schema_bytes || ',' || idle_gap_ns \
+             FROM model_attempts"
+        )
+        .as_deref(),
+        Some("1000000,4321,128,256,5000000000")
+    );
+    assert_eq!(
+        row(
+            "SELECT access_digest || ',' || range_first_line || ',' || range_lines || ',' || \
+             page_partial || ',' || observation_clipped_bytes FROM tool_calls \
+             WHERE access_digest IS NOT NULL"
+        )
+        .as_deref(),
+        Some(format!("{},10,20,1,900", "ab".repeat(32)).as_str())
+    );
+    assert_eq!(
+        row("SELECT command_class FROM tool_calls WHERE command_class IS NOT NULL").as_deref(),
+        Some("rg")
+    );
+    assert_eq!(
+        row(
+            "SELECT wait_count || ':' || wait_kind || ':' || wait_outcome FROM tool_calls \
+             WHERE wait_kind IS NOT NULL"
+        )
+        .as_deref(),
+        Some("2:agent:interrupted")
+    );
+    assert_eq!(
+        store.query_i64(
+            "SELECT COUNT(*) FROM tool_calls WHERE observation_clipped_bytes IS NOT NULL"
+        ),
+        Some(1),
+        "a clip updates only its own call"
+    );
+    assert_eq!(
+        row(
+            "SELECT context_window_tokens || ',' || threshold_tokens || ',' || \
+             occupancy_tokens || ',' || idle_gap_ns FROM compactions"
+        )
+        .as_deref(),
+        Some("1000000,800000,900000,2000000000")
+    );
     Ok(())
 }

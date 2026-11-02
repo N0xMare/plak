@@ -15,9 +15,9 @@ use crate::runtime::observation::{
 };
 use crate::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentError, AgentErrorKind,
-    AgentSessionEndpointError, CompactionEventOutcome, ContextEvaluationAudit,
-    DurableOperationKind, DurableOperationRecord, DurableOperationState, RuntimeCheckpoint,
-    RuntimeLifecycle, TelemetryObservationKind,
+    AgentSessionEndpointError, CompactionEventOutcome, CompactionMeasurement,
+    ContextEvaluationAudit, DurableOperationKind, DurableOperationRecord, DurableOperationState,
+    RuntimeCheckpoint, RuntimeLifecycle, TelemetryObservationKind,
 };
 use plakous_model::{
     ContextStatus, ContextStatusKind, ConversationView, Digest, ModelCacheAffinity, ModelError,
@@ -49,6 +49,8 @@ struct CompactionDetail {
     no_eligible_detail: Option<&'static str>,
     exhausted: bool,
     rung: Option<&'static str>,
+    /// Idle gap before the paid call, when one dispatched.
+    idle_gap: Option<std::time::Duration>,
 }
 
 /// The fixed inputs of one compaction attempt, shared by its phases.
@@ -215,8 +217,14 @@ impl Driver {
         request: AgentCompactSessionRequest,
         origin: CompactOrigin,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
-        self.compact_session_with_detail(active, request, origin, &mut CompactionDetail::default())
-            .await
+        self.compact_session_with_detail(
+            active,
+            request,
+            origin,
+            &mut CompactionDetail::default(),
+            None,
+        )
+        .await
     }
 
     async fn compact_session_with_detail(
@@ -225,6 +233,7 @@ impl Driver {
         request: AgentCompactSessionRequest,
         origin: CompactOrigin,
         committed_detail: &mut CompactionDetail,
+        measurement: Option<CompactionMeasurement>,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
         if self.compaction_in_flight {
             return Err(AgentSessionEndpointError::Busy);
@@ -284,9 +293,14 @@ impl Driver {
             return Err(AgentSessionEndpointError::Busy);
         }
         self.compaction_in_flight = true;
-        let outcome =
-            Box::pin(self.compact_session_admitted(active, request, origin, committed_detail))
-                .await;
+        let outcome = Box::pin(self.compact_session_admitted(
+            active,
+            request,
+            origin,
+            committed_detail,
+            measurement,
+        ))
+        .await;
         self.compaction_in_flight = false;
         outcome
     }
@@ -301,6 +315,7 @@ impl Driver {
         mut request: AgentCompactSessionRequest,
         origin: CompactOrigin,
         committed_detail: &mut CompactionDetail,
+        measurement: Option<CompactionMeasurement>,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
         let checkpoint = self.authority.checkpoint();
         let source = DurableSessionAddress::new(
@@ -387,6 +402,10 @@ impl Driver {
         }
         let (tokens_before, tokens_after, compaction_usage) =
             compaction_telemetry_tokens(&self.authority, &outcome);
+        let measurement = CompactionMeasurement {
+            idle_gap: committed_detail.idle_gap,
+            ..measurement.unwrap_or_else(|| self.compaction_measurement(None))
+        };
         self.emit_telemetry(
             compaction_context,
             TelemetryObservationKind::CompactionFinished {
@@ -397,6 +416,7 @@ impl Driver {
                 tokens_before: tokens_before.or(measured_source_tokens),
                 tokens_after,
                 usage: compaction_usage,
+                measurement,
             },
         );
         if let Some(command) = active {

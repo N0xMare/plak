@@ -194,7 +194,7 @@ impl Driver {
                             let (result, clip) =
                                 clip_tool_result(result, &mut self.observation_budget)?;
                             publish_observation_clip(
-                                &command.shared.events,
+                                &command.shared,
                                 command.turn_id,
                                 attempt_id,
                                 call.call_id(),
@@ -351,7 +351,7 @@ impl Driver {
         }
         let (result, clip) = clip_tool_result(result, &mut self.observation_budget)?;
         publish_observation_clip(
-            &command.shared.events,
+            &command.shared,
             command.turn_id,
             attempt_id,
             call.call_id(),

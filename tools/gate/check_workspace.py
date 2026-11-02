@@ -924,6 +924,9 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "TelemetrySink",
         "TelemetrySinkError",
         "TelemetryTerminalStatus",
+        # Closed wait labels persisted by the telemetry projection.
+        "WaitOutcome",
+        "WaitTargetKind",
         "ChildProcessKind",
         "ChildProcessExit",
         "CredentialProviderLabel",
@@ -1217,6 +1220,9 @@ _SHARED_PLAKOUS_SYMBOLS = {
     },
     "tools": {
         "ToolPreempt",
+        # A waiting tool's typed fact: counts and a closed wake for measurement.
+        "WaitFact",
+        "WaitWake",
         "AlwaysAllowPolicy",
         # A template's `mcp:<id>` names parse through the facade's server id.
         "McpServerName",

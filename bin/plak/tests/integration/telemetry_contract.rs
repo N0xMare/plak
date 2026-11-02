@@ -59,13 +59,14 @@ fn seed_minimal_product_provenance(database: &std::path::Path, subagents: &std::
               account TEXT NOT NULL,
               effort TEXT,
               session_locator TEXT,
+              template TEXT,
               PRIMARY KEY(tree_id, agent_id)
             );
             INSERT INTO agent_nodes VALUES (
-              'node-root','node-root','gpt-test','openai','low',NULL
+              'node-root','node-root','gpt-test','openai','low',NULL,NULL
             );
             INSERT INTO agent_nodes VALUES (
-              'node-root','node-child','gpt-child','openai',NULL,'sess-2/br/ckpt'
+              'node-root','node-child','gpt-child','openai',NULL,'sess-2/br/ckpt','reviewer'
             );",
         )
         .expect("seed product provenance");
@@ -118,6 +119,70 @@ fn telemetry_sql_with_product_attach() {
     assert!(stdout.contains("20"), "stdout: {stdout}");
     assert!(stdout.contains("gpt-child"), "stdout: {stdout}");
     assert!(stdout.contains("child"), "stdout: {stdout}");
+
+    let role = Command::new(plak_bin())
+        .env("PLAK_HOME", paths.home())
+        .env("HOME", paths.home())
+        .current_dir(paths.home())
+        .args([
+            "telemetry",
+            "sql",
+            "SELECT template, origin FROM v_session_models ORDER BY origin",
+        ])
+        .output()
+        .expect("spawn template query");
+    assert!(role.status.success(), "{role:?}");
+    let role_stdout = String::from_utf8_lossy(&role.stdout);
+    assert!(role_stdout.contains("reviewer"), "stdout: {role_stdout}");
+}
+
+/// The statements `--views` prints, split at each line that ends one.
+fn recommended_statements(output: &str) -> Vec<String> {
+    let views = output
+        .split_once("RECOMMENDED VIEWS")
+        .map(|(_, views)| views)
+        .expect("views header");
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    for line in views.lines().skip(1) {
+        if line.trim_start().starts_with("--") || line.trim().is_empty() {
+            continue;
+        }
+        current.push_str(line);
+        current.push('\n');
+        if line.trim_end().ends_with(';') {
+            statements.push(std::mem::take(&mut current));
+        }
+    }
+    assert!(
+        current.trim().is_empty(),
+        "unterminated statement: {current}"
+    );
+    statements
+}
+
+#[test]
+fn every_recommended_view_runs_against_a_fresh_schema() {
+    let (_guard, paths) = PlakPaths::isolated_test_home();
+    paths.ensure_layout().expect("layout");
+    drop(TelemetryStore::open(&paths).expect("open telemetry"));
+    seed_minimal_product_provenance(&paths.product_database(), &paths.subagents_database());
+    private_home(paths.home());
+    let output = Command::new(plak_bin())
+        .env("PLAK_HOME", paths.home())
+        .env("HOME", paths.home())
+        .current_dir(paths.home())
+        .args(["telemetry", "status", "--views"])
+        .output()
+        .expect("spawn plak telemetry status --views");
+    assert!(output.status.success(), "{output:?}");
+    let statements = recommended_statements(&String::from_utf8_lossy(&output.stdout));
+    assert!(statements.len() >= 15, "{statements:?}");
+    for statement in statements {
+        if let Err(error) = TelemetryStore::query_attached(&paths, &statement) {
+            panic!("recommended view failed: {error}\n{statement}");
+        }
+    }
 }
 
 #[test]
@@ -137,8 +202,8 @@ fn telemetry_status_reports_schema_version() {
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Schema version 20"),
-        "expected schema v20 in status: {stdout}"
+        stdout.contains("Schema version 21"),
+        "expected schema v21 in status: {stdout}"
     );
 }
 
@@ -150,7 +215,7 @@ fn jobs_telemetry_schema_is_content_free_and_route_joinable() {
     assert!(
         paths
             .telemetry_database()
-            .ends_with("telemetry-v20.sqlite3")
+            .ends_with("telemetry-v21.sqlite3")
     );
     let connection = Connection::open(paths.telemetry_database()).expect("telemetry db");
     let mut query = connection
@@ -357,6 +422,7 @@ fn model_finished_persists_served_endpoint_and_cost() {
                     usage: Some(Usage::new(1, 2, 0, 0, 0).with_cost_micros(Some(123_456))),
                     served_by: Some(ServedBy::new("Provider").expect("served_by")),
                     output_deltas: 3,
+                    measurement: plakous::agent::ModelMeasurement::absent(),
                 },
             ),
             TelemetryObservation::new(
@@ -368,6 +434,7 @@ fn model_finished_persists_served_endpoint_and_cost() {
                     usage: Some(Usage::new(3, 4, 0, 0, 0)),
                     served_by: None,
                     output_deltas: 0,
+                    measurement: plakous::agent::ModelMeasurement::absent(),
                 },
             ),
         ])

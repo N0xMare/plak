@@ -51,8 +51,8 @@ fn statement(kind: RowKind) -> &'static str {
         RowKind::TurnFinished => "INSERT INTO turns (
                     session_id, branch_id, run_id, agent_id, turn_id,
                     elapsed_ns, status, model_wall_ns, tool_wall_ns, compaction_wall_ns,
-                    model_attempts, tool_calls, compactions
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                    model_attempts, tool_calls, compactions, prepared_input_high_water
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT(turn_id) DO UPDATE SET
                     run_id = CASE WHEN turns.run_id = '' THEN excluded.run_id ELSE turns.run_id END,
                     agent_id = CASE WHEN turns.agent_id = '' THEN excluded.agent_id ELSE turns.agent_id END,
@@ -63,7 +63,8 @@ fn statement(kind: RowKind) -> &'static str {
                     compaction_wall_ns = excluded.compaction_wall_ns,
                     model_attempts = excluded.model_attempts,
                     tool_calls = excluded.tool_calls,
-                    compactions = excluded.compactions",
+                    compactions = excluded.compactions,
+                    prepared_input_high_water = excluded.prepared_input_high_water",
         RowKind::ModelStarted => "INSERT INTO model_attempts (
                     attempt_id, session_id, branch_id, run_id, agent_id, turn_id, started_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -83,8 +84,10 @@ fn statement(kind: RowKind) -> &'static str {
                     finished_at, ttlb_ns, status,
                     input_tokens, output_tokens, reasoning_tokens,
                     cached_input_tokens, cache_write_tokens,
-                    served_endpoint, cost_micros, cost_status, served_path_fingerprint
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                    served_endpoint, cost_micros, cost_status, served_path_fingerprint,
+                    context_window_tokens, instruction_bytes, tool_schema_bytes, prepared_input_tokens,
+                    idle_gap_ns
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
                  ON CONFLICT(attempt_id) DO UPDATE SET
                     finished_at = excluded.finished_at,
                     ttlb_ns = excluded.ttlb_ns,
@@ -97,7 +100,12 @@ fn statement(kind: RowKind) -> &'static str {
                     served_endpoint = excluded.served_endpoint,
                     cost_micros = excluded.cost_micros,
                     cost_status = excluded.cost_status,
-                    served_path_fingerprint = excluded.served_path_fingerprint",
+                    served_path_fingerprint = excluded.served_path_fingerprint,
+                    context_window_tokens = excluded.context_window_tokens,
+                    instruction_bytes = excluded.instruction_bytes,
+                    tool_schema_bytes = excluded.tool_schema_bytes,
+                    prepared_input_tokens = excluded.prepared_input_tokens,
+                    idle_gap_ns = excluded.idle_gap_ns",
         RowKind::ToolStarted => "INSERT INTO tool_calls (
                     call_id, session_id, branch_id, run_id, agent_id, turn_id,
                     attempt_id, started_at, tool_name
@@ -107,13 +115,25 @@ fn statement(kind: RowKind) -> &'static str {
                     tool_name = excluded.tool_name",
         RowKind::ToolFinished => "INSERT INTO tool_calls (
                     call_id, session_id, branch_id, run_id, agent_id, turn_id,
-                    attempt_id, finished_at, elapsed_ns, status, output_bytes
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                    attempt_id, finished_at, elapsed_ns, status, output_bytes,
+                    access_digest, range_first_line, range_lines, page_partial,
+                    command_class, wait_count, wait_kind, wait_outcome
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                  ON CONFLICT(turn_id, call_id) DO UPDATE SET
                     finished_at = excluded.finished_at,
                     elapsed_ns = excluded.elapsed_ns,
                     status = excluded.status,
-                    output_bytes = excluded.output_bytes",
+                    output_bytes = excluded.output_bytes,
+                    access_digest = excluded.access_digest,
+                    range_first_line = excluded.range_first_line,
+                    range_lines = excluded.range_lines,
+                    page_partial = excluded.page_partial,
+                    command_class = excluded.command_class,
+                    wait_count = excluded.wait_count,
+                    wait_kind = excluded.wait_kind,
+                    wait_outcome = excluded.wait_outcome",
+        RowKind::ToolObservationClipped => "UPDATE tool_calls SET observation_clipped_bytes = ?3
+                 WHERE turn_id = ?1 AND call_id = ?2",
         RowKind::CompactionStarted => "INSERT INTO compactions (
                     session_id, branch_id, run_id, agent_id, turn_id,
                     started_at, reason
@@ -132,7 +152,11 @@ fn statement(kind: RowKind) -> &'static str {
                     cache_write_tokens = ?11,
                     cost_micros = ?12,
                     cost_status = ?13,
-                    refusal_reason = ?18
+                    refusal_reason = ?18,
+                    context_window_tokens = ?19,
+                    threshold_tokens = ?20,
+                    occupancy_tokens = ?21,
+                    idle_gap_ns = ?22
                  WHERE id = (
                     SELECT id FROM compactions
                     WHERE session_id = ?14 AND branch_id = ?15 AND agent_id = ?16
@@ -147,8 +171,9 @@ fn statement(kind: RowKind) -> &'static str {
                         tokens_before, tokens_after,
                         input_tokens, output_tokens, reasoning_tokens,
                         cached_input_tokens, cache_write_tokens,
-                        cost_micros, cost_status, refusal_reason
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                        cost_micros, cost_status, refusal_reason,
+                        context_window_tokens, threshold_tokens, occupancy_tokens, idle_gap_ns
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
         RowKind::DurabilityFinished => "INSERT INTO durability_attempts (
                     session_id, branch_id, run_id, agent_id, turn_id,
                     at, elapsed_ns, kind, status

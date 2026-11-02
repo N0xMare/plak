@@ -34,7 +34,8 @@ use plakous_offline_crash_harness::script::ScriptPlan;
 use plakous_offline_crash_harness::{
     BoundaryController, scripted_artifact_runtime_binding,
     scripted_code_mode_runtime_binding_with_extensions, scripted_compaction_runtime_binding,
-    scripted_runtime_binding_with_extensions, scripted_topology_runtime_binding,
+    scripted_runtime_binding_with_extensions, scripted_runtime_binding_with_telemetry,
+    scripted_topology_runtime_binding,
 };
 
 use crate::store::sessions as product_sessions;
@@ -1089,12 +1090,13 @@ impl OfflineSelection {
             } else if plan.seal_family_artifacts {
                 scripted_artifact_runtime_binding(&workspace, runtime_controller.clone(), &plan)
             } else {
-                scripted_runtime_binding_with_extensions(
+                scripted_runtime_binding_with_telemetry(
                     &workspace,
                     runtime_controller.clone(),
                     Arc::clone(&plan),
                     Arc::clone(&cursor),
                     root_tools.registrations()?,
+                    telemetry.clone(),
                 )
             }
             .map_err(|error| error.to_string())

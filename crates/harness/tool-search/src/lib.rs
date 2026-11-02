@@ -174,8 +174,12 @@ fn execute_list_directory(
     let stamp = generation_stamp_prefix(context);
     let outcome = ToolOutcome::success_text(format!("{stamp}{}", entries.join("\n")))?;
     Ok(if want_value {
-        let count =
-            bounded_value_count::<plakous_tools::ListedEntry>(entries.iter().map(String::len));
+        let mut listed = args.path.display().to_string();
+        listed.shrink_to_fit();
+        let count = bounded_value_count::<plakous_tools::ListedEntry>(
+            listed.capacity(),
+            entries.iter().map(String::len),
+        );
         let entries_cut = (entries.len() - count) as u64;
         let mut values = Vec::with_capacity(count);
         values.extend(entries.into_iter().take(count).map(|name| {
@@ -195,6 +199,7 @@ fn execute_list_directory(
         }));
         outcome.with_value(plakous_tools::ExecutionValue::Listing(
             plakous_tools::ListingValue {
+                path: listed,
                 entries: values,
                 entries_cut,
                 incomplete,
@@ -303,16 +308,24 @@ async fn execute_regex_search(
         .flat_map(|range| result.matches()[range].iter());
     with_search_hits(
         outcome,
-        want_value,
+        want_value.then_some(pattern),
         hits,
         result.matches().len(),
         result.incomplete(),
     )
 }
 
-fn bounded_value_count<T>(sizes: impl Iterator<Item = usize>) -> usize {
+/// The first 4096 bytes of a value's query, cut on a character boundary.
+fn value_query(query: &str) -> String {
+    let mut query = query[..query.floor_char_boundary(query.len().min(4_096))].to_owned();
+    query.shrink_to_fit();
+    query
+}
+
+fn bounded_value_count<T>(reserved: usize, sizes: impl Iterator<Item = usize>) -> usize {
     let mut room = plakous_tools::MAX_TOOL_OUTCOME_BYTES
-        .saturating_sub(size_of::<plakous_tools::ExecutionValue>());
+        .saturating_sub(size_of::<plakous_tools::ExecutionValue>())
+        .saturating_sub(reserved);
     sizes
         .take_while(|size| {
             let bytes = size.saturating_add(size_of::<T>());
@@ -327,18 +340,20 @@ fn bounded_value_count<T>(sizes: impl Iterator<Item = usize>) -> usize {
 
 fn with_search_hits<'a>(
     outcome: ToolOutcome,
-    want_value: bool,
+    query: Option<&str>,
     matches: impl Iterator<Item = &'a plakous_tools::RepositoryQueryMatch>,
     known_matches: usize,
     incomplete: bool,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
-    if !want_value {
+    let Some(query) = query else {
         return Ok(outcome);
-    }
+    };
+    let query = value_query(query);
     let mut hits = Vec::new();
     let mut strings = 0_usize;
     let room = plakous_tools::MAX_TOOL_OUTCOME_BYTES
-        .saturating_sub(size_of::<plakous_tools::ExecutionValue>());
+        .saturating_sub(size_of::<plakous_tools::ExecutionValue>())
+        .saturating_sub(query.capacity());
     for hit in matches {
         let mut path = hit.path().to_string_lossy().into_owned();
         let mut text = String::from_utf8_lossy(hit.bytes()).into_owned();
@@ -375,6 +390,7 @@ fn with_search_hits<'a>(
     let hits_cut = known_matches.saturating_sub(hits.len()) as u64;
     outcome.with_value(plakous_tools::ExecutionValue::SearchHits(
         plakous_tools::SearchHitsValue {
+            query,
             hits,
             hits_cut,
             incomplete,
@@ -663,6 +679,10 @@ impl ToolExecutor for SearchRepositoryTool {
                 repository_query_limits(&args, STANDARD_SEARCH_MATCHES)?
             };
             let root = query_root(&context, &args.path)?;
+            let wanted_query = invocation
+                .want_value()
+                .then(|| args.query.clone())
+                .flatten();
             let query = if args.paths_only.unwrap_or(false) {
                 let glob = args.filename_glob.ok_or_else(|| {
                     ToolRuntimeError::new(
@@ -767,7 +787,7 @@ impl ToolExecutor for SearchRepositoryTool {
             let outcome = ToolOutcome::success_text(output.finish())?;
             with_search_hits(
                 outcome,
-                invocation.want_value(),
+                wanted_query.as_deref(),
                 result.matches().iter().take(match_limit),
                 result.matches().len(),
                 result.incomplete(),

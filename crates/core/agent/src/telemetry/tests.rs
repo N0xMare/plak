@@ -43,6 +43,7 @@ fn observation() -> TestResult<TelemetryObservation> {
             usage: Some(Usage::new(11, 12, 13, 14, 15)),
             served_by: None,
             output_deltas: 0,
+            measurement: ModelMeasurement::absent(),
         },
     ))
 }
@@ -134,6 +135,7 @@ fn turn_finished_compartments_are_copy_and_typed() -> TestResult {
         model_attempts: 1,
         tool_calls: 2,
         compactions: 1,
+        prepared_input_high_water: None,
     };
     let copied = kind;
     let TelemetryObservationKind::TurnFinished {
@@ -155,6 +157,7 @@ fn tool_finished_carries_output_bytes() -> TestResult {
         elapsed: Duration::from_millis(5),
         status: TelemetryTerminalStatus::Completed,
         output_bytes: 42,
+        measurement: ToolMeasurement::absent(),
     };
     let TelemetryObservationKind::ToolFinished { output_bytes, .. } = kind else {
         panic!("expected ToolFinished");
@@ -173,6 +176,7 @@ fn compaction_finished_carries_tokens_and_usage() -> TestResult {
         tokens_before: Some(100),
         tokens_after: Some(40),
         usage: Some(Usage::new(1, 2, 3, 4, 5)),
+        measurement: CompactionMeasurement::absent(),
     };
     let TelemetryObservationKind::CompactionFinished {
         tokens_before,
@@ -277,4 +281,16 @@ fn credential_refresh_is_copy_and_content_free() -> TestResult {
     );
     assert!(CredentialProviderLabel::new("").is_err());
     Ok(())
+}
+
+#[test]
+fn only_an_attached_sink_turns_measurement_on() {
+    struct Discard;
+    impl TelemetrySink for Discard {
+        fn try_emit(&self, _: TelemetryObservation) -> Result<(), TelemetrySinkError> {
+            Ok(())
+        }
+    }
+    assert!(!TelemetryEmitter::disabled().is_enabled());
+    assert!(TelemetryEmitter::enabled(Arc::new(Discard)).is_enabled());
 }

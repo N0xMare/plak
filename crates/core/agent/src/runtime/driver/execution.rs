@@ -69,6 +69,7 @@ impl ActorToolDispatchObserver {
             telemetry: telemetry.emitter,
             telemetry_context: telemetry.context,
             clock: telemetry.clock,
+            access_salt: telemetry.access_salt,
             started: Mutex::new(None),
             dispatch_witness,
             error: Mutex::new(None),
@@ -110,15 +111,30 @@ impl ActorToolDispatchObserver {
         Ok(())
     }
 
+    /// Emits the call's terminal observation, measured from the executor's
+    /// typed value and wait fact.
     pub(in crate::runtime) fn emit_finished(
         &self,
         status: TelemetryTerminalStatus,
         output_bytes: u64,
+        value: Option<&plakous_tools::ExecutionValue>,
+        outcome: Option<&plakous_tools::ToolOutcome>,
     ) -> bool {
         let Some(started) = lock_mutex(&self.started).take() else {
             return false;
         };
         let elapsed = started.elapsed();
+        let measurement = if self.telemetry.is_enabled() {
+            crate::telemetry::measure_tool_call(
+                self.access_salt.as_ref(),
+                self.audit_identity.canonical_name().as_str(),
+                status,
+                value,
+                outcome,
+            )
+        } else {
+            crate::ToolMeasurement::absent()
+        };
         self.telemetry.emit(TelemetryObservation::new(
             self.telemetry_context,
             self.clock.now(),
@@ -126,6 +142,7 @@ impl ActorToolDispatchObserver {
                 elapsed,
                 status,
                 output_bytes,
+                measurement,
             },
         ));
         self.shared.record_tool_telemetry(elapsed);
@@ -237,6 +254,7 @@ async fn execute_read_only_tool(
         turn_shared,
         dispatch_witness,
         process_session_update: process_session_update_slot,
+        access_salt,
     } = request;
     let call_id = call.call_id();
     let (progress, progress_receiver) =
@@ -255,6 +273,7 @@ async fn execute_read_only_tool(
             emitter: telemetry,
             context: telemetry_context,
             clock: Arc::clone(&clock),
+            access_salt,
         },
         dispatch_witness,
     ));
@@ -329,6 +348,8 @@ async fn execute_read_only_tool(
     let dispatched = dispatch_observer.emit_finished(
         tool_terminal_status(&execution_outcome, shutdown.is_cancelled()),
         output_bytes,
+        value.as_ref(),
+        execution_outcome.as_ref().ok(),
     );
     if let Some(error) = dispatch_observer.take_error() {
         return Err(error);
@@ -428,7 +449,7 @@ pub(in crate::runtime) fn canonicalize_observed_tool_execution(
 /// context is the call, not the turn, so a surface can attach the note to the
 /// tool row whose output was cut rather than to the turn as a whole.
 pub(in crate::runtime) fn publish_observation_clip(
-    events: &EventPipeline,
+    shared: &TurnShared,
     turn_id: TurnId,
     attempt_id: AttemptId,
     call_id: CallId,
@@ -438,7 +459,8 @@ pub(in crate::runtime) fn publish_observation_clip(
     let Some(clip) = clip else {
         return;
     };
-    let _ = events.publish(
+    shared.record_observation_clip(attempt_id, call_id, clip.bytes_kept, clip.bytes_dropped);
+    let _ = shared.events.publish(
         EventContext::call(turn_id, attempt_id, call_id),
         AgentEventKind::ObservationClipped {
             name: Arc::from(name.as_str()),

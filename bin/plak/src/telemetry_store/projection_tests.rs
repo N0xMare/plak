@@ -79,7 +79,7 @@ fn observations() -> TestResult<Vec<TelemetryObservation>> {
     }
     assert_eq!(
         observations.len(),
-        22,
+        23,
         "one fixture for every observation kind"
     );
     // Also cover missing correlation ids, finish-without-start, and clean commit suppression.
@@ -160,7 +160,7 @@ fn every_observation_keeps_the_before_refactor_rows_and_spans() -> TestResult {
         .collect();
     assert_eq!(
         digest,
-        "22fc53c0a75efd5646c0f36ed9d1c143b3157d29460f39e35e96458c3d2e5c7a"
+        "959825181c64882f571b9e88f47d29e0dc730626991fd92208a84df0b5d597da"
     );
     Ok(())
 }

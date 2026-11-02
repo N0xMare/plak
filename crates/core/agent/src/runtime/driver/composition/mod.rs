@@ -204,6 +204,7 @@ impl Driver {
                 emitter: Arc::clone(&self.telemetry),
                 context: telemetry_context,
                 clock: Arc::clone(&self.clock),
+                access_salt: self.access_salt,
             },
             dispatch_witness,
         ))

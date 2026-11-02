@@ -296,6 +296,7 @@ impl Driver {
                 tokens_before: Some(request.before_input_tokens),
                 tokens_after: Some(evidence.after_input_tokens),
                 usage: None,
+                measurement: self.compaction_measurement(None),
             },
         );
         Ok(())

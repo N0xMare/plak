@@ -114,6 +114,7 @@ impl Driver {
             if attempt.origin.pressure_forced() {
                 self.turn_budgets.pressure_fold_spent = true;
             }
+            committed_detail.idle_gap = self.note_provider_request();
             Box::pin(self.run_compaction_call(&mut live)).await
         };
         match result {

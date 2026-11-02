@@ -185,7 +185,7 @@ impl Driver {
         // stands until the frame can say otherwise.
         for clipped in &restored.observation_clips {
             publish_observation_clip(
-                &command.shared.events,
+                &command.shared,
                 command.turn_id,
                 restored.frame.attempt_id,
                 clipped.call_id,
@@ -281,7 +281,7 @@ impl Driver {
                         )?;
 
                         publish_observation_clip(
-                            &command.shared.events,
+                            &command.shared,
                             command.turn_id,
                             frame.attempt_id,
                             call.call_id(),
@@ -466,7 +466,7 @@ impl Driver {
                     )?;
 
                     publish_observation_clip(
-                        &command.shared.events,
+                        &command.shared,
                         command.turn_id,
                         frame.attempt_id,
                         call.call_id(),
@@ -599,7 +599,7 @@ impl Driver {
                 )?;
 
                 publish_observation_clip(
-                    &command.shared.events,
+                    &command.shared,
                     command.turn_id,
                     attempt_id,
                     call.call_id(),

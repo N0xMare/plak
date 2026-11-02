@@ -286,10 +286,17 @@ fn topology_envelope(outcome: ToolOutcome) -> Result<ToolOutcome, ToolRuntimeErr
         return Ok(outcome);
     }
     let subject = outcome.presentation_subject().map(str::to_owned);
+    let fact = outcome.wait_fact();
     ToolOutcome::success_text(json!({ "result": outcome.joined_text() }).to_string()).map(
-        |wrapped| match subject {
-            Some(subject) => wrapped.with_presentation_subject(subject),
-            None => wrapped,
+        |wrapped| {
+            let wrapped = match subject {
+                Some(subject) => wrapped.with_presentation_subject(subject),
+                None => wrapped,
+            };
+            match fact {
+                Some(fact) => wrapped.with_wait_fact(fact),
+                None => wrapped,
+            }
         },
     )
 }

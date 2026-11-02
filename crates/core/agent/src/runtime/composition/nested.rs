@@ -34,6 +34,9 @@ pub(in crate::runtime) fn queue_local_composition_nested_values(
     result: Result<serde_json::Value, AgentError>,
     execution: Option<plakous_tools::ExecutionValue>,
 ) -> Result<(), AgentError> {
+    // Telemetry may have asked the executor for a value the cell did not.
+    let execution =
+        execution.filter(|_| state.integration.consumes_values() && responder.wants_value());
     let count = waiters.len().saturating_add(1);
     if state.pending_deliveries.len().saturating_add(count)
         > state.integration.max_outstanding_nested_calls()

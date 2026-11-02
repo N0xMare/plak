@@ -27,7 +27,7 @@ use crate::observation_projection::labels::{
 use crate::observation_projection::{Output, project};
 use plakous_hosted::product_observation::{ChildKind, ProductObservation};
 
-pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 20;
+pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 21;
 
 /// Default disposable telemetry retention.
 pub const DEFAULT_TELEMETRY_MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -103,6 +103,7 @@ CREATE TABLE turns (
   model_attempts INTEGER,
   tool_calls INTEGER,
   compactions INTEGER,
+  prepared_input_high_water INTEGER,
   input_tokens INTEGER,
   output_tokens INTEGER,
   reasoning_tokens INTEGER,
@@ -137,7 +138,12 @@ CREATE TABLE model_attempts (
   served_endpoint TEXT,
   served_path_fingerprint TEXT,
   cost_micros INTEGER,
-  cost_status TEXT NOT NULL DEFAULT 'unknown'
+  cost_status TEXT NOT NULL DEFAULT 'unknown',
+  context_window_tokens INTEGER,
+  instruction_bytes INTEGER,
+  tool_schema_bytes INTEGER,
+  prepared_input_tokens INTEGER,
+  idle_gap_ns INTEGER
 );
 
 CREATE TABLE tool_calls (
@@ -154,6 +160,15 @@ CREATE TABLE tool_calls (
   status TEXT,
   output_bytes INTEGER,
   tool_name TEXT,
+  access_digest TEXT,
+  range_first_line INTEGER,
+  range_lines INTEGER,
+  page_partial INTEGER,
+  observation_clipped_bytes INTEGER,
+  command_class TEXT,
+  wait_count INTEGER,
+  wait_kind TEXT,
+  wait_outcome TEXT,
   PRIMARY KEY (turn_id, call_id)
 );
 
@@ -178,7 +193,11 @@ CREATE TABLE compactions (
   cached_input_tokens INTEGER,
   cache_write_tokens INTEGER,
   cost_micros INTEGER,
-  cost_status TEXT NOT NULL DEFAULT 'unknown'
+  cost_status TEXT NOT NULL DEFAULT 'unknown',
+  context_window_tokens INTEGER,
+  threshold_tokens INTEGER,
+  occupancy_tokens INTEGER,
+  idle_gap_ns INTEGER
 );
 
 CREATE TABLE durability_attempts (
@@ -948,7 +967,7 @@ fn create_session_models_view(
 ) -> Result<(), TelemetryStoreOpenError> {
     let children = if subagents_attached {
         "UNION SELECT substr(session_locator, 1, instr(session_locator, '/') - 1),
-                    tuple_id, account, effort, NULL, 'child'
+                    tuple_id, account, effort, NULL, 'child', template
              FROM subagents.agent_nodes
              WHERE session_locator IS NOT NULL AND instr(session_locator, '/') > 1"
     } else {
@@ -958,7 +977,8 @@ fn create_session_models_view(
         .execute_batch(&format!(
             "CREATE TEMP VIEW {SESSION_MODELS_VIEW} AS
              SELECT substr(locator, 1, instr(locator, '/') - 1) AS session_id,
-                    model AS tuple_id, account, effort, composition, 'root' AS origin
+                    model AS tuple_id, account, effort, composition, 'root' AS origin,
+                    NULL AS template
              FROM product.sessions
              WHERE locator IS NOT NULL AND instr(locator, '/') > 1
              {children}"

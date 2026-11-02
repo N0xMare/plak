@@ -233,6 +233,7 @@ impl Driver {
             .with_turn(command.turn_id)
             .with_attempt(attempt_id);
         self.emit_telemetry(context, TelemetryObservationKind::ModelStarted);
+        let idle_gap = self.note_provider_request();
         let mut usage = None;
         let mut output_deltas = 0;
         let mut operation_id = None;
@@ -272,6 +273,14 @@ impl Driver {
             .as_ref()
             .ok()
             .and_then(|response| response.metadata().served_by());
+        let measurement = self.model_measurement(
+            request_context_status.as_deref(),
+            command.shared.take_first_attempt(),
+            idle_gap,
+        );
+        if let Some(tokens) = measurement.prepared_input_tokens {
+            command.shared.record_prepared_input(tokens);
+        }
         self.emit_telemetry(
             context,
             TelemetryObservationKind::ModelFinished {
@@ -280,6 +289,7 @@ impl Driver {
                 usage,
                 served_by,
                 output_deltas,
+                measurement,
             },
         );
         command.shared.record_model_telemetry(model_elapsed);

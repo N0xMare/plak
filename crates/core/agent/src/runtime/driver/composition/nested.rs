@@ -379,7 +379,7 @@ impl Driver {
                     &mut self.observation_budget,
                 )?;
                 publish_observation_clip(
-                    &command.shared.events,
+                    &command.shared,
                     command.turn_id,
                     attempt_id,
                     call.call_id(),

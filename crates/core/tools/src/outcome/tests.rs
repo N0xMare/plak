@@ -12,6 +12,7 @@ fn typed_value_moves_without_changing_or_exposing_canonical_content() -> Result<
         output: "private typed content".into(),
         truncated: false,
         full_output: None,
+        program: None,
     });
     let plain = ToolOutcome::success_text("same text")?;
     let mut typed = ToolOutcome::success_text("same text")?.with_value(value.clone())?;
@@ -35,6 +36,7 @@ fn typed_payloads_obey_default_and_reduced_runtime_memory_bounds() -> Result<(),
             output: "x".repeat(bytes),
             truncated: false,
             full_output: None,
+            program: None,
         })
     };
     assert!(
