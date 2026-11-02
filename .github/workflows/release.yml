@@ -1,12 +1,15 @@
 # The repository's only workflow. A pushed v* tag builds the two release
-# tarballs, attests them and creates the GitHub Release. Nothing else runs
-# here: the gates are local, and publishing the crate cohort is a maintainer
-# act (docs/spec/06-build-and-support-surface.md).
+# tarballs, attests them and creates the GitHub Release. A manual run on a
+# branch is the pre-tag dry run: the same build, packaging and attestation,
+# with the tarballs kept as workflow artifacts and no release. Nothing else
+# runs here: the gates are local, and publishing the crate cohort is a
+# maintainer act (docs/spec/06-build-and-support-surface.md).
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -39,7 +42,13 @@ jobs:
       - name: Package
         env:
           TAG: ${{ github.ref_name }}
-        run: tools/release/package-release.sh --tag "$TAG" --out dist
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            tools/release/package-release.sh --tag "$TAG" --out dist
+          else
+            tools/release/package-release.sh --untagged --out dist
+          fi
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/plak-*.tar.gz
@@ -51,6 +60,7 @@ jobs:
 
   release:
     needs: build
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: write

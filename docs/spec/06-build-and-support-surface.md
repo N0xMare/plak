@@ -1408,7 +1408,11 @@ static: an ELF program interpreter fails packaging.
 and an Ubuntu x86_64 runner with `musl-tools`, attests each tarball with
 `actions/attest-build-provenance`, and creates the GitHub Release with both
 tarballs and their combined `SHA256SUMS`, marked as a prerelease for a
-`-rc.<n>` tag so `releases/latest` never resolves to a candidate. It never publishes crates: a runner
+`-rc.<n>` tag so `releases/latest` never resolves to a candidate. A manual run
+of the workflow on a branch (`gh workflow run release.yml --ref main`) is the
+pre-tag dry run: the same two builds, `package-release.sh --untagged` and the
+attestations, with the tarballs kept as workflow artifacts and no release
+created, so a release is cut by tagging a commit whose dry run passed. It never publishes crates: a runner
 has no full-gate evidence for the tree (§6.5). Every action is pinned to a full
 commit SHA.
 

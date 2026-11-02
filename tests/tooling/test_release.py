@@ -628,14 +628,18 @@ class ReleaseWorkflowTests(unittest.TestCase):
         text = (workflows / "release.yml").read_text()
         trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual([line for line in trigger.splitlines() if not line.startswith("    ")],
-                         ["  push:"])
+                         ["  push:", "  workflow_dispatch:"])
         self.assertIn('    tags: ["v*"]', trigger)
+        # A manual run is the pre-tag dry run: it packages untagged and never releases.
+        release_job = text.split("\n  release:\n", 1)[1]
+        self.assertIn("    if: github.ref_type == 'tag'", release_job.split("\n    steps:", 1)[0])
+        self.assertIn('package-release.sh --untagged --out dist', text)
         uses = re.findall(r"uses: (\S+)", text)
         self.assertTrue(uses)
         for action in uses:
             self.assertRegex(action, r"^actions/[a-z-]+@[0-9a-f]{40}$")
         self.assertIn("tools/release/package-release.sh", text)
-        for publish in ("publish.sh", "cargo publish", "CARGO_REGISTRY_TOKEN", "workflow_dispatch"):
+        for publish in ("publish.sh", "cargo publish", "CARGO_REGISTRY_TOKEN"):
             self.assertNotIn(publish, text)
 
 

@@ -120,7 +120,7 @@ operator's `~/.plak`, plus `GIT_CONFIG_GLOBAL=$TMPDIR/gitconfig` (empty) and
 `GIT_CONFIG_NOSYSTEM=1`, so fixture git never reads the operator's git config;
 a test that commits sets its own identity. Set all four yourself if you run
 `cargo nextest` by hand: `TMPDIR="$(bash scripts/test-tmpdir.sh)"`. There is no CI: the only workflow,
-`.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag
+`.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag, and a manual run on `main` is the pre-tag dry run that releases nothing
 (`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
 
 Transport faults for smoke and soak runs: a `test-hooks` build of `plak` reads
