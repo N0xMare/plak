@@ -8,7 +8,7 @@ use plakous::agent::Agent;
 use crate::session_store::SessionRecordStore;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
-pub(super) struct StorageNotices(tokio::task::JoinHandle<()>);
+pub(super) struct StorageNotices(crate::TaskHandle<()>);
 
 impl StorageNotices {
     pub(super) fn start<P: plakous_host_protocol::ProtocolExtension>(

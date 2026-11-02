@@ -114,7 +114,7 @@ pub(crate) struct LiveProjector {
     generation: u64,
     reported: u64,
     tasks: crate::TaskSet,
-    task: tokio::task::JoinHandle<Option<SessionViews>>,
+    task: crate::TaskHandle<Option<SessionViews>>,
 }
 
 impl LiveProjector {
@@ -294,7 +294,7 @@ async fn run(
 ) -> Option<SessionViews> {
     let mut current: Option<Request> = None;
     let mut cached = None;
-    let mut forwarder: Option<tokio::task::JoinHandle<()>> = None;
+    let mut forwarder: Option<crate::TaskHandle<()>> = None;
     let mut shown = SettledRows::default();
     loop {
         wake.notified().await;
@@ -313,7 +313,7 @@ async fn run(
             }
             if forwarder
                 .as_ref()
-                .is_none_or(tokio::task::JoinHandle::is_finished)
+                .is_none_or(crate::TaskHandle::is_finished)
                 || current
                     .as_ref()
                     .is_none_or(|current| !current.target.same_session(&next.target))

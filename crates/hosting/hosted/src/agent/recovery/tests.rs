@@ -725,7 +725,7 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
     // Abort recovery before any child grant can be reacquired.
     fixture
         .runtime
-        .start_recovery_pass(|| tokio::spawn(std::future::pending()));
+        .start_recovery_pass(|| crate::TaskSet::new().spawn(std::future::pending()));
     let root = AttachedCodingSession {
         output_bound_rederived: None,
         reachability_probe: None,

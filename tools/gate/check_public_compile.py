@@ -536,7 +536,8 @@ AUTHORITY_NEGATIVE_ERROR_CODES["terminal_result"] = None
 AUTHORITY_NEGATIVE_ERROR_CODES["credential_bytes"] = "E0599"
 AUTHORITY_NEGATIVE_ERROR_MESSAGES = {
     "hosted_runtime_factory": (
-        "the trait bound `ExternalFactory: runtime::factory::sealed::Sealed` is not satisfied"
+        "the trait bound `ExternalFactory: plakous_hosted::runtime::factory::sealed::Sealed` "
+        "is not satisfied"
     ),
     "hosted_registered_authority": (
         "cannot initialize a tuple struct which contains private fields"

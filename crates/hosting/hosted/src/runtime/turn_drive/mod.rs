@@ -29,7 +29,7 @@ pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) job_agent: &'a Agent,
     pub(super) host_wakes: bool,
     pub(super) quit_started_at: &'a mut Option<Instant>,
-    pub(super) quit_job_stops: &'a mut Option<tokio::task::JoinHandle<Result<(), String>>>,
+    pub(super) quit_job_stops: &'a mut Option<crate::TaskHandle<Result<(), String>>>,
     pub(super) actions: &'a crate::surface_protocol::UserActionReceiver<P>,
     pub(super) deferred: &'a RefCell<InterruptWatchState<P>>,
     pub(super) events: &'a Sender<P>,

@@ -6,7 +6,7 @@ use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 pub(super) struct QueueRefresh {
     expected: sessions::QueueCommands,
-    pub(super) task: tokio::task::JoinHandle<Result<sessions::QueueCommands, String>>,
+    pub(super) task: crate::TaskHandle<Result<sessions::QueueCommands, String>>,
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {

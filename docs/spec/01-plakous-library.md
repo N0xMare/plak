@@ -238,6 +238,37 @@ publication remain under the durable owner. Admission, continuation, terminal,
 observation and request codecs are shared through explicit private imports;
 module organization grants no additional public runtime or persistence authority.
 
+### 2.5 Runtime interfaces
+
+`plakous-model` defines the executor-neutral interfaces a host runs Plakous
+code on. `Runtime::spawn` starts a boxed `'static` task and returns a
+`SpawnedTask` that can abort it and report whether it finished; dropping that
+handle detaches the task. `Runtime::sleep` returns a future that completes after
+a duration, and `Runtime::now` is monotonic time since the runtime's own origin,
+never wall-clock time. Wall-clock time is the existing `Clock` (`SystemClock`
+natively). `HttpTransport::send` performs one HTTP exchange: an `HttpRequest`
+(method, absolute URL, ordered headers, body) in, an `HttpResponse` (status,
+headers, a pull-driven body stream) out, with no redirect, retry or
+authentication semantics. Dropping the `send` future cancels the exchange:
+an unsent request is never sent, and one in flight is abandoned with no
+response and an unknown server-side outcome; dropping a body before its end
+abandons the rest. A failure is a redaction-safe `HttpTransportError`
+classed by where the exchange failed; a request's `Debug` prints neither header
+values nor body. The interfaces, their tasks, futures and bodies are bounded
+by `MaybeSend` and `MaybeSync`: `Send` and `Sync` on native targets, no bound
+on `wasm32`, whose single-threaded hosts hold handles that are not `Send`.
+Body chunks are owned byte vectors.
+
+The facade's `plakous::runtime` re-exports these interfaces with their native
+implementations: `TokioRuntime`, on the Tokio runtime the caller runs on, and,
+with any HTTP-capable feature, `http::NativeHttpTransport`, over one bounded
+`plakous-http` client for absolute `https` URLs. The interfaces are in the
+portable crate set (chapter 06 §7.5); the native implementations are not.
+
+Hosted task sets start every task through `Runtime::spawn`. The agent driver,
+its tool runtime and the durable checkpoint owner still use Tokio's timers,
+`Instant` and spawns directly; moving them onto these interfaces is later work.
+
 ## 3. The agent loop and turn lifecycle
 
 ### 3.1 Commands, admission, and acknowledgement
@@ -9397,6 +9428,10 @@ attach its turn-scoped preempt watch through the crate-private `with_preempt`.
 `ToolRegistration::with_owner`, `RegisteredToolIdentity::owner` and
 `ToolExecutorBindingsBuilder::owner`. They are supported inventory, pinned by
 the external `tests/fixtures/facade-consumer`.
+
+`plakous::runtime` names the runtime interfaces of §2.5 and their native
+implementations, `TokioRuntime` and the feature-gated
+`http::NativeHttpTransport`.
 
 `plakous::sessions::feed` is the change feed's public surface (§5.11):
 `FeedSeq`, `FeedCursor`, `FeedRecord`, `FeedChange`, `FeedFact` and its typed

@@ -2051,7 +2051,7 @@ async fn recovery_pass_request_while_running_reruns_it() {
     let runs = Arc::new(AtomicUsize::new(0));
     let (pass_gate, pass_runs, pass_runtime) = (gate.clone(), runs.clone(), runtime.clone());
     let started = runtime.start_recovery_pass(move || {
-        tokio::spawn(async move {
+        crate::task_set::TaskSet::new().spawn(async move {
             loop {
                 pass_gate.notified().await;
                 pass_runs.fetch_add(1, Ordering::SeqCst);
@@ -2104,7 +2104,7 @@ async fn shutdown_aborts_a_recovery_pass_that_overruns() {
     let runtime = recovery_runtime("recovery-pass-shutdown", root.path());
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
     let request = runtime.start_recovery_pass(move || {
-        tokio::spawn(async move {
+        crate::task_set::TaskSet::new().spawn(async move {
             let _dropped = dropped_tx;
             std::future::pending::<()>().await;
         })
@@ -2130,7 +2130,7 @@ async fn shutdown_aborts_an_explicit_child_recover() {
     let root = tempfile::tempdir().unwrap();
     let runtime = recovery_runtime("explicit-recover-shutdown", root.path());
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
-    assert!(runtime.track_explicit_recover(tokio::spawn(async move {
+    assert!(runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
         let _dropped = dropped_tx;
         std::future::pending::<()>().await;
     })));
@@ -2161,7 +2161,7 @@ async fn abandon_live_agents_aborts_an_explicit_child_recover() {
     )
     .unwrap();
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
-    assert!(runtime.track_explicit_recover(tokio::spawn(async move {
+    assert!(runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
         let _dropped = dropped_tx;
         std::future::pending::<()>().await;
     })));

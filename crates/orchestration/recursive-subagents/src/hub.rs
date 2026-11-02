@@ -175,7 +175,7 @@ struct Retirement {
     dispatched: futures_util::future::Shared<futures_util::future::BoxFuture<'static, ()>>,
     completion:
         futures_util::future::Shared<futures_util::future::BoxFuture<'static, Result<(), String>>>,
-    abort: tokio::task::AbortHandle,
+    abort: crate::task_set::TaskAbortHandle,
 }
 
 /// Releases an exact child turn, or joins its existing retirement. A failed
@@ -397,7 +397,7 @@ fn record_retirement_fault(
 /// The tree's one background recovery pass.
 #[derive(Default)]
 struct RecoveryPassSlot {
-    task: Option<tokio::task::JoinHandle<()>>,
+    task: Option<crate::task_set::TaskHandle<()>>,
     /// Set from start until the pass gives up the slot.
     running: bool,
     /// A start arrived while the pass ran.
@@ -459,7 +459,7 @@ pub struct ProductTopologyRuntime {
     recovery_pass: Mutex<RecoveryPassSlot>,
     /// Operator recovers of one child (`u`), separate from the background pass.
     /// Shutdown aborts every one before it releases leases.
-    explicit_recovers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    explicit_recovers: Mutex<Vec<crate::task_set::TaskHandle<()>>>,
     rejoin_spec: Mutex<Option<Arc<dyn Any + Send + Sync>>>,
     observer: Option<Arc<dyn TopologyObserver>>,
 }

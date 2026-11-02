@@ -957,6 +957,12 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "TurnDriveOutcome",
         "run_once_until_signal",
     },
+    # Task sets spawn through the executor-neutral runtime (spec 01 section 2.5).
+    "runtime": {
+        "Runtime",
+        "SpawnedTask",
+        "TokioRuntime",
+    },
     "model": {
         "Clock",
         "ToolResultKind",

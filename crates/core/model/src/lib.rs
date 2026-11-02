@@ -22,6 +22,7 @@ mod prompts;
 #[doc(hidden)]
 pub mod redaction;
 mod request;
+mod runtime;
 mod semantic_json;
 mod subscription_usage;
 
@@ -38,6 +39,7 @@ pub use identity::*;
 pub use model::*;
 pub use portable_schema_v2::*;
 pub use request::*;
+pub use runtime::*;
 pub use semantic_json::*;
 pub use subscription_usage::*;
 

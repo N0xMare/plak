@@ -275,7 +275,7 @@ impl ProductTopologyRuntime {
     /// starts nothing.
     pub fn start_recovery_pass(
         &self,
-        spawn: impl FnOnce() -> tokio::task::JoinHandle<()>,
+        spawn: impl FnOnce() -> crate::task_set::TaskHandle<()>,
     ) -> RecoveryPassRequest {
         let Ok(mut slot) = self.recovery_pass.lock() else {
             return RecoveryPassRequest::Closed;
@@ -316,7 +316,7 @@ impl ProductTopologyRuntime {
 
     /// Remembers one operator child-recover task. A closed hub aborts it
     /// instead. Finished tasks are dropped so the list stays the live set.
-    pub fn track_explicit_recover(&self, task: tokio::task::JoinHandle<()>) -> bool {
+    pub fn track_explicit_recover(&self, task: crate::task_set::TaskHandle<()>) -> bool {
         let Ok(mut tasks) = self.explicit_recovers.lock() else {
             task.abort();
             return false;
@@ -334,7 +334,7 @@ impl ProductTopologyRuntime {
     }
 
     /// Takes every operator child-recover task, for shutdown.
-    pub fn take_explicit_recovers(&self) -> Vec<tokio::task::JoinHandle<()>> {
+    pub fn take_explicit_recovers(&self) -> Vec<crate::task_set::TaskHandle<()>> {
         self.explicit_recovers
             .lock()
             .map(|mut tasks| std::mem::take(&mut *tasks))

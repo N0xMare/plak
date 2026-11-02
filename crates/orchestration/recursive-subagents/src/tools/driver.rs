@@ -25,7 +25,7 @@ pub struct TreeDriver {
     pub(super) vcs: Arc<dyn VcsOps>,
     pub(super) job_host: Arc<Mutex<Option<Arc<dyn plakous::tools::JobHost>>>>,
     retirement_recovery: Arc<Mutex<Option<RetirementRecovery>>>,
-    retirement_tasks: Arc<Mutex<tokio::task::JoinSet<()>>>,
+    retirement_tasks: Arc<Mutex<Vec<crate::task_set::TaskHandle<()>>>>,
     /// The tree's own tasks: they outlive any one root's release.
     tasks: crate::task_set::TaskSet,
     /// Work that owns a child's authority, kept apart from `tasks`; see
@@ -350,8 +350,8 @@ impl TreeDriver {
             .retirement_tasks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while tasks.try_join_next().is_some() {}
-        self.release_owners.spawn_into(&mut tasks, work);
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(self.release_owners.spawn(work));
     }
 
     /// The tree's own task set, for work that owns no child session:
@@ -369,7 +369,7 @@ impl TreeDriver {
     /// other owner running detached. Process-exit abandonment aborts
     /// retirement workers; the other owners end with the process's executor
     /// (spec 03 section 16).
-    pub fn spawn_release_owner<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
+    pub fn spawn_release_owner<F>(&self, future: F) -> crate::task_set::TaskHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
@@ -389,11 +389,25 @@ impl TreeDriver {
     pub async fn join_retirement_tasks(&self) -> Result<(), String> {
         let mut failed = false;
         loop {
+            // Each poll joins in place, so a cancelled join leaves every
+            // unjoined task tracked for the next one.
             let next = std::future::poll_fn(|cx| {
-                self.retirement_tasks
+                let mut tasks = self
+                    .retirement_tasks
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .poll_join_next(cx)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if tasks.is_empty() {
+                    return std::task::Poll::Ready(None);
+                }
+                for index in 0..tasks.len() {
+                    if let std::task::Poll::Ready(joined) =
+                        Pin::new(&mut tasks[index]).poll(cx)
+                    {
+                        tasks.swap_remove(index);
+                        return std::task::Poll::Ready(Some(joined));
+                    }
+                }
+                std::task::Poll::Pending
             })
             .await;
             match next {

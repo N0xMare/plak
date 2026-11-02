@@ -82,13 +82,45 @@ async fn close_reports_a_task_that_does_not_yield_within_the_bound() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn close_aborts_tasks_spawned_into_a_join_set() {
+async fn a_panicking_task_reports_the_panic_and_leaves_the_set() {
     let tasks = TaskSet::new();
-    let mut set = tokio::task::JoinSet::new();
-    tasks.spawn_into(&mut set, std::future::pending::<()>());
-    assert_eq!(tasks.len(), 1);
-
+    let task = tasks.spawn(async {
+        panic!("synthetic task panic");
+    });
+    assert!(task.await.unwrap_err().is_panic());
+    assert!(tasks.is_empty());
     assert!(tasks.close(Duration::from_secs(5)).await);
+}
 
-    assert!(set.join_next().await.unwrap().unwrap_err().is_cancelled());
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_task_starts_through_the_sets_runtime() {
+    struct Counting {
+        native: plakous::runtime::TokioRuntime,
+        spawned: std::sync::atomic::AtomicUsize,
+    }
+    impl plakous::runtime::Runtime for Counting {
+        fn spawn(
+            &self,
+            task: plakous::runtime::RuntimeTask,
+        ) -> Box<dyn plakous::runtime::SpawnedTask> {
+            self.spawned.fetch_add(1, Ordering::SeqCst);
+            self.native.spawn(task)
+        }
+        fn sleep(&self, duration: Duration) -> plakous::runtime::RuntimeSleep {
+            self.native.sleep(duration)
+        }
+        fn now(&self) -> Duration {
+            self.native.now()
+        }
+    }
+    let runtime = Arc::new(Counting {
+        native: plakous::runtime::TokioRuntime::new(),
+        spawned: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let tasks = TaskSet::on(runtime.clone());
+    assert_eq!(tasks.spawn(async { 1 }).await.unwrap(), 1);
+    let pending = tasks.spawn(std::future::pending::<()>());
+    assert_eq!(runtime.spawned.load(Ordering::SeqCst), 2);
+    assert!(tasks.close(Duration::from_secs(5)).await);
+    assert!(pending.await.unwrap_err().is_cancelled());
 }

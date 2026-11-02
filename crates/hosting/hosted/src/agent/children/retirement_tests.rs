@@ -2048,7 +2048,7 @@ async fn real_session_late_start_ack_releases_after_deadline_without_redispatch(
     let worker_id = id.clone();
     let gate_entered = entered.clone();
     let gate_release = deliver_ack.clone();
-    let worker = tokio::spawn(async move {
+    let worker = crate::TaskSet::new().spawn(async move {
         start_child_turn_owned_with_ack(
             &worker_runtime,
             &worker_id,

@@ -406,6 +406,7 @@ mod retrieval_outcome;
 mod test_model;
 
 pub mod application;
+pub mod runtime;
 pub mod subscriptions;
 
 /// Curated Anthropic integration configuration.

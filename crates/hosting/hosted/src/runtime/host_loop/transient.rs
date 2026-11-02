@@ -13,7 +13,7 @@ pub(super) struct PendingResume {
     plan: ResumePlan,
     ready: Arc<AtomicBool>,
     cancellation: CancellationToken,
-    task: tokio::task::JoinHandle<()>,
+    task: crate::TaskHandle<()>,
 }
 
 impl PendingResume {

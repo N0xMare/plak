@@ -221,7 +221,7 @@ pub(super) fn record_start_failure(
 
 pub(super) async fn await_child_start(
     mut caller: StartupCaller,
-    task: tokio::task::JoinHandle<Result<TurnId, ChildStartFailure>>,
+    task: crate::TaskHandle<Result<TurnId, ChildStartFailure>>,
     deadline: tokio::time::Instant,
 ) -> Result<TurnId, ChildStartFailure> {
     let result = match tokio::time::timeout_at(deadline, task).await {

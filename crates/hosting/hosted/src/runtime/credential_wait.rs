@@ -5,7 +5,7 @@ use plakous::agent::{Agent, CredentialWait};
 use std::sync::{Arc, Mutex};
 
 pub(super) struct CredentialNotices<P: plakous_host_protocol::ProtocolExtension> {
-    task: tokio::task::JoinHandle<()>,
+    task: crate::TaskHandle<()>,
     state: Arc<Mutex<Option<bool>>>,
     events: super::Sender<P>,
 }

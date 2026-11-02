@@ -32,9 +32,9 @@ default = []
 # Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.
 # TUI/embedder-safe surface is always-on: agent (curated), model, tools, profiles.
 # Provider-hosted tools and the local page fetcher are independent choices.
-anthropic = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-anthropic", "dep:plakous-http", "plakous-tool-web/image-gen"]
+anthropic = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-anthropic", "dep:plakous-http", "dep:futures-util", "plakous-tool-web/image-gen"]
 auth = ["dep:plakous-auth"]
-web-fetch = ["plakous-tool-web/fetch", "dep:plakous-http"]
+web-fetch = ["plakous-tool-web/fetch", "dep:plakous-http", "dep:futures-util"]
 # Code Mode and JavaScript through the engine-free cell client; Python is
 # selected explicitly by composition-python. Neither carries credential,
 # subscription, or HTTP machinery.
@@ -64,18 +64,19 @@ full = [
 # Model Context Protocol client: the server pool, frozen listings and the MCP
 # tool pack. Configuration, secrets and views stay with the embedding product.
 mcp = ["plakous-mcp/client"]
-codex = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-openai", "plakous-openai/native-auth"]
-grok = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-xai", "plakous-xai/native-auth", "dep:plakous-responses"]
-claude = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-anthropic", "plakous-anthropic/native-auth"]
-openai = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-openai", "dep:plakous-http", "plakous-tool-web/image-gen"]
-openrouter = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-http", "dep:plakous-openrouter", "plakous-tool-web/image-gen"]
+codex = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "dep:futures-util", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-openai", "plakous-openai/native-auth"]
+grok = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "dep:futures-util", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-xai", "plakous-xai/native-auth", "dep:plakous-responses"]
+claude = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "dep:futures-util", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-anthropic", "plakous-anthropic/native-auth"]
+openai = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-openai", "dep:plakous-http", "dep:futures-util", "plakous-tool-web/image-gen"]
+openrouter = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-http", "dep:futures-util", "dep:plakous-openrouter", "plakous-tool-web/image-gen"]
 sessions-sqlite = ["plakous-store/sqlite"]
-xai = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/image-gen"]
+xai = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-xai", "dep:plakous-http", "dep:futures-util", "plakous-tool-web/image-gen"]
 
 [package.metadata.docs.rs]
 all-features = true
 
 [dependencies]
+futures-util = { workspace = true, features = ["std"], optional = true }
 thiserror = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v4"], optional = true }
 plakous-exchange = { workspace = true, optional = true }
@@ -103,7 +104,7 @@ serde_json.workspace = true
 sha2 = { workspace = true, optional = true }
 plakous-tools.workspace = true
 plakous-xai = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

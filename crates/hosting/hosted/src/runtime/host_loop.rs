@@ -91,7 +91,7 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     opened: crate::agent::AttachedCodingSession,
     quit_started_at: Option<Instant>,
     quit_abandoned_turn: bool,
-    quit_job_stops: Option<tokio::task::JoinHandle<Result<(), String>>>,
+    quit_job_stops: Option<crate::TaskHandle<Result<(), String>>>,
     executor: session_executor::SessionExecutor,
     log: Option<SessionLog>,
     stderr_buf: Vec<u8>,

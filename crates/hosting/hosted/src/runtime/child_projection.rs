@@ -10,7 +10,7 @@ use plakous_host_protocol::{Core, views::ChildProgress};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
+use crate::TaskHandle;
 
 const RETAINED_UPDATES: usize = 128;
 
@@ -41,7 +41,7 @@ impl ChildAdmission {
 
 pub(crate) struct ChildTurnProjection {
     pub(crate) observation: Arc<ChildObservation>,
-    task: JoinHandle<()>,
+    task: TaskHandle<()>,
 }
 
 impl Drop for ChildTurnProjection {

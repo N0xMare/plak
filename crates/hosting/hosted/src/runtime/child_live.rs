@@ -12,7 +12,7 @@ use plakous::sessions::{AgentSessions, SessionLocator, SessionTranscriptSource};
 use plakous_host_protocol::Core;
 use plakous_host_protocol::views::transcript::{TranscriptItem, TranscriptScope};
 use plakous_host_protocol::views::{ChildProgress, PresentationSnapshot, TreeView};
-use tokio::task::JoinHandle;
+use crate::TaskHandle;
 
 use super::child_projection::ChildObservation;
 #[cfg(test)]
@@ -34,7 +34,7 @@ struct Observer {
 /// Restarts an open agent view's serving task, optionally on a live turn,
 /// under a send generation.
 type ServeAgent =
-    Box<dyn Fn(Option<(TurnId, Agent, Arc<ChildObservation>)>, u64, bool) -> JoinHandle<()> + Send>;
+    Box<dyn Fn(Option<(TurnId, Agent, Arc<ChildObservation>)>, u64, bool) -> TaskHandle<()> + Send>;
 
 /// The send generation of a face's agent view. A serve sends only while the
 /// generation it was started under is current; close, replace, a new turn
@@ -82,7 +82,7 @@ struct AgentView {
     /// The live turn the serving task attached to, when there was one.
     turn_id: Option<TurnId>,
     serve: ServeAgent,
-    task: JoinHandle<()>,
+    task: TaskHandle<()>,
 }
 
 impl Drop for AgentView {
