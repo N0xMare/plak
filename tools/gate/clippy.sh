@@ -3,7 +3,8 @@
 # Usage: tools/gate/clippy.sh [--status-file PATH]
 # On failure the status file receives the same names the gate summarizes
 # (`clippy` and `clippy:<package>`), and the exit status is 1. Every package
-# still runs.
+# still runs. A supported-package list that does not match the manifest writes
+# `clippy:packages` and exits before cargo.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
@@ -25,7 +26,7 @@ fi
 # manifest, and the real tree does.
 packages=(plakous plakous-agent plakous-model plakous-tools plak)
 if [[ -f Cargo.toml ]]; then
-  python3 - "${packages[@]}" <<'PY'
+  if ! python3 - "${packages[@]}" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
@@ -48,6 +49,13 @@ if sorted(found) != sorted(expected):
         + " ".join(sorted(found))
     )
 PY
+  then
+    # Write before exiting. An empty status file is not a failed step.
+    if [[ -n "$status_file" ]]; then
+      printf '%s' 'clippy:packages' >"$status_file"
+    fi
+    exit 1
+  fi
 fi
 failed=""
 echo "== clippy =="

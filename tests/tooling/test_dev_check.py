@@ -857,6 +857,30 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertIn(['tools/gate/check_features.py'], scripts)
         self.assertTrue(any(c['args'][0] == 'clippy' for c in calls))
 
+    def test_mismatched_workspace_manifest_fails_static_naming_the_step(self):
+        (self.root / 'Cargo.toml').write_text('[workspace]\nmembers = ["crates/alpha"]\n')
+        member = self.root / 'crates/alpha/Cargo.toml'
+        member.parent.mkdir(parents=True)
+        member.write_text(
+            '[package]\nname = "beta"\n\n[package.metadata.plakous]\nclass = "supported"\n'
+        )
+        result, calls, _scripts = self.run_gate('--steps', 'static')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('== failed static steps: clippy:packages ==', result.stdout)
+        self.assertIn('failed groups: static', result.stdout)
+        self.assertIn('do not match manifest class supported', result.stderr)
+        self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
+
+    def test_clippy_failure_without_a_status_still_names_the_step(self):
+        script = self.root / 'tools/gate/clippy.sh'
+        script.write_text('#!/bin/bash\nexit 1\n')
+        script.chmod(0o755)
+        result, calls, _scripts = self.run_gate('--steps', 'static')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('== failed static steps: clippy ==', result.stdout)
+        self.assertNotIn('clippy:packages', result.stdout)
+        self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
+
     def test_full_equals_every_group_in_canonical_order(self):
         full, full_calls, full_scripts = self.run_gate('--full')
         self.log.unlink()

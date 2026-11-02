@@ -459,7 +459,8 @@ run_group() {
       # Workspace, then each supported package alone (tools/gate/clippy.sh).
       clippy_status="$(mktemp "$TMPDIR/plak-clippy.XXXXXX")"
       if ! tools/gate/clippy.sh --status-file "$clippy_status"; then
-        failed_steps="${failed_steps:+$failed_steps }$(cat "$clippy_status")"
+        s="$(cat "$clippy_status")"
+        failed_steps="${failed_steps:+$failed_steps }${s:-clippy}"
       fi
       rm -f "$clippy_status"
       if [[ -n "$failed_steps" ]]; then

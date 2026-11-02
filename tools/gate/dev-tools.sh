@@ -44,20 +44,25 @@ require_exact_version() {
 
 case "${1:-check}" in
   check)
-    [[ $# -le 1 ]] || fail 'usage: dev-tools.sh check|install|deny'
+    [[ $# -le 1 ]] || fail 'usage: dev-tools.sh check|check-nextest|install|deny'
     require_python
     require_version cargo-nextest "$nextest_version" cargo nextest --version
     require_exact_version ruff "$ruff_version" ruff --version
     printf 'Development prerequisites are available.\n'
     ;;
+  check-nextest)
+    [[ $# -eq 1 ]] || fail 'usage: dev-tools.sh check|check-nextest|install|deny'
+    require_version cargo-nextest "$nextest_version" cargo nextest --version
+    printf 'cargo-nextest %s or newer is available.\n' "$nextest_version"
+    ;;
   deny)
-    [[ $# -eq 1 ]] || fail 'usage: dev-tools.sh deny'
+    [[ $# -eq 1 ]] || fail 'usage: dev-tools.sh check|check-nextest|install|deny'
     require_version cargo-deny "$deny_version" cargo deny --version
     cd "$root"
     exec cargo deny --config "$root/.config/deny.toml" check advisories bans licenses sources
     ;;
   install)
-    [[ $# -eq 1 ]] || fail 'usage: dev-tools.sh install'
+    [[ $# -eq 1 ]] || fail 'usage: dev-tools.sh check|check-nextest|install|deny'
     cd "$root"
     require_python
     command -v cargo >/dev/null 2>&1 || fail 'Cargo is required; install the repository-pinned Rust toolchain'
@@ -70,8 +75,8 @@ case "${1:-check}" in
     printf 'Installed verification tools in %s/bin; just check and just dev-tools deny use this prefix.\n' "$prefix"
     ;;
   -h|--help)
-    printf 'usage: dev-tools.sh check|install|deny\n'
+    printf 'usage: dev-tools.sh check|check-nextest|install|deny\n'
     printf 'Install pins: cargo-nextest %s, cargo-deny %s, ruff %s. Installation is explicit and repository-local.\n' "$nextest_version" "$deny_version" "$ruff_version"
     ;;
-  *) fail 'usage: dev-tools.sh check|install|deny' ;;
+  *) fail 'usage: dev-tools.sh check|check-nextest|install|deny' ;;
 esac

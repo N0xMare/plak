@@ -125,6 +125,25 @@ raise SystemExit(0)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("Development prerequisites are available.", result.stdout)
 
+    def test_check_nextest_ignores_ruff(self):
+        for version in ("0.9.100", "0.10.0"):
+            with self.subTest(version=version):
+                result = self.run_script(
+                    "check-nextest",
+                    env=dict(self.env, FAKE_NEXTEST_VERSION=version, FAKE_RUFF_VERSION="9.9.9"),
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("cargo-nextest 0.9.100 or newer is available.", result.stdout)
+        (self.bin / "ruff").unlink()
+        missing = self.run_script("check-nextest")
+        self.assertEqual(missing.returncode, 0, missing.stderr)
+        old = self.run_script("check-nextest", env=dict(self.env, FAKE_NEXTEST_VERSION="0.9.99"))
+        self.assertEqual(old.returncode, 2)
+        self.assertIn("cargo-nextest 0.9.100 or newer is required", old.stderr)
+        extra = self.run_script("check-nextest", "extra")
+        self.assertEqual(extra.returncode, 2)
+        self.assertIn("usage: dev-tools.sh check|check-nextest|install|deny", extra.stderr)
+
     def test_old_and_newer_ruff_are_rejected(self):
         for version in ("0.17.2", "0.17.4", "0.18.0"):
             with self.subTest(version=version):
@@ -206,6 +225,7 @@ raise SystemExit(0)
         help_result = self.run_script("--help")
         self.assertEqual(check.returncode, 0, check.stderr)
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
+        self.assertIn("check-nextest", help_result.stdout)
         self.assertFalse(any(call["args"][:1] == ["install"] for call in self.calls()))
         self.assertFalse(any("--fetch" in call["args"] for call in self.calls()))
 
@@ -308,8 +328,9 @@ class ClippySupportedPackageTests(unittest.TestCase):
         member.write_text(
             '[package]\nname = "beta"\n\n[package.metadata.plakous]\nclass = "supported"\n'
         )
+        status = root / "status"
         result = subprocess.run(
-            ["bash", str(script)],
+            ["bash", str(script), "--status-file", str(status)],
             cwd=root,
             env=self.env,
             capture_output=True,
@@ -319,6 +340,7 @@ class ClippySupportedPackageTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("do not match manifest class supported", result.stderr)
         self.assertNotIn("== clippy ==", result.stdout)
+        self.assertEqual(status.read_text(), "clippy:packages")
 
 
 if __name__ == "__main__":

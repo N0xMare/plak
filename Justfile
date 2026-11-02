@@ -72,7 +72,7 @@ nextest *ARGS:
     root="$(pwd -P)"; \
     source tools/gate/dev-tools-prefix.sh; \
     export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"; \
-    tools/gate/dev-tools.sh check; \
+    tools/gate/dev-tools.sh check-nextest; \
     tools/gate/test-env.sh -- cargo nextest "$@"
 
 # Build plak and its workers without installing a snapshot or touching PATH.

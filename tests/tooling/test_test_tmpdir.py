@@ -140,10 +140,11 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertIn("[positional-arguments]", justfile)
         self.assertIn('tools/gate/test-env.sh -- cargo nextest "$@"', justfile)
         self.assertIn("plak_dev_tools_prefix", justfile)
+        self.assertIn("dev-tools.sh check-nextest", justfile)
         self.assertNotIn("\ntest:\n", justfile)
         coverage = (ROOT / "tools/dev/coverage.sh").read_text()
         self.assertIn("plak_dev_tools_prefix", coverage)
-        self.assertIn("dev-tools.sh check", coverage)
+        self.assertIn("dev-tools.sh check-nextest", coverage)
 
     def test_test_env_exports_home_and_empty_git_config(self):
         script = ROOT / "tools/gate/test-env.sh"
@@ -206,7 +207,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "#!/usr/bin/env python3\n"
             "import sys\n"
             "if '--version' in sys.argv:\n"
-            "    print('ruff 0.17.3')\n"
+            "    print('ruff 9.9.9')\n"
             "raise SystemExit(0)\n"
         )
         ruff.chmod(0o755)
