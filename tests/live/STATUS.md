@@ -7,22 +7,19 @@ Raw reports stay private under the ignored `target/live/`.
 
 ## Qualification
 
-`25ea8365` (tag `v0.0.2`) passed the spec 05 §3.4 pre-release bar:
+`efe23aba` (0.0.3) passed the spec 05 §3.4 pre-release bar:
 
 - the integrated gate on both supported platforms: `just full` on Apple
   Silicon and on Linux x86_64, the native musl tier and the pinned musl
-  container gate, and the strict crash-point sweep over all seventeen shapes
-  with no unclassified, divergent or refused cut;
-- the 0.0.2 live matrix (History, below);
-- a maintainer's review of the `25ea8365` maintainer build in the TUI.
+  container gate, and the strict crash-point sweep over all twenty-seven
+  shapes with no unclassified, divergent or refused cut, plus the publish dry
+  run;
+- the 0.0.3 live matrix (History, below);
+- a maintainer's review of the `efe23aba` maintainer build in the TUI.
 
-`efe23aba`, the 0.0.3 release candidate, has passed part one: the integrated
-gate on both supported platforms (`just full` on Apple Silicon and on Linux
-x86_64, the native musl tier and the pinned musl container gate), the strict
-crash-point sweep over all twenty-seven shapes with no unclassified, divergent
-or refused cut, and the publish dry run. Its live matrix (History, below) has
-run every non-sparing row. The maintainer's review of its build in the TUI is
-pending, so it is not yet qualified.
+`25ea8365` (tag `v0.0.2`) passed the same bar for 0.0.2.
+
+No later revision is qualified.
 
 ## Live matrix
 
