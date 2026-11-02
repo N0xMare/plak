@@ -90,6 +90,100 @@ fn retry_notice_names_the_network_phase() {
     assert_eq!(notice.cause_kind, "connect");
 }
 
+fn agent_event(kind: serde_json::Value) -> AgentEvent {
+    let uuid = uuid::Uuid::from_u128(1);
+    serde_json::from_value(serde_json::json!({
+        "branch_sequence": 1, "event_id": uuid, "session_id": uuid, "branch_id": uuid,
+        "agent_id": uuid, "run_id": uuid, "turn_id": null, "attempt_id": null, "call_id": null,
+        "timestamp": {"seconds": 1, "nanoseconds": 0}, "causal_parent": null,
+        "origin": "Model", "classification": "Public", "event_schema": 3,
+        "projection_revision": 6, "visibility": "Content", "scope": "Agent", "event_kind_version": 11,
+        "kind": kind,
+        "retained_bytes": 512, "metadata_retained_bytes": 512, "content_retained_bytes": 0
+    }))
+    .unwrap()
+}
+
+fn apply_kind(
+    kind: serde_json::Value,
+    assistant: &mut String,
+    projection: &mut TurnProjection<TestExtension>,
+) -> Vec<HostEvent> {
+    let dir = tempfile::tempdir().unwrap();
+    let roots = crate::agent::ProductStateRoots::with_doubles(
+        dir.path().to_path_buf(),
+        dir.path().join("state"),
+    );
+    let rows = test_kit::MemoryRows::new();
+    let store = crate::session_store::MemoryStore::new();
+    let home = SessionHome::new(dir.path().join("sessions"));
+    let mut session = SessionRecord::new(dir.path().to_path_buf());
+    let (events, rx) = host_event_sink();
+    let event = agent_event(kind);
+    apply_event(
+        &event,
+        &roots,
+        &rows,
+        &store,
+        &home,
+        &mut session,
+        &events,
+        assistant,
+        &mut String::new(),
+        &mut Instant::now(),
+        &mut ToolSubjectStash::new(),
+        projection,
+        None,
+        "test",
+        &mut TreeSnapshotPush::default(),
+        &mut false,
+        &mut 0,
+    );
+    rx.try_iter().collect()
+}
+
+#[test]
+fn uncommitted_tails_are_discarded_on_output_limit_settle_and_overflow_fold() {
+    let workflow: Vec<u8> = std::iter::repeat_n(0x5a, 32).collect();
+    let cases = [
+        serde_json::json!({"OutputLimitRetry": {"bound": 128}}),
+        serde_json::json!({"ResponseSettled": {"discardable": true}}),
+        serde_json::json!({"CompactionStarted": {"workflow_id": workflow, "reason": "scheduled"}}),
+    ];
+    for kind in cases {
+        let mut assistant = String::from("kept tail");
+        let mut projection = TurnProjection::<TestExtension> {
+            settled_assistant_len: 4,
+            ..TurnProjection::default()
+        };
+        let events = apply_kind(kind, &mut assistant, &mut projection);
+        assert_eq!(assistant, "kept");
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, HostEvent::OutputDiscarded { dim: true })),
+            "{events:?}"
+        );
+    }
+    let mut assistant = String::from("kept tail");
+    let mut projection = TurnProjection::<TestExtension> {
+        settled_assistant_len: 4,
+        ..TurnProjection::default()
+    };
+    let workflow: Vec<u8> = std::iter::repeat_n(0x5a, 32).collect();
+    let events = apply_kind(
+        serde_json::json!({"CompactionStarted": {"workflow_id": workflow, "reason": "manual"}}),
+        &mut assistant,
+        &mut projection,
+    );
+    assert_eq!(assistant, "kept tail");
+    assert!(
+        events
+            .iter()
+            .all(|event| !matches!(event, HostEvent::OutputDiscarded { .. }))
+    );
+}
+
 #[test]
 fn live_tool_subject_redaction_is_idempotent() {
     let subject = live_tool_subject("GITHUB_TOKEN=ghp_abcdefghijklmnopqrst gh pr list");

@@ -282,6 +282,7 @@ impl TranscriptSelection {
             else {
                 continue;
             };
+            let (from, to) = snap_cells(line, from, to).unwrap_or((from, to));
             for column in from..=to.min(max_column) {
                 let x = area
                     .x
@@ -491,6 +492,8 @@ fn selection_reaches(lines: &[String], end: ContentPosition, group_end: usize) -
 
 /// Include a whole grapheme when any of its occupied terminal cells intersects
 /// the inclusive selection. This avoids splitting combining or wide glyphs.
+/// A zero-width grapheme does not advance the column; `max(1)` applies only to
+/// the cell a selection can land on.
 fn slice_cells(line: &str, first: usize, last: usize) -> String {
     let mut column = 0usize;
     line.graphemes(true)
@@ -502,6 +505,25 @@ fn slice_cells(line: &str, first: usize, last: usize) -> String {
             end >= first && start <= last
         })
         .collect()
+}
+
+/// The highlight paints every cell of a grapheme the selection touches.
+/// A zero-width grapheme does not advance the column.
+fn snap_cells(line: &str, first: usize, last: usize) -> Option<(usize, usize)> {
+    let mut column = 0usize;
+    let mut start = None;
+    let mut end = None;
+    for grapheme in line.graphemes(true) {
+        let width = grapheme.width();
+        let grapheme_start = column;
+        let grapheme_end = column.saturating_add(width.max(1)).saturating_sub(1);
+        column = column.saturating_add(width);
+        if grapheme_end >= first && grapheme_start <= last {
+            start.get_or_insert(grapheme_start);
+            end = Some(grapheme_end);
+        }
+    }
+    start.zip(end)
 }
 
 #[cfg(test)]

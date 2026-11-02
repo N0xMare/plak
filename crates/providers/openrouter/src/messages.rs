@@ -656,9 +656,14 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for OpenRouterMessagesHoo
     }
 
     fn classify_stream_error(&self, error: MessagesStreamError) -> MessagesAttemptProtocolError {
-        MessagesAttemptProtocolError::new(format!(
+        let protocol = MessagesAttemptProtocolError::new(format!(
             "OpenRouter Messages stream validation failed: {error}"
-        ))
+        ));
+        if error.context_overflow() {
+            protocol.with_context_overflow()
+        } else {
+            protocol
+        }
     }
 }
 

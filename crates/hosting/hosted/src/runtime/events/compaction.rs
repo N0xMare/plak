@@ -1,6 +1,7 @@
 //! Compaction, observation clipping and replacement events.
 
 use super::notes::{observation_clipped_note, observation_replaced_record};
+use super::reasoning::discard_uncommitted_response;
 use super::tools::observe_tool_activity;
 use super::{EventApplier, timestamp_ms};
 use crate::runtime::logging::log_event;
@@ -344,8 +345,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             event,
             session,
             events,
+            assistant,
             delta_buf,
             last_flush,
+            projection,
             log,
             observed_session_id,
             ..
@@ -372,7 +375,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         // `CompactSessionOutcome` the idle loop can report; the tool-group
         // fence publishes its start and end as turn events, and logging
         // them alone made an automatic compaction a silent no-op on screen.
-        flush_assistant_delta(delta_buf, last_flush, events, true);
+        // An overflow fold publishes this same scheduled start before it
+        // summarizes. The failed attempt left its tail uncommitted; drop that
+        // tail here. A manual or residency compact, and a scheduled compact
+        // whose response already settled, keeps what was streamed.
+        if matches!(reason, CompactionEventReason::Scheduled) {
+            discard_uncommitted_response(assistant, delta_buf, projection, events);
+        } else {
+            flush_assistant_delta(delta_buf, last_flush, events, true);
+        }
         let _ = events.send(ContentEvent::Activity {
             label: COMPACTING_ACTIVITY_LABEL.into(),
             active: true,

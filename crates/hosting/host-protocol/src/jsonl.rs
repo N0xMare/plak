@@ -63,6 +63,7 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::AssistantDelta(_) => "assistant",
         SessionObservation::AssistantDone => "assistant_done",
         SessionObservation::ModelRefusal { .. } => "model_refusal",
+        SessionObservation::OutputDiscarded { .. } => "output_discarded",
         SessionObservation::ToolLine { .. } => "tool",
         SessionObservation::ModelRetry(_) => "retry",
         SessionObservation::Binding { .. } => "binding",
@@ -571,6 +572,7 @@ pub fn project_host_event<P: ProtocolExtension>(
         | SessionObservation::ReattachReady
         | SessionObservation::SessionOpening
         | SessionObservation::ModelRequestStarted
+        | SessionObservation::OutputDiscarded { .. }
         | SessionObservation::SessionOpened { .. }
         | SessionObservation::CallDetail(_)
         | SessionObservation::PendingContinuation { .. }

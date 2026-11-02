@@ -16,7 +16,7 @@ use crate::{MessagesRequestPolicy, MessagesStreamErrorKind};
 mod native;
 mod output_limit;
 
-fn projector_with_hosted(hosted: bool) -> MessagesStreamProjector {
+fn prepared_with_hosted(hosted: bool) -> PreparedMessagesStreamBinding {
     let selected: SelectedProviderConfigurationId = serde_json::from_value(
         serde_json::to_value(
             Digest::sha256(
@@ -67,7 +67,7 @@ fn projector_with_hosted(hosted: bool) -> MessagesStreamProjector {
             NamespaceId::new("anthropic.programmatic_tool").expect("namespace"),
         );
     }
-    let prepared = PreparedMessagesStreamBinding::new(
+    PreparedMessagesStreamBinding::new(
         policy,
         digest,
         ToolOwnership::default(),
@@ -75,9 +75,16 @@ fn projector_with_hosted(hosted: bool) -> MessagesStreamProjector {
             "code_execution",
             NamespaceId::new("anthropic.programmatic_tool").expect("namespace"),
         ),
-    );
+    )
+}
+
+fn open_projector(prepared: PreparedMessagesStreamBinding) -> MessagesStreamProjector {
     MessagesStreamProjector::new(prepared, Arc::new(SystemClock), Arc::new(SystemIdGenerator))
         .expect("projector")
+}
+
+fn projector_with_hosted(hosted: bool) -> MessagesStreamProjector {
+    open_projector(prepared_with_hosted(hosted))
 }
 
 fn projector() -> MessagesStreamProjector {
@@ -89,6 +96,18 @@ fn openrouter_projector() -> MessagesStreamProjector {
     projector.prepared.dialect = MessagesStreamDialectHooks::client_tools_only()
         .with_extensions(MessagesStreamExtensions::OpenRouterV1);
     projector
+}
+
+fn programmatic_projector() -> MessagesStreamProjector {
+    let mut lineage = crate::artifact::MessagesArtifactLineage::default();
+    lineage.push_server("srv_prior").expect("prior server tool");
+    // The projector copies server lineage when it is built.
+    let mut prepared = prepared_with_hosted(true).with_active_artifact_lineage(None, Some(lineage));
+    prepared.tool_ownership = ToolOwnership::default().with_caller(
+        ToolName::new("weather").expect("tool"),
+        plakous_model::ToolCallerDisposition::DirectAndProviderProgrammatic,
+    );
+    open_projector(prepared)
 }
 
 fn claude_oauth_projector() -> MessagesStreamProjector {

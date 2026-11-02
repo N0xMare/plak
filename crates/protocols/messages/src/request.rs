@@ -520,6 +520,14 @@ impl ToolOwnership {
     pub fn caller(&self, tool: &ToolName) -> Option<ToolCallerDisposition> {
         self.callers.get(tool).copied()
     }
+
+    /// Records one advertised caller disposition. Stream tests use this to
+    /// admit a programmatic tool without lowering a full request.
+    #[cfg(test)]
+    pub(crate) fn with_caller(mut self, tool: ToolName, caller: ToolCallerDisposition) -> Self {
+        self.callers.insert(tool, caller);
+        self
+    }
 }
 
 /// Credential-free output of the neutral Messages request kernel.

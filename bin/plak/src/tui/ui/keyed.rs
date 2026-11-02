@@ -137,7 +137,7 @@ impl App {
         }
     }
 
-    fn remove_keyed_block(&mut self, at: usize) -> ScrollBlock {
+    pub(super) fn remove_keyed_block(&mut self, at: usize) -> ScrollBlock {
         let block = self.pane.blocks.remove(at);
         self.pane.transcript_bytes = self
             .pane

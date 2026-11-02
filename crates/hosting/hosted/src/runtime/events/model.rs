@@ -5,8 +5,8 @@ use super::notes::{
     OPERATION_BUDGET_EXHAUSTED_NOTE, output_bound_rederived_note, output_limit_retry_note,
 };
 use super::reasoning::{
-    discard_response_reasoning, reasoning_location_key, seal_reasoning_block, settle_live_thinking,
-    settle_model_response,
+    discard_response_reasoning, discard_uncommitted_response, reasoning_location_key,
+    seal_reasoning_block, settle_live_thinking, settle_model_response,
 };
 use crate::runtime::Sender;
 use crate::runtime::admission::commit_session_update;
@@ -83,7 +83,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             return;
         };
         if *discardable {
-            discard_response_reasoning(projection, events);
+            discard_uncommitted_response(assistant, delta_buf, projection, events);
         } else {
             settle_model_response(projection, session, events, delta_buf, last_flush);
             projection.settled_assistant_len = assistant.len();
@@ -170,7 +170,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                         let _ = events.send(ContentEvent::AssistantDone);
                     }
                 }
-                projection.settled_assistant_len = assistant.len();
+                // The settled mark moves only when the response is kept.
+                // A discardable length still has to drop this tail.
                 // Stash tool subjects from completed model output before tools run.
                 stash_tool_subjects_from_response(tool_subjects, response);
             }
@@ -306,8 +307,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         let Self {
             event,
             events,
+            assistant,
             delta_buf,
-            last_flush,
             projection,
             log,
             observed_session_id,
@@ -316,8 +317,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         let AgentEventKind::OutputLimitRetry { bound } = event.kind() else {
             return;
         };
-        discard_response_reasoning(projection, events);
-        flush_assistant_delta(delta_buf, last_flush, events, true);
+        discard_uncommitted_response(assistant, delta_buf, projection, events);
         let note = output_limit_retry_note(*bound);
         log_event(
             log,

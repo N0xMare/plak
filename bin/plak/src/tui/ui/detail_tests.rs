@@ -1374,9 +1374,20 @@ fn a_one_line_thought_copies_its_full_clean_summary_without_toggling() {
         body.y,
     ));
     paint(&mut app, 40);
+    let copied = app.take_transcript_selection_text();
+    assert_eq!(copied, Some(format!("  ◆ {summary} · 2.1s")));
+    let row = app
+        .pane
+        .transcript_cache
+        .layout()
+        .plain
+        .iter()
+        .position(|line| line.contains('◆'))
+        .expect("thinking lead");
     assert_eq!(
-        app.take_transcript_selection_text(),
-        Some(format!("◆ {summary}"))
+        app.pane.transcript_cache.layout().copy[row].decoration,
+        2,
+        "thinking lead decoration is the rail width"
     );
 }
 

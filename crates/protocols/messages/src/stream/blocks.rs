@@ -299,6 +299,8 @@ impl MessagesStreamProjector {
                             "Messages programmatic caller is not admitted by the prepared request",
                         ));
                     }
+                    // A non-direct caller is a hosted effect from this block, even
+                    // while its input stays deferred until the stop reason.
                     self.hosted_effects_possible = true;
                     if !self.server_lineage.is_unresolved(tool_id)
                         || !matches!(
@@ -703,17 +705,10 @@ impl MessagesStreamProjector {
                 name,
                 owner,
                 execution_id,
-                mut json,
+                json,
             } => {
-                if json.is_empty() {
-                    json.push_str("{}");
-                }
-                let parsed = serde_json::from_str::<serde_json::Value>(&json).map_err(|_| {
-                    self.fail("terminal Messages tool input was not complete valid JSON")
-                })?;
-                if !parsed.is_object() {
-                    return Err(self.fail("terminal Messages tool input must be a JSON object"));
-                }
+                // The terminal reason is not known yet. A cut input is judged
+                // at message_delta, not rejected as malformed JSON here.
                 self.deferred_programmatic_blocks.push((
                     index,
                     OpenBlock::DeferredProgrammaticToolUse {

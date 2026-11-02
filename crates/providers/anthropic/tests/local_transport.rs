@@ -2187,6 +2187,42 @@ async fn accepted_sse_error_uses_anthropic_classification_and_terminal_delivery(
     Ok(())
 }
 
+/// A cost-only stream that ends in `model_context_window_exceeded` is one
+/// physical attempt and a context overflow. The hook, not a hand-built flag,
+/// is what marks it.
+#[tokio::test]
+async fn a_context_window_stop_on_a_cost_only_request_is_one_attempt() -> TestResult {
+    let body = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_ctx\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fixture\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"model_context_window_exceeded\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    );
+    let response = sse_response(body);
+    let (client, origin, peer) = tls_exchange(Some(response), false).await?;
+    let resolved = resolved_fixture()?;
+    let factory = AnthropicLocalHttpServiceFactory::new(
+        client,
+        origin,
+        resolved.route().clone(),
+        prepared(&resolved)?,
+    )?;
+    let (result, _events) = run(&factory).await?;
+    let error = result.expect_err("context window succeeded");
+    assert!(error.context_overflow(), "{error}");
+    assert_eq!(
+        error
+            .facts()
+            .ok_or_else(|| io::Error::other("facts"))?
+            .physical_attempts(),
+        1
+    );
+    timeout(Duration::from_secs(5), peer).await???;
+    Ok(())
+}
+
 /// An injected `529` never reaches Anthropic and reads exactly as Anthropic's
 /// own overloaded refusal: same status, acceptance, attempts and error class.
 #[tokio::test]

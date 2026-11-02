@@ -3573,7 +3573,7 @@ fn copying_summary_item_and_thinking_rows_carries_no_padding_or_caret() {
         "the summary copies whole:\n{copied}"
     );
     assert!(
-        copied.lines().any(|line| line == "◆ weighing it"),
+        copied.lines().any(|line| line == "  ◆ weighing it · 2.1s"),
         "the thinking row copies whole:\n{copied}"
     );
     assert!(

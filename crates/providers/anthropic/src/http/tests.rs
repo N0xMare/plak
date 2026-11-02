@@ -562,6 +562,162 @@ fn retry_after_uses_the_shared_parser_and_saturates_long_advice() {
 }
 
 #[test]
+fn context_overflow_is_a_typed_model_error() {
+    let descriptor = ResolvedModelDescriptor::new(
+        &plakous_model::StandardIntegrationAuthority::release_owned(),
+        ProtocolId::new("anthropic.messages").expect("protocol"),
+        RouteId::new("anthropic.claude_oauth").expect("route"),
+        ModelId::new("claude-sonnet-5").expect("model"),
+        None,
+        None,
+        ModelAdapterProfileId::new("anthropic.claude.oauth.test").expect("profile"),
+        CapabilitySet::new(BTreeMap::new(), BTreeMap::new()),
+    );
+    let facts = |hosted: bool| {
+        TerminalFacts::from_snapshot(plakous_attempt::ObservationSnapshot {
+            physical_attempts: 1,
+            provider_acceptance: ProviderAcceptance::Accepted,
+            visible_output: true,
+            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            hosted_effects_possible: hosted,
+            logical_success: false,
+        })
+    };
+    let overflow = MessagesAttemptError::protocol(
+        MessagesAttemptProtocolError::new("Anthropic model_context_window_exceeded")
+            .with_context_overflow(),
+        facts(false),
+    );
+    assert_eq!(
+        anthropic_model_error(&descriptor, Some(&overflow), overflow.to_string().as_str()).kind(),
+        ModelErrorKind::ContextLimit
+    );
+    let hosted = MessagesAttemptError::protocol(
+        MessagesAttemptProtocolError::new("Anthropic model_context_window_exceeded")
+            .with_context_overflow(),
+        facts(true),
+    );
+    assert_ne!(
+        anthropic_model_error(&descriptor, Some(&hosted), "hosted").kind(),
+        ModelErrorKind::ContextLimit
+    );
+}
+
+/// A real `model_context_window_exceeded` stream, not a hand-built flag, has to
+/// survive the provider hook. Dropping the mark in `annotate_messages_stream_terminal`
+/// leaves a hand-built protocol error green and fails this test.
+#[test]
+fn a_context_window_stream_reaches_context_limit_through_the_hook() {
+    use plakous_attempt::ObservationSnapshot;
+
+    let stream = context_window_stream_error();
+    assert!(stream.context_overflow(), "{stream}");
+    let annotated = super::annotate_messages_stream_terminal(
+        super::protocol_source(&crate::stream::map_stream_error(stream.clone())),
+        &stream,
+    );
+    assert!(annotated.context_overflow(), "{annotated}");
+    let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
+        physical_attempts: 1,
+        provider_acceptance: ProviderAcceptance::Accepted,
+        visible_output: false,
+        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        hosted_effects_possible: false,
+        logical_success: false,
+    });
+    assert_eq!(facts.physical_attempts(), 1);
+    let attempt = MessagesAttemptError::protocol(annotated, facts);
+    let descriptor = ResolvedModelDescriptor::new(
+        &plakous_model::StandardIntegrationAuthority::release_owned(),
+        ProtocolId::new("anthropic.messages").expect("protocol"),
+        RouteId::new("anthropic.claude_oauth").expect("route"),
+        ModelId::new("claude-sonnet-5").expect("model"),
+        None,
+        None,
+        ModelAdapterProfileId::new("anthropic.claude.oauth.test").expect("profile"),
+        CapabilitySet::new(BTreeMap::new(), BTreeMap::new()),
+    );
+    assert_eq!(
+        anthropic_model_error(&descriptor, Some(&attempt), attempt.to_string().as_str()).kind(),
+        ModelErrorKind::ContextLimit
+    );
+}
+
+fn context_window_stream_error() -> plakous_messages::MessagesStreamError {
+    use plakous_messages::{
+        MessagesRequestPolicy, MessagesRequestPolicyInput, MessagesStreamDialectHooks,
+        MessagesStreamProjector, PreparedMessagesStreamBinding, ToolOwnership,
+    };
+    use plakous_model::{
+        Digest, DigestDomain, EffectiveProviderConfigurationId, ModelId, ProtocolId,
+        SelectedProviderConfigurationId, SystemClock, SystemIdGenerator,
+    };
+
+    let digest =
+        Digest::sha256(DigestDomain::RequestPlan, 1, &[b"context-window-hook"]).expect("digest");
+    let selected: SelectedProviderConfigurationId = serde_json::from_value(
+        serde_json::to_value(
+            Digest::sha256(
+                DigestDomain::SelectedProviderConfiguration,
+                5,
+                &[b"selected"],
+            )
+            .expect("selected digest"),
+        )
+        .expect("selected json"),
+    )
+    .expect("selected");
+    let effective: EffectiveProviderConfigurationId = serde_json::from_value(
+        serde_json::to_value(
+            Digest::sha256(
+                DigestDomain::EffectiveProviderConfiguration,
+                5,
+                &[b"effective"],
+            )
+            .expect("effective digest"),
+        )
+        .expect("effective json"),
+    )
+    .expect("effective");
+    let mut projector = MessagesStreamProjector::new(
+        PreparedMessagesStreamBinding::new(
+            MessagesRequestPolicy::new(MessagesRequestPolicyInput {
+                protocol: ProtocolId::new("anthropic.messages").expect("protocol"),
+                requested_model: ModelId::new("claude-sonnet-5").expect("model"),
+                expected_reported_model: None,
+                descriptor_binding: digest,
+                semantic_descriptor_binding: digest,
+                account_binding: digest,
+                selected_provider_configuration: selected,
+                effective_provider_configuration: effective,
+                maximum_output_tokens: 128,
+                minimum_thinking_budget: None,
+                api_version: "2023-06-01".into(),
+                beta_header: "oauth-2025-04-20".into(),
+            }),
+            digest,
+            ToolOwnership::default(),
+            MessagesStreamDialectHooks::client_tools_only(),
+        ),
+        std::sync::Arc::new(SystemClock),
+        std::sync::Arc::new(SystemIdGenerator),
+    )
+    .expect("projector");
+    projector
+        .push(CONTEXT_WINDOW_SSE.as_bytes())
+        .expect_err("context window fails the stream")
+}
+
+const CONTEXT_WINDOW_SSE: &str = concat!(
+    "event: message_start\n",
+    "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_ctx\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+    "event: message_delta\n",
+    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"model_context_window_exceeded\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n",
+    "event: message_stop\n",
+    "data: {\"type\":\"message_stop\"}\n\n",
+);
+
+#[test]
 fn typed_429_and_retry_after_reach_model_error_context() {
     let descriptor = ResolvedModelDescriptor::new(
         &plakous_model::StandardIntegrationAuthority::release_owned(),

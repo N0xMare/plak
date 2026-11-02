@@ -18,6 +18,12 @@ pub(super) struct LiveRows {
     assistant: Option<RowKey>,
     calls: HashMap<String, RowKey>,
     thinking: HashMap<String, (RowKey, Instant)>,
+    /// Provisional key of the last row issued before the current model request.
+    /// A discard deletes assistant and thinking rows only after this key, so an
+    /// earlier request of the same turn stays. `None` means no request boundary
+    /// was observed.
+    request_floor: Option<RowKey>,
+    last_issued: Option<RowKey>,
 }
 
 pub(super) struct LiveChange {
@@ -30,6 +36,7 @@ impl LiveRows {
         self.pending.clear();
         self.assistant = None;
         self.thinking.clear();
+        self.request_floor = None;
         self.calls = rows
             .iter()
             .filter_map(|(key, row)| row.call_id().map(|id| (id.to_owned(), *key)))
@@ -37,7 +44,9 @@ impl LiveRows {
     }
 
     fn key(&mut self) -> RowKey {
-        crate::sessions::provisional_key()
+        let key = crate::sessions::provisional_key();
+        self.last_issued = Some(key);
+        key
     }
 
     pub(super) fn retain(&mut self, rows: &BTreeMap<RowKey, TranscriptRow>) {
@@ -106,6 +115,12 @@ impl LiveRows {
                 }
                 return None;
             }
+            HostEvent::ModelRequestStarted => {
+                self.assistant = None;
+                self.thinking.clear();
+                self.request_floor = self.last_issued;
+                return None;
+            }
             _ => {}
         }
         if let HostEvent::ToolLine {
@@ -164,31 +179,12 @@ impl LiveRows {
         event: &HostEvent<P>,
         rows: &BTreeMap<RowKey, TranscriptRow>,
     ) -> Option<LiveChange> {
-        if let HostEvent::ModelRetry(retry) = event
-            && retry.output_discarded
-        {
-            let mut deletes: Vec<_> = rows
-                .iter()
-                .rev()
-                .take_while(|(key, row)| {
-                    key.anchor >= 1_u64 << 63
-                        && matches!(
-                            row,
-                            TranscriptRow::Assistant { .. } | TranscriptRow::Thinking(_)
-                        )
-                })
-                .map(|(key, _)| *key)
-                .collect();
-            deletes.reverse();
-            deletes.extend(self.pending.iter().filter_map(|(key, row)| {
-                matches!(
-                    row,
-                    TranscriptRow::Assistant { .. } | TranscriptRow::Thinking(_)
-                )
-                .then_some(*key)
-            }));
-            deletes.sort_unstable();
-            deletes.dedup();
+        let discard = matches!(
+            event,
+            HostEvent::ModelRefusal { .. } | HostEvent::OutputDiscarded { .. }
+        ) || matches!(event, HostEvent::ModelRetry(retry) if retry.output_discarded);
+        if discard {
+            let deletes = self.uncommitted_keys(rows);
             self.assistant = None;
             self.thinking.clear();
             return Some(LiveChange {
@@ -262,6 +258,37 @@ impl LiveRows {
             deletes: Vec::new(),
         })
     }
+    /// Assistant and thinking keys of the current request, published or pending.
+    fn uncommitted_keys(&self, rows: &BTreeMap<RowKey, TranscriptRow>) -> Vec<RowKey> {
+        let kept = |key: &RowKey| {
+            key.anchor < 1_u64 << 63 || self.request_floor.is_some_and(|floor| *key <= floor)
+        };
+        let mut deletes = Vec::new();
+        for (key, row) in rows.iter().rev() {
+            if kept(key) {
+                break;
+            }
+            match row {
+                TranscriptRow::Assistant { .. } | TranscriptRow::Thinking(_) => deletes.push(*key),
+                TranscriptRow::Tool(_) => {}
+                _ => break,
+            }
+        }
+        deletes.extend(self.pending.iter().filter_map(|(key, row)| {
+            if kept(key) {
+                return None;
+            }
+            matches!(
+                row,
+                TranscriptRow::Assistant { .. } | TranscriptRow::Thinking(_)
+            )
+            .then_some(*key)
+        }));
+        deletes.sort_unstable();
+        deletes.dedup();
+        deletes
+    }
+
     fn tool<P: ProtocolExtension>(
         &mut self,
         event: &HostEvent<P>,

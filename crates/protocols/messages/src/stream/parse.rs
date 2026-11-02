@@ -576,9 +576,6 @@ pub(super) fn map_finish(
             ) | (
                 MessagesStopReason::Refusal,
                 MessagesStopDetailsKind::Refusal
-            ) | (
-                MessagesStopReason::ModelContextWindowExceeded,
-                MessagesStopDetailsKind::ModelContextWindowExceeded
             )
         );
         if !compatible {
@@ -589,8 +586,11 @@ pub(super) fn map_finish(
     }
     let reason = match stop_reason {
         MessagesStopReason::ToolUse => FinishReason::ToolCalls,
-        MessagesStopReason::MaxTokens | MessagesStopReason::ModelContextWindowExceeded => {
-            FinishReason::Length
+        MessagesStopReason::MaxTokens => FinishReason::Length,
+        // `message_stop` rejects this stop before finish mapping. It used to
+        // commit as Length; replay ignores stop reasons, so nothing reads it.
+        MessagesStopReason::ModelContextWindowExceeded => {
+            unreachable!("message_stop rejects a context-window stop before finish mapping")
         }
         MessagesStopReason::EndTurn | MessagesStopReason::StopSequence => FinishReason::Stop,
         MessagesStopReason::PauseTurn => FinishReason::ProviderContinuation,

@@ -1398,6 +1398,170 @@ fn a_model_retry_shows_its_wait_and_marks_the_discarded_text() {
     );
 }
 
+/// A tool row of the failed response does not keep the assistant text or
+/// thinking that preceded it. An earlier committed answer stays.
+#[test]
+fn e2probe_tui_retry_keeps_text_of_an_earlier_model_call() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::ModelRequestStarted);
+    app.apply_host_event(HostEvent::AssistantDelta("round one".into()));
+    app.apply_host_event(HostEvent::AssistantDone);
+    app.apply_host_event(tool_line(
+        "call",
+        None,
+        None,
+        ActivityKind::Tool,
+        "read_file",
+        "done",
+        Some("src/lib.rs"),
+    ));
+    app.apply_host_event(HostEvent::ModelRequestStarted);
+    app.apply_host_event(HostEvent::AssistantDelta("round two".into()));
+    app.apply_host_event(HostEvent::ModelRetry(
+        plakous_host_protocol::ModelRetryNotice {
+            next_attempt: 2,
+            max_attempts: 4,
+            delay_ms: 0,
+            cause_kind: "stream_interrupted".into(),
+            cause: "response stream interrupted".into(),
+            output_discarded: true,
+        },
+    ));
+    assert!(
+        app.pane
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ScrollBlock::Assistant(text) if text == "round one"))
+    );
+    assert!(app.pane.blocks.iter().any(|block| {
+        matches!(block, ScrollBlock::Discarded { text, thinking: false } if text == "round two")
+    }));
+    assert!(
+        !app.pane.blocks.iter().any(
+            |block| matches!(block, ScrollBlock::Discarded { text, .. } if text == "round one")
+        )
+    );
+}
+
+#[test]
+fn output_discarded_keeps_text_of_an_earlier_model_call() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::ModelRequestStarted);
+    app.apply_host_event(HostEvent::AssistantDelta("round one".into()));
+    app.apply_host_event(HostEvent::AssistantDone);
+    app.apply_host_event(HostEvent::ModelRequestStarted);
+    app.apply_host_event(HostEvent::AssistantDelta("round two".into()));
+    app.apply_host_event(HostEvent::OutputDiscarded { dim: true });
+    assert!(
+        app.pane
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ScrollBlock::Assistant(text) if text == "round one"))
+    );
+    assert!(app.pane.blocks.iter().any(|block| {
+        matches!(block, ScrollBlock::Discarded { text, thinking: false } if text == "round two")
+    }));
+}
+
+#[test]
+fn a_retry_discards_text_that_preceded_the_response_tools() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(super::test_support::restore_snapshot(
+        1,
+        vec![plakous_host_protocol::views::transcript::TranscriptRow::assistant("kept answer")],
+    ));
+    app.apply_host_event(HostEvent::AssistantDelta("before the tool".into()));
+    app.apply_host_event(HostEvent::AssistantDone);
+    app.apply_host_event(HostEvent::ReasoningDelta {
+        location_key: "0:1".into(),
+        text: "thought before the tool".into(),
+    });
+    app.apply_host_event(tool_line(
+        "call",
+        None,
+        None,
+        ActivityKind::Tool,
+        "read_file",
+        "done",
+        Some("src/lib.rs"),
+    ));
+    app.apply_host_event(HostEvent::AssistantDelta("after the tool".into()));
+    app.apply_host_event(HostEvent::ModelRetry(
+        plakous_host_protocol::ModelRetryNotice {
+            next_attempt: 2,
+            max_attempts: 4,
+            delay_ms: 0,
+            cause_kind: "stream_interrupted".into(),
+            cause: "response stream interrupted".into(),
+            output_discarded: true,
+        },
+    ));
+    assert!(
+        app.pane
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ScrollBlock::Assistant(text) if text == "kept answer"))
+    );
+    assert!(app.pane.blocks.iter().any(|block| {
+        matches!(block, ScrollBlock::Discarded { text, thinking: false } if text == "before the tool")
+    }));
+    assert!(app.pane.blocks.iter().any(|block| {
+        matches!(block, ScrollBlock::Discarded { text, thinking: false } if text == "after the tool")
+    }));
+    assert!(app.pane.blocks.iter().any(|block| {
+        matches!(block, ScrollBlock::Discarded { text, thinking: true } if text == "thought before the tool")
+    }));
+    assert!(
+        !app.pane
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ScrollBlock::Assistant(text) if text != "kept answer"))
+    );
+    assert!(
+        app.pane
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ScrollBlock::Tool { name, .. } if name == "read_file"))
+    );
+}
+
+#[test]
+fn a_refusal_drops_text_that_preceded_the_response_tools() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(super::test_support::restore_snapshot(
+        1,
+        vec![plakous_host_protocol::views::transcript::TranscriptRow::assistant("kept answer")],
+    ));
+    app.apply_host_event(HostEvent::AssistantDelta("before the tool".into()));
+    app.apply_host_event(HostEvent::AssistantDone);
+    app.apply_host_event(HostEvent::ReasoningDelta {
+        location_key: "0:1".into(),
+        text: "thought before the tool".into(),
+    });
+    app.apply_host_event(tool_line(
+        "call",
+        None,
+        None,
+        ActivityKind::Tool,
+        "read_file",
+        "done",
+        Some("src/lib.rs"),
+    ));
+    app.apply_host_event(HostEvent::AssistantDelta("after the tool".into()));
+    app.apply_host_event(HostEvent::ModelRefusal { detail: None });
+    assert!(blocks_contain(&app, "kept answer"));
+    assert!(!blocks_contain(&app, "before the tool"));
+    assert!(!blocks_contain(&app, "after the tool"));
+    assert!(!blocks_contain(&app, "thought before the tool"));
+    assert!(blocks_contain(&app, "model refused the request"));
+    assert!(
+        app.pane
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ScrollBlock::Tool { name, .. } if name == "read_file"))
+    );
+}
+
 #[test]
 fn escape_from_a_queue_edit_restores_the_replaced_draft_and_never_interrupts() {
     for busy in [false, true] {

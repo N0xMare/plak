@@ -1926,8 +1926,15 @@ bound, discarding that response and its reasoning projection; a second
 consecutive empty Length fails the turn. A successful classified round resets
 the guard. An incomplete local call also uses the existing output-limit path
 and never dispatches, whether it reaches the driver as a call inside a Length
-response or was revoked by the protocol kernel into an empty Length (a Messages `max_tokens` or
-`model_context_window_exceeded` stop, or a Chat `length` stop, with client tool input, §6.1). Neither a wrap-up round nor a response with
+response or was revoked by the protocol kernel into an empty Length (a Messages
+`max_tokens` stop, or a Chat `length` stop, with client tool input, §6.1). A
+Messages `model_context_window_exceeded` stop is not that output limit: the
+stream fails before a terminal response is sealed, and with no hosted effect
+the providers classify it as `ContextLimit`, so the driver takes one
+`OverflowFold`. A programmatic `tool_use` is a hosted effect from the moment
+its block starts, so a `max_tokens` cut of that call is an unsupported terminal
+requiring reconciliation. It is not an `OutputLimit` and it is not retried.
+Neither a wrap-up round nor a response with
 provider-hosted ToolCall/ToolResult blocks may retry: visible tool-free Length
 still commits its answer, while empty Length fails immediately. A completed
 aggregate may be empty for Length so the driver can classify this failure;
@@ -2789,25 +2796,50 @@ observations remain provisional; they are not assistant history or replay
 material. No refused proposal executes and no tool result is fabricated.
 The user's admitted input and all earlier committed history remain intact.
 
-Messages `stop_reason: max_tokens` and `model_context_window_exceeded` are the
-documented output-limit stops, and the service may end either inside a client
-`tool_use` block, with its input cut anywhere. When such a stop arrives after
-any closed client-tool input, complete or not, the entire provisional response
-is revoked exactly as for refusal: no client input is parsed, canonical output
-is empty, finish reason is `Length` with detail `stop_reason=<reason>`, and
-usage, response identity, request-plan identity, and provider metadata are
-retained. The driver classifies that empty Length as typed `OutputLimit`
-(§5.5): it discards the response, retries once with the output-limit note, and
-a second consecutive output limit fails the turn. No revoked proposal is
-offered for execution, recorded as a call, or replayed. An output-limit stop
-without client input keeps its output and takes the ordinary Length path. An
-output-limit stop that would revoke client input after possible hosted effects
-is an unsupported terminal requiring reconciliation, as for refusal. Chat
-Completions `finish_reason: length` with any tool-call slot is revoked the same
-way: no slot is parsed or projected, and the terminal is an empty `Length`.
-`tool_calls` without a slot and any other finish with a slot remain invalid.
-Responses already reports an unfinished function call at `max_output_tokens` as
-a definite output-limit failure (§6.5), with the same consequence.
+Messages `stop_reason: max_tokens` is the documented output-limit stop, and the
+service may end it inside a client `tool_use` block, with its input cut
+anywhere. When that stop arrives after any closed client-tool input, complete
+or not, the entire provisional response is revoked exactly as for refusal: no
+client input is parsed, canonical output is empty, finish reason is `Length`
+with detail `stop_reason=max_tokens`, and usage, response identity,
+request-plan identity, and provider metadata are retained. The driver
+classifies that empty Length as typed `OutputLimit` (§5.5): it discards the
+response, retries once with the output-limit note, and a second consecutive
+output limit fails the turn. No revoked proposal is offered for execution,
+recorded as a call, or replayed. An output-limit stop without client input
+keeps its output and takes the ordinary Length path. An output-limit stop that
+would revoke client input after possible hosted effects is an unsupported
+terminal requiring reconciliation, as for refusal.
+
+Messages `stop_reason: model_context_window_exceeded` is a context overflow,
+not an output limit. The stream fails before a terminal response is sealed:
+there is no empty `Length` and nothing from the provisional response is
+committed. With no hosted effect, Anthropic and OpenRouter mark the failure
+`context_overflow` and classify `ModelErrorKind::ContextLimit`, so the driver
+takes one `OverflowFold` (§5.5). Closed client-tool input is dropped unparsed.
+After possible hosted effects the same stop is an unsupported terminal
+requiring reconciliation and is not classified as `ContextLimit`. The
+context-window stop is rejected before finish mapping, so it never commits the
+`Length` terminal that stop used to produce. Replay ignores stop reasons, so
+that former mapping is unused.
+
+A programmatic `tool_use` (a customer tool invoked by a provider-hosted
+caller) stays deferred until the terminal reason is known, and it is a hosted
+effect from the moment its block starts. `max_tokens` does not flush it,
+whether or not its JSON closed. The cut is the reconciliation terminal in
+every case: an unsupported terminal, not an `OutputLimit`, and the driver does
+not retry it. A context-window stop after that mark is the same reconciliation
+terminal, not `ContextLimit`. A `message_delta` that has not yet carried a
+stop reason does not flush the deferred call. Any other stop still requires
+complete JSON object input; a cut input fails as invalid JSON. A complete
+programmatic call under `tool_use` still flushes.
+
+Chat Completions `finish_reason: length` with any tool-call slot is revoked the
+same way as a Messages `max_tokens` client tool: no slot is parsed or
+projected, and the terminal is an empty `Length`. `tool_calls` without a slot
+and any other finish with a slot remain invalid. Responses already reports an
+unfinished function call at `max_output_tokens` as a definite output-limit
+failure (§6.5), with the same consequence.
 
 The neutral response assembler permits an empty `Refusal` or `Length` terminal
 to revoke provisional output after validating normal identity, metadata, plan,
@@ -2816,7 +2848,8 @@ revoked without JSON interpretation; other open canonical blocks remain
 invalid. Messages still requires physical `content_block_stop` before terminal
 metadata. It retains closed client input under the existing byte/event bounds
 until the terminal reason is known, and parses it only under a terminal that
-neither refuses nor stops at an output limit. Malformed or truncated JSON
+neither refuses, overflows the context window, nor stops at an output limit.
+Malformed or truncated JSON
 therefore never becomes an executable call. Other output mismatches remain
 invalid.
 Only local and MCP tool calls still in `Requested` are revocable, including
@@ -2836,9 +2869,10 @@ The canonical projection identities are `messages.projection.v3` for Claude
 OAuth and `openrouter-messages-canonical-v2` for OpenRouter Messages. Their
 context contracts and prepared records bind these semantics; wire, accounting,
 authentication, and persistence codecs keep their existing revisions. The
-output-limit revocation keeps these identities and the Chat projection
-identities: it admits only terminals that earlier failed the stream, and an
-empty Length is never committed to history.
+output-limit revocation, the context-window failure, and the programmatic
+reconciliation cut keep these identities and the Chat projection identities:
+they admit only terminals that earlier failed the stream or an empty Length that is never
+committed to history.
 
 This local admission guarantee does not promise that the service will accept
 unchanged context. Anthropic's streaming-refusal guidance calls for resetting or

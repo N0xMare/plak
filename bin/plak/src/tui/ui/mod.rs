@@ -750,6 +750,9 @@ pub(crate) struct App {
     phase_started: Option<Instant>,
     /// Start of the latest dispatched model round, independent of tool phases.
     model_request_started: Option<Instant>,
+    /// First pane block that belongs to the current model request. A discard
+    /// does not dim or remove blocks before it.
+    stream_discard_from: usize,
     /// The account whose request budget the next model round waits on.
     request_slot_wait: Option<String>,
     credential_wait: Option<String>,
@@ -1022,6 +1025,7 @@ impl App {
             turn_started: None,
             phase_started: None,
             model_request_started: None,
+            stream_discard_from: 0,
             request_slot_wait: None,
             credential_wait: None,
             composer_chrome: composer_chrome::ComposerChrome::default(),

@@ -160,6 +160,13 @@ define_observations! {
         /// Optional non-secret provider diagnostic; absence means no reason was supplied.
         detail: Option<String>,
     },
+    /// The current model request's streamed assistant text and reasoning are void.
+    /// In-process only: JSONL does not carry it. `dim` keeps the text visible as
+    /// discarded instead of removing it.
+    OutputDiscarded {
+        /// Keep the text visible as discarded instead of removing it.
+        dim: bool,
+    },
     /// Tool lifecycle line (`state`: start|done|rejected|…).
     ///
     /// Prefer `call_id` for correlation when present (parallel same-name tools).

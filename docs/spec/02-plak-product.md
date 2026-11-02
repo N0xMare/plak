@@ -2629,7 +2629,10 @@ An optional bounded, sanitized `detail` carries the provider-supplied diagnostic
 Plak does not infer a refusal category when none was supplied.
 Canonical assistant output stays exact and appears once; an empty refusal leaves
 stdout empty. Streamed previews are provisional and must not be treated as a
-completed response when the provider discards them at refusal. The TUI restores
+completed response when the provider discards them at refusal. The TUI and the
+hosted transcript drop or dim only the assistant text and thinking of that
+refused response, including text that preceded a tool call of it, and keep
+text from earlier model calls of the same turn. The TUI restores
 the published transcript before showing refusal; JSONL consumers discard refused
 provisional output when they receive `model_refusal`. The JSONL host
 stays available for explicit user action. Refusal does not trigger automatic
@@ -4671,8 +4674,11 @@ clickable row under the pointer. Clickable rows are derived from the cached
 row plans, not from a per-frame rebuild. Copying a selection that runs through
 the end of a one-line row from its first cell copies that row's full text
 (rail, glyph, untruncated label with the subject's own newlines rather than
-`↵`, and meta) instead of its `…` cut, without layout padding or the caret; a
-thinking row copies as `◆ ` plus its full summary line. A prompt or steer row copies its
+`↵`, and meta) instead of its `…` cut, without layout padding or the caret. A
+thinking lead uses that same full text: its rail, `◆` or the running mark,
+the full summary, and the elapsed meta. Its indent is decoration of the
+rail's width, so a selection that starts in the indent does not highlight it.
+A prompt or steer row copies its
 text without the send time or the `steer` tag. Assistant text drops its leading
 decoration when the selection starts at or before that decoration: the
 two-space block indent, a quote rail or a code rail (`│ ` or a fence's
@@ -4689,11 +4695,10 @@ the selection starts or ends inside a rail: a dropped indent, rail, or marker
 is not highlighted, a language label the copy omits is not highlighted, and a
 prompt or steer row does not highlight its send time or `steer` tag. Cells the
 copy includes stay highlighted. Two cases differ from the painted cells: a row
-whose whole-row copy substitutes text (a one-line item's full text, a
-thinking lead's `◆` summary, a code row's source line) highlights its painted
-cells, including a caret, `…` or elapsed time the copy leaves out; and a
-selection edge on half of a wide character copies the whole character while
-highlighting only the covered cell. List markers and table rails are
+whose whole-row copy substitutes text (a one-line item's full text or a
+code row's source line) highlights its painted cells, including a caret or
+`…` the copy leaves out. A selection edge on part of a wide grapheme copies
+and highlights the whole grapheme. List markers and table rails are
 content and stay. A fenced or indented
 code row selected through its end copies the source line whole, including text
 a narrow pane clipped instead of reflowing. That copy keeps the line's tabs,
@@ -7599,10 +7604,11 @@ replay as a typed `ModelEvent::Retry`, and Plak shows it on every face:
 - **TUI.** The composer HUD reads `retrying Xs`, counting down, until the
   replay streams or the turn ends. The attempt and cause stay on the
   transcript retry row (`retry n/N · cause`). When the failed request had
-  streamed assistant text or reasoning, those trailing blocks are redrawn
+  streamed assistant text or reasoning, those blocks are redrawn
   dimmed under the label `discarded -- retrying` (reasoning as
-  `discarded thinking -- retrying`, shown only while thinking is shown); the
-  replay streams into new blocks. The session persists a model response's
+  `discarded thinking -- retrying`, shown only while thinking is shown),
+  including assistant text and thinking that preceded a tool call of that
+  same response; the replay streams into new blocks. The session persists a model response's
   sealed reasoning when that response completes (the Content view the host
   drives carries the completion's kind, not its aggregate), so its thinking
   rows precede the rows of the tools it requested and survive a later crash;

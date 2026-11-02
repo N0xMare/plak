@@ -604,6 +604,209 @@ fn retry_discards_only_the_uncommitted_response_tail() {
 }
 
 #[test]
+fn output_discarded_keeps_text_of_an_earlier_model_call_in_the_turn() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let scope = TranscriptScope::Root;
+    let mut publisher = Presentations::default();
+    publisher.snapshot(snapshot(scope.clone(), &[(1, "committed")]), &sink);
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::AssistantDelta("round one".into()),
+        &sink,
+    ));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::ModelRequestStarted,
+        &sink
+    ));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::AssistantDelta("round two".into()),
+        &sink,
+    ));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::OutputDiscarded { dim: true },
+        &sink,
+    ));
+    let _ = receiver.try_iter().count();
+    assert!(publisher.resync(&scope, &sink));
+    let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
+        panic!("resync");
+    };
+    let texts: Vec<String> = resync
+        .items
+        .iter()
+        .map(|item| format!("{:?}", item.row))
+        .collect();
+    assert!(
+        texts.iter().any(|text| text.contains("round one")),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().all(|text| !text.contains("round two")),
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn e2probe_retry_keeps_text_of_an_earlier_model_call_in_the_turn() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let scope = TranscriptScope::Root;
+    let mut publisher = Presentations::default();
+    publisher.snapshot(snapshot(scope.clone(), &[(1, "committed")]), &sink);
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::ModelRequestStarted,
+        &sink
+    ));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::AssistantDelta("round one".into()),
+        &sink,
+    ));
+    let tool = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+        call_id: "call".into(),
+        name: "read_file".into(),
+        exposed_name: None,
+        kind: plakous_host_protocol::views::ActivityKind::Tool,
+        state: "running".into(),
+        subject: Some("file.rs".into()),
+        detail: None,
+        parent_call_id: None,
+        cell_id: None,
+        wait: None,
+        started_at_ms: Some(10),
+        finished_at_ms: None,
+    }));
+    assert!(publisher.observe(scope.clone(), &tool, &sink));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::ModelRequestStarted,
+        &sink
+    ));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::AssistantDelta("round two".into()),
+        &sink,
+    ));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::ModelRetry(plakous_host_protocol::ModelRetryNotice {
+            next_attempt: 2,
+            max_attempts: 3,
+            delay_ms: 0,
+            cause_kind: "stream_interrupted".into(),
+            cause: "fixture".into(),
+            output_discarded: true,
+        }),
+        &sink,
+    ));
+    let _ = receiver.try_iter().count();
+    assert!(publisher.resync(&scope, &sink));
+    let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
+        panic!("resync");
+    };
+    let texts: Vec<String> = resync
+        .items
+        .iter()
+        .map(|item| format!("{:?}", item.row))
+        .collect();
+    assert!(
+        texts.iter().any(|text| text.contains("round one")),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().all(|text| !text.contains("round two")),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text.contains("read_file")),
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn retry_and_refusal_drop_assistant_text_that_preceded_the_tool() {
+    for refusal in [false, true] {
+        let (sink, receiver) = observation_channel::<Core>();
+        let scope = TranscriptScope::Root;
+        let mut publisher = Presentations::default();
+        publisher.snapshot(snapshot(scope.clone(), &[(1, "committed")]), &sink);
+        assert!(publisher.observe(
+            scope.clone(),
+            &HostEvent::<Core>::AssistantDelta("before the tool".into()),
+            &sink,
+        ));
+        assert!(publisher.observe(
+            scope.clone(),
+            &HostEvent::<Core>::ReasoningDelta {
+                location_key: "thought".into(),
+                text: "early thought".into(),
+            },
+            &sink,
+        ));
+        let tool = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+            call_id: "call".into(),
+            name: "read_file".into(),
+            exposed_name: None,
+            kind: plakous_host_protocol::views::ActivityKind::Tool,
+            state: "running".into(),
+            subject: Some("file.rs".into()),
+            detail: None,
+            parent_call_id: None,
+            cell_id: None,
+            wait: None,
+            started_at_ms: Some(10),
+            finished_at_ms: None,
+        }));
+        assert!(publisher.observe(scope.clone(), &tool, &sink));
+        assert!(publisher.observe(
+            scope.clone(),
+            &HostEvent::<Core>::AssistantDelta("after the tool".into()),
+            &sink,
+        ));
+        let boundary = if refusal {
+            HostEvent::<Core>::ModelRefusal { detail: None }
+        } else {
+            HostEvent::<Core>::ModelRetry(plakous_host_protocol::ModelRetryNotice {
+                next_attempt: 2,
+                max_attempts: 3,
+                delay_ms: 0,
+                cause_kind: "stream_interrupted".into(),
+                cause: "fixture".into(),
+                output_discarded: true,
+            })
+        };
+        assert!(publisher.observe(scope.clone(), &boundary, &sink));
+        let _ = receiver.try_iter().count();
+        assert!(publisher.resync(&scope, &sink));
+        let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
+            panic!("resync");
+        };
+        let texts: Vec<String> = resync
+            .items
+            .iter()
+            .map(|item| format!("{:?}", item.row))
+            .collect();
+        assert!(
+            texts.iter().any(|text| text.contains("committed")),
+            "refusal={refusal} {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.contains("read_file")),
+            "refusal={refusal} {texts:?}"
+        );
+        assert!(
+            texts.iter().all(|text| !text.contains("before the tool")
+                && !text.contains("after the tool")
+                && !text.contains("early thought")),
+            "refusal={refusal} {texts:?}"
+        );
+    }
+}
+
+#[test]
 fn invalid_view_repair_restores_key_order_uniqueness_and_bounds() {
     let mut invalid = snapshot(
         TranscriptScope::Root,

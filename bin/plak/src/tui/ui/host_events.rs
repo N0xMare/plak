@@ -20,6 +20,7 @@ impl App {
         self.turn_started = None;
         self.phase_started = None;
         self.model_request_started = None;
+        self.stream_discard_from = 0;
         self.request_slot_wait = None;
         self.credential_wait = None;
         self.cancel_pending = false;
@@ -68,19 +69,43 @@ impl App {
         self.mark_dirty();
     }
 
-    /// Marks the assistant text and reasoning the failed request streamed:
-    /// the trailing blocks of this model call, which a replay only follows
-    /// before any tool call began.
-    fn discard_streamed_assistant(&mut self) {
-        for index in (0..self.pane.blocks.len()).rev() {
+    /// Marks or removes the assistant text and reasoning the failed request
+    /// streamed. Only blocks from the current model request are touched, so an
+    /// earlier request of the same turn stays. A tool row of that response
+    /// does not hide the text that preceded it. A committed row ends the walk.
+    fn discard_streamed_assistant(&mut self, dim: bool) {
+        let mut drop_at = Vec::new();
+        let mut dim_at = Vec::new();
+        let floor = self.stream_discard_from.min(self.pane.blocks.len());
+        for index in (floor..self.pane.blocks.len()).rev() {
+            if self
+                .pane
+                .keyed
+                .key_at(index)
+                .is_some_and(|key| key.anchor < 1_u64 << 63)
+            {
+                break;
+            }
+            match &self.pane.blocks[index] {
+                ScrollBlock::Assistant(_) | ScrollBlock::Thinking { .. } if dim => {
+                    dim_at.push(index);
+                }
+                ScrollBlock::Assistant(_) | ScrollBlock::Thinking { .. } => drop_at.push(index),
+                ScrollBlock::Discarded { .. } | ScrollBlock::Tool { .. } => {}
+                _ => break,
+            }
+        }
+        for index in dim_at {
             let (text, thinking) = match &mut self.pane.blocks[index] {
                 ScrollBlock::Assistant(text) => (std::mem::take(text), false),
                 ScrollBlock::Thinking { text, .. } => (std::mem::take(text), true),
-                ScrollBlock::Discarded { .. } => continue,
-                _ => break,
+                _ => continue,
             };
             self.pane.blocks[index] = ScrollBlock::Discarded { text, thinking };
             self.mark_block_changed(index);
+        }
+        for index in drop_at {
+            self.remove_keyed_block(index);
         }
         self.pane.assistant_stream_active = false;
     }
@@ -740,7 +765,7 @@ impl App {
             )),
             HostEvent::ModelRetry(retry) => {
                 if retry.output_discarded {
-                    self.discard_streamed_assistant();
+                    self.discard_streamed_assistant(true);
                 }
                 self.pending_retry = Some((retry, self.now()));
                 self.mark_dirty();
@@ -798,7 +823,12 @@ impl App {
                 self.retire_started_draft();
                 self.push_live_block(ScrollBlock::User { text, sent_at_ms });
             }
+            HostEvent::OutputDiscarded { dim } => {
+                self.discard_streamed_assistant(dim);
+                self.mark_dirty();
+            }
             HostEvent::ModelRefusal { detail } => {
+                self.discard_streamed_assistant(false);
                 let message = detail.map_or_else(
                     || "model refused the request".into(),
                     |detail| format!("model refused the request: {detail}"),
@@ -846,6 +876,7 @@ impl App {
                 self.clear_pending = false;
                 self.last_turn = None;
                 self.pane.blocks.clear();
+                self.stream_discard_from = 0;
                 self.clear_presentation();
                 self.pane.assistant_stream_active = false;
                 self.open_approval = None;
@@ -1165,6 +1196,7 @@ impl App {
             HostEvent::ModelRequestStarted => {
                 self.credential_wait = None;
                 self.request_slot_wait = None;
+                self.stream_discard_from = self.pane.blocks.len();
                 self.model_request_started = Some(self.now());
                 self.pane.assistant_stream_active = false;
                 self.mark_dirty();

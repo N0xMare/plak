@@ -907,6 +907,7 @@ fn transcript_observation<P: ProtocolExtension>(event: &SessionObservation<P>) -
         | SessionObservation::UserMessage { .. }
         | SessionObservation::AssistantDelta(_)
         | SessionObservation::AssistantDone
+        | SessionObservation::OutputDiscarded { .. }
         | SessionObservation::ReasoningDelta { .. }
         | SessionObservation::ReasoningSealed { .. }
         | SessionObservation::ToolLine { .. }
@@ -945,6 +946,7 @@ fn retained_edge<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
             | SessionObservation::JobPromoted { .. }
             | SessionObservation::JobTerminal { .. }
             | SessionObservation::CredentialWait { .. }
+            | SessionObservation::OutputDiscarded { .. }
     )
 }
 
@@ -1005,7 +1007,10 @@ fn eviction_index<P: ProtocolExtension>(
 ) -> Option<usize> {
     if latest_state_event(event) {
         state_eviction(queue)
-    } else if matches!(event, SessionObservation::AssistantDone) {
+    } else if matches!(
+        event,
+        SessionObservation::AssistantDone | SessionObservation::OutputDiscarded { .. }
+    ) {
         queue.iter().position(|queued| {
             !latest_state_event(queued)
                 && !retained_edge(queued)

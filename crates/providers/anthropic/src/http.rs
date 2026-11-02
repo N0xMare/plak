@@ -883,7 +883,21 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
         &self,
         error: plakous_messages::MessagesStreamError,
     ) -> MessagesAttemptProtocolError {
-        protocol_source(&crate::stream::map_stream_error(error))
+        annotate_messages_stream_terminal(
+            protocol_source(&crate::stream::map_stream_error(error.clone())),
+            &error,
+        )
+    }
+}
+
+fn annotate_messages_stream_terminal(
+    error: MessagesAttemptProtocolError,
+    stream: &plakous_messages::MessagesStreamError,
+) -> MessagesAttemptProtocolError {
+    if stream.context_overflow() {
+        error.with_context_overflow()
+    } else {
+        error
     }
 }
 

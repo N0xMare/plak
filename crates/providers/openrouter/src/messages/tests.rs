@@ -107,6 +107,72 @@ fn the_openrouter_messages_row_of_the_provider_failure_matrix_is_definite() {
         ModelErrorKind::Transport
     );
 }
+
+#[test]
+fn messages_context_overflow_is_typed() {
+    use plakous_attempt::ObservationSnapshot;
+    use plakous_messages::{MessagesAttemptProtocolError, TerminalFacts};
+
+    let facts = |hosted: bool| {
+        TerminalFacts::from_snapshot(ObservationSnapshot {
+            physical_attempts: 1,
+            provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+            visible_output: false,
+            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            hosted_effects_possible: hosted,
+            logical_success: false,
+        })
+    };
+    let overflow = MessagesAttemptError::protocol(
+        MessagesAttemptProtocolError::new("OpenRouter Messages model_context_window_exceeded")
+            .with_context_overflow(),
+        facts(false),
+    );
+    assert_eq!(
+        messages_model_error(&crate::chat::test_descriptor(), &overflow).kind(),
+        ModelErrorKind::ContextLimit
+    );
+}
+
+/// A real `model_context_window_exceeded` stream has to pass through
+/// `classify_stream_error`. A hand-built `with_context_overflow()` stays green
+/// if that hook drops the mark.
+#[test]
+fn a_context_window_stream_reaches_context_limit_through_the_hook()
+-> Result<(), Box<dyn std::error::Error>> {
+    use plakous_messages::MessagesHttpHooks;
+
+    let stream = context_window_stream_error()?;
+    assert!(stream.context_overflow(), "{stream}");
+    let route = route()?;
+    let target = OpenRouterMessagesTarget::gateway_managed(
+        route.clone(),
+        evidence(&route, 2, 3_600)?,
+        context(&route, 4_096)?,
+    )?;
+    let hooks = OpenRouterMessagesHooks {
+        target,
+        clock: Arc::new(plakous_model::SystemClock),
+        generation: route.current_credential_generation_grant()?,
+    };
+    let classified = MessagesHttpHooks::classify_stream_error(&hooks, stream);
+    assert!(classified.context_overflow(), "{classified}");
+    let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
+        physical_attempts: 1,
+        provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+        visible_output: false,
+        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        hosted_effects_possible: false,
+        logical_success: false,
+    });
+    assert_eq!(facts.physical_attempts(), 1);
+    let attempt = MessagesAttemptError::protocol(classified, facts);
+    assert_eq!(
+        messages_model_error(hooks.target.descriptor(), &attempt).kind(),
+        ModelErrorKind::ContextLimit
+    );
+    Ok(())
+}
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
@@ -127,6 +193,67 @@ use plakous_model::{
 use super::*;
 use crate::wire::WireOperation;
 use crate::{ApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin, OpenRouterToolChoiceModes};
+
+fn context_window_stream_error() -> Result<MessagesStreamError, Box<dyn std::error::Error>> {
+    use plakous_messages::{
+        MessagesRequestPolicy, MessagesRequestPolicyInput, MessagesStreamDialectHooks,
+        MessagesStreamProjector, PreparedMessagesStreamBinding, ToolOwnership,
+    };
+    use plakous_model::{
+        Digest, DigestDomain, EffectiveProviderConfigurationId, ModelId, ProtocolId,
+        SelectedProviderConfigurationId, SystemClock, SystemIdGenerator,
+    };
+
+    let digest = Digest::sha256(DigestDomain::RequestPlan, 1, &[b"context-window-hook"])?;
+    let selected: SelectedProviderConfigurationId =
+        serde_json::from_value(serde_json::to_value(Digest::sha256(
+            DigestDomain::SelectedProviderConfiguration,
+            5,
+            &[b"selected"],
+        )?)?)?;
+    let effective: EffectiveProviderConfigurationId =
+        serde_json::from_value(serde_json::to_value(Digest::sha256(
+            DigestDomain::EffectiveProviderConfiguration,
+            5,
+            &[b"effective"],
+        )?)?)?;
+    let mut projector = MessagesStreamProjector::new(
+        PreparedMessagesStreamBinding::new(
+            MessagesRequestPolicy::new(MessagesRequestPolicyInput {
+                protocol: ProtocolId::new("anthropic.messages")?,
+                requested_model: ModelId::new("claude-sonnet-5")?,
+                expected_reported_model: None,
+                descriptor_binding: digest,
+                semantic_descriptor_binding: digest,
+                account_binding: digest,
+                selected_provider_configuration: selected,
+                effective_provider_configuration: effective,
+                maximum_output_tokens: 128,
+                minimum_thinking_budget: None,
+                api_version: "2023-06-01".into(),
+                beta_header: "oauth-2025-04-20".into(),
+            }),
+            digest,
+            ToolOwnership::default(),
+            MessagesStreamDialectHooks::client_tools_only(),
+        ),
+        Arc::new(SystemClock),
+        Arc::new(SystemIdGenerator),
+    )?;
+    match projector.push(CONTEXT_WINDOW_SSE.as_bytes()) {
+        Err(error) => Ok(error),
+        Ok(_) => Err("context window fails the stream".into()),
+    }
+}
+
+const CONTEXT_WINDOW_SSE: &str = concat!(
+    "event: message_start\n",
+    "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_ctx\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+    "event: message_delta\n",
+    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"model_context_window_exceeded\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n",
+    "event: message_stop\n",
+    "data: {\"type\":\"message_stop\"}\n\n",
+);
 
 fn route() -> Result<OpenRouterChatRoute, Box<dyn std::error::Error>> {
     let source = Arc::new(crate::static_openrouter_api_key_source(

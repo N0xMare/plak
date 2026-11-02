@@ -60,11 +60,13 @@ impl LeadRow {
         )
     }
 
+    /// Whether this lead is a thinking row. Its rail is decoration.
+    pub(crate) const fn is_thinking(&self) -> bool {
+        self.thinking
+    }
+
     /// The row's untruncated text, which a copy of the row carries.
     pub(crate) fn full_text(&self) -> String {
-        if self.thinking {
-            return format!("◆ {}", self.copy);
-        }
         let mut text = format!("{}{} {}", self.rail, self.glyph.0, self.copy);
         // The tip slot is room for paint, not text.
         for meta in self.meta.iter().filter(|meta| !meta.trim().is_empty()) {

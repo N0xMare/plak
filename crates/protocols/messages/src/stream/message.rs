@@ -116,23 +116,11 @@ impl MessagesStreamProjector {
         if let Some(container) = event.delta.container {
             self.bind_container(container, "message_delta")?;
         }
-        self.flush_deferred_programmatic_blocks(output)?;
         if let Some(stop_reason) = event.delta.stop_reason {
             if self.stop_reason.is_some() {
                 return Err(self.fail("message stop reason was supplied more than once"));
             }
             self.stop_reason = Some(MessagesStopReason::parse(&stop_reason)?);
-        }
-        if self
-            .stop_reason
-            .is_some_and(|reason| !reason.revokes_client_input())
-        {
-            for (index, input) in std::mem::take(&mut self.closed_client_blocks) {
-                let location = OutputLocation::new(0, index);
-                let block = self.complete_tool_input(input, location, output)?;
-                self.blocks.insert(index, block);
-                output.push(ModelEvent::BlockCompleted(BlockCompleted::new(location)));
-            }
         }
         match (self.stop_sequence.is_some(), event.delta.stop_sequence) {
             (true, Some(_)) => {
@@ -147,11 +135,38 @@ impl MessagesStreamProjector {
             }
             self.stop_details = Some(parse_stop_details(stop_details)?);
         }
+        // A delta that has not named the stop reason cannot decide a deferred
+        // programmatic call. Flushing it now would emit the call before a later
+        // delta's max_tokens or context overflow could revoke it.
+        if self.stop_reason.is_none() {
+            self.apply_delta_usage(event.usage, output)?;
+            return Ok(());
+        }
+        self.flush_deferred_programmatic_blocks(output)?;
+        if self
+            .stop_reason
+            .is_some_and(|reason| !reason.revokes_client_input())
+        {
+            for (index, input) in std::mem::take(&mut self.closed_client_blocks) {
+                let location = OutputLocation::new(0, index);
+                let block = self.complete_tool_input(input, location, output)?;
+                self.blocks.insert(index, block);
+                output.push(ModelEvent::BlockCompleted(BlockCompleted::new(location)));
+            }
+        }
+        self.apply_delta_usage(event.usage, output)
+    }
+
+    fn apply_delta_usage(
+        &mut self,
+        usage: super::MessageDeltaUsage,
+        output: &mut Vec<ModelEvent>,
+    ) -> Result<(), MessagesStreamError> {
         let previous = self
             .provider_usage
             .ok_or_else(|| self.fail("message usage was not initialized"))?;
         let provider_usage = previous
-            .merge(event.usage.into_family())
+            .merge(usage.into_family())
             .map_err(|message| self.invalid_accounting(message))?;
         let usage = provider_usage
             .into_canonical()
@@ -168,6 +183,23 @@ impl MessagesStreamProjector {
     ) -> Result<(), MessagesStreamError> {
         if self.deferred_programmatic_blocks.is_empty() {
             return Ok(());
+        }
+        if self.stop_reason == Some(MessagesStopReason::ModelContextWindowExceeded) {
+            self.deferred_programmatic_blocks.clear();
+            return Ok(());
+        }
+        // max_tokens revokes a programmatic call whether or not its JSON
+        // closed. The caller is already a hosted effect, so the cut is the
+        // reconciliation terminal in every case and is not an output limit.
+        if self.stop_reason == Some(MessagesStopReason::MaxTokens) {
+            self.deferred_programmatic_blocks.clear();
+            return Err(self.unsupported_terminal(
+                "Messages output limit after possible hosted effects requires reconciliation",
+            ));
+        }
+        if let Some(message) = self.cut_programmatic_json() {
+            self.deferred_programmatic_blocks.clear();
+            return Err(self.fail(message));
         }
         let container = self
             .container_id
@@ -199,6 +231,7 @@ impl MessagesStreamProjector {
             let correlation =
                 ToolCorrelation::new(Some(remote_id.clone()), Some(container.clone()), lineage)
                     .map_err(|error| invalid_response(error.to_string()))?;
+            self.hosted_effects_possible = true;
             output.push(ModelEvent::BlockStarted(BlockStarted::new(
                 item_id,
                 location,
@@ -233,6 +266,22 @@ impl MessagesStreamProjector {
         Ok(())
     }
 
+    fn cut_programmatic_json(&self) -> Option<&'static str> {
+        self.deferred_programmatic_blocks
+            .iter()
+            .find_map(|(_, block)| {
+                let OpenBlock::DeferredProgrammaticToolUse { json, .. } = block else {
+                    return Some("invalid deferred Messages block");
+                };
+                let json = if json.is_empty() { "{}" } else { json.as_str() };
+                match serde_json::from_str::<serde_json::Value>(json) {
+                    Ok(value) if value.is_object() => None,
+                    Ok(_) => Some("terminal Messages tool input must be a JSON object"),
+                    Err(_) => Some("terminal Messages tool input was not complete valid JSON"),
+                }
+            })
+    }
+
     fn ordered_blocks(&mut self) -> Result<Vec<ContentBlock>, MessagesStreamError> {
         if self
             .blocks
@@ -261,6 +310,14 @@ impl MessagesStreamProjector {
         let stop_reason = self
             .stop_reason
             .ok_or_else(|| self.fail("message_stop arrived without a terminal stop_reason"))?;
+        if stop_reason == MessagesStopReason::ModelContextWindowExceeded {
+            if self.hosted_effects_possible {
+                return Err(self.unsupported_terminal(
+                    "Messages context window after possible hosted effects requires reconciliation",
+                ));
+            }
+            return Err(self.context_overflow_failure("Messages model_context_window_exceeded"));
+        }
         // Refusal revokes the entire provisional response. An output limit
         // revokes it only when it closed client tool input, which may be cut
         // anywhere and so never becomes a call; the driver classifies the

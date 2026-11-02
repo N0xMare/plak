@@ -1,5 +1,5 @@
 use super::*;
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
 use ratatui::{buffer::Buffer, layout::Rect};
 use unicode_width::UnicodeWidthChar as _;
 
@@ -21,6 +21,7 @@ fn reverse_drag_copies_offscreen_rows_from_full_projection() {
 fn wide_and_combining_graphemes_are_never_split() {
     assert_eq!(slice_cells("a界e\u{301}z", 2, 2), "界");
     assert_eq!(slice_cells("a界e\u{301}z", 3, 3), "e\u{301}");
+    assert_eq!(slice_cells("a\u{200B}bc", 2, 2), "c");
 }
 
 #[test]
@@ -531,6 +532,50 @@ fn highlight_skips_prompt_chrome_past_the_plain_row() {
     assert_eq!(copied, line);
     assert_ne!(Some(buffer[(30u16, 0)].bg), style.bg);
     assert_ne!(Some(buffer[(36u16, 0)].bg), style.bg);
+}
+
+#[test]
+fn reversed_multi_row_highlight_matches_the_forward_copy() {
+    let lines = &["  one", "  two", "  three"];
+    let copy = &[
+        row(2, None, false, false),
+        row(2, None, false, false),
+        row(2, None, false, false),
+    ];
+    let forward = paint_selection(lines, copy, at(0, 3), at(2, 4));
+    let reversed = paint_selection(lines, copy, at(2, 4), at(0, 3));
+    assert_eq!(forward.0, vec!["ne", "two", "thr"]);
+    assert_eq!(forward.1, "ne\ntwo\nthr");
+    assert_eq!(reversed.0, forward.0);
+    assert_eq!(reversed.1, forward.1);
+}
+
+#[test]
+fn highlight_snaps_a_partial_wide_grapheme() {
+    let line = "a界z";
+    let area = Rect::new(0, 0, 8, 1);
+    let style = selection_style();
+    let owned = vec![line.to_owned()];
+    let copy = [row(0, None, false, false)];
+    let paint = |column: usize| {
+        let mut buffer = Buffer::empty(area);
+        buffer.set_string(0, 0, line, Style::default());
+        let mut selection = TranscriptSelection::default();
+        selection.begin(at(0, column), 8, 1);
+        assert!(selection.drag(at(0, column)));
+        selection.render(&mut buffer, area, 0, &owned, &copy, style);
+        let copied = selection
+            .take_text(1, &owned, &copy, &mut |_| None)
+            .unwrap_or_default();
+        let highlighted = (0..4).all(|cell| {
+            let painted =
+                Some(buffer[(cell, 0)].fg) == style.fg && Some(buffer[(cell, 0)].bg) == style.bg;
+            painted == (cell == 1 || cell == 2)
+        });
+        (highlighted, copied)
+    };
+    assert_eq!(paint(1), (true, "界".to_owned()));
+    assert_eq!(paint(2), (true, "界".to_owned()));
 }
 
 #[test]

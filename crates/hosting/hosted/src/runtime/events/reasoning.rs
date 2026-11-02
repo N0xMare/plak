@@ -93,6 +93,31 @@ pub(super) fn discard_response_reasoning<P: plakous_host_protocol::ProtocolExten
     }
 }
 
+/// Drops the assistant text and reasoning the current request streamed past the
+/// last kept response, and tells every surface to do the same.
+///
+/// A response that already settled has nothing uncommitted. Sending the discard
+/// then would wipe that response, so the notice goes out only when this call
+/// actually drops text or reasoning.
+pub(super) fn discard_uncommitted_response<P: plakous_host_protocol::ProtocolExtension>(
+    assistant: &mut String,
+    delta_buf: &mut String,
+    projection: &mut TurnProjection<P>,
+    events: &Sender<P>,
+) {
+    let had_delta = !delta_buf.is_empty();
+    delta_buf.clear();
+    let had_tail = assistant.len() > projection.settled_assistant_len;
+    assistant.truncate(projection.settled_assistant_len);
+    let sealed = projection.discard_reasoning();
+    for location_key in sealed.iter().cloned() {
+        let _ = events.send(ContentEvent::ReasoningSealed { location_key });
+    }
+    if had_delta || had_tail || !sealed.is_empty() {
+        let _ = events.send(ContentEvent::OutputDiscarded { dim: true });
+    }
+}
+
 pub(in crate::runtime) fn reasoning_location_key(
     location: plakous::model::OutputLocation,
 ) -> String {

@@ -92,6 +92,31 @@ mod tests {
         String::from_utf8(output).unwrap()
     }
 
+    /// The export sentence is derived from the document constants, so a version
+    /// bump that forgets this page fails here instead of shipping stale help.
+    #[test]
+    fn session_help_names_the_export_versions() {
+        use crate::carry::{IMPORTABLE_VERSIONS, VERSION};
+        let current = VERSION;
+        let previous = IMPORTABLE_VERSIONS
+            .iter()
+            .copied()
+            .find(|version| *version != current)
+            .expect("previous importable version");
+        let sentence = format!(
+            "This build writes version {current} and imports versions {current} and {previous}. Both preserve named state. Version {} and older are refused.",
+            previous.saturating_sub(1)
+        );
+        let flat = rendered_command("session")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            flat.contains(&sentence),
+            "session help drifted from export versions {IMPORTABLE_VERSIONS:?}: {flat}"
+        );
+    }
+
     #[test]
     fn retired_setup_commands_have_no_detailed_help() {
         for command in ["init", "setup"] {

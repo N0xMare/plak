@@ -145,7 +145,8 @@ hosted tools without that semantic limit. Each actual retry wait is shown: on th
 `plak agent` JSONL as a `retry` frame, and in the log under target `plak.retry`
 with session/turn/agent ids, checkout idle age when pooled, transport phase and cause (for a provider refusal, the provider's own
 error message with credentials filtered out). If the broken stream had already
-shown text or thinking, the TUI dims it and labels it `discarded -- retrying`;
+shown text or thinking, the TUI dims it and labels it `discarded -- retrying`,
+including text and thinking that preceded a tool call of that same response;
 only the replay's answer enters the conversation, and its usage is the only one
 counted. Text and thinking from earlier model calls of the same turn are kept.
 Press Esc (or cancel the JSONL turn) to stop waiting; nothing is sent after

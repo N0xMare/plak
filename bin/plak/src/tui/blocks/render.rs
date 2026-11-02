@@ -365,8 +365,8 @@ const MILESTONE_DETAIL_HANG: &str = "    │   ";
 
 /// Detail rows record the rail actually painted in front of them. Lead rows
 /// stay at zero: a whole lead still copies its rail through the row's full
-/// text. A thinking lead is the exception that copies `◆ ` plus the summary,
-/// which is not a prefix of the painted row, so its indent stays with the lead.
+/// text. A thinking lead's indent is decoration of that rail's width; its
+/// full text still carries the rail, glyph, summary and elapsed meta.
 fn stamp_block_rails(
     block: &ScrollBlock,
     plan: &RowPlan,
@@ -386,12 +386,19 @@ fn stamp_block_rails(
             let hanging = format!("{rail}  ");
             stamp_railed(lines, copy, leads.len(), &rail, &hanging);
         }
-        ScrollBlock::Thinking { text, mode, .. }
-            if !plan.group_folded && mode.shows_detail() && thinking_has_detail(text) =>
-        {
-            let rail = thinking_detail_rail(plan);
-            let from = lead_rows(block, plan, theme).len();
-            stamp_railed(lines, copy, from, &rail, &rail);
+        ScrollBlock::Thinking { text, mode, .. } => {
+            let leads = lead_rows(block, plan, theme);
+            for (index, lead) in leads.iter().enumerate() {
+                if lead.is_thinking()
+                    && let Some(meta) = copy.get_mut(index)
+                {
+                    meta.decoration = cells_u16(lead.rail.width());
+                }
+            }
+            if !plan.group_folded && mode.shows_detail() && thinking_has_detail(text) {
+                let rail = thinking_detail_rail(plan);
+                stamp_railed(lines, copy, leads.len(), &rail, &rail);
+            }
         }
         ScrollBlock::Milestone { open: true, .. } => {
             let from = lead_rows(block, plan, theme).len();

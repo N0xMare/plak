@@ -64,6 +64,7 @@ pub struct MessagesStreamError {
     provider_payload: Option<Vec<u8>>,
     visible_output: bool,
     hosted_effects_possible: bool,
+    context_overflow: bool,
 }
 impl MessagesStreamError {
     fn new(
@@ -78,7 +79,12 @@ impl MessagesStreamError {
             provider_payload: None,
             visible_output: false,
             hosted_effects_possible: false,
+            context_overflow: false,
         }
+    }
+    fn with_context_overflow(mut self) -> Self {
+        self.context_overflow = true;
+        self
     }
     fn provider(payload: &[u8], visible_output: bool, hosted_effects_possible: bool) -> Self {
         Self {
@@ -88,6 +94,7 @@ impl MessagesStreamError {
             provider_payload: Some(payload.to_vec()),
             visible_output,
             hosted_effects_possible,
+            context_overflow: false,
         }
     }
     fn incomplete() -> Self {
@@ -120,6 +127,10 @@ impl MessagesStreamError {
     /// Reports whether provider-hosted effects may have occurred.
     pub const fn hosted_effects_possible(&self) -> bool {
         self.hosted_effects_possible
+    }
+    /// The provider ended the turn because the input exceeded the window.
+    pub const fn context_overflow(&self) -> bool {
+        self.context_overflow
     }
 }
 impl fmt::Display for MessagesStreamError {
@@ -368,13 +379,14 @@ impl MessagesStopReason {
 
     /// An output-limit stop may cut a client `tool_use` block anywhere in its
     /// input, so its client proposals are revoked rather than parsed.
+    /// `model_context_window_exceeded` is a context overflow, not this stop.
     const fn is_output_limit(self) -> bool {
-        matches!(self, Self::MaxTokens | Self::ModelContextWindowExceeded)
+        matches!(self, Self::MaxTokens)
     }
 
     /// Whether closed client tool input is revoked unparsed at this terminal.
     const fn revokes_client_input(self) -> bool {
-        matches!(self, Self::Refusal) || self.is_output_limit()
+        matches!(self, Self::Refusal | Self::ModelContextWindowExceeded) || self.is_output_limit()
     }
 }
 
@@ -1006,6 +1018,19 @@ impl MessagesStreamProjector {
         MessagesStreamError::new(
             MessagesStreamErrorKind::InvalidEvent,
             MessagesStreamErrorPhase::Stream,
+            message,
+        )
+    }
+
+    fn context_overflow_failure(&mut self, message: impl Into<String>) -> MessagesStreamError {
+        self.fail(message).with_context_overflow()
+    }
+
+    fn unsupported_terminal(&mut self, message: impl Into<String>) -> MessagesStreamError {
+        self.poison();
+        MessagesStreamError::new(
+            MessagesStreamErrorKind::UnsupportedSemantic,
+            MessagesStreamErrorPhase::Complete,
             message,
         )
     }

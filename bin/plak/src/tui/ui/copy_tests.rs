@@ -459,6 +459,50 @@ fn cell_output_gutter_highlight_matches_copy() {
     );
 }
 
+#[test]
+fn opened_cell_output_highlight_drops_the_rail() {
+    const WIDTH: u16 = 80;
+    const HEIGHT: u16 = 40;
+    let mut app = transcript_fixture();
+    app.render_prefs.reduced_motion = true;
+    super::test_support::compose_cell(
+        &mut app,
+        "cell",
+        "exec_js",
+        "done",
+        "0 tools",
+        "const x = 1;",
+        &[],
+    );
+    say(&mut app, "Done.");
+    app.toggle_tool_expand_at(0);
+    app.apply_host_event(canonical_detail("cell", "{}", "alpha\nbeta"));
+    app.toggle_row(0, crate::tui::blocks::RowTarget::CellOutput(0));
+    paint(&mut app, WIDTH, HEIGHT);
+    let rows = plain(&app);
+    let edge = usize::from(app.transcript_body_area.unwrap().width) - 1;
+    let alpha = rows_containing(&rows, "alpha")[0];
+    let beta = rows_containing(&rows, "beta")[0];
+    assert!(rows[alpha].contains('│'), "output rail: {:?}", rows[alpha]);
+    assert_eq!(
+        highlighted_equals_copy(&mut app, WIDTH, HEIGHT, alpha, 0, edge),
+        "alpha"
+    );
+    let from_rail = highlighted_equals_copy(
+        &mut app,
+        WIDTH,
+        HEIGHT,
+        alpha,
+        0,
+        cell_at(&rows[alpha], "alpha") + 2,
+    );
+    assert_eq!(from_rail, "alp");
+    assert_no_rail(&from_rail, &rows[alpha]);
+    let copied = copy_rows(&mut app, WIDTH, HEIGHT, alpha, beta);
+    assert_eq!(copied, "alpha\nbeta");
+    assert_no_rail(&copied, &rows[beta]);
+}
+
 fn canonical_detail(call_id: &str, input: &str, output: &str) -> HostEvent {
     HostEvent::CallDetail(CallDetail {
         call_id: call_id.to_owned(),
