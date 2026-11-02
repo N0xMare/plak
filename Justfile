@@ -1,8 +1,4 @@
-# Plak / Plakous recipes (Linux/macOS). Workers run `just fast <packages>` plus the groups their change needs.
-# An integration batch tip passes `just musl native`, `just steps static,rustdoc,contracts,tooling,package` once,
-# macOS `just platform`, and the crash sweep (full strict when recovery, persistence, store, or host-loop code
-# changed; otherwise `just dev crash-sweep --shapes <list>` for the affected shapes). An install requires that batch gate. A release candidate or publication
-# runs `just full` on both platforms, musl native and container, the full strict sweep, and the publish dry run.
+# Plak / Plakous recipes (Linux/macOS). Gate tiers and cadence: spec 06 §8.
 # Each module sets its working directory to the repository root, so recipes
 # keep root-relative paths.
 
@@ -50,58 +46,33 @@ full:
 # package and verify every crate); `--execute` uploads, with CARGO_REGISTRY_TOKEN.
 [doc("crates.io cohort dry run; --execute uploads")]
 publish *ARGS:
-    bash tools/release/publish.sh {{ARGS}}
+    tools/release/publish.sh {{ARGS}}
 
 dev-tools *ARGS:
-    bash tools/gate/dev-tools.sh {{ARGS}}
+    tools/gate/dev-tools.sh {{ARGS}}
 
 fmt:
     cargo fmt --all
 
+# Workspace clippy, then each supported package alone. Same invocations as static.
+[doc("workspace clippy, then each supported package alone")]
 clippy:
-    cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+    tools/gate/clippy.sh
+
+# cargo nextest with the isolated test environment (spec 05 §1).
+[doc("cargo nextest under the isolated test environment")]
+nextest *ARGS:
+    tools/gate/test-env.sh -- cargo nextest {{ARGS}}
 
 # Build plak and its workers without installing a snapshot or touching PATH.
 # profile: debug, release, maintainer, or profiling.
 # profiling builds only target/profiling/plak (no workers, no linkage check).
 [doc("debug, release, maintainer or profiling; no snapshot and no PATH change")]
 build profile:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case {{quote(profile)}} in
-      debug)
-        tools/build/build-plak.sh
-        ;;
-      release)
-        tools/build/build-plak.sh --release
-        ;;
-      maintainer)
-        tools/build/build-plak.sh --maintainer
-        ;;
-      profiling)
-        cargo build --locked --profile profiling -p plak
-        ;;
-      *)
-        echo "usage: just build debug|release|maintainer|profiling" >&2
-        exit 2
-        ;;
-    esac
+    tools/build/recipe-build.sh {{quote(profile)}}
 
 # Install an immutable snapshot and point ~/.local/bin at it.
 # flavor: release (plain release) or maintainer (dogfood profile).
 [doc("release or maintainer immutable snapshot on PATH")]
 install flavor:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case {{quote(flavor)}} in
-      release)
-        tools/build/build-plak.sh --install
-        ;;
-      maintainer)
-        tools/build/build-plak.sh --install-maintainer
-        ;;
-      *)
-        echo "usage: just install release|maintainer" >&2
-        exit 2
-        ;;
-    esac
+    tools/build/recipe-install.sh {{quote(flavor)}}

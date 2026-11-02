@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import platform
@@ -53,14 +54,9 @@ def install(prefix: Path) -> None:
 
 def compat(prefix: Path) -> None:
     root = Path(__file__).resolve().parents[2]
+    script = root / 'tools' / 'gate' / 'test-env.sh'
     env = os.environ.copy()
-    env['TMPDIR'] = subprocess.check_output(['bash', 'tools/gate/test-tmpdir.sh'], cwd=root, text=True).strip()
-    env['PLAK_HOME'] = str(Path(env['TMPDIR']) / 'plak-isolated-home')
-    Path(env['PLAK_HOME']).mkdir(mode=0o700, exist_ok=True)
-    git_config = Path(env['TMPDIR']) / 'gitconfig'
-    git_config.write_text('')
-    env['GIT_CONFIG_GLOBAL'] = str(git_config)
-    env['GIT_CONFIG_NOSYSTEM'] = '1'
+    env.update(json.loads(subprocess.check_output([str(script), '--json'], text=True)))
     for version in VERSIONS:
         binary = (prefix / 'jj' / version / 'jj').resolve()
         if not binary.is_file():

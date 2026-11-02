@@ -738,25 +738,16 @@ def rehearse(home, options):
     session_id = options.session_id
     for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, terminate)
-    # Match build-plak.sh: independent resolutions isolate the Monty runtime.
+    # Same offline maintainer build as `build-plak.sh --maintainer`, plus --offline.
     subprocess.run(
-        ["cargo", "build", "--locked", "--offline", "-p", "plak", "--features", "plak/maintainer", "--profile", "maintainer"],
+        [str(ROOT / "tools/build/build-plak.sh"), "--maintainer", "--offline"],
         cwd=ROOT,
         check=True,
-    )
-    subprocess.run(
-        ["cargo", "build", "--locked", "--offline", "-p", "plakous-js-runtime",
-         "-p", "plakous-py-worker", "--profile", "maintainer"],
-        cwd=ROOT, check=True,
     )
     target = Path(os.environ.get("CARGO_TARGET_DIR", str(ROOT / "target")))
     if not target.is_absolute():
         target = ROOT / target
     output = target / os.environ.get("CARGO_BUILD_TARGET", "") / "maintainer"
-    subprocess.run(
-        [sys.executable, str(ROOT / "tools/build/check-artifact-linkage.py"), str(output)],
-        cwd=ROOT, check=True,
-    )
     with tempfile.TemporaryDirectory(prefix="plak-reload-rehearsal-", dir=temporary_parent(home)) as directory:
         temporary = Path(directory).resolve()
         if temporary == home or home in temporary.parents:

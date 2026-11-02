@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Prints the physical scratch directory for offline test runs, creating it.
 #
-# Every test entry point (dev-check.sh, the `dev coverage` recipe,
-# perf-smoke.sh, crash-sweep.py) exports TMPDIR from this one selector.
+# tools/gate/test-env.sh is the entry point that exports this directory, the
+# isolated PLAK_HOME and the empty git config. dev-check.sh, coverage,
+# perf-smoke.sh, crash-sweep.py, jj-tools.py and the live drivers use it.
 # `PLAK_TEST_TMPDIR` wins. Otherwise Linux uses a per-checkout directory under
 # RAM-backed /dev/shm and macOS one under /private/tmp, outside the operator's
 # HOME so a spawned binary's project-discovery walk cannot reach `~/.plak`.

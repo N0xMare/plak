@@ -13,16 +13,7 @@ render:
 
 # Diff a fresh render against the previous one (target/prompt-renders.prev).
 diff:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    rm -rf target/prompt-renders.prev
-    if [ -d target/prompt-renders ]; then cp -a target/prompt-renders target/prompt-renders.prev; fi
-    PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_
-    if [ -d target/prompt-renders.prev ]; then
-        diff -ru target/prompt-renders.prev target/prompt-renders || true
-    else
-        echo "no previous render; target/prompt-renders is the first one"
-    fi
+    tools/prompts/diff-renders.sh
 
 # Print the in-code prompt/lifecycle sha256 pin tables for re-pinning.
 pins:
@@ -32,4 +23,4 @@ pins:
 # Local mock responses; not live provider qualification.
 [doc("capture native request shapes with local mock responses")]
 native-compare *ARGS:
-    python3 tools/prompts/native_compare_prompts.py {{ARGS}}
+    tools/prompts/native_compare_prompts.py {{ARGS}}

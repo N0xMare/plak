@@ -8,7 +8,7 @@ default:
 
 # Profiling binary: release codegen, full symbols, no LTO (target/profiling/plak).
 _profiling:
-    cargo build --locked --profile profiling -p plak
+    tools/build/build-plak.sh --profiling
 
 # Offline performance smoke over the scripted model, not in any gate tier. It reports
 # six short product metrics, four worker timings and six long-lineage metrics.
@@ -40,4 +40,8 @@ bloat:
 
 # Production LOC density report (informational, not in any gate tier).
 density:
-    python3 tools/perf/check_prod_loc.py
+    tools/perf/check_prod_loc.py
+
+[doc("run the checked-in performance workloads")]
+check *ARGS:
+    tools/perf/perf-check.sh {{ARGS}}

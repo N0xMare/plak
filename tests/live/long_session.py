@@ -1865,6 +1865,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    live.isolate_test_environment()
     try:
         selected = selected_catalog(args.only, args.all)
     except ValueError as error:

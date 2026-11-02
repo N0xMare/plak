@@ -18,11 +18,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-TMPDIR="$(bash tools/gate/test-tmpdir.sh)"
-export TMPDIR
-# Fixture git reads no operator config (spec 05 §1, test isolation).
-: >"$TMPDIR/gitconfig"
-export GIT_CONFIG_GLOBAL="$TMPDIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
+# Fixture scratch, isolated product home and git config (spec 05 §1).
+eval "$(tools/gate/test-env.sh)"
+export TMPDIR PLAK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 
 # A `python3` on PATH may be a shim that cannot run (this repository has met
 # one). Pick the first candidate that actually executes.
@@ -73,9 +71,8 @@ chmod 700 "$root/home" "$root/home/agents"
 chmod 600 "$root/home/config.toml" "$root/home/agents/lead.toml"
 
 echo "== building the release scripted binary and sidecars ==" >&2
-# Match build-plak.sh: artifact isolation is proved from the raw symbols.
-export CARGO_PROFILE_RELEASE_STRIP=debuginfo
-cargo build --release --locked -p plak -p plakous-js-runtime -p plakous-py-worker --features plak/test-hooks,plak/test-support >&2
+# Same entry point as the product build, including the linkage check.
+tools/build/build-plak.sh --release --features plak/test-hooks,plak/test-support >&2
 # Keep the measured executable and its matching workers together, away from
 # later builds that could replace a configured target's artifacts.
 cargo_target_dir="${CARGO_TARGET_DIR:-$PWD/target}"

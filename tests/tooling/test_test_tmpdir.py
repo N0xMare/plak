@@ -100,15 +100,37 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertEqual(list(self.shared.iterdir()), [])
 
     def test_every_test_entry_point_uses_the_selector(self):
-        for path in ("tools/gate/dev-check.sh", "tools/perf/perf-smoke.sh", "tools/dev/crash-sweep.py"):
+        self.assertIn("test-tmpdir.sh", (ROOT / "tools/gate/test-env.sh").read_text())
+        for path in ("tools/gate/dev-check.sh", "tools/perf/perf-smoke.sh",
+                     "tools/dev/crash-sweep.py", "tools/dev/jj-tools.py",
+                     "tools/dev/coverage.sh", "tests/live/live.py"):
             with self.subTest(path=path):
-                self.assertIn("test-tmpdir.sh", (ROOT / path).read_text())
+                self.assertIn("test-env.sh", (ROOT / path).read_text())
         dev = (ROOT / "tools/dev/dev.just").read_text()
-        self.assertEqual(dev.count('TMPDIR="$(bash tools/gate/test-tmpdir.sh)"'), 1)
+        self.assertIn("tools/dev/coverage.sh", dev)
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', dev)
         justfile = (ROOT / "Justfile").read_text()
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)
+        self.assertIn("tools/gate/test-env.sh -- cargo nextest", justfile)
         self.assertNotIn("\ntest:\n", justfile)
+
+    def test_test_env_exports_home_and_empty_git_config(self):
+        script = ROOT / "tools/gate/test-env.sh"
+        env = dict(os.environ, PLAK_TEST_TMPDIR=str(self.base / "explicit-tmp"))
+        result = subprocess.run(["bash", str(script), "--json"], env=env,
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        import json
+        values = json.loads(result.stdout)
+        scratch = (self.base / "explicit-tmp").resolve()
+        self.assertEqual(Path(values["TMPDIR"]), scratch)
+        home = Path(values["PLAK_HOME"])
+        self.assertEqual(home, scratch / "plak-isolated-home")
+        self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
+        gitconfig = Path(values["GIT_CONFIG_GLOBAL"])
+        self.assertEqual(gitconfig, scratch / "gitconfig")
+        self.assertEqual(gitconfig.read_text(), "")
+        self.assertEqual(values["GIT_CONFIG_NOSYSTEM"], "1")
 
 
 if __name__ == "__main__":

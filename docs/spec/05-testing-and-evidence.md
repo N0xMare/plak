@@ -629,19 +629,8 @@ separate checkout, target and temporary roots. Each group prints a
 `== group: <name> ==` banner and a `== time: <name> <seconds> s ==` line.
 
 Worker branches iterate and finish with `just fast <packages>` plus the groups
-their change needs. Main advances one integration batch at a time. Before a
-batch lands, its tip tree passes the integration batch gate: `just musl native`
-on Linux x86_64, the target-independent groups once
-(`just steps static,rustdoc,contracts,tooling,package`), `just platform` on
-Apple Silicon macOS, and the crash sweep (`just dev crash-sweep --strict` over
-the whole matrix when recovery, persistence, store, or host-loop code changed;
-otherwise `just dev crash-sweep --shapes <list>` for the affected shapes).
-Commits inside a batch are not gated individually. An install requires that
-batch gate on the tree being installed.
-
-A release candidate or publication runs `just full` on both supported
-platforms, `just musl native` and `just musl container`, the full strict crash
-sweep, and the publish dry run.
+their change needs. The integration batch, install and publication gates are
+chapter 06 §8.
 
 After argument validation and the prerequisite check, every selected group runs
 even if an earlier group fails. The static group also runs every step (fmt,
@@ -728,9 +717,12 @@ explicit `--target` to every compile and nextest invocation, and subprocess
 Cargo checks inherit that target. A GNU-host gate does not qualify the
 supported musl platform.
 
-Every test entry point (`dev-check.sh`, `just dev coverage`,
-`perf-smoke.sh` and `crash-sweep.py`) exports `TMPDIR` from one selector,
-`tools/gate/test-tmpdir.sh`, before anything runs. On Linux it is a per-checkout
+`tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
+`tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
+0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. `dev-check.sh`
+(with `--fresh`), `just dev coverage`, `perf-smoke.sh`, `crash-sweep.py`,
+`jj-tools.py compat` and the live drivers use it. `just nextest` runs cargo
+nextest under it. On Linux the selector is a per-checkout
 directory under `/dev/shm`; on macOS a per-checkout directory under
 `/private/tmp`, so neither lies under the operator's `HOME`, where a spawned
 binary's project discovery could reach the real `~/.plak`. The directory is
@@ -748,29 +740,26 @@ deadlines or assertions, and must be recorded when interpreting
 filesystem-sensitive results. On macOS `/tmp` and `/var` are symlinks, the
 SQLite stores open with `SQLITE_OPEN_NOFOLLOW`, and the credential store walks
 refuse symlinked parents, so a default temporary root makes every host test
-that opens `runtime.sqlite3` fail with `SQLITE_CANTOPEN_SYMLINK`. Anyone
-invoking `cargo nextest` by hand MUST set a physical, non-symlinked `TMPDIR`
-outside `HOME`; `TMPDIR="$(bash tools/gate/test-tmpdir.sh)"` selects the same one.
+that opens `runtime.sqlite3` fail with `SQLITE_CANTOPEN_SYMLINK`. `just nextest`
+selects that physical, non-symlinked `TMPDIR` outside `HOME`.
 
-The same scripts export `PLAK_HOME` to `$TMPDIR/plak-isolated-home` (mode
-`0700`) on every nextest lane. Offline tests must not create the operator's
+The gate applies `PLAK_HOME` on nextest lanes only, so other cargo commands do
+not inherit a product home. Offline tests must not create the operator's
 `~/.plak`. Product home resolution consults `PLAK_HOME` before `$HOME/.plak`,
 so a test, or a `plak` it spawns, that forgets to choose a home writes that
 scratch directory instead of the real one. `HOME` stays the operator's, because
-Cargo reads it. A hand-run `cargo nextest` does not set `PLAK_HOME`;
-export it to an absolute scratch directory first, the same way as `TMPDIR`.
+Cargo reads it.
 
-Git in tests reads no operator or system configuration. The same entry points
-(and `tools/dev/jj-tools.py compat`) export `GIT_CONFIG_GLOBAL` to an empty
-`$TMPDIR/gitconfig`, truncated at start, and `GIT_CONFIG_NOSYSTEM=1`;
-`dev-check.sh` exports them for every group, so the nextest lanes, the crash
-sweep and the Python tooling suite inherit them. An operator's global
+Git in tests reads no operator or system configuration. The helper truncates
+`$TMPDIR/gitconfig` on every call. `dev-check.sh` exports the git variables for
+every group, so the nextest lanes, the crash sweep and the Python tooling
+suite inherit them. An operator's global
 `commit.gpgsign`, hooks path, aliases or identity cannot reach a fixture. A test
 that commits sets its identity on its own command (`-c user.name=...
 -c user.email=...`) or in its fixture repository's local config, never through
 the global config. The live drivers give their own fixture git the same
-isolation (`GIT_CONFIG_GLOBAL=/dev/null`), while the `plak` under test keeps
-the operator's environment. A hand-run `cargo nextest` exports both as well.
+isolation. A driver that applies the helper also exports it for that process;
+the `plak` child still sets its own `PLAK_HOME`. `just nextest` exports all four.
 
 | Layer | Command | What it proves |
 | --- | --- | --- |
@@ -901,7 +890,8 @@ the durable owner so tests can inspect its nonce and compatibility state without
 exposing live fields. The full agent suite and real executor-stack witness remain
 required after runtime module moves.
 
-`just fmt` and `just clippy` run individual layers. Rustdoc is `just steps rustdoc`.
+`just fmt` is the formatter. `just clippy` runs the static group's clippy
+invocations: the workspace, then each supported package alone. Rustdoc is `just steps rustdoc`.
 The three nextest lanes are `just steps tests-parallel,tests-serial,tests-durability`.
 `cargo-nextest` is required by every tier: if it is absent the gate exits 2 rather than falling back to `cargo test`, because a plain
 workspace `cargo test` would skip the serial budget lane and the nextest test groups.
@@ -3929,7 +3919,7 @@ the environmental assumption, never to weaken the assertion.
 
 | Class | Cause | Fix in force |
 | --- | --- | --- |
-| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `tools/gate/test-tmpdir.sh`, set by `dev-check.sh` and the test recipes, and required for hand-run nextest |
+| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `tools/gate/test-env.sh`, and required for `just nextest` |
 | Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |

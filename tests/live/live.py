@@ -1754,13 +1754,29 @@ def pin_composition(home: Path, composition: str) -> None:
         path.write_text(text.replace(needle, f'composition = "{composition}"\n'))
 
 
+def test_environment() -> dict[str, str]:
+    """The four variables from `tools/gate/test-env.sh` over the current environment."""
+    # __file__, not ROOT: live tests patch ROOT to a capture workspace.
+    script = Path(__file__).resolve().parents[2] / "tools" / "gate" / "test-env.sh"
+    values = json.loads(subprocess.check_output([str(script), "--json"], text=True))
+    env = os.environ.copy()
+    env.update(values)
+    return env
+
+
+def isolate_test_environment() -> None:
+    """Point this driver at the isolated test home, scratch and git config."""
+    os.environ.update(test_environment())
+
+
 def fixture_git_env() -> dict[str, str]:
     """The harness's own fixture git reads no operator or system config.
 
     An operator's global `commit.gpgsign` or hooks would otherwise run inside
-    fixture setup. The `plak` under test keeps the operator's environment.
+    fixture setup. Returned for git only; a driver that calls
+    `isolate_test_environment` also applies it to the process.
     """
-    return dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    return test_environment()
 
 
 def git_repo(path: Path, files: dict[str, str]) -> Path:

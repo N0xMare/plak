@@ -36,7 +36,7 @@ from live import ScenarioFailure  # noqa: E402
 
 REPO_URL = "https://github.com/more-itertools/more-itertools.git"
 REPO_COMMIT = "4998a257373f36e91edef7324572ed8df10f39d1"  # v10.5.0
-REBUILD = ["cargo", "build", "--release", "--locked", "--features", "plak/test-hooks", "-p", "plak"]
+REBUILD = [str(live.ROOT / "tools/build/build-plak.sh"), "--release", "--features", "plak/test-hooks", "--plak-only"]
 
 # Bugs the driver plants before asking for a fix: (file, function, correct
 # text, broken text). The correct text is in the pinned commit's function.
@@ -376,6 +376,7 @@ def main(argv: list[str]) -> int:
         return long_session.main(forwarded)
     parser = build_parser()
     args = parser.parse_args(argv)
+    live.isolate_test_environment()
     route = live.ROUTES[args.route]
     artifacts = args.artifacts or live.ROOT / "target" / "live" / f"soak-{route.name}-{time.strftime('%Y%m%d-%H%M%S')}"
     artifacts.mkdir(parents=True)

@@ -27,19 +27,8 @@ history, never prerequisite reading, and never cited as authority.
 MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest and cargo-deny. Worker branches iterate and finish with
-`just fast <packages>` plus the groups their change needs. Main advances one
-integration batch at a time. Before a batch lands, its tip tree passes the
-integration batch gate: `just musl native` on Linux x86_64, the
-target-independent groups once
-(`just steps static,rustdoc,contracts,tooling,package`), `just platform` on
-Apple Silicon macOS, and the crash sweep (`just dev crash-sweep --strict` over
-the whole matrix when recovery, persistence, store, or host-loop code changed;
-otherwise `just dev crash-sweep --shapes <list>` for the affected shapes).
-Commits inside a batch are not gated individually. An install requires that
-batch gate on the tree being installed.
-A release candidate or publication runs `just full` on both supported
-platforms, `just musl native` and `just musl container`, the full strict crash
-sweep, and the publish dry run.
+`just fast <packages>` plus the groups their change needs. The integration
+batch, install and publication gates are spec 06 §8.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
 offline image `plak-qual-base:11162b86`, which is not published (spec 06).
 
@@ -50,18 +39,19 @@ just check                # Linux workspace gate (no durability): fmt, clippy, s
 just platform             # per install: fmt, clippy, builds, parallel, serial, durability
 just full                 # every group: check, plus variants, rustdoc, durability and the publish dry run
 just fmt                  # cargo fmt --all
-just clippy               # clippy -D warnings on all targets
+just clippy               # workspace clippy, then each supported package alone
+just nextest ARGS         # cargo nextest under the isolated test environment
 just publish [--execute]  # crates.io cohort dry run; --execute uploads
 just dev-tools ARGS       # pinned nextest and cargo-deny; `deny` is the dependency audit
 just build PROFILE        # debug, release, maintainer or profiling; no snapshot and no PATH change
 just install FLAVOR       # release (plain) or maintainer (dogfood) immutable snapshot on PATH
 just musl native          # Linux x86_64 musl platform tier, static PIE via rust-lld
 just musl container       # full tier in the pinned offline Alpine image; maintainer-only
-just live RECIPE          # smoke, soak, tui-soak, jobs, mcp-oauth, census, estimate, daily-driver
-just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density; not a gate
+just live RECIPE          # smoke, soak, tui-soak, jobs, mcp-oauth, census, estimate, daily-driver, qualify
+just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density, check; not a gate
 just prompts RECIPE       # render, diff, pins, native-compare
 just tui RECIPE           # story, frames
-just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, jj-compat
+just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, crash-compare, jj-compat
 just harbor RECIPE        # Harbor bakeoff, not a gate; `test` is the zero-inference adapter suite
 ```
 
@@ -111,15 +101,12 @@ partition the suite; a new serial test goes into the `serial` or `durability`
 filter and the `offline` exclusion. Contract fixture builds use a persistent
 `.public-contracts/<target-dir-name>/<triple>` directory beside
 `CARGO_TARGET_DIR` (`PLAK_PUBLIC_CONTRACTS_DIR` overrides it).
-`dev-check.sh` and `just dev coverage` set `TMPDIR` from `tools/gate/test-tmpdir.sh`
-(a per-checkout 0700 directory under `/dev/shm` on Linux, where fsync under gate
-load breaks process deadlines, and under `/private/tmp` on macOS, outside
-`HOME`; `PLAK_TEST_TMPDIR` overrides) and `PLAK_HOME=$TMPDIR/plak-isolated-home`
-(mode 0700) for nextest, so a test that forgets a product home cannot create the
-operator's `~/.plak`, plus `GIT_CONFIG_GLOBAL=$TMPDIR/gitconfig` (empty) and
-`GIT_CONFIG_NOSYSTEM=1`, so fixture git never reads the operator's git config;
-a test that commits sets its own identity. Set all four yourself if you run
-`cargo nextest` by hand: `TMPDIR="$(bash tools/gate/test-tmpdir.sh)"`. There is no CI: the only workflow,
+Hand-run nextest is `just nextest`. It exports the isolated test environment
+from `tools/gate/test-env.sh`: per-checkout `TMPDIR` (`tools/gate/test-tmpdir.sh`,
+`PLAK_TEST_TMPDIR` overrides), `PLAK_HOME` under that directory (mode 0700), an
+empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. The gate, coverage, the
+crash sweep, perf smoke and the live drivers use the same helper (spec 05 §1).
+There is no CI: the only workflow,
 `.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag, and a manual run on `main` is the pre-tag dry run that releases nothing
 (`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
 

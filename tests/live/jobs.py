@@ -2514,6 +2514,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    live.isolate_test_environment()
     try:
         chosen = selected({name for name in args.only.split(",") if name})
     except ValueError as error:

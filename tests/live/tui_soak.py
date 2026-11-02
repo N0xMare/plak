@@ -171,6 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    live.isolate_test_environment()
     if args.hours <= 0:
         parser.error("--hours must be positive")
 

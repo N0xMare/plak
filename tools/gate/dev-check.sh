@@ -43,20 +43,15 @@ bash tools/gate/dev-tools.sh check
 
 # Linux budget tests need RAM-backed fsync under parallel gate load; macOS
 # NOFOLLOW needs a physical path outside HOME. Placement changes, not deadlines.
-TMPDIR="$(bash tools/gate/test-tmpdir.sh --fresh)"
-export TMPDIR
-# Nextest must not inherit the operator product home. A maintainer binary
-# writes its diagnostics log as soon as it starts, and an unresolved
-# PLAK_HOME falls back to $HOME/.plak. HOME itself stays the operator's:
-# Cargo and git read it. Hand-run nextest needs the same export.
-isolated_home="$TMPDIR/plak-isolated-home"
-mkdir -p "$isolated_home"
-chmod 700 "$isolated_home"
+# PLAK_HOME is applied only on nextest lanes: other cargo must not inherit it.
 # Git in test fixtures must not read the operator's global or system config
 # (a global commit.gpgsign made fixture commits spawn gpg). A test that needs
-# an identity sets it on its own command or repository.
-: >"$TMPDIR/gitconfig"
-export GIT_CONFIG_GLOBAL="$TMPDIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
+# an identity sets it on its own command or repository. Hand-run nextest is
+# `just nextest`, which keeps PLAK_HOME exported.
+eval "$(tools/gate/test-env.sh --fresh)"
+export TMPDIR GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+isolated_home=$PLAK_HOME
+unset PLAK_HOME
 
 # Supported packages (spec 06 §3). Each also builds alone in the builds group:
 # Cargo resolves features per selected package set, so `cargo build -p plak`
@@ -452,16 +447,12 @@ run_group() {
         echo "== structure: evidence allowlist =="
         python3 tools/release/gate_evidence.py audit || failed_steps="${failed_steps:+$failed_steps }evidence"
       fi
-      echo "== clippy =="
-      cargo clippy --locked --workspace --all-features --all-targets ${target_args[@]+"${target_args[@]}"} -- -D warnings \
-        || failed_steps="${failed_steps:+$failed_steps }clippy"
-      # Each supported package's own default resolution: a lint that only that
-      # closure (or its own tests) sees is hidden from the all-features run.
-      for package in "${supported_packages[@]}"; do
-        echo "== clippy: $package alone =="
-        cargo clippy --locked -p "$package" --all-targets ${target_args[@]+"${target_args[@]}"} -- -D warnings \
-          || failed_steps="${failed_steps:+$failed_steps }clippy:$package"
-      done
+      # Workspace, then each supported package alone (tools/gate/clippy.sh).
+      clippy_status="$(mktemp "$TMPDIR/plak-clippy.XXXXXX")"
+      if ! tools/gate/clippy.sh --status-file "$clippy_status"; then
+        failed_steps="${failed_steps:+$failed_steps }$(cat "$clippy_status")"
+      fi
+      rm -f "$clippy_status"
       if [[ -n "$failed_steps" ]]; then
         echo "== failed static steps: $failed_steps =="
         return 1

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the opt-in real-product SQLite commit sweep."""
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -15,17 +16,10 @@ def main() -> int:
     args = parser.parse_args()
     if args.jobs < 1 or args.repeat < 1:
         parser.error("--jobs and --repeat must be positive")
-    selector = Path(__file__).resolve().parents[1] / "gate" / "test-tmpdir.sh"
-    scratch = Path(subprocess.run(["bash", str(selector)], check=True,
-                                  capture_output=True, text=True).stdout.strip())
-    home = scratch / "plak-isolated-home"
-    home.mkdir(mode=0o700, exist_ok=True)
-    # Fixture git reads no operator config: no global identity or signing.
-    git_config = scratch / "gitconfig"
-    git_config.write_text("")
-    env = dict(os.environ, TMPDIR=str(scratch), PLAK_HOME=str(home),
-               GIT_CONFIG_GLOBAL=str(git_config), GIT_CONFIG_NOSYSTEM="1",
-               PLAK_CRASH_SWEEP_JOBS=str(args.jobs),
+    script = Path(__file__).resolve().parents[1] / "gate" / "test-env.sh"
+    env = os.environ.copy()
+    env.update(json.loads(subprocess.check_output([str(script), "--json"], text=True)))
+    env.update(PLAK_CRASH_SWEEP_JOBS=str(args.jobs),
                PLAK_CRASH_SWEEP_REPEAT=str(args.repeat),
                PLAK_CRASH_SWEEP_STRICT=str(int(args.strict)))
     if args.shapes is not None:

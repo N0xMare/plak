@@ -954,6 +954,11 @@ just install maintainer # dogfood snapshot under ~/.local/lib/plak/maintainer
 `just build debug`, `just build release`, `just build maintainer` and
 `just install maintainer` pass `--features plak/maintainer`. `just install release`
 does not, and `just build profiling` builds only `plak` at its default features.
+Live `test-hooks` builds, the offline performance smoke, a soak rebuild and the
+reload rehearsal's offline maintainer build call the same script. `--features`
+replaces the parent feature set, `--plak-only` skips workers and the linkage
+check, `--profiling` is the plak-only profiling profile, and `--offline` passes
+Cargo `--offline`.
 `<id>` is the SHA-256 of a manifest of all three executables' SHA-256 digests.
 Each worker is installed
 independently at `~/.local/lib/plak/sidecars/<name>/<sha256>/<name>`; the

@@ -40,14 +40,14 @@ run_jsonl() {
     local output="$PLAKOUS_PERF_RUN_DIR/$name.jsonl"
     printf 'running %s -> %s\n' "$name" "$output" >&2
     "$@" >"$output"
-    python3 "$PLAKOUS_PERF_ROOT/tools/perf/validate_perf_jsonl.py" "$output"
+    "$PLAKOUS_PERF_ROOT/tools/perf/validate_perf_jsonl.py" "$output"
 }
 
 cd -- "$PLAKOUS_PERF_ROOT"
 
 for profile in "${PLAKOUS_PERF_BUILD_PROFILES[@]}"; do
     run_jsonl "perf-build-$profile" \
-        python3 tools/perf/perf_build.py \
+        tools/perf/perf_build.py \
         --build-profile "$profile" \
         --cargo-profile dev \
         --operation check \

@@ -664,6 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    live.isolate_test_environment()
     route = live.ROUTES[args.route]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     artifacts = args.artifacts or live.ROOT / "target" / "live" / f"smoke-{route.name}-{stamp}"

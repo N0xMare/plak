@@ -62,10 +62,11 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "tools/gate").mkdir(parents=True)
         (self.root / "tools/release").mkdir(parents=True)
-        shutil.copyfile(ROOT / "tools/gate/dev-check.sh", self.root / "tools/gate/dev-check.sh")
-        shutil.copyfile(ROOT / "tools/gate/dev-tools.sh", self.root / "tools/gate/dev-tools.sh")
-        shutil.copyfile(ROOT / "tools/gate/dev-tools-prefix.sh", self.root / "tools/gate/dev-tools-prefix.sh")
-        shutil.copyfile(ROOT / "tools/gate/test-tmpdir.sh", self.root / "tools/gate/test-tmpdir.sh")
+        for name in ("dev-check.sh", "dev-tools.sh", "dev-tools-prefix.sh",
+                     "test-tmpdir.sh", "test-env.sh", "clippy.sh"):
+            destination = self.root / "tools/gate" / name
+            shutil.copyfile(ROOT / "tools/gate" / name, destination)
+            destination.chmod(0o755)
         shutil.copyfile(ROOT / "tools/gate/vcs_listing.py", self.root / "tools/gate/vcs_listing.py")
         self.bin = self.root / "bin"
         self.bin.mkdir()

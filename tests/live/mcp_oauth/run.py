@@ -1002,6 +1002,8 @@ def main(argv=None):
     if args.list:
         print("\n".join(SCENARIOS))
         return 0
+    os.environ.update(json.loads(subprocess.check_output(
+        [str(ROOT / "tools/gate/test-env.sh"), "--json"], text=True)))
     rules = json.loads(Path(args.resource_rules).read_text())
     if set(rules) != {"tenant_metadata"} or rules["tenant_metadata"] not in (
         "accept",

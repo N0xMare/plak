@@ -158,6 +158,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plak")
     parser.add_argument("--dry-run", action="store_true")
     args, forwarded = parser.parse_known_args(argv)
+    live.isolate_test_environment()
     option_error = ("attempt artifacts/seed are owned by this driver; use lane long-session"
                     if any(arg.split("=", 1)[0] in ("--artifacts", "--fixture-seed", "--long-session")
                            for arg in forwarded) else None)

@@ -211,6 +211,8 @@ class ReloadRehearsalTests(unittest.TestCase):
             import shutil
             shutil.copy(ROOT / "tools/build/reload-rehearsal.sh", repo / "tools/build")
             shutil.copy(ROOT / "tools/build/reload_rehearsal.py", repo / "tools/build")
+            shutil.copy(ROOT / "tools/build/build-plak.sh", repo / "tools/build")
+            (repo / "tools/build/build-plak.sh").chmod(0o755)
             (repo / "tools/build/check-artifact-linkage.py").write_text(
                 "import sys\nfrom pathlib import Path\n"
                 "Path('linkage-checked').write_text(sys.argv[1])\n")

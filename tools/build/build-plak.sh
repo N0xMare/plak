@@ -7,11 +7,15 @@
 #   (no flags)    debug + maintainer features
 #   --release     release + maintainer features
 #   --maintainer  maintainer profile
+#   --profiling   profiling profile, plak only, default features, no linkage check
 # Install modes write an immutable snapshot and point PATH at it:
 #   --install             plain release, under the release snapshot root
 #   --install-maintainer  maintainer profile, under the maintainer snapshot root
 #   --artifacts           plain release build and linkage check; prints the directory
-# The modes are exclusive.
+# The modes are exclusive. Additive flags, not with install, artifacts or profiling:
+#   --features LIST  replace the parent feature set (workers stay unfeatured)
+#   --plak-only      parent only; no workers and no linkage check
+#   --offline        pass Cargo --offline (any mode)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -22,17 +26,31 @@ plak_features=(--features plak/maintainer)
 artifacts_only=
 install=
 mode=
+plak_only=0
+features_set=0
+offline=()
 usage() {
-  echo "usage: $0 [--release|--maintainer|--install|--install-maintainer|--artifacts]" >&2
+  echo "usage: $0 [--offline] [--features LIST] [--plak-only] [--release|--maintainer|--profiling|--install|--install-maintainer|--artifacts]" >&2
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --release|--maintainer|--install|--install-maintainer|--artifacts)
+    --release|--maintainer|--profiling|--install|--install-maintainer|--artifacts)
       if [[ -n "$mode" ]]; then
         usage
         exit 2
       fi
       mode=$1
+      ;;
+    --offline) offline=(--offline) ;;
+    --plak-only) plak_only=1 ;;
+    --features)
+      if [[ $# -lt 2 ]]; then
+        usage
+        exit 2
+      fi
+      plak_features=(--features "$2")
+      features_set=1
+      shift
       ;;
     *)
       usage
@@ -41,9 +59,23 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+# Install and profiling keep their own feature sets. --plak-only cannot install.
+if [[ "$features_set" == 1 || "$plak_only" == 1 ]]; then
+  case "$mode" in
+    --install|--install-maintainer|--artifacts|--profiling)
+      usage
+      exit 2
+      ;;
+  esac
+fi
 case "$mode" in
   --release) profile=release ;;
   --maintainer) profile=maintainer ;;
+  --profiling)
+    profile=profiling
+    plak_features=()
+    plak_only=1
+    ;;
   --install)
     profile=release
     snapshot_flavor=release
@@ -85,14 +117,22 @@ if [[ "$profile" == release ]]; then
   # Linkage proof needs raw symbols; strip only the staged shipping copies.
   export CARGO_PROFILE_RELEASE_STRIP=debuginfo
 fi
-cargo build --locked -p plak ${plak_features[@]+"${plak_features[@]}"} ${profile_flag[@]+"${profile_flag[@]}"}
-cargo build --locked -p plakous-js-runtime -p plakous-py-worker ${profile_flag[@]+"${profile_flag[@]}"}
+cargo build --locked ${offline[@]+"${offline[@]}"} -p plak ${plak_features[@]+"${plak_features[@]}"} ${profile_flag[@]+"${profile_flag[@]}"}
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 [[ "$target_dir" == /* ]] || target_dir="$repo_root/$target_dir"
 output_dir="$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}${profile}"
 bin="$output_dir/plak"
 js_host="$output_dir/plakous-js-host"
 py_host="$output_dir/plakous-py-host"
+# Profiling and a parent-only rebuild do not build workers or check linkage.
+if [[ "$plak_only" == 1 ]]; then
+  if [[ ! -x "$bin" ]]; then
+    echo "build-plak: cargo did not write $bin" >&2
+    exit 2
+  fi
+  exit 0
+fi
+cargo build --locked ${offline[@]+"${offline[@]}"} -p plakous-js-runtime -p plakous-py-worker ${profile_flag[@]+"${profile_flag[@]}"}
 if [[ ! -x "$bin" ]]; then
   echo "build-plak: cargo did not write $bin" >&2
   exit 2
