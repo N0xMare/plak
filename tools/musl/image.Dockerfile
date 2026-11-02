@@ -6,7 +6,7 @@
 #     docker build --platform linux/amd64 -f tools/musl/image.Dockerfile -q -
 #   docker tag <image-id> plak-qual-base:<first 8 hex digits of the image id>
 #
-# The musl cargo-nextest for ~/plak-musl/bin comes from the `nextest` target:
+# The musl cargo-nextest and ruff for ~/plak-musl/bin come from the `nextest` target:
 #
 #   git archive --format=tar HEAD |
 #     docker build --platform linux/amd64 -f tools/musl/image.Dockerfile \
@@ -34,10 +34,13 @@ RUN set -eu; \
 FROM base AS nextest-build
 COPY tools/gate/dev-tools.sh /tmp/dev-tools.sh
 RUN nextest_version=$(sed -n 's/^nextest_version=//p' /tmp/dev-tools.sh) \
- && cargo install --locked --root /out --version "$nextest_version" cargo-nextest
+ && ruff_version=$(sed -n 's/^ruff_version=//p' /tmp/dev-tools.sh) \
+ && cargo install --locked --root /out --version "$nextest_version" cargo-nextest \
+ && cargo install --locked --root /out --version "$ruff_version" ruff
 
 FROM scratch AS nextest
 COPY --from=nextest-build /out/bin/cargo-nextest /cargo-nextest
+COPY --from=nextest-build /out/bin/ruff /ruff
 
 FROM base AS image
 COPY --from=sources /usr/local/cargo/registry /usr/local/cargo/registry

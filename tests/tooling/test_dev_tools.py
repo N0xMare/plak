@@ -24,7 +24,7 @@ class DevToolsTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                         DEV_TOOLS_CALLS=str(self.log), DEV_TOOLS_ROOT=str(self.root),
                         FAKE_PYTHON_MODE="ok", FAKE_NEXTEST_VERSION="0.9.100",
-                        FAKE_DENY_VERSION="0.19.0")
+                        FAKE_DENY_VERSION="0.19.0", FAKE_RUFF_VERSION="0.17.3")
         self.executable("python3", r'''import os, sys
 mode = os.environ['FAKE_PYTHON_MODE']
 if mode in {'broken', 'old'}:
@@ -49,6 +49,11 @@ elif args[:1] == ['install']:
     expected = Path(os.environ['DEV_TOOLS_ROOT']) / '.dev-tools/build'
     if os.environ.get('CARGO_TARGET_DIR') != str(expected):
         raise SystemExit(90)
+''')
+        self.executable("ruff", r'''import os, sys
+if "--version" in sys.argv:
+    print("ruff " + os.environ["FAKE_RUFF_VERSION"])
+raise SystemExit(0)
 ''')
 
     def executable(self, name, source, directory=None):
@@ -98,6 +103,11 @@ elif args[:1] == ['install']:
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("Development prerequisites are available.", result.stdout)
 
+    def test_old_ruff_is_rejected(self):
+        result = self.run_script("check", env=dict(self.env, FAKE_RUFF_VERSION="0.17.2"))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("ruff 0.17.3 or newer is required", result.stderr)
+
     def test_old_deny_fails_before_policy_check(self):
         result = self.run_script("deny", env=dict(self.env, FAKE_DENY_VERSION="0.18.999"))
         self.assertEqual(result.returncode, 2)
@@ -121,10 +131,11 @@ elif args[:1] == ['install']:
         self.assertEqual([call["args"] for call in calls], [
             ["install", "--locked", "--root", prefix, "--version", "0.9.100", "cargo-nextest"],
             ["install", "--locked", "--root", prefix, "--version", "0.19.0", "cargo-deny"],
+            ["install", "--locked", "--root", prefix, "--version", "0.17.3", "ruff"],
             ["tools/gate/check_public_compile.py", "--fetch"],
             ["tools/dev/jj-tools.py", "install", prefix],
         ])
-        self.assertTrue(all(call["env_names"] == ["CARGO_TARGET_DIR"] for call in calls[:2]))
+        self.assertTrue(all(call["env_names"] == ["CARGO_TARGET_DIR"] for call in calls[:3]))
         self.assertEqual(calls[-1]["env_names"], [])
         self.assertNotIn("--force", result.stdout + result.stderr + json.dumps(calls))
         self.assertTrue((self.root / ".dev-tools/build").is_dir())

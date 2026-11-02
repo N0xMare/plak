@@ -26,7 +26,7 @@ history, never prerequisite reading, and never cited as authority.
 
 MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
-cargo-nextest and cargo-deny. Worker branches iterate and finish with
+cargo-nextest, cargo-deny and ruff. Worker branches iterate and finish with
 `just fast <packages>` plus the groups their change needs. The integration
 batch, install and publication gates are spec 06 §8.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
@@ -67,9 +67,10 @@ arm exists, compare interactive subscription OAuth, not `claude --print`.
 All tiers use `tools/gate/dev-check.sh`; Rust test lanes build the whole workspace
 with all features and share that artifact set. Default and reduced product
 resolutions have separate compile evidence. The groups, in canonical order, are
-`static` (fmt, locked dependency fetch, offline first, online only for missing
-cache inputs, the workspace and feature structure checkers, clippy -D warnings
-on the workspace and on each supported package alone),
+`static` (fmt, ruff check and ruff format --check, locked dependency fetch,
+offline first, online only for missing cache inputs, the workspace and feature
+structure checkers, clippy -D warnings on the workspace and on each supported
+package alone),
 `builds` (default-feature, each supported package alone in its own default
 resolution, and maintainer-feature builds, rustc warnings denied),
 `variants` (named headless/API/minimal builds and an admission fixture, clippy
@@ -82,7 +83,8 @@ names and retrying offline once, online only for missing cache inputs, then
 packages and verifies the cohort strictly offline; compiled review time is informational
 here, while publication dry runs and uploads require more than a third of each
 review window remaining). Check runs all but variants, rustdoc, durability and package; platform runs
-static without the platform-independent structure checkers, builds and the
+static without the platform-independent structure checkers (fmt, ruff and
+clippy still run), builds and the
 three lanes; full runs every group, and a full pass on a clean tree records that
 tree as the evidence `just publish` requires. Later commits that change only
 `CHANGELOG.md`, `tests/live/STATUS.md`, `docs/spec/**` (not spec 07) or

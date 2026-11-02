@@ -21,7 +21,7 @@ You need Rust 1.99.0 (pinned by `rust-toolchain.toml`), a C/C++ toolchain,
 platforms are Apple Silicon macOS and Linux x86_64 musl.
 
 ```sh
-just dev-tools install   # once: pinned cargo-nextest and cargo-deny
+just dev-tools install   # once: pinned cargo-nextest, cargo-deny and ruff
 just fast PKG...         # worker gate: named packages and their dependents
 just check               # Linux workspace gate (no durability)
 ```

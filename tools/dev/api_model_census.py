@@ -1045,7 +1045,7 @@ def load_key(account: str, environ: dict[str, str] | None = None, home: Path | N
         raise CensusError(f"no {account} API key in the environment or the Plak key file")
     try:
         value = path.read_text()
-    except OSError as exc:
+    except OSError:
         raise CensusError(f"could not read the {account} key file") from None
     if value.strip() == "" or len(value) > 4096 or "\n" in value.strip() or "\x00" in value:
         raise CensusError(f"the {account} key file is unusable")
@@ -1125,7 +1125,7 @@ def auth_headers(provider: str, key: str) -> list[tuple[str, str]]:
 def _json_bytes(payload: bytes) -> Any:
     try:
         return json.loads(payload)
-    except json.JSONDecodeError as exc:
+    except json.JSONDecodeError:
         raise CensusError("response was not JSON") from None
 
 

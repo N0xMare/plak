@@ -239,7 +239,7 @@ For local development, `just fast <packages>` is the worker gate, plus the group
 | [`docs/reference-config/`](docs/reference-config/) | Annotated reference Plak home |
 | [`tests/fixtures/config-scenarios/`](tests/fixtures/config-scenarios/) | Scenario homes loaded by offline tests |
 | [`docs/spec/`](docs/spec/) / [`docs/user-guide/`](docs/user-guide/) | Behavioral authority and usage documentation |
-| [`Justfile`](Justfile) / [`.config/nextest.toml`](.config/nextest.toml) | Development recipes and test profiles; `just dev-tools install` provides the pinned cargo-nextest and cargo-deny the gates require |
+| [`Justfile`](Justfile) / [`.config/nextest.toml`](.config/nextest.toml) | Development recipes and test profiles; `just dev-tools install` provides the pinned cargo-nextest, cargo-deny and ruff the gates require |
 
 ## License
 

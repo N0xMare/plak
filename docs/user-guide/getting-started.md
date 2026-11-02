@@ -47,8 +47,8 @@ cargo install --locked plak plakous-js-runtime plakous-py-worker
 - Session stores need access to the operating system's boot and clock-domain
   identity. Restricted access fails closed; see the
   [store contract](../spec/01-plakous-library.md#51-the-store-port).
-- To run the test gate: `just dev-tools install` puts the pinned cargo-nextest
-  and cargo-deny into the repository-local `.dev-tools/bin` and prefetches the
+- To run the test gate: `just dev-tools install` puts the pinned cargo-nextest,
+  cargo-deny and ruff into the repository-local `.dev-tools/bin` and prefetches the
   locked public compile-contract dependencies. Installation needs network
   access; subsequent compile-contract gates stay offline.
 

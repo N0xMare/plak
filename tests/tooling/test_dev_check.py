@@ -131,6 +131,7 @@ if args[0] == 'test':
     print(json.dumps(dict(reason='compiler-artifact', executable=str(js_worker),
                          target=dict(name='plakous-js-host', kind=['bin']), profile=dict(test=False))))
 ''')
+        self.executable('ruff', "import sys\nif '--version' in sys.argv:\n    print('ruff 0.17.3')\nraise SystemExit(0)\n")
         self.executable('python3', r'''import json, os, sys
 if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
@@ -650,6 +651,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def test_steps_static_fetches_offline_before_structure_checks(self):
         result, calls, scripts = self.run_gate('--steps', 'static')
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('== ruff ==', result.stdout)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'],
                          ['fmt', 'fetch', *CLIPPIES])
         self.assertIn(['tools/gate/check_workspace.py'], scripts)

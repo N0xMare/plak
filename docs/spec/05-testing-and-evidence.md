@@ -592,7 +592,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings |
+| `static` | fmt, then `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/` (root `pyproject.toml` is tool config only; `vendor/` and `eval/datasets` stay excluded), then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings |
 | `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build. All deny rustc warnings |
 | `variants` | Reduced Plak resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): headless is default minus `tui` and `clipboard`; api is default minus `codex`, `grok` and `claude`; minimal is exactly `tui`, `openrouter` and `git-cli`; the admission fixture is default minus `tui`, `clipboard`, `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plak processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
 | `rustdoc` | Workspace all-features rustdoc, then each supported package alone with default features; denied warnings |
@@ -607,14 +607,14 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 | --- | --- |
 | `--fast` | `static`; `tests-parallel` scoped to the touched packages' reverse dependencies, if any |
 | default (check) | `static`, `builds`, `tests-parallel`, `tests-serial`, `contracts`, `tooling` |
-| `--platform` | `static` (fmt/clippy only), `builds`, `tests-parallel`, `tests-serial`, `tests-durability` |
+| `--platform` | `static` (fmt/ruff/clippy only), `builds`, `tests-parallel`, `tests-serial`, `tests-durability` |
 | `--full` | Every group |
 
 The tiers are not nested. Check is the Linux workspace gate: structure
 checkers, feature builds, the parallel and serial lanes, contracts and tooling,
 but no durability lane; no landing, install or publication rule requires it.
 Platform is the per-install, per-platform gate:
-fmt/clippy, feature builds and all three lanes, without the
+fmt/ruff/clippy, feature builds and all three lanes, without the
 platform-independent structure checkers and contracts. Full is their union
 plus variants, rustdoc and the package dry run; a passing full run that started and ended
 on the same clean git tree writes that tree id to
@@ -634,7 +634,7 @@ chapter 06 §8.
 
 After argument validation and the prerequisite check, every selected group runs
 even if an earlier group fails. The static group also runs every step (fmt,
-locked dependency fetch, each structure checker, clippy) and summarizes all
+ruff, locked dependency fetch, each structure checker, clippy) and summarizes all
 failures. Other groups may
 stop internally on a failed command; later groups still run. The final summary
 names all failed groups, exits with the first failed group's status, and never

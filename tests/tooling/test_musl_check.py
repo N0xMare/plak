@@ -27,6 +27,9 @@ class MuslCheckTests(unittest.TestCase):
         worker = self.tools / 'cargo-nextest'
         worker.write_text('#!/bin/sh\nexit 0\n')
         worker.chmod(0o700)
+        ruff = self.tools / 'ruff'
+        ruff.write_text('#!/bin/sh\nexit 0\n')
+        ruff.chmod(0o700)
         self.log = self.root / 'docker.json'
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         PLAK_MUSL_TOOLS=str(self.tools), MUSL_CALLS=str(self.log))
@@ -183,3 +186,10 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         self.assertNotEqual(result.returncode, 0)
         self.assertIsNone(call)
         self.assertIn('cargo-nextest', result.stderr)
+
+    def test_missing_musl_ruff_refuses_before_docker(self):
+        (self.tools / 'ruff').unlink()
+        result, call = self.run_gate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIsNone(call)
+        self.assertIn('ruff 0.17.3', result.stderr)

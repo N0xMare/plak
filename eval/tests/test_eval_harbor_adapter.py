@@ -226,7 +226,6 @@ from harbor_adapter.pmux_pins import (  # noqa: E402
 )
 from harbor_adapter.artifact_identity import (  # noqa: E402
     SCHEMA_VERSION as ARTIFACT_SCHEMA_VERSION,
-    ArtifactDigest,
     artifact_record,
     digest_all,
     digest_file,
@@ -285,10 +284,7 @@ from harbor_adapter.termination import (  # noqa: E402
     summarize_job,
     tool_rejections,
 )
-from harbor_adapter.arguments import (  # noqa: E402
-    require_prompt_variant,
-    run_env,
-)
+from harbor_adapter.arguments import require_prompt_variant  # noqa: E402
 from harbor_adapter.tuples import (  # noqa: E402
     PROMPT_VARIANT_ENV,
     PROMPT_VARIANTS,
@@ -1275,7 +1271,11 @@ class PlanContractTests(unittest.TestCase):
 class ConfigurationContractTests(unittest.TestCase):
     def test_eval_python_project_is_self_contained(self) -> None:
         self.assertTrue((ROOT / "eval" / "pyproject.toml").is_file())
-        self.assertFalse((ROOT / "pyproject.toml").is_file())
+        # The repository root configures ruff only. A project table there would
+        # make uv treat the checkout as the eval project.
+        root_config = (ROOT / "pyproject.toml").read_text()
+        self.assertIn("[tool.ruff]", root_config)
+        self.assertFalse(any(line.strip() == "[project]" for line in root_config.splitlines()))
 
     def test_terminal_bench_pin(self) -> None:
         text = (ROOT / "eval" / "terminal-bench.yaml").read_text()

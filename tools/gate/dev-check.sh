@@ -434,6 +434,13 @@ run_group() {
       local failed_steps=""
       echo "== fmt =="
       cargo fmt --all --check || failed_steps="fmt"
+      # Ruff covers the maintainer Python trees. vendor/ and Harbor task
+      # fixtures are excluded in the root tool config, not here.
+      echo "== ruff =="
+      ruff check tools tests/tooling tests/live eval \
+        || failed_steps="${failed_steps:+$failed_steps }ruff"
+      ruff format --check tools tests/tooling tests/live eval \
+        || failed_steps="${failed_steps:+$failed_steps }ruff-format"
       if [[ "$tier" == platform ]]; then
         echo "skip structure checkers: platform-independent (check/full on Linux)"
       else

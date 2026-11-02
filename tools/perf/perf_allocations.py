@@ -153,6 +153,10 @@ def discover_benchmark(root: Path, name: str) -> tuple[Path, list[str]]:
     return unique[0], arguments
 
 
+def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns)
+
+
 def source_binding(root: Path) -> dict[str, Any]:
     listed = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
@@ -169,14 +173,7 @@ def source_binding(root: Path) -> dict[str, Any]:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         try:
             opened = os.fstat(descriptor)
-            identity = lambda value: (
-                value.st_dev,
-                value.st_ino,
-                value.st_mode,
-                value.st_size,
-                value.st_mtime_ns,
-            )
-            if identity(before) != identity(opened):
+            if _file_identity(before) != _file_identity(opened):
                 raise ProbeError(f"source changed before hashing: {path}")
             chunks = []
             while chunk := os.read(descriptor, 1024 * 1024):
@@ -185,7 +182,7 @@ def source_binding(root: Path) -> dict[str, Any]:
             after = os.fstat(descriptor)
         finally:
             os.close(descriptor)
-        if identity(before) != identity(after) or identity(path.lstat()) != identity(before):
+        if _file_identity(before) != _file_identity(after) or _file_identity(path.lstat()) != _file_identity(before):
             raise ProbeError(f"source changed while hashing: {path}")
         digest.update(len(encoded).to_bytes(8, "big"))
         digest.update(encoded)
@@ -214,14 +211,7 @@ def snapshot_executable(source: Path, destination: Path) -> dict[str, Any]:
             shutil.copyfileobj(input_stream, output_stream, 1024 * 1024)
         destination.chmod(0o500)
         after = os.fstat(descriptor)
-        identity = lambda value: (
-            value.st_dev,
-            value.st_ino,
-            value.st_mode,
-            value.st_size,
-            value.st_mtime_ns,
-        )
-        if identity(before) != identity(after):
+        if _file_identity(before) != _file_identity(after):
             raise ProbeError(f"benchmark changed while snapshotting: {source}")
     finally:
         os.close(descriptor)

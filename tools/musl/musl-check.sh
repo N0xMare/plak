@@ -8,8 +8,8 @@ if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
   exit 2
 fi
 tools="${PLAK_MUSL_TOOLS:-$HOME/plak-musl/bin}"
-if [[ ! -x "$tools/cargo-nextest" ]]; then
-  echo "musl cargo-nextest 0.9.100 required in $tools" >&2
+if [[ ! -x "$tools/cargo-nextest" || ! -x "$tools/ruff" ]]; then
+  echo "musl cargo-nextest 0.9.100 and ruff 0.17.3 required in $tools" >&2
   exit 2
 fi
 tools="$(cd "$tools" && pwd -P)"

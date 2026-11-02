@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import http.server
-import io
 import json
 import os
 import pathlib

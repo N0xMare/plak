@@ -7,6 +7,7 @@ prefix="$(plak_dev_tools_prefix "$root")"
 export PATH="$prefix/bin:$PATH"
 nextest_version=0.9.100
 deny_version=0.19.0
+ruff_version=0.17.3
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -35,6 +36,7 @@ case "${1:-check}" in
     [[ $# -le 1 ]] || fail 'usage: dev-tools.sh check|install|deny'
     require_python
     require_version cargo-nextest "$nextest_version" cargo nextest --version
+    require_version ruff "$ruff_version" ruff --version
     printf 'Development prerequisites are available.\n'
     ;;
   deny)
@@ -51,13 +53,14 @@ case "${1:-check}" in
     mkdir -p "$prefix" "$prefix/build"
     CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$nextest_version" cargo-nextest
     CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$deny_version" cargo-deny
+    CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$ruff_version" ruff
     python3 tools/gate/check_public_compile.py --fetch
     python3 tools/dev/jj-tools.py install "$prefix"
     printf 'Installed verification tools in %s/bin; just check and just dev-tools deny use this prefix.\n' "$prefix"
     ;;
   -h|--help)
     printf 'usage: dev-tools.sh check|install|deny\n'
-    printf 'Install pins: cargo-nextest %s, cargo-deny %s. Installation is explicit and repository-local.\n' "$nextest_version" "$deny_version"
+    printf 'Install pins: cargo-nextest %s, cargo-deny %s, ruff %s. Installation is explicit and repository-local.\n' "$nextest_version" "$deny_version" "$ruff_version"
     ;;
   *) fail 'usage: dev-tools.sh check|install|deny' ;;
 esac

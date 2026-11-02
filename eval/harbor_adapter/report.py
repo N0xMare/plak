@@ -19,7 +19,7 @@ from harbor_adapter.pricing import RATE_CARD_PATH, from_harbor_context, resolve_
 from harbor_adapter.native_usage import extract_agent_usage
 from harbor_adapter.usage import read_archived_plak_usage
 from harbor_adapter.termination import (
-    CLASS_COMPLETED, RESULT_OK, RESULT_REPAIRED, find_job_dirs, load_json,
+    CLASS_COMPLETED, RESULT_OK, find_job_dirs, load_json,
     is_trial_dir, summarize_trial,
 )
 from harbor_adapter.timing import trial_phases
@@ -94,9 +94,6 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     task_ref = _safe_part((result.get("task_id") or {}).get("ref")) if isinstance(result.get("task_id"), dict) else None
     task_ref = task_ref or _safe_part(task_config.get("ref"))
     task_checksum = _safe_part(result.get("task_checksum"))
-    environment = config.get("environment") if isinstance(config.get("environment"), dict) else {}
-    environment_kwargs = environment.get("kwargs") if isinstance(environment.get("kwargs"), dict) else {}
-    image = _safe_part(environment_kwargs.get("image"))
     usage = result.get("agent_result") if isinstance(result.get("agent_result"), dict) else {}
     agent_info = result.get("agent_info") if isinstance(result.get("agent_info"), dict) else {}
     metadata = usage.get("metadata") if isinstance(usage.get("metadata"), dict) else {}
@@ -283,9 +280,6 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     )
     assertions_verified = verifier_evidence["status"] in ("not_required", "assertions_recorded")
     termination = summary.record.termination_class
-    setup = result.get("agent_setup")
-    execution = result.get("agent_execution")
-    verifier = result.get("verifier")
     attribution = failure_class(termination, exception)
     if loaded.status != RESULT_OK:
         attribution = "infra"
@@ -595,13 +589,20 @@ def build_report(jobs: list[Path], selection: Path | None = None,
         )
         status = "matched" if uniform and provenance_complete and complete and repeat_slots_match else "mismatched"
         reasons = []
-        if not complete: reasons.append("no_comparison_arm")
-        if not uniform: reasons.append("source_or_task_mismatch")
-        if not provenance_complete: reasons.append("source_or_task_unverified")
-        if not repeats_match: reasons.append("repeat_count_mismatch")
-        elif not repeat_slots_verified: reasons.append("repeat_slot_unverified")
-        elif not repeat_slots_match: reasons.append("repeat_slot_mismatch")
-        if any(len(v) != len(groups[arm]) for arm, v in originals.items()): reasons.append("repairs_present")
+        if not complete:
+            reasons.append("no_comparison_arm")
+        if not uniform:
+            reasons.append("source_or_task_mismatch")
+        if not provenance_complete:
+            reasons.append("source_or_task_unverified")
+        if not repeats_match:
+            reasons.append("repeat_count_mismatch")
+        elif not repeat_slots_verified:
+            reasons.append("repeat_slot_unverified")
+        elif not repeat_slots_match:
+            reasons.append("repeat_slot_mismatch")
+        if any(len(v) != len(groups[arm]) for arm, v in originals.items()):
+            reasons.append("repairs_present")
         controls = {arm: entries[0]["comparison_context"] for arm, entries in groups.items()}
         artifact_complete = all(
             arm_artifact_consistent.get((arm, slice_name, model_key, effort, cohort), False) and
@@ -652,11 +653,16 @@ def build_report(jobs: list[Path], selection: Path | None = None,
         comparison_eligible = (status == "matched" and known_controls and clean and
                                len(commits) == 1 and context_consistent and not control_mismatches
                                and artifact_complete and not validity_failures)
-        if not known_controls: reasons.append("comparison_context_missing")
-        elif not clean: reasons.append("dirty_eval_source")
-        elif len(commits) != 1: reasons.append("eval_source_mismatch")
-        if not context_consistent: reasons.append("context_result_mismatch")
-        if not artifact_complete: reasons.append("artifact_missing_or_varied_within_arm")
+        if not known_controls:
+            reasons.append("comparison_context_missing")
+        elif not clean:
+            reasons.append("dirty_eval_source")
+        elif len(commits) != 1:
+            reasons.append("eval_source_mismatch")
+        if not context_consistent:
+            reasons.append("context_result_mismatch")
+        if not artifact_complete:
+            reasons.append("artifact_missing_or_varied_within_arm")
         reasons.extend(f"control_unverified_or_mismatched:{key}" for key in control_mismatches)
         if status == "matched" and not comparison_eligible:
             status = "unverified"
@@ -761,8 +767,10 @@ def render_markdown(report: dict[str, Any], output_dir: Path) -> str:
               "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |"]
     for trial in report["trials"]:
         result_path = Path(trial["evidence"]["result"])
-        try: link = result_path.relative_to(output_dir)
-        except ValueError: link = Path(__import__("os").path.relpath(result_path, output_dir))
+        try:
+            link = result_path.relative_to(output_dir)
+        except ValueError:
+            link = Path(__import__("os").path.relpath(result_path, output_dir))
         lines.append("| " + " | ".join((trial["arm"], trial["task"], trial["trial"],
             trial["outcome"], trial["verifier_evidence"]["status"], trial["termination"],
             shown(trial["raw_reward"]), shown(trial["reward"]),

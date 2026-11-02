@@ -687,14 +687,16 @@ Install the pinned verification tools once, which the gates require:
 just dev-tools install
 ```
 
-`tools/gate/dev-tools.sh install` installs exactly cargo-nextest 0.9.100 and
-cargo-deny 0.19.0 into the repository-local `.dev-tools/bin`, which the
-gate puts first on `PATH`. The prefix sits outside `target/` so `cargo clean`
-does not remove it; its install build artifacts go to `.dev-tools/build`.
-Installation also prefetches all locked public compile-contract fixture
-dependencies (chapter 05 §1.1), so subsequent contract gates can stay offline.
-Every `tools/gate/dev-check.sh` tier and `just dev-tools deny` require at least those versions before they run
-anything; a newer tool already on `PATH` is accepted.
+`tools/gate/dev-tools.sh install` installs exactly cargo-nextest 0.9.100,
+cargo-deny 0.19.0 and ruff 0.17.3 into the repository-local `.dev-tools/bin`,
+which the gate puts first on `PATH`. The prefix sits outside `target/` so
+`cargo clean` does not remove it; its install build artifacts go to
+`.dev-tools/build`. Installation also prefetches all locked public
+compile-contract fixture dependencies (chapter 05 §1.1), so subsequent contract
+gates can stay offline. Every `tools/gate/dev-check.sh` tier requires at least
+the pinned cargo-nextest and ruff versions before it runs anything, and
+`just dev-tools deny` requires at least the pinned cargo-deny; a newer tool
+already on `PATH` is accepted.
 
 ### 6.1 Cargo-native product build
 
@@ -790,14 +792,15 @@ run, and the platform tiers above remain the public evidence. The image holds Al
 Rust 1.99.0 with a musl host toolchain, clippy, rustfmt and C/C++ tools, Python 3.14,
 curl, git, jj, just, and the registry sources for cargo-deny (not its executable),
 the workspace and compile-contract fixture lockfiles. It never pulls an image or installs tools.
-Provide the executable musl cargo-nextest 0.9.100 in `~/plak-musl/bin`
-(override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot substitute for it.
+Provide the executable musl cargo-nextest 0.9.100 and ruff 0.17.3 in
+`~/plak-musl/bin` (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot
+substitute for them. The image's `nextest` target exports both binaries.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.
 `tools/musl/image.Dockerfile` is the recipe: built from a `git archive` of a
 commit, its default target is the image, tagged `plak-qual-base:` plus the first
 eight hex digits of its image ID, and its `nextest` target exports the musl
-cargo-nextest at the version `tools/gate/dev-tools.sh` pins. A toolchain or
+cargo-nextest and ruff at the versions `tools/gate/dev-tools.sh` pins. A toolchain or
 dependency change rebuilds the image under a new tag and updates the tag in
 `tools/musl/musl-check.sh`.
 
