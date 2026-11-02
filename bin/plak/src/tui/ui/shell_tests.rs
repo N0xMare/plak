@@ -1444,6 +1444,38 @@ fn e2probe_tui_retry_keeps_text_of_an_earlier_model_call() {
 }
 
 #[test]
+fn inserting_a_row_before_the_request_floor_keeps_the_earlier_answer() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::ModelRequestStarted);
+    app.apply_host_event(HostEvent::AssistantDelta("round one".into()));
+    app.apply_host_event(HostEvent::ModelRequestStarted);
+    app.apply_host_event(HostEvent::AssistantDelta("round two".into()));
+    assert_eq!(app.stream_discard_from, 1);
+    // A keyed insert above the floor shifts every later block. The floor has
+    // to move with them or the discard dims round one.
+    app.splice_keyed_indices(0, 0, 1);
+    app.pane
+        .blocks
+        .insert(0, ScrollBlock::System("note".into()));
+    assert_eq!(app.stream_discard_from, 2);
+    app.apply_host_event(HostEvent::OutputDiscarded { dim: true });
+    assert!(
+        app.pane
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ScrollBlock::Assistant(text) if text == "round one"))
+    );
+    assert!(app.pane.blocks.iter().any(|block| {
+        matches!(block, ScrollBlock::Discarded { text, thinking: false } if text == "round two")
+    }));
+    assert!(
+        !app.pane.blocks.iter().any(
+            |block| matches!(block, ScrollBlock::Discarded { text, .. } if text == "round one")
+        )
+    );
+}
+
+#[test]
 fn output_discarded_keeps_text_of_an_earlier_model_call() {
     let mut app = App::new(launch_basic(), true);
     app.apply_host_event(HostEvent::ModelRequestStarted);

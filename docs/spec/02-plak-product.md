@@ -7651,7 +7651,9 @@ back to where the last completed response left it), its open and held
 reasoning, and its in-flight usage, so neither the persisted assistant text —
 including the text an interrupted turn keeps — nor the turn usage counts the
 discarded request, and nothing an earlier response of the turn streamed is
-lost. The turn fails only when the budget is spent or the failure is not
+lost. An output-limit retry and an overflow fold dim the current request's
+streamed text; that mark is in-process only and is not a persisted record.
+The turn fails only when the budget is spent or the failure is not
 replayable.
 
 The status words are closed and each means one thing: refresh required (the

@@ -8,6 +8,26 @@ mod index;
 mod restore;
 pub(super) use index::BlockIndex;
 
+/// Carry a discard floor across a keyed splice or move.
+///
+/// `None` means that index was removed. The request then starts at the first
+/// index the remap keeps at or after the old floor.
+fn remap_discard_floor(floor: usize, remap: impl Fn(usize) -> Option<usize>) -> usize {
+    if let Some(next) = remap(floor) {
+        return next;
+    }
+    let mut index = floor;
+    loop {
+        index = index.saturating_add(1);
+        if let Some(next) = remap(index) {
+            return next;
+        }
+        if index == usize::MAX {
+            return floor;
+        }
+    }
+}
+
 impl App {
     pub(super) fn push_live_block(&mut self, block: ScrollBlock) {
         self.push_block(block);
@@ -195,6 +215,9 @@ impl App {
     }
 
     fn remap_keyed_ui(&mut self, remap: impl Fn(usize) -> Option<usize> + Copy) {
+        // The discard floor is a raw block index. An insert or move before it
+        // has to carry that index, or the next discard dims an earlier answer.
+        self.stream_discard_from = remap_discard_floor(self.stream_discard_from, remap);
         self.pane.focused_block = self.pane.focused_block.and_then(remap);
         self.pane.transcript_view_anchor = self.pane.transcript_view_anchor.map(|(index, row)| {
             remap(index).map_or((index.saturating_sub(1), 0), |index| (index, row))

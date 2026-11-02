@@ -184,6 +184,174 @@ fn uncommitted_tails_are_discarded_on_output_limit_settle_and_overflow_fold() {
     );
 }
 
+fn model_kind(event: plakous::model::ModelEvent) -> serde_json::Value {
+    serde_json::to_value(plakous::agent::AgentEventKind::model(event)).unwrap()
+}
+
+fn text_delta(text: &str) -> serde_json::Value {
+    model_kind(plakous::model::ModelEvent::TextDelta(
+        plakous::model::TextDelta::new(plakous::model::OutputLocation::new(0, 0), text.as_bytes()),
+    ))
+}
+
+fn response_completed() -> serde_json::Value {
+    use plakous::model::{Digest, DigestDomain, FinishDetails, FinishReason, ModelResponse};
+    let response = ModelResponse::new(
+        Vec::new(),
+        FinishDetails::new(FinishReason::Stop, None),
+        None,
+        None,
+        Digest::sha256(DigestDomain::RequestPlan, 1, &[b"plan"]).unwrap(),
+    );
+    model_kind(plakous::model::ModelEvent::ResponseCompleted(response))
+}
+
+/// `ResponseCompleted` must not mark the tail settled. A later discardable
+/// settle still drops it; a kept settle does not.
+#[test]
+fn discardable_settle_drops_the_tail_a_completed_response_streamed() {
+    for discardable in [true, false] {
+        let mut assistant = String::from("kept");
+        let mut projection = TurnProjection::<TestExtension> {
+            settled_assistant_len: 4,
+            ..TurnProjection::default()
+        };
+        let _ = apply_kind(text_delta(" tail"), &mut assistant, &mut projection);
+        assert_eq!(assistant, "kept tail");
+        let completed = apply_kind(response_completed(), &mut assistant, &mut projection);
+        assert_eq!(projection.settled_assistant_len, 4);
+        assert!(
+            completed
+                .iter()
+                .all(|event| !matches!(event, HostEvent::OutputDiscarded { .. }))
+        );
+        let settled = apply_kind(
+            serde_json::json!({"ResponseSettled": {"discardable": discardable}}),
+            &mut assistant,
+            &mut projection,
+        );
+        if discardable {
+            assert_eq!(assistant, "kept");
+            assert!(
+                settled
+                    .iter()
+                    .any(|event| matches!(event, HostEvent::OutputDiscarded { dim: true })),
+                "{settled:?}"
+            );
+        } else {
+            assert_eq!(assistant, "kept tail");
+            assert!(
+                settled
+                    .iter()
+                    .all(|event| !matches!(event, HostEvent::OutputDiscarded { .. }))
+            );
+        }
+    }
+}
+
+fn apply_with(
+    kind: serde_json::Value,
+    assistant: &mut String,
+    delta_buf: &mut String,
+    last_flush: &mut Instant,
+    projection: &mut TurnProjection<TestExtension>,
+    events: &Sender,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let roots = crate::agent::ProductStateRoots::with_doubles(
+        dir.path().to_path_buf(),
+        dir.path().join("state"),
+    );
+    let rows = test_kit::MemoryRows::new();
+    let store = crate::session_store::MemoryStore::new();
+    let home = SessionHome::new(dir.path().join("sessions"));
+    let mut session = SessionRecord::new(dir.path().to_path_buf());
+    apply_event(
+        &agent_event(kind),
+        &roots,
+        &rows,
+        &store,
+        &home,
+        &mut session,
+        events,
+        assistant,
+        delta_buf,
+        last_flush,
+        &mut ToolSubjectStash::new(),
+        projection,
+        None,
+        "test",
+        &mut TreeSnapshotPush::default(),
+        &mut false,
+        &mut 0,
+    );
+}
+
+/// A scheduled compaction after a kept response drops nothing, so the answer
+/// row the transcript already holds survives.
+#[test]
+fn scheduled_compaction_after_a_kept_response_sends_no_discard() {
+    use plakous_host_protocol::views::PresentationSnapshot;
+    use plakous_host_protocol::views::transcript::TranscriptScope;
+    let (events, rx) = host_event_sink();
+    assert!(events.replace_transcript(PresentationSnapshot {
+        scope: TranscriptScope::Root,
+        ..PresentationSnapshot::default()
+    }));
+    assert!(events.send(ContentEvent::ModelRequestStarted));
+    let mut assistant = String::new();
+    let mut delta_buf = String::new();
+    let mut last_flush = Instant::now();
+    let mut projection = TurnProjection::<TestExtension>::default();
+    apply_with(
+        text_delta("answer"),
+        &mut assistant,
+        &mut delta_buf,
+        &mut last_flush,
+        &mut projection,
+        &events,
+    );
+    apply_with(
+        serde_json::json!({"ResponseSettled": {"discardable": false}}),
+        &mut assistant,
+        &mut delta_buf,
+        &mut last_flush,
+        &mut projection,
+        &events,
+    );
+    assert_eq!(assistant, "answer");
+    assert_eq!(projection.settled_assistant_len, assistant.len());
+    let workflow: Vec<u8> = std::iter::repeat_n(0x5a, 32).collect();
+    apply_with(
+        serde_json::json!({"CompactionStarted": {"workflow_id": workflow, "reason": "scheduled"}}),
+        &mut assistant,
+        &mut delta_buf,
+        &mut last_flush,
+        &mut projection,
+        &events,
+    );
+    assert_eq!(assistant, "answer");
+    let observed: Vec<_> = rx.try_iter().collect();
+    assert!(
+        observed
+            .iter()
+            .all(|event| !matches!(event, HostEvent::OutputDiscarded { .. })),
+        "{observed:?}"
+    );
+    let published: Vec<String> = observed
+        .iter()
+        .filter_map(|event| match event {
+            HostEvent::TranscriptPatch(patch) => Some(format!("{patch:?}")),
+            HostEvent::PresentationSnapshot(snapshot) => Some(format!("{snapshot:?}")),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        published.iter().any(|text| text.contains("answer")),
+        "{published:?}"
+    );
+}
+
 #[test]
 fn live_tool_subject_redaction_is_idempotent() {
     let subject = live_tool_subject("GITHUB_TOKEN=ghp_abcdefghijklmnopqrst gh pr list");

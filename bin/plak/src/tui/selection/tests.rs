@@ -24,6 +24,38 @@ fn wide_and_combining_graphemes_are_never_split() {
     assert_eq!(slice_cells("a\u{200B}bc", 2, 2), "c");
 }
 
+/// A zero-width grapheme does not take a highlight column. Column 2 of
+/// `a\u{200B}bc` is `c`, the same cell the copy returns.
+#[test]
+fn zero_width_grapheme_highlights_the_cell_it_does_not_advance() {
+    let line = "a\u{200B}bc";
+    let area = Rect::new(0, 0, 8, 1);
+    let mut buffer = Buffer::empty(area);
+    let mut column = 0u16;
+    for ch in line.chars() {
+        let width = ch.width().unwrap_or(0);
+        if width == 0 {
+            continue;
+        }
+        buffer[(column, 0)].set_symbol(&ch.to_string());
+        column = column.saturating_add(u16::try_from(width).unwrap_or(1));
+    }
+    let style = selection_style();
+    let mut selection = TranscriptSelection::default();
+    selection.begin(ContentPosition { row: 0, column: 2 }, 8, 1);
+    assert!(selection.drag(ContentPosition { row: 0, column: 2 }));
+    selection.render(&mut buffer, area, 0, &[line.into()], &[], style);
+    let cell = &buffer[(2, 0)];
+    assert_eq!(cell.symbol(), "c");
+    assert_eq!(Some(cell.fg), style.fg);
+    assert_eq!(Some(cell.bg), style.bg);
+    assert_ne!(Some(buffer[(1, 0)].fg), style.fg);
+    let copied = selection
+        .take_text(1, &[line.into()], &[], &mut |_| None)
+        .unwrap_or_default();
+    assert_eq!(copied, "c");
+}
+
 #[test]
 fn width_change_clears_but_same_width_redraw_preserves_anchor() {
     let mut selection = TranscriptSelection::default();

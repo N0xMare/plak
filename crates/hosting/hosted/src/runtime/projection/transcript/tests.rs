@@ -649,6 +649,56 @@ fn output_discarded_keeps_text_of_an_earlier_model_call_in_the_turn() {
     );
 }
 
+/// A kept answer is published, then a scheduled compaction's row arrives.
+/// The compaction does not discard that request, so the answer stays.
+#[test]
+fn kept_answer_survives_scheduled_compaction() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let scope = TranscriptScope::Root;
+    let mut publisher = Presentations::default();
+    publisher.snapshot(snapshot(scope.clone(), &[]), &sink);
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::ModelRequestStarted,
+        &sink
+    ));
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::AssistantDelta("answer".into()),
+        &sink,
+    ));
+    assert!(publisher.observe(scope.clone(), &HostEvent::<Core>::AssistantDone, &sink));
+    let compact = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+        call_id: "compact-1".into(),
+        name: "compact".into(),
+        exposed_name: None,
+        kind: plakous_host_protocol::views::ActivityKind::Tool,
+        state: "running".into(),
+        subject: None,
+        detail: None,
+        parent_call_id: None,
+        cell_id: None,
+        wait: None,
+        started_at_ms: Some(10),
+        finished_at_ms: None,
+    }));
+    assert!(publisher.observe(scope.clone(), &compact, &sink));
+    let _ = receiver.try_iter().count();
+    assert!(publisher.resync(&scope, &sink));
+    let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
+        panic!("resync");
+    };
+    let texts: Vec<String> = resync
+        .items
+        .iter()
+        .map(|item| format!("{:?}", item.row))
+        .collect();
+    assert!(
+        texts.iter().any(|text| text.contains("answer")),
+        "{texts:?}"
+    );
+}
+
 #[test]
 fn e2probe_retry_keeps_text_of_an_earlier_model_call_in_the_turn() {
     let (sink, receiver) = observation_channel::<Core>();

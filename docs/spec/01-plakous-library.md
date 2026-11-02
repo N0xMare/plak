@@ -2871,8 +2871,8 @@ context contracts and prepared records bind these semantics; wire, accounting,
 authentication, and persistence codecs keep their existing revisions. The
 output-limit revocation, the context-window failure, and the programmatic
 reconciliation cut keep these identities and the Chat projection identities:
-they admit only terminals that earlier failed the stream or an empty Length that is never
-committed to history.
+they only reject terminals or admit an empty Length that is never committed;
+replay ignores stop reasons.
 
 This local admission guarantee does not promise that the service will accept
 unchanged context. Anthropic's streaming-refusal guidance calls for resetting or
