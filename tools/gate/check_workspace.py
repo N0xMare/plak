@@ -23,6 +23,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import io
+import json
 import os
 import re
 import shlex
@@ -40,6 +41,7 @@ from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import cargo_key  # noqa: E402
 import vcs_listing  # noqa: E402
 
 from plakous_policy import (  # noqa: E402
@@ -4099,18 +4101,30 @@ def symbol_tool() -> list[str] | None:
     return None
 
 
+def cargo_target_dir(root: Path) -> Path:
+    """The Cargo target directory the gate is using.
+
+    `CARGO_TARGET_DIR` when set, otherwise `root / "target"`. An empty value
+    is unset. A relative value is under `root`.
+    """
+    target = Path(os.environ.get("CARGO_TARGET_DIR") or "target")
+    if not target.is_absolute():
+        target = root / target
+    return target
+
+
 def built_product_artifacts(root: Path) -> dict[str, Path]:
     """Return the release product executables, which is the product build.
 
-    Only `target/release` counts: `target/debug` holds gate builds of a
-    different feature selection (`--all-features`, including `test-hooks`).
+    Only `<target>/release` counts, where `<target>` is `CARGO_TARGET_DIR`
+    or `root / "target"`. `target/debug` holds gate builds of a different
+    feature selection (`--all-features`, including `test-hooks`).
     The product parent is `cargo build --release --locked -p plak`, whose facade
     features are the explicit set `bin/plak` declares.
     """
+    release = cargo_target_dir(root) / "release"
     return {
-        name: candidate
-        for name in PRODUCT_EXECUTABLES
-        if (candidate := root / "target" / "release" / name).is_file()
+        name: candidate for name in PRODUCT_EXECUTABLES if (candidate := release / name).is_file()
     }
 
 
@@ -4573,6 +4587,7 @@ def load_publish_shape() -> Any:
     import importlib.util
 
     path = ROOT / "tools/release/publish_shape.py"
+    _note_file(path)
     spec = importlib.util.spec_from_file_location("publish_shape", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {path}")
@@ -4597,12 +4612,6 @@ def validate_workspace_excludes(
             f"workspace excludes unsupported nested packages: {sorted(unknown_excludes)!r}"
         )
     return errors
-
-
-def main() -> int:
-    """Run all workspace policy checks."""
-    with source_scan():
-        return _check_workspace()
 
 
 def _check_workspace() -> int:
@@ -5041,11 +5050,364 @@ def _check_workspace() -> int:
 
     layers = {layer: len(workspace.in_layers(layer)) for layer in policy.layers}
     populated = ", ".join(f"{layer}={count}" for layer, count in layers.items() if count)
-    print(
+    line = (
         f"validated {len(packages)} workspace packages across layers ({populated}), "
         f"dependency boundaries, and the plak/plakous-js-host build split; {linkage_note}"
     )
+    global _success_line
+    _success_line = line
+    print(line)
     return 0
+
+
+# Successful runs only. A miss, a failure, or any unreadable input recomputes.
+_success_line: str | None = None
+_CACHE_NAME = "workspace-check-cache.json"
+_CacheDoubt = cargo_key.CacheDoubt
+# Local modules whose bytes decide the check. A change misses, even if the tree does not.
+_CHECKER_SOURCES = (
+    Path(__file__).resolve(),
+    Path(__file__).resolve().parent / "plakous_policy.py",
+    Path(__file__).resolve().parent / "vcs_listing.py",
+    Path(__file__).resolve().parent / "cargo_key.py",
+)
+
+
+class _ReadLog:
+    """Paths the checker actually touched, with the identity observed at that moment.
+
+    A path observed twice with different identities is `unstable`, and a walk
+    that could not read a directory is a doubt; neither can be recorded.
+    """
+
+    def __init__(self) -> None:
+        self.files: dict[str, dict[str, object]] = {}
+        self.dirs: dict[str, list[list[object]]] = {}
+        self.probes: dict[str, dict[str, object]] = {}
+        self.listings: list[list[str]] = []
+        self.doubt = False
+
+
+_read_log: _ReadLog | None = None
+_originals: dict[tuple[object, str], Any] = {}
+# The only Path methods a receipt may name. Replay calls nothing else.
+_PROBES = ("exists", "is_file", "is_dir", "is_symlink")
+# Values `path_identity` and `directory_listing` never return, so they never replay.
+_UNREADABLE_FILE: dict[str, object] = {"state": "unreadable"}
+_UNSTABLE_FILE: dict[str, object] = {"state": "unstable"}
+_UNREADABLE_DIR: list[list[object]] = [["unreadable"]]
+_UNSTABLE_DIR: list[list[object]] = [["unstable"]]
+
+
+def workspace_cache_path(root: Path = ROOT) -> Path:
+    """The result cache beside the gate target, same place as the feature-closure cache."""
+    return cargo_target_dir(root) / _CACHE_NAME
+
+
+def _abs(path: Path | str) -> str:
+    return os.path.abspath(path)
+
+
+def _record(table: dict[str, Any], key: str, value: Any, unstable: Any) -> None:
+    if key in table and table[key] != value:
+        value = unstable
+    table[key] = value
+
+
+def _note_file(path: Path) -> None:
+    """Record a file before it is read, so a read that raises still records absence."""
+    if _read_log is None:
+        return
+    key = _abs(path)
+    try:
+        identity = cargo_key.path_identity(Path(key))
+    except cargo_key.CacheDoubt:
+        identity = _UNREADABLE_FILE
+    _record(_read_log.files, key, identity, _UNSTABLE_FILE)
+
+
+def _note_dir(path: str, seen: list[str] | None = None) -> None:
+    """Record a directory listing; `seen` is what the walk itself listed there."""
+    if _read_log is None:
+        return
+    key = _abs(path)
+    try:
+        listing = cargo_key.directory_listing(Path(key))
+    except cargo_key.CacheDoubt:
+        listing = _UNREADABLE_DIR
+    if seen is not None and [entry[0] for entry in listing] != seen:
+        listing = _UNSTABLE_DIR
+    _record(_read_log.dirs, key, listing, _UNSTABLE_DIR)
+
+
+def _note_probe(kind: str, path: Path, result: bool) -> None:
+    if _read_log is None:
+        return
+    key = _abs(path)
+    try:
+        identity = cargo_key.path_identity(Path(key))
+    except cargo_key.CacheDoubt:
+        identity = _UNREADABLE_FILE
+    unstable = {"result": result, "identity": _UNSTABLE_FILE}
+    _record(_read_log.probes, f"{kind}\0{key}", {"result": result, "identity": identity}, unstable)
+
+
+def _patched(owner: object, name: str, wrapper: Any) -> None:
+    _originals[(owner, name)] = getattr(owner, name)
+    setattr(owner, name, wrapper)
+
+
+def _install_read_log(log: _ReadLog) -> None:
+    global _read_log
+    _read_log = log
+
+    def walk(top: Any, topdown: bool = True, onerror: Any = None, followlinks: bool = False) -> Any:
+        def unreadable(error: OSError) -> None:
+            log.doubt = True
+            if onerror is not None:
+                onerror(error)
+
+        original = _originals[(os, "walk")]
+        _note_dir(top)
+        for dirpath, dirnames, filenames in original(top, topdown, unreadable, followlinks):
+            _note_dir(dirpath, sorted([*dirnames, *filenames]))
+            yield dirpath, dirnames, filenames
+
+    # Each wrapper records the path itself and reads through the unwrapped open,
+    # so no read depends on another wrapper to be recorded.
+    def read_bytes(self: Path) -> bytes:
+        _note_file(self)
+        with _originals[(Path, "open")](self, "rb") as stream:
+            return stream.read()
+
+    def read_text(
+        self: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> str:
+        _note_file(self)
+        encoding = io.text_encoding(encoding)
+        with _originals[(Path, "open")](
+            self, "r", encoding=encoding, errors=errors, newline=newline
+        ) as stream:
+            return stream.read()
+
+    def open_path(self: Path, *args: Any, **kwargs: Any) -> Any:
+        _note_file(self)
+        return _originals[(Path, "open")](self, *args, **kwargs)
+
+    def probe(kind: str) -> Any:
+        original = getattr(Path, kind)
+
+        def wrapped(self: Path, *args: Any, **kwargs: Any) -> bool:
+            result = original(self, *args, **kwargs)
+            _note_probe(kind, self, bool(result))
+            return result
+
+        return wrapped
+
+    def listed(root: Path) -> list[str]:
+        result = _originals[(vcs_listing, "listed_files")](root)
+        log.listings.append(list(result))
+        return result
+
+    _patched(os, "walk", walk)
+    _patched(Path, "read_bytes", read_bytes)
+    _patched(Path, "read_text", read_text)
+    _patched(Path, "open", open_path)
+    _patched(vcs_listing, "listed_files", listed)
+    for kind in _PROBES:
+        _patched(Path, kind, probe(kind))
+
+
+def _remove_read_log() -> None:
+    global _read_log
+    for (owner, name), original in _originals.items():
+        setattr(owner, name, original)
+    _originals.clear()
+    _read_log = None
+
+
+@contextmanager
+def recording_reads() -> Iterator[_ReadLog]:
+    """Record file reads, directory walks and existence probes for one check."""
+    log = _ReadLog()
+    try:
+        _install_read_log(log)
+        yield log
+    finally:
+        _remove_read_log()
+
+
+def _observation(log: _ReadLog) -> dict[str, object]:
+    return {
+        "files": dict(log.files),
+        "dirs": dict(log.dirs),
+        "probes": dict(log.probes),
+        "listings": [list(listing) for listing in log.listings],
+    }
+
+
+def replay_observation(stored: dict[str, object], root: Path) -> dict[str, object]:
+    """Re-fingerprint exactly the paths a previous run recorded.
+
+    Replay only lstats, reads, lists and probes with the four allowed kinds; a
+    receipt naming any other operation is a doubt.
+    """
+    files = stored.get("files")
+    dirs = stored.get("dirs")
+    probes = stored.get("probes")
+    listings = stored.get("listings")
+    if (
+        not isinstance(files, dict)
+        or not isinstance(dirs, dict)
+        or not isinstance(probes, dict)
+        or not isinstance(listings, list)
+    ):
+        raise _CacheDoubt("observation is not a record of files, directories, probes and listings")
+    replayed_probes: dict[str, dict[str, object]] = {}
+    for key in probes:
+        if not isinstance(key, str) or "\0" not in key:
+            raise _CacheDoubt("probe key is not kind and path")
+        kind, path = key.split("\0", 1)
+        if kind not in _PROBES:
+            raise _CacheDoubt(f"unknown probe {kind!r}")
+        replayed_probes[key] = {
+            "result": bool(getattr(Path(path), kind)()),
+            "identity": cargo_key.path_identity(Path(path)),
+        }
+    replayed_files = {path: cargo_key.path_identity(Path(path)) for path in files}
+    replayed_dirs = {path: cargo_key.directory_listing(Path(path)) for path in dirs}
+    replayed_listings = [vcs_listing.listed_files(root) for _entry in listings]
+    return {
+        "files": replayed_files,
+        "dirs": replayed_dirs,
+        "probes": replayed_probes,
+        "listings": replayed_listings,
+    }
+
+
+def global_cache_digest(root: Path = ROOT) -> str:
+    """Hash the inputs that are not discovered by watching the checker read."""
+    digest = hashlib.sha256()
+
+    def add(label: str, payload: bytes) -> None:
+        digest.update(label.encode())
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(payload).digest())
+
+    try:
+        cargo = subprocess.check_output(["cargo", "--version"], cwd=root, text=True)
+        rustc = subprocess.check_output(["rustc", "-vV"], cwd=root, text=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise _CacheDoubt(str(error)) from error
+    add("cargo", cargo.encode())
+    add("rustc", rustc.encode())
+    add("root", _abs(root).encode())
+    for name, value in cargo_key.tracked_env():
+        add(f"env:{name}", value.encode())
+    for path in _CHECKER_SOURCES:
+        add(f"checker:{path.name}", path.read_bytes())
+    for tool in ("llvm-nm", "nm"):
+        found = shutil.which(tool)
+        if found is None:
+            add(f"tool:{tool}", b"absent")
+            continue
+        add(
+            f"tool:{tool}",
+            json.dumps(cargo_key.path_identity(Path(found)), sort_keys=True).encode(),
+        )
+    for path in cargo_key.config_candidates(root):
+        add(f"config:{path}", json.dumps(cargo_key.path_identity(path), sort_keys=True).encode())
+    # Untracked and optional, it decides the hygiene check: present or absent is keyed here too.
+    hygiene = root / HYGIENE_PRIVATE_NAMES_FILE
+    add("hygiene", json.dumps(cargo_key.path_identity(hygiene), sort_keys=True).encode())
+    return digest.hexdigest()
+
+
+def _canonical(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _receipt_checksum(body: dict[str, object]) -> str:
+    return hashlib.sha256(_canonical(body)).hexdigest()
+
+
+def read_cached_success(root: Path, digest: str) -> str | None:
+    """Return the recorded line when the global key and the recorded reads still match."""
+    try:
+        payload = json.loads(workspace_cache_path(root).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        line = payload.get("line")
+        cached = payload.get("digest")
+        observation = payload.get("observation")
+        checksum = payload.get("checksum")
+        body = {"digest": cached, "line": line, "observation": observation}
+        if (
+            not isinstance(line, str)
+            or not line.startswith("validated ")
+            or cached != digest
+            or not isinstance(observation, dict)
+            or checksum != _receipt_checksum(body)
+            or replay_observation(observation, root) != observation
+        ):
+            return None
+        return line
+    except (OSError, json.JSONDecodeError, TypeError, UnicodeError, cargo_key.CacheDoubt):
+        return None
+
+
+def write_cached_success(
+    root: Path, digest: str, observation: dict[str, object], line: str
+) -> None:
+    """Record one successful run. A write failure leaves the checker result unchanged."""
+    if not line.startswith("validated "):
+        return
+    path = workspace_cache_path(root)
+    body: dict[str, object] = {"digest": digest, "line": line, "observation": observation}
+    payload = dict(body)
+    payload["checksum"] = _receipt_checksum(body)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        return
+
+
+def check_root(root: Path) -> int:
+    """Run the checks at `root`, skipping them when the recorded reads are unchanged."""
+    global _success_line
+    _success_line = None
+    try:
+        digest = global_cache_digest(root)
+    except _CacheDoubt:
+        digest = None
+    if digest is not None and (cached := read_cached_success(root, digest)) is not None:
+        print(cached)
+        return 0
+    with recording_reads() as log:
+        with source_scan():
+            code = _check_workspace()
+        observed = _observation(log)
+    if code == 0 and digest is not None and _success_line is not None and not log.doubt:
+        try:
+            if (
+                global_cache_digest(root) == digest
+                and replay_observation(observed, root) == observed
+            ):
+                write_cached_success(root, digest, observed, _success_line)
+        except _CacheDoubt:
+            pass
+    return code
+
+
+def main() -> int:
+    """Run the workspace checks, skipping them when the recorded reads are unchanged."""
+    return check_root(ROOT)
 
 
 if __name__ == "__main__":

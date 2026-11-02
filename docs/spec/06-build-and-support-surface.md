@@ -535,11 +535,53 @@ not only in the manifests. It lists the symbols of the `plak`,
 JavaScript worker contains QuickJS engine symbols, only the Python worker
 contains Monty interpreter or type-checking symbols, and that the three are
 separate files by digest.
+A successful run records that success line in
+`${CARGO_TARGET_DIR:-$ROOT/target}/workspace-check-cache.json`. The receipt
+holds a global digest, the success line, an observation and a checksum, and a
+later run prints the recorded line only when the digest and the observation
+still match. A failure is not recorded. A missing, truncated, non-object or
+checksum-mismatched receipt recomputes, as does any input that cannot be
+stated. No run is recorded when the global digest or any observed path changed
+before the run finished, when one path was observed with two identities during
+the run, or when a walk could not read a directory.
+
+The global digest is a SHA-256 over: `cargo --version`; `rustc -vV`; the
+absolute workspace root; every `CARGO_*` environment variable except
+`CARGO_TERM_COLOR`, `CARGO_TERM_PROGRESS_WHEN`, `CARGO_TERM_PROGRESS_WIDTH`,
+`CARGO_TERM_VERBOSE` and any credential variable (a name containing `TOKEN`,
+`CREDENTIAL`, `SECRET` or `PASSWORD`, such as `CARGO_REGISTRY_TOKEN`), plus
+`RUSTC`, `RUSTFLAGS` and `RUSTUP_TOOLCHAIN` (an unset variable is the empty
+string); the bytes of `tools/gate/check_workspace.py`, `plakous_policy.py`,
+`vcs_listing.py` and `cargo_key.py`; the identity of `llvm-nm` and of `nm` on
+`PATH`, or absence; the identity of `$CARGO_HOME/config.toml` and
+`$CARGO_HOME/config` (`~/.cargo` when `CARGO_HOME` is unset) together with
+every ancestor `.cargo/config.toml` and `.cargo/config` from the workspace root
+through `/`, present or absent; and the identity of
+`docs/local/hygiene-private-names.txt`, present or absent. The receipt stores
+only the digest, never an environment value.
+
+The observation is what that successful run actually touched. A file the run
+tried to read (bytes, text or an open in any mode) is recorded before the read,
+so a read that fails records the path as absent. It is keyed by its absolute
+path and an lstat identity: type, size, mtime and sha256. A symlink's identity
+is its own lstat type, size and mtime, its `readlink` text, and the identity of
+what it points to, following the chain to its end (more than 40 links is a
+doubt), so replacing a file with a symlink of the same bytes and mtime, or
+retargeting a link between identical files, is a miss. A directory `os.walk`
+entered is keyed by its sorted entry names, lstat types and, for a symlink, its
+target. An `exists`, `is_file`, `is_dir` or `is_symlink` probe is keyed by the
+kind, the path, the boolean result and the same identity. Each `listed_files`
+result is stored and compared by running the listing again. Lookup
+re-fingerprints exactly those paths with lstat, `readlink`, reads, directory
+listings and those four probes; a receipt naming any other operation is a doubt.
+The checksum is SHA-256 of the canonical JSON of the digest, the success line
+and the observation.
 
 Two details make that check sound. Host-side adapters are not interpreters,
 so the check matches the engine's v0-mangled crate names and C entry points
 rather than a substring. And it reads only
-`target/release`, the product build: gate runs build `target/debug` with
+`${CARGO_TARGET_DIR:-$ROOT/target}/release`, the product build: gate runs
+build `target/debug` with
 `--all-features`, a different feature selection. Without a release build the
 checker says the linkage was not checked rather than passing quietly.
 

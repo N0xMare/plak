@@ -221,10 +221,13 @@ class StaleReleaseBuild(unittest.TestCase):
             release.mkdir(parents=True)
             for name in workspace_policy.PRODUCT_EXECUTABLES:
                 (release / name).write_bytes(name.encode())
-            with patch.object(
-                workspace_policy,
-                "newest_tracked_source_mtime",
-                lambda _root: 2_000_000_000.0,
+            with (
+                patch.dict(os.environ, {"CARGO_TARGET_DIR": str(root / "target")}),
+                patch.object(
+                    workspace_policy,
+                    "newest_tracked_source_mtime",
+                    lambda _root: 2_000_000_000.0,
+                ),
             ):
                 errors, note = workspace_policy.artifact_linkage_errors(root)
         self.assertEqual(errors, [])

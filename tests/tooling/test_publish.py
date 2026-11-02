@@ -129,6 +129,7 @@ class PublishScriptTests(unittest.TestCase):
             "tools/release/prefetch_packages.py",
             "tools/release/gate_evidence.py",
             "tools/release/offline_first.py",
+            "tools/gate/cargo_key.py",
             "tools/gate/vcs_listing.py",
             "tools/gate/check_workspace.py",
             "tools/gate/plakous_policy.py",
