@@ -6,7 +6,7 @@ set working-directory := '../..'
 # Correctness is pinned in code (sha256 tables in rendered_prompts.rs /
 # rendered_lifecycle.rs); this target only writes the human-readable render.
 # Markdown files open with a harness-environment footprint (instructions + tools;
-# excludes enrolled AGENTS.md and the scenario user/assignment message).
+# excludes enrolled AGENTS.md, the skills listing and the scenario user/assignment message).
 [doc("render prompt, wire and lifecycle artifacts into target/prompt-renders")]
 render:
     PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_

@@ -396,7 +396,7 @@ Notes worth knowing:
 - `/agents <profile>` asks whether to use that profile in this session now or
   set it as the default for new sessions. The name can be a profile id or one of the short
   names the list shows (`codex`, `claude`, `grok`, ...).
-- `/fork` keeps the current binding and the conversation, and recompiles this session's current configuration: your `AGENTS.md` files as they are now, harness settings and tool presentation. If an `AGENTS.md` changed since this session started, the transcript names it. If this session's tools changed (for example a tool added or removed in configuration), `/fork` says `cannot fork: this session's tools changed; start a new session`. `/fork-then-compact` does that and then compacts only the new session.
+- `/fork` keeps the current binding and the conversation, and recompiles this session's current configuration: your `AGENTS.md` files and skills as they are now, harness settings and tool presentation. If an `AGENTS.md` or the skills listing changed since this session started, the transcript names it. If this session's tools changed (for example a tool added or removed in configuration), `/fork` says `cannot fork: this session's tools changed; start a new session`. `/fork-then-compact` does that and then compacts only the new session.
   During fork or Fork now, Esc offers **Stop operation**. Projection stops between committed pages; the source stays attached and the notice names any saved fork you can open with `/resume`.
   After a crash, an unstarted fork is withdrawn with `fork did not start; run /fork again`. An already-created fork stays available as its own session; reopening the source does not switch to it or rerun `/fork`.
 - Two aliases are accepted but are not extra commands: `/stop_all` for
@@ -639,7 +639,7 @@ confirmation pop-up: focus starts on Fork now, so `Enter` forks at once and
   session stays as it was and can be resumed later with its own cards. It needs
   an idle root with no running sub-agent and no queued prompt. If the session
   already runs that profile, nothing branches and the transcript says so. The
-  new session reads your `AGENTS.md` files as they are now; if you edited one
+  new session reads your `AGENTS.md` files and skills as they are now; if you edited one
   since this session started, the transcript names it (for example
   `AGENTS.md re-read for this branch: workspace root changed`), and so does the
   recovery that finishes a Fork now a crash interrupted. `/fork` and

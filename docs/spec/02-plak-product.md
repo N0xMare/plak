@@ -3701,7 +3701,7 @@ What the argument-taking ones do:
 | --- | --- |
 | `/resume` | bare opens the cwd-scoped picker; a uuid resumes exactly; any further word is refused and does nothing |
 | `/agents` | bare opens the Agents tab; `<profile>` resolves the name against the product's list (an exact id, then an alias the list shows) and asks whether to use that profile in this session now or set it as the default for new sessions |
-| `/fork` | takes no argument. Forks on the current binding with the source's history, recompiling the session's current configuration for the same target: the `AGENTS.md` files as they are now, harness settings and tool presentation (chapter 01 §5.6). A fork whose tool authority changed since the session started is refused with `cannot fork: this session's tools changed; start a new session`. When any `AGENTS.md` differs from the source's, the transcript note names each by scope as changed, added, or removed, also when the fork is saved without attaching. Recovery of an interrupted fork first reads its receipt before anything opens: a recorded fork becomes current; otherwise the source opens and the fork recompiles the same way, with the same note. A recovered fork that is refused outright (another target, changed tool authority, an operation published with other semantics, storage pressure) is abandoned: the session opens unchanged with the abandoned-fork note and the refusal, and does not retry it. A different profile is `/agents <profile>`. If the canonical fork lands but its session cannot attach, the fork is saved as its own resumable session, the workflow resolves, and this session stays attached and promptable; the note names the saved session. A stop before canonical dispatch leaves the exact source unchanged; a stop during successor projection says `fork stopped; saved as session X` and offers `/resume X` with the source still attached |
+| `/fork` | takes no argument. Forks on the current binding with the source's history, recompiling the session's current configuration for the same target: the `AGENTS.md` files and the skills listing as they are now, under the source's skills on or off rather than the live `skills.enabled` (§6.1.1), harness settings and tool presentation (chapter 01 §5.6). A fork whose tool authority changed since the session started is refused with `cannot fork: this session's tools changed; start a new session`. When any `AGENTS.md` or the skills listing differs from the source's, the transcript note names each by scope as changed, added, or removed (`AGENTS.md re-read for this branch: ...`, or `AGENTS.md and skills re-read for this branch: ...` when either side has a skills listing), also when the fork is saved without attaching. Recovery of an interrupted fork first reads its receipt before anything opens: a recorded fork becomes current; otherwise the source opens and the fork recompiles the same way, with the same note. A recovered fork that is refused outright (another target, changed tool authority, an operation published with other semantics, storage pressure) is abandoned: the session opens unchanged with the abandoned-fork note and the refusal, and does not retry it. A different profile is `/agents <profile>`. If the canonical fork lands but its session cannot attach, the fork is saved as its own resumable session, the workflow resolves, and this session stays attached and promptable; the note names the saved session. A stop before canonical dispatch leaves the exact source unchanged; a stop during successor projection says `fork stopped; saved as session X` and offers `/resume X` with the source still attached |
 | `/fork-then-compact` | takes no argument. Forks on the current binding, then compacts only the new session. If compaction fails, the fork stands and `/compact` retries it |
 | `/stop-all` | the whole-tree verb (chapter 03), sent only from the destructive confirmation pop-up (§5.7) |
 
@@ -5320,9 +5320,10 @@ returns to the transcript:
   keeps its own tree, epoch, and cards, and reopens with exactly the tools it
   sealed. This holds when the root tuple is unchanged and only the cards
   differ. The branch recompiles for its target, so it is built from the
-  `AGENTS.md` files as they are now (chapter 01 §5.7); when any differ from the
-  source's, a transcript note names each one by scope (`global`, `workspace
-  root`, `nested directory`) as changed, added, or removed. Recovery that
+  `AGENTS.md` files and the skills listing as they are now (chapter 01 §5.7,
+  §6.1.1); when any differ from the source's, a transcript note names each one
+  by scope (`global`, `workspace root`, `nested directory`, `skills listing`)
+  as changed, added, or removed. Recovery that
   completes an interrupted Fork now after a crash recompiles the same way and
   prints the same note. `/fork` and `/fork-then-compact` land the same way on
   the current binding (see the `/fork` command). Exact reopen and `/resume` keep the sources a
@@ -5487,7 +5488,8 @@ Plakous context projection:
   it is not, they stack so a cell is never clipped.
 - A legend of one row per occupying category under `Estimated usage by
   category`: core system prompt, tool definitions, auto-loaded instruction
-  files (`AGENTS.md`) when enrolled, messages, and reasoning replay when present.
+  files (`AGENTS.md`, and the skills listing in the same row) when enrolled,
+  messages, and reasoning replay when present.
   **Every occupying category is an estimate and is labelled `est.`**, because
   no provider reports per-part token counts: the host converts the prepared
   request body's measured byte parts by four. Envelope JSON (`model`,
@@ -6189,7 +6191,101 @@ A first turn is built in one fixed order, and each layer has one owner:
    tools and host facts earn one. These contributions are owned by
    `plakous-prompts`; the tools are owned by `plakous-recursive-subagents`.
 5. **Enrolled `AGENTS.md`**, identified separately as a context source.
-6. **The user or assignment message.**
+6. **The skills listing**, one context source (`plak.skills.v1`) after the
+   `AGENTS.md` files, only when skills were found (§6.1.1).
+7. **The user or assignment message.**
+
+#### 6.1.1 Agent Skills
+
+A skill is a directory `<root>/<name>/SKILL.md` in the Agent Skills format.
+With `skills.enabled` (chapter 07, default true) a new construction discovers
+`<workspace root>/.agents/skills` and then `~/.agents/skills`; nothing else
+under `.agents/` is read. The project root is admitted only when its canonical
+path stays inside the canonical workspace, and nothing in it may be reached
+through a link: a linked skill directory or `SKILL.md` there is refused, so
+every project path listed is one the workspace read opens. In the user root a
+link may point anywhere inside that root, never out of it. Each root's entry
+names are sorted in byte order, dot entries and plain files are skipped, and
+the first 256 are examined. A skill is listed when its `SKILL.md` is a regular
+file (never opened if it is anything else, so a FIFO cannot block), is UTF-8,
+is at most 256 KiB (so every listed skill is loadable), and opens with a
+`---` front matter block, closed within its first 64 KiB by
+`---` or `...` (trailing whitespace allowed on either fence), whose `name`
+matches the directory name (1-64 characters of `a-z`, `0-9` and `-`, not
+starting or ending with `-` and without `--`) and whose `description` is
+non-empty and at most 1,024 characters. Discovery reads only the front matter.
+A skill whose front matter sets `disable-model-invocation` true is neither
+listed nor loadable, and is not reported; the value is one of the YAML 1.2
+core booleans `true`, `True`, `TRUE`, `false`, `False`, `FALSE` (`yes`, `no`
+and other words refuse the skill). The front matter subset is
+top-level `key: value` scalars, the key optionally quoted: plain (continuation
+lines folded; `#` after a space or tab starts a comment), single- or
+double-quoted on one line with an optional trailing comment (double quotes
+take `\n`, `\t`, `\r`, `\0`, `\"`, `\\`, `\/` and `\uXXXX`), and `|` / `>` blocks
+with an optional chomping or indentation indicator; empty, `~` and `null` are
+absent. Other keys and their nested values are ignored, and anything else in
+`name`, `description` or `disable-model-invocation` refuses that skill. A
+description is listed on one line, its whitespace collapsed. The project root
+wins a name both roots define. At most 64 skills are listed; once the listing
+is full the remaining entries are counted, not read, and the notice names the
+rest of that root and the later roots that were not read. Entries stop at
+16 KiB with a closing `N additional skill(s) omitted from this bounded skills
+list.` line; a skill cut there is not loadable either. Skills a new
+construction did not list are reported as one Session notice (`skills not
+listed: ...`), shown once per root session however many of its spawns and
+forks raise the same one, and never fail the session; a missing root is
+silent, and an exact reopen or compaction reports nothing.
+
+Discovery runs when a node's tools are built. The listing is rendered for the
+node's family and enrolled as an instruction source exactly like `AGENTS.md`:
+an exact reopen, `/resume` and `/reload` keep the listing the session was
+compiled with; a new session, a child spawn, `/fork`, `/fork-then-compact` and
+a recompiling rebind read the roots again, and the fork note names `skills
+listing` as changed, added or removed.
+
+Whether a session's skills are on is frozen with it, as whether its sealed
+registry holds the `Skill` executor (read back without opening the session;
+nothing else is persisted). While they are on, every family's node registers
+`Skill`, and only a Claude-vocabulary node presents it (§6.3); a presentation
+that omits it leaves the canonical executor bindings unchanged (chapter 01
+§3), so tool authority never moves with the vocabulary. The live
+`skills.enabled` decides it only for a new session, a child spawn and
+`/clear`. Every other construction follows the session:
+
+- an exact reopen, `/resume`, `/reload` and a compaction carry exactly the
+  sealed `Skill` and listing, and give the read tool the user root only when
+  the session froze a listing or the tool;
+- a fork (`/fork`, the fork of `/fork-then-compact`, and a fork recompiled
+  on recovery) and a rebind or switch successor (`/rebind`, `/agents
+  <profile>`, the Agents tab's **Fork now**), whatever account, model, family
+  or composition it moves to, inherits the source's on or off and discovers
+  the roots again under it for its own family's listing.
+
+A session made before skills existed, or with them off, therefore never
+gains `Skill`: it reopens, forks and switches with its old tools after
+skills are turned on, and one made with them keeps `Skill` after they are
+turned off, including across a switch to another family and back. A fork
+whose tools would still change refuses with `cannot fork: this session's
+tools changed; start a new session`, and a switch with `cannot switch: this
+session's tools would change; start a new session on that model` and the
+start-fresh remedy; the source stays attached. A skill's own
+files are not frozen: they are read when used.
+
+Each family gets its own client's wording, verified against the installed
+clients and their source:
+
+| Family | Listing | How a skill is read |
+| --- | --- | --- |
+| Codex (Codex OAuth, OpenAI API) | Codex CLI's `<skills_instructions>` catalog: `## Skills`, the host intro, `### Skill roots` (`` - `r0` = `<root>` ``), `### Available skills` (`- <name>: <description> (file: r0/<name>/SKILL.md)`) and the host `### How to use skills`, vendored from `codex-rs/ext/skills` | through the shell, as Codex CLI does |
+| Claude (Claude OAuth, Anthropic API) | Claude Code's `The following skills are available for use with the Skill tool:` then `- <name>: <description>` lines | the `Skill` tool (§6.3), then `Read` for the files it references |
+| Grok (SuperGrok OAuth, xAI API) | grok-build's `The following skills are available for use:` then `- <name>: <description>` and `  Absolute path: <path>`, plus one Plak sentence that `read_file` reads a listed skill's files | `read_file` at the absolute path |
+| pi (OpenRouter) | pi's `<skills>` section: its three sentences and the `<available_skills>` XML (`<name>`, `<description>`, `<location>`) | `read` |
+| Typed Python SDK | the pi section with pi's wording for a reader reached through another tool | `ctx.read` |
+
+Project skill files are workspace files. Files under the user root are
+readable with the family's read tool even outside the workspace (chapter 04
+§2.1); the read descriptions are unchanged, and the listing is where the model
+learns that its paths are readable.
 
 ### 6.2 The identity tail and the working agreements
 
@@ -6499,6 +6595,32 @@ and Anthropic API `WebSearch`, `WebFetch`; SuperGrok and xAI API
 `web_search`, `x_search`; Codex, OpenAI API and OpenRouter `web_search`.
 Their results begin with the untrusted-data line and end with the sources
 list; the row's presentation subject is the query, or the fetched host.
+
+A Claude-vocabulary node (Claude OAuth and the Anthropic API; Direct, js-ptc
+and py-ptc, not the typed SDK) also presents Claude Code's `Skill` tool,
+appended last after the topology and planned tools, whether or not any skill
+was found, while the session's skills are on (§6.1.1). Every other node of
+such a session registers the same executor without presenting it, so a
+switch between families keeps the session's tools; a skill added later never
+changes them. Its schema is Claude Code's (`skill`, required: "The name of a skill
+from the available-skills list. Do not guess names."; `args`, optional:
+"Optional arguments for the skill"); its description is Claude Code's,
+limited to what Plak does (no forked or background skills, no plugin,
+directory-scoped or slash names). A call loads only a skill the node's
+rendered listing names, from the directory discovery found it in (a skill the
+16 KiB bound cut is not loadable): an exact reopen keeps the skills whose
+current listing line equals the frozen one. Its
+`SKILL.md` is read and validated again at the call (at most 256 KiB, the
+same rules as discovery). It returns `Launching skill: <name>`, a blank line,
+`Base directory for this skill: <dir>`, a blank line and the body after its
+front matter, then `ARGUMENTS: <args>` when arguments were given. A name the
+listing does not name (unlisted, shadowed, created later) is a definite
+unsuccessful result `Unknown skill: <name>`, and a listed one that is no
+longer valid `Unknown skill: <name> (<reason>)`; a result over 200 KiB is
+refused with the remedy to read `SKILL.md` with `Read` in pages. The tool is
+read-only and parallel, and its row's presentation subject is the skill
+name. Adding it rotates no profile id (`.subagents.v1` follows only tools
+other than `Skill`).
 
 Native Claude coding requests use 128,000 as the output ceiling and product
 bound for every enrolled row (`claude-sonnet-5`, `claude-sonnet-5-5`,
@@ -6889,8 +7011,11 @@ observations are not persisted.
 
 The **harness environment** of a route is the dialect costume plus the family,
 product, and PTC instruction text plus the compact `tools[]` JSON. It excludes
-the enrolled `AGENTS.md` and the user or assignment message, because those are
-the operator's bytes and the assignment's bytes rather than the harness's.
+the enrolled `AGENTS.md`, the skills listing and the user or assignment
+message, because those are the operator's bytes and the assignment's bytes
+rather than the harness's. Claude's `Skill` tool is in `tools[]` and counts.
+The render fixture enrolls one project and one user skill, so every route's
+render shows its family's listing.
 
 Token figures are UTF-8 bytes divided by four; the workspace carries no
 tiktoken-compatible tokenizer, and that method is printed on every render

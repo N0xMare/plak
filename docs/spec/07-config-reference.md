@@ -165,10 +165,10 @@ remain unchanged. Only explicit configuration actions (including Settings and
 profile application) publish configuration changes; an incomplete bind cannot
 silently clear `[root] agent`.
 
-Ten key sections, in render order: `[root] [roster] [orchestration] [turn]
-[jobs] [api] [tui] [compaction] [telemetry] [mcp]`, plus two families of named
-tables, `[tools.<name>]` (§3.4) and `[mcp_servers.<id>]` (§3.5), twelve in
-all. Any other section is an error. The two families are not `plak config set`
+Eleven key sections, in render order: `[root] [roster] [orchestration] [turn]
+[jobs] [api] [tui] [compaction] [skills] [telemetry] [mcp]`, plus two families
+of named tables, `[tools.<name>]` (§3.4) and `[mcp_servers.<id>]` (§3.5),
+thirteen in all. Any other section is an error. The two families are not `plak config set`
 keys: they are authored in the file, a save leaves them exactly as written, and
 `plak config show` prints their canonical rendering after the keys.
 
@@ -202,6 +202,7 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 | `tui.reduced_motion` | bool | `false` | — | Suppress the spinner, the pulse and camera easing. |
 | `tui.reload_requests` | bool | `false` | true or false; home-scoped | Let this user's own processes, including an agent's shell, ask a running interactive session to reload onto the installed build (plak session reload <session> --expect-binary <id>) at its next idle boundary. Takes effect when a session next attaches. |
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
+| `skills.enabled` | bool | `true` | true or false | Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills) when a session is constructed, list them in its instructions, let its read tool read files under ~/.agents/skills, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |

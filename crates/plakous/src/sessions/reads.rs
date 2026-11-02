@@ -3,8 +3,8 @@ use super::{
     OutputBoundDisposition, RuntimeLifecycle, RuntimeWorkingRoot, SessionCallDetailOutcome,
     SessionHistoryPageOutcome, SessionHistoryPageRequest, SessionLocator, SessionTranscriptSource,
     TurnId, call_detail, checkpoint_instruction_sources, checkpoint_job_config,
-    committed_compaction_facts, history_page_preflight, project_history_page, runtime_error,
-    store_error,
+    checkpoint_registers_tool, committed_compaction_facts, history_page_preflight,
+    project_history_page, runtime_error, store_error,
 };
 #[cfg(feature = "sessions-sqlite")]
 use {
@@ -207,6 +207,28 @@ impl AgentSessions {
         let exact = self.load_exact(locator).await?;
         checkpoint_instruction_sources(&exact.checkpoint)
             .map_err(|error| runtime_error(&error).for_session(locator.session_id))
+    }
+
+    /// Whether the session at this exact locator froze a tool registration
+    /// named `name`, and the instruction sources it was compiled from, from
+    /// one exact load and without opening it. A host whose optional tools
+    /// depend on a live setting reads this before an exact reopen, so the
+    /// reopen rebuilds exactly the tools the session sealed.
+    ///
+    /// # Errors
+    /// Returns typed lookup, stale-locator, integrity, compatibility or backend
+    /// failures.
+    pub async fn created_tool_registration_and_sources(
+        &self,
+        locator: SessionLocator,
+        name: &plakous_model::ToolName,
+    ) -> Result<(bool, Vec<plakous_agent::ResolvedContextSourceFact>), AgentSessionsError> {
+        let exact = self.load_exact(locator).await?;
+        let registered = checkpoint_registers_tool(&exact.checkpoint, name)
+            .map_err(|error| runtime_error(&error).for_session(locator.session_id))?;
+        let sources = checkpoint_instruction_sources(&exact.checkpoint)
+            .map_err(|error| runtime_error(&error).for_session(locator.session_id))?;
+        Ok((registered, sources))
     }
 
     /// The per-request output bound the session at this locator was created with.

@@ -154,6 +154,10 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
     ),
     ("compaction", "Automatic transcript compaction."),
     (
+        "skills",
+        "Agent Skills under .agents/skills and ~/.agents/skills.",
+    ),
+    (
         "telemetry",
         "Local analytics store bounds; nothing leaves the machine.",
     ),
@@ -261,6 +265,8 @@ pub enum ConfigField {
     ReloadRequests,
     /// `[compaction] enabled`.
     CompactionEnabled,
+    /// `[skills] enabled`.
+    SkillsEnabled,
     /// `[telemetry] max_bytes`.
     TelemetryMaxBytes,
     /// `[telemetry] max_age_days`.
@@ -587,6 +593,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         kind: "bool",
         constraint: "",
         doc: "Automatic transcript compaction when a session approaches its context bound.",
+        example: "true",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "skills.enabled",
+        field: ConfigField::SkillsEnabled,
+        kind: "bool",
+        constraint: "true or false",
+        doc: "Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills) when a session is constructed, list them in its instructions, let its read tool read files under ~/.agents/skills, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off.",
         example: "true",
         scope: ConfigScope::Immediate,
     },

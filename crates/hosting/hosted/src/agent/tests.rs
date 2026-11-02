@@ -509,7 +509,7 @@ fn new_plan_enrolls_global_then_root_to_cwd_sources() {
     )
     .expect("product profile");
 
-    let (profile, facts) = enroll_product_instructions(&profile, Some(&home), &root, &cwd)
+    let (profile, facts) = enroll_product_instructions(&profile, Some(&home), &root, &cwd, None)
         .expect("instruction enrollment");
 
     assert_eq!(
@@ -577,8 +577,9 @@ fn javascript_and_python_overlays_enroll_agents_md() {
         .expect("overlay profile")
         .expect("new overlay session profile");
         let profile = base;
-        let (enrolled, facts) = enroll_product_instructions(&profile, Some(&home), &root, &cwd)
-            .expect("overlay enrollment");
+        let (enrolled, facts) =
+            enroll_product_instructions(&profile, Some(&home), &root, &cwd, None)
+                .expect("overlay enrollment");
         assert_eq!(facts.len(), 3);
         assert_eq!(
             enrolled.instruction_strategy(),
@@ -622,6 +623,7 @@ fn absent_optional_instructions_preserve_base_only_profile() {
         Some(&temporary.path().join("missing-home")),
         temporary.path(),
         temporary.path(),
+        None,
     )
     .expect("missing optional instructions");
     assert_eq!(enrolled, profile);

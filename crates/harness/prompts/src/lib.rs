@@ -14,6 +14,7 @@
 //! - [`plan`] — [`plan::PromptPlan`], the one assembly and base-selection site.
 //! - [`vocabulary`] — the three facts the text names, and nothing else.
 //! - [`instructions`] — bounded `AGENTS.md` discovery.
+//! - [`skills`] — bounded Agent Skills discovery and the per-family listing.
 //!
 //! The pin tables live with their text; [`pins`] is the only thing that hashes.
 
@@ -31,6 +32,7 @@ pub mod pins;
 pub mod plan;
 pub mod profiles;
 pub mod ptc;
+pub mod skills;
 pub mod vocabulary;
 
 #[cfg(test)]

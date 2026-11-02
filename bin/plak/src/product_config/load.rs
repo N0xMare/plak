@@ -218,6 +218,8 @@ pub struct ProductConfig {
     pub reload_requests: bool,
     pub theme: ProductTheme,
     pub compaction_enabled: bool,
+    /// `[skills] enabled`: Agent Skills discovery for new sessions.
+    pub skills_enabled: bool,
     pub telemetry_max_bytes: u64,
     pub telemetry_max_age_days: u64,
     /// `[mcp] client_id_metadata_url`: the Client ID Metadata Document an
@@ -261,6 +263,7 @@ impl PartialEq for ProductConfig {
             && self.reload_requests == other.reload_requests
             && self.theme == other.theme
             && self.compaction_enabled == other.compaction_enabled
+            && self.skills_enabled == other.skills_enabled
             && self.telemetry_max_bytes == other.telemetry_max_bytes
             && self.telemetry_max_age_days == other.telemetry_max_age_days
             && self.mcp_client_id_metadata_url == other.mcp_client_id_metadata_url
@@ -566,6 +569,7 @@ impl ProductConfig {
             ConfigField::CompactionEnabled => {
                 self.compaction_enabled = source.compaction_enabled;
             }
+            ConfigField::SkillsEnabled => self.skills_enabled = source.skills_enabled,
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = source.telemetry_max_bytes;
             }
@@ -601,6 +605,7 @@ impl ProductConfig {
     pub fn session_policy(&self) -> SessionPolicy {
         SessionPolicy {
             compaction_enabled: self.compaction_enabled,
+            skills_enabled: self.skills_enabled,
             max_model_rounds: usize::from(self.max_model_rounds),
             jobs_foreground_seconds: self.jobs_foreground_seconds,
             jobs_max_runtime_hours: self.jobs_max_runtime_hours,
@@ -673,6 +678,7 @@ impl ProductConfig {
             reload_requests: false,
             theme: ProductTheme::DefaultDark,
             compaction_enabled: true,
+            skills_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
             telemetry_max_age_days: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_AGE_DAYS,
             mcp_client_id_metadata_url: None,
@@ -948,6 +954,7 @@ impl ProductConfig {
             ConfigField::ReducedMotion => Value::from(self.reduced_motion),
             ConfigField::ReloadRequests => Value::from(self.reload_requests),
             ConfigField::CompactionEnabled => Value::from(self.compaction_enabled),
+            ConfigField::SkillsEnabled => Value::from(self.skills_enabled),
             // A TOML integer is an `i64`; the two retention bounds are held as
             // `u64` for the store and can only have come from one.
             ConfigField::TelemetryMaxBytes => {
@@ -1452,6 +1459,7 @@ impl ProductConfig {
             ConfigField::ReducedMotion => self.reduced_motion = value.boolean()?,
             ConfigField::ReloadRequests => self.reload_requests = value.boolean()?,
             ConfigField::CompactionEnabled => self.compaction_enabled = value.boolean()?,
+            ConfigField::SkillsEnabled => self.skills_enabled = value.boolean()?,
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = parse_positive(key.path, value)?;
             }

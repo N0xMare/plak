@@ -114,6 +114,41 @@ pub fn checkpoint_instruction_sources(
         })
 }
 
+/// Whether an exact checkpoint's frozen tool registry registers `name`.
+///
+/// # Errors
+/// Returns an incompatible-session error when the stored registry is
+/// unreadable or carries an unsupported descriptor revision.
+pub fn checkpoint_registers_tool(
+    checkpoint: &RuntimeCheckpoint,
+    name: &plakous_model::ToolName,
+) -> Result<bool, AgentError> {
+    let registry = checkpoint.manifest().tools().registry();
+    let unreadable = |_| {
+        AgentError::new(
+            crate::AgentErrorKind::IncompatibleSession,
+            "stored tool registry is unreadable",
+        )
+    };
+    let descriptor = match registry.codec_revision() {
+        plakous_tools::TOOL_REGISTRY_DESCRIPTOR_CODEC_REVISION => {
+            plakous_tools::FrozenToolRegistryDescriptor::decode_v1(registry.bytes())
+                .map_err(unreadable)?
+        }
+        plakous_tools::TOOL_REGISTRY_DESCRIPTOR_V2_CODEC_REVISION => {
+            plakous_tools::FrozenToolRegistryDescriptor::decode_v2(registry.bytes())
+                .map_err(unreadable)?
+        }
+        _ => {
+            return Err(AgentError::new(
+                crate::AgentErrorKind::IncompatibleSession,
+                "stored tool registry revision is unsupported",
+            ));
+        }
+    };
+    Ok(descriptor.executor_id_for_name(name).is_some())
+}
+
 /// Exact evaluator reconstruction facts for facade implementation only.
 pub struct StoredCompositionArtifact {
     /// Complete recorded profile digest identity.

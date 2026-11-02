@@ -141,6 +141,13 @@ reload_requests = false
 # type: bool · default: true
 enabled = true
 
+# Agent Skills under .agents/skills and ~/.agents/skills.
+[skills]
+
+# Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills) when a session is constructed, list them in its instructions, let its read tool read files under ~/.agents/skills, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off.
+# type: bool · default: true · true or false
+enabled = true
+
 # Local analytics store bounds; nothing leaves the machine.
 [telemetry]
 

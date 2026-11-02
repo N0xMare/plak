@@ -54,7 +54,7 @@ fn registry() -> TestResult<plakous_tools::FrozenToolRegistry> {
 
 fn registry_with_plan(plan: Arc<dyn PlanState>) -> TestResult<plakous_tools::FrozenToolRegistry> {
     let packs: Vec<Arc<dyn plakous_tools::ToolPack>> = vec![
-        Arc::new(plakous_tool_files::FilesToolPack),
+        Arc::new(plakous_tool_files::FilesToolPack::default()),
         Arc::new(plakous_tool_search::SearchToolPack),
         Arc::new(plakous_tool_plan::PlanToolPack::new(plan)),
     ];

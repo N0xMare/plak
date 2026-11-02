@@ -274,7 +274,7 @@ pub(crate) fn runtime_binding(
             spec.effort,
             spec.wire,
             spec.literal_model,
-            !spec.topology_extensions.is_empty(),
+            spec.topology_extensions.extends_beyond_skills(),
             workspace.root(),
             workspace.cwd(),
             &surface,
@@ -284,6 +284,7 @@ pub(crate) fn runtime_binding(
             spec.product_home,
             workspace.root(),
             workspace.cwd(),
+            spec.topology_extensions.skills_listing(),
         )?;
         let model = configured_for_composition.model();
         let plan = compile_explicit_runtime_profile(

@@ -990,7 +990,7 @@ pub(crate) mod suite {
         ),
         (
             "grok.direct.root",
-            "568d61271aa384dfdd56ea5707d576c5359aa80746920fb3b607a080e18e1669",
+            "91caaa264c955a7da4ddd30d7b921a68157c7afa8de221171e83327b58fd5948",
         ),
         (
             "claude.direct.root",
@@ -998,15 +998,15 @@ pub(crate) mod suite {
         ),
         (
             "openrouter-chat.direct.root",
-            "5eedcb4e65fb67bd1ae96fe22e56beaa2234297d0d266ba7abc77ab5a11422be",
+            "e44b35c9af7f47817f710af13cc48454b33aee4d814aa42a9a9d31189f5b502c",
         ),
         (
             "openrouter-responses.direct.root",
-            "ce042bf02e0d1f1d133296656bc3f9e5e3ec2f7caac9d8917400eae1239afae9",
+            "87195c51dee60a9d93072b6c66ff22f4ad3677ce6ca130432e13971fefdae2d2",
         ),
         (
             "openrouter-messages.direct.root",
-            "dfdb219764d186bcea89139e778f99a9538201ecb8e13c91725f4dbc5b8ce989",
+            "2c5d531277520bf9d6c5d2a88ed7d5e7fa22f8ca21a774d59070dddf7a49855b",
         ),
         (
             "openai-api.direct.root.single-agent",
@@ -1014,7 +1014,7 @@ pub(crate) mod suite {
         ),
         (
             "xai-api.direct.root.single-agent",
-            "5fbf7c53de0494dc280006de2678d29b470b01e5fbf1e6232294ba8c48ba2709",
+            "6685e71be96d49c0c6dafcbc0deb54bc2ae54a5d1848412cf358d2483b312525",
         ),
         (
             "anthropic-api.direct.root.single-agent",

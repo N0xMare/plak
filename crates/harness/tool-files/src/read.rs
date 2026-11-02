@@ -17,11 +17,18 @@ use std::sync::Arc;
 
 use crate::relative_workspace_path;
 
+mod skill_root;
+
 #[derive(Clone)]
-pub(super) struct ReadFileTool;
+pub(super) struct ReadFileTool {
+    /// Canonical skill roots this session's reads may also reach (spec 04).
+    skill_roots: Arc<[PathBuf]>,
+}
 
 impl ReadFileTool {
-    pub(super) fn new() -> Result<(ToolDefinition, Self), ToolRuntimeError> {
+    pub(super) fn new(
+        skill_roots: Arc<[PathBuf]>,
+    ) -> Result<(ToolDefinition, Self), ToolRuntimeError> {
         Ok((
             standard_definition(
                 READ_FILE_CAPABILITY_NAME,
@@ -37,7 +44,7 @@ impl ReadFileTool {
                 ToolConcurrency::Parallel,
                 ToolEffect::ReadOnly,
             )?,
-            Self,
+            Self { skill_roots },
         ))
     }
 }
@@ -82,8 +89,8 @@ impl ToolExecutor for ReadFileTool {
             read_text_page(
                 invocation,
                 context,
+                &self.skill_roots,
                 args,
-                path_display,
                 start_line,
                 limit,
                 page_bytes,
@@ -96,13 +103,14 @@ impl ToolExecutor for ReadFileTool {
 async fn read_text_page(
     invocation: ToolInvocation,
     context: ToolContext,
+    skill_roots: &[PathBuf],
     args: ReadFileArgs,
-    path_display: String,
     start_line: u64,
     limit: u64,
     page_bytes: usize,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
-    let leading = read_leading_lines(&context, &args, start_line, limit).await?;
+    let path_display = args.path.display().to_string();
+    let leading = read_leading_lines(&context, skill_roots, &args, start_line, limit).await?;
     let (mut bytes, complete) = (leading.bytes, leading.complete);
     if bytes.iter().take(8_192).any(|byte| *byte == 0) {
         return ToolOutcome::failure_text(PLAKOUS_TOOL_READ_BINARY);
@@ -254,6 +262,7 @@ struct LeadingBytes {
 /// same content up to the workspace file bound.
 async fn read_leading_lines(
     context: &ToolContext,
+    skill_roots: &[PathBuf],
     args: &ReadFileArgs,
     start_line: u64,
     limit: u64,
@@ -267,6 +276,19 @@ async fn read_leading_lines(
         return read_job_output_page(context, issued, first, start_line, limit).await;
     }
     let wanted_lines = start_line.saturating_sub(1).saturating_add(limit);
+    if context.workspace().relative_input(&args.path).is_err()
+        && let Some(root) = skill_root::containing_root(skill_roots, &args.path)
+    {
+        let (bytes, complete) = skill_root::read_leading(root, &args.path, wanted_lines)?;
+        return Ok(LeadingBytes {
+            revision: None,
+            bytes,
+            complete,
+            skipped_lines: 0,
+            dropped_partial: false,
+            write_failed_after: None,
+        });
+    }
     let path = relative_workspace_path(context, &args.path)?;
     let mut request = WorkspaceReadSliceRequest::start(path, MAX_STANDARD_TEXT_BYTES)
         .map_err(backend_runtime_error)?;

@@ -114,10 +114,36 @@ fn codex_patch_envelope_registration(
 /// `Write`, `write`, and `search_replace` are lowerings of `apply_patch`, not
 /// separate capabilities (spec 02 §6.3), so they live here with the preflight
 /// that makes them exact.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FilesToolPack;
+///
+/// The default pack reads only the workspace (and issued job output files).
+/// [`FilesToolPack::with_skill_roots`] adds read-only skill roots.
+#[derive(Clone, Debug, Default)]
+pub struct FilesToolPack {
+    skill_roots: Arc<[PathBuf]>,
+}
 
 impl FilesToolPack {
+    /// A pack whose read also admits regular files under these user skill
+    /// roots outside the workspace (spec 04 §2.1). Each root is canonicalized now; a root that does not
+    /// exist as a directory now is dropped and stays unreadable for this pack.
+    /// Reads under a root are read-only, follow no link out of their root and
+    /// keep the workspace read's bounds and refusals.
+    #[must_use]
+    pub fn with_skill_roots(roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        let mut canonical = Vec::new();
+        for root in roots {
+            if let Ok(path) = std::fs::canonicalize(&root)
+                && path.is_dir()
+                && !canonical.contains(&path)
+            {
+                canonical.push(path);
+            }
+        }
+        Self {
+            skill_roots: canonical.into(),
+        }
+    }
+
     /// Registers transactional file operations for an explicitly enrolled SDK catalog.
     /// Existing files packs do not enroll this capability.
     ///
@@ -141,7 +167,10 @@ impl ToolPack for FilesToolPack {
         let apply_executor: Arc<dyn ToolExecutor> = Arc::new(apply_tool);
         let apply_executor_id = standard_executor_id("apply-patch")?;
         Ok(vec![
-            standard_registration("read-file", ReadFileTool::new())?,
+            standard_registration(
+                "read-file",
+                ReadFileTool::new(Arc::clone(&self.skill_roots)),
+            )?,
             standard_registration("view-image", visual::ViewImageTool::new())?,
             standard_registration_with_executor(
                 "apply-patch",

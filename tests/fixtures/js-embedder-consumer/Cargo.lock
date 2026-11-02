@@ -582,6 +582,7 @@ dependencies = [
  "diffy",
  "plakous-model",
  "plakous-tools",
+ "rustix",
  "serde",
  "serde_json",
 ]

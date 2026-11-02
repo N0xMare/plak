@@ -114,7 +114,7 @@ classes and directory policy.
 | `plakous-xai` | `crates/providers/xai` | `provider` | xAI Responses provider facts and SuperGrok subscription auth |
 | `plakous-openrouter` | `crates/providers/openrouter` | `provider` | Dynamic OpenRouter route, discovery, authz, and capability tables across three wire dialects |
 | `plakous-store` | `crates/store` | `store` | `SessionStore` backends: bounded in-memory by default, SQLite behind the `sqlite` feature |
-| `plakous-prompts` | `crates/harness/prompts` | `harness` | Model-visible instruction text, the first-turn assembler, the recommended profiles, and `AGENTS.md` discovery. Depends on no pack |
+| `plakous-prompts` | `crates/harness/prompts` | `harness` | Model-visible instruction text, the first-turn assembler, the recommended profiles, and `AGENTS.md` and Agent Skills discovery. Depends on no pack |
 | `plakous-compose` | `crates/harness/compose` | `harness` | Cell presentations and their single compiler, the host-API descriptor and TypeScript/Python generators, Codex exec parsing/DTO helpers, nested catalogs, and the `SidecarLocator` port |
 | `plakous-tool-files` | `crates/harness/tool-files` | `harness` | Bounded reads, exact-content patching, image inspection, and the Codex patch envelope, behind `ToolPack` |
 | `plakous-tool-search` | `crates/harness/tool-search` | `harness` | Bounded deterministic repository search and directory listing, behind `ToolPack` |

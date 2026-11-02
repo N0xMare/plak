@@ -442,96 +442,127 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     protocol: Option<crate::binding::ProtocolSelection>,
     roster: &crate::orchestration::RosterInput,
 ) -> CliResult<Rebound> {
-    super::jobs_transition_guard(config, opened)?;
-    watch.begin();
-    let started = Instant::now();
-    refuse_unready_rebind(config)?;
-    let account = account.to_owned();
-    // A Code Mode (native-ptc) prefix is replayable onto every presentation:
-    // each kernel re-projects `exec`/`wait` cells truthfully at dispatch
-    // (Responses/Chat carry the original string input, Messages wraps it as
-    // `{"input": ...}`), so the rebind branches at the canonical checkpoint
-    // like any other and nothing is refused up front.
-    let (target_selection, api_root, effort_label, composition) = profile_rebind_selection(
-        config,
-        &account,
-        model,
-        effort,
-        extra,
-        composition,
-        protocol,
-    )?;
-    // refuse before the first resolution round-trip,
-    // while no durable rebind work exists to roll back.
-    if watch.observe_now() {
-        return Err(interrupted_before_dispatch("rebind"));
-    }
-    let same_binding = config.session.account.as_deref() == Some(account.as_str())
-        && config.session.model.as_deref() == Some(model)
-        && config.session.effort.as_deref() == effort_label.as_deref()
-        && config.session.composition == composition
-        && config.session.target_selection == target_selection;
-    if same_binding && profile_cards_active(config, roster)? {
-        return Ok(Rebound::Unchanged);
-    }
-    if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {
-        return Err(CliFailure::new(refusal)
-            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {}));
-    }
-    let (operation, target_product_id, own_tree, topology_tree_id) =
-        stage_profile_fork(config, opened, &account, model, composition, roster)?;
-    let target = resolve_profile_target(
-        executor,
-        watch,
-        config,
-        ProfileTargetInput {
-            api_root,
-            account: &account,
+    let rebound = (|| -> CliResult<Rebound> {
+        super::jobs_transition_guard(config, opened)?;
+        watch.begin();
+        let started = Instant::now();
+        refuse_unready_rebind(config)?;
+        let account = account.to_owned();
+        // A Code Mode (native-ptc) prefix is replayable onto every presentation:
+        // each kernel re-projects `exec`/`wait` cells truthfully at dispatch
+        // (Responses/Chat carry the original string input, Messages wraps it as
+        // `{"input": ...}`), so the rebind branches at the canonical checkpoint
+        // like any other and nothing is refused up front.
+        let (target_selection, api_root, effort_label, composition) = profile_rebind_selection(
+            config,
+            &account,
             model,
-            effort_label: &effort_label,
+            effort,
+            extra,
             composition,
-            target_selection: &target_selection,
-            target_product_id: &target_product_id,
-            operation: &operation,
-            topology_tree_id: &topology_tree_id,
-        },
-    )?;
-    observe_phase(
-        events,
-        HostLifecyclePhase::RebindResolveTarget,
-        started,
-        config.session.pending_queue.len(),
-    );
-    let instructions_before = instruction_sources(opened);
-    let mut attached_tree = None;
-    let branched = attach_profile_branch(
-        executor,
-        watch,
-        config,
-        opened,
-        stderr_buf,
-        events,
-        ProfileBranchInput {
-            target,
-            own_tree,
-            topology_tree_id: &topology_tree_id,
-            effort_label: &effort_label,
-            attached_tree: &mut attached_tree,
+            protocol,
+        )?;
+        // refuse before the first resolution round-trip,
+        // while no durable rebind work exists to roll back.
+        if watch.observe_now() {
+            return Err(interrupted_before_dispatch("rebind"));
+        }
+        let same_binding = config.session.account.as_deref() == Some(account.as_str())
+            && config.session.model.as_deref() == Some(model)
+            && config.session.effort.as_deref() == effort_label.as_deref()
+            && config.session.composition == composition
+            && config.session.target_selection == target_selection;
+        if same_binding && profile_cards_active(config, roster)? {
+            return Ok(Rebound::Unchanged);
+        }
+        if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {
+            return Err(CliFailure::new(refusal)
+                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {}));
+        }
+        // A rebind or switch keeps canonical tool authority: its successor
+        // inherits whether the source's skills are on, whatever tuple it
+        // moves to, and never takes the live setting (spec 02 §6.1.1).
+        let inherited = source_skills_on(executor, opened)?;
+        config.state_roots.set_inherited_skills(inherited);
+        let (operation, target_product_id, own_tree, topology_tree_id) =
+            stage_profile_fork(config, opened, &account, model, composition, roster)?;
+        let target = resolve_profile_target(
+            executor,
+            watch,
+            config,
+            ProfileTargetInput {
+                api_root,
+                account: &account,
+                model,
+                effort_label: &effort_label,
+                composition,
+                target_selection: &target_selection,
+                target_product_id: &target_product_id,
+                operation: &operation,
+                topology_tree_id: &topology_tree_id,
+            },
+        )?;
+        observe_phase(
+            events,
+            HostLifecyclePhase::RebindResolveTarget,
             started,
-            account: &account,
-            model,
-            composition,
-            target_selection,
-            operation: &operation,
-        },
-    );
-    if let Some(tree_id) = attached_tree {
-        release_profile_build_lease(executor, events, &tree_id)?;
+            config.session.pending_queue.len(),
+        );
+        let instructions_before = instruction_sources(opened);
+        let mut attached_tree = None;
+        let branched = attach_profile_branch(
+            executor,
+            watch,
+            config,
+            opened,
+            stderr_buf,
+            events,
+            ProfileBranchInput {
+                target,
+                own_tree,
+                topology_tree_id: &topology_tree_id,
+                effort_label: &effort_label,
+                attached_tree: &mut attached_tree,
+                started,
+                account: &account,
+                model,
+                composition,
+                target_selection,
+                operation: &operation,
+            },
+        );
+        if let Some(tree_id) = attached_tree {
+            release_profile_build_lease(executor, events, &tree_id)?;
+        }
+        if matches!(branched, Ok(Rebound::Switched)) {
+            note_reread_instructions(events, instructions_before, opened);
+        }
+        branched
+    })();
+    config.state_roots.set_inherited_skills(None);
+    rebound
+}
+
+/// Whether the attached source session has its skills on, from its sealed
+/// registry. `None` when it has no sealed checkpoint to inherit from: the
+/// rebind's or fork's own load of the source then refuses it.
+pub(super) fn source_skills_on(
+    executor: &ApplicationExecutor,
+    opened: &AttachedCodingSession,
+) -> CliResult<Option<bool>> {
+    let read = executor
+        .block_on(crate::skills::frozen_skills(
+            opened.sessions(),
+            opened.locator(),
+        ))
+        .map_err(|_| CliFailure::new("application execution failed"))?;
+    match read {
+        Ok(frozen) => Ok(Some(frozen.on)),
+        Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliFailure::new(format!(
+            "the session's skills setting could not be read: {error}"
+        ))),
     }
-    if matches!(branched, Ok(Rebound::Switched)) {
-        note_reread_instructions(events, instructions_before, opened);
-    }
-    branched
 }
 
 struct ProfileTargetInput<'a> {
@@ -1181,8 +1212,9 @@ pub(super) fn note_reread_instructions_at<P: plakous_host_protocol::ProtocolExte
 }
 
 /// What a branch that recompiled for its target re-read from disk: each
-/// enrolled `AGENTS.md` whose bytes differ from the source's, plus any the
-/// target gained or lost. `None` when the instructions are unchanged.
+/// enrolled `AGENTS.md` (and the skills listing) whose bytes differ from the
+/// source's, plus any the target gained or lost. `None` when the instructions
+/// are unchanged.
 fn reread_instructions_note(
     before: &[plakous::agent::ResolvedContextSourceFact],
     after: &[plakous::agent::ResolvedContextSourceFact],
@@ -1205,8 +1237,17 @@ fn reread_instructions_note(
             changes.push(format!("{} removed", label(source.source_id())));
         }
     }
-    (!changes.is_empty())
-        .then(|| format!("AGENTS.md re-read for this branch: {}", changes.join(", ")))
+    let skills = plakous::prompts::skills::SKILLS_SOURCE_ID;
+    let read = if before
+        .iter()
+        .chain(after)
+        .any(|source| source.source_id() == skills)
+    {
+        "AGENTS.md and skills"
+    } else {
+        "AGENTS.md"
+    };
+    (!changes.is_empty()).then(|| format!("{read} re-read for this branch: {}", changes.join(", ")))
 }
 
 pub(super) fn validate_rebind_effort(

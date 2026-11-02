@@ -89,7 +89,7 @@ fn ids(call: u8) -> TestResult<Ids> {
 
 fn registry(plan: Arc<dyn PlanState>) -> TestResult<plakous_tools::FrozenToolRegistry> {
     let packs: Vec<Arc<dyn ToolPack>> = vec![
-        Arc::new(plakous_tool_files::FilesToolPack),
+        Arc::new(plakous_tool_files::FilesToolPack::default()),
         Arc::new(plakous_tool_search::SearchToolPack),
         Arc::new(PlanToolPack::new(plan)),
     ];
@@ -440,6 +440,89 @@ async fn portable_executor_enforces_environment_containment() -> TestResult {
             .map(plakous_tools::ToolRuntimeError::kind),
         Some(ToolRuntimeErrorKind::WorkspacePolicy)
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn read_file_reaches_skill_roots_outside_the_workspace_and_nothing_else() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    let skills = outside.path().canonicalize()?.join("skills");
+    fs::create_dir_all(skills.join("deploy"))?;
+    fs::write(
+        skills.join("deploy/SKILL.md"),
+        b"---\nname: deploy\n---\nsteps\n",
+    )?;
+    fs::write(outside.path().join("secret.txt"), b"secret\n")?;
+    let packs: Vec<Arc<dyn ToolPack>> = vec![Arc::new(
+        plakous_tool_files::FilesToolPack::with_skill_roots([
+            skills.clone(),
+            outside.path().join("missing-root"),
+        ]),
+    )];
+    let mut builder = ToolRegistryBuilder::default();
+    plakous_tools::register_packs(&packs, &mut builder)?;
+    let skilled = builder.freeze();
+    let plain = registry(Arc::new(InMemoryPlanState::new()))?;
+    assert_eq!(
+        skilled.definition(&ToolName::new("read_file")?),
+        plain.definition(&ToolName::new("read_file")?),
+        "skill roots change no descriptor"
+    );
+    let environment = || -> TestResult<Arc<ExecutionEnvironment>> {
+        Ok(Arc::new(ExecutionEnvironment::host(
+            ExecutionEnvironmentScope::Run(ids(0x82)?.run),
+            workspace.path(),
+            ".",
+            ExecutionEnvironmentConfig::default(),
+        )?))
+    };
+    let path = |file: &std::path::Path| serde_json::json!({ "path": file }).to_string();
+
+    let read = execute(
+        &skilled,
+        environment()?,
+        ids(0x82)?,
+        "read_file",
+        &path(&skills.join("deploy/SKILL.md")),
+    )
+    .await?;
+    assert_eq!(read.kind(), ToolOutcomeKind::Success);
+    assert!(text(&read)?.contains("steps"));
+
+    for refused in [
+        outside.path().canonicalize()?.join("secret.txt"),
+        skills.join("deploy/../../secret.txt"),
+    ] {
+        let Err(error) = execute(
+            &skilled,
+            environment()?,
+            ids(0x83)?,
+            "read_file",
+            &path(&refused),
+        )
+        .await
+        else {
+            return Err(format!("{} unexpectedly read", refused.display()).into());
+        };
+        assert_eq!(
+            error
+                .downcast_ref::<plakous_tools::ToolRuntimeError>()
+                .map(plakous_tools::ToolRuntimeError::kind),
+            Some(ToolRuntimeErrorKind::WorkspacePolicy)
+        );
+    }
+    let Err(_) = execute(
+        &plain,
+        environment()?,
+        ids(0x84)?,
+        "read_file",
+        &path(&skills.join("deploy/SKILL.md")),
+    )
+    .await
+    else {
+        return Err("a pack without skill roots read a skill file".into());
+    };
     Ok(())
 }
 

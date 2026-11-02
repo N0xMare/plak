@@ -10,7 +10,9 @@ use serde_json::{Value, json};
 
 fn sdk_registry() -> TestResult<FrozenToolRegistry> {
     let mut builder = ToolRegistryBuilder::default();
-    for registration in <FilesToolPack as plakous_tools::ToolPack>::registrations(&FilesToolPack)? {
+    for registration in
+        <FilesToolPack as plakous_tools::ToolPack>::registrations(&FilesToolPack::default())?
+    {
         builder.register(registration)?;
     }
     builder.register(FilesToolPack::edit_files_registration()?)?;

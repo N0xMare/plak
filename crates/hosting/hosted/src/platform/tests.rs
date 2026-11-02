@@ -743,6 +743,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         None,
         workspace.root(),
         workspace.cwd(),
+        None,
     )
     .unwrap();
     let plan = plakous::agent::compile_explicit_runtime_profile(
@@ -1041,6 +1042,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         None,
         workspace.root(),
         workspace.cwd(),
+        None,
     )
     .unwrap();
     let plan = plakous::agent::compile_explicit_runtime_profile(

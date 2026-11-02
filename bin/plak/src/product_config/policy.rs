@@ -40,6 +40,8 @@ pub fn topology_admission_probe(
 pub struct SessionPolicy {
     /// `[compaction] enabled`: scheduled compaction for this session.
     pub compaction_enabled: bool,
+    /// `[skills] enabled`: Agent Skills discovery at session construction.
+    pub skills_enabled: bool,
     /// `[turn] max_model_rounds`: the round cap each root turn is admitted under.
     pub max_model_rounds: usize,
     /// Construction-bound process budgets, passed explicitly to hosting.
@@ -417,6 +419,16 @@ impl SessionPolicy {
         } else {
             plakous_hosted::platform::ApiWindow::Working
         }
+    }
+
+    /// The skills setting `[skills] enabled` binds, with the user skills root
+    /// under the login home (`~/.agents/skills`).
+    #[must_use]
+    pub fn skills(&self) -> plakous_hosted::skills::SkillsSetting {
+        plakous_hosted::skills::SkillsSetting::new(
+            self.skills_enabled,
+            crate::home::paths::user_home(),
+        )
     }
 }
 

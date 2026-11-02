@@ -59,6 +59,15 @@ pub struct ProductToolExtensions {
     retrieval: Option<Arc<crate::tool_plan::DeferredRetrievalPort>>,
     image_gen: Option<Arc<crate::tool_plan::DeferredImagePort>>,
     contributions: Arc<[PromptContribution]>,
+    /// Canonical user skill roots this node's read may reach outside the
+    /// workspace.
+    skill_roots: Arc<[std::path::PathBuf]>,
+    /// The skills listing this node's instructions carry after `AGENTS.md`.
+    skills_listing: Option<plakous::agent::RegisteredContextSource>,
+    /// Whether a registered `Skill` is presented: only on Claude vocabulary.
+    /// Elsewhere it stays registered, so canonical tool authority does not
+    /// move with the vocabulary, and is never shown (spec 01 §3).
+    skill_presented: bool,
 }
 
 impl ProductToolExtensions {
@@ -108,7 +117,49 @@ impl ProductToolExtensions {
             retrieval: None,
             image_gen: None,
             contributions: Arc::new([]),
+            skill_roots: Arc::new([]),
+            skills_listing: None,
+            skill_presented: false,
         })
+    }
+
+    /// Adds one node's skills: the roots its read may reach, its listing,
+    /// and while its skills are on the `Skill` registration, appended last
+    /// and presented on Claude vocabulary only.
+    /// Call it after [`Self::with_plan`], which rebuilds the extensions.
+    pub(crate) fn with_skills(mut self, skills: &crate::skills::NodeSkills) -> CliResult<Self> {
+        self.skill_roots = skills.read_roots().into();
+        self.skills_listing = skills.listing_source()?;
+        self.skill_presented = skills.presented();
+        if let Some(registration) = skills.tool_registration()? {
+            if self.names().any(|name| name == registration.name()) {
+                return Err(CliFailure::new(
+                    "product tool extensions contain a duplicate tool",
+                ));
+            }
+            self.registrations = self
+                .registrations
+                .iter()
+                .cloned()
+                .chain([registration])
+                .collect();
+        }
+        Ok(self)
+    }
+
+    /// Whether a tool other than `Skill` extends the catalog: what rotates a
+    /// profile id to its `.subagents.v1` form, which `Skill` alone does not.
+    pub(crate) fn extends_beyond_skills(&self) -> bool {
+        self.names()
+            .any(|name| name.as_str() != crate::skills::SKILL_TOOL_NAME)
+    }
+
+    pub(crate) fn skill_roots(&self) -> &[std::path::PathBuf] {
+        &self.skill_roots
+    }
+
+    pub(crate) fn skills_listing(&self) -> Option<&plakous::agent::RegisteredContextSource> {
+        self.skills_listing.as_ref()
     }
 
     #[cfg(test)]
@@ -117,8 +168,9 @@ impl ProductToolExtensions {
     }
 
     #[must_use]
+    /// Whether no member is presented.
     pub fn is_empty(&self) -> bool {
-        self.registrations.is_empty()
+        self.names().next().is_none()
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -259,8 +311,13 @@ impl ProductToolExtensions {
         })
     }
 
+    /// The presented members, in order: every registration except a `Skill`
+    /// this vocabulary does not present.
     pub fn names(&self) -> impl Iterator<Item = &ToolName> {
-        self.registrations.iter().map(ToolRegistration::name)
+        self.registrations
+            .iter()
+            .map(ToolRegistration::name)
+            .filter(|name| self.skill_presented || name.as_str() != crate::skills::SKILL_TOOL_NAME)
     }
 }
 

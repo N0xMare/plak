@@ -118,6 +118,7 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// The session's projector task, spawned on the first tick.
     live: Option<super::projection::live::LiveProjector>,
     projection_finished: bool,
+    shown_skill_notices: crate::skills::ShownSkillNotices,
 }
 
 enum HostStep {
@@ -420,6 +421,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     fn commit_notice_intents(&mut self) {
+        // A new construction (this session, a fork, a spawn) queued what its
+        // skills discovery left out; each distinct notice is shown once per
+        // root session.
+        let notices = self.config.state_roots.take_skill_notices();
+        for notice in self
+            .shown_skill_notices
+            .fresh(&self.config.session.id, notices)
+        {
+            let _ = self.events.notice(sessions::TranscriptRow::info(
+                sessions::NoticeScope::Session,
+                notice,
+            ));
+        }
         if self.storage_interrupted && self.config.store.storage_unavailable() {
             return;
         }

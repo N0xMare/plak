@@ -55,7 +55,8 @@ pub(crate) fn coding_tool_registry_with_extensions(
     // a driver, not a model-visible tool, and are not a pack.
     let mut builder = ToolRegistryBuilder::default();
     plakous::tools::register_packs(
-        &plakous::tools::standard_coding_packs(
+        &plakous::tools::standard_coding_packs_with_files(
+            plakous::tools::FilesToolPack::with_skill_roots(extensions.skill_roots().to_vec()),
             Arc::new(InMemoryPlanState::with_identity(identity)),
             Arc::clone(&process),
         ),

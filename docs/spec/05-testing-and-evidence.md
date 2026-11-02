@@ -1556,7 +1556,8 @@ present. The full inventory:
 ### 2.5 Prompt renders are pinned in code, not in files
 
 What a model sees on each product route — harness costume, identity, enrolled
-`AGENTS.md`, every tool name and description, the first-turn HTTP request
+`AGENTS.md`, the skills listing (one fixture project skill and one user skill,
+with synthetic roots), every tool name and description, the first-turn HTTP request
 body, and each wire's compaction summary request body — is pinned by sha256 tables in `crates/hosting/hosted/tests/common/rendered_prompts.rs`
 and `rendered_lifecycle.rs`, with the wire lowering in `rendered_wire.rs`.
 Review headers assert the Plak User-Agent shape `plak/<semver>` separately and
@@ -1585,8 +1586,8 @@ matrix is exactly 95 included routes plus two documented exclusions
 (`native-ptc` is enrolled only as Codex Code Mode, and direct API routes render
 only the single-agent root); the rendered wire JSON equals the
 kernel-lowered request and the Markdown `## Request` fence equals the jsonc
-formatter's output; the harness footprint excludes the enrolled `AGENTS.md` and
-the scenario assignment, subtracts enrolled source bytes, and keeps the Claude
+formatter's output; the harness footprint excludes the enrolled `AGENTS.md`, the
+skills listing and the scenario assignment, subtracts enrolled source bytes, and keeps the Claude
 costume identity on Claude routes; and every product tool extension's name and
 description reaches the model verbatim, either as a lowered `tools[]` entry or
 in the harness instruction text.

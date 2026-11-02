@@ -91,6 +91,9 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     if watch.observe_now() {
         return Err(interrupted_before_dispatch("fork"));
     }
+    // A fork is a successor of its source: it keeps whether the source's
+    // skills are on, and re-reads the roots under that (spec 02 §6.1.1).
+    let inherited_skills = super::rebind::source_skills_on(executor, opened)?;
     let operation_id = format!("plak:fork:{}", uuid::Uuid::new_v4());
     let facade_operation = SessionOperationId::new(&operation_id)
         .map_err(|_| CliFailure::new("fork operation identity is invalid"))?;
@@ -125,7 +128,10 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         return Err(interrupted_before_dispatch("fork"));
     }
     stderr_buf.clear();
-    let runtime = match fork_runtime_binding(executor, config, stderr_buf) {
+    config.state_roots.set_inherited_skills(inherited_skills);
+    let built = fork_runtime_binding(executor, config, stderr_buf);
+    config.state_roots.set_inherited_skills(None);
+    let runtime = match built {
         Ok(runtime) => runtime,
         Err(error) => {
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;

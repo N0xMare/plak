@@ -163,6 +163,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 let workflow_finish = abandon_prepared_rebind(executor, config, operation);
                 restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
                 workflow_finish?;
+                if let Some(refusal) = rebind_refusal(error.kind(), &error.to_string()) {
+                    return Err(CliFailure::new(refusal).with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {},
+                    ));
+                }
                 return Err(CliFailure::new(format!("canonical rebind failed: {error}")));
             }
             Ok(Err(error)) => Err(CliFailure::new(format!("canonical rebind failed: {error}"))),
@@ -507,4 +512,16 @@ fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(
         }
     }
     Ok(())
+}
+
+/// The `/rebind` and `/agents` wording for a refusal the operator can act on.
+/// A successor keeps its source's tools; when its build would change them
+/// (Plakous: "rebind changed canonical tool authority") only a new session
+/// can use the target's.
+pub(super) fn rebind_refusal(kind: AgentSessionsErrorKind, message: &str) -> Option<&'static str> {
+    (kind == AgentSessionsErrorKind::Revalidation
+        && message.contains("rebind changed canonical tool authority"))
+    .then_some(
+        "cannot switch: this session's tools would change; start a new session on that model",
+    )
 }

@@ -100,6 +100,7 @@ pub mod product_observation;
 pub mod prompt_inputs;
 pub mod request_slots;
 pub mod runtime;
+pub mod skills;
 pub(crate) mod storage_pressure;
 pub mod surface_protocol;
 pub mod tool_plan;

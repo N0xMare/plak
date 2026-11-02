@@ -258,8 +258,8 @@ component that exists and is not a directory is the same pre-effect
 `NotADirectory` (`a parent component is not a directory: {path}`); a component
 that is absent stays `NotFound`.
 
-**The job-output read exception.** The one path a file tool may read outside
-the workspace is a job output file (chapter 01 §8.5) that the process service of
+**The job-output read exception.** One of the two kinds of path a file tool may
+read outside the workspace is a job output file (chapter 01 §8.5) that the process service of
 the **same agent** (its runtime session and branch) issued in this process. The
 canonical read executor, which Claude `Read`, Grok `read_file` and the
 OpenRouter `read` lower onto, admits a path only if it byte-equals an issued
@@ -307,6 +307,40 @@ anyway (§2.2); the exception exists so a pack without a shell-read habit can
 follow the `full output: <path>` line its own tools print. The Claude `Read`
 description, Grok `read_file`, and the canonical `read_file` description state
 the exception and its earlier-process refusal.
+
+**The skill-root read exception.** The other is a regular file under the
+session's user skill root, `~/.agents/skills` (chapter 02 §6.1.1). The project
+skill root never enters the exception: its files are workspace files, read
+through ordinary containment, and discovery refuses a project root whose
+canonical path leaves the canonical workspace (a repository may commit
+`.agents/skills` as a link to anywhere) and any link inside it. The user root
+is admitted only if it existed as a directory when the node's tools were
+built (session construction, and again at each reopen or attach; a reopen
+admits it only when the session froze a skills listing or the `Skill` tool,
+and a fork or rebind successor only when the source's skills are on),
+canonicalized then and fixed for that runtime; a root created later is not
+readable until the next attach. The canonical read executor admits an
+absolute path without `..` or `.` components that lexically lies strictly
+under that root and outside the workspace. It canonicalizes the path and
+refuses, as a pre-effect `WorkspacePolicy`, one that resolves outside the same
+root (`path resolves outside the skills directory: <path>`), so a link never
+reads out of the root. It then requires a regular file before opening it,
+opens it without following a link and without blocking (`O_NOFOLLOW |
+O_NONBLOCK`), and checks the descriptor again, so a FIFO or device is refused
+(`path is not a regular file: <path>`) and never read; missing paths and
+directories get the same messages as workspace reads. The read keeps the
+workspace read's page, slice, line and 16 MiB file bounds, records no
+text-read observation (it never authorizes `Write`), and grants nothing else:
+no write, edit, search or listing tool accepts these paths. The canonical
+check and the open are separate steps, not a descriptor walk, so a rename
+inside the root between them is not excluded; the user root is a directory
+under the operator's own home, which a repository cannot place a link into,
+and process tools can read it anyway (§2.2). Discovery applies the same rules
+to every `SKILL.md` it reads, so a skill that links out of its root, or a
+FIFO, is not listed. The read tool descriptions do not change; each family's
+skill listing states that the listed paths are readable (chapter 02 §6.1.1).
+With `skills.enabled = false` a new construction admits no root, and a
+session whose skills are off never gains one on a fork or rebind.
 
 The opt-in `edit_files` capability preflights every operation and submits one
 workspace mutation transaction with original-content/absence comparisons.
@@ -1271,7 +1305,9 @@ missing or malformed registry admits nothing, and `plak config untrust`
 revokes. Project configuration is limited to those two files; credentials,
 sessions, databases, logs and cache never resolve from a project directory.
 
-`AGENTS.md` files are model-visible instructions, not configuration: they
+`AGENTS.md` files and Agent Skills (`.agents/skills/<name>/SKILL.md` in the
+workspace and under `~/.agents/skills`) are model-visible instructions, not
+configuration: they
 carry no authority, credential or tool grant, and the workspace's own files
 are read at construction without a trust step. A session keeps the instruction
 bytes it was compiled with across reopen, `/resume` and `/reload`. Only a new
@@ -1282,7 +1318,11 @@ new session started in that directory would, and the transcript names every
 file a fork re-read. A fork a crash interrupted is either published (its feed
 record names the successor, projected without a second read) or withdrawn at
 reopen with a notice to run it again; reopening never re-reads them on its
-own.
+own. The skills listing (each skill's name, description and path) follows the
+same rule; a skill's body is not frozen: the model reads it, and Claude's
+`Skill` tool loads it, from disk when it is used, so its current bytes are what
+the model sees. Nothing in `SKILL.md` grants a tool, an authority or a
+permission: Claude Code front matter such as `allowed-tools` is ignored.
 
 ### 4.5 Reload handoffs are private files
 

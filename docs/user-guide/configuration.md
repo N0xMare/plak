@@ -150,6 +150,64 @@ waiting for output and stopping. If stdin is closed, an input refusal explains
 how to rerun `exec_command` with `tty=true`. Claude, Grok and pi (OpenRouter) shell tools do not accept stdin
 input.
 
+## Agent Skills
+
+A skill is a folder holding a `SKILL.md`: front matter naming and describing
+it, then the instructions an agent follows for one kind of task.
+
+```text
+<project>/.agents/skills/review-pr/SKILL.md     # project skill
+~/.agents/skills/release-notes/SKILL.md         # your own skill
+```
+
+```markdown
+---
+name: review-pr
+description: Review a pull request against the project checklist. Use when asked to review a PR.
+---
+# Review a PR
+
+1. Read `checklist.md` in this folder.
+...
+```
+
+`name` must equal the folder name (lowercase letters, digits and single
+hyphens, at most 64 characters) and `description` is required (at most 1,024
+characters). A skill with `disable-model-invocation: true` (or `True`,
+`TRUE`; `yes` and `no` are not accepted) is left out, and so is a `SKILL.md`
+over 256 KiB. Only
+`skills/` under `.agents/` is read; a project skill wins a name your own skills
+also use. The project folder must stay inside the repository: a
+`.agents/skills` that links outside it, or a linked skill folder inside it, is
+skipped.
+
+When a session starts, Plak lists every valid skill's name and description in
+the model's instructions, in the wording that model's own client uses: Codex's
+skills catalog, Claude Code's listing for its `Skill` tool, grok-build's
+listing with absolute paths, or pi's `<available_skills>`. The model reads a
+skill's files when a task matches; its read tool can also read your own skill
+files under `~/.agents/skills`, outside the workspace. Claude models also get
+Claude Code's `Skill` tool, which loads a listed skill by name. At most 64
+skills are listed, and the listing stops at 16 KiB; a skill left out is named
+in the notice and cannot be loaded.
+
+The listing is fixed for the session, like `AGENTS.md`: `/resume` and `/reload`
+keep it, and a new session, a spawned child or `/fork` lists the skills as they
+are then. A skill's own files are read when used, so edits to them apply at
+once. Skills that are not valid are named in one notice when the session (or
+fork, or child) is created, and a notice already shown for the session is not
+repeated.
+
+Turn skills off with `plak config set skills.enabled false`: new sessions then
+have no skills and no `Skill` tool. The setting is fixed into each session
+when it starts. Resuming a session keeps its tools whatever the setting is
+now. Forking it (`/fork`, `/fork-then-compact`) or switching it to another
+model or account (`/rebind`, `/agents <profile>`, **Fork now**) also keeps
+its skills on or off, including a switch between Claude and another provider
+and back: a session started with skills keeps them, and one started without
+them, or before Plak had skills, never gains them. Start a new session to use
+the new setting.
+
 ## Choose a root
 
 The root is the agent your session starts as. It is a **template**: a file in

@@ -58,7 +58,7 @@ use plakous_agent::internal::facade_support::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason,
     AgentSessionEndpointError, CompactionSummary, ModelRouteBinding, RuntimeCheckpoint,
     SessionStoreOrigin, agent_builder_target_authority, agent_checkpoint, agent_store_origin,
-    checkpoint_instruction_sources, checkpoint_job_config,
+    checkpoint_instruction_sources, checkpoint_job_config, checkpoint_registers_tool,
 };
 use plakous_agent::internal::{
     ArchiveSession, DeleteSession, DurableCodeCellAbandonmentOutcome,

@@ -646,6 +646,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-host-protocol", "src/jsonl.rs"): {"json"},
     ("plakous-host-protocol", "src/topology.rs"): {"json"},
     ("plakous-hosted", "src/session_log.rs"): {"thread_local"},
+    ("plakous-hosted", "src/skills.rs"): {"json"},
     # Explicit unreachable operation in the feature-gated hosted test fixture.
     ("plakous-hosted", "src/runtime/test_kit.rs"): {"panic"},
     ("plakous-hosted", "src/sessions.rs"): {"thread_local"},
@@ -1314,6 +1315,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "register_packs",
         "standard_coding_menus",
         "standard_coding_packs",
+        "standard_coding_packs_with_files",
+        "FilesToolPack",
         "validate_process_presentation_candidate_v2",
         "ToolProjectionLoweringV2",
         "ToolPolicy",
@@ -1339,7 +1342,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "neutral_coding",
     },
     # `plakous-prompts` re-exported by the facade: the instruction text, its
-    # assembler and its vocabulary, and bounded AGENTS.md discovery. The tool
+    # assembler and its vocabulary, and bounded AGENTS.md and Agent Skills
+    # discovery. The tool
     # descriptions the product still owns are not here -- they travel with the
     # topology pack and live in `crates/orchestration/recursive-subagents/src/text/`.
     "prompts": {
@@ -1349,6 +1353,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "pins",
         "plan",
         "ptc",
+        "skills",
         "vocabulary",
         "AgentTier",
         "ASSIGNMENT_CONTRIBUTION_ID",
@@ -1362,7 +1367,14 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "TOPOLOGY_CONTRIBUTION_ID",
         "WireDialect",
         "discover_instruction_sources",
+        "discover_skill_roots",
+        "discover_skills",
         "openrouter_direct_base_instructions",
+        "Skill",
+        "SkillDiscovery",
+        "SkillRoot",
+        "SkillScope",
+        "SkillsPresentation",
         "target_instructions",
     },
 }

@@ -420,7 +420,8 @@ pub fn build_host_config(
                     .with_api_models(
                         plakous_hosted::platform::ApiModelLists::Live,
                         policy.api_window(),
-                    ),
+                    )
+                    .with_skills(policy.skills()),
                 session,
                 target,
                 model_id: model_id.to_owned(),
@@ -532,7 +533,8 @@ pub fn build_host_config(
             .with_api_models(
                 plakous_hosted::platform::ApiModelLists::Live,
                 policy.api_window(),
-            ),
+            )
+            .with_skills(policy.skills()),
         session,
         target: product_host::HostTargetAuthority::Native {
             provider,

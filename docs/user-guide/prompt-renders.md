@@ -30,7 +30,7 @@ writes nothing.
 
 | Path | Contents |
 | --- | --- |
-| `target/prompt-renders/rendered/<route>.md` | One-file view of a first-turn agent: harness footprint (UTF-8 bytes and bytes÷4 tokens for costume, family/product/PTC instructions and compact `tools[]`, excluding enrolled `AGENTS.md` and the scenario user/assignment message), scenario summary, headers table (authorization `[redacted]`), and the pretty-printed request body in a `jsonc` fence |
+| `target/prompt-renders/rendered/<route>.md` | One-file view of a first-turn agent: harness footprint (UTF-8 bytes and bytes÷4 tokens for costume, family/product/PTC instructions and compact `tools[]`, excluding enrolled `AGENTS.md`, the skills listing and the scenario user/assignment message), scenario summary, headers table (authorization `[redacted]`), and the pretty-printed request body in a `jsonc` fence |
 | `target/prompt-renders/rendered/wire/<route>.request.json` | Strict, parseable first-turn body as the protocol kernel serializes it (Responses / Chat Completions / Messages) |
 | `target/prompt-renders/rendered/wire/<route>.headers.json` | Dialect-pinned headers and approximate body size |
 | `target/prompt-renders/rendered/lifecycle/*.md` | Post-first-turn surfaces: `tool-results`, `compaction`, `child-mail`, `mid-session` |
@@ -96,7 +96,7 @@ Never edit a rendered artifact — `just prompts render` overwrites it from Rust
   exclusions, and every API route is a composition the API table admits.
 - Rendered wire JSON equals the kernel-lowered request, and the Markdown
   `## Request` fence equals the jsonc formatter's output.
-- The harness footprint excludes enrolled `AGENTS.md` and the scenario
+- The harness footprint excludes enrolled `AGENTS.md`, the skills listing and the scenario
   assignment, subtracts enrolled source bytes, and keeps the Claude costume
   identity on Claude routes.
 - Every product tool extension's **name and description** appear verbatim to

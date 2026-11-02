@@ -149,6 +149,15 @@ pub struct ProductStateRoots {
     child_runtime: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
     job_registry: Arc<crate::jobs::JobRegistry>,
     job_config: plakous::tools::JobConfig,
+    skills: crate::skills::SkillsSetting,
+    /// What an exact reopen read back about the session's skills; `None`
+    /// for a new construction, which follows `skills`.
+    frozen_skills: Option<crate::skills::FrozenSkills>,
+    /// A rebind or switch successor's skills on/off, inherited from its
+    /// source; `None` outside one.
+    inherited_skills: Option<bool>,
+    /// Skill notices new constructions raised, drained by the host loop.
+    skill_notices: Arc<Mutex<Vec<String>>>,
     exchange_observer: crate::exchange_observation::Observer,
     session_records: Arc<dyn crate::session_store::SessionRecordStore>,
     product: PathBuf,
@@ -266,6 +275,10 @@ impl ProductStateRoots {
             ),
             job_registry: Arc::default(),
             job_config: plakous::tools::JobConfig::default(),
+            skills: crate::skills::SkillsSetting::default(),
+            frozen_skills: None,
+            inherited_skills: None,
+            skill_notices: Arc::default(),
             exchange_observer: None,
             session_records,
             product: std::fs::canonicalize(&product).unwrap_or(product),
@@ -328,6 +341,69 @@ impl ProductStateRoots {
     pub fn with_job_output_root(self, root: PathBuf) -> Self {
         self.job_registry.set_output_root(root);
         self
+    }
+
+    /// Binds whether sessions built from these roots discover Agent Skills,
+    /// and the home the user skills root is under.
+    #[must_use]
+    pub fn with_skills(mut self, skills: crate::skills::SkillsSetting) -> Self {
+        self.skills = skills;
+        self
+    }
+
+    pub(crate) const fn skills(&self) -> &crate::skills::SkillsSetting {
+        &self.skills
+    }
+
+    /// Which skills authority a node built from these roots follows.
+    pub(crate) fn skills_mode(&self) -> crate::skills::SkillsMode<'_> {
+        match (&self.frozen_skills, self.inherited_skills) {
+            (Some(frozen), _) => crate::skills::SkillsMode::Frozen(frozen),
+            (None, Some(on)) => crate::skills::SkillsMode::Inherited(on),
+            (None, None) => crate::skills::SkillsMode::New,
+        }
+    }
+
+    /// Makes the builds that follow rebuild exactly a session's frozen skills
+    /// (`None` ends that).
+    pub(crate) fn set_frozen_skills(&mut self, frozen: Option<crate::skills::FrozenSkills>) {
+        self.frozen_skills = frozen;
+    }
+
+    /// Marks the builds that follow as a fork, rebind or switch successor of a
+    /// source whose skills are `on` (`None` ends that).
+    pub(crate) fn set_inherited_skills(&mut self, on: Option<bool>) {
+        self.inherited_skills = on;
+    }
+
+    /// Queues one skills notice a new construction raised.
+    pub(crate) fn push_skill_notice(&self, notice: String) {
+        self.skill_notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(notice);
+    }
+
+    /// The skills notices raised since the last call, oldest first.
+    pub(crate) fn take_skill_notices(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .skill_notices
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    /// Reads back whether the session at `locator` has its skills on (its
+    /// sealed registry holds `Skill`) and its skills listing, from one exact
+    /// load, so its tools are rebuilt exactly as sealed.
+    pub(crate) async fn with_frozen_skills(
+        mut self,
+        sessions: &AgentSessions,
+        locator: plakous::sessions::SessionLocator,
+    ) -> Result<Self, plakous::sessions::AgentSessionsError> {
+        self.frozen_skills = Some(crate::skills::frozen_skills(sessions, locator).await?);
+        Ok(self)
     }
 
     pub(crate) const fn job_config(&self) -> plakous::tools::JobConfig {
@@ -480,6 +556,8 @@ impl ProductStateRoots {
     pub(super) fn without_reopen_artifact(mut self) -> Self {
         self.reopen_sidecars = None;
         self.created_semantic_evidence = None;
+        self.frozen_skills = None;
+        self.inherited_skills = None;
         self
     }
 
@@ -505,7 +583,7 @@ impl ProductStateRoots {
                 .into(),
         );
         self.reopen_sidecars = recorded_sidecar::recorded_sidecars(sessions, locator).await?;
-        Ok(self)
+        self.with_frozen_skills(sessions, locator).await
     }
 
     /// Replaces the roster a genesis built from these roots freezes. A carry
@@ -559,6 +637,10 @@ impl ProductStateRoots {
             ),
             job_registry: Arc::default(),
             job_config: plakous::tools::JobConfig::default(),
+            skills: crate::skills::SkillsSetting::default(),
+            frozen_skills: None,
+            inherited_skills: None,
+            skill_notices: Arc::default(),
             exchange_observer: None,
             session_records: Arc::new(crate::session_store::MemoryStore::new()),
             subscriptions: state_home.join("plak/subscriptions"),

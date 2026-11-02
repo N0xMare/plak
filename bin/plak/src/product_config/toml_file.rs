@@ -32,7 +32,7 @@ use std::ops::Range;
 use toml::Spanned;
 use toml_edit::{DocumentMut, Item, Table, TableLike, Value};
 
-/// `config.toml`: twelve sections, each optional, nothing else. `[tools]` and
+/// `config.toml`: thirteen sections, each optional, nothing else. `[tools]` and
 /// `[mcp_servers]` hold one named table per entry.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +45,7 @@ struct ConfigFile {
     api: Option<ApiSection>,
     tui: Option<TuiSection>,
     compaction: Option<CompactionSection>,
+    skills: Option<SkillsSection>,
     telemetry: Option<TelemetrySection>,
     mcp: Option<McpSection>,
     tools: Option<ToolsSection>,
@@ -121,6 +122,12 @@ struct ApiSection {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CompactionSection {
+    enabled: Entry,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillsSection {
     enabled: Entry,
 }
 
@@ -240,6 +247,9 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
     }
     if let Some(section) = &file.compaction {
         assign("compaction.enabled", &section.enabled)?;
+    }
+    if let Some(section) = &file.skills {
+        assign("skills.enabled", &section.enabled)?;
     }
     if let Some(section) = &file.telemetry {
         assign("telemetry.max_bytes", &section.max_bytes)?;

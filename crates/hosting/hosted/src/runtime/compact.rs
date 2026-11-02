@@ -289,7 +289,21 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
         (run.executor, run.opened, run.events, run.log, run.reason);
     let (operation, call_id, compact_started_at) = (&run.operation, &run.call_id, run.started_at);
     stderr_buf.clear();
-    let runtime = host_runtime_binding(config, stderr_buf, RuntimeRole::Compact)?;
+    // A compaction keeps the session's tools: its skills follow what the
+    // session froze, never the live setting (spec 02 §6.1.1).
+    let sessions = config.state_roots.runtime_sessions()?;
+    let frozen = executor
+        .block_on(crate::skills::frozen_skills(&sessions, source))
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map_err(|error| {
+            CliFailure::new(format!(
+                "the session's frozen skills could not be read: {error}"
+            ))
+        })?;
+    config.state_roots.set_frozen_skills(Some(frozen));
+    let runtime = host_runtime_binding(config, stderr_buf, RuntimeRole::Compact);
+    config.state_roots.set_frozen_skills(None);
+    let runtime = runtime?;
     let operation_id = SessionOperationId::new(operation)
         .map_err(|_| CliFailure::new("compact operation identity is invalid"))?;
     let facade_reason = match reason {

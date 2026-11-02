@@ -19,6 +19,7 @@ pub fn instruction_prompt_pins() -> Vec<&'static [plakous_tools::PromptPin]> {
         crate::identity::IDENTITY_PROMPT_PINS,
         crate::ptc::PTC_PROMPT_PINS,
         crate::content_filter::CONTENT_FILTER_PROMPT_PINS,
+        crate::skills::SKILLS_PROMPT_PINS,
     ]
 }
 

@@ -143,3 +143,27 @@ Re-vendor by decoding that exact JSON member, checking the source digest,
 reviewing the recorded edits, then updating the source/base pins in
 `src/bases/codex.rs` and the rendered prompt pins. GPT-5.6 and other models
 retain the earlier base, and the legacy variant retains its control base.
+
+## Skills catalog
+
+The Codex skills listing (`prompts::skills`, spec 02 §6.1) carries two string
+constants from `codex-rs/ext/skills/src/catalog_prompt.rs` at the Code Mode
+protocol revision `b1a547b1f73ce86205d9222ac19cff334b3b7a2e` (whole-file
+sha256 `ba8bb4b4369301af0ad75c8762f01b3067a91942790c08e3bdeda55f13a7ebaa`),
+byte for byte and unchanged at `rust-v0.163.0`. They are the host-filesystem
+variants: Plakous lists only local skills, which Codex reads through its
+shell, so the source-locator and `skills.read` variants would name tools that
+are not presented.
+
+| File | Upstream constant | Bytes | sha256 of the vendored file |
+| --- | --- | ---: | --- |
+| `skills/intro-host-aliases.txt` | `SKILLS_INTRO_WITH_HOST_ALIASES` | 261 | `1e24ced81a2ad9e9b1ae49124c2a7dbafce3d4bbdac215eab60e310811af0140` |
+| `skills/how-to-use-host-aliases.txt` | `SKILLS_HOW_TO_USE_WITH_HOST_ALIASES` | 2531 | `a542ff08e01add3661080ddc80c5a0239cbfb15d4dceb85c73d800b5ed9e0547` |
+
+The surrounding shape follows `catalog_prompt::render_available_skills_body`
+and `fragments::AvailableSkillsInstructions` at that revision:
+`<skills_instructions>`, `## Skills`, the intro, `### Skill roots` with one
+`` - `rN` = `<root>` `` line per root, `### Available skills` with
+`- <name>: <description> (file: rN/<name>/SKILL.md)` lines, `### How to use
+skills` and the how-to. Plakous always uses the aliased form (one alias per
+skill root) rather than choosing it by cost.

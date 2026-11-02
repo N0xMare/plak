@@ -372,7 +372,12 @@ pub(super) async fn api_session_runtime_binding_with_owner(
             acquired_owner,
         )?
     }
-    .with_plan(&tool_plan)?;
+    .with_plan(&tool_plan)?
+    .with_skills(&node_skills(
+        &parent.state_roots,
+        &parent.workspace_root,
+        api_skills_presentation(parent.target, parent.composition),
+    ))?;
     install_occupancy_fence(&parent.cwd)?;
     match parent.target {
         crate::binding::ApiTarget::OpenRouter { wire } => {
@@ -648,7 +653,13 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             attached_tree,
         )?
     }
-    .with_plan(&tool_plan)?;
+    .with_plan(&tool_plan)?
+    .with_skills(&native_node_skills(
+        &state_roots,
+        &workspace_root,
+        provider,
+        product_sdk,
+    ))?;
     install_occupancy_fence(&cwd)?;
     product_extensions.connect_retrieval(resolved.retrieval_port())?;
     product_extensions.connect_image_gen(resolved.image_gen_port())?;
@@ -978,7 +989,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             opening_durable_session,
             code_mode_candidate,
             extra_nested.as_slice(),
-            !extra_nested.is_empty(),
+            product_extensions.extends_beyond_skills(),
             composition,
             &surface,
             workspace.root(),
@@ -991,6 +1002,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             product_home.as_deref(),
             workspace.root(),
             workspace.cwd(),
+            product_extensions.skills_listing(),
         )?;
         // Explicit harness plans own reasoning at agent construction and would
         // otherwise overwrite CLI `--effort` with the profile default (Codex
@@ -1076,4 +1088,64 @@ pub fn coding_session_target_binding(resolved: &ResolvedProvider) -> SessionTarg
         resolved.configuration().effective_identity(),
         resolved.initial_authority().account_binding(),
     )
+}
+
+/// The skills one native node discovers, in its family's listing.
+fn native_node_skills(
+    state_roots: &crate::agent::ProductStateRoots,
+    workspace_root: &Path,
+    provider: NativeProvider,
+    product_sdk: bool,
+) -> crate::skills::NodeSkills {
+    use plakous::prompts::skills::SkillsPresentation;
+    let presentation = match provider {
+        _ if product_sdk => SkillsPresentation::Neutral,
+        NativeProvider::Codex => SkillsPresentation::Codex,
+        NativeProvider::Claude => SkillsPresentation::Claude,
+        NativeProvider::Xai => SkillsPresentation::Grok,
+        _ => SkillsPresentation::Neutral,
+    };
+    node_skills(state_roots, workspace_root, presentation)
+}
+
+/// One node's skills: frozen on an exact reopen or compaction, inherited on a
+/// rebind successor, live otherwise. A new construction queues its one notice
+/// for the host to show.
+fn node_skills(
+    state_roots: &crate::agent::ProductStateRoots,
+    workspace_root: &Path,
+    presentation: plakous::prompts::skills::SkillsPresentation,
+) -> crate::skills::NodeSkills {
+    let skills = crate::skills::NodeSkills::discover(
+        state_roots.skills(),
+        state_roots.skills_mode(),
+        workspace_root,
+        presentation,
+    );
+    if let Some(notice) = skills.notice() {
+        state_roots.push_skill_notice(notice);
+    }
+    skills
+}
+
+/// The skills listing family of one API target: the pack its route wears.
+fn api_skills_presentation(
+    target: crate::binding::ApiTarget,
+    composition: CompositionSelection,
+) -> plakous::prompts::skills::SkillsPresentation {
+    use crate::binding::{ApiTarget, PlatformProvider};
+    use plakous::prompts::skills::SkillsPresentation;
+    match target {
+        _ if composition == CompositionSelection::PySdk => SkillsPresentation::Neutral,
+        ApiTarget::OpenRouter { .. } => SkillsPresentation::Pi,
+        ApiTarget::Platform {
+            provider: PlatformProvider::OpenAi,
+        } => SkillsPresentation::Codex,
+        ApiTarget::Platform {
+            provider: PlatformProvider::Anthropic,
+        } => SkillsPresentation::Claude,
+        ApiTarget::Platform {
+            provider: PlatformProvider::Xai,
+        } => SkillsPresentation::Grok,
+    }
 }

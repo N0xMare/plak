@@ -36,8 +36,19 @@ pub fn standard_coding_packs(
     plan_state: Arc<dyn PlanState>,
     process: Arc<ProcessSessionTools>,
 ) -> Vec<Arc<dyn ToolPack>> {
+    standard_coding_packs_with_files(FilesToolPack::default(), plan_state, process)
+}
+
+/// [`standard_coding_packs`] over an explicitly configured files pack, such as
+/// one whose read admits skill roots ([`FilesToolPack::with_skill_roots`]).
+#[must_use]
+pub fn standard_coding_packs_with_files(
+    files: FilesToolPack,
+    plan_state: Arc<dyn PlanState>,
+    process: Arc<ProcessSessionTools>,
+) -> Vec<Arc<dyn ToolPack>> {
     vec![
-        Arc::new(FilesToolPack) as Arc<dyn ToolPack>,
+        Arc::new(files) as Arc<dyn ToolPack>,
         Arc::new(SearchToolPack),
         Arc::new(ProcessToolPack::new(
             process,
@@ -55,7 +66,7 @@ pub fn standard_coding_packs(
 #[must_use]
 pub fn standard_coding_menus(job_config: plakous_tools::JobConfig) -> Vec<Arc<dyn ToolPack>> {
     vec![
-        Arc::new(FilesToolPack) as Arc<dyn ToolPack>,
+        Arc::new(FilesToolPack::default()) as Arc<dyn ToolPack>,
         Arc::new(SearchToolPack),
         Arc::new(ProcessToolPack::menu_only(job_config)),
         Arc::new(PlanToolPack::menu_only()),

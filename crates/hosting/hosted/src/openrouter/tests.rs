@@ -1178,7 +1178,8 @@ fn product_profile_enrolls_global_and_workspace_instructions() {
     )
     .unwrap();
 
-    let (profile, facts) = enroll_product_instructions(&profile, Some(&home), &root, &cwd).unwrap();
+    let (profile, facts) =
+        enroll_product_instructions(&profile, Some(&home), &root, &cwd, None).unwrap();
 
     assert_eq!(
         profile.instruction_strategy(),
@@ -1222,7 +1223,7 @@ fn openrouter_javascript_and_python_enroll_agents_md() {
         )
         .unwrap();
         let (enrolled, facts) =
-            enroll_product_instructions(&profile, Some(&home), &root, &cwd).unwrap();
+            enroll_product_instructions(&profile, Some(&home), &root, &cwd, None).unwrap();
         assert_eq!(facts.len(), 3);
         assert_eq!(
             enrolled.instruction_strategy(),

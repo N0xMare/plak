@@ -570,7 +570,7 @@ impl PlakousApplication {
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),
             store: self.session_records()?,
-            state_roots: roots,
+            state_roots: roots.with_skills(policy.skills()),
             model_id: session
                 .model
                 .clone()

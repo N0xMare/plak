@@ -704,7 +704,7 @@ fn compile_rejects_a_present_but_direct_only_nested_capability() -> Result<(), T
     // Every pack but the process pack, whose first operation is re-registered
     // Direct-only below so the nested compile has a present but ineligible name.
     for pack in [
-        Arc::new(plakous_tool_files::FilesToolPack) as Arc<dyn plakous_tools::ToolPack>,
+        Arc::new(plakous_tool_files::FilesToolPack::default()) as Arc<dyn plakous_tools::ToolPack>,
         Arc::new(plakous_tool_search::SearchToolPack),
         Arc::new(plakous_tool_plan::PlanToolPack::new(plan_state)),
     ] {

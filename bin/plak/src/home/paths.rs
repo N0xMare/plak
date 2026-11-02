@@ -586,7 +586,8 @@ pub fn installed_snapshot_roots() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// The operator home used only to shorten display paths, never a product-state default.
+/// The operator's login home: display-path shortening and the user skills
+/// root (`~/.agents/skills`); never a product-state default.
 pub(crate) fn user_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .filter(|home| !home.is_empty())

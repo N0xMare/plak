@@ -5410,6 +5410,21 @@ entry points, not default pack registrations or presentation menus:
 host enrolls them. No existing Direct, Code Mode, js-ptc or py-ptc catalog
 includes them.
 
+`FilesToolPack::with_skill_roots(roots)` builds the files pack whose canonical
+read also admits regular files under those skill roots outside the workspace
+(spec 04 §2.1; Plak passes only the user skill root); each root is
+canonicalized when the pack is built and one that is not a directory then is
+dropped. Such a read requires a regular file and opens it with `O_NOFOLLOW |
+O_NONBLOCK`. `FilesToolPack::default()` admits none.
+`standard_coding_packs_with_files` composes the standard packs over such a
+files pack; `standard_coding_packs` uses the default. No descriptor, menu or
+registration identity changes with the roots. `plakous::prompts::skills`
+discovers Agent Skills under explicit roots, renders the per-family listing
+and registers it as one context source (`plak.skills.v1`), narrows a discovery to
+the skills a frozen Claude listing names, and loads one listed skill again
+with the same validation; it reads no environment, and the product supplies
+the roots (spec 02 §6.1.1).
+
 `edit_files` takes a nonempty bounded `ops` array. Each operation has an `op`
 tag: `patch` takes a Codex `patch` envelope; `replace` takes `path`, `old`,
 `new` and optional `all` (false); `write` takes `path` and `content`; `delete`
@@ -9512,6 +9527,14 @@ exact stored checkpoint before the host compiles tool descriptors or local
 composition attachments for reopen. Lookup, stale-head, integrity and invalid
 stored-environment failures remain typed errors; no current-default fallback
 is permitted.
+`AgentSessions::created_tool_registration_and_sources(locator, name)` reads,
+the same way and from one exact load, whether the exact stored checkpoint's
+frozen tool registry holds a registration of that canonical name, decoding
+the stored registry descriptor (either supported codec revision), and the
+checkpoint's resolved instruction sources, without opening the session. A
+host whose optional tools follow a live setting reads it before an exact
+reopen, a compaction or a rebind so every such build keeps exactly the
+registry the session sealed.
 `AgentSessions::created_composition_artifact` likewise performs a read-only
 exact-head load before runtime compilation. Core parses the existing workspace
 and `local-composition-attachment-v2` environment framing; the facade returns

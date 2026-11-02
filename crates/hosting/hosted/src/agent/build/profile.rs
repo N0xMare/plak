@@ -5,7 +5,7 @@ use crate::{CliFailure, CliResult};
 use plakous::agent::{
     ContextSourceCatalog, ContextSourceResolver, ContextSourceSelector, HarnessProfileId,
     HarnessProfileSpec, HarnessProfileSpecBuilder, InstructionCompositionStrategy, ReasoningEffort,
-    ResolvedContextSourceFact,
+    RegisteredContextSource, ResolvedContextSourceFact,
 };
 use plakous::model::ModelId;
 use plakous::subscriptions::NativeProvider;
@@ -196,11 +196,14 @@ pub(crate) fn product_target_identity_profile(
         .map_err(|error| CliFailure::new(format!("product identity profile is invalid: {error}")))
 }
 
+/// Enrolls the discovered `AGENTS.md` files, then the node's skills listing
+/// when it has one, as the profile's instruction sources (spec 02 §6.1).
 pub(crate) fn enroll_product_instructions(
     profile: &HarnessProfileSpec,
     product_home: Option<&Path>,
     workspace_root: &Path,
     cwd: &Path,
+    skills_listing: Option<&RegisteredContextSource>,
 ) -> CliResult<(HarnessProfileSpec, Vec<ResolvedContextSourceFact>)> {
     let discovery = plakous::prompts::instructions::discover_instruction_sources(
         product_home,
@@ -208,24 +211,28 @@ pub(crate) fn enroll_product_instructions(
         cwd,
     )
     .map_err(|error| CliFailure::new(format!("product instructions are invalid: {error}")))?;
-    if discovery.sources().is_empty() {
-        return Ok((profile.clone(), Vec::new()));
-    }
-
-    let mut catalog = ContextSourceCatalog::new();
-    let mut selectors = Vec::with_capacity(discovery.sources().len());
+    let mut sources = Vec::with_capacity(discovery.sources().len() + 1);
     for source in discovery.sources() {
-        let registered = source.registered_source().map_err(|error| {
+        sources.push(source.registered_source().map_err(|error| {
             CliFailure::new(format!(
                 "instruction source {} could not be registered: {error}",
                 source.source_id()
             ))
-        })?;
+        })?);
+    }
+    sources.extend(skills_listing.cloned());
+    if sources.is_empty() {
+        return Ok((profile.clone(), Vec::new()));
+    }
+
+    let mut catalog = ContextSourceCatalog::new();
+    let mut selectors = Vec::with_capacity(sources.len());
+    for registered in sources {
         selectors.push(
             ContextSourceSelector::new(registered.source_id()).map_err(|error| {
                 CliFailure::new(format!(
                     "instruction source {} has an invalid selector: {error}",
-                    source.source_id()
+                    registered.source_id()
                 ))
             })?,
         );

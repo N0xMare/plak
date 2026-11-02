@@ -345,10 +345,10 @@ pub mod profiles {
 ///
 /// Tool descriptions are not here: a tool's text travels with its pack
 /// in the harness layer. This module owns single-agent instruction assembly
-/// and bounded `AGENTS.md` discovery (spec 01 §12).
+/// and bounded `AGENTS.md` and Agent Skills discovery (spec 01 §12).
 pub mod prompts {
     pub use plakous_prompts::{
-        bases, content_filter, identity, instructions, pins, plan, ptc, vocabulary,
+        bases, content_filter, identity, instructions, pins, plan, ptc, skills, vocabulary,
     };
 }
 
@@ -1267,7 +1267,7 @@ pub mod tools {
         PythonHarnessSdkDescriptorV1, PythonHarnessSdkV1, PythonPtcDescriptorV1, PythonPtcLimitsV1,
         PythonPtcPresentationV1, PythonPtcV1, SidecarLocator, process_presentation_candidate_v2,
         process_presentation_candidate_with_extensions_v2, standard_coding_menus,
-        standard_coding_packs, standard_coding_packs_in_memory,
+        standard_coding_packs, standard_coding_packs_in_memory, standard_coding_packs_with_files,
         validate_process_presentation_candidate_v2,
     };
     pub use plakous_tool_files::FilesToolPack;

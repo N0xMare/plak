@@ -26,6 +26,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 diffy.workspace = true
 plakous-model.workspace = true
 plakous-tools.workspace = true
+rustix = { workspace = true, features = ["fs"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 

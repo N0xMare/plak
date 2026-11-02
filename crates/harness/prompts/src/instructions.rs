@@ -29,13 +29,15 @@ const GLOBAL_SOURCE_ID: &str = "plak.agents.global.v1";
 const WORKSPACE_ROOT_SOURCE_ID: &str = "plak.agents.workspace-root.v1";
 
 /// Where an enrolled instruction source id was discovered, in words a person
-/// reads: `global`, `workspace root`, or `nested directory`. Nested ids carry
-/// only a digest of their directory, so the directory itself is not named.
+/// reads: `global`, `workspace root`, `skills listing`, or `nested directory`.
+/// Nested ids carry only a digest of their directory, so the directory itself
+/// is not named.
 #[must_use]
 pub fn instruction_source_scope_label(source_id: &str) -> &'static str {
     match source_id {
         GLOBAL_SOURCE_ID => "global",
         WORKSPACE_ROOT_SOURCE_ID => "workspace root",
+        crate::skills::SKILLS_SOURCE_ID => "skills listing",
         _ => "nested directory",
     }
 }

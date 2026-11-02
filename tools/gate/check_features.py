@@ -718,7 +718,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-messages": "30cb4595eb111ef7184ff61bd83fa4351a4fa2401fd2906be0c9409af9a9155b",
     "plakous-model": "04297fb5135a6bec3b2b5838aa8a0f71620162cfa4166529f1e110702fd0a16f",
     "plakous-openai": "4b3068f8a7ff7a3cea79892ccdf561ee1499eb37db69ce045871348ad840c99b",
-    "plakous-tool-files": "d185df5e82e5a3b12eec44057930854e2bf203816544acb7e7de4d64296b899a",
+    "plakous-tool-files": "a683c26a9af2d50b8e2ad05a85920a7e725aa571c267742028b25046521bf037",
     "plakous-tool-plan": "f6b901df7cd208ea7296a9593510ba3ccaa50acdb57b08de497d5f05948d1aff",
     "plakous-tool-process": "fa21e6c7ded66a688062e91814e5ef1127d3ed855f3889fff8c791b9f50cbda8",
     "plakous-tool-search": "96d7fb5cc266fc2475ee59059bbe05e1e80f5f03de7dc046e60b1fcb3a5ba958",

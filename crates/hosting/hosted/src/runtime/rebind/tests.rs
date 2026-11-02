@@ -103,6 +103,32 @@ fn a_recompiled_branch_names_each_agents_md_it_re_read() {
 }
 
 #[test]
+fn a_recompiled_branch_names_a_skills_listing_it_re_read() {
+    let agents = instruction_fact("plak.agents.workspace-root.v1", "root");
+    let skills = |content| instruction_fact(plakous::prompts::skills::SKILLS_SOURCE_ID, content);
+    assert_eq!(
+        reread_instructions_note(
+            std::slice::from_ref(&agents),
+            &[agents.clone(), skills("one skill")]
+        )
+        .as_deref(),
+        Some("AGENTS.md and skills re-read for this branch: skills listing added")
+    );
+    assert_eq!(
+        reread_instructions_note(
+            &[agents.clone(), skills("one skill")],
+            &[agents.clone(), skills("two skills")]
+        )
+        .as_deref(),
+        Some("AGENTS.md and skills re-read for this branch: skills listing changed")
+    );
+    assert_eq!(
+        reread_instructions_note(&[agents.clone(), skills("one skill")], &[agents]).as_deref(),
+        Some("AGENTS.md and skills re-read for this branch: skills listing removed")
+    );
+}
+
+#[test]
 fn a_treeless_profile_is_not_already_active_when_topology_is_admitted() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = fresh_injected_attached_host(root.path());
@@ -177,7 +203,13 @@ impl crate::platform::OpenAiCredentials for TopologyApiCredentials {
 }
 impl crate::platform::AnthropicCredentials for TopologyApiCredentials {
     fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
-        Err(CliFailure::new("unselected provider"))
+        Ok(Arc::new(plakous::api_key::StaticApiKeySource::for_key(
+            plakous::api_key::ApiKey::new("synthetic-topology-lifecycle-key").unwrap(),
+            plakous::api_key::CredentialProviderTag::AnthropicPlatform,
+            plakous::anthropic::ANTHROPIC_PLATFORM_ORIGIN,
+            None,
+            (),
+        )))
     }
 }
 impl crate::platform::XaiCredentials for TopologyApiCredentials {
@@ -199,24 +231,43 @@ fn actual_api_topology_host_with(
     executor: &ApplicationExecutor,
     frozen: Option<crate::frozen_tools::FrozenRootTools>,
 ) -> (HostConfig<TestExtension>, AttachedCodingSession) {
+    api_topology_host_on(
+        root,
+        executor,
+        frozen,
+        crate::binding::PlatformProvider::OpenAi,
+        "gpt-5.6-luna",
+        crate::skills::SkillsSetting::default(),
+    )
+}
+
+/// A real API root on `provider`/`model`, created under `skills`.
+fn api_topology_host_on(
+    root: &std::path::Path,
+    executor: &ApplicationExecutor,
+    frozen: Option<crate::frozen_tools::FrozenRootTools>,
+    provider: crate::binding::PlatformProvider,
+    model: &str,
+    skills: crate::skills::SkillsSetting,
+) -> (HostConfig<TestExtension>, AttachedCodingSession) {
     let (mut config, _) = fresh_injected_attached_host(root);
     config.session.frozen_tools = frozen;
     config.runtime_factory = Arc::new(ProductionRuntimeFactory);
     config.state_roots = config
         .state_roots
-        .with_test_platform_credentials(Arc::new(TopologyApiCredentials));
+        .with_test_platform_credentials(Arc::new(TopologyApiCredentials))
+        .with_skills(skills);
     config.store = config.state_roots.session_records();
-    let provider = crate::binding::PlatformProvider::OpenAi;
     config.target = HostTargetAuthority::Platform {
         provider,
         subscriptions: config.state_roots.native_subscriptions().unwrap(),
     };
     config.session.account = Some(provider.account().into());
-    config.session.model = Some("gpt-5.6-luna".into());
+    config.session.model = Some(model.into());
     config.session.effort = Some("low".into());
     config.session.composition = ProductComposition::Direct;
     config.session.target_selection = TargetSelection::Platform { provider };
-    config.model_id = "gpt-5.6-luna".into();
+    config.model_id = model.into();
     config.effort = Some(ReasoningEffort::Low);
     let parent = crate::agent::api_topology_parent(
         config.product_home.clone(),
@@ -573,6 +624,369 @@ fn plain_fork_rereads_changed_agents_md_and_names_it() {
         instructions(&opened)
     );
     executor.block_on(opened.release()).unwrap().unwrap();
+}
+
+/// Skills follow `AGENTS.md`: a fork re-reads them and names the listing, an
+/// exact reopen keeps the listing the session was compiled with.
+#[test]
+fn a_fork_rereads_skills_and_an_exact_reopen_keeps_the_frozen_listing() {
+    use crate::runtime::fork::handle_fork;
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (mut config, mut opened) = api_topology_host_on(
+        root.path(),
+        &executor,
+        None,
+        crate::binding::PlatformProvider::OpenAi,
+        "gpt-5.6-luna",
+        crate::skills::SkillsSetting::new(true, None),
+    );
+    let skill = config
+        .session
+        .workspace_root
+        .join(".agents/skills/review-pr");
+    std::fs::create_dir_all(&skill).unwrap();
+    let write_skill = |description: &str| {
+        std::fs::write(
+            skill.join("SKILL.md"),
+            format!("---\nname: review-pr\ndescription: {description}\n---\nSteps.\n"),
+        )
+        .unwrap();
+    };
+    write_skill("Review a PR the first way.");
+    let listing = |opened: &AttachedCodingSession| {
+        instruction_sources(opened)
+            .unwrap()
+            .iter()
+            .find(|source| source.source_id() == plakous::prompts::skills::SKILLS_SOURCE_ID)
+            .map(|source| source.content().to_owned())
+    };
+    assert_eq!(listing(&opened), None, "no skill existed at construction");
+
+    let (events, notes_rx) = host_event_sink();
+    let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let state = RefCell::new(InterruptWatchState::default());
+    handle_fork(
+        &executor,
+        InterruptWatch::new(&receiver, &state),
+        &mut config,
+        &mut opened,
+        &mut Vec::new(),
+        &events,
+        None,
+    )
+    .unwrap();
+    let notes = notes_rx
+        .try_iter()
+        .filter_map(|event| match event {
+            HostEvent::Row(row) => row.text().map(str::to_owned),
+            _ => None,
+        })
+        .filter(|note| note.contains("re-read"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        notes,
+        ["AGENTS.md and skills re-read for this branch: skills listing added"]
+    );
+    let forked = listing(&opened).expect("the fork lists the skill");
+    assert!(
+        forked.contains("- review-pr: Review a PR the first way."),
+        "{forked}"
+    );
+
+    write_skill("Review a PR the second way.");
+    let locator = executor.block_on(opened.detach()).unwrap().unwrap();
+    config.session.bind_plakous_locator(locator).unwrap();
+    config.store.save(&mut config.session).unwrap();
+    executor.block_on(opened.release()).unwrap().unwrap();
+    let reopened = executor
+        .block_on(startup::build_session_from_config(
+            &mut config,
+            &mut Vec::new(),
+        ))
+        .unwrap()
+        .unwrap();
+    assert_eq!(listing(&reopened), Some(forked));
+    executor.block_on(reopened.release()).unwrap().unwrap();
+}
+
+fn claude_api_host(
+    root: &std::path::Path,
+    executor: &ApplicationExecutor,
+    skills_enabled: bool,
+) -> (HostConfig<TestExtension>, AttachedCodingSession) {
+    api_topology_host_on(
+        root,
+        executor,
+        None,
+        crate::binding::PlatformProvider::Anthropic,
+        "claude-sonnet-5",
+        crate::skills::SkillsSetting::new(skills_enabled, None),
+    )
+}
+
+fn froze_skill_tool(executor: &ApplicationExecutor, config: &HostConfig<TestExtension>) -> bool {
+    let sessions = config.state_roots.runtime_sessions().unwrap();
+    executor
+        .block_on(crate::skills::frozen_skills(
+            &sessions,
+            config.session.plakous_locator.unwrap(),
+        ))
+        .unwrap()
+        .unwrap()
+        .on
+}
+
+fn rebind_to(
+    executor: &ApplicationExecutor,
+    config: &mut HostConfig<TestExtension>,
+    opened: &mut AttachedCodingSession,
+    account: &str,
+    model: &str,
+) -> CliResult<Rebound> {
+    let (events, _notes) = host_event_sink();
+    let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let state = RefCell::new(InterruptWatchState::default());
+    handle_rebind(
+        executor,
+        InterruptWatch::new(&receiver, &state),
+        config,
+        opened,
+        &mut Vec::new(),
+        &events,
+        account,
+        model,
+        Some("low"),
+        None,
+        Some(ProductComposition::Direct),
+        None,
+        &crate::orchestration::RosterInput::unpinned(model),
+    )
+}
+
+fn set_skills(config: &mut HostConfig<TestExtension>, enabled: bool) {
+    config.state_roots = config
+        .state_roots
+        .clone()
+        .with_skills(crate::skills::SkillsSetting::new(enabled, None));
+}
+
+fn reopen_exactly(
+    executor: &ApplicationExecutor,
+    config: &mut HostConfig<TestExtension>,
+    mut opened: AttachedCodingSession,
+) -> AttachedCodingSession {
+    let locator = executor.block_on(opened.detach()).unwrap().unwrap();
+    config.session.bind_plakous_locator(locator).unwrap();
+    config.store.save(&mut config.session).unwrap();
+    executor.block_on(opened.release()).unwrap().unwrap();
+    executor
+        .block_on(startup::build_session_from_config(config, &mut Vec::new()))
+        .unwrap()
+        .unwrap()
+}
+
+fn fork_now(
+    executor: &ApplicationExecutor,
+    config: &mut HostConfig<TestExtension>,
+    opened: &mut AttachedCodingSession,
+) -> CliResult<()> {
+    let (events, _notes) = host_event_sink();
+    let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let state = RefCell::new(InterruptWatchState::default());
+    fork::handle_fork(
+        executor,
+        InterruptWatch::new(&receiver, &state),
+        config,
+        opened,
+        &mut Vec::new(),
+        &events,
+        None,
+    )
+}
+
+/// A Claude session made before skills (or with them off) reopens exactly
+/// once they are on, keeping its tools; one made with them reopens exactly
+/// once they are off, keeping `Skill`. The reopen follows what the session
+/// froze, never the live setting.
+#[test]
+fn an_exact_reopen_keeps_the_skill_tool_the_session_froze_in_both_directions() {
+    for created_with_skills in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let executor = ApplicationExecutor::new().unwrap();
+        let (mut config, opened) = claude_api_host(root.path(), &executor, created_with_skills);
+        assert_eq!(froze_skill_tool(&executor, &config), created_with_skills);
+        set_skills(&mut config, !created_with_skills);
+        let reopened = reopen_exactly(&executor, &mut config, opened);
+        assert_eq!(
+            froze_skill_tool(&executor, &config),
+            created_with_skills,
+            "reopen created_with_skills={created_with_skills}"
+        );
+        executor.block_on(reopened.release()).unwrap().unwrap();
+    }
+}
+
+/// A rebind or switch successor inherits its source's skills on/off whatever
+/// tuple it moves to, so canonical tool authority never changes: Claude to
+/// OpenAI and back with skills on keeps `Skill` registered (presented only on
+/// Claude), and a toggle before the rebind changes nothing.
+#[test]
+fn a_cross_family_rebind_keeps_the_sources_skills_in_both_directions() {
+    for setting_at_rebind in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let executor = ApplicationExecutor::new().unwrap();
+        let (mut config, mut opened) = claude_api_host(root.path(), &executor, true);
+        assert!(froze_skill_tool(&executor, &config));
+        set_skills(&mut config, setting_at_rebind);
+        let to_openai = rebind_to(
+            &executor,
+            &mut config,
+            &mut opened,
+            "openai",
+            "gpt-5.6-luna",
+        );
+        assert_eq!(to_openai.unwrap(), Rebound::Switched);
+        assert!(froze_skill_tool(&executor, &config), "openai successor");
+        let to_claude = rebind_to(
+            &executor,
+            &mut config,
+            &mut opened,
+            "anthropic",
+            "claude-sonnet-5",
+        );
+        assert_eq!(to_claude.unwrap(), Rebound::Switched);
+        assert!(froze_skill_tool(&executor, &config), "claude successor");
+        executor.block_on(opened.release()).unwrap().unwrap();
+    }
+}
+
+/// An OpenAI session made with skills on rebinds onto Claude keeping `Skill`,
+/// which the Claude successor now presents.
+#[test]
+fn an_openai_session_with_skills_rebinds_onto_claude() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (mut config, mut opened) = api_topology_host_on(
+        root.path(),
+        &executor,
+        None,
+        crate::binding::PlatformProvider::OpenAi,
+        "gpt-5.6-luna",
+        crate::skills::SkillsSetting::new(true, None),
+    );
+    assert!(froze_skill_tool(&executor, &config));
+    let rebound = rebind_to(
+        &executor,
+        &mut config,
+        &mut opened,
+        "anthropic",
+        "claude-sonnet-5",
+    );
+    assert_eq!(rebound.unwrap(), Rebound::Switched);
+    assert!(froze_skill_tool(&executor, &config));
+    executor.block_on(opened.release()).unwrap().unwrap();
+}
+
+/// A Claude session made with skills off (as every session a build without
+/// skills made) never gains `Skill`: a model switch after they are turned on
+/// keeps its tools.
+#[test]
+fn a_claude_model_switch_on_a_session_made_without_skills_never_gains_skill() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (mut config, mut opened) = claude_api_host(root.path(), &executor, false);
+    set_skills(&mut config, true);
+    let rebound = rebind_to(
+        &executor,
+        &mut config,
+        &mut opened,
+        "anthropic",
+        "claude-opus-5",
+    );
+    assert_eq!(rebound.unwrap(), Rebound::Switched);
+    assert!(!froze_skill_tool(&executor, &config));
+    let rebound = rebind_to(
+        &executor,
+        &mut config,
+        &mut opened,
+        "openai",
+        "gpt-5.6-luna",
+    );
+    assert_eq!(rebound.unwrap(), Rebound::Switched);
+    assert!(!froze_skill_tool(&executor, &config));
+    executor.block_on(opened.release()).unwrap().unwrap();
+}
+
+/// A fork is a successor of its source: on Claude and OpenAI alike it keeps
+/// whether the source's skills are on after `skills.enabled` changed (made
+/// without them and forked with them on, or the reverse), so it is admitted
+/// with the source's tools, re-reads the roots under that (a skill written
+/// since is listed only when they are on), and a fork of the fork keeps them.
+#[test]
+fn a_fork_after_skills_were_toggled_keeps_the_sources_skills() {
+    for (provider, model) in [
+        (
+            crate::binding::PlatformProvider::Anthropic,
+            "claude-sonnet-5",
+        ),
+        (crate::binding::PlatformProvider::OpenAi, "gpt-5.6-luna"),
+    ] {
+        for created_with_skills in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let executor = ApplicationExecutor::new().unwrap();
+            let (mut config, mut opened) = api_topology_host_on(
+                root.path(),
+                &executor,
+                None,
+                provider,
+                model,
+                crate::skills::SkillsSetting::new(created_with_skills, None),
+            );
+            let case = format!("{model} created_with_skills={created_with_skills}");
+            assert_eq!(
+                froze_skill_tool(&executor, &config),
+                created_with_skills,
+                "{case}"
+            );
+            set_skills(&mut config, !created_with_skills);
+            let skill = config
+                .session
+                .workspace_root
+                .join(".agents/skills/review-pr");
+            std::fs::create_dir_all(&skill).unwrap();
+            std::fs::write(
+                skill.join("SKILL.md"),
+                "---\nname: review-pr\ndescription: Review a PR.\n---\nSteps.\n",
+            )
+            .unwrap();
+            let source_id = config.session.id.clone();
+            let forked = fork_now(&executor, &mut config, &mut opened);
+            assert!(forked.is_ok(), "{case}: {forked:?}");
+            assert_ne!(config.session.id, source_id, "{case}: the fork attached");
+            assert_eq!(
+                froze_skill_tool(&executor, &config),
+                created_with_skills,
+                "{case}"
+            );
+            let listed = instruction_sources(&opened)
+                .unwrap()
+                .iter()
+                .any(|source| source.source_id() == plakous::prompts::skills::SKILLS_SOURCE_ID);
+            assert_eq!(
+                listed, created_with_skills,
+                "{case}: the fork re-read the roots"
+            );
+            let again = fork_now(&executor, &mut config, &mut opened);
+            assert!(again.is_ok(), "{case}: {again:?}");
+            assert_eq!(
+                froze_skill_tool(&executor, &config),
+                created_with_skills,
+                "{case}"
+            );
+            executor.block_on(opened.release()).unwrap().unwrap();
+        }
+    }
 }
 
 fn row_texts(receiver: &crate::surface_protocol::HostEventReceiver<TestExtension>) -> Vec<String> {
@@ -1485,4 +1899,24 @@ fn handle_rebind_fails_closed_when_tree_epoch_blocks_rebind() {
         crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_PAUSED
     );
     assert!(no_unsettled_rebind_requests(&config));
+}
+
+/// A switch refused because its successor's tools would change says so in
+/// `/rebind` terms; other refusals keep the canonical text.
+#[test]
+fn a_switch_refused_for_changed_tools_says_so() {
+    assert_eq!(
+        complete::rebind_refusal(
+            AgentSessionsErrorKind::Revalidation,
+            "rebind changed canonical tool authority outside its authority",
+        ),
+        Some("cannot switch: this session's tools would change; start a new session on that model")
+    );
+    assert_eq!(
+        complete::rebind_refusal(
+            AgentSessionsErrorKind::Revalidation,
+            "rebind changed effect policy outside its authority",
+        ),
+        None
+    );
 }

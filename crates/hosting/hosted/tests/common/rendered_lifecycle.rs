@@ -882,7 +882,7 @@ mod suite {
         ));
 
         md.push_str("## Guarded Write refusals\n\n");
-        let file_pins = plakous::tools::ToolPack::pins(&plakous::tools::FilesToolPack);
+        let file_pins = plakous::tools::ToolPack::pins(&plakous::tools::FilesToolPack::default());
         for (label, pin, call) in [
             ("Unread existing file", "files.write_unread", 0x6a),
             ("Stale content after Read", "files.write_stale", 0x6b),
