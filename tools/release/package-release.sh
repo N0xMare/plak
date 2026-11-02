@@ -79,7 +79,11 @@ target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 [[ "$target_dir" == /* ]] || target_dir="$repo_root/$target_dir"
 mkdir -p "$target_dir"
 target_dir="$(cd "$target_dir" && pwd -P)"
-cargo_home="$(cd "${CARGO_HOME:-$HOME/.cargo}" && pwd -P)"
+# A fresh runner may not have created the Cargo home yet; Cargo creates it at
+# this path on first use, so the remap must name it before the build.
+cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+mkdir -p "$cargo_home"
+cargo_home="$(cd "$cargo_home" && pwd -P)"
 maps=("$cargo_home=/cargo" "$repo_root=/plak" "$target_dir=/target")
 c_flags_var="CFLAGS_${triple//-/_}"
 cxx_flags_var="CXXFLAGS_${triple//-/_}"

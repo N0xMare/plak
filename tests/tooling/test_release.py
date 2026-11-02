@@ -587,6 +587,20 @@ esac""")
         sums = (self.base / "target/release-dist/SHA256SUMS").read_text().splitlines()
         self.assertEqual(len(sums), 2)
 
+    def test_a_missing_cargo_home_is_created_and_remapped(self) -> None:
+        env = {key: value for key, value in self.env.items() if key != "CARGO_HOME"}
+        home = self.base / "fresh-home"
+        env["HOME"] = str(home)
+        result = subprocess.run(["bash", str(self.repo / "tools/release/package-release.sh")],
+                                env={**env, "FAKE_TAG": f"v{VERSION}"}, capture_output=True,
+                                text=True, timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((home / ".cargo").is_dir())
+        builds = [line for line in self.log.read_text().splitlines() if line.startswith("cargo build")]
+        self.assertTrue(builds)
+        for line in builds:
+            self.assertIn(f"--remap-path-prefix={(home / '.cargo').resolve()}=/cargo", line)
+
     def test_a_release_candidate_tag_names_the_tarball_and_other_tags_are_refused(self) -> None:
         result = self.run_script("--tag", f"v{VERSION}-rc.2", FAKE_TAG=f"v{VERSION}-rc.2")
         self.assertEqual(result.returncode, 0, result.stderr)
