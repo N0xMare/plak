@@ -2,7 +2,7 @@
 
 use plakous_auth::CompatibilityDrift;
 
-pub(super) fn unknown_beta(status: u16, body: &[u8], sent: &str) -> Option<CompatibilityDrift> {
+pub(crate) fn unknown_beta(status: u16, body: &[u8], sent: &str) -> Option<CompatibilityDrift> {
     if status != 400 || body.len() > crate::error::MAX_PROVIDER_ERROR_BODY_BYTES {
         return None;
     }

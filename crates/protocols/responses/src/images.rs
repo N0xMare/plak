@@ -224,6 +224,12 @@ pub trait ResponsesImageTransport: Send + Sync {
     fn retry_wrapped_overload(&self) -> bool {
         false
     }
+
+    /// See [`crate::ResponsesRetrievalTransport::contract_refusal`].
+    fn contract_refusal(&self, status: u16, body: &[u8]) -> Option<String> {
+        let _ = (status, body);
+        None
+    }
 }
 
 /// The image bytes of a successful images response.
@@ -321,6 +327,9 @@ impl side_request::RetrievalTransport for ImageTransport<'_> {
     }
     fn retry_wrapped_overload(&self) -> bool {
         self.inner.retry_wrapped_overload()
+    }
+    fn contract_refusal(&self, status: u16, body: &[u8]) -> Option<String> {
+        self.inner.contract_refusal(status, body)
     }
 }
 struct ImageReader {

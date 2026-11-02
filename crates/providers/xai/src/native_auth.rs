@@ -46,7 +46,8 @@ use refresh::{XaiRefreshCancelGuard, XaiRefreshHooks, XaiRevokeHooks};
 use dispatch::supergrok_generation_fingerprint;
 pub(crate) use dispatch::{
     SuperGrokDispatchGuard, SuperGrokResponsesExecution, revalidate_supergrok_responses,
-    supergrok_credential_rejected, supergrok_responses_preflight, supergrok_side_request,
+    supergrok_contract_refusal, supergrok_credential_rejected, supergrok_responses_preflight,
+    supergrok_side_request,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

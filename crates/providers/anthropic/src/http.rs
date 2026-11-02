@@ -1,7 +1,7 @@
 //! Anthropic HTTP dialect hooks for the neutral Messages exchange host.
 
 #[cfg(feature = "native-auth")]
-mod compatibility;
+pub(crate) mod compatibility;
 
 use std::collections::VecDeque;
 use std::fmt;

@@ -1532,6 +1532,68 @@ async fn production_unknown_sent_beta_is_single_dispatch_permanent_configuration
 }
 
 #[tokio::test]
+async fn a_side_request_rejecting_a_sent_beta_is_final_with_the_newer_build_remedy() {
+    let temp = tempfile::tempdir().unwrap();
+    let refusal = local_response(
+        400,
+        "application/json",
+        r#"{"type":"error","error":{"type":"invalid_request_error","message":"Unexpected value(s) `effort-2025-11-24` for the `anthropic-beta` header. Please consult our documentation at docs.claude.com or try again without the header."}}"#,
+    );
+    let (client, origin, peer) = local_peer(vec![refusal]).await;
+    let gate = inference_gate(2);
+    let manager = manager_with_client(private_store(&temp), client.clone())
+        .with_subscription_request_gate(gate.clone());
+    manager
+        .persist_test_grant(
+            "offline-access",
+            "offline-refresh",
+            3600,
+            CLAUDE_OAUTH_INFERENCE_SCOPE,
+        )
+        .unwrap();
+    let session_id = plakous_model::SessionId::try_from(Uuid::from_u128(7)).unwrap();
+    let (_, _, _, retrieval) = manager
+        .resolve_model_with_retrieval("claude-sonnet-5", client, SessionLineage::Root, session_id)
+        .await
+        .unwrap();
+    let query = plakous_messages::MessagesRetrievalQuery::WebSearch {
+        query: "Rust release".to_owned(),
+        allowed_domains: Vec::new(),
+        blocked_domains: Vec::new(),
+        max_uses: 1,
+    };
+    let error = timeout(
+        Duration::from_secs(5),
+        retrieval
+            .with_dial_origin(origin)
+            .retrieve(query, &plakous_model::CancellationToken::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(
+        error.kind(),
+        plakous_messages::MessagesRetrievalErrorKind::Rejected
+    );
+    assert_eq!(error.status(), Some(400));
+    assert_eq!(error.physical_requests(), 1);
+    assert_eq!(
+        error.message(),
+        plakous_auth::CompatibilityDrift::UnknownBeta.message("Claude")
+    );
+    let requests = timeout(Duration::from_secs(5), peer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        String::from_utf8_lossy(&requests[0])
+            .to_ascii_lowercase()
+            .contains("effort-2025-11-24")
+    );
+}
+
+#[tokio::test]
 async fn production_oauth_turn_retries_local_429_with_fresh_inference_permit() {
     let temp = tempfile::tempdir().unwrap();
     let refusal = local_response(

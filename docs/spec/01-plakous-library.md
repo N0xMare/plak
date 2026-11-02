@@ -4091,6 +4091,16 @@ betas removed. Unsent values, other 400s and attestation errors retain the
 existing error path. The shared Messages failure carries a neutral typed
 contract-refusal flag; it does not parse diagnostic strings to recover it.
 
+Hosted side requests on these routes carry the same client-version header and
+beta values, so their transports classify the same two shapes: SuperGrok web
+search, X search and image requests the Grok 426 sentence, Claude OAuth web
+search and page fetch the 400 naming a beta that side request sent. A match is
+a final `Rejected` side-request failure that keeps the HTTP status and replaces
+the provider text with the newer-build remedy (`CompatibilityDrift` message for
+`Grok` or `Claude`), so the advertised update command never reaches the model.
+It is not retried and runs no claimed refresh. The xAI and Anthropic API routes
+classify neither shape.
+
 Under account load the Codex subscription backend answers some inference
 requests with HTTP 401, `error.type=authentication_error` and
 `error.message` ``authentication failed (status=503): {"error":"Too many
@@ -6518,8 +6528,10 @@ transport may report one claimed refresh of the rejected login; when it does
 not, the refusal ends the side request and no further physical request is
 sent. A transport may opt into the Codex wrapped-503 401 (§7.2). That refusal
 is retried as the upstream 503, honoring `Retry-After`, and the claimed
-refresh is not run. Each family still owns its request builder, typed replay
-allowlist, provider status interpretation and result collector. Retrieval
+refresh is not run. A transport may also claim a proven contract refusal
+(§7.2) as its route's remedy text; that refusal ends the side request with no
+retry or claimed refresh. Each family still owns its request builder, typed
+replay allowlist, provider status interpretation and result collector. Retrieval
 normalizes to one outcome (text, ordered sources, usage and the successful
 exchange count) at the facade, without changing model-visible retrieval text.
 Images keep their own result and a stricter policy: only a proven-unsent

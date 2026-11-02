@@ -536,3 +536,54 @@ async fn other_401s_and_routes_without_the_opt_in_stay_credential_rejections() -
     }
     Ok(())
 }
+
+/// Claims a 426 as a contract refusal and renews any 401.
+struct ContractGated {
+    inner: OptIn,
+}
+
+impl ResponsesImageTransport for ContractGated {
+    fn authorize<'a>(
+        &'a self,
+        endpoint: ResponsesImageEndpoint,
+        body: &'a [u8],
+    ) -> ResponsesImageAuthorization<'a> {
+        self.inner.authorize(endpoint, body)
+    }
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        self.inner.credential_rejected()
+    }
+    fn contract_refusal(&self, status: u16, _: &[u8]) -> Option<String> {
+        (status == 426).then(|| "fixture contract is out of date; install a newer build".to_owned())
+    }
+}
+
+#[tokio::test]
+async fn an_image_contract_refusal_is_forwarded_as_the_routes_remedy() -> TestResult {
+    let peer = peer(vec![
+        http_response(
+            426,
+            "",
+            r#"{"error":"please run the vendor update command"}"#,
+        ),
+        image_response(),
+    ])
+    .await?;
+    let transport = ContractGated {
+        inner: opt_in(peer.origin.clone(), false, true),
+    };
+    let error = run(&transport, &generation(ResponsesImageFlavor::Xai))
+        .await
+        .err()
+        .ok_or("a contract refusal succeeded")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Rejected);
+    assert_eq!(error.status(), Some(426));
+    assert_eq!(
+        error.message(),
+        "fixture contract is out of date; install a newer build"
+    );
+    assert_eq!(error.physical_requests(), 1);
+    assert_eq!(transport.inner.inner.authorized.load(Ordering::SeqCst), 1);
+    assert_eq!(transport.inner.refreshes.load(Ordering::SeqCst), 0);
+    Ok(())
+}

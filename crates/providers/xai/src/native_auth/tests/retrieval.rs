@@ -232,3 +232,61 @@ async fn a_logged_out_supergrok_login_refuses_the_side_request_before_the_socket
     session.inference.abort_join().await?;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_supergrok_side_request_version_gate_is_final_with_the_newer_build_remedy() -> TestResult
+{
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let session = session().await?;
+    let gate = r#"{"error":"Your Grok CLI version (0.2.93) is outdated. Please update to version 1.0.13 or later via `grok update` or the installation documentation."}"#;
+    for _ in 0..2 {
+        session
+            .inference
+            .responses
+            .send(raw_response(
+                "426 Upgrade Required",
+                "application/json",
+                gate,
+            ))
+            .await?;
+    }
+    let search = session
+        .model
+        .retrieval()
+        .retrieve(x_search(), &plakous_model::CancellationToken::new())
+        .await
+        .err()
+        .ok_or("a version-gated search succeeded")?;
+    let images = session.model.images();
+    let image = images
+        .generate(
+            &images.request("a red square"),
+            &plakous_model::CancellationToken::new(),
+        )
+        .await
+        .err()
+        .ok_or("a version-gated image succeeded")?;
+    for error in [search, image] {
+        assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Rejected);
+        assert_eq!(error.status(), Some(426));
+        assert_eq!(error.physical_requests(), 1);
+        assert_eq!(
+            error.message(),
+            plakous_auth::CompatibilityDrift::VersionGate.message("Grok")
+        );
+        assert!(!error.message().contains("grok update"));
+        assert!(!error.message().contains("1.0.13"));
+    }
+    let requests = session.inference.requests.lock().await.clone();
+    assert_eq!(requests.len(), 2);
+    for request in &requests {
+        let head = String::from_utf8_lossy(request).to_ascii_lowercase();
+        assert!(head.contains(&format!(
+            "x-grok-client-version: {}",
+            SUPERGROK_CLIENT_COMPATIBILITY_VERSION.to_ascii_lowercase()
+        )));
+    }
+    session.auth.shutdown().await?;
+    session.inference.shutdown().await?;
+    Ok(())
+}

@@ -198,6 +198,14 @@ pub trait RetrievalTransport: Send + Sync {
     fn retry_wrapped_overload(&self) -> bool {
         false
     }
+
+    /// The route's operator remedy for a proven contract refusal (a rejected
+    /// client version or sent beta), replacing the provider's text. Such a
+    /// refusal is final: no retry and no claimed refresh. Default: none.
+    fn contract_refusal(&self, status: u16, body: &[u8]) -> Option<String> {
+        let _ = (status, body);
+        None
+    }
 }
 
 /// Bounded transport and backoff policy for one side request.
@@ -443,6 +451,11 @@ async fn exchange_once<R: ResponseReader>(
         .unwrap_or_default();
         if reader.policy() == SideRequestPolicy::Image && cancellation.is_cancelled() {
             return Err(cancelled());
+        }
+        if let Some(remedy) = transport.contract_refusal(status, &body) {
+            return Err(
+                RetrievalError::new(RetrievalErrorKind::Rejected, remedy).with_status(status)
+            );
         }
         let error = reader.status_error(status, &body);
         // A proven overload wearing another status is retried as the status

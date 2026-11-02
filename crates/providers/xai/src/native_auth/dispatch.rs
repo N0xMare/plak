@@ -15,6 +15,12 @@ pub(super) fn version_gate(status: u16, body: &[u8]) -> Option<plakous_auth::Com
         .then_some(plakous_auth::CompatibilityDrift::VersionGate)
 }
 
+/// The newer-build remedy for a side request refused by the same proven
+/// client-version gate; the advertised version is never adopted.
+pub(crate) fn supergrok_contract_refusal(status: u16, body: &[u8]) -> Option<String> {
+    version_gate(status, body).map(|drift| drift.message("Grok"))
+}
+
 #[cfg(test)]
 use super::{Arc, SubscriptionRequestGate};
 

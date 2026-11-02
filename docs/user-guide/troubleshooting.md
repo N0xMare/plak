@@ -47,7 +47,8 @@ pinned local catalog, so they do not make a startup catalog GET.
 
 `<reason>; this build's <route> contract is out of date; install a newer build`
 means the provider's contract no longer matches this build's compiled pins.
-It can appear on an unavailable picker row, during login, or during a turn.
+It can appear on an unavailable picker row, during login, during a turn, or as
+the failed result of a web search, page fetch or image request.
 Install a newer build; logging in again or refreshing the same credential
 does not repair contract drift. Other subscription failures keep their own
 reported remedy; not every failure calls for login or refresh.

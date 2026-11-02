@@ -36,6 +36,9 @@ pub(crate) fn lowest_effort(efforts: &[ReasoningEffort]) -> Option<&'static str>
     .map(|(_, name)| name)
 }
 
+/// The route's proven contract-refusal remedy for a side-request refusal.
+type ContractRefusal = Box<dyn Fn(u16, &[u8]) -> Option<String> + Send + Sync>;
+
 enum Executor {
     Api(Arc<AnthropicLanguageModel>),
     #[cfg(feature = "native-auth")]
@@ -48,6 +51,7 @@ enum Executor {
 /// One session's hosted web search and page fetch.
 pub struct AnthropicRetrieval {
     executor: Executor,
+    contract_refusal: ContractRefusal,
     client: Client,
     dial_origin: Origin,
     effort: Option<&'static str>,
@@ -64,6 +68,7 @@ impl AnthropicRetrieval {
             dial_origin: model.dial_origin()?,
             effort: adaptive_effort(model.resolved().model().thinking(), effort),
             executor: Executor::Api(model),
+            contract_refusal: Box::new(|_: u16, _: &[u8]| None),
             limits: MessagesRetrievalLimits::default(),
         })
     }
@@ -80,8 +85,13 @@ impl AnthropicRetrieval {
                 "Claude OAuth origin is invalid",
             )
         })?;
+        let sent = model.resolved().dialect().beta_header();
         Ok(Self {
             client: model.client().clone(),
+            contract_refusal: Box::new(move |status: u16, body: &[u8]| {
+                crate::http::compatibility::unknown_beta(status, body, sent.as_deref()?)
+                    .map(|drift| drift.message("Claude"))
+            }),
             dial_origin,
             // The reference client's ladder starts at low on every adaptive model.
             effort: adaptive_effort(model.resolved().model().thinking(), Some("low")),
@@ -247,6 +257,10 @@ impl MessagesRetrievalTransport for AnthropicRetrieval {
                 }
             }
         })
+    }
+
+    fn contract_refusal(&self, status: u16, body: &[u8]) -> Option<String> {
+        (self.contract_refusal)(status, body)
     }
 }
 

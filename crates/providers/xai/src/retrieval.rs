@@ -24,6 +24,14 @@ use plakous_responses::{
 use crate::XaiLanguageModel;
 use crate::XaiPlatformModel;
 
+/// The route's proven contract-refusal remedy for a side-request refusal.
+pub(crate) type ContractRefusal = fn(u16, &[u8]) -> Option<String>;
+
+/// Routes that send no compiled client-version contract claim no refusal.
+pub(crate) fn no_contract_refusal(_: u16, _: &[u8]) -> Option<String> {
+    None
+}
+
 enum Executor {
     Api(Arc<XaiPlatformModel>),
     #[cfg(feature = "native-auth")]
@@ -33,6 +41,7 @@ enum Executor {
 /// One session's hosted web and X search on the xAI API or SuperGrok route.
 pub struct XaiRetrieval {
     executor: Executor,
+    contract_refusal: ContractRefusal,
     effort: Option<&'static str>,
     limits: ResponsesRetrievalLimits,
 }
@@ -41,6 +50,7 @@ impl XaiRetrieval {
     pub(crate) fn new(model: Arc<XaiPlatformModel>, effort: Option<&'static str>) -> Self {
         Self {
             executor: Executor::Api(model),
+            contract_refusal: no_contract_refusal,
             effort,
             limits: ResponsesRetrievalLimits::default(),
         }
@@ -50,6 +60,7 @@ impl XaiRetrieval {
     pub(crate) fn supergrok(model: Arc<XaiLanguageModel>, effort: Option<&'static str>) -> Self {
         Self {
             executor: Executor::SuperGrok(model),
+            contract_refusal: crate::native_auth::supergrok_contract_refusal,
             effort,
             limits: ResponsesRetrievalLimits::default(),
         }
@@ -124,6 +135,10 @@ impl ResponsesRetrievalTransport for XaiRetrieval {
             #[cfg(feature = "native-auth")]
             Executor::SuperGrok(model) => Box::pin(model.side_request_rejected()),
         }
+    }
+
+    fn contract_refusal(&self, status: u16, body: &[u8]) -> Option<String> {
+        (self.contract_refusal)(status, body)
     }
 }
 

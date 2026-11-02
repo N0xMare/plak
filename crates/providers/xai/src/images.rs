@@ -18,6 +18,7 @@ use plakous_responses::{
 #[cfg(feature = "native-auth")]
 use crate::XaiLanguageModel;
 use crate::XaiPlatformModel;
+use crate::retrieval::ContractRefusal;
 #[cfg(feature = "native-auth")]
 use plakous_responses::ResponsesRetrievalDispatch;
 
@@ -36,13 +37,15 @@ enum Executor {
 /// One session's image generation on the xAI API or SuperGrok route.
 pub struct XaiImages {
     executor: Executor,
+    contract_refusal: ContractRefusal,
     limits: ResponsesRetrievalLimits,
 }
 
 impl XaiImages {
-    const fn with_executor(executor: Executor) -> Self {
+    const fn with_executor(executor: Executor, contract_refusal: ContractRefusal) -> Self {
         Self {
             executor,
+            contract_refusal,
             limits: ResponsesRetrievalLimits {
                 exchange_timeout: RESPONSES_IMAGE_EXCHANGE_TIMEOUT,
                 jitter: None,
@@ -51,12 +54,15 @@ impl XaiImages {
     }
 
     pub(crate) const fn new(model: Arc<XaiPlatformModel>) -> Self {
-        Self::with_executor(Executor::Api(model))
+        Self::with_executor(Executor::Api(model), crate::retrieval::no_contract_refusal)
     }
 
     #[cfg(feature = "native-auth")]
     pub(crate) const fn supergrok(model: Arc<XaiLanguageModel>) -> Self {
-        Self::with_executor(Executor::SuperGrok(model))
+        Self::with_executor(
+            Executor::SuperGrok(model),
+            crate::native_auth::supergrok_contract_refusal,
+        )
     }
 
     fn client(&self) -> &plakous_http::Client {
@@ -133,6 +139,10 @@ impl ResponsesImageTransport for XaiImages {
             #[cfg(feature = "native-auth")]
             Executor::SuperGrok(model) => Box::pin(model.side_request_rejected()),
         }
+    }
+
+    fn contract_refusal(&self, status: u16, body: &[u8]) -> Option<String> {
+        (self.contract_refusal)(status, body)
     }
 }
 

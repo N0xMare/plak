@@ -3015,7 +3015,13 @@ Responses side-request tests pin that a transport opting in retries the Codex
 wrapped-503 401 as a 503 without a claimed refresh, on both the JSON retrieval
 and image policies, and that every other 401 body and a transport without the
 opt-in still take the claimed-refresh path; an ordinary image 503 is still not
-retried. The
+retried. They also pin that a transport-claimed contract refusal on retrieval
+and image requests ends after one physical request with its remedy text, its
+status and no claimed refresh, whatever the status, while an unclaimed refusal
+keeps the provider's bounded detail. SuperGrok search and image requests pin
+the Grok 426 version gate over loopback TLS, and a Claude OAuth web search pins
+the 400 sent-beta rejection, each with the newer-build remedy and no provider
+update advice. The
 SuperGrok and Codex executors pin over loopback TLS their path, OAuth headers,
 body and one authorized inference permit (acquired before its dispatch
 authorization), and that a logged-out or changed login refuses before the
