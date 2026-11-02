@@ -474,3 +474,81 @@ fn existing_semantic_summary_is_preserved_and_the_notice_remains_single() {
             .contains("keep summary")
     );
 }
+
+#[test]
+fn a_consumed_tool_image_is_a_residency_candidate_like_a_user_image() {
+    let correlation =
+        ToolCorrelation::new(None, None, ToolCallerLineage::Direct).expect("correlation");
+    let call_id = CallId::try_from(Uuid::from_u128(70)).expect("call id");
+    let parts = (0..3).map(|_| ToolResultPart::Image(image())).collect();
+    let result = ToolResultBlock::new(
+        call_id,
+        ToolExecutionOwner::Local,
+        ToolResultKind::Success,
+        parts,
+        correlation.clone(),
+    )
+    .expect("result");
+    let call = ToolCallBlock::new(
+        call_id,
+        ToolName::new("view_image").expect("tool"),
+        ToolExecutionOwner::Local,
+        ToolCallState::Completed,
+        correlation,
+        "{\"path\":\"shot.png\"}",
+    )
+    .expect("call");
+    let batch = HistorySegment::new(
+        HistorySegmentKind::ToolExchange,
+        vec![
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(71)).expect("entry"),
+                Actor::Assistant,
+                vec![ContentBlock::ToolCall(call)],
+                Provenance::ModelOutput,
+            )
+            .expect("call item"),
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(72)).expect("entry"),
+                Actor::Tool,
+                vec![ContentBlock::ToolResult(result)],
+                Provenance::ToolExecution,
+            )
+            .expect("result item"),
+        ],
+    )
+    .expect("batch");
+    let source = CanonicalHistory::new(vec![
+        batch,
+        segment(
+            73,
+            HistorySegmentKind::Conversation,
+            Actor::Assistant,
+            vec![text()],
+        ),
+        segment(
+            74,
+            HistorySegmentKind::RecentIntent,
+            Actor::User,
+            vec![ContentBlock::Image(image())],
+        ),
+    ])
+    .expect("history");
+    let plan = evaluate(
+        &source,
+        ImageTotals::ZERO,
+        ResidentImageBudget::new(3, 16 * 1024 * 1024).expect("budget"),
+    )
+    .expect("policy")
+    .expect("plan");
+    assert!(
+        plan.selection
+            .iter()
+            .any(|selected| selected.kind == ImageSelectionKind::ToolResultImage)
+    );
+    assert!(
+        plan.selection
+            .iter()
+            .all(|selected| selected.kind != ImageSelectionKind::UserImage)
+    );
+}

@@ -72,6 +72,7 @@ pub mod session_store;
 pub mod sessions;
 /// The inert subscription-allowance projection.
 pub mod subscription_usage;
+mod visual_read;
 
 pub mod agent;
 pub mod agent_tree_protocol;

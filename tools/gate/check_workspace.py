@@ -1448,6 +1448,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/attachments/normalize.rs"): {
         "tools": {"ImageSniffError", "sniff_image"},
     },
+    # Workspace image reads install only the decoder. The agent derives the
+    # route, model and image-input fact from the bound provider configuration.
+    ("plakous-hosted", "src/visual_read.rs"): {
+        "tools": {"ImageNormalizer", "PreparedImage"},
+    },
     ("plakous-hosted", "src/sessions/queue.rs"): {
         "agent": {"MAX_USER_IMAGES", "MAX_USER_IMAGE_BYTES", "UserInput", "UserPart"},
         "tools": {"sniff_image"},

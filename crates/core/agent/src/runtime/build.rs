@@ -76,12 +76,12 @@ use crate::{
     compiler_model_facts_from_model,
 };
 use plakous_model::{
-    AgentId, BranchId, CachePolicy, CanonicalHistory, CapabilityRequirement, Clock,
+    AgentId, BranchId, CachePolicy, CanonicalHistory, Capability, CapabilityRequirement, Clock,
     CompiledProviderConfiguration, ConfiguredLanguageModel, Digest, DigestDomain,
     EffectiveProviderConfigurationId, EventId, GenerationLimits, IdGenerator, InstructionBlock,
     InstructionSource, LanguageModel, LocalDurabilityDisposition, ModelErrorTarget, ModelId,
     NativeOptions, ProjectedToolPresentationV2, ReasoningEffortDisposition, ReasoningPolicy, RunId,
-    SelectedProviderConfigurationId, SessionId, StableRequestPrefix, SystemClock,
+    SelectedProviderConfigurationId, SessionId, StableRequestPrefix, Support, SystemClock,
     SystemIdGenerator, Timestamp, ToolCallBlock, ToolEffect, ToolExecutionDisposition,
     ToolInputContract, ToolName, WorkingProjection,
 };
@@ -249,6 +249,7 @@ impl AgentBuilder {
             job_config: plakous_tools::JobConfig::default(),
             job_counter_seed: 1,
             job_host: None,
+            image_normalizer: None,
             config: AgentConfig::default(),
             request_policy: AgentRequestPolicy::default(),
             instructions: Vec::new(),
@@ -270,6 +271,17 @@ impl AgentBuilder {
     #[must_use]
     pub fn job_config(mut self, config: plakous_tools::JobConfig) -> Self {
         self.job_config = config;
+        self
+    }
+
+    /// Installs the host image normalizer.
+    ///
+    /// Route, model and image-input acceptance come from the bound provider
+    /// configuration, the same facts user-input admission reads. The normalizer
+    /// is not part of the environment descriptor.
+    #[must_use]
+    pub fn image_normalizer(mut self, normalizer: Arc<dyn plakous_tools::ImageNormalizer>) -> Self {
+        self.image_normalizer = Some(normalizer);
         self
     }
 
@@ -1029,6 +1041,27 @@ fn construction_identities(
     })
 }
 
+/// Installs the route facts for image tool reads, from the same provider
+/// configuration user-input admission reads.
+fn install_visual_read(
+    environment: ExecutionEnvironment,
+    configuration: &CompiledProviderConfiguration,
+    normalizer: Arc<dyn plakous_tools::ImageNormalizer>,
+) -> ExecutionEnvironment {
+    let descriptor = configuration.effective().descriptor();
+    let accepts_images = descriptor
+        .capabilities()
+        .get(Capability::ImageInput)
+        .is_some_and(|fact| fact.support() != Support::Unsupported);
+    plakous_tools::internal::install_visual_read(
+        environment,
+        descriptor.route().as_str(),
+        descriptor.requested_model().as_str(),
+        accepts_images,
+        Some(normalizer),
+    )
+}
+
 /// Builds the run environment and joins it to the job host, restoring the
 /// persisted job counter and terminal job rows of a reopened session.
 fn attach_job_environment(
@@ -1039,12 +1072,19 @@ fn attach_job_environment(
     branch_id: BranchId,
     run_id: RunId,
 ) -> Result<(ExecutionEnvironment, plakous_tools::JoinedProcessSessions), AgentError> {
-    let environment = run_environment(
+    let mut environment = run_environment(
         &builder.workspace,
         run_id,
         builder.host_process_options.clone(),
         builder.job_config,
     )?;
+    if let Some(normalizer) = &builder.image_normalizer {
+        environment = install_visual_read(
+            environment,
+            &builder.provider_configuration,
+            Arc::clone(normalizer),
+        );
+    }
     let fresh_sessions = environment
         .joined_process_sessions()
         .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;

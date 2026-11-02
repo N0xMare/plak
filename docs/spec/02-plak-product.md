@@ -6426,13 +6426,51 @@ is which canonical tool each name binds to.
 
 | Vertical, Direct | Model-visible names |
 | --- | --- |
-| Codex OAuth | `apply_patch`, `exec_command`, `update_plan`, `write_stdin` |
+| Codex OAuth | `apply_patch`, `exec_command`, `update_plan`, `view_image`, `write_stdin` |
 | SuperGrok OAuth | `get_command_or_subagent_output`, `grep`, `kill_command_or_subagent`, `list_dir`, `read_file`, `run_terminal_command`, `search_replace`, `todo_write`, `write` |
 | Claude OAuth | `Bash`, `Edit`, `Read`, `TaskStop`, `Write` |
 | OpenRouter (Chat, Messages, Responses) | `bash`, `edit`, `read`, `stop`, `wait`, `write` (the pi pack) |
 | OpenAI API | the Codex OAuth pack, with no costume |
 | xAI API | the SuperGrok OAuth pack, with no costume |
 | Anthropic API | the Claude OAuth pack, with no costume |
+
+Codex `view_image` is Codex CLI's image read: one required `path` whose
+schema description is `Local filesystem path to an image file.`, no `detail`
+argument, and the result is one image at high detail. It is registered on the
+Direct Codex menu regardless of modality and refused at call time when the
+model does not accept images (`view_image is not allowed because you do not
+support image inputs`, followed by the route and model). Bytes that are not a
+decodable PNG, JPEG, GIF or WebP are refused `unable to process image: invalid
+or unsupported image data`. The path rule is the workspace read rule. It is
+not on the native Code Mode outer surface and not in the Code Mode nested
+catalog. Native Codex shows `view_image` inside the cell only; this version
+does not, because a cell cannot return an image result.
+
+Claude `Read` stays the text read (cat -n, `offset` / `limit`, no `pages`)
+for everything that is not an image. PNG, JPEG, GIF and WebP return one image
+part when the bound model accepts image input. A model that does not is
+refused `route {route} model {model} does not accept image input; Read cannot
+return images on this model`. A `Read` inside a program cell stays text and
+refuses images. A PDF is not an image read: it takes the same text path as any
+other non-image file. Grok, pi and the canonical `read_file` do not return
+images.
+
+Image bytes are always decoded. PNG, JPEG and WebP that decode cleanly and
+already fit are kept byte-identical; a GIF is re-encoded from its first frame
+as PNG. Anything over the bounds is downscaled with Lanczos3 to a long edge of
+at most 2048 px. The byte budget is the tool-result contract, not the 3.75 MiB
+attachment budget: a tool result is measured as JSON and the image is base64
+inside it, so the raw image is held to 786,048 bytes. Normalization runs on
+the blocking pool, off the tool future; cancelling the call returns
+`Cancelled` at once, and a decode already running finishes and is discarded.
+The sniff is at most 8 KiB; a non-image stops there, and an image is read
+whole. The workspace read's 16 MiB file bound is the only source bound: a
+larger file is refused before the sniff with the workspace read's
+resource-limit failure (`tool invocation failed: workspace file exceeds the
+hard content identity limit`), for an image and any other file alike. A
+build without image decoding refuses instead of returning the raw file.
+Neither success records a text-read observation, so it does not authorize a
+later whole-file write. Job-output paths stay on the text read.
 
 A template's hosted-retrieval tools append after the pack, in the order
 `web_search`, `web_fetch`, `x_search`, under the vocabulary's names: Claude
@@ -6582,8 +6620,8 @@ compiled choose the root, hub or assignee wording.
 
 Read results separate exact file `content` from JSON pagination metadata. Grok
 reads expose that result; Claude Direct renders cat-n text (text
-only: Claude's `Read` has no PDF `pages` parameter and refuses images and
-PDFs) and pi's `read` the plain lines with its continuation line, while
+only for a text file, and an image part for PNG, JPEG, GIF and WebP; a
+program cell refuses images) and pi's `read` the plain lines with its continuation line, while
 local composition receives the neutral JSON string and explicit parsing
 instructions. Grok `read_file` defaults to 1,000 lines and accepts at most
 2,000 per call, matching its canonical executor. Line selection preserves CRLF
@@ -6867,7 +6905,9 @@ budgets are **under 5,500** for a basic single node and **at most 8,000** for
 orchestration/children. Other families retain 4,000/8,000; this is not a global
 increase. The Codex native-PTC single-agent default additionally leaves at least
 150 approximate tokens below its family budget (at most 5,350 for GPT-6,
-3,850 for the earlier base); its compact cell wording keeps
+3,850 for the earlier base). `view_image` is not offered on that outer
+surface or inside the cell: native Codex shows it only inside the cell, and
+this version does not, because a cell cannot return an image result. Its compact cell wording keeps
 yield/output defaults and the process catalog's foreground/background lifetime
 facts. Non-mutating child catalogs omit file-writing presentations before
 instruction assembly. Family editing sentences, including the vendored Codex

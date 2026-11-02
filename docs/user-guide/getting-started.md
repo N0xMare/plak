@@ -43,7 +43,9 @@ cargo install --locked plak plakous-js-runtime plakous-py-worker
   Anything else may compile, and compiling is not support.
 - `grep`, `rg` or `find` on `PATH` for Claude sessions: the Claude tool set is
   Claude Code's native `Bash`, `Read`, `Edit`, `Write` and `TaskStop`, with no
-  search tool, so the model searches through the shell.
+  search tool, so the model searches through the shell. `Read` returns PNG,
+  JPEG, GIF and WebP as images when the model can accept them. Codex adds
+  `view_image` for one workspace image.
 - Session stores need access to the operating system's boot and clock-domain
   identity. Restricted access fails closed; see the
   [store contract](../spec/01-plakous-library.md#51-the-store-port).

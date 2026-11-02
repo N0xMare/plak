@@ -1596,7 +1596,8 @@ at or under 8,000. GPT-6 Codex Direct/native Code Mode instead has an explicit
 family budget under 5,500 for a single node and at or under 8,000 for the
 fullest surface/children. Codex native-PTC single-agent leaves at least 150
 tokens of headroom under the applicable family budget (5,350 for GPT-6,
-3,850 otherwise). Other routes' budgets do not change. The suite also checks
+3,850 for the GPT-5 base). `view_image` is not on the native Code Mode
+outer surface. Other routes' budgets do not change. The suite also checks
 GPT-6 versus GPT-5.6 base selection and pins the source and approved derived
 bases; unaffected routes retain their rendered digests.
 `rendered_prompt_footprints_stay_within_budget` fails the

@@ -986,7 +986,7 @@ pub(crate) mod suite {
     const COMPACTION_WIRE_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root",
-            "55837e9e5b7d37f91e66a924843e6b8b2b57042bb4065087a62357e70fe59fe9",
+            "fddc1c1b50288a5311c7fe7cf44380dd49fb787cdeb3220c09de01fca742b108",
         ),
         (
             "grok.direct.root",
@@ -994,7 +994,7 @@ pub(crate) mod suite {
         ),
         (
             "claude.direct.root",
-            "1d17c48ab40709ad2bc4952a4d7ccd30aae48e9426a3b5a9969e9fc7eabd1ac8",
+            "8460146a4a52b2e41f4afea0aa3f6ab61d8033783afc6109239568b12fde4c2a",
         ),
         (
             "openrouter-chat.direct.root",
@@ -1010,7 +1010,7 @@ pub(crate) mod suite {
         ),
         (
             "openai-api.direct.root.single-agent",
-            "398e3fde37cb06795429c48fae6347496ca8c0e7132801032c461ca110634f9e",
+            "3330760bd51daabb95f672011965d93f5cc5c708824f062350550302cb5b1cd4",
         ),
         (
             "xai-api.direct.root.single-agent",
@@ -1018,7 +1018,7 @@ pub(crate) mod suite {
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "add1d98ea8e9da118c0db73ab58587755d02d0cdbf63d641e7a7037a5c5b5ac9",
+            "2a7e3440c0dca15a241d8047a14f3f23d4e96dac4b09622b14c3c79acc631343",
         ),
     ];
 

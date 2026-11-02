@@ -27,7 +27,7 @@ fn projected_process_pack_adds_four_closed_operations() -> Result<(), ToolRuntim
         .iter()
         .map(|definition| definition.name().as_str())
         .collect::<Vec<_>>();
-    assert_eq!(names.len(), 11);
+    assert_eq!(names.len(), 12);
     assert!(names.contains(&PROCESS_SESSION_CAPABILITY_NAME));
     assert!(names.contains(&PROCESS_SESSION_WRITE_NAME));
     assert!(names.contains(&PROCESS_SESSION_POLL_NAME));
@@ -61,6 +61,7 @@ fn standard_manifest_is_stable_and_complete() -> Result<(), ToolRuntimeError> {
             "read_file",
             "search_repository",
             "update_plan",
+            "view_image",
         ]
     );
     Ok(())
@@ -82,7 +83,7 @@ fn read_only_standard_manifest_is_exact_and_executable() -> Result<(), Box<dyn E
     let frozen = builder.freeze();
     let definitions = frozen.definitions();
 
-    assert_eq!(frozen.len(), 4);
+    assert_eq!(frozen.len(), 5);
     let mut names = definitions
         .iter()
         .map(|definition| definition.name().as_str().to_owned())
@@ -95,6 +96,7 @@ fn read_only_standard_manifest_is_exact_and_executable() -> Result<(), Box<dyn E
             "process_session_poll",
             "read_file",
             "search_repository",
+            "view_image",
         ]
     );
     assert!(
@@ -125,6 +127,7 @@ fn read_only_standard_manifest_is_exact_and_executable() -> Result<(), Box<dyn E
         ("read_file", r#"{"path":"README.md"}"#),
         ("search_repository", r#"{"query":"needle","path":"."}"#),
         ("inspect_image", r#"{"path":"image.png"}"#),
+        ("view_image", r#"{"path":"image.png"}"#),
     ] {
         let name = ToolName::new(name)?;
         let invocation = frozen.prepare(ToolInvocationRequest::new(

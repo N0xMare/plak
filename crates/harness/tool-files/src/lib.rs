@@ -19,6 +19,7 @@ mod mutation;
 mod patch;
 mod read;
 mod text;
+mod visual;
 
 pub use text::{
     PLAKOUS_CODEX_APPLY_PATCH_FREEFORM_DESCRIPTION, PLAKOUS_GROK_READ_DESCRIPTION,
@@ -43,10 +44,12 @@ use plakous_model::{ProjectedCustomToolFormatV2, Utf8TextContractV1};
 use plakous_tools::CodingPresentation;
 use plakous_tools::PromptPin;
 use plakous_tools::object_schema;
-use plakous_tools::{APPLY_PATCH_CAPABILITY_NAME, READ_FILE_CAPABILITY_NAME};
+use plakous_tools::{
+    APPLY_PATCH_CAPABILITY_NAME, READ_FILE_CAPABILITY_NAME, VIEW_IMAGE_CAPABILITY_NAME,
+};
 use plakous_tools::{
     CanonicalProcessOperationV2, FrozenToolRegistry, RegisteredToolId, ToolExecutorBindingIdentity,
-    ToolExecutorId, ToolProjectionLoweringV2, ToolRegistration,
+    ToolExecutorId, ToolProjectionLoweringV2, ToolProjectionRaisingV2, ToolRegistration,
 };
 use plakous_tools::{MenuBinding, MenuEntry, MenuShape, ToolPack, tool_name};
 use plakous_tools::{ToolContext, ToolExecutor, ToolRuntimeError, ToolRuntimeErrorKind};
@@ -77,9 +80,10 @@ fn relative_workspace_path(
 const PI_READ_DESCRIPTION: &str = "Read the contents of a text file; images and binary files are refused. Output is truncated to 2000 lines or 50 KiB (50 * 1024 bytes), whichever is hit first, and lines longer than 2000 characters are clipped. Use offset/limit for large files. When you need the full file, continue with offset until complete. path is relative to the workspace or absolute under it, or exactly a path a bash result or completion notice named on its `full output:` line.";
 const PI_EDIT_DESCRIPTION: &str = "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes. The edits apply together or not at all. Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
 const PI_WRITE_DESCRIPTION: &str = "Write content to a file. Creates missing files and parent directories. Overwriting an existing file requires an explicit text read in this session attachment and unchanged content, not just unchanged mtime. Read again after each change to that file or resume/reload. Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
-const CLAUDE_READ_DESCRIPTION: &str = "Reads a file from the local filesystem.\n\n- Reads up to 2000 lines by default.\n- If you already know which part of the file to read, only read that part. This is important for larger files/context efficiency.\n- `offset` is the 1-indexed first line (omit to start at line 1). `limit` is how many lines to return (default 2000, max 2000).\n- The result is cat -n text: a 6-character file line number, a tab, then the line. Numbers are the file's real line numbers (offset 10 starts at line 10).\n- If truncated, a last line `... more lines; next_offset=N` means call again with that offset.\n- Lines longer than 2000 characters are clipped.\n- Text files only: binary files, images and PDFs are refused (there is no `pages` parameter).\n- `file_path` is an absolute path under the workspace root, a workspace-relative path without `..`, or exactly a path a Bash result or completion notice named on its `full output:` line; other paths are refused, as is a `full output:` path issued by an earlier process (before a restart or reload) or another agent.\n- A read of an output file whose writing failed ends with `[output file incomplete: write failed after N bytes]`; the file stops there.\n- An empty file succeeds with an empty body, missing file/directory returns an error.";
+const CLAUDE_READ_DESCRIPTION: &str = "Reads a file from the local filesystem.\n\n- Reads up to 2000 lines by default.\n- If you already know which part of the file to read, only read that part. This is important for larger files/context efficiency.\n- `offset` is the 1-indexed first line (omit to start at line 1). `limit` is how many lines to return (default 2000, max 2000).\n- The result is cat -n text: a 6-character file line number, a tab, then the line. Numbers are the file's real line numbers (offset 10 starts at line 10).\n- If truncated, a last line `... more lines; next_offset=N` means call again with that offset.\n- Lines longer than 2000 characters are clipped.\n- PNG, JPEG, GIF and WebP are returned as an image when this route's model accepts image input. Other binary files are refused.\n- A model that does not accept images is refused with the route and model named.\n- `file_path` is an absolute path under the workspace root, a workspace-relative path without `..`, or exactly a path a Bash result or completion notice named on its `full output:` line; other paths are refused, as is a `full output:` path issued by an earlier process (before a restart or reload) or another agent.\n- A read of an output file whose writing failed ends with `[output file incomplete: write failed after N bytes]`; the file stops there.\n- An empty file succeeds with an empty body, missing file/directory returns an error.";
 const CLAUDE_EDIT_DESCRIPTION: &str = "Performs exact string replacement in a file.\n\n- `old_string` must be non-empty and match the file exactly, including indentation, and be unique — the edit fails otherwise.\n- `replace_all: true` replaces every occurrence instead.\n- Use Write to create a new file.\n- Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
 const CLAUDE_WRITE_DESCRIPTION: &str = "Writes a file to the local filesystem.\n\n- Creates missing files and parent directories.\n- Overwriting an existing file requires an explicit text read in this session attachment and unchanged content, not just unchanged mtime. Read again after each change to that file or resume/reload.\n- Prefer Edit for partial changes.\n- Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
+const VIEW_IMAGE_DESCRIPTION: &str = "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk. path is an absolute path under the workspace root or a workspace-relative path without `..`; other paths are refused. PNG, JPEG, GIF and WebP are returned as an image. A model that does not accept image input is refused with the route and model named.";
 
 /// The Codex freeform patch envelope: the same apply-patch executor under the
 /// registration a Codex costume expects. It is the files pack's registration
@@ -138,6 +142,7 @@ impl ToolPack for FilesToolPack {
         let apply_executor_id = standard_executor_id("apply-patch")?;
         Ok(vec![
             standard_registration("read-file", ReadFileTool::new())?,
+            standard_registration("view-image", visual::ViewImageTool::new())?,
             standard_registration_with_executor(
                 "apply-patch",
                 apply_definition,
@@ -164,7 +169,25 @@ impl ToolPack for FilesToolPack {
         )?;
         Ok(match presentation {
             CodingPresentation::Pi => pi_menu(&read_file, &apply_patch),
-            CodingPresentation::Codex => vec![codex_patch_envelope_entry()?],
+            CodingPresentation::Codex => {
+                let view_image = tool_name(
+                    VIEW_IMAGE_CAPABILITY_NAME,
+                    "canonical coding capability name is invalid",
+                )?;
+                vec![
+                    codex_patch_envelope_entry()?,
+                    MenuEntry::new(
+                        "view_image",
+                        vec![MenuBinding::by_effect(view_image)],
+                        MenuShape::Structured {
+                            description: Arc::from(VIEW_IMAGE_DESCRIPTION),
+                            schema: visual::view_image_schema(),
+                        },
+                        ToolProjectionLoweringV2::CanonicalPassthrough,
+                    )
+                    .with_raising(ToolProjectionRaisingV2::ModelContentIdentityV1),
+                ]
+            }
             CodingPresentation::Grok => vec![
                 MenuEntry::new(
                     "read_file",
@@ -526,7 +549,12 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.claude.Read",
         CLAUDE_READ_DESCRIPTION,
-        "d406130f15c7bbd6908b7e74d4e564b063babbce65e4aa6c35602f186e377b13",
+        "1e1631b8491a6dbb1613ced7a6512092f0ca252d3c1bdc2b6a8b3e5eea4d980f",
+    ),
+    PromptPin::new(
+        "files.codex.view_image",
+        VIEW_IMAGE_DESCRIPTION,
+        "9f28a4e8ad63309a430c2979ab77f1d38886c3ff22c591230a06cc874dad45d3",
     ),
     PromptPin::new(
         "files.claude.Edit",

@@ -9,6 +9,12 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plak
 
+- Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
+  accepts image input. Codex Direct adds `view_image` for one workspace image.
+  Other packs stay text. A model that cannot accept the image is refused with
+  the route and model named. New sessions record a registry descriptor that
+  includes `view_image`; no schema revision or state-key change. Codex native
+  Code Mode does not offer `view_image`.
 - `plak session --help` names the export versions from the build's own
   constants: it writes 11 and imports 11 and 10.
 - Text and thinking streamed by a model request that is retried, refused, cut

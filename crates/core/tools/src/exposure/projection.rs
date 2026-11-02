@@ -1107,6 +1107,17 @@ impl ToolProjectionMap {
         ) && entry.raising != ToolProjectionRaisingV2::RawUtf8V1
             && outcome.kind() == crate::ToolOutcomeKind::Success
         {
+            // A direct Claude image read is already model content. Text reads
+            // still become cat -n or pi lines. Nested RawUtf8 never reaches
+            // this branch.
+            if entry.lowering == ToolProjectionLoweringV2::ClaudeReadFile
+                && outcome
+                    .parts()
+                    .iter()
+                    .any(|part| matches!(part, ToolResultPart::Image(_)))
+            {
+                return Ok(outcome);
+            }
             return raise_read_observation(entry, &outcome);
         }
         if entry.raising == ToolProjectionRaisingV2::Identity {
@@ -1123,6 +1134,15 @@ impl ToolProjectionMap {
             return raise_text_result_object(outcome);
         }
         if entry.raising == ToolProjectionRaisingV2::RawUtf8V1 {
+            if outcome
+                .parts()
+                .iter()
+                .any(|part| matches!(part, ToolResultPart::Image(_)))
+            {
+                return ToolOutcome::failure_text(
+                    "Read inside a program returns text only; images are refused",
+                );
+            }
             return Ok(outcome);
         }
         if outcome.kind() == crate::ToolOutcomeKind::Success {

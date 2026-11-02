@@ -36,6 +36,7 @@ mod registry;
 mod retrieval;
 mod schema;
 mod standard_identity;
+mod visual_read;
 
 pub use admission::*;
 pub use capabilities::*;

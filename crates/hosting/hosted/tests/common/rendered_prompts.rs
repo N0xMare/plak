@@ -1222,14 +1222,10 @@ pub(crate) mod suite {
         match spec.composition {
             ProductCompositionSelection::NativePtc => {
                 let surface = route_surface(spec, extras);
-                // The API route compiles its nested catalog as production
-                // does: Codex OAuth order, every surface tool but `inspect_image`.
-                let nested = match spec.provider {
-                    ProviderKind::Platform(_) => {
-                        crate::agent::build::api::code_mode_nested_names(&surface)
-                    }
-                    _ => surface.exposed_names().to_vec(),
-                };
+                // Production hides `view_image` and `inspect_image` from the
+                // cell: image results are not a cell's text catalog, and the
+                // native Code Mode outer surface does not list `view_image`.
+                let nested = crate::agent::build::api::code_mode_nested_names(&surface);
                 CodexMinimalLocalCodeModeV1::compile_for_catalog(
                     plakous::tools::JobConfig::default(),
                     registry,
@@ -1488,19 +1484,19 @@ pub(crate) mod suite {
         ),
         (
             "codex.direct.root.single-agent",
-            "172a30f3c14dc4b1f1bda28e098d1e929bef4b180b446bc690364e1dc39335b6",
+            "3ebcfc0eb8dac34d3529e494cea3220ad369a6807d6c5a401f1d551354479326",
         ),
         (
             "codex.direct.root",
-            "d78c8ef7d9d79b48e7e9431076188c237cdcaa20c5a30f0d2a2b1c042b3285ad",
+            "f0c98281c1eeeb78fc26b026d6a78bb94b1ab51f7aa42cfb0dfc1454ac53aa76",
         ),
         (
             "codex.direct.nested-parent",
-            "700f023719d77d2454d8cdd0d701db8efd0cf3e2ce8ea074db1c67aed3a25d6b",
+            "84bc5faea4d83798b829d74d3231be211558a053247a53d20aa784649984fbee",
         ),
         (
             "codex.direct.child",
-            "b80a3bc7889fdbd9c7522f80d2620b3b0187a32213780036f4cd4238fb40fcc5",
+            "2bcf68ef783e8cd7e707f5ce53f14c8e1a40a9be20d736160f59d2268463b629",
         ),
         (
             "codex.native-ptc.root.single-agent",
@@ -1600,19 +1596,19 @@ pub(crate) mod suite {
         ),
         (
             "claude.direct.root.single-agent",
-            "0ca45804a7ca3f41e72c798199814c208cba7a0a5fae7e57fa8201d86b317c16",
+            "0b349cc998223e938f4035634dc877cf1fb422ccfea98ae426e6561749027212",
         ),
         (
             "claude.direct.root",
-            "b58c0f632c996c2b91db976eedb1ca8791808c541c2e51e2170a5c7e10b5aa7f",
+            "cb4d2432267761a725fde8cdadba6b0df25c310dff42e7bf8f7b43b0da99d378",
         ),
         (
             "claude.direct.nested-parent",
-            "1ddcaee5236c849263e349935c17f6a7cc90718dd664cb2d9a6c69254b6e8efa",
+            "945c93b425925cde67f5dc40566162866b64e927cfb1fe733258b7a2e821c275",
         ),
         (
             "claude.direct.child",
-            "6e5f7f74ba31bd701c3b8271ec327f64014cb9599c36248af028cb171ec1e840",
+            "83945a5c01e26c0d942f8600a884fde6b5ad44eec0d9654516be32aa85873925",
         ),
         (
             "claude.js-ptc.root.single-agent",
@@ -1792,7 +1788,7 @@ pub(crate) mod suite {
         ),
         (
             "openai-api.direct.root.single-agent",
-            "2201a34eddeb24bb950fb909247cb013f4e9a022b652e96139daafcd5126f42a",
+            "cddc1ddb8ee3b7717e4eee4c0107e75d3ff24e6db2138fd6c299558e4770c2bc",
         ),
         (
             "openai-api.native-ptc.root.single-agent",
@@ -1820,7 +1816,7 @@ pub(crate) mod suite {
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "618ce29b5a3619842e7da7fbd3e59ee78299d4cb2ff9ed16508e23dae81e2710",
+            "60c0f0995f6ae81aadfa4a16e177b30044878631f691a512e57d7a7a2374e487",
         ),
         (
             "anthropic-api.js-ptc.root.single-agent",
@@ -2021,6 +2017,11 @@ pub(crate) mod suite {
     /// and whose tools carry the orchestration schemas.
     pub(crate) const ORCHESTRATION_TOKEN_BUDGET: usize = 8_000;
 
+    /// GPT-5 Codex native Code Mode uses the 4,000 single-node cap.
+    /// `view_image` is not on that outer surface. The headroom check keeps
+    /// 150 tokens under the cap.
+    const NATIVE_PTC_GPT5_TOKEN_BUDGET: usize = 4_000;
+
     #[test]
     fn rendered_codex_base_selection_tracks_the_model_family() {
         let (_tmp, home, root, cwd) = instruction_fixture();
@@ -2056,6 +2057,8 @@ pub(crate) mod suite {
                 let budget = if spec.occupancy == Occupancy::SingleAgent {
                     if model.starts_with("gpt-6") {
                         5_500
+                    } else if spec.composition == ProductCompositionSelection::NativePtc {
+                        NATIVE_PTC_GPT5_TOKEN_BUDGET
                     } else {
                         SINGLE_NODE_TOKEN_BUDGET
                     }
@@ -2072,7 +2075,7 @@ pub(crate) mod suite {
                 {
                     assert!(
                         total <= budget - 150,
-                        "{}: {model} lacks headroom",
+                        "{}: {model} lacks headroom ({total} tokens, budget {budget})",
                         spec.file_stem
                     );
                 }

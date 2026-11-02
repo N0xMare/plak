@@ -7,6 +7,10 @@ pub fn normalize(
     Err(unavailable())
 }
 
+pub fn normalize_tool(_bytes: &[u8]) -> Result<(String, Vec<u8>), NormalizeError> {
+    Err(unavailable())
+}
+
 pub fn normalize_rgba(
     _name: String,
     _width: u32,

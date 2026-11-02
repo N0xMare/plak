@@ -53,9 +53,43 @@ pub fn normalize(name: String, bytes: Vec<u8>) -> Result<DraftImage, NormalizeEr
             name,
             &image,
             matches!(media_type, "image/png" | "image/gif"),
+            MAX_IMAGE_BYTES,
         ),
     }
 }
+
+/// Normalizes one workspace image for a tool result.
+///
+/// The long-edge rule is the attachment rule. The byte budget is the
+/// tool-result JSON limit, not the 3.75 MiB attachment budget: a tool result
+/// is measured as JSON, and image bytes are base64 inside that JSON.
+///
+/// # Errors
+///
+/// Returns [`NormalizeError`] when the bytes are not a supported image or
+/// cannot be brought within the tool-result budget.
+pub fn normalize_tool(bytes: &[u8]) -> Result<(String, Vec<u8>), NormalizeError> {
+    let header = plakous::tools::sniff_image(bytes).map_err(NormalizeError::NotAnImage)?;
+    let media_type = header.media_type();
+    // Always decode. A header that does not decode is a refusal, never a
+    // pass-through of the original bytes. GIF keeps only its first frame.
+    let image = decode(bytes, media_type)?;
+    let fits = bytes.len() <= TOOL_IMAGE_RAW_BYTES && within_edge((image.width(), image.height()));
+    if fits && matches!(media_type, "image/png" | "image/jpeg" | "image/webp") {
+        return Ok((media_type.to_owned(), bytes.to_vec()));
+    }
+    let fitted = fit(
+        String::new(),
+        &image,
+        matches!(media_type, "image/png" | "image/gif" | "image/webp"),
+        TOOL_IMAGE_RAW_BYTES,
+    )?;
+    Ok((fitted.media_type, fitted.bytes))
+}
+
+/// Raw image bytes whose standard base64 fits a 1 MiB tool-result JSON part,
+/// leaving room for the part envelope.
+const TOOL_IMAGE_RAW_BYTES: usize = 786_048;
 
 /// Normalizes raw RGBA pixels (a clipboard image) into a PNG attachment,
 /// or a JPEG when no PNG within the edge bound fits.
@@ -73,7 +107,12 @@ pub fn normalize_rgba(
     let image = RgbaImage::from_raw(width, height, rgba)
         .filter(|_| width > 0 && height > 0)
         .ok_or(NormalizeError::Malformed { width, height })?;
-    fit(name, &DynamicImage::ImageRgba8(image), true)
+    fit(
+        name,
+        &DynamicImage::ImageRgba8(image),
+        true,
+        MAX_IMAGE_BYTES,
+    )
 }
 
 fn within_edge((width, height): (u32, u32)) -> bool {
@@ -106,7 +145,12 @@ fn decode(bytes: &[u8], media_type: &str) -> Result<DynamicImage, NormalizeError
 
 /// Encodes `image` at the largest long edge, at most [`MAX_IMAGE_EDGE`],
 /// whose encoding fits the byte bound.
-fn fit(name: String, image: &DynamicImage, lossless: bool) -> Result<DraftImage, NormalizeError> {
+fn fit(
+    name: String,
+    image: &DynamicImage,
+    lossless: bool,
+    max_bytes: usize,
+) -> Result<DraftImage, NormalizeError> {
     let source = (image.width(), image.height());
     let mut edge = source.0.max(source.1).min(MAX_IMAGE_EDGE);
     loop {
@@ -117,7 +161,7 @@ fn fit(name: String, image: &DynamicImage, lossless: bool) -> Result<DraftImage,
         };
         let encoded = if lossless {
             Some(encode_png(&scaled)?)
-                .filter(|png| png.len() <= MAX_IMAGE_BYTES)
+                .filter(|png| png.len() <= max_bytes)
                 .map(|png| ("image/png", png))
         } else {
             None
@@ -125,7 +169,7 @@ fn fit(name: String, image: &DynamicImage, lossless: bool) -> Result<DraftImage,
         let encoded = match encoded {
             Some(encoded) => Some(encoded),
             None => Some(encode_jpeg(&scaled)?)
-                .filter(|jpeg| jpeg.len() <= MAX_IMAGE_BYTES)
+                .filter(|jpeg| jpeg.len() <= max_bytes)
                 .map(|jpeg| ("image/jpeg", jpeg)),
         };
         if let Some((media_type, bytes)) = encoded {

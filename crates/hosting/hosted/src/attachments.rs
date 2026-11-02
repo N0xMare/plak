@@ -96,7 +96,7 @@ mod normalize;
 #[path = "attachments/unavailable.rs"]
 mod normalize;
 
-pub use normalize::{normalize, normalize_rgba};
+pub use normalize::{normalize, normalize_rgba, normalize_tool};
 
 /// Longest edge, in pixels, of an image Plak re-encodes.
 pub const MAX_IMAGE_EDGE: u32 = 2048;

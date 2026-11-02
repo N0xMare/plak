@@ -2375,6 +2375,7 @@ fn non_v1_codex_selection_retains_the_direct_canonical_surface() {
             "process_session_start",
             "process_session_write",
             "update_plan",
+            "view_image",
         ]
     );
     assert!(!names.contains(&"exec"));
@@ -3062,7 +3063,13 @@ fn product_composition_catalog_starts_from_core_and_adds_extensions_explicitly()
     let codex = names(NativeProvider::Codex);
     assert_eq!(
         codex,
-        ["apply_patch", "exec_command", "update_plan", "write_stdin"]
+        [
+            "apply_patch",
+            "exec_command",
+            "update_plan",
+            "view_image",
+            "write_stdin",
+        ]
     );
 
     let grok = names(NativeProvider::Xai);
@@ -3883,11 +3890,13 @@ fn session_surfaces_rename_nothing_under_any_runtime() {
                     let expected = direct
                         .exposed_names()
                         .iter()
-                        .map(|name| match name.as_str() {
+                        .filter_map(|name| match name.as_str() {
+                            // A cell returns text, so the image tool stays Direct-only.
+                            "view_image" => None,
                             "wait" if runtime == CompositionRuntime::CodexNative => {
-                                ToolName::new("wait_jobs").expect("alternate")
+                                Some(ToolName::new("wait_jobs").expect("alternate"))
                             }
-                            _ => name.clone(),
+                            _ => Some(name.clone()),
                         })
                         .collect::<Vec<_>>();
                     assert_eq!(

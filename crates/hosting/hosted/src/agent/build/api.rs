@@ -308,7 +308,10 @@ pub(crate) fn runtime_binding(
         })?;
     }
     Ok(SessionRuntimeBinding::new(
-        builder.config(config).request_policy(request),
+        builder
+            .config(config)
+            .request_policy(request)
+            .image_normalizer(crate::visual_read::normalizer()),
     ))
 }
 
@@ -421,7 +424,8 @@ fn api_base_instructions(
 
 /// The nested Code Mode catalog in Codex OAuth order: the minimal core
 /// (`exec_command`, `write_stdin`, `apply_patch`, `update_plan`) for the names
-/// this surface presents, then every other exposed name except `inspect_image`.
+/// this surface presents, then every other exposed name except `inspect_image`
+/// and `view_image` (image results are not a cell's text catalog).
 ///
 /// `compile_for_catalog` already emits that order. The prompt `{names}` list
 /// has to use it too, or the model is told a different sequence than the cell.
@@ -434,7 +438,9 @@ pub(crate) fn code_mode_nested_names(surface: &CompiledSurface) -> Vec<plakous::
         }
     }
     for name in exposed {
-        if name.as_str() == "inspect_image" || names.iter().any(|have| have == name) {
+        if matches!(name.as_str(), "inspect_image" | "view_image")
+            || names.iter().any(|have| have == name)
+        {
             continue;
         }
         names.push(name.clone());

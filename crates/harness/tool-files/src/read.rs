@@ -72,84 +72,110 @@ impl ToolExecutor for ReadFileTool {
                 .map_or(Ok(200), |value| exact_u64(value, "read limit is invalid"))?
                 .clamp(1, 2_000);
             let page_bytes = read_response_bytes(&invocation);
-            let leading = read_leading_lines(&context, &args, start_line, limit).await?;
-            let (mut bytes, complete) = (leading.bytes, leading.complete);
-            if bytes.iter().take(8_192).any(|byte| *byte == 0) {
-                return ToolOutcome::failure_text(PLAKOUS_TOOL_READ_BINARY);
+            if invocation
+                .exposure()
+                .is_some_and(|binding| binding.exposed_name().as_str() == "Read")
+                && let Some(outcome) = crate::visual::claude_read(&context, &args.path).await?
+            {
+                return Ok(outcome);
             }
-            if !complete {
-                drop_cut_utf8_tail(&mut bytes);
-            }
-            let (text, lossy) = match String::from_utf8(bytes) {
-                Ok(text) => (text, false),
-                Err(error) => (String::from_utf8_lossy(error.as_bytes()).into_owned(), true),
-            };
-            let lines = text.split_inclusive('\n').collect::<Vec<_>>();
-            let start_index = usize::try_from(
-                start_line
-                    .saturating_sub(1)
-                    .saturating_sub(leading.skipped_lines),
-            )
-            .unwrap_or(usize::MAX);
-            let available = lines.len() + usize::from(leading.dropped_partial);
-            if start_index > available || (start_index == available && start_line != 1) {
-                return ToolOutcome::failure_text(PLAKOUS_TOOL_READ_OFFSET_PAST_EOF);
-            }
-            let take = usize::try_from(limit).unwrap_or(lines.len());
-            let mut page = String::new();
-            let mut presented = 0_usize;
-            let mut selected = 0_usize;
-            let mut clipped_lines = 0_u64;
-            for line in lines.iter().skip(start_index).take(take) {
-                let (line, clipped) = clip_long_line(line);
-                let line_number =
-                    start_line.saturating_add(u64::try_from(selected).unwrap_or(u64::MAX));
-                presented = presented.saturating_add(presented_line_bytes(&line, line_number));
-                if selected != 0
-                    && (presented > READ_PAGE_PRESENTED_BYTES
-                        || page.len() + line.len() > page_bytes)
-                {
-                    break;
-                }
-                page.push_str(&line);
-                selected += 1;
-                clipped_lines += u64::from(clipped);
-            }
-            let next_line = start_line.saturating_add(u64::try_from(selected).unwrap_or(0));
-            let eof = complete && start_index.saturating_add(selected) >= lines.len();
-            let value_text = invocation.want_value().then(|| page.clone());
-            if eof && let Some(written) = leading.write_failed_after {
-                push_incomplete_line(&mut page, written);
-            }
-            let result = plakous_tools::WorkspaceFileReadResult {
-                content: page,
-                offset: start_line,
-                lines: selected as u64,
-                eof,
-                next_offset: if eof { None } else { Some(next_line) },
-                lossy,
-                clipped_lines,
-                workspace_generation: context.workspace().generation_stamp(),
-            };
-            let outcome = read_outcome(
+            read_text_page(
+                invocation,
+                context,
+                args,
                 path_display,
-                &result,
-                leading.revision,
-                lines
-                    .len()
-                    .saturating_sub(start_index)
-                    .min(take)
-                    .saturating_sub(selected) as u64,
-                value_text,
-            )?;
-            if let Some(revision) = leading.revision {
-                context
-                    .environment()
-                    .record_text_read(context.run_id(), &args.path, revision);
-            }
-            Ok(outcome)
+                start_line,
+                limit,
+                page_bytes,
+            )
+            .await
         })
     }
+}
+
+async fn read_text_page(
+    invocation: ToolInvocation,
+    context: ToolContext,
+    args: ReadFileArgs,
+    path_display: String,
+    start_line: u64,
+    limit: u64,
+    page_bytes: usize,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    let leading = read_leading_lines(&context, &args, start_line, limit).await?;
+    let (mut bytes, complete) = (leading.bytes, leading.complete);
+    if bytes.iter().take(8_192).any(|byte| *byte == 0) {
+        return ToolOutcome::failure_text(PLAKOUS_TOOL_READ_BINARY);
+    }
+    if !complete {
+        drop_cut_utf8_tail(&mut bytes);
+    }
+    let (text, lossy) = match String::from_utf8(bytes) {
+        Ok(text) => (text, false),
+        Err(error) => (String::from_utf8_lossy(error.as_bytes()).into_owned(), true),
+    };
+    let lines = text.split_inclusive('\n').collect::<Vec<_>>();
+    let start_index = usize::try_from(
+        start_line
+            .saturating_sub(1)
+            .saturating_sub(leading.skipped_lines),
+    )
+    .unwrap_or(usize::MAX);
+    let available = lines.len() + usize::from(leading.dropped_partial);
+    if start_index > available || (start_index == available && start_line != 1) {
+        return ToolOutcome::failure_text(PLAKOUS_TOOL_READ_OFFSET_PAST_EOF);
+    }
+    let take = usize::try_from(limit).unwrap_or(lines.len());
+    let mut page = String::new();
+    let mut presented = 0_usize;
+    let mut selected = 0_usize;
+    let mut clipped_lines = 0_u64;
+    for line in lines.iter().skip(start_index).take(take) {
+        let (line, clipped) = clip_long_line(line);
+        let line_number = start_line.saturating_add(u64::try_from(selected).unwrap_or(u64::MAX));
+        presented = presented.saturating_add(presented_line_bytes(&line, line_number));
+        if selected != 0
+            && (presented > READ_PAGE_PRESENTED_BYTES || page.len() + line.len() > page_bytes)
+        {
+            break;
+        }
+        page.push_str(&line);
+        selected += 1;
+        clipped_lines += u64::from(clipped);
+    }
+    let next_line = start_line.saturating_add(u64::try_from(selected).unwrap_or(0));
+    let eof = complete && start_index.saturating_add(selected) >= lines.len();
+    let value_text = invocation.want_value().then(|| page.clone());
+    if eof && let Some(written) = leading.write_failed_after {
+        push_incomplete_line(&mut page, written);
+    }
+    let result = plakous_tools::WorkspaceFileReadResult {
+        content: page,
+        offset: start_line,
+        lines: selected as u64,
+        eof,
+        next_offset: if eof { None } else { Some(next_line) },
+        lossy,
+        clipped_lines,
+        workspace_generation: context.workspace().generation_stamp(),
+    };
+    let outcome = read_outcome(
+        path_display,
+        &result,
+        leading.revision,
+        lines
+            .len()
+            .saturating_sub(start_index)
+            .min(take)
+            .saturating_sub(selected) as u64,
+        value_text,
+    )?;
+    if let Some(revision) = leading.revision {
+        context
+            .environment()
+            .record_text_read(context.run_id(), &args.path, revision);
+    }
+    Ok(outcome)
 }
 
 fn read_response_bytes(invocation: &ToolInvocation) -> usize {

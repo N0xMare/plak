@@ -124,3 +124,74 @@ fn transparency_is_composed_over_white_for_jpeg() {
     let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 0])));
     assert_eq!(opaque(&image).get_pixel(0, 0).0, [255, 255, 255]);
 }
+
+fn animated_gif() -> Vec<u8> {
+    use image::codecs::gif::{GifEncoder, Repeat};
+    use image::{Delay, Frame};
+    let mut bytes = Cursor::new(Vec::new());
+    {
+        let mut encoder = GifEncoder::new(&mut bytes);
+        encoder.set_repeat(Repeat::Infinite).unwrap();
+        encoder
+            .encode_frame(Frame::from_parts(
+                noise(4, 4),
+                0,
+                0,
+                Delay::from_numer_denom_ms(100, 1),
+            ))
+            .unwrap();
+        encoder
+            .encode_frame(Frame::from_parts(
+                gradient(4, 4),
+                0,
+                0,
+                Delay::from_numer_denom_ms(100, 1),
+            ))
+            .unwrap();
+    }
+    bytes.into_inner()
+}
+
+#[test]
+fn tool_images_always_decode_pass_through_only_clean_fitting_still_frames() {
+    for (format, media) in [
+        (ImageFormat::Png, "image/png"),
+        (ImageFormat::Jpeg, "image/jpeg"),
+        (ImageFormat::WebP, "image/webp"),
+    ] {
+        let bytes = encoded(noise(4, 4), format);
+        let (got_media, got_bytes) = normalize_tool(&bytes).unwrap();
+        assert_eq!(got_media, media);
+        assert_eq!(got_bytes, bytes);
+    }
+
+    let gif = animated_gif();
+    let (media, bytes) = normalize_tool(&gif).unwrap();
+    assert_eq!(media, "image/png");
+    assert!(bytes.starts_with(b"\x89PNG"));
+    assert_ne!(bytes, gif);
+
+    let png = encoded(noise(4, 4), ImageFormat::Png);
+    let mut truncated = png.clone();
+    truncated.truncate(40);
+    assert!(matches!(
+        normalize_tool(&truncated),
+        Err(NormalizeError::Undecodable(_))
+    ));
+    let mut garbage = png[..24].to_vec();
+    garbage.extend_from_slice(&[0; 32]);
+    assert!(matches!(
+        normalize_tool(&garbage),
+        Err(NormalizeError::Undecodable(_))
+    ));
+
+    let wide = encoded(noise(2050, 2), ImageFormat::Png);
+    let (media, bytes) = normalize_tool(&wide).unwrap();
+    assert_eq!(media, "image/png");
+    let (width, height) = plakous::tools::sniff_image(&bytes)
+        .unwrap()
+        .dimensions()
+        .unwrap();
+    assert!(width <= MAX_IMAGE_EDGE && height <= MAX_IMAGE_EDGE);
+    assert_ne!(bytes, wide);
+}

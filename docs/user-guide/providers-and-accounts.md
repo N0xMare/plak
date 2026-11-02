@@ -66,7 +66,10 @@ per-turn prompt and turn numbers and its previous-response diagnostics. The beta
 or adaptive, and omits it when reasoning is disabled.
 Claude sessions see
 Claude Code's native tools `Bash`, `Read`, `Edit`, `Write` and `TaskStop`;
-search runs through the shell, so the host needs `grep`, `rg` or `find`. The separately billed
+search runs through the shell, so the host needs `grep`, `rg` or `find`.
+`Read` returns a PNG, JPEG, GIF or WebP as an image when the model accepts
+image input. A model that cannot accept the image is refused by name. Codex
+sessions also have `view_image`, one workspace image and nothing else. The separately billed
 `anthropic` API-key route does not use that OAuth identity.
 
 ## OAuth

@@ -760,7 +760,13 @@ fn coding_presentation_catalogs_are_exact_menus() -> Result<(), TestError> {
             .iter()
             .map(|definition| definition.exposed_name().as_str())
             .collect::<Vec<_>>(),
-        ["apply_patch", "exec_command", "update_plan", "write_stdin"]
+        [
+            "apply_patch",
+            "exec_command",
+            "update_plan",
+            "view_image",
+            "write_stdin",
+        ]
     );
     assert_eq!(
         grok_view

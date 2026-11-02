@@ -316,6 +316,15 @@ turn's own admission-compaction fit check uses the turn's input — is measured
 with all its parts, images included, so a pending image counts exactly as it
 will once admitted. An input with no text part (images only) is valid.
 
+A workspace image returned by a tool is not user-input admission. Claude
+`Read` and Codex `view_image` normalize it through the hosted image decoder
+(long edge at most 2048 px) into the tool-result contract, whose JSON
+measurement is 1 MiB, and the result is an ordinary image part. The decoder
+always runs: PNG, JPEG and WebP that decode cleanly and already fit are kept
+byte-identical, and a GIF is re-encoded from its first frame as PNG. A decode
+failure is a tool failure, not a runtime error. Image residency then applies
+to that part as it does to any other consumed tool image.
+
 The command's canonical input frames the verb tag (and target turn), then per
 part either `text` and the text, or `image`, the media type, and the SHA-256
 of the image bytes, so the receipt digest covers every part without storing
@@ -5702,8 +5711,8 @@ when the call returns continues in the background with its id and its
 completion is reported automatically, so a Claude leaf waits by giving a long
 command a timeout long enough to finish. Search goes through the shell, as in
 Claude Code's native build. `Read` presents `file_path`, `offset` and `limit`;
-the native PDF `pages` parameter is not presented because Plak's read is
-text-only. `TaskStop` is derived from the installed Claude Code 2.1.289 strict-object
+the native PDF `pages` parameter is not presented. A PDF is not an image
+read. `TaskStop` is derived from the installed Claude Code 2.1.289 strict-object
 schema, narrowed to the current process identifier: the deprecated `shell_id`
 alias is removed and `task_id` is required. The `task_id` description names
 the process session id `Bash` returned and says agents are not accepted; it

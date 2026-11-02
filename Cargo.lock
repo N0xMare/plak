@@ -4044,6 +4044,7 @@ dependencies = [
  "plakous",
  "plakous-anthropic",
  "plakous-chat-completions",
+ "plakous-compose",
  "plakous-host-protocol",
  "plakous-http",
  "plakous-messages",

@@ -29,7 +29,7 @@ pub enum CodingPresentation {
     /// The generic vocabulary, pi 1.1.0's: `read`, `bash`, `edit`, `write`,
     /// plus `wait` and `stop` over its background processes.
     Pi,
-    /// Codex vocabulary: `exec_command`, `write_stdin`, Codex-envelope `apply_patch`, `update_plan`.
+    /// Codex vocabulary: `exec_command`, `write_stdin`, Codex-envelope `apply_patch`, `update_plan`, and `view_image`.
     Codex,
     /// Grok vocabulary: grok-build wire-aligned Direct tools.
     Grok,
@@ -60,6 +60,7 @@ impl CodingPresentation {
                 PROCESS_SESSION_POLL_NAME,
                 CODEX_PATCH_ENVELOPE_CANONICAL_NAME,
                 "update_plan",
+                "view_image",
             ],
             Self::Grok => &[
                 PROCESS_SESSION_CAPABILITY_NAME,

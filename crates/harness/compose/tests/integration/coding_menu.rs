@@ -19,9 +19,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use plakous_model::{
-    AttemptId, CallId, Digest, DigestDomain, EffectiveProviderConfigurationId, IntegrationClass,
-    RunId, TextBlock, ToolCallerLineage, ToolConcurrency, ToolCorrelation, ToolDefinition,
-    ToolEffect, ToolInputContract, ToolName, ToolOutputContract, ToolResultPart, TurnId,
+    AttemptId, CallId, Digest, DigestDomain, EffectiveProviderConfigurationId, ImageBlock,
+    IntegrationClass, MediaSource, RunId, TextBlock, ToolCallerLineage, ToolConcurrency,
+    ToolCorrelation, ToolDefinition, ToolEffect, ToolInputContract, ToolName, ToolOutputContract,
+    ToolResultPart, TurnId,
 };
 
 use plakous_tools::{
@@ -1262,6 +1263,46 @@ fn nested_claude_read_returns_exact_json_instead_of_numbered_display()
     Ok(())
 }
 
+#[test]
+fn claude_read_keeps_a_direct_image_and_a_nested_cell_refuses_it()
+-> Result<(), Box<dyn std::error::Error>> {
+    let image = ToolOutcome::success(vec![ToolResultPart::Image(ImageBlock::new(
+        "image/png",
+        MediaSource::bytes(vec![0x89, b'P', b'N', b'G'])?,
+    )?)])?;
+    let direct = claude_projection()?;
+    let prepared = direct.prepare(request(
+        "00000000-0000-0000-0000-000000000125",
+        "Read",
+        r#"{"file_path":"a.png"}"#,
+    )?)?;
+    let (_, receipt) = prepared.into_parts();
+    let raised = direct.raise(&receipt.ok_or("missing receipt")?, image.clone())?;
+    assert!(
+        matches!(raised.parts(), [ToolResultPart::Image(_)]),
+        "a direct Claude image read was not kept"
+    );
+
+    let nested = claude_read_projection(true)?;
+    let prepared = nested.prepare(request(
+        "00000000-0000-0000-0000-000000000126",
+        "Read",
+        r#"{"file_path":"a.png"}"#,
+    )?)?;
+    let (_, receipt) = prepared.into_parts();
+    let raised = nested.raise(&receipt.ok_or("missing receipt")?, image)?;
+    assert_eq!(raised.kind(), ToolOutcomeKind::Failure);
+    let [ToolResultPart::Text(text)] = raised.parts() else {
+        return Err("nested image refusal was not text".into());
+    };
+    assert!(
+        text.text().contains("images are refused"),
+        "{}",
+        text.text()
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // The vendor-vocabulary contract: every documented example lowers and
 // validates.
@@ -1291,6 +1332,7 @@ fn documented_vendor_example(
         }
         (CodingPresentation::Codex, "exec_command") => r#"{"cmd":"ls -la"}"#,
         (CodingPresentation::Codex, "write_stdin") => r#"{"session_id":1,"chars":"y\n"}"#,
+        (CodingPresentation::Codex, "view_image") => r#"{"path":"image.png"}"#,
         // The Codex freeform envelope is UTF-8 text, not JSON.
         (CodingPresentation::Codex, "apply_patch") => {
             "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch\n"

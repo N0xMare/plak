@@ -22,7 +22,7 @@ use crate::{
     EffectDecision, EffectDecisionDisposition, ExecutionEnvironment,
     ExecutionEnvironmentDescriptor, FrozenToolRegistry, ProgressSink, ToolContext, ToolExecutor,
     ToolInvocation, ToolOutcome, ToolOutcomeLimits, ToolPolicyRequest, ToolPolicyRevision,
-    ToolRuntimeError,
+    ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -403,6 +403,62 @@ pub fn bind_effect_dispatch(
     claim_evidence_digest: Digest,
 ) -> ToolInvocation {
     invocation.with_effect_dispatch(intent_digest, claim_evidence_digest)
+}
+
+pub use crate::visual_read::VisualReadSession;
+
+/// Installs image-read facts the agent derived from its provider configuration.
+///
+/// Not part of the environment descriptor, and not a supported inventory item.
+pub fn install_visual_read(
+    environment: ExecutionEnvironment,
+    route: impl Into<String>,
+    model: impl Into<String>,
+    accepts_images: bool,
+    normalizer: Option<Arc<dyn crate::ImageNormalizer>>,
+) -> ExecutionEnvironment {
+    environment.with_visual_read(Arc::new(VisualReadSession::new(
+        route,
+        model,
+        accepts_images,
+        normalizer,
+    )))
+}
+
+/// The image-read facts installed on `environment`, if any.
+pub fn visual_read(environment: &ExecutionEnvironment) -> Option<&VisualReadSession> {
+    environment.visual_read()
+}
+
+/// Runs `work` on the blocking pool and waits for it without occupying an
+/// async worker. The harness calls this for image decode.
+///
+/// Cancellation returns `Cancelled` at once and drops the handle: the work
+/// already on the pool runs to completion and its result is discarded.
+pub async fn join_blocking<T: Send + 'static>(
+    cancellation: &CancellationToken,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, ToolRuntimeError> {
+    use std::future::Future as _;
+    use std::pin::Pin;
+    use std::task::Poll;
+
+    let mut handle = tokio::task::spawn_blocking(work);
+    let mut cancelled = cancellation.cancelled();
+    std::future::poll_fn(|cx| {
+        if Pin::new(&mut cancelled).poll(cx).is_ready() {
+            return Poll::Ready(Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Cancelled,
+                "tool execution was cancelled",
+            )));
+        }
+        Pin::new(&mut handle).poll(cx).map(|joined| {
+            joined.map_err(|_| {
+                ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "blocking tool task failed")
+            })
+        })
+    })
+    .await
 }
 
 #[allow(

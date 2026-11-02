@@ -97,7 +97,7 @@ fn python_harness_sdk_identity_golden() -> Result<(), TestError> {
     )?;
     assert_eq!(
         descriptor.identity().to_string(),
-        "5b04b7e539e001a201dd7f3a5a68bb9ad8e2de3a6fd2403162cee3f86b56c5f6"
+        "d21cf50a5c9f1011d72dcd9836215cfbfcd837db26f4707c3245c8e02aa4bc89"
     );
     Ok(())
 }
@@ -140,51 +140,51 @@ fn python_harness_sdk_compile_refuses_missing_registration_and_nested_marker()
 const DURABLE_DESCRIPTOR_PINS: &[(&str, &str, &str, &str)] = &[
     (
         "Pi",
-        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
-        "3599a0f0c63407d1989e65c37bfbef4151eb800b57ea9dde4dbe79c1a64df046",
-        "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
+        "6ec95db32cafa91f268611c3def69249341fdd6a810f7d4c2eb28294c4aa03ba",
+        "7cae5d44d56616413e8aac30d001055bdd8ef184e50d88bff91181f859ab578b",
+        "44b8430fce9ce883c54102f9808f260a6c1687c139ce13db82fe85791a178f62",
     ),
     (
         "CodexOAuth",
-        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
-        "18eaa4d3576ee6d1fa875d743f48bea23266569ddedc7f09625f460bf26f4009",
-        "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
+        "6ec95db32cafa91f268611c3def69249341fdd6a810f7d4c2eb28294c4aa03ba",
+        "a2c962b9065a71367280dcd065abbcd03a40a9e1702fd88875ea914fa87ad031",
+        "44b8430fce9ce883c54102f9808f260a6c1687c139ce13db82fe85791a178f62",
     ),
     (
         "SuperGrokOAuth",
-        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
-        "2c064d03202e5caa6e4a0c57bc8fa2405e316e429b2a53b4a9a8b58f53d498c4",
-        "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
+        "6ec95db32cafa91f268611c3def69249341fdd6a810f7d4c2eb28294c4aa03ba",
+        "8eeda6b60dc02eb28bb05bc38391f1300b420ef80a48bd5af96dd2d523c46869",
+        "44b8430fce9ce883c54102f9808f260a6c1687c139ce13db82fe85791a178f62",
     ),
     (
         "ClaudeOAuth",
-        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
-        "13b0bbe32d3c96c6cdd5945066fee07de005d8c52364a14095331458fefa5490",
-        "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
+        "6ec95db32cafa91f268611c3def69249341fdd6a810f7d4c2eb28294c4aa03ba",
+        "1c617433c325f690412e5127bfc4e4968f0911b9545fcaa3597fe75d55a31fa7",
+        "44b8430fce9ce883c54102f9808f260a6c1687c139ce13db82fe85791a178f62",
     ),
     (
         "Pi+topology",
-        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
-        "ce93fe257cabeabdf3b1eeeccb2fab9348dd54211cc934fff68f1f2599d1591a",
-        "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
+        "91b2a96d11be09d5c693b8cb5e6cae9de020c4849dd5e324d863070034d7914c",
+        "416437a22b9904142d10f6d4f1b9e3328a56c6a5d9a71de313a5027190d84e7a",
+        "237f71d3fab19c96694b061fe1f8a057a7fe2d20e3a383a7ce784fb8f3ed409f",
     ),
     (
         "CodexOAuth+topology",
-        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
-        "807ebd94681bb7974c4b4d3cceb71511a3d97e985cde2f96ec4d7d43e5ae6908",
-        "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
+        "91b2a96d11be09d5c693b8cb5e6cae9de020c4849dd5e324d863070034d7914c",
+        "ebb4c7bb9ecad649604b5c13e060f6bc10b7d647dd35c1b77c28d591bdcf91fd",
+        "237f71d3fab19c96694b061fe1f8a057a7fe2d20e3a383a7ce784fb8f3ed409f",
     ),
     (
         "SuperGrokOAuth+topology",
-        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
-        "a64f7add1a1f11303e52782662fe299cba55ec53b3275ed7c67dab29d8148ce8",
-        "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
+        "91b2a96d11be09d5c693b8cb5e6cae9de020c4849dd5e324d863070034d7914c",
+        "c99d0a0cdef8d4f6fd4ab7b920aafad6d7472bff7e36a9568c236ab1f96aa8dc",
+        "237f71d3fab19c96694b061fe1f8a057a7fe2d20e3a383a7ce784fb8f3ed409f",
     ),
     (
         "ClaudeOAuth+topology",
-        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
-        "a82402d8675470925e5d99a432e2c04a1edb21de339378271a6f80e7588954f3",
-        "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
+        "91b2a96d11be09d5c693b8cb5e6cae9de020c4849dd5e324d863070034d7914c",
+        "4ec4251ccaa29af742b2ed8e636c01dcb4da75a3b82b775394949507835c603c",
+        "237f71d3fab19c96694b061fe1f8a057a7fe2d20e3a383a7ce784fb8f3ed409f",
     ),
 ];
 

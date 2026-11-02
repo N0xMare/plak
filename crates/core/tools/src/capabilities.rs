@@ -17,6 +17,9 @@ pub const READ_FILE_CAPABILITY_NAME: &str = "read_file";
 pub const APPLY_PATCH_CAPABILITY_NAME: &str = "apply_patch";
 /// Canonical image-inspection capability.
 pub const INSPECT_IMAGE_CAPABILITY_NAME: &str = "inspect_image";
+
+/// Codex `view_image`: one workspace image, returned as image content.
+pub const VIEW_IMAGE_CAPABILITY_NAME: &str = "view_image";
 /// Canonical bounded repository-search capability.
 pub const SEARCH_REPOSITORY_CAPABILITY_NAME: &str = "search_repository";
 /// Canonical ignore-aware repository-listing capability.

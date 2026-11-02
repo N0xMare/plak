@@ -920,7 +920,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             &surface
                 .exposed_names()
                 .iter()
-                .filter(|name| name.as_str() != "inspect_image")
+                .filter(|name| !matches!(name.as_str(), "inspect_image" | "view_image"))
                 .cloned()
                 .collect::<Vec<_>>(),
         )
@@ -1032,7 +1032,10 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
     }
 
     Ok(SessionRuntimeBinding::new(
-        builder.config(config).request_policy(request_policy),
+        builder
+            .config(config)
+            .request_policy(request_policy)
+            .image_normalizer(crate::visual_read::normalizer()),
     ))
 }
 

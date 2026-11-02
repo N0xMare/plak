@@ -22,6 +22,7 @@ fn catalog_preserves_core_then_extension_declaration_order() -> TestResult {
             "apply_patch",
             "exec_command",
             "update_plan",
+            "view_image",
             "write_stdin",
             "custom_second",
             "custom_first",

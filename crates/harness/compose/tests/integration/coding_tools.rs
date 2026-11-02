@@ -189,16 +189,17 @@ async fn execute_invocation(
 #[test]
 fn coding_pack_registry_schema_and_descriptor_are_portable() -> TestResult {
     let registry = registry(Arc::new(InMemoryPlanState::new()))?;
-    // Three stateless capabilities, the Codex patch envelope over the same
-    // apply-patch executor, one search, and the plan port's two.
-    assert_eq!(registry.definitions().len(), 7);
+    // Four stateless capabilities (including view_image), the Codex patch
+    // envelope over the same apply-patch executor, one search, and the plan
+    // port's two.
+    assert_eq!(registry.definitions().len(), 8);
     assert_eq!(
         registry
             .definitions()
             .iter()
             .filter(|definition| definition.effect() == ToolEffect::ReadOnly)
             .count(),
-        3
+        4
     );
     let patch = registry
         .definition(&ToolName::new("apply_patch")?)

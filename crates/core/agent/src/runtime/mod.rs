@@ -162,6 +162,7 @@ pub struct AgentBuilder {
     job_config: plakous_tools::JobConfig,
     job_counter_seed: u32,
     job_host: Option<Arc<dyn plakous_tools::JobHost>>,
+    image_normalizer: Option<Arc<dyn plakous_tools::ImageNormalizer>>,
     config: AgentConfig,
     request_policy: AgentRequestPolicy,
     instructions: Vec<InstructionBlock>,

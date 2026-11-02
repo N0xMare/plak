@@ -379,6 +379,14 @@ pub(crate) fn product_surface_with_fence(
             })
             .collect();
     }
+    // A cell returns text. `view_image` stays on the Direct menu (runtime
+    // `None`) and is refused at call time when the model has no image input.
+    if runtime.is_some() {
+        packs = packs
+            .into_iter()
+            .map(|pack| Arc::new(CellTextMenu { pack }) as Arc<dyn ToolPack>)
+            .collect();
+    }
     compile_over(&packs, presentation, registry, target, runtime).map_err(|error| {
         match error.namespace_clash() {
             Some(clash) => CliFailure::new(format!(
@@ -432,6 +440,44 @@ impl ToolPack for OccupancyMenu {
     fn contributions(&self) -> &[PromptContribution] {
         self.pack.contributions()
     }
+    fn pins(&self) -> &'static [PromptPin] {
+        self.pack.pins()
+    }
+}
+
+/// Drops `view_image` from a program surface. Image results are not a cell's
+/// catalog, so the nested names and the prompt that lists them stay the Direct
+/// menu without that tool.
+struct CellTextMenu {
+    pack: Arc<dyn ToolPack>,
+}
+
+impl ToolPack for CellTextMenu {
+    fn id(&self) -> &'static str {
+        self.pack.id()
+    }
+
+    fn verify(
+        &self,
+        presentation: CodingPresentation,
+        registry: &FrozenToolRegistry,
+    ) -> Result<(), ToolRuntimeError> {
+        self.pack.verify(presentation, registry)
+    }
+
+    fn menu(&self, presentation: CodingPresentation) -> Result<Vec<MenuEntry>, ToolRuntimeError> {
+        Ok(self
+            .pack
+            .menu(presentation)?
+            .into_iter()
+            .filter(|entry| entry.exposed() != "view_image")
+            .collect())
+    }
+
+    fn contributions(&self) -> &[PromptContribution] {
+        self.pack.contributions()
+    }
+
     fn pins(&self) -> &'static [PromptPin] {
         self.pack.pins()
     }

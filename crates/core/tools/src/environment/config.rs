@@ -665,6 +665,8 @@ pub struct ExecutionEnvironment {
     pub(super) joined_process_sessions: Arc<JoinedProcessServiceCache>,
     pub(super) host_process: Option<Arc<HostProcessContext>>,
     pub(super) read_observations: Arc<super::read_observations::ReadObservations>,
+    /// Live image-read facts. Absent from the descriptor digest.
+    pub(super) visual_read: Option<Arc<crate::internal::VisualReadSession>>,
 }
 
 impl ExecutionEnvironment {
@@ -832,7 +834,25 @@ impl ExecutionEnvironment {
             joined_process_sessions: Arc::new(JoinedProcessServiceCache::default()),
             host_process: None,
             read_observations: Arc::default(),
+            visual_read: None,
         })
+    }
+
+    /// Installs live image-read facts. Not part of the descriptor.
+    ///
+    /// The agent derives the route facts; a host supplies only the normalizer.
+    #[must_use]
+    pub(crate) fn with_visual_read(
+        mut self,
+        session: Arc<crate::internal::VisualReadSession>,
+    ) -> Self {
+        self.visual_read = Some(session);
+        self
+    }
+
+    /// The live image-read facts, when the agent installed them.
+    pub(crate) fn visual_read(&self) -> Option<&crate::internal::VisualReadSession> {
+        self.visual_read.as_deref()
     }
 
     /// Returns the exact identity to bind into audit and authorization records.
