@@ -11,8 +11,8 @@ use super::{
     EnvironmentDelegation, EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackend,
     ExecutionBackendErrorKind, ExecutionBackendFuture, ExecutionBackendIdentity,
     ExecutionEnvironmentError, ExecutionEnvironmentErrorKind, ExecutionEnvironmentLimits,
-    ExecutionOperationControl, ExecutionWorkspace, LiteralProcessIntent, LiteralProcessResult,
-    MAX_EXECUTION_VALUE_BYTES, PreparedLiteralProcess, PreparedServiceProcess, RepositoryQuery,
+    ExecutionWorkspace, LiteralProcessIntent, LiteralProcessResult, MAX_EXECUTION_VALUE_BYTES,
+    OperationContext, PreparedLiteralProcess, PreparedServiceProcess, RepositoryQuery,
     RepositoryQueryResult, ServiceProcess, WorkspaceMutationTransaction,
     WorkspaceMutationTransactionResult, WorkspaceReadSlice, WorkspaceReadSliceRequest,
     WorkspaceSnapshotCache, backend_error, lock, mutate_workspace_sync, query_repository_sync,
@@ -390,7 +390,7 @@ impl ExecutionBackend for DeterministicExecutionBackend {
         &self,
         workspace: ExecutionWorkspace,
         request: WorkspaceReadSliceRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceReadSlice> {
         let snapshots = Arc::clone(&self.workspace_snapshots);
         run_filesystem_blocking(move || {
@@ -402,7 +402,7 @@ impl ExecutionBackend for DeterministicExecutionBackend {
         &self,
         workspace: ExecutionWorkspace,
         query: RepositoryQuery,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<RepositoryQueryResult> {
         run_filesystem_blocking(move || query_repository_sync(&workspace, &query, &control))
     }
@@ -411,7 +411,7 @@ impl ExecutionBackend for DeterministicExecutionBackend {
         &self,
         workspace: ExecutionWorkspace,
         transaction: WorkspaceMutationTransaction,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceMutationTransactionResult> {
         let mutation_lock = Arc::clone(&self.mutation_lock);
         run_filesystem_blocking(move || {
@@ -425,7 +425,7 @@ impl ExecutionBackend for DeterministicExecutionBackend {
         workspace: ExecutionWorkspace,
         request: PreparedLiteralProcess,
         _limits: ExecutionEnvironmentLimits,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<LiteralProcessResult> {
         let resolved_cwd = match resolve_existing_no_symlink(&workspace, request.request.cwd()) {
             Ok(path) => path,
@@ -493,7 +493,7 @@ impl ExecutionBackend for DeterministicExecutionBackend {
         &self,
         _workspace: ExecutionWorkspace,
         request: PreparedServiceProcess,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<ServiceProcess> {
         if let Err(error) = control.check_cancelled() {
             return ready_error(error.with_proven_no_effect(true));

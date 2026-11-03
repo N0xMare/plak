@@ -19,7 +19,7 @@ use plakous::tools::web::{
     RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalOptions,
     RetrievalPort, RetrievalRequest, WebTool,
 };
-use plakous::tools::{CodingPresentation, ExecutionOperationControl, McpServerName};
+use plakous::tools::{CodingPresentation, McpServerName, OperationContext};
 
 use crate::binding::{ApiTarget, PlatformProvider};
 
@@ -431,11 +431,7 @@ impl RetrievalPort for DeferredRetrievalPort {
         &self.kinds
     }
 
-    fn retrieve(
-        &self,
-        request: RetrievalRequest,
-        control: ExecutionOperationControl,
-    ) -> RetrievalFuture {
+    fn retrieve(&self, request: RetrievalRequest, control: OperationContext) -> RetrievalFuture {
         match self.port.get() {
             Some(port) => port.retrieve(request, control),
             None => Box::pin(async {
@@ -501,11 +497,7 @@ impl ImageGenPort for DeferredImagePort {
         self.port.get().is_some_and(|port| port.takes_size())
     }
 
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        control: ExecutionOperationControl,
-    ) -> ImageGenFuture {
+    fn generate(&self, request: ImageGenRequest, control: OperationContext) -> ImageGenFuture {
         match self.port.get() {
             Some(port) => port.generate(request, control),
             None => Box::pin(async {

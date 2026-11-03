@@ -61,7 +61,7 @@ use plakous_tools::{
     CodingPresentation, MenuEntry, PassthroughPack, PromptPin, RegisteredToolId,
     RetrievalErrorKind, RetrievalKind, RetrievalPort, RetrievalRequest, ToolContext, ToolExecutor,
     ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack,
-    ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, operation_control,
+    ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, operation_context,
 };
 
 /// Longest accepted query, in bytes.
@@ -378,7 +378,7 @@ impl ToolExecutor for RetrievalTool {
             let _ = context.progress().report(&subject, None, None);
             let outcome = self
                 .port
-                .retrieve(request, operation_control(&context))
+                .retrieve(request, operation_context(&context))
                 .await;
             let outcome = call_result(self.presented, outcome)?;
             Ok(outcome.with_presentation_subject(subject))

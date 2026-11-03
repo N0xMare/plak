@@ -23,7 +23,7 @@ use plakous_tools::{
     WorkspaceMutationDisposition, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
     WorkspaceReplacement,
 };
-use plakous_tools::{backend_runtime_error, decode_arguments, operation_control};
+use plakous_tools::{backend_runtime_error, decode_arguments, operation_context};
 use plakous_tools::{standard_definition, workspace_concurrency};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -240,7 +240,7 @@ impl ToolExecutor for ApplyPatchTool {
                                             );
                                         }
                                     },
-                                    operation_control(&context),
+                                    operation_context(&context),
                                 )
                                 .await;
                             let read = match read {
@@ -326,7 +326,7 @@ impl ToolExecutor for ApplyPatchTool {
             };
             let result = context
                 .environment()
-                .mutate_workspace(transaction, operation_control(&context))
+                .mutate_workspace(transaction, operation_context(&context))
                 .await;
             match result {
                 Ok(result) => {
@@ -632,7 +632,7 @@ async fn read_patch_target(
         .read_workspace(
             WorkspaceReadSliceRequest::start(path, MAX_STANDARD_TEXT_BYTES)
                 .map_err(backend_runtime_error)?,
-            operation_control(context),
+            operation_context(context),
         )
         .await;
     match read {

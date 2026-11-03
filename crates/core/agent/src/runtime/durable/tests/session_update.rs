@@ -254,9 +254,7 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
                     let id = sessions
                         .start(
                             request,
-                            plakous_tools::ExecutionOperationControl::new(
-                                context.cancellation().clone(),
-                            ),
+                            plakous_tools::OperationContext::new(context.cancellation().clone()),
                         )
                         .map_err(|_| {
                             ToolRuntimeError::new(
@@ -385,7 +383,7 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
             let id = sessions
                 .start(
                     request,
-                    plakous_tools::ExecutionOperationControl::new(
+                    plakous_tools::OperationContext::new(
                         if matches!(mode, SessionUpdateFixtureMode::ActiveAfterCancellation) {
                             CancellationToken::new()
                         } else {

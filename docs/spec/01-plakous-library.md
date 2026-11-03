@@ -178,6 +178,17 @@ durable descriptor's identity. Any drift refuses the open. A host that changes
 what a session's tools say (for example new spawn cards) does so on a new
 branch, never by reopening an old checkpoint with different tools.
 
+A session's tools run on one runner, and the runner is part of its binding:
+the execution backend descriptor names it (§8.5), the run-stable workspace
+facts record it, and reopen compares it like every other environment fact.
+Every L0 branch transition (a rebind or fork compiled by this library) keeps
+its source's runner; a transition whose target names another runner is refused
+before any branch is written, as `InvalidInput` with `BindingChange::Runner`
+naming the recorded and the derived runner. This rule is scoped to today's
+branch transitions: a fork that starts a new line, and children placed on
+another runner, may later choose their runner. Today every session runs on the
+local runner.
+
 ### 2.4 Handles and shutdown
 
 `Agent::begin_abandon` stops admission and fires cancellation while retaining
@@ -1953,8 +1964,9 @@ of: the model protocol, route, model or model adapter profile (each with its
 recorded and current identifier), the model capability binding (adapter
 revision, declared features or context contract, compared by digest), the
 provider configuration, one tool's executor binding identity (named by its
-executor id), the tool presentation, the tool registry, or the execution
-environment. A plan model-binding refusal reads `resolved harness plan is bound
+executor id), the tool presentation, the tool registry, the execution
+environment, or the runner (with its recorded and current runner id; a branch
+transition onto another runner is refused with it, §2.3). A plan model-binding refusal reads `resolved harness plan is bound
 to a different <change>`; the most specific differing input is named first, and
 the comparison accepts only fully identical bindings. Identifiers are build and catalog
 constants; no credential, account bytes or content enters a change. A missing or
@@ -5499,6 +5511,24 @@ arguments digest, environment authority, and policy revision. Any drift
 invalidates it. Plakous guarantees at most one in-process dispatch for one
 canonical attempt — **not** exactly-once behavior in an external system.
 
+Every environment operation carries an `OperationContext`: the line head it
+runs for (`LineOwner`: the agent line, its generation, the head branch and that
+branch's lease fence, ordered within a line by `(generation, fence)`), its
+request class and key (`OperationClass::EffectCall { call_id, attempt_id }` for
+a tool call; `Unkeyed` for work no call started, such as a pooled service or a
+host-side probe), its caller's absolute deadline (the budget), and its
+cancellation token and yield signal. `plakous_tools::operation_context`, a
+pack-author helper in `plakous-tools` that the facade does not re-export,
+builds it for a tool call from the call's `ToolContext`; the owner is the one the
+agent named on its execution environment at construction
+(`ExecutionEnvironment::with_line_owner`, from the job owner of §8.5). The
+owner, class and budget are carried, not enforced: they are the fence and
+idempotency key a runner checks once execution leaves the process, and no
+backend reads them yet. When a runner does check them, the owner comes from the
+session's current job owner (§8.5), not from an owner a joined process
+service stored when it started. `LineOwner` lives in `plakous-tools`; it never
+enters `plakous-model`.
+
 Every potentially effectful invocation follows one small protocol: validate →
 authorize or approve → record identity → dispatch → observe outcome → commit or
 reconcile. A mutating tool has exactly one durable operation with states
@@ -5849,7 +5879,7 @@ host authority. The hosted workspace constructor selects the copy-shim prefix; c
 homes or shims. The captured fallback PATH/HOME and live directory handles are
 fresh host authority, excluded from descriptor bytes and digests. The relative
 prefix and discovery ceiling are reconstructive policy: descriptor digest
-format 4 and host backend semantic revision 15 bind them, and exact reopen rejects
+format 5 and host backend semantic revision 15 bind them, and exact reopen rejects
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
 the ceiling boolean, including when false. The runtime format epoch isolates
 these bindings from earlier state. CarryBinding does not embed an environment
@@ -5896,12 +5926,28 @@ thread of its own or a blocking worker. The orchestration VCS port is async:
 every answer is awaited outside the tree's lock and its writers (chapter 03
 §16).
 The run-stable workspace facts that plan compilation and the runtime
-environment component bind (`plakous-agent/workspace-environment-v1`) name the
-operating system of the execution backend's descriptor
-(`ExecutionBackendDescriptor::operating_system`), not the agent process's.
-`ExecutionBackendDescriptor::current_host()` is the descriptor every host
-backend allocated in the process presents; it is comparison data, and for the
-host backend these bytes, the plan digests and every descriptor are unchanged.
+environment component bind (`plakous-agent/workspace-environment-v2`) name the
+operating system and the runner of the execution backend's descriptor
+(`ExecutionBackendDescriptor::operating_system`, `runner_id`), not the agent
+process's. The descriptor's kind is `ExecutionBackendKind::Runner` with a
+`RunnerId`, or `DeterministicFake` with none; a descriptor whose kind and
+runner disagree does not decode. The in-process host backend is the local
+runner: `ExecutionBackendDescriptor::local_runner()` is the descriptor every
+host backend allocated in the process presents, with `RunnerId::local()`
+(`local`), whether its calls are made in process or, later, through a local
+runner daemon, so neither mode changes a session's binding. `local` is
+host-relative and reserved: it always names the host's own runner, so a local
+runner daemon's announced identity maps to `local`, and pairing a remote runner
+refuses `local` as its identity. Other runners are named by the identity their
+own home records. `RunnerId::new` accepts `local` today, since no daemon or
+pairing exists yet to enforce either rule. The runner is inside the environment
+digest (descriptor digest format 5) and the descriptor wire encoding carries
+`runner_id`. Decoding a `Runner` descriptor checks its containment against this
+process's platform rather than the descriptor's own operating system, so a
+descriptor written for another platform does not decode here; deriving the
+expected containment from the wire's operating system is required before a
+descriptor crosses a process boundary. Joined process sessions require the local
+runner's direct backend.
 
 An explicit joined-process shell profile enrolls both its absolute invocation
 name and its canonical filesystem object, plus its fixed argument prefix.
@@ -9751,6 +9797,32 @@ earlier embedders in these ways:
    a durable job row, and the owning driver instance (`DriverInstanceId`) for a
    live process snapshot; it was the per-construction agent id for both. It is
    display attribution, never authority.
+
+**Runners and operation context** (§2.3, §8.4, §8.5) are on the facade:
+`plakous::tools::RunnerId`, `ExecutionBackendKind::Runner`,
+`ExecutionBackendDescriptor::local_runner` and `runner_id`,
+`ExecutionBackendIdentity::runner_id`, `OperationContext`, `LineOwner`,
+`OperationClass`, `ExecutionEnvironment::with_line_owner` and `line_owner`, and
+`plakous::agent::BindingChange::Runner`; `plakous_tools::operation_context`
+stays a `plakous-tools` helper. They break earlier embedders in these ways:
+
+1. `ExecutionOperationControl` is renamed `OperationContext`, and
+   `plakous_tools::operation_control` is renamed `operation_context`. Its
+   constructor and cancellation and yield accessors are unchanged; it adds
+   `owner`, `class` and `budget`. `RetrievalPort::retrieve` and
+   `ImageGenPort::generate` take an `OperationContext` in place of the
+   `ExecutionOperationControl` they took.
+2. `ExecutionBackendKind::Host` is gone: the in-process host backend reports
+   `ExecutionBackendKind::Runner` on `RunnerId::local()`, and
+   `ExecutionBackendDescriptor::current_host` is renamed `local_runner`.
+3. The descriptor wire encoding gains `runner_id`, the execution-environment
+   digest moves to format 5 and the run-stable workspace facts to
+   `workspace-environment-v2`, so every environment descriptor, plan digest and
+   runtime environment component changes; the runtime format epoch of the cut
+   already separates them from earlier state. The descriptor's `Debug`
+   output gains `runner_id`.
+4. A rebind or fork whose target names another runner is refused
+   (`InvalidInput`, `BindingChange::Runner`).
 
 `plakous::sessions::feed` is the change feed's public surface (§5.11):
 `FeedSeq`, `FeedCursor`, `FeedRecord`, `FeedChange`, `FeedFact` and its typed

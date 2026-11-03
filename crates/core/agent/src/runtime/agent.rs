@@ -324,6 +324,11 @@ impl Agent {
     }
 
     #[cfg(test)]
+    pub(crate) fn line_owner_for_test(&self) -> Option<plakous_tools::LineOwner> {
+        self.inner.line_owner
+    }
+
+    #[cfg(test)]
     pub(super) fn abort_driver_for_test(&self) {
         self.inner.driver_abort.abort();
     }

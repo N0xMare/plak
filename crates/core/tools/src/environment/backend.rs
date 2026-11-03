@@ -46,6 +46,8 @@ use process::{
     validate_process_values,
 };
 use workspace::resolve_existing_no_symlink;
+mod operation;
+pub use operation::{LineOwner, OperationClass, OperationContext};
 mod service;
 use service::spawn_host_service;
 pub use service::{
@@ -54,7 +56,7 @@ pub use service::{
     ServiceSecretValue,
 };
 
-use plakous_model::{CancellationToken, SafeDiagnostic};
+use plakous_model::SafeDiagnostic;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
@@ -294,62 +296,6 @@ impl fmt::Display for ExecutionBackendError {
 
 impl std::error::Error for ExecutionBackendError {}
 
-/// Cooperative control shared by all environment operations.
-#[derive(Clone, Debug)]
-pub struct ExecutionOperationControl {
-    cancellation: CancellationToken,
-    preempt: tokio::sync::watch::Receiver<crate::ToolPreempt>,
-}
-
-impl ExecutionOperationControl {
-    /// Creates controls for one operation.
-    #[must_use]
-    pub fn new(cancellation: CancellationToken) -> Self {
-        Self {
-            cancellation,
-            preempt: tokio::sync::watch::channel(crate::ToolPreempt::None).1,
-        }
-    }
-
-    /// Binds a yield-only control signal for process promotion.
-    #[must_use]
-    pub fn with_preempt(
-        mut self,
-        preempt: tokio::sync::watch::Receiver<crate::ToolPreempt>,
-    ) -> Self {
-        self.preempt = preempt;
-        self
-    }
-
-    /// Returns the yield request independently from the kill token.
-    #[must_use]
-    pub const fn preempt(&self) -> &tokio::sync::watch::Receiver<crate::ToolPreempt> {
-        &self.preempt
-    }
-
-    /// Returns cooperative cancellation.
-    #[must_use]
-    pub const fn cancellation(&self) -> &CancellationToken {
-        &self.cancellation
-    }
-
-    /// Refuses once the operation's cancellation token is observed.
-    ///
-    /// # Errors
-    ///
-    /// Returns a cancelled backend error when the token has fired.
-    pub fn check_cancelled(&self) -> Result<(), ExecutionBackendError> {
-        if self.cancellation.is_cancelled() {
-            Err(backend_error(
-                ExecutionBackendErrorKind::Cancelled,
-                "execution environment operation was cancelled",
-            ))
-        } else {
-            Ok(())
-        }
-    }
-}
-
 /// Redacted environment value resolved for one exact delegation binding.
 #[derive(Clone)]
 pub struct EnvironmentVariableValue(Arc<str>);
@@ -464,7 +410,7 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
         &self,
         workspace: ExecutionWorkspace,
         request: WorkspaceReadSliceRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceReadSlice>;
 
     /// Runs one bounded deterministic repository query without following symlinks.
@@ -472,7 +418,7 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
         &self,
         workspace: ExecutionWorkspace,
         query: RepositoryQuery,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<RepositoryQueryResult>;
 
     /// Preflights and publishes one bounded workspace mutation.
@@ -480,7 +426,7 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
         &self,
         workspace: ExecutionWorkspace,
         transaction: WorkspaceMutationTransaction,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceMutationTransactionResult>;
 
     /// Executes or simulates one literal process request.
@@ -489,7 +435,7 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
         workspace: ExecutionWorkspace,
         request: PreparedLiteralProcess,
         limits: ExecutionEnvironmentLimits,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<LiteralProcessResult>;
 
     /// Starts one long-lived service process with piped stdio in the
@@ -502,7 +448,7 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
         &self,
         workspace: ExecutionWorkspace,
         request: PreparedServiceProcess,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<ServiceProcess>;
 }
 
@@ -541,7 +487,7 @@ impl HostExecutionBackend {
             }
         }
         Ok(Self {
-            identity: ExecutionBackendIdentity::current_host()?,
+            identity: ExecutionBackendIdentity::local_runner()?,
             process,
             environment,
             mutation_lock: Arc::new(Mutex::new(())),
@@ -568,7 +514,7 @@ impl ExecutionBackend for HostExecutionBackend {
         &self,
         workspace: ExecutionWorkspace,
         request: WorkspaceReadSliceRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceReadSlice> {
         let snapshots = Arc::clone(&self.workspace_snapshots);
         run_filesystem_blocking(move || {
@@ -580,7 +526,7 @@ impl ExecutionBackend for HostExecutionBackend {
         &self,
         workspace: ExecutionWorkspace,
         query: RepositoryQuery,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<RepositoryQueryResult> {
         run_filesystem_blocking(move || query_repository_sync(&workspace, &query, &control))
     }
@@ -589,7 +535,7 @@ impl ExecutionBackend for HostExecutionBackend {
         &self,
         workspace: ExecutionWorkspace,
         transaction: WorkspaceMutationTransaction,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceMutationTransactionResult> {
         let mutation_lock = Arc::clone(&self.mutation_lock);
         run_filesystem_blocking(move || {
@@ -603,7 +549,7 @@ impl ExecutionBackend for HostExecutionBackend {
         workspace: ExecutionWorkspace,
         request: PreparedLiteralProcess,
         limits: ExecutionEnvironmentLimits,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<LiteralProcessResult> {
         execute_host_literal_process(
             workspace,
@@ -618,7 +564,7 @@ impl ExecutionBackend for HostExecutionBackend {
         &self,
         workspace: ExecutionWorkspace,
         request: PreparedServiceProcess,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<ServiceProcess> {
         spawn_host_service(workspace, request, control, Arc::clone(&self.process))
     }
@@ -655,7 +601,7 @@ impl ExecutionEnvironment {
     pub fn read_workspace(
         &self,
         request: WorkspaceReadSliceRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceReadSlice> {
         if let Err(error) = self.verify_operation_backend() {
             return ready_error(error);
@@ -677,7 +623,7 @@ impl ExecutionEnvironment {
     pub fn query_repository(
         &self,
         query: RepositoryQuery,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<RepositoryQueryResult> {
         if let Err(error) = self.verify_operation_backend() {
             return ready_error(error);
@@ -710,7 +656,7 @@ impl ExecutionEnvironment {
     pub fn mutate_workspace(
         &self,
         transaction: WorkspaceMutationTransaction,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceMutationTransactionResult> {
         if let Err(error) = self.verify_operation_backend() {
             return ready_error(error);
@@ -754,7 +700,7 @@ impl ExecutionEnvironment {
     pub fn execute_literal_process(
         &self,
         request: LiteralProcessRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<LiteralProcessResult> {
         if let Err(error) = self.verify_operation_backend() {
             return ready_error(error);
@@ -793,7 +739,7 @@ impl ExecutionEnvironment {
     pub fn spawn_service(
         &self,
         request: ServiceProcessRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<ServiceProcess> {
         if let Err(error) = self.verify_operation_backend() {
             return ready_error(error);

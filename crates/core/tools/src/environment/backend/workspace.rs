@@ -22,15 +22,14 @@ use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 
 use super::{
-    ExecutionBackendError, ExecutionBackendErrorKind, ExecutionBackendFuture,
-    ExecutionOperationControl, ExecutionWorkspace, MAX_WORKSPACE_FILE_BYTES, RepositoryMatchCase,
-    RepositoryQuery, RepositoryQueryResult, RepositoryQueryStopReason,
-    WORKSPACE_CONTENT_IDENTITY_REVISION, WorkspaceContentIdentity, WorkspaceExpectedFileState,
-    WorkspaceMutationDisposition, WorkspaceMutationResultItem, WorkspaceMutationTransaction,
-    WorkspaceMutationTransactionResult, WorkspaceReadCursor, WorkspaceReadSlice,
-    WorkspaceReadSliceRequest, WorkspaceReplacement, backend_error, conflict_error, io_error, lock,
-    recovery_required_error, resource_error, validate_relative_path, workspace_error,
-    workspace_path_not_found,
+    ExecutionBackendError, ExecutionBackendErrorKind, ExecutionBackendFuture, ExecutionWorkspace,
+    MAX_WORKSPACE_FILE_BYTES, OperationContext, RepositoryMatchCase, RepositoryQuery,
+    RepositoryQueryResult, RepositoryQueryStopReason, WORKSPACE_CONTENT_IDENTITY_REVISION,
+    WorkspaceContentIdentity, WorkspaceExpectedFileState, WorkspaceMutationDisposition,
+    WorkspaceMutationResultItem, WorkspaceMutationTransaction, WorkspaceMutationTransactionResult,
+    WorkspaceReadCursor, WorkspaceReadSlice, WorkspaceReadSliceRequest, WorkspaceReplacement,
+    backend_error, conflict_error, io_error, lock, recovery_required_error, resource_error,
+    validate_relative_path, workspace_error, workspace_path_not_found,
 };
 mod admitted;
 mod aliases;
@@ -478,7 +477,7 @@ impl WorkspaceSnapshotCache {
 pub(super) fn read_workspace_sync(
     workspace: &ExecutionWorkspace,
     request: &WorkspaceReadSliceRequest,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
     snapshots: &Mutex<WorkspaceSnapshotCache>,
 ) -> Result<WorkspaceReadSlice, ExecutionBackendError> {
     control.check_cancelled()?;
@@ -586,7 +585,7 @@ pub(super) fn read_workspace_sync(
 pub(super) fn query_repository_sync(
     workspace: &ExecutionWorkspace,
     query: &RepositoryQuery,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
 ) -> Result<RepositoryQueryResult, ExecutionBackendError> {
     control.check_cancelled()?;
     let limits = query.limits();
@@ -1019,7 +1018,7 @@ struct PreflightMutation {
 pub(super) fn mutate_workspace_sync(
     workspace: &ExecutionWorkspace,
     transaction: &WorkspaceMutationTransaction,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
 ) -> Result<WorkspaceMutationTransactionResult, ExecutionBackendError> {
     control.check_cancelled()?;
     let mut preflight = Vec::with_capacity(transaction.mutations().len());
@@ -1157,7 +1156,7 @@ fn mutation_disposition(
 fn verify_expected_file_state(
     file: Option<&mut fs::File>,
     expected: WorkspaceExpectedFileState,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
 ) -> Result<(), ExecutionBackendError> {
     match (file, expected) {
         (None, WorkspaceExpectedFileState::Missing | WorkspaceExpectedFileState::Any)
@@ -1207,12 +1206,12 @@ fn verify_expected_file_state(
 
 struct CancellationReader<'a> {
     inner: &'a mut fs::File,
-    control: &'a ExecutionOperationControl,
+    control: &'a OperationContext,
     cancelled: bool,
 }
 
 impl<'a> CancellationReader<'a> {
-    fn new(inner: &'a mut fs::File, control: &'a ExecutionOperationControl) -> Self {
+    fn new(inner: &'a mut fs::File, control: &'a OperationContext) -> Self {
         Self {
             inner,
             control,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::super::workspace_types::compile_query_regex;
 use super::super::{RepositoryMatchCase, RepositoryQueryLimits, RepositoryQueryMatch};
 use super::{
-    ExecutionBackendError, ExecutionOperationControl, PathGlob, RepositoryLiteralMatcher,
+    ExecutionBackendError, OperationContext, PathGlob, RepositoryLiteralMatcher,
     RepositoryQueryResult, RepositoryQueryStopReason, WorkspaceContentIdentity,
     repository_row_bytes, utf8_prefix_len,
 };
@@ -51,7 +51,7 @@ pub enum AdmittedTextSearch<'a> {
 ///
 /// Returns a cancellation, or an invalid pattern or glob.
 pub fn search_admitted_text<'a>(
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
     query: AdmittedTextQuery<'a>,
 ) -> Result<AdmittedTextSearch<'a>, ExecutionBackendError> {
     let AdmittedTextQuery {
@@ -165,7 +165,7 @@ impl AdmittedTextScan<'_> {
     /// Returns a cancellation.
     pub fn push(
         &mut self,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
         slice: &[u8],
     ) -> Result<bool, ExecutionBackendError> {
         control.check_cancelled()?;
@@ -212,7 +212,7 @@ impl AdmittedTextScan<'_> {
     /// Returns a cancellation.
     pub fn finish(
         mut self,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<RepositoryQueryResult, ExecutionBackendError> {
         if !self.stopped() {
             let line = std::mem::take(&mut self.partial);
@@ -230,7 +230,7 @@ impl AdmittedTextScan<'_> {
 
     fn scan_line(
         &mut self,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
         line: &[u8],
     ) -> Result<(), ExecutionBackendError> {
         let replaced;

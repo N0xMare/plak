@@ -5,7 +5,7 @@ use plakous_tools::{
     ExecutionBackendError, ExecutionBackendErrorKind, ToolContext, ToolOutcome, ToolRuntimeError,
     ToolRuntimeErrorKind, WorkspaceExpectedFileState, WorkspaceMutationDisposition,
     WorkspaceMutationTransaction, WorkspaceMutationTransactionResult, WorkspaceReadSliceRequest,
-    backend_runtime_error, operation_control,
+    backend_runtime_error, operation_context,
 };
 
 use crate::text::{
@@ -37,7 +37,7 @@ pub(super) async fn blind_write_expected(
         .environment()
         .read_workspace(
             WorkspaceReadSliceRequest::start(path, 8_192).map_err(backend_runtime_error)?,
-            operation_control(context),
+            operation_context(context),
         )
         .await;
     let read = match read {

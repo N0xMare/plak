@@ -14,7 +14,7 @@ use plakous_tools::{
     JobOutputSlice, MAX_STANDARD_TEXT_BYTES, RepositoryMatchCase, RepositoryQueryLimits,
     RepositoryQueryMatch, RepositoryQueryResult, ToolContext, ToolRuntimeError,
     ToolRuntimeErrorKind, backend_runtime_error, job_output_file_lost, job_output_runtime_error,
-    operation_control, search_admitted_text,
+    operation_context, search_admitted_text,
 };
 
 /// Searches `path` when it is a job-output spelling.
@@ -41,7 +41,7 @@ pub(crate) async fn search_issued(
         return Ok(None);
     };
     let mut slice = first.await.map_err(job_output_runtime_error)?;
-    let control = operation_control(context);
+    let control = operation_context(context);
     let query = AdmittedTextQuery {
         path,
         pattern,

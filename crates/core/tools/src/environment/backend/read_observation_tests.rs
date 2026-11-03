@@ -1,6 +1,6 @@
 use super::*;
 use crate::ExecutionEnvironmentScope;
-use plakous_model::RunId;
+use plakous_model::{CancellationToken, RunId};
 use std::str::FromStr;
 
 struct ReadingDuringMutation {
@@ -26,7 +26,7 @@ impl ExecutionBackend for ReadingDuringMutation {
         &self,
         workspace: ExecutionWorkspace,
         request: WorkspaceReadSliceRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceReadSlice> {
         self.inner.read_workspace(workspace, request, control)
     }
@@ -35,7 +35,7 @@ impl ExecutionBackend for ReadingDuringMutation {
         &self,
         workspace: ExecutionWorkspace,
         query: RepositoryQuery,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<RepositoryQueryResult> {
         self.inner.query_repository(workspace, query, control)
     }
@@ -44,7 +44,7 @@ impl ExecutionBackend for ReadingDuringMutation {
         &self,
         workspace: ExecutionWorkspace,
         transaction: WorkspaceMutationTransaction,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<WorkspaceMutationTransactionResult> {
         let environment = self
             .environment
@@ -72,7 +72,7 @@ impl ExecutionBackend for ReadingDuringMutation {
         workspace: ExecutionWorkspace,
         request: PreparedLiteralProcess,
         limits: ExecutionEnvironmentLimits,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<LiteralProcessResult> {
         self.inner
             .execute_literal_process(workspace, request, limits, control)
@@ -82,7 +82,7 @@ impl ExecutionBackend for ReadingDuringMutation {
         &self,
         workspace: ExecutionWorkspace,
         request: PreparedServiceProcess,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<ServiceProcess> {
         self.inner.spawn_service(workspace, request, control)
     }
@@ -125,7 +125,7 @@ async fn successful_mutation_consumes_a_read_recorded_inside_the_backend()
                     )?),
                     replacement,
                 )?])?,
-                ExecutionOperationControl::new(CancellationToken::new()),
+                OperationContext::new(CancellationToken::new()),
             )
             .await?;
         if delete {

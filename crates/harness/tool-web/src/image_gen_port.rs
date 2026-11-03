@@ -1,6 +1,6 @@
 //! Transport-free image generation port and request vocabulary.
 
-use plakous_tools::{ExecutionOperationControl, RetrievalError};
+use plakous_tools::{OperationContext, RetrievalError};
 use std::{future::Future, pin::Pin};
 
 /// Longest accepted prompt, in bytes.
@@ -49,9 +49,5 @@ pub trait ImageGenPort: Send + Sync {
     fn takes_size(&self) -> bool;
 
     /// Runs one generation or edit as one request.
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        control: ExecutionOperationControl,
-    ) -> ImageGenFuture;
+    fn generate(&self, request: ImageGenRequest, control: OperationContext) -> ImageGenFuture;
 }

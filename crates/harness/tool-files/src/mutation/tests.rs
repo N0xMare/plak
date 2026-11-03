@@ -1,8 +1,8 @@
 use super::*;
 use plakous_model::{CancellationToken, RunId};
 use plakous_tools::{
-    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
-    ExecutionOperationControl, WorkspaceContentIdentity, WorkspaceMutation, WorkspaceReplacement,
+    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, OperationContext,
+    WorkspaceContentIdentity, WorkspaceMutation, WorkspaceReplacement,
 };
 use std::str::FromStr;
 
@@ -41,10 +41,7 @@ async fn commit_preflight_conflicts_name_the_guarded_target_and_change_no_files(
             ExecutionEnvironmentConfig::default(),
         )?;
         let result = environment
-            .mutate_workspace(
-                transaction,
-                ExecutionOperationControl::new(CancellationToken::new()),
-            )
+            .mutate_workspace(transaction, OperationContext::new(CancellationToken::new()))
             .await;
         let error = result.err().ok_or("expected conflict")?;
         let guards = [(path.clone(), expected)].into_iter().collect();

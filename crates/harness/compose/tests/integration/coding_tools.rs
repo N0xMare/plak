@@ -1140,7 +1140,7 @@ async fn issued_job_output(
             true,
             plakous_tools::JoinedProcessTerminalMode::Pipes,
         )?,
-        plakous_tools::ExecutionOperationControl::new(CancellationToken::new()),
+        plakous_tools::OperationContext::new(CancellationToken::new()),
     )?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while sessions
@@ -1812,7 +1812,7 @@ async fn read_file_pages_deep_into_a_multi_slice_job_output_file() -> TestResult
             true,
             plakous_tools::JoinedProcessTerminalMode::Pipes,
         )?,
-        plakous_tools::ExecutionOperationControl::new(CancellationToken::new()),
+        plakous_tools::OperationContext::new(CancellationToken::new()),
     )?;
     plakous_tools::internal::promote(&sessions, id)?;
     let path = sessions

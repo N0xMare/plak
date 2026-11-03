@@ -9,20 +9,19 @@ use std::os::unix::process::CommandExt;
 use super::{
     Arc, AsRawFd, AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Command, CommandBuilder, Condvar,
     Duration, EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackendError,
-    ExecutionBackendErrorKind, ExecutionEnvironmentLimits, ExecutionOperationControl,
-    ExecutionWorkspace, FOREGROUND, HostProcessContext, HostProcessOwner, Instant,
-    JOINED_PROCESS_PTY_INITIAL_COLUMNS, JOINED_PROCESS_PTY_INITIAL_ROWS, JoinedProcessCommand,
-    JoinedProcessOutputCursor, JoinedProcessOutputStream, JoinedProcessStartRequest,
-    JoinedProcessStatus, JoinedProcessTerminalMode, JoinedSession, JoinedSessionInput,
-    JoinedSessionOutput, JoinedSessionShared, MAX_EXECUTION_VALUE_BYTES,
-    MAX_LITERAL_PROCESS_ARGUMENTS, MasterPty, Mutex, Ordering, Path, PendingJobOutput, PtySize,
-    RawFd, Receiver, Stdio, SyncSender, TrySendError, Write, backend_error,
-    cleanup_pty_setup_error, cleanup_setup_error, cleanup_unresolved_error, conflict_error,
-    displayed_command, fs, host_process_home, host_process_path, invalid_request, io_error,
-    join_thread_until, native_pty_system, resolve_existing_no_symlink, resource_error,
-    restore_path_after_login, set_nonblocking, sleep_until_next_poll, spawn_joined_output_reader,
-    supervise_joined_process, sync_channel, terminate_direct_child, terminate_direct_pty_child,
-    workspace_error,
+    ExecutionBackendErrorKind, ExecutionEnvironmentLimits, ExecutionWorkspace, FOREGROUND,
+    HostProcessContext, HostProcessOwner, Instant, JOINED_PROCESS_PTY_INITIAL_COLUMNS,
+    JOINED_PROCESS_PTY_INITIAL_ROWS, JoinedProcessCommand, JoinedProcessOutputCursor,
+    JoinedProcessOutputStream, JoinedProcessStartRequest, JoinedProcessStatus,
+    JoinedProcessTerminalMode, JoinedSession, JoinedSessionInput, JoinedSessionOutput,
+    JoinedSessionShared, MAX_EXECUTION_VALUE_BYTES, MAX_LITERAL_PROCESS_ARGUMENTS, MasterPty,
+    Mutex, OperationContext, Ordering, Path, PendingJobOutput, PtySize, RawFd, Receiver, Stdio,
+    SyncSender, TrySendError, Write, backend_error, cleanup_pty_setup_error, cleanup_setup_error,
+    cleanup_unresolved_error, conflict_error, displayed_command, fs, host_process_home,
+    host_process_path, invalid_request, io_error, join_thread_until, native_pty_system,
+    resolve_existing_no_symlink, resource_error, restore_path_after_login, set_nonblocking,
+    sleep_until_next_poll, spawn_joined_output_reader, supervise_joined_process, sync_channel,
+    terminate_direct_child, terminate_direct_pty_child, workspace_error,
 };
 
 pub(in crate::environment::backend) fn validate_absolute_program(
@@ -72,7 +71,7 @@ pub(super) fn start_joined_host_process(
     limits: ExecutionEnvironmentLimits,
     queue_limit: usize,
     request: &JoinedProcessStartRequest,
-    control: ExecutionOperationControl,
+    control: OperationContext,
     pending_spool: Option<PendingJobOutput>,
 ) -> Result<JoinedSession, ExecutionBackendError> {
     let mut resolved = request.clone();

@@ -34,7 +34,7 @@ pub use identity::{
     ExecutionBackendAuthorityRevision, ExecutionBackendDescriptor, ExecutionBackendIdentity,
     ExecutionBackendKind, ExecutionBackendSemanticRevision, ExecutionContainmentDescriptor,
     FilesystemContainment, HostFilesystemObjectIdentity, HostPathFormat, NetworkContainment,
-    ProcessContainment,
+    ProcessContainment, RunnerId,
 };
 use identity::{
     HOST_SNAPSHOT_SOURCE_AUTHORITY, HOST_SNAPSHOT_SOURCE_REVISION, environment_digest,

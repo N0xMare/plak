@@ -4,7 +4,7 @@ use crate::recovery_scope::require_recoverable;
 use crate::runtime::admission::{recorded_admission_authority, sealed_runtime_admission};
 use crate::runtime::build::{
     caller_instructions_match, construction_tool_presentation, harness_plan_component,
-    resolve_construction_harness_plan, runtime_manifest_binding_and_tools,
+    require_same_runner, resolve_construction_harness_plan, runtime_manifest_binding_and_tools,
     stable_prefix_from_effective_configuration, stable_workspace_environment_bytes,
     tool_registry_descriptor,
 };
@@ -867,9 +867,19 @@ async fn compile_branch_target(
     let source_tools = source_manifest.tools();
     let target_registry = tool_registry_descriptor(tool_manifest.registry())?;
     let source_registry = tool_registry_descriptor(source_tools.registry())?;
-    let target_workspace = stable_workspace_environment_bytes(
-        &request.builder.workspace,
-        tools.environment().descriptor().backend(),
+    let target_backend = tools.environment().descriptor().backend();
+    #[cfg(test)]
+    let target_backend = request
+        .builder
+        .target_backend
+        .as_ref()
+        .unwrap_or(target_backend);
+    let target_workspace =
+        stable_workspace_environment_bytes(&request.builder.workspace, target_backend)?;
+    require_same_runner(
+        transition,
+        source_tools.environment().bytes(),
+        target_backend,
     )?;
     let exact_tool_continuity = target_registry
         .interface_identity()
@@ -1296,6 +1306,57 @@ mod jobs_carry_tests {
                 Some(serde_json::json!({"exact": [1, 2, 3]}))
             );
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod runner_tests {
+    use super::*;
+
+    /// The runner check guards the branch target's compilation itself: a
+    /// target on another runner is refused with the typed runner change,
+    /// and the same target on the source's runner compiles unchanged.
+    #[tokio::test]
+    async fn a_branch_target_on_another_runner_is_refused_as_a_runner_change()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (_directory, source, [foreign_target, local_target]) =
+            crate::runtime::durable::tests::jobs_carry_fixture::source_and_target_builders()
+                .await?;
+        let mut wire =
+            serde_json::to_value(plakous_tools::ExecutionBackendDescriptor::local_runner())?;
+        wire["runner_id"] = "build-box".into();
+        let foreign: plakous_tools::ExecutionBackendDescriptor = serde_json::from_value(wire)?;
+        let request = |builder: AgentBuilder| DurableRebindRequest {
+            target: own_target_selectors(&builder),
+            builder,
+            new_line: false,
+        };
+        let run_id = RunId::try_from(uuid::Uuid::from_u128(0x5eed))?;
+        let refused = Box::pin(compile_branch_target(
+            &source,
+            request(foreign_target.with_target_backend(foreign)),
+            run_id,
+            "rebind",
+        ))
+        .await
+        .err()
+        .ok_or("a target on another runner compiled")?;
+        assert_eq!(
+            refused.binding_change(),
+            Some(&crate::BindingChange::Runner {
+                recorded: "local".to_owned(),
+                current: "build-box".to_owned(),
+            })
+        );
+        let compiled = Box::pin(compile_branch_target(
+            &source,
+            request(local_target),
+            run_id,
+            "rebind",
+        ))
+        .await?;
+        assert!(compiled.unchanged);
         Ok(())
     }
 }

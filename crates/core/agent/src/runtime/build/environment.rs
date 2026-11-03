@@ -11,6 +11,9 @@ mod tests;
 
 const JOB_CONFIG_ENVIRONMENT_TAG: &[u8] = b"\0plakous-agent/job-limits-v1\0";
 
+// v2: the runner follows the operating system.
+const WORKSPACE_ENVIRONMENT_TAG: &[u8] = b"plakous-agent/workspace-environment-v2\0";
+
 pub(super) fn stable_workspace_environment_digest(
     workspace: &WorkspacePolicy,
     backend: &ExecutionBackendDescriptor,
@@ -64,7 +67,7 @@ pub fn compile_explicit_runtime_profile(
     // builder's backend is the host backend (spec 01 §12).
     let environment_digest = stable_workspace_environment_digest(
         workspace,
-        &ExecutionBackendDescriptor::current_host(),
+        &ExecutionBackendDescriptor::local_runner(),
     )?;
     crate::compile_explicit_profile(
         spec,
@@ -161,15 +164,16 @@ pub(crate) fn stored_composition_artifact(
             "stored composition environment is invalid",
         )
     };
-    let prefix = b"plakous-agent/workspace-environment-v1\0";
-    if take(&mut bytes, prefix.len()) != Some(prefix.as_slice()) {
+    if take(&mut bytes, WORKSPACE_ENVIRONMENT_TAG.len()) != Some(WORKSPACE_ENVIRONMENT_TAG) {
         return Err(invalid());
     }
-    let os_end = bytes
-        .iter()
-        .position(|byte| *byte == 0)
-        .ok_or_else(invalid)?;
-    take(&mut bytes, os_end + 1).ok_or_else(invalid)?;
+    for _ in ["operating system", "runner"] {
+        let end = bytes
+            .iter()
+            .position(|byte| *byte == 0)
+            .ok_or_else(invalid)?;
+        take(&mut bytes, end + 1).ok_or_else(invalid)?;
+    }
     let policy = b"host-path-policy-only\0";
     if take(&mut bytes, policy.len()) != Some(policy.as_slice()) {
         return Err(invalid());
@@ -251,8 +255,45 @@ pub(in crate::runtime) fn live_job_config(
     })
 }
 
-/// The run-stable workspace facts: the workspace OS the backend descriptor
-/// names, then the canonical root and cwd.
+/// Refuses a branch transition onto another runner than the one the source
+/// recorded: every rebind of a line keeps its runner (spec 01 §5.7). The
+/// refusal names both runners as a [`BindingChange::Runner`].
+///
+/// [`BindingChange::Runner`]: crate::BindingChange::Runner
+pub(in crate::runtime) fn require_same_runner(
+    transition: &str,
+    recorded_environment: &[u8],
+    target: &ExecutionBackendDescriptor,
+) -> Result<(), AgentError> {
+    let current = target
+        .runner_id()
+        .map_or("", plakous_tools::RunnerId::as_str);
+    match stored_runner(recorded_environment) {
+        Some(recorded) if recorded != current => Err(AgentError::new(
+            AgentErrorKind::InvalidInput,
+            format!("{transition} changed the runner; every rebind of a line keeps its runner"),
+        )
+        .with_binding_change(crate::BindingChange::Runner {
+            recorded: recorded.to_owned(),
+            current: current.to_owned(),
+        })),
+        _ => Ok(()),
+    }
+}
+
+/// The runner recorded in run-stable workspace facts, or `None` when the
+/// bytes are not workspace facts this build writes. An empty runner is the
+/// deterministic fake's.
+fn stored_runner(bytes: &[u8]) -> Option<&str> {
+    let rest = bytes.strip_prefix(WORKSPACE_ENVIRONMENT_TAG)?;
+    let os_end = rest.iter().position(|byte| *byte == 0)?;
+    let rest = &rest[os_end + 1..];
+    let runner_end = rest.iter().position(|byte| *byte == 0)?;
+    std::str::from_utf8(&rest[..runner_end]).ok()
+}
+
+/// The run-stable workspace facts: the workspace OS and the runner the
+/// backend descriptor names, then the canonical root and cwd.
 pub(in crate::runtime) fn stable_workspace_environment_bytes(
     workspace: &WorkspacePolicy,
     backend: &ExecutionBackendDescriptor,
@@ -276,8 +317,12 @@ pub(in crate::runtime) fn stable_workspace_environment_bytes(
             .saturating_add(root.len())
             .saturating_add(cwd.len()),
     );
-    bytes.extend_from_slice(b"plakous-agent/workspace-environment-v1\0");
+    bytes.extend_from_slice(WORKSPACE_ENVIRONMENT_TAG);
     bytes.extend_from_slice(backend.operating_system().as_bytes());
+    bytes.push(0);
+    if let Some(runner) = backend.runner_id() {
+        bytes.extend_from_slice(runner.as_str().as_bytes());
+    }
     bytes.push(0);
     bytes.extend_from_slice(b"host-path-policy-only\0");
     bytes.extend_from_slice(&root_len.to_be_bytes());

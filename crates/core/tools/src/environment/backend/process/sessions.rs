@@ -5,25 +5,25 @@ mod job_output;
 mod jobs;
 mod stop;
 
-use crate::environment::ExecutionBackendKind;
 use crate::environment::backend::job_output::{JobOutputAdmission, JobOutputWriter, JobOutputs};
 use crate::environment::backend::{JOINED_STDIN_CLOSED, JobOutputFile, JobOutputRoot};
+use crate::environment::{ExecutionBackendKind, RunnerId};
 
 use super::{
     Arc, AtomicBool, AtomicU8, AtomicU64, AtomicUsize, BTreeMap, BTreeSet, CancellationToken,
     Condvar, Duration, EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackendError,
     ExecutionBackendErrorKind, ExecutionEnvironment, ExecutionEnvironmentLimits,
-    ExecutionOperationControl, ExecutionWorkspace, HostProcessContext, Instant,
-    JOINED_PROCESS_SERVICE_GENERATION, JoinedProcessCommand, JoinedProcessCursorPollResult,
-    JoinedProcessInputDisposition, JoinedProcessOutputCursor, JoinedProcessOutputRecord,
-    JoinedProcessOutputStream, JoinedProcessPollResult, JoinedProcessSessionId,
-    JoinedProcessStartRequest, JoinedProcessStatus, MAX_JOINED_PROCESS_SESSION_POLL_RECORDS,
-    MAX_JOINED_PROCESS_SESSION_QUEUE, MAX_JOINED_PROCESS_SESSION_WRITE_BYTES,
-    MAX_JOINED_PROCESS_SESSIONS, MAX_LITERAL_PROCESS_STDIN_BYTES, Mutex, NonZeroU64, Ordering,
-    PtyInputSender, Receiver, TryLockError, VecDeque, Weak, backend_error,
-    cleanup_unresolved_error, close_joined_session_input, conflict_error, fmt, invalid_request,
-    io_error, lock, recovery_required_error, resource_error, sleep_until_next_poll,
-    start_joined_host_process, sync_channel, write_joined_session_input,
+    ExecutionWorkspace, HostProcessContext, Instant, JOINED_PROCESS_SERVICE_GENERATION,
+    JoinedProcessCommand, JoinedProcessCursorPollResult, JoinedProcessInputDisposition,
+    JoinedProcessOutputCursor, JoinedProcessOutputRecord, JoinedProcessOutputStream,
+    JoinedProcessPollResult, JoinedProcessSessionId, JoinedProcessStartRequest,
+    JoinedProcessStatus, MAX_JOINED_PROCESS_SESSION_POLL_RECORDS, MAX_JOINED_PROCESS_SESSION_QUEUE,
+    MAX_JOINED_PROCESS_SESSION_WRITE_BYTES, MAX_JOINED_PROCESS_SESSIONS,
+    MAX_LITERAL_PROCESS_STDIN_BYTES, Mutex, NonZeroU64, OperationContext, Ordering, PtyInputSender,
+    Receiver, TryLockError, VecDeque, Weak, backend_error, cleanup_unresolved_error,
+    close_joined_session_input, conflict_error, fmt, invalid_request, io_error, lock,
+    recovery_required_error, resource_error, sleep_until_next_poll, start_joined_host_process,
+    sync_channel, write_joined_session_input,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -215,7 +215,7 @@ const PROMOTED: u8 = 1;
 
 const CANCELLING: u8 = 2;
 
-pub(super) fn cancel_foreground(ownership: &AtomicU8, control: &ExecutionOperationControl) -> bool {
+pub(super) fn cancel_foreground(ownership: &AtomicU8, control: &OperationContext) -> bool {
     if control.cancellation().is_cancelled() {
         let _ =
             ownership.compare_exchange(FOREGROUND, CANCELLING, Ordering::AcqRel, Ordering::Acquire);
@@ -237,7 +237,7 @@ pub(super) struct JoinedSession {
     pub(super) consumer_quiet_polls: Arc<Mutex<crate::internal::ProcessQuietPollState>>,
     pub(super) promoted: Arc<AtomicU8>,
     pub(super) consumed: AtomicBool,
-    pub(super) foreground_control: ExecutionOperationControl,
+    pub(super) foreground_control: OperationContext,
     pub(super) stop_grace_millis: Arc<AtomicU64>,
     pub(super) command: String,
     pub(super) started_at: plakous_model::Timestamp,
@@ -313,7 +313,7 @@ impl JoinedSession {
             consumer_quiet_polls: Arc::default(),
             consumed: AtomicBool::new(false),
             promoted: Arc::new(AtomicU8::new(PROMOTED)),
-            foreground_control: ExecutionOperationControl::new(CancellationToken::new()),
+            foreground_control: OperationContext::new(CancellationToken::new()),
             stop_grace_millis: Arc::new(AtomicU64::new(2000)),
             command: view.command.clone(),
             started_at: view.started_at,
@@ -541,10 +541,15 @@ impl JoinedProcessSessions {
     }
 
     pub(super) fn new(environment: &ExecutionEnvironment) -> Result<Self, ExecutionBackendError> {
-        if environment.backend().kind() != ExecutionBackendKind::Host {
+        if environment.backend().kind() != ExecutionBackendKind::Runner
+            || !environment
+                .backend()
+                .runner_id()
+                .is_some_and(RunnerId::is_local)
+        {
             return Err(backend_error(
                 ExecutionBackendErrorKind::Unsupported,
-                "joined process sessions require the direct host backend",
+                "joined process sessions require the local runner's direct backend",
             ));
         }
         environment.verify_operation_backend()?;

@@ -1587,11 +1587,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         # must serve.
         "tools": {
             "DEFAULT_WEB_SEARCH_MAX_USES",
-            "ExecutionOperationControl",
             "FetchUrlLimits",
             "ImageGenFuture",
             "ImageGenPort",
             "ImageGenRequest",
+            "OperationContext",
             "RetrievalError",
             "RetrievalErrorKind",
             "RetrievalFuture",

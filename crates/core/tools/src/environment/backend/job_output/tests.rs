@@ -1,6 +1,6 @@
 use super::super::{
-    ExecutionOperationControl, JoinedProcessCommand, JoinedProcessSessions,
-    JoinedProcessShellProfile, JoinedProcessStartRequest, JoinedProcessTerminalMode,
+    JoinedProcessCommand, JoinedProcessSessions, JoinedProcessShellProfile,
+    JoinedProcessStartRequest, JoinedProcessTerminalMode, OperationContext,
 };
 use super::*;
 use crate::{
@@ -119,7 +119,7 @@ fn promoted_job(environment: &ExecutionEnvironment) -> TestResult<(u32, String)>
     let sessions = environment.joined_process_sessions()?;
     let id = sessions.start(
         request("printf before; read line; printf after")?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while sessions
@@ -821,7 +821,7 @@ async fn promotion_without_budget_room_succeeds_without_an_output_file() -> Test
     let sessions = environment.joined_process_sessions()?;
     let id = sessions.start(
         request("read line")?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.promote(id)?;
     assert_eq!(
@@ -993,10 +993,7 @@ async fn a_refused_promotion_evicts_nothing() -> TestResult {
     let environment = bound(workspace.path(), &root, SESSION)?;
     let sessions = environment.joined_process_sessions()?;
     let token = CancellationToken::new();
-    let id = sessions.start(
-        request("read line")?,
-        ExecutionOperationControl::new(token.clone()),
-    )?;
+    let id = sessions.start(request("read line")?, OperationContext::new(token.clone()))?;
     token.cancel();
     let refused = sessions.promote(id);
     assert!(refused.is_err(), "a cancelled foreground was promoted");
@@ -1052,7 +1049,7 @@ async fn a_promotion_refused_at_the_row_limit_sweeps_and_evicts_nothing() -> Tes
     sessions.restore_job_terminals(&rows);
     let id = sessions.start(
         request("read line")?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     for _ in 0..2 {
         let refused = sessions
@@ -1089,7 +1086,7 @@ async fn concurrent_reservations_overshoot_the_root_budget_by_at_most_one_bound_
     sized(&other, 1, used, false, Duration::ZERO)?;
     let environment = bound(workspace.path(), &root, SESSION)?;
     let sessions = environment.joined_process_sessions()?;
-    let control = || ExecutionOperationControl::new(CancellationToken::new());
+    let control = || OperationContext::new(CancellationToken::new());
     let first = sessions.start(request("read line")?, control())?;
     let second = sessions.start(request("read line")?, control())?;
     let first_fits = sessions.reserve_job_output(first);
@@ -1142,7 +1139,7 @@ async fn a_promotion_refused_by_a_full_notice_ledger_evicts_nothing() -> TestRes
     sessions.observe_jobs(|_| false, || false);
     let id = sessions.start(
         request("read line")?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     let refused = sessions
         .promote(id)
@@ -1194,7 +1191,7 @@ async fn a_refused_promotion_ends_its_monitor_and_leaves_the_foreground_untouche
         move |_| observer.load(std::sync::atomic::Ordering::SeqCst),
         || true,
     );
-    let control = || ExecutionOperationControl::new(CancellationToken::new());
+    let control = || OperationContext::new(CancellationToken::new());
     // Control: a published running job keeps exactly one waiting monitor.
     let job = sessions.start(request("read line")?, control())?;
     sessions.promote(job)?;

@@ -6,9 +6,9 @@ use super::start::JoinedProcessResources;
 
 use super::{
     Arc, AtomicBool, AtomicU8, AtomicU64, Command, Duration, ExecutionBackendError,
-    ExecutionBackendErrorKind, ExecutionEnvironmentLimits, ExecutionOperationControl, GroupProbe,
-    HostProcessContext, HostProcessOutput, HostProcessStop, HostProcessStream, Instant,
-    JoinedProcessStatus, JoinedSessionShared, LiteralProcessResult, Mutex, Ordering, Path, PathBuf,
+    ExecutionBackendErrorKind, ExecutionEnvironmentLimits, GroupProbe, HostProcessContext,
+    HostProcessOutput, HostProcessStop, HostProcessStream, Instant, JoinedProcessStatus,
+    JoinedSessionShared, LiteralProcessResult, Mutex, OperationContext, Ordering, Path, PathBuf,
     PreparedLiteralProcess, Stdio, backend_error, cancel_foreground, cleanup_setup_error,
     host_process_home, host_process_path, io_error, lock, observe_leftover_group, peek_leader_exit,
     resource_error, set_nonblocking, spawn_output_reader, terminate_direct_child,
@@ -50,7 +50,7 @@ pub(super) fn sleep_until_next_poll(started: Instant, deadline: Instant) {
 pub(super) fn supervise_joined_process(
     resources: &mut JoinedProcessResources,
     limits: ExecutionEnvironmentLimits,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
     promoted: &AtomicU8,
     stop_grace_millis: &AtomicU64,
     stopped: &AtomicBool,
@@ -157,7 +157,7 @@ pub(super) fn supervise_host_process(
     program: &Path,
     request: &PreparedLiteralProcess,
     limits: ExecutionEnvironmentLimits,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
     dropped: &AtomicBool,
 ) -> Result<LiteralProcessResult, ExecutionBackendError> {
     let started = Instant::now();

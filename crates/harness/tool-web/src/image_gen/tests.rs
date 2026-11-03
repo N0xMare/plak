@@ -4,7 +4,7 @@
 )]
 
 use crate::ImageGenFuture;
-use plakous_tools::{ExecutionOperationControl, RetrievalError};
+use plakous_tools::{OperationContext, RetrievalError};
 use std::error::Error;
 use std::str::FromStr as _;
 use std::sync::Mutex;
@@ -62,11 +62,7 @@ impl ImageGenPort for FakePort {
         self.takes_size
     }
 
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        _control: ExecutionOperationControl,
-    ) -> ImageGenFuture {
+    fn generate(&self, request: ImageGenRequest, _control: OperationContext) -> ImageGenFuture {
         if let Ok(mut requests) = self.requests.lock() {
             requests.push(request);
         }

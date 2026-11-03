@@ -1,16 +1,16 @@
 //! The four canonical process operations and their wire requests.
 
 use super::{
-    Arc, BoundProcessSession, CanonicalProcessOperationV2, Deserialize, ExecutionOperationControl,
-    HeadTailPage, JoinedProcessCommand, JoinedProcessInputDisposition, JoinedProcessOutputCursor,
+    Arc, BoundProcessSession, CanonicalProcessOperationV2, Deserialize, HeadTailPage,
+    JoinedProcessCommand, JoinedProcessInputDisposition, JoinedProcessOutputCursor,
     JoinedProcessSessionId, JoinedProcessSessions, JoinedProcessStartRequest,
-    JoinedProcessTerminalMode, ObservationWait, PROCESS_OBSERVATION_BYTES, PathBuf,
-    ProcessExecutionResult, ProcessHintSource, ProcessOperationKind, ProcessProjectionResult,
-    ProcessSessionTools, ProcessTelemetry, Serialize, StartedProcessGuard, ToolOutcome,
-    ToolRuntimeError, ToolRuntimeErrorKind, Value, append_output_file, backend_runtime_error,
-    deserialize_optional_semantic_u64, deserialize_semantic_u64, deserialize_semantic_usize,
-    exited_session_refusal, json, lock_process_cursor, process_status_label, projection_arguments,
-    status_exit_code,
+    JoinedProcessTerminalMode, ObservationWait, OperationContext, PROCESS_OBSERVATION_BYTES,
+    PathBuf, ProcessExecutionResult, ProcessHintSource, ProcessOperationKind,
+    ProcessProjectionResult, ProcessSessionTools, ProcessTelemetry, Serialize, StartedProcessGuard,
+    ToolOutcome, ToolRuntimeError, ToolRuntimeErrorKind, Value, append_output_file,
+    backend_runtime_error, deserialize_optional_semantic_u64, deserialize_semantic_u64,
+    deserialize_semantic_usize, exited_session_refusal, json, lock_process_cursor,
+    process_status_label, projection_arguments, status_exit_code,
 };
 #[cfg(test)]
 use super::{ProcessToolProjectionKind, ProjectedProcessTool};
@@ -340,7 +340,7 @@ pub(crate) async fn await_process_change(
     changes: &mut tokio::sync::watch::Receiver<u64>,
     preempt: &mut tokio::sync::watch::Receiver<plakous_tools::ToolPreempt>,
     deadline: tokio::time::Instant,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
 ) {
     // Some callers deliberately have no preempt sender. A closed watch must
     // not turn a long observation into a ready-future busy loop.
@@ -391,7 +391,7 @@ pub(crate) fn raised_stop_result(canonical: &str) -> Result<String, ToolRuntimeE
 pub(crate) async fn execute_process_await(
     environment: Arc<plakous_tools::ExecutionEnvironment>,
     value: Value,
-    control: ExecutionOperationControl,
+    control: OperationContext,
     operation: ProcessOperationKind,
     hint_source: ProcessHintSource,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
@@ -413,7 +413,7 @@ impl ProcessSessionTools {
         &self,
         environment: &plakous_tools::ExecutionEnvironment,
         raw: &str,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let tool = projection_tool(ProcessToolProjectionKind::CodexUnifiedExec, "exec_command")?;
         tool.schema
@@ -498,7 +498,7 @@ impl ProcessSessionTools {
     pub(crate) async fn write_stdin_with_update(
         environment: &plakous_tools::ExecutionEnvironment,
         raw: &str,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let tool = projection_tool(ProcessToolProjectionKind::CodexUnifiedExec, "write_stdin")?;
         tool.schema
@@ -536,7 +536,7 @@ impl ProcessSessionTools {
         &self,
         environment: &plakous_tools::ExecutionEnvironment,
         request: CanonicalProcessStartRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         request.validate()?;
         let yield_time_ms = request.yield_time_ms.clamp(250, 600_000);
@@ -573,7 +573,7 @@ impl ProcessSessionTools {
         &self,
         environment: &plakous_tools::ExecutionEnvironment,
         request: ProcessExecRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let mut argv = request.argv.into_iter();
         let program = argv.next().ok_or_else(|| {
@@ -618,7 +618,7 @@ impl ProcessSessionTools {
         request: JoinedProcessStartRequest,
         yield_time_ms: u64,
         max_output_bytes: usize,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let sessions = environment
             .joined_process_sessions()
@@ -698,7 +698,7 @@ impl ProcessSessionTools {
         id: JoinedProcessSessionId,
         mut window: u64,
         max_output_bytes: usize,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let handle = u64::from(JoinedProcessSessions::job_number(id));
         loop {
@@ -733,7 +733,7 @@ impl ProcessSessionTools {
     pub(crate) async fn write_canonical(
         environment: &plakous_tools::ExecutionEnvironment,
         request: &CanonicalProcessWriteRequest,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         request.validate()?;
         let session = Self::session(environment, request.session_id)?;
@@ -813,7 +813,7 @@ impl ProcessSessionTools {
     pub(crate) async fn poll_canonical(
         environment: &plakous_tools::ExecutionEnvironment,
         request: &CanonicalProcessPollRequest,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         request.validate()?;
         if let Some(reported) = Self::reported_canonical(environment, request.session_id) {
@@ -920,7 +920,7 @@ impl ProcessSessionTools {
     pub(crate) async fn await_canonical(
         environment: &plakous_tools::ExecutionEnvironment,
         request: &CanonicalProcessAwaitRequest,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         request.validate()?;
         let mut handles = Vec::new();

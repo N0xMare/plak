@@ -12,7 +12,7 @@ use crate::IsolationLevel;
 
 use super::backend::{
     DeterministicExecutionBackend, ExecutionBackend, HostExecutionBackend, HostProcessContext,
-    JoinedProcessServiceCache,
+    JoinedProcessServiceCache, LineOwner,
 };
 use super::{
     Arc, ExecutionBackendDescriptor, ExecutionBackendIdentity, ExecutionEnvironmentError,
@@ -667,6 +667,9 @@ pub struct ExecutionEnvironment {
     pub(super) read_observations: Arc<super::read_observations::ReadObservations>,
     /// Live image-read facts. Absent from the descriptor digest.
     pub(super) visual_read: Option<Arc<crate::internal::VisualReadSession>>,
+    /// The line head this environment's operations run for. Process-local
+    /// and absent from the descriptor digest: a reopen owns under a new fence.
+    pub(super) line_owner: Option<LineOwner>,
 }
 
 impl ExecutionEnvironment {
@@ -835,7 +838,25 @@ impl ExecutionEnvironment {
             host_process: None,
             read_observations: Arc::default(),
             visual_read: None,
+            line_owner: None,
         })
+    }
+
+    /// Names the line head every operation started on this environment runs
+    /// for. Carried into each tool call's
+    /// [`OperationContext`](crate::OperationContext); not yet
+    /// enforced.
+    #[must_use]
+    pub fn with_line_owner(mut self, owner: LineOwner) -> Self {
+        self.line_owner = Some(owner);
+        self
+    }
+
+    /// The line head this environment's operations run for, when the agent
+    /// that built it named one.
+    #[must_use]
+    pub const fn line_owner(&self) -> Option<LineOwner> {
+        self.line_owner
     }
 
     /// Installs live image-read facts. Not part of the descriptor.

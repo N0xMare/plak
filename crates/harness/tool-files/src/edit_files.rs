@@ -8,7 +8,7 @@ use plakous_tools::{
     ToolExecutor, ToolFuture, ToolInvocation, ToolOutcome, ToolRuntimeError, ToolRuntimeErrorKind,
     WorkspaceContentIdentity, WorkspaceExpectedFileState, WorkspaceMutation,
     WorkspaceMutationTransaction, WorkspaceReadSliceRequest, WorkspaceReplacement,
-    backend_runtime_error, decode_arguments, object_schema, operation_control, standard_definition,
+    backend_runtime_error, decode_arguments, object_schema, operation_context, standard_definition,
     workspace_concurrency,
 };
 use serde::Deserialize;
@@ -142,7 +142,7 @@ async fn load(
         .read_workspace(
             WorkspaceReadSliceRequest::start(path.clone(), MAX_STANDARD_TEXT_BYTES)
                 .map_err(backend_runtime_error)?,
-            operation_control(context),
+            operation_context(context),
         )
         .await;
     let state = match read {
@@ -382,7 +382,7 @@ impl ToolExecutor for EditFilesTool {
                 .transpose()?;
             let result = context
                 .environment()
-                .mutate_workspace(transaction, operation_control(&context))
+                .mutate_workspace(transaction, operation_context(&context))
                 .await;
             match result {
                 Ok(result) => edit_outcome(&result, value_inputs),

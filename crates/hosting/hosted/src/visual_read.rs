@@ -657,7 +657,7 @@ mod executor {
                     plakous_tools::JoinedProcessTerminalMode::Pipes,
                 )
                 .unwrap(),
-                plakous_tools::ExecutionOperationControl::new(CancellationToken::new()),
+                plakous_tools::OperationContext::new(CancellationToken::new()),
             )
             .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);

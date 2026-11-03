@@ -1231,9 +1231,9 @@ pub mod openrouter {
 /// mint an admitted invocation or participate in durable effect arbitration.
 ///
 /// ```compile_fail
-/// # use plakous::tools::{ExecutionEnvironment, ExecutionOperationControl, ProcessSessionTools};
+/// # use plakous::tools::{ExecutionEnvironment, OperationContext, ProcessSessionTools};
 /// # let environment: &ExecutionEnvironment = todo!();
-/// # let control: ExecutionOperationControl = todo!();
+/// # let control: OperationContext = todo!();
 /// ProcessSessionTools::posix_sh().unwrap().exec_command(
 ///     environment,
 ///     r#"{"cmd":"true"}"#,
@@ -1251,9 +1251,9 @@ pub mod openrouter {
 /// ```
 ///
 /// ```compile_fail
-/// # use plakous::tools::{ExecutionEnvironment, ExecutionOperationControl, ProcessSessionTools};
+/// # use plakous::tools::{ExecutionEnvironment, OperationContext, ProcessSessionTools};
 /// # let environment: &ExecutionEnvironment = todo!();
-/// # let control: ExecutionOperationControl = todo!();
+/// # let control: OperationContext = todo!();
 /// ProcessSessionTools::posix_sh().unwrap().run_terminal_cmd(
 ///     environment,
 ///     r#"{"command":"true"}"#,
@@ -1334,28 +1334,29 @@ pub mod tools {
         ExecutionBackendKind, ExecutionBackendSemanticRevision, ExecutionContainmentDescriptor,
         ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentDescriptor,
         ExecutionEnvironmentError, ExecutionEnvironmentErrorKind, ExecutionEnvironmentLimits,
-        ExecutionEnvironmentScope, ExecutionOperationControl, ExecutionWorkspace,
-        FilesystemContainment, FrozenToolExposureDescriptor, FrozenToolRegistry,
-        FrozenToolRegistryDescriptor, HostExecutionBackend, HostPathFormat, HostProcessOptions,
-        IsolationLevel, JobConfig, JobHost, JobHostCapacity, JobOutputRoot, JobOwner, JobStatus,
-        JobStopReason, JobView, JoinedProcessCommand, JoinedProcessInputDisposition,
-        JoinedProcessSessionId, JoinedProcessSessions, JoinedProcessShellProfile,
-        JoinedProcessStartRequest, JoinedProcessStatus, JoinedProcessTerminalMode,
-        JoinedSessionsPort, LiteralProcessIntent, LiteralProcessRequest, LiteralProcessResult,
-        LocalJobHost, LocalWorkspaceProbe, MAX_MCP_SERVER_NAME_BYTES, McpServerName, MenuBinding,
-        MenuEntry, MenuOperation, MenuOrdinal, MenuOutput, MenuShape, NamespaceClash,
-        NamespaceClashReason, NamespacePresentation, NetworkContainment, PROCESS_OBSERVATION_BYTES,
-        PROCESS_SESSION_CAPABILITY_NAME, PROCESS_TOOL_PROJECTION_REVISION,
-        PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1, PRODUCT_JAVASCRIPT_RUN_NAME_V1,
-        PRODUCT_JAVASCRIPT_WAIT_NAME_V1, PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1,
-        PYTHON_PTC_RUN_NAME_V1, PYTHON_PTC_WAIT_NAME_V1, PassthroughPack, PlanStateIdentity,
-        PreparedLiteralProcess, PresentationProvider, PresentationRoute, PresentationRouteTuple,
-        PresentationRoutes, ProbeError, ProcessContainment, ProjectionCandidateAdmission,
-        PromptContribution, PromptDigest, PromptPin, ProviderModelProjectionIdentityV2,
-        ReadOnlyToolPolicy, RecordedLiteralProcess, RegisteredToolId, RegisteredToolIdentity,
-        RepositoryMatchCase, RepositoryQuery, RepositoryQueryLimits, RepositoryQueryMatch,
-        RepositoryQueryResult, SafeErrorMessage, SchemaLimits, ToolBindingError, ToolContext,
-        ToolDescriptorError, ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorBindings,
+        ExecutionEnvironmentScope, ExecutionWorkspace, FilesystemContainment,
+        FrozenToolExposureDescriptor, FrozenToolRegistry, FrozenToolRegistryDescriptor,
+        HostExecutionBackend, HostPathFormat, HostProcessOptions, IsolationLevel, JobConfig,
+        JobHost, JobHostCapacity, JobOutputRoot, JobOwner, JobStatus, JobStopReason, JobView,
+        JoinedProcessCommand, JoinedProcessInputDisposition, JoinedProcessSessionId,
+        JoinedProcessSessions, JoinedProcessShellProfile, JoinedProcessStartRequest,
+        JoinedProcessStatus, JoinedProcessTerminalMode, JoinedSessionsPort, LineOwner,
+        LiteralProcessIntent, LiteralProcessRequest, LiteralProcessResult, LocalJobHost,
+        LocalWorkspaceProbe, MAX_MCP_SERVER_NAME_BYTES, McpServerName, MenuBinding, MenuEntry,
+        MenuOperation, MenuOrdinal, MenuOutput, MenuShape, NamespaceClash, NamespaceClashReason,
+        NamespacePresentation, NetworkContainment, OperationClass, OperationContext,
+        PROCESS_OBSERVATION_BYTES, PROCESS_SESSION_CAPABILITY_NAME,
+        PROCESS_TOOL_PROJECTION_REVISION, PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1,
+        PRODUCT_JAVASCRIPT_RUN_NAME_V1, PRODUCT_JAVASCRIPT_WAIT_NAME_V1,
+        PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1, PYTHON_PTC_RUN_NAME_V1, PYTHON_PTC_WAIT_NAME_V1,
+        PassthroughPack, PlanStateIdentity, PreparedLiteralProcess, PresentationProvider,
+        PresentationRoute, PresentationRouteTuple, PresentationRoutes, ProbeError,
+        ProcessContainment, ProjectionCandidateAdmission, PromptContribution, PromptDigest,
+        PromptPin, ProviderModelProjectionIdentityV2, ReadOnlyToolPolicy, RecordedLiteralProcess,
+        RegisteredToolId, RegisteredToolIdentity, RepositoryMatchCase, RepositoryQuery,
+        RepositoryQueryLimits, RepositoryQueryMatch, RepositoryQueryResult, RunnerId,
+        SafeErrorMessage, SchemaLimits, ToolBindingError, ToolContext, ToolDescriptorError,
+        ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorBindings,
         ToolExecutorBindingsBuilder, ToolExecutorId, ToolExposure, ToolExposureBinding,
         ToolExposureMap, ToolFuture, ToolInvocation, ToolInvocationRequest, ToolOutcome,
         ToolOutcomeKind, ToolOutcomeLimits, ToolOwnerClass, ToolPack, ToolPolicy,

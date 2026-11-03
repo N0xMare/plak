@@ -3,9 +3,9 @@
 use std::fmt::Write as _;
 
 use super::{
-    Arc, CanonicalProcessOperationV2, CanonicalProcessTerminateRequest, ExecutionOperationControl,
-    HeadTailPage, JoinedProcessOutputCursor, JoinedProcessSessionId, JoinedProcessSessions,
-    JoinedProcessShellProfile, MAX_DRAIN_READS, Mutex, PROCESS_OBSERVATION_BYTES,
+    Arc, CanonicalProcessOperationV2, CanonicalProcessTerminateRequest, HeadTailPage,
+    JoinedProcessOutputCursor, JoinedProcessSessionId, JoinedProcessSessions,
+    JoinedProcessShellProfile, MAX_DRAIN_READS, Mutex, OperationContext, PROCESS_OBSERVATION_BYTES,
     PROCESS_SESSION_CAPABILITY_NAME, PROCESS_SESSION_CAPABILITY_REVISION,
     PROCESS_SESSION_EXECUTOR_ID, PROCESS_SESSION_POLL_NAME,
     PROCESS_SESSION_POLL_REGISTERED_TOOL_ID, PROCESS_SESSION_REGISTERED_TOOL_ID,
@@ -18,7 +18,7 @@ use super::{
     ToolRuntimeErrorKind, Utf8TextContractV1, append_output_file, await_process_change,
     backend_runtime_error, canonical_process_input_schema, classify_process_outcome,
     deserialize_semantic_u64, drain_process_utf8_bounded, execute_process_await, json,
-    lock_pending_process_utf8, lock_process_cursor, operation_control, process_backend,
+    lock_pending_process_utf8, lock_process_cursor, operation_context, process_backend,
     process_observation_labels, process_session_active, process_session_joined,
     process_status_label, projection_arguments, raised_stop_result, status_exit_code,
     validate_canonical_poll_shape,
@@ -314,7 +314,7 @@ impl ToolExecutor for ProcessSessionTools {
             }
             context.check_cancelled()?;
             let environment = context.environment().clone();
-            let control = operation_control(&context);
+            let control = operation_context(&context);
             let promotion_hint = (canonical == CanonicalProcessOperationV2::Start).then(|| {
                 deserialize_semantic_u64(value["yield_time_ms"].clone())
                     .unwrap_or(30_000)
@@ -527,7 +527,7 @@ impl ProcessSessionTools {
         execute_process_await(
             context.environment().clone(),
             value,
-            operation_control(context),
+            operation_context(context),
             operation,
             hint_source,
         )
@@ -565,7 +565,7 @@ impl ProcessSessionTools {
         execute_process_await(
             context.environment().clone(),
             value,
-            operation_control(context),
+            operation_context(context),
             operation,
             hint_source,
         )
@@ -836,7 +836,7 @@ impl ProcessSessionTools {
         max_output_tokens: Option<u64>,
         cursor: JoinedProcessOutputCursor,
         may_join: bool,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let max_bytes = max_output_tokens
             .and_then(|tokens| tokens.checked_mul(4))
@@ -873,7 +873,7 @@ impl ProcessSessionTools {
         max_bytes: usize,
         cursor: JoinedProcessOutputCursor,
         wait: ObservationWait,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let session = Self::session(environment, handle)?;
         let starting_cursor = cursor.get();
@@ -1037,7 +1037,7 @@ impl ProcessSessionTools {
         cursor: JoinedProcessOutputCursor,
         may_join: bool,
         wait: ObservationWait,
-        control: &ExecutionOperationControl,
+        control: &OperationContext,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let session = Self::session(environment, handle)?;
         let _observer = ProcessObservationGuard::enter(&session, false);

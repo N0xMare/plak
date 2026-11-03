@@ -1,8 +1,7 @@
 use super::*;
 use plakous_model::{CancellationToken, RunId};
 use plakous_tools::{
-    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
-    ExecutionOperationControl,
+    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, OperationContext,
 };
 use std::str::FromStr;
 
@@ -40,10 +39,7 @@ async fn sdk_dot_path_commit_races_keep_the_exact_guard_refusal()
             ExecutionEnvironmentConfig::default(),
         )?;
         let error = environment
-            .mutate_workspace(
-                transaction,
-                ExecutionOperationControl::new(CancellationToken::new()),
-            )
+            .mutate_workspace(transaction, OperationContext::new(CancellationToken::new()))
             .await
             .err()
             .ok_or("expected commit conflict")?;

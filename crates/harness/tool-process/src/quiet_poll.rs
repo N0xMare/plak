@@ -22,8 +22,8 @@ fn environment(root: &Path) -> TestResult<ExecutionEnvironment> {
     )?)
 }
 
-fn control() -> ExecutionOperationControl {
-    ExecutionOperationControl::new(CancellationToken::new())
+fn control() -> OperationContext {
+    OperationContext::new(CancellationToken::new())
 }
 
 async fn start(environment: &ExecutionEnvironment, notices: bool) -> TestResult<u64> {
@@ -56,7 +56,7 @@ async fn poll(
     environment: &ExecutionEnvironment,
     handle: u64,
     hint: u64,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
 ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
     ProcessSessionTools::write_canonical(
         environment,

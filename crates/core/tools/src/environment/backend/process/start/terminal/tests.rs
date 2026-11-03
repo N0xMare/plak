@@ -2,7 +2,7 @@ use std::io::Read;
 
 use super::*;
 use crate::environment::backend::process::{JoinedSessionOutput, process_group_exists};
-use crate::{ExecutionOperationControl, JoinedProcessCommand};
+use crate::{JoinedProcessCommand, OperationContext};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -224,7 +224,7 @@ fn pty_reader_drains_after_leader_exit_before_io_stop() -> TestResult {
     super::super::super::supervise_joined_process(
         &mut resources,
         limits,
-        &ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+        &OperationContext::new(plakous_model::CancellationToken::new()),
         &super::super::AtomicU8::new(super::super::FOREGROUND),
         &super::super::AtomicU64::new(200),
         &AtomicBool::new(false),

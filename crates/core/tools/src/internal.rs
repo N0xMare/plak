@@ -223,7 +223,7 @@ pub fn process_session_joined(
 pub fn start_process_with_output_limit(
     sessions: &crate::JoinedProcessSessions,
     request: crate::JoinedProcessStartRequest,
-    control: crate::ExecutionOperationControl,
+    control: crate::OperationContext,
     max_output_bytes: usize,
 ) -> Result<crate::JoinedProcessSessionId, crate::ExecutionBackendError> {
     sessions.start_with_output_limit(request, control, max_output_bytes)

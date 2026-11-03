@@ -808,9 +808,7 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                         plakous::tools::JoinedProcessTerminalMode::Pipes,
                     )
                     .unwrap(),
-                    plakous::tools::ExecutionOperationControl::new(
-                        plakous::model::CancellationToken::new(),
-                    ),
+                    plakous::tools::OperationContext::new(plakous::model::CancellationToken::new()),
                 )
                 .unwrap();
             plakous_tools::internal::promote(&service, job).unwrap();

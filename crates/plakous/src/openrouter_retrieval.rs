@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use plakous_openrouter::OpenRouterRetrieval;
 use plakous_tools::{
-    ExecutionOperationControl, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
+    OperationContext, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
     RetrievalPort, RetrievalRequest,
 };
 
@@ -27,11 +27,7 @@ impl RetrievalPort for OpenRouterRetrievalPort {
         &KINDS
     }
 
-    fn retrieve(
-        &self,
-        request: RetrievalRequest,
-        control: ExecutionOperationControl,
-    ) -> RetrievalFuture {
+    fn retrieve(&self, request: RetrievalRequest, control: OperationContext) -> RetrievalFuture {
         let retrieval = Arc::clone(&self.0);
         Box::pin(async move {
             let RetrievalRequest::WebSearch {

@@ -55,6 +55,14 @@ pub enum BindingChange {
     ToolRegistry,
     /// The stable execution-environment facts differ.
     ExecutionEnvironment,
+    /// The runner the session's tools run on differs. Every rebind of a line
+    /// keeps its runner.
+    Runner {
+        /// The recorded runner.
+        recorded: String,
+        /// The runner this build derives.
+        current: String,
+    },
 }
 
 fn pair(
@@ -88,6 +96,7 @@ impl fmt::Display for BindingChange {
             Self::ToolPresentation => formatter.write_str("tool presentation"),
             Self::ToolRegistry => formatter.write_str("tool registry"),
             Self::ExecutionEnvironment => formatter.write_str("execution environment"),
+            Self::Runner { recorded, current } => pair(formatter, "runner", recorded, current),
         }
     }
 }

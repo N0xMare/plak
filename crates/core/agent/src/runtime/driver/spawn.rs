@@ -199,6 +199,8 @@ impl PreparedAgent {
             .then(|| super::observation::request_footprint(&self.stable_request_prefix));
         #[cfg(test)]
         let measurement_state = (access_salt.is_some(), request_footprint.is_some());
+        #[cfg(test)]
+        let line_owner = self.tools.environment().line_owner();
         let driver = Driver {
             credential_wait: Arc::clone(&credential_wait),
             job_sessions: self.job_sessions,
@@ -326,6 +328,8 @@ impl PreparedAgent {
                 driver_abort,
                 #[cfg(test)]
                 measurement_state,
+                #[cfg(test)]
+                line_owner,
             }),
         }
     }

@@ -1,6 +1,6 @@
 //! The helpers every coding pack writes with.
 //!
-//! Argument decoding, the workspace generation stamp, the cancellation bridge,
+//! Argument decoding, the workspace generation stamp, the operation context,
 //! and the two error conversions are the same in all four packs, and none of
 //! them is a tool. They live in the core so the packs above it share one
 //! spelling of each, and so a fifth pack gets them for free.
@@ -9,8 +9,8 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Value;
 
 use crate::{
-    ExecutionBackendError, ExecutionBackendErrorKind, ExecutionOperationControl, ToolContext,
-    ToolInvocation, ToolRuntimeError, ToolRuntimeErrorKind,
+    ExecutionBackendError, ExecutionBackendErrorKind, OperationClass, OperationContext,
+    ToolContext, ToolInvocation, ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
 /// The `workspace_generation=` prefix a stamped workspace puts on a result.
@@ -49,11 +49,24 @@ pub fn decode_arguments<T: for<'de> Deserialize<'de>>(
     })
 }
 
-/// The cancellation bridge one invocation hands to a backend operation.
+/// The operation context one invocation hands to a backend operation: the
+/// line head its environment runs for, the call and attempt that key it, the
+/// call's deadline, and its cancellation and yield signals.
 #[must_use]
-pub fn operation_control(context: &ToolContext) -> ExecutionOperationControl {
-    ExecutionOperationControl::new(context.cancellation().clone())
+pub fn operation_context(context: &ToolContext) -> OperationContext {
+    let mut operation = OperationContext::new(context.cancellation().clone())
         .with_preempt(context.preempt().clone())
+        .with_class(OperationClass::EffectCall {
+            call_id: context.call_id(),
+            attempt_id: context.attempt_id(),
+        });
+    if let Some(owner) = context.environment().line_owner() {
+        operation = operation.with_owner(owner);
+    }
+    if let Some(deadline) = context.deadline() {
+        operation = operation.with_budget(deadline);
+    }
+    operation
 }
 
 #[allow(

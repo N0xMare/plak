@@ -6,7 +6,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use plakous_tools::{
-    ExecutionOperationControl, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
+    OperationContext, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
     RetrievalPort, RetrievalRequest,
 };
 

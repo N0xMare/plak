@@ -19,8 +19,8 @@ use super::process::{
 use super::workspace::verified_workspace_root;
 use super::{
     EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackendError,
-    ExecutionBackendErrorKind, ExecutionBackendFuture, ExecutionOperationControl,
-    ExecutionWorkspace, MAX_EXECUTION_VALUE_BYTES, MAX_LITERAL_PROCESS_ARGUMENTS, backend_error,
+    ExecutionBackendErrorKind, ExecutionBackendFuture, ExecutionWorkspace,
+    MAX_EXECUTION_VALUE_BYTES, MAX_LITERAL_PROCESS_ARGUMENTS, OperationContext, backend_error,
     cleanup_unresolved_error, invalid_request, io_error, lock,
 };
 
@@ -465,7 +465,7 @@ impl Drop for HostService {
 pub(super) fn spawn_host_service(
     workspace: ExecutionWorkspace,
     request: PreparedServiceProcess,
-    control: ExecutionOperationControl,
+    control: OperationContext,
     process: Arc<HostProcessContext>,
 ) -> ExecutionBackendFuture<ServiceProcess> {
     Box::pin(async move {

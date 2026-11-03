@@ -11,11 +11,11 @@ use rustix::fs::Dir;
 use super::super::workspace_types::compile_query_regex;
 use super::super::{RepositoryQueryLimits, RepositoryQueryMatch, validate_path_bytes};
 use super::{
-    ExecutionBackendError, ExecutionOperationControl, FileObservation, IgnoreChain, PathGlob,
-    QueryFileRead, RepositoryLiteralMatcher, RepositoryQuery, RepositoryQueryEntry,
-    RepositoryQueryResult, RepositoryQueryStopReason, WorkspaceContentIdentity, directory_ignores,
-    is_ignored, open_directory_entry_for_query, query_entry_kind_is_walkable,
-    read_unchanged_query_file, repository_row_bytes, utf8_prefix_len,
+    ExecutionBackendError, FileObservation, IgnoreChain, OperationContext, PathGlob, QueryFileRead,
+    RepositoryLiteralMatcher, RepositoryQuery, RepositoryQueryEntry, RepositoryQueryResult,
+    RepositoryQueryStopReason, WorkspaceContentIdentity, directory_ignores, is_ignored,
+    open_directory_entry_for_query, query_entry_kind_is_walkable, read_unchanged_query_file,
+    repository_row_bytes, utf8_prefix_len,
 };
 
 pub(super) type OpenedRepositoryFile = (PathBuf, u64, FileObservation, fs::File);
@@ -27,7 +27,7 @@ pub(super) struct RepositoryQueryWalk {
 }
 
 pub(super) fn walk_repository_query_directories(
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
     limits: RepositoryQueryLimits,
     mut pending: BTreeMap<PathBuf, (fs::File, IgnoreChain)>,
     mut files: Vec<OpenedRepositoryFile>,
@@ -159,7 +159,7 @@ pub(super) fn retain_repository_query_glob_matches(
 }
 
 pub(super) fn list_repository_query_paths(
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
     query: &RepositoryQuery,
     files: Vec<OpenedRepositoryFile>,
     files_considered: usize,
@@ -227,7 +227,7 @@ pub(super) fn list_repository_query_paths(
 )]
 pub(super) fn scan_repository_query_files(
     query: &RepositoryQuery,
-    control: &ExecutionOperationControl,
+    control: &OperationContext,
     limits: RepositoryQueryLimits,
     files: Vec<OpenedRepositoryFile>,
     files_considered: usize,

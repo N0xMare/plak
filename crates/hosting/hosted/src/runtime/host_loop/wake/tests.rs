@@ -3272,7 +3272,7 @@ impl plakous::tools::ToolExecutor for WakeJobFixture {
             let id = sessions
                 .start(
                     request,
-                    ExecutionOperationControl::new(context.cancellation().clone()),
+                    OperationContext::new(context.cancellation().clone()),
                 )
                 .unwrap();
             plakous_tools::internal::promote(&sessions, id).unwrap();

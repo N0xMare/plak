@@ -29,8 +29,8 @@ fn host(workspace: &Path, config: ExecutionEnvironmentConfig) -> TestResult<Exec
     )?)
 }
 
-fn control() -> ExecutionOperationControl {
-    ExecutionOperationControl::new(CancellationToken::new())
+fn control() -> OperationContext {
+    OperationContext::new(CancellationToken::new())
 }
 
 fn name(value: &str) -> TestResult<EnvironmentVariableName> {
@@ -263,7 +263,7 @@ async fn host_service_startup_cancellation_leaves_no_process() -> TestResult {
     let error = environment
         .spawn_service(
             request("sh", &["-c", script])?,
-            ExecutionOperationControl::new(cancelled),
+            OperationContext::new(cancelled),
         )
         .await
         .err()
@@ -274,7 +274,7 @@ async fn host_service_startup_cancellation_leaves_no_process() -> TestResult {
     let token = CancellationToken::new();
     let startup = environment.spawn_service(
         request("sh", &["-c", script])?,
-        ExecutionOperationControl::new(token.clone()),
+        OperationContext::new(token.clone()),
     );
     token.cancel();
     let error = startup

@@ -24,7 +24,7 @@ use plakous_tools::{
     ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack,
     ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, WorkspaceExpectedFileState,
     WorkspaceMutation, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
-    WorkspaceReplacement, object_schema, operation_control,
+    WorkspaceReplacement, object_schema, operation_context,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -264,7 +264,7 @@ async fn generate(
         size: call.size.clone(),
         edit_from,
     };
-    let bytes = match port.generate(request, operation_control(context)).await {
+    let bytes = match port.generate(request, operation_context(context)).await {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == RetrievalErrorKind::Cancelled => {
             return Err(ToolRuntimeError::new(
@@ -336,7 +336,7 @@ async fn read_one_slice(
     let request = WorkspaceReadSliceRequest::start(path, max).map_err(|error| error.kind())?;
     let slice = context
         .environment()
-        .read_workspace(request, operation_control(context))
+        .read_workspace(request, operation_context(context))
         .await
         .map_err(|error| error.kind())?;
     Ok((slice.bytes().as_ref().to_vec(), slice.next().is_some()))
@@ -378,7 +378,7 @@ async fn write_new(context: &ToolContext, path: &Path, bytes: Vec<u8>) -> Result
         .map_err(|error| error.message().as_str().to_owned())?;
     match context
         .environment()
-        .mutate_workspace(transaction, operation_control(context))
+        .mutate_workspace(transaction, operation_context(context))
         .await
     {
         Ok(_) => Ok(()),

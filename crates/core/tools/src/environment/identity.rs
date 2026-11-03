@@ -16,7 +16,8 @@ use super::{
 };
 
 /// Digest format for reconstruction-complete execution-environment descriptors.
-pub const EXECUTION_ENVIRONMENT_DIGEST_VERSION: u32 = 4;
+// 5: the backend names the runner it executes on.
+pub const EXECUTION_ENVIRONMENT_DIGEST_VERSION: u32 = 5;
 
 // 13: reported process snapshots retain bounded terminal tombstones.
 // 14: surviving shell groups retain joined ownership after leader exit.
@@ -37,10 +38,90 @@ pub(super) const HOST_SNAPSHOT_SOURCE_REVISION: u64 = 1;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[non_exhaustive]
 pub enum ExecutionBackendKind {
-    /// Execution would occur with the embedding host process's OS authority.
-    Host,
+    /// Execution on one runner, named by the descriptor's [`RunnerId`], with
+    /// that runner's OS authority. The in-process host backend is the local
+    /// runner ([`RunnerId::local`]).
+    Runner,
     /// Deterministic test execution with no real child process.
     DeterministicFake,
+}
+
+/// The runner an execution backend runs tools on. Part of a session's
+/// binding: every rebind of a line keeps it.
+///
+/// [`RunnerId::local`] is the runner on the embedding host's own machine and
+/// user, whether its calls are made in process or through a local runner
+/// daemon. Other runners are named by the identity their own home records.
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RunnerId(Box<str>);
+
+impl RunnerId {
+    const LOCAL: &'static str = "local";
+
+    /// The runner on the embedding host's own machine and user.
+    #[must_use]
+    pub fn local() -> Self {
+        Self(Self::LOCAL.into())
+    }
+
+    /// Admits a lowercase runner identifier of at most 128 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Refuses anything else.
+    pub fn new(value: impl Into<String>) -> Result<Self, ExecutionEnvironmentError> {
+        let value = value.into();
+        if !is_lowercase_identifier(&value) {
+            return Err(ExecutionEnvironmentError::new(
+                ExecutionEnvironmentErrorKind::InvalidIdentity,
+                "runner id must be a lowercase identifier of at most 128 bytes",
+            ));
+        }
+        Ok(Self(value.into()))
+    }
+
+    /// The identifier text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether this is the local runner.
+    #[must_use]
+    pub fn is_local(&self) -> bool {
+        &*self.0 == Self::LOCAL
+    }
+}
+
+impl fmt::Debug for RunnerId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_tuple("RunnerId").field(&&*self.0).finish()
+    }
+}
+
+impl fmt::Display for RunnerId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl Serialize for RunnerId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for RunnerId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Backend-owned semantic revision for authority and containment behavior.
@@ -314,6 +395,10 @@ const fn current_filesystem_containment() -> FilesystemContainment {
 #[derive(Clone, Eq, Hash, PartialEq, Serialize)]
 pub struct ExecutionBackendDescriptor {
     pub(super) kind: ExecutionBackendKind,
+    /// The runner of a [`ExecutionBackendKind::Runner`] backend; absent for
+    /// the deterministic fake.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) runner_id: Option<RunnerId>,
     pub(super) semantic_revision: ExecutionBackendSemanticRevision,
     pub(super) operating_system: String,
     pub(super) path_format: HostPathFormat,
@@ -324,6 +409,8 @@ pub struct ExecutionBackendDescriptor {
 #[serde(deny_unknown_fields)]
 pub(super) struct ExecutionBackendDescriptorWire {
     pub(super) kind: ExecutionBackendKind,
+    #[serde(default)]
+    pub(super) runner_id: Option<RunnerId>,
     pub(super) semantic_revision: ExecutionBackendSemanticRevision,
     pub(super) operating_system: String,
     pub(super) path_format: HostPathFormat,
@@ -332,12 +419,12 @@ pub(super) struct ExecutionBackendDescriptorWire {
 
 impl ExecutionBackendDescriptor {
     /// The descriptor every [`HostExecutionBackend`](crate::HostExecutionBackend)
-    /// allocated in this process presents. It is comparison data, not
-    /// authority.
+    /// allocated in this process presents: the local runner, on this
+    /// process's OS. It is comparison data, not authority.
     #[must_use]
-    pub fn current_host() -> Self {
+    pub fn local_runner() -> Self {
         let mut descriptor =
-            Self::host_for_platform(std::env::consts::OS, HostPathFormat::current());
+            Self::local_runner_for_platform(std::env::consts::OS, HostPathFormat::current());
         descriptor.containment = ExecutionContainmentDescriptor::current_host();
         descriptor
     }
@@ -345,6 +432,7 @@ impl ExecutionBackendDescriptor {
     pub(super) fn deterministic_fake() -> Self {
         Self {
             kind: ExecutionBackendKind::DeterministicFake,
+            runner_id: None,
             semantic_revision: ExecutionBackendSemanticRevision::deterministic_fake(),
             operating_system: std::env::consts::OS.to_owned(),
             path_format: HostPathFormat::current(),
@@ -352,9 +440,13 @@ impl ExecutionBackendDescriptor {
         }
     }
 
-    pub(super) fn host_for_platform(operating_system: &str, path_format: HostPathFormat) -> Self {
+    pub(super) fn local_runner_for_platform(
+        operating_system: &str,
+        path_format: HostPathFormat,
+    ) -> Self {
         Self {
-            kind: ExecutionBackendKind::Host,
+            kind: ExecutionBackendKind::Runner,
+            runner_id: Some(RunnerId::local()),
             semantic_revision: ExecutionBackendSemanticRevision::host(),
             operating_system: operating_system.to_owned(),
             path_format,
@@ -370,6 +462,13 @@ impl ExecutionBackendDescriptor {
     #[must_use]
     pub const fn kind(&self) -> ExecutionBackendKind {
         self.kind
+    }
+
+    /// Returns the runner this backend runs tools on; `None` for the
+    /// deterministic fake.
+    #[must_use]
+    pub const fn runner_id(&self) -> Option<&RunnerId> {
+        self.runner_id.as_ref()
     }
 
     /// Returns the backend-owned semantic revision.
@@ -404,18 +503,23 @@ impl<'de> Deserialize<'de> for ExecutionBackendDescriptor {
     {
         let wire = ExecutionBackendDescriptorWire::deserialize(deserializer)?;
         let expected_revision = match wire.kind {
-            ExecutionBackendKind::Host => ExecutionBackendSemanticRevision::host(),
+            ExecutionBackendKind::Runner => ExecutionBackendSemanticRevision::host(),
             ExecutionBackendKind::DeterministicFake => {
                 ExecutionBackendSemanticRevision::deterministic_fake()
             }
         };
         let expected_containment = match wire.kind {
-            ExecutionBackendKind::Host => ExecutionContainmentDescriptor::current_host(),
+            ExecutionBackendKind::Runner => ExecutionContainmentDescriptor::current_host(),
             ExecutionBackendKind::DeterministicFake => {
                 ExecutionContainmentDescriptor::deterministic_fake()
             }
         };
-        if wire.semantic_revision != expected_revision
+        let runner_named = match wire.kind {
+            ExecutionBackendKind::Runner => wire.runner_id.is_some(),
+            ExecutionBackendKind::DeterministicFake => wire.runner_id.is_none(),
+        };
+        if !runner_named
+            || wire.semantic_revision != expected_revision
             || !is_platform_tag(&wire.operating_system)
             || !wire.path_format.is_compatible_with(&wire.operating_system)
             || wire.containment != expected_containment
@@ -426,6 +530,7 @@ impl<'de> Deserialize<'de> for ExecutionBackendDescriptor {
         }
         Ok(Self {
             kind: wire.kind,
+            runner_id: wire.runner_id,
             semantic_revision: wire.semantic_revision,
             operating_system: wire.operating_system,
             path_format: wire.path_format,
@@ -439,6 +544,7 @@ impl fmt::Debug for ExecutionBackendDescriptor {
         formatter
             .debug_struct("ExecutionBackendDescriptor")
             .field("kind", &self.kind)
+            .field("runner_id", &self.runner_id)
             .field("semantic_revision", &self.semantic_revision)
             .field("operating_system", &self.operating_system)
             .field("path_format", &self.path_format)
@@ -456,9 +562,9 @@ pub struct ExecutionBackendIdentity {
 }
 
 impl ExecutionBackendIdentity {
-    pub(super) fn current_host() -> Result<Self, ExecutionEnvironmentError> {
+    pub(super) fn local_runner() -> Result<Self, ExecutionEnvironmentError> {
         Ok(Self {
-            descriptor: ExecutionBackendDescriptor::current_host(),
+            descriptor: ExecutionBackendDescriptor::local_runner(),
             authority_id: fresh_backend_authority_id()?,
             authority_revision: ExecutionBackendAuthorityRevision::host(),
         })
@@ -480,6 +586,12 @@ impl ExecutionBackendIdentity {
     #[must_use]
     pub const fn kind(&self) -> ExecutionBackendKind {
         self.descriptor.kind
+    }
+
+    /// Returns the runner this backend runs tools on.
+    #[must_use]
+    pub const fn runner_id(&self) -> Option<&RunnerId> {
+        self.descriptor.runner_id()
     }
 
     /// Returns the backend-owned semantic revision.
@@ -645,6 +757,10 @@ pub(super) fn environment_digest(
     let mut parts = vec![
         b"plakous-tools/execution-environment".to_vec(),
         backend_kind_identifier(backend.kind()).to_vec(),
+        backend
+            .runner_id()
+            .map_or(&b""[..], |runner| runner.as_str().as_bytes())
+            .to_vec(),
         backend.semantic_revision().get().to_be_bytes().to_vec(),
         backend.operating_system().as_bytes().to_vec(),
         path_format_identifier(backend.path_format()).to_vec(),
@@ -770,7 +886,7 @@ fn push_source_parts(
 
 const fn backend_kind_identifier(kind: ExecutionBackendKind) -> &'static [u8] {
     match kind {
-        ExecutionBackendKind::Host => b"backend/host",
+        ExecutionBackendKind::Runner => b"backend/runner",
         ExecutionBackendKind::DeterministicFake => b"backend/deterministic-fake",
     }
 }

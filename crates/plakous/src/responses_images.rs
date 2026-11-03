@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use plakous_tool_web::{ImageGenFuture, ImageGenPort, ImageGenRequest};
-use plakous_tools::ExecutionOperationControl;
+use plakous_tools::OperationContext;
 
 #[cfg(any(feature = "openai", feature = "codex"))]
 use plakous_openai as responses;

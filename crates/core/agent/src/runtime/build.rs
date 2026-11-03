@@ -20,7 +20,8 @@ pub(super) use checkpoint::{
 pub use environment::compile_explicit_runtime_profile;
 use environment::stable_workspace_environment_digest;
 pub(super) use environment::{
-    live_job_config, stable_runtime_environment_component, stable_workspace_environment_bytes,
+    live_job_config, require_same_runner, stable_runtime_environment_component,
+    stable_workspace_environment_bytes,
 };
 pub(crate) use environment::{stored_composition_artifact, stored_job_config};
 
@@ -278,7 +279,19 @@ impl AgentBuilder {
             post_compaction_note: None,
             model_reresolver: None,
             request_slots: None,
+            #[cfg(test)]
+            target_backend: None,
         }
+    }
+
+    /// Stands `backend` in for the backend a branch target compiles against.
+    #[cfg(test)]
+    pub(crate) fn with_target_backend(
+        mut self,
+        backend: plakous_tools::ExecutionBackendDescriptor,
+    ) -> Self {
+        self.target_backend = Some(backend);
+        self
     }
 
     /// Binds process foreground and hard-cap limits at construction or rebind.
@@ -1123,7 +1136,8 @@ fn attach_job_environment(
         run_id,
         builder.host_process_options.clone(),
         builder.job_config,
-    )?;
+    )?
+    .with_line_owner(plakous_tools::LineOwner::from(&job_owner));
     if let Some(normalizer) = &builder.image_normalizer {
         environment = install_visual_read(
             environment,

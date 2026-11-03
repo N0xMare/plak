@@ -1,10 +1,9 @@
 use super::*;
 use plakous::model::{BranchId, CancellationToken, LineId, RunId, SessionId};
 use plakous::tools::{
-    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
-    ExecutionOperationControl, JobStatus, JobStopReason, JoinedProcessCommand,
-    JoinedProcessSessions, JoinedProcessShellProfile, JoinedProcessStartRequest,
-    JoinedProcessTerminalMode,
+    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, JobStatus,
+    JobStopReason, JoinedProcessCommand, JoinedProcessSessions, JoinedProcessShellProfile,
+    JoinedProcessStartRequest, JoinedProcessTerminalMode, OperationContext,
 };
 use std::{path::Path, str::FromStr, time::Duration};
 
@@ -644,7 +643,7 @@ fn start_script(
             true,
             JoinedProcessTerminalMode::Pipes,
         )?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?)
 }
 
@@ -866,7 +865,7 @@ fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> Tes
             false,
             JoinedProcessTerminalMode::Pipes,
         )?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     let deadline = Instant::now() + Duration::from_secs(5);
     while original.leftover(id).is_none() {

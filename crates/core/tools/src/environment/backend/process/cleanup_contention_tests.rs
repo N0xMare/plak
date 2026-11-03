@@ -63,10 +63,7 @@ fn sleeping_child(sessions: &JoinedProcessSessions) -> Result<JoinedProcessSessi
         false,
         JoinedProcessTerminalMode::Pipes,
     )?;
-    Ok(sessions.start(
-        request,
-        ExecutionOperationControl::new(CancellationToken::new()),
-    )?)
+    Ok(sessions.start(request, OperationContext::new(CancellationToken::new()))?)
 }
 
 fn assert_bounded(started: Instant) {
@@ -95,10 +92,7 @@ fn exiting_child(
         true,
         JoinedProcessTerminalMode::Pipes,
     )?;
-    Ok(sessions.start(
-        request,
-        ExecutionOperationControl::new(CancellationToken::new()),
-    )?)
+    Ok(sessions.start(request, OperationContext::new(CancellationToken::new()))?)
 }
 
 /// A session that exited and was joined has a knowable disposition, and it
@@ -157,10 +151,7 @@ fn promoted_short_job_is_retired_without_observer_polling() -> Result<(), TestEr
         true,
         JoinedProcessTerminalMode::Pipes,
     )?;
-    let id = sessions.start(
-        request,
-        ExecutionOperationControl::new(CancellationToken::new()),
-    )?;
+    let id = sessions.start(request, OperationContext::new(CancellationToken::new()))?;
     sessions.promote(id)?;
     sessions.write_stdin(id, b"", JoinedProcessInputDisposition::Close)?;
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -227,10 +218,7 @@ async fn process_changes_wake_on_output_and_exit_without_promotion() -> Result<(
         true,
         JoinedProcessTerminalMode::Pipes,
     )?;
-    let id = sessions.start(
-        request,
-        ExecutionOperationControl::new(CancellationToken::new()),
-    )?;
+    let id = sessions.start(request, OperationContext::new(CancellationToken::new()))?;
     let mut changes = sessions.session_changes(id)?;
     sessions.write_stdin(id, b"go\n", JoinedProcessInputDisposition::KeepOpen)?;
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -328,7 +316,7 @@ fn running_children_still_count_against_the_session_limit() -> Result<(), TestEr
                 false,
                 JoinedProcessTerminalMode::Pipes,
             )?,
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .err()
         .ok_or("the session limit admitted one child too many")?;
@@ -360,7 +348,7 @@ fn a_finished_session_keeps_its_output_readable_across_later_starts() -> Result<
             true,
             JoinedProcessTerminalMode::Pipes,
         )?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     await_terminal(&sessions, talker);
     for _ in 0..8 {

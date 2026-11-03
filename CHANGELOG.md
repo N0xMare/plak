@@ -99,6 +99,16 @@ one cross-build carrier (a build imports its own and the previous version).
   services through `JoinedSessionsPort`; answers distinguish unavailable from
   absent and discovery fails closed. `JobHost`, `discover_instruction_sources`,
   `discover_skills`, `discover_skill_roots` and `Skill::load` signatures change.
+- The execution backend descriptor names its runner
+  (`ExecutionBackendKind::Runner` with a `RunnerId`; the in-process backend is
+  the reserved local runner `local`), and a rebind or fork onto another runner
+  is refused with `BindingChange::Runner`. `ExecutionBackendKind::Host` and
+  `ExecutionBackendDescriptor::current_host` are gone (`local_runner`), and the
+  descriptor's `Debug` output gains `runner_id`. `ExecutionOperationControl`
+  becomes `OperationContext`, which also carries the line owner, the request
+  class and key, and the caller's deadline; `operation_control` becomes
+  `operation_context`, and `RetrievalPort::retrieve` and
+  `ImageGenPort::generate` take an `OperationContext`.
 - Hosted and orchestration tasks have explicit owners: a session's tasks are
   aborted and joined at release, a tree's at its last root lease, and tasks
   that own a child's session or runtime authority run until they return.

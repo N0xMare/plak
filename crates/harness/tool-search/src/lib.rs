@@ -51,7 +51,7 @@ use plakous_tools::{
 };
 use plakous_tools::{
     backend_runtime_error, decode_arguments, deserialize_optional_semantic_u64,
-    generation_stamp_prefix, operation_control,
+    generation_stamp_prefix, operation_context,
 };
 use plakous_tools::{standard_definition, standard_registration};
 
@@ -380,7 +380,7 @@ async fn regex_query(
     }
     let result = context
         .environment()
-        .query_repository(query, operation_control(context))
+        .query_repository(query, operation_context(context))
         .await
         .map_err(backend_runtime_error)?;
     Ok((result, false))
@@ -869,7 +869,7 @@ impl ToolExecutor for SearchRepositoryTool {
                 };
                 context
                     .environment()
-                    .query_repository(query, operation_control(&context))
+                    .query_repository(query, operation_context(&context))
                     .await
                     .map_err(backend_runtime_error)?
             };

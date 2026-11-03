@@ -2,7 +2,7 @@ use std::error::Error;
 
 use plakous_model::ToolResultPart;
 use plakous_tools::{
-    ExecutionOperationControl, RetrievalError, RetrievalFuture, RetrievalOutcome, RetrievalSource,
+    OperationContext, RetrievalError, RetrievalFuture, RetrievalOutcome, RetrievalSource,
     RetrievalUsage, ToolOutcomeKind, drifted_pins,
 };
 use serde_json::json;
@@ -18,7 +18,7 @@ impl RetrievalPort for FixedPort {
         &self.0
     }
 
-    fn retrieve(&self, _: RetrievalRequest, _: ExecutionOperationControl) -> RetrievalFuture {
+    fn retrieve(&self, _: RetrievalRequest, _: OperationContext) -> RetrievalFuture {
         Box::pin(async { Ok(RetrievalOutcome::default()) })
     }
 }

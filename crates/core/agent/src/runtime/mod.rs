@@ -193,6 +193,10 @@ pub struct AgentBuilder {
     post_compaction_note: Option<PostCompactionNote>,
     model_reresolver: Option<(Arc<dyn ModelReresolver>, plakous_model::Timestamp)>,
     request_slots: Option<RequestSlots>,
+    /// Another runner's backend descriptor a test stands in for a branch
+    /// target's own.
+    #[cfg(test)]
+    target_backend: Option<plakous_tools::ExecutionBackendDescriptor>,
 }
 
 /// Derives a note to append after a committed compaction from its source and
@@ -295,6 +299,9 @@ struct AgentInner {
     /// Whether the driver drew a digest salt and measured the request footprint.
     #[cfg(test)]
     measurement_state: (bool, bool),
+    /// The line head the agent's tool environment names.
+    #[cfg(test)]
+    line_owner: Option<plakous_tools::LineOwner>,
 }
 
 /// Cheap cloneable capability for one private agent actor.

@@ -163,7 +163,7 @@ async fn unified_exec_non_tty_has_null_stdin_and_pty_accepts_input() -> Result<(
         ".",
         plakous_tools::ExecutionEnvironmentConfig::default(),
     )?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let tools = ProcessSessionTools::posix_sh()?;
     for command in ["cat", "test -c /dev/stdin"] {
         let result = tools
@@ -220,7 +220,7 @@ fn process_await_wait_does_not_reserve_a_blocking_worker() -> Result<(), Box<dyn
             yield_time_ms: 0,
             max_output_bytes: 64,
         },
-        ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+        OperationContext::new(plakous_model::CancellationToken::new()),
     ))?;
     let handle = started.projection.session_id.ok_or("promoted job handle")?;
     let (preempt, receiver) = tokio::sync::watch::channel(plakous_tools::ToolPreempt::None);
@@ -233,7 +233,7 @@ fn process_await_wait_does_not_reserve_a_blocking_worker() -> Result<(), Box<dyn
             execute_process_await(
                 waiting_environment,
                 json!({"session_ids":[handle],"yield_time_ms":5000,"max_output_bytes":64,"max_output_records":256}),
-                ExecutionOperationControl::new(plakous_model::CancellationToken::new()).with_preempt(receiver),
+                OperationContext::new(plakous_model::CancellationToken::new()).with_preempt(receiver),
                 ProcessOperationKind::Await,
                 ProcessHintSource::Default,
             ).await
@@ -354,7 +354,7 @@ async fn await_chatty_terminal_deduplicates_and_reports_consumed_jobs() -> Resul
         ".",
         ExecutionEnvironmentConfig::default(),
     )?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let started = ProcessSessionTools::posix_sh()?
         .start_canonical(
             &environment,
@@ -500,7 +500,7 @@ async fn canonical_process_operations_close_poll_terminate_and_reject_stale_auth
         ExecutionEnvironmentConfig::default(),
     )?;
     let tools = ProcessSessionTools::posix_sh()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let started = tools
         .start_canonical(
             &environment,
@@ -685,7 +685,7 @@ async fn dropping_process_tool_does_not_repeat_the_runtime_cleanup_attempt()
                 yield_time_ms: 0,
                 max_output_bytes: 64,
             },
-            ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+            OperationContext::new(plakous_model::CancellationToken::new()),
         )
         .await?;
     assert!(started.projection.session_id.is_some());
@@ -1022,7 +1022,7 @@ async fn terminal_hint_drains_more_than_one_record_batch_without_waiting()
         ExecutionEnvironmentConfig::default(),
     )?;
     let sessions = environment.joined_process_sessions()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let request = JoinedProcessStartRequest::new(
         JoinedProcessCommand::literal("/bin/sh", ["-c", "cat"].map(String::from))?,
         ".",
@@ -1099,7 +1099,7 @@ async fn contended_observation_does_not_block_the_async_worker() -> Result<(), B
         ExecutionEnvironmentConfig::default(),
     )?;
     let sessions = environment.joined_process_sessions()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let request = JoinedProcessStartRequest::new(
         JoinedProcessCommand::literal("/bin/sh", ["-c", "trap 'echo stopping > stopping; while :; do :; done' TERM; echo ready > ready; while :; do :; done"].map(String::from))?,
         ".", [], false, JoinedProcessTerminalMode::Pipes,
@@ -1271,7 +1271,7 @@ async fn terminal_utf8_larger_than_observation_bound_returns_without_deadline_sp
         ExecutionEnvironmentConfig::default(),
     )?;
     let tools = ProcessSessionTools::posix_sh()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let started = std::time::Instant::now();
     // A one-byte page cannot hold a three-byte character: the exited
     // process is joined at once and the page counts the bytes it could not
@@ -1321,7 +1321,7 @@ async fn a_start_publishes_its_job_only_in_the_poll_that_completes_it() -> Resul
     )?;
     let sessions = environment.joined_process_sessions()?;
     let tools = ProcessSessionTools::posix_sh()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let mut start = Box::pin(tools.start_canonical(
         &environment,
         CanonicalProcessStartRequest {
@@ -1463,7 +1463,7 @@ fn start_to_its_reservation(repoll: bool) -> Result<(), Box<dyn Error>> {
         },
     );
     let tools = ProcessSessionTools::posix_sh()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let mut start = Box::pin(tools.start_canonical(
         &environment,
         CanonicalProcessStartRequest {
@@ -1604,7 +1604,7 @@ async fn a_polled_session_is_summarised_to_its_newest_output() -> Result<(), Box
         ExecutionEnvironmentConfig::default(),
     )?;
     let tools = ProcessSessionTools::posix_sh()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     // About 1.3 MB of output: more than one page, more than the session
     // window. One call shows the start and the end and counts the rest.
     let result = tools
@@ -1673,7 +1673,7 @@ async fn a_finished_session_keeps_its_handle_and_frees_its_slot() -> Result<(), 
                 yield_time_ms: 1,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+            OperationContext::new(plakous_model::CancellationToken::new()),
         )
         .await?;
     assert!(started.projection.session_id.is_some());
@@ -1749,7 +1749,7 @@ async fn forced_backend_retirement_prunes_stale_projection_handles() -> Result<(
                 yield_time_ms: 1,
                 max_output_bytes: 1,
             },
-            ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+            OperationContext::new(plakous_model::CancellationToken::new()),
         )
         .await?;
     assert!(started.projection.session_id.is_some());
@@ -1780,7 +1780,7 @@ async fn codex_output_does_not_turn_a_short_command_into_a_live_session()
     let result = tools.exec_command_with_update(
         &environment,
         r#"{"cmd":"printf first; sleep 0.05; printf second","login":false,"yield_time_ms":5000}"#,
-        ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+        OperationContext::new(plakous_model::CancellationToken::new()),
     ).await?;
     assert_eq!(result.projection.output, "firstsecond");
     assert_eq!(result.projection.exit_code, Some(0));
@@ -1808,7 +1808,7 @@ async fn exited_output_over_one_observation_remains_correlatable_until_joined()
     )?;
     let sessions = environment.joined_process_sessions()?;
     let tools = ProcessSessionTools::posix_sh()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let first = tools.exec_command_with_update(
         &environment,
         &format!(
@@ -1903,7 +1903,7 @@ async fn join_before_return_keeps_the_head_and_the_tail_of_a_long_log() -> Resul
                 yield_time_ms: 20_000,
                 max_output_bytes: PROCESS_OBSERVATION_BYTES,
             },
-            ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+            OperationContext::new(plakous_model::CancellationToken::new()),
         )
         .await?;
     let output = &result.projection.output;
@@ -1949,7 +1949,7 @@ async fn codex_observations_accumulate_one_bound_and_resume_exactly() -> Result<
         ExecutionEnvironmentConfig::default(),
     )?;
     let tools = ProcessSessionTools::posix_sh()?;
-    let control = ExecutionOperationControl::new(plakous_model::CancellationToken::new());
+    let control = OperationContext::new(plakous_model::CancellationToken::new());
     let first = tools.exec_command_with_update(
         &environment,
         &format!(
@@ -2610,7 +2610,7 @@ async fn a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure()
                 false,
                 JoinedProcessTerminalMode::Pipes,
             )?,
-            ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+            OperationContext::new(plakous_model::CancellationToken::new()),
         )?;
     }
 

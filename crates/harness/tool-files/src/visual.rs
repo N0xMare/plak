@@ -14,7 +14,7 @@ use plakous_tools::internal::VisualReadSession;
 use plakous_tools::{
     ImageSniffError, MAX_WORKSPACE_READ_SLICE_BYTES, ToolContext, ToolOutcome, ToolRuntimeError,
     ToolRuntimeErrorKind, WorkspaceReadSliceRequest, backend_runtime_error, content_runtime_error,
-    operation_control, sniff_image,
+    operation_context, sniff_image,
 };
 use plakous_tools::{VIEW_IMAGE_CAPABILITY_NAME, object_schema, standard_definition};
 
@@ -100,7 +100,7 @@ async fn load_image(context: &ToolContext, path: PathBuf) -> Result<Loaded, Tool
     context.check_cancelled()?;
     let slice = context
         .environment()
-        .read_workspace(request, operation_control(context))
+        .read_workspace(request, operation_context(context))
         .await
         .map_err(backend_runtime_error)?;
     if !is_image(slice.bytes()) {
@@ -114,7 +114,7 @@ async fn load_image(context: &ToolContext, path: PathBuf) -> Result<Loaded, Tool
         context.check_cancelled()?;
         let slice = context
             .environment()
-            .read_workspace(request, operation_control(context))
+            .read_workspace(request, operation_context(context))
             .await
             .map_err(backend_runtime_error)?;
         bytes.extend_from_slice(slice.bytes());

@@ -1,12 +1,12 @@
 use super::{
-    Arc, ExecutionBackendError, ExecutionBackendErrorKind, ExecutionOperationControl,
-    JOINED_STDIN_CLOSED, JoinedProcessCursorPollResult, JoinedProcessHostCapacity,
-    JoinedProcessInputDisposition, JoinedProcessOutputCursor, JoinedProcessOutputRecord,
-    JoinedProcessPollResult, JoinedProcessSessionId, JoinedProcessSessions,
-    JoinedProcessStartRequest, JoinedProcessStatus, MAX_JOINED_PROCESS_SESSION_POLL_RECORDS,
-    MAX_JOINED_PROCESS_SESSION_WRITE_BYTES, MAX_LITERAL_PROCESS_STDIN_BYTES, Ordering,
-    PendingJobOutput, backend_error, close_joined_session_input, conflict_error, invalid_request,
-    lock, resource_error, start_joined_host_process, write_joined_session_input,
+    Arc, ExecutionBackendError, ExecutionBackendErrorKind, JOINED_STDIN_CLOSED,
+    JoinedProcessCursorPollResult, JoinedProcessHostCapacity, JoinedProcessInputDisposition,
+    JoinedProcessOutputCursor, JoinedProcessOutputRecord, JoinedProcessPollResult,
+    JoinedProcessSessionId, JoinedProcessSessions, JoinedProcessStartRequest, JoinedProcessStatus,
+    MAX_JOINED_PROCESS_SESSION_POLL_RECORDS, MAX_JOINED_PROCESS_SESSION_WRITE_BYTES,
+    MAX_LITERAL_PROCESS_STDIN_BYTES, OperationContext, Ordering, PendingJobOutput, backend_error,
+    close_joined_session_input, conflict_error, invalid_request, lock, resource_error,
+    start_joined_host_process, write_joined_session_input,
 };
 
 impl JoinedProcessSessions {
@@ -35,7 +35,7 @@ impl JoinedProcessSessions {
     pub fn start(
         &self,
         request: JoinedProcessStartRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
         control.check_cancelled()?;
         let control = control.with_preempt(tokio::sync::watch::channel(crate::ToolPreempt::None).1);
@@ -124,7 +124,7 @@ impl JoinedProcessSessions {
     pub(crate) fn start_with_output_limit(
         &self,
         mut request: JoinedProcessStartRequest,
-        control: ExecutionOperationControl,
+        control: OperationContext,
         max_output_bytes: usize,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
         request.output_spool_threshold = Some(max_output_bytes);

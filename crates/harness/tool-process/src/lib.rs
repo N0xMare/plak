@@ -75,10 +75,10 @@ use plakous_tools::internal::{
 };
 use plakous_tools::object_schema;
 use plakous_tools::{
-    CanonicalProcessOperationV2, ExecutionOperationControl, JoinedProcessCommand,
-    JoinedProcessInputDisposition, JoinedProcessOutputCursor, JoinedProcessSessionId,
-    JoinedProcessSessions, JoinedProcessShellProfile, JoinedProcessStartRequest,
-    JoinedProcessStatus, JoinedProcessTerminalMode, PortableToolSchemaV2,
+    CanonicalProcessOperationV2, JoinedProcessCommand, JoinedProcessInputDisposition,
+    JoinedProcessOutputCursor, JoinedProcessSessionId, JoinedProcessSessions,
+    JoinedProcessShellProfile, JoinedProcessStartRequest, JoinedProcessStatus,
+    JoinedProcessTerminalMode, OperationContext, PortableToolSchemaV2,
     ProviderModelProjectionIdentityV2, RegisteredToolId, RegisteredToolIdentity, ToolContext,
     ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation,
     ToolOutcome, ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap,
@@ -96,7 +96,7 @@ use plakous_tools::{
 };
 use plakous_tools::{
     backend_runtime_error, deserialize_optional_semantic_u64, deserialize_semantic_u64,
-    deserialize_semantic_usize, operation_control, projection_arguments,
+    deserialize_semantic_usize, operation_context, projection_arguments,
 };
 
 #[cfg(test)]

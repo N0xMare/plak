@@ -6,8 +6,8 @@ use std::os::unix::fs::MetadataExt;
 use super::{
     Arc, AtomicBool, EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackendError,
     ExecutionBackendFuture, ExecutionEnvironmentError, ExecutionEnvironmentErrorKind,
-    ExecutionEnvironmentLimits, ExecutionOperationControl, ExecutionWorkspace, HostProcessOwner,
-    Instant, LiteralProcessResult, MAX_EXECUTION_VALUE_BYTES, Path, PathBuf,
+    ExecutionEnvironmentLimits, ExecutionWorkspace, HostProcessOwner, Instant,
+    LiteralProcessResult, MAX_EXECUTION_VALUE_BYTES, OperationContext, Path, PathBuf,
     PreparedLiteralProcess, cleanup_unresolved_error, fs, invalid_request, io_error,
     resolve_existing_no_symlink, supervise_host_process, workspace_error,
 };
@@ -220,7 +220,7 @@ pub(in crate::environment::backend) fn execute_host_literal_process(
     workspace: ExecutionWorkspace,
     request: PreparedLiteralProcess,
     limits: ExecutionEnvironmentLimits,
-    control: ExecutionOperationControl,
+    control: OperationContext,
     process: Arc<HostProcessContext>,
 ) -> ExecutionBackendFuture<LiteralProcessResult> {
     Box::pin(async move {

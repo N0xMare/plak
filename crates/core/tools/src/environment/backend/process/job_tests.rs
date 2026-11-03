@@ -14,7 +14,7 @@ fn explicit_leftover_disown_is_released_and_reopen_is_read_only() -> TestResult 
             "while [ ! -f finish-leftover ]; do sleep 0.01; done &",
             false,
         )?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     service.promote(id)?;
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -96,7 +96,7 @@ fn review_release_records_session_exit_stopper() -> TestResult {
     let sessions = sessions(directory.path())?;
     let id = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.promote(id)?;
     sessions.join_all()?;
@@ -114,7 +114,7 @@ fn review_cancel_between_observation_and_promotion_refuses_handle() -> TestResul
     let cancellation = CancellationToken::new();
     let id = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(cancellation.clone()),
+        OperationContext::new(cancellation.clone()),
     )?;
     assert_eq!(
         sessions
@@ -139,7 +139,7 @@ fn review_running_snapshot_counts_toward_cap_and_is_consumable() -> TestResult {
     let sessions = sessions(directory.path())?;
     let source = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.promote(source)?;
     let mut views = sessions.jobs();
@@ -178,7 +178,7 @@ fn review_running_snapshot_counts_toward_cap_and_is_consumable() -> TestResult {
     );
     let next = restored.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     assert!(restored.promote(next).is_err());
     restored.consume_jobs(&[1]);
@@ -195,7 +195,7 @@ fn review_consumption_removes_active_terminal_and_missing_stopper_is_unknown() -
     let sessions = sessions(directory.path())?;
     let id = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     // Hold the operation so the monitor cannot retire this terminal first.
     let session = sessions.session(id)?;
@@ -224,7 +224,7 @@ fn a_consumed_terminal_job_awaiting_its_join_is_not_unreported() -> TestResult {
     let sessions = sessions(directory.path())?;
     let id = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     let session = sessions.session(id)?;
     let operation = session.enter()?;
@@ -252,7 +252,7 @@ fn consume_running_job_keeps_the_owner_joinable() -> TestResult {
     let sessions = sessions(directory.path())?;
     let id = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.promote(id)?;
     sessions.consume_jobs(&[1]);
@@ -268,10 +268,7 @@ fn tty_job_tail_normalizes_line_endings_and_all_controls() -> TestResult {
     let sessions = sessions(directory.path())?;
     let mut start = request("read line; printf 'one\\n two\\177\\302\\205\\n'", true)?;
     start.terminal_mode = JoinedProcessTerminalMode::UnixPty;
-    let id = sessions.start(
-        start,
-        ExecutionOperationControl::new(CancellationToken::new()),
-    )?;
+    let id = sessions.start(start, OperationContext::new(CancellationToken::new()))?;
     sessions.promote(id)?;
     sessions.write_stdin(id, b"done\n", JoinedProcessInputDisposition::KeepOpen)?;
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -292,7 +289,7 @@ fn review_job_tail_sanitizes_controls_and_is_bounded() -> TestResult {
     let sessions = sessions(directory.path())?;
     let id = sessions.start(
         request("read line; printf 'a\\000b\\001c\\r\\tend\\n'", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.promote(id)?;
     sessions.write_stdin(id, b"done\n", JoinedProcessInputDisposition::KeepOpen)?;
@@ -314,7 +311,7 @@ fn promotion_detaches_cancel_and_per_id_join_retains_terminal_snapshot() -> Test
     let cancellation = CancellationToken::new();
     let id = sessions.start(
         request("read line; printf 'tail'; exit 7", true)?,
-        ExecutionOperationControl::new(cancellation.clone()),
+        OperationContext::new(cancellation.clone()),
     )?;
     assert_eq!(JoinedProcessSessions::job_number(id), 7);
     sessions.promote(id)?;
@@ -359,7 +356,7 @@ fn foreground_retention_does_not_count_as_unconsumed_job_rows() -> TestResult {
         for _ in 0..64 {
             let id = sessions.start(
                 request(if promoted { "read line" } else { "true" }, promoted)?,
-                ExecutionOperationControl::new(CancellationToken::new()),
+                OperationContext::new(CancellationToken::new()),
             )?;
             if promoted {
                 sessions.promote(id)?;
@@ -378,7 +375,7 @@ fn foreground_retention_does_not_count_as_unconsumed_job_rows() -> TestResult {
     assert_eq!(sessions.jobs().len(), 64);
     let id = sessions.start(
         request("true", false)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.terminate(id)?;
     sessions.consume_jobs(&(1..=64).collect::<Vec<_>>());
@@ -393,7 +390,7 @@ fn promotion_refuses_the_129th_unconsumed_row() -> TestResult {
     for _ in 0..127 {
         let id = sessions.start(
             request("read line", true)?,
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )?;
         sessions.promote(id)?;
         sessions.write_stdin(id, b"done\n", JoinedProcessInputDisposition::KeepOpen)?;
@@ -406,11 +403,11 @@ fn promotion_refuses_the_129th_unconsumed_row() -> TestResult {
     }
     let first = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     let second = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.promote(first)?;
     let refused = sessions
@@ -421,7 +418,7 @@ fn promotion_refuses_the_129th_unconsumed_row() -> TestResult {
     assert_eq!(sessions.jobs().len(), 128);
     let foreground = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     assert!(sessions.promote(foreground).is_err());
     sessions.join_all()?;
@@ -435,12 +432,12 @@ fn sixty_fifth_running_start_is_refused_before_spawn() -> TestResult {
     for _ in 0..64 {
         sessions.start(
             request("read line", true)?,
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )?;
     }
     let refused = sessions.start(
         request("printf bad > marker", false)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     );
     join_until_drained(&sessions)?;
     let error = refused.err().ok_or("65th start was admitted")?;
@@ -463,13 +460,13 @@ fn host_capacity_refuses_the_129th_start_across_services_before_spawn() -> TestR
         for _ in 0..64 {
             service.start(
                 request("read line", true)?,
-                ExecutionOperationControl::new(CancellationToken::new()),
+                OperationContext::new(CancellationToken::new()),
             )?;
         }
     }
     let refused = services[2].start(
         request("printf bad > marker", false)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     );
     for service in &services {
         join_until_drained(service)?;
@@ -478,7 +475,7 @@ fn host_capacity_refuses_the_129th_start_across_services_before_spawn() -> TestR
     assert!(!directory.path().join("marker").exists());
     let id = services[2].start(
         request("true", false)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     services[2].terminate(id)?;
     Ok(())
@@ -490,7 +487,7 @@ fn explicit_stop_snapshot_keeps_attribution() -> TestResult {
     let sessions = sessions(directory.path())?;
     let id = sessions.start(
         request("read line", true)?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     sessions.promote(id)?;
     sessions.stop_with_grace(id, JobStopReason::User, Duration::from_millis(200))?;

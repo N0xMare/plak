@@ -10,7 +10,7 @@ use plakous_tools::{
     ToolRuntimeErrorKind, WorkspaceReadSliceRequest,
 };
 use plakous_tools::{
-    backend_runtime_error, decode_arguments, job_output_runtime_error, operation_control,
+    backend_runtime_error, decode_arguments, job_output_runtime_error, operation_context,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -308,7 +308,7 @@ async fn read_leading_lines(
         context.check_cancelled()?;
         let slice = context
             .environment()
-            .read_workspace(request, operation_control(context))
+            .read_workspace(request, operation_context(context))
             .await
             .map_err(backend_runtime_error)?;
         newlines += slice

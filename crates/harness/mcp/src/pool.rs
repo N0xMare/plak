@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use plakous_model::{CancellationToken, Digest};
 use plakous_tools::{
-    ExecutionEnvironment, ExecutionOperationControl, McpServerName,
-    SERVICE_PROCESS_TERMINATE_GRACE, ServiceHandle,
+    ExecutionEnvironment, McpServerName, OperationContext, SERVICE_PROCESS_TERMINATE_GRACE,
+    ServiceHandle,
 };
 use rmcp::model::{PaginatedRequestParams, ProtocolVersion, Tool};
 use rmcp::service::{ClientInitializeError, RunningService};
@@ -515,10 +515,7 @@ impl Connection {
         let request = stdio.service_request(server)?;
         let started = within_startup(spec, async {
             let process = environment
-                .spawn_service(
-                    request,
-                    ExecutionOperationControl::new(CancellationToken::new()),
-                )
+                .spawn_service(request, OperationContext::new(CancellationToken::new()))
                 .await
                 .map_err(|error| {
                     McpError::with_source(

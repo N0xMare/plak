@@ -65,3 +65,34 @@ pub(in crate::runtime::durable) async fn checkpoint() -> TestResult<RuntimeCheck
     agent.shutdown().await?;
     Ok(seeded)
 }
+
+/// A created durable source checkpoint, and two fresh builders for the same
+/// binding a branch target compiles from.
+pub(in crate::runtime::durable) async fn source_and_target_builders()
+-> TestResult<(tempfile::TempDir, Arc<RuntimeCheckpoint>, [AgentBuilder; 2])> {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let builder = || -> TestResult<AgentBuilder> {
+        Ok(durable_artifact_test_builder(
+            Arc::clone(&workspace),
+            Arc::new(ArtifactModel::new(
+                descriptor.clone(),
+                artifact_authority(&descriptor, 1)?,
+                0,
+                95_800,
+                false,
+            )),
+        ))
+    };
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions.create("create:runner-source", builder()?).await?;
+    let source = agent.checkpoint();
+    agent.shutdown().await?;
+    let targets = [builder()?, builder()?];
+    Ok((directory, source, targets))
+}

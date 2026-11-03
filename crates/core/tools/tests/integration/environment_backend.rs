@@ -22,13 +22,13 @@ use plakous_tools::{
     DeterministicProcessStep, EnvironmentDelegation, EnvironmentVariableName,
     ExecutionBackendErrorKind, ExecutionBackendKind, ExecutionEnvironment,
     ExecutionEnvironmentConfig, ExecutionEnvironmentLimits, ExecutionEnvironmentScope,
-    ExecutionOperationControl, FilesystemContainment, JoinedProcessCommand,
-    JoinedProcessInputDisposition, JoinedProcessShellProfile, JoinedProcessStartRequest,
-    JoinedProcessStatus, JoinedProcessTerminalMode, LiteralProcessIntent, LiteralProcessRequest,
-    LiteralProcessResult, NetworkContainment, ProcessContainment, RepositoryMatchCase,
-    RepositoryQuery, RepositoryQueryLimits, WorkspaceContentIdentity, WorkspaceExpectedFileState,
-    WorkspaceMutation, WorkspaceMutationDisposition, WorkspaceMutationTransaction,
-    WorkspaceReadSliceRequest, WorkspaceReplacement,
+    FilesystemContainment, JoinedProcessCommand, JoinedProcessInputDisposition,
+    JoinedProcessShellProfile, JoinedProcessStartRequest, JoinedProcessStatus,
+    JoinedProcessTerminalMode, LiteralProcessIntent, LiteralProcessRequest, LiteralProcessResult,
+    NetworkContainment, OperationContext, ProcessContainment, RepositoryMatchCase, RepositoryQuery,
+    RepositoryQueryLimits, WorkspaceContentIdentity, WorkspaceExpectedFileState, WorkspaceMutation,
+    WorkspaceMutationDisposition, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
+    WorkspaceReplacement,
 };
 
 use plakous_tools::JoinedProcessOutputCursor;
@@ -64,8 +64,8 @@ fn credential_binding() -> Result<CredentialDelegation, TestError> {
     ))
 }
 
-fn control() -> ExecutionOperationControl {
-    ExecutionOperationControl::new(CancellationToken::new())
+fn control() -> OperationContext {
+    OperationContext::new(CancellationToken::new())
 }
 
 fn limits(
@@ -326,7 +326,7 @@ async fn host_backend_preserves_constructor_and_is_truthful() -> Result<(), Test
         ExecutionEnvironmentConfig::new(limits(8, 8, 12, 3)?, [], [])?,
     )?;
 
-    assert_eq!(environment.backend().kind(), ExecutionBackendKind::Host);
+    assert_eq!(environment.backend().kind(), ExecutionBackendKind::Runner);
     let containment = environment.backend().containment();
     #[cfg(target_os = "linux")]
     {
@@ -884,7 +884,7 @@ async fn joined_process_sessions_join_cancelled_group() -> Result<(), TestError>
             JoinedProcessCommand::literal(shell, [String::from("-c"), cancelled_command])?,
             false,
         )?,
-        ExecutionOperationControl::new(cancellation.clone()),
+        OperationContext::new(cancellation.clone()),
     )?;
     let cancelled_process = wait_for_pid_file(&cancelled_marker).await?;
     cancellation.cancel();
@@ -1164,7 +1164,7 @@ async fn joined_process_pty_cancellation_and_timeout_join_the_group() -> Result<
             false,
             JoinedProcessTerminalMode::UnixPty,
         )?,
-        ExecutionOperationControl::new(cancellation.clone()),
+        OperationContext::new(cancellation.clone()),
     )?;
     let cancelled_pid = wait_for_pid_file(&cancelled_pid_path).await?;
     cancellation.cancel();
@@ -2539,7 +2539,7 @@ async fn host_cancel_and_future_drop_join_the_owned_process_group() -> Result<()
             [],
             LiteralProcessIntent::default(),
         )?,
-        ExecutionOperationControl::new(cancellation.clone()),
+        OperationContext::new(cancellation.clone()),
     ));
     let child_path = workspace.path().join("child.pid");
     let child_pid = wait_for_pid_file(&child_path).await?;
@@ -2769,7 +2769,7 @@ async fn cancellation_error_is_terminal_only_after_cleanup() -> Result<(), TestE
             Vec::new(),
             LiteralProcessIntent::default(),
         )?,
-        ExecutionOperationControl::new(cancellation.clone()),
+        OperationContext::new(cancellation.clone()),
     ));
     tokio::task::yield_now().await;
     assert!(!backend.status().is_drained());

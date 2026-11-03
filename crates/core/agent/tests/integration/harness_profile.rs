@@ -217,8 +217,10 @@ fn workspace_digest(workspace: &WorkspacePolicy) -> TestResult<plakous_model::Di
     let root = workspace.root().as_os_str().as_encoded_bytes();
     let cwd = workspace.cwd().as_os_str().as_encoded_bytes();
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"plakous-agent/workspace-environment-v1\0");
+    bytes.extend_from_slice(b"plakous-agent/workspace-environment-v2\0");
     bytes.extend_from_slice(std::env::consts::OS.as_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(b"local");
     bytes.push(0);
     bytes.extend_from_slice(b"host-path-policy-only\0");
     bytes.extend_from_slice(&u64::try_from(root.len())?.to_be_bytes());

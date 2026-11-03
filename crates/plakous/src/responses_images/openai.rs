@@ -1,6 +1,6 @@
 use super::{
-    Arc, ExecutionOperationControl, ImageGenFuture, ImageGenPort, ImageGenRequest,
-    ResponsesImageFlavor, error_of, lowered,
+    Arc, ImageGenFuture, ImageGenPort, ImageGenRequest, OperationContext, ResponsesImageFlavor,
+    error_of, lowered,
 };
 
 /// One session's OpenAI API image generation as an [`ImageGenPort`].
@@ -23,11 +23,7 @@ impl ImageGenPort for OpenAiImagePort {
         ResponsesImageFlavor::OpenAi.takes_size()
     }
 
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        control: ExecutionOperationControl,
-    ) -> ImageGenFuture {
+    fn generate(&self, request: ImageGenRequest, control: OperationContext) -> ImageGenFuture {
         let images = Arc::clone(&self.0);
         Box::pin(async move {
             let request = lowered(

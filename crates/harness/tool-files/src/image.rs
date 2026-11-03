@@ -10,7 +10,7 @@ use plakous_tools::{
     ToolRuntimeErrorKind, WorkspaceReadSliceRequest,
 };
 use plakous_tools::{
-    backend_runtime_error, content_runtime_error, decode_arguments, operation_control,
+    backend_runtime_error, content_runtime_error, decode_arguments, operation_context,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -62,7 +62,7 @@ impl ToolExecutor for InspectImageTool {
                 .read_workspace(
                     WorkspaceReadSliceRequest::start(path, MAX_STANDARD_IMAGE_BYTES)
                         .map_err(backend_runtime_error)?,
-                    operation_control(&context),
+                    operation_context(&context),
                 )
                 .await
                 .map_err(backend_runtime_error)?;

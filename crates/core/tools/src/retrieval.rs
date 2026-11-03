@@ -11,7 +11,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::ExecutionOperationControl;
+use crate::OperationContext;
 
 /// The retrieval a port can perform.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -177,9 +177,5 @@ pub trait RetrievalPort: Send + Sync {
     fn kinds(&self) -> &[RetrievalKind];
 
     /// Runs one retrieval as one isolated side request.
-    fn retrieve(
-        &self,
-        request: RetrievalRequest,
-        control: ExecutionOperationControl,
-    ) -> RetrievalFuture;
+    fn retrieve(&self, request: RetrievalRequest, control: OperationContext) -> RetrievalFuture;
 }

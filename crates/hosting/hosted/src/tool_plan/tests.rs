@@ -457,11 +457,7 @@ impl ImageGenPort for FixedImagePort {
         true
     }
 
-    fn generate(
-        &self,
-        _request: ImageGenRequest,
-        _control: ExecutionOperationControl,
-    ) -> ImageGenFuture {
+    fn generate(&self, _request: ImageGenRequest, _control: OperationContext) -> ImageGenFuture {
         Box::pin(async { Ok(Vec::new()) })
     }
 }
@@ -520,7 +516,7 @@ impl RetrievalPort for FakePort {
         &self.0
     }
 
-    fn retrieve(&self, _: RetrievalRequest, _: ExecutionOperationControl) -> RetrievalFuture {
+    fn retrieve(&self, _: RetrievalRequest, _: OperationContext) -> RetrievalFuture {
         Box::pin(async { Ok(plakous::tools::web::RetrievalOutcome::default()) })
     }
 }
@@ -610,7 +606,7 @@ impl RetrievalPort for RecordingPort {
         &[RetrievalKind::WebSearch, RetrievalKind::PageFetch]
     }
 
-    fn retrieve(&self, request: RetrievalRequest, _: ExecutionOperationControl) -> RetrievalFuture {
+    fn retrieve(&self, request: RetrievalRequest, _: OperationContext) -> RetrievalFuture {
         let text = match &request {
             RetrievalRequest::WebSearch { query, .. } => query.clone(),
             RetrievalRequest::PageFetch { url, .. } => url.clone(),
@@ -628,8 +624,8 @@ impl RetrievalPort for RecordingPort {
     }
 }
 
-fn control() -> ExecutionOperationControl {
-    ExecutionOperationControl::new(plakous::model::CancellationToken::new())
+fn control() -> OperationContext {
+    OperationContext::new(plakous::model::CancellationToken::new())
 }
 
 #[tokio::test]

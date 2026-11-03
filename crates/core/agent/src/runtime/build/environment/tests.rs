@@ -1,20 +1,19 @@
 use super::{
     AgentError, AgentErrorKind, Digest, DigestDomain, ExecutionBackendDescriptor, WorkspacePolicy,
-    append_job_config, stable_workspace_environment_bytes, stored_composition_artifact,
-    stored_job_config,
+    append_job_config, require_same_runner, stable_workspace_environment_bytes,
+    stored_composition_artifact, stored_job_config,
 };
 
 #[test]
-fn workspace_facts_name_the_backend_os_and_keep_the_host_bytes()
--> Result<(), Box<dyn std::error::Error>> {
+fn workspace_facts_name_the_backend_os_and_runner() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let workspace = WorkspacePolicy::host(directory.path(), ".")?;
-    let host = ExecutionBackendDescriptor::current_host();
+    let host = ExecutionBackendDescriptor::local_runner();
     let root = workspace.root().as_os_str().as_encoded_bytes();
     let cwd = workspace.cwd().as_os_str().as_encoded_bytes();
-    let mut expected = b"plakous-agent/workspace-environment-v1\0".to_vec();
+    let mut expected = b"plakous-agent/workspace-environment-v2\0".to_vec();
     expected.extend_from_slice(std::env::consts::OS.as_bytes());
-    expected.extend_from_slice(b"\0host-path-policy-only\0");
+    expected.extend_from_slice(b"\0local\0host-path-policy-only\0");
     expected.extend_from_slice(&u64::try_from(root.len())?.to_be_bytes());
     expected.extend_from_slice(root);
     expected.extend_from_slice(&u64::try_from(cwd.len())?.to_be_bytes());
@@ -28,8 +27,39 @@ fn workspace_facts_name_the_backend_os_and_keep_the_host_bytes()
     other["operating_system"] = "freebsd".into();
     let other: ExecutionBackendDescriptor = serde_json::from_value(other)?;
     let bytes = stable_workspace_environment_bytes(&workspace, &other)?;
-    let prefix = b"plakous-agent/workspace-environment-v1\0".len();
-    assert!(bytes[prefix..].starts_with(b"freebsd\0host-path-policy-only\0"));
+    let prefix = b"plakous-agent/workspace-environment-v2\0".len();
+    assert!(bytes[prefix..].starts_with(b"freebsd\0local\0host-path-policy-only\0"));
+    Ok(())
+}
+
+/// Every rebind of a line keeps its runner: a target on another runner is
+/// refused and names both runners.
+#[test]
+fn a_transition_onto_another_runner_is_refused_by_name() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let workspace = WorkspacePolicy::host(directory.path(), ".")?;
+    let local = ExecutionBackendDescriptor::local_runner();
+    let recorded = stable_workspace_environment_bytes(&workspace, &local)?;
+    require_same_runner("rebind", &recorded, &local)?;
+
+    let mut remote: serde_json::Value = serde_json::to_value(&local)?;
+    remote["runner_id"] = "build-box".into();
+    let remote: ExecutionBackendDescriptor = serde_json::from_value(remote)?;
+    let refused = require_same_runner("rebind", &recorded, &remote)
+        .err()
+        .ok_or("a rebind onto another runner must be refused")?;
+    assert_eq!(refused.kind(), AgentErrorKind::InvalidInput);
+    assert_eq!(
+        refused.binding_change(),
+        Some(&crate::BindingChange::Runner {
+            recorded: "local".to_owned(),
+            current: "build-box".to_owned(),
+        })
+    );
+    assert_eq!(
+        refused.binding_change().map(ToString::to_string).as_deref(),
+        Some("runner (recorded `local`, this build `build-box`)")
+    );
     Ok(())
 }
 
@@ -40,7 +70,7 @@ fn composition_environment_reader_is_length_framed_and_fail_closed()
     let workspace = WorkspacePolicy::host(directory.path(), ".")?;
     let mut bytes = stable_workspace_environment_bytes(
         &workspace,
-        &ExecutionBackendDescriptor::current_host(),
+        &ExecutionBackendDescriptor::local_runner(),
     )?;
     let workspace_len = bytes.len();
     append_job_config(&mut bytes, plakous_tools::JobConfig::default());

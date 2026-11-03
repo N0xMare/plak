@@ -32,7 +32,7 @@ async fn leftover_jobs_leader_exit_wakes_an_already_held_quiet_poll() -> TestRes
                 yield_time_ms: 0,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .await?;
     let handle = started.projection.session_id.ok_or("budget handle")?;
@@ -42,7 +42,7 @@ async fn leftover_jobs_leader_exit_wakes_an_already_held_quiet_poll() -> TestRes
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .quiet_polls = 1;
-    let control = ExecutionOperationControl::new(CancellationToken::new());
+    let control = OperationContext::new(CancellationToken::new());
     let observed = ProcessSessionTools::observe_summarized(
         &environment,
         handle,
@@ -156,7 +156,7 @@ async fn literal_joined_commands_do_not_promote_leftover_shell_children() -> Tes
             false,
             JoinedProcessTerminalMode::Pipes,
         )?,
-        ExecutionOperationControl::new(CancellationToken::new()),
+        OperationContext::new(CancellationToken::new()),
     )?;
     tokio::time::timeout(Duration::from_secs(5), async {
         while !sessions
@@ -194,7 +194,7 @@ async fn leftover_jobs_budget_promotion_converts_and_wait_reports_leader_exit() 
                 yield_time_ms: 0,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .await?;
     let id = started.session_id;
@@ -210,7 +210,7 @@ async fn leftover_jobs_budget_promotion_converts_and_wait_reports_leader_exit() 
             yield_time_ms: Some(30_000),
             max_output_bytes: Some(4096),
         },
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     assert!(before.elapsed() < Duration::from_secs(5));
@@ -221,7 +221,7 @@ async fn leftover_jobs_budget_promotion_converts_and_wait_reports_leader_exit() 
     let outcome = ProcessSessionTools::await_canonical(
         &environment,
         &await_request(&[handle], 0),
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     assert!(outcome.joined_text().contains("leader exited 7"));
@@ -285,7 +285,7 @@ async fn start_leftover(
                 yield_time_ms: 30_000,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .await?)
 }
@@ -458,7 +458,7 @@ async fn untruncated_foreground_output_creates_no_output_file() -> TestResult {
                 yield_time_ms: 30_000,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .await?;
     let id = result.session_id;
@@ -499,7 +499,7 @@ async fn foreground_lossy_utf8_truncation_spools_the_original_bytes() -> TestRes
                     yield_time_ms: 30_000,
                     max_output_bytes: 502,
                 },
-                ExecutionOperationControl::new(CancellationToken::new()),
+                OperationContext::new(CancellationToken::new()),
             )
             .await?;
         let value: Value = serde_json::from_str(&result.into_outcome()?.joined_text())?;
@@ -544,7 +544,7 @@ async fn foreground_truncation_names_complete_output_before_window_eviction() ->
                     yield_time_ms: 30_000,
                     max_output_bytes: 4096,
                 },
-                ExecutionOperationControl::new(CancellationToken::new()),
+                OperationContext::new(CancellationToken::new()),
             )
             .await?;
         assert!(result.joined && !result.first_promotion);
@@ -650,7 +650,7 @@ async fn start(tools: &ProcessSessionTools, environment: &ExecutionEnvironment) 
                 yield_time_ms: 0,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .await?;
     result
@@ -680,7 +680,7 @@ async fn empty_poll_returns_on_new_output_without_waiting_full_window() -> TestR
             yield_time_ms: Some(120_000),
             max_output_bytes: Some(4096),
         },
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     let elapsed = before.elapsed();
@@ -708,7 +708,7 @@ async fn control_c_stops_a_pipe_job_and_consumes_as_terminal_result() -> TestRes
             yield_time_ms: Some(250),
             max_output_bytes: Some(4096),
         },
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     let jobs = environment.joined_process_sessions()?;
@@ -770,7 +770,7 @@ async fn steer_promotes_a_foreground_process_without_killing_it() -> TestResult 
                 yield_time_ms: 600_000,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()).with_preempt(receiver),
+            OperationContext::new(CancellationToken::new()).with_preempt(receiver),
         )
         .await?;
     let handle = result.projection.session_id.ok_or("promoted handle")?;
@@ -785,7 +785,7 @@ async fn steer_promotes_a_foreground_process_without_killing_it() -> TestResult 
             yield_time_ms: Some(30_000),
             max_output_bytes: Some(4096),
         },
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     assert!(completed.joined);
@@ -858,7 +858,7 @@ async fn preempt_at_full_job_ledger_keeps_foreground_observation(
                 yield_time_ms,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()).with_preempt(preempt),
+            OperationContext::new(CancellationToken::new()).with_preempt(preempt),
         )
         .await;
     sessions.join_all()?;
@@ -891,7 +891,7 @@ async fn grok_snapshots_read_output_so_far_without_consuming_running_jobs() -> T
         .session_for_number(u32::try_from(handle)?)
         .ok_or("id")?;
     sessions.write_stdin(id, b"first\n", JoinedProcessInputDisposition::KeepOpen)?;
-    let control = ExecutionOperationControl::new(CancellationToken::new());
+    let control = OperationContext::new(CancellationToken::new());
     // Synchronize on output, not on a sleep or an assumed scheduler deadline.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -938,7 +938,7 @@ async fn grok_await_waits_for_all_processes_and_reports_only_terminal_ids() -> T
     let outcome = ProcessSessionTools::await_canonical(
         &environment,
         &await_request(&[first, second], 3_600_000),
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     let value: Value = serde_json::from_str(&outcome.joined_text())?;
@@ -978,7 +978,7 @@ async fn first_terminal_await_over_every_own_job_returns_when_one_ends() -> Test
     let outcome = ProcessSessionTools::await_canonical(
         &environment,
         &request,
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     assert!(before.elapsed() < Duration::from_secs(30));
@@ -1023,7 +1023,7 @@ async fn bare_first_terminal_await_with_no_jobs_returns_empty_tasks_at_once() ->
     let outcome = ProcessSessionTools::await_canonical(
         &environment,
         &request,
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     assert!(
@@ -1055,7 +1055,7 @@ async fn grok_await_steer_returns_without_stopping_or_consuming_running_jobs() -
                 yield_time_ms: 0,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .await?;
     let handle = started.projection.session_id.ok_or("promoted handle")?;
@@ -1064,7 +1064,7 @@ async fn grok_await_steer_returns_without_stopping_or_consuming_running_jobs() -
     let outcome = ProcessSessionTools::await_canonical(
         &environment,
         &await_request(&[handle], 120_000),
-        &ExecutionOperationControl::new(CancellationToken::new()).with_preempt(receiver),
+        &OperationContext::new(CancellationToken::new()).with_preempt(receiver),
     )
     .await?;
     assert!(before.elapsed() < Duration::from_secs(30));
@@ -1109,7 +1109,7 @@ async fn grok_terminal_snapshot_survives_repeated_reads_and_preserves_natural_ex
         .session_for_number(u32::try_from(handle)?)
         .ok_or("id")?;
     sessions.write_stdin(id, b"one\ntwo\n", JoinedProcessInputDisposition::KeepOpen)?;
-    let control = ExecutionOperationControl::new(CancellationToken::new());
+    let control = OperationContext::new(CancellationToken::new());
     let awaited = ProcessSessionTools::await_canonical(
         &environment,
         &await_request(&[handle], 5000),
@@ -1245,7 +1245,7 @@ async fn promotion_and_truncated_pages_name_the_job_output_file() -> TestResult 
                 yield_time_ms: 0,
                 max_output_bytes: 4096,
             },
-            ExecutionOperationControl::new(CancellationToken::new()),
+            OperationContext::new(CancellationToken::new()),
         )
         .await?;
     let handle = started.projection.session_id.ok_or("job handle")?;
@@ -1275,7 +1275,7 @@ async fn promotion_and_truncated_pages_name_the_job_output_file() -> TestResult 
         assert!(Instant::now() < deadline, "no progress");
         std::thread::yield_now();
     }
-    let control = ExecutionOperationControl::new(CancellationToken::new());
+    let control = OperationContext::new(CancellationToken::new());
     let mut request = await_request(&[handle], 0);
     request.max_output_bytes = 4;
     let value: Value = serde_json::from_str(
@@ -1332,7 +1332,7 @@ async fn first_terminal_await_waits_past_an_already_reported_id() -> TestResult 
     let outcome = ProcessSessionTools::await_canonical(
         &environment,
         &request,
-        &ExecutionOperationControl::new(CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     )
     .await?;
     let elapsed = before.elapsed();

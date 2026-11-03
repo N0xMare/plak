@@ -3,10 +3,9 @@ use super::super::mutate_workspace_sync;
 use super::ExecutionBackendErrorKind;
 use super::{ExecutionWorkspace, fs};
 use crate::{
-    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
-    ExecutionOperationControl, WorkspaceContentIdentity, WorkspaceExpectedFileState,
-    WorkspaceMutation, WorkspaceMutationDisposition, WorkspaceMutationTransaction,
-    WorkspaceReplacement,
+    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, OperationContext,
+    WorkspaceContentIdentity, WorkspaceExpectedFileState, WorkspaceMutation,
+    WorkspaceMutationDisposition, WorkspaceMutationTransaction, WorkspaceReplacement,
 };
 use plakous_model::CancellationToken;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -24,8 +23,8 @@ fn workspace(root: &Path) -> Result<ExecutionWorkspace, Box<dyn std::error::Erro
     Ok(ExecutionWorkspace::from_environment(&environment))
 }
 
-fn control() -> ExecutionOperationControl {
-    ExecutionOperationControl::new(CancellationToken::new())
+fn control() -> OperationContext {
+    OperationContext::new(CancellationToken::new())
 }
 
 #[test]

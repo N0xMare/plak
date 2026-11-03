@@ -81,6 +81,7 @@ mod continuation_reopen;
 mod descriptor_fixtures;
 mod fence_compaction;
 mod lease_permits;
+mod line_owner;
 mod lineage;
 mod model_fixtures;
 mod named_state;

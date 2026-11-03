@@ -3,7 +3,7 @@ use super::{
     STANDARD_SEARCH_FILE_BYTES, STANDARD_SEARCH_RESULT_BYTES, STANDARD_SEARCH_TREE_ENTRIES,
     ToolContext, ToolDefinition, ToolEffect, ToolExecutor, ToolFuture, ToolInvocation, ToolOutcome,
     ToolRuntimeError, backend_runtime_error, decode_arguments, deserialize_optional_semantic_u64,
-    json, object_schema, operation_control, query_root, standard_definition,
+    json, object_schema, operation_context, query_root, standard_definition,
 };
 use std::path::PathBuf;
 
@@ -63,7 +63,7 @@ impl ToolExecutor for ListEntriesTool {
             .map_err(backend_runtime_error)?;
             let result = context
                 .environment()
-                .query_repository(query, operation_control(&context))
+                .query_repository(query, operation_context(&context))
                 .await
                 .map_err(backend_runtime_error)?;
             let entries: Vec<_> = result
