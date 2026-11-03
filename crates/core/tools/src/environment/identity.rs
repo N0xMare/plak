@@ -570,6 +570,17 @@ impl ExecutionBackendIdentity {
         })
     }
 
+    /// A runner-backed authority presenting the runner's own `descriptor`.
+    pub(super) fn runner(
+        descriptor: ExecutionBackendDescriptor,
+    ) -> Result<Self, ExecutionEnvironmentError> {
+        Ok(Self {
+            descriptor,
+            authority_id: fresh_backend_authority_id()?,
+            authority_revision: ExecutionBackendAuthorityRevision::host(),
+        })
+    }
+
     pub(super) fn deterministic_fake() -> Result<Self, ExecutionEnvironmentError> {
         Ok(Self {
             descriptor: ExecutionBackendDescriptor::deterministic_fake(),

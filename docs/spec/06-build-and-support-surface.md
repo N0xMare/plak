@@ -82,7 +82,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages, and the runner packages before their first release, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 38 packages: five supported, 29 published internal, four
+The workspace holds 39 packages: five supported, 29 published internal, five
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -109,15 +109,16 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 A retired package stops at its last published version; that version is not yanked.
 
-**Repository-only (4)**
+**Repository-only (5)**
 
 `plakous-test-support`, `plakous-offline-crash-harness`,
-`plakous-mcp-fake-server`, `plakous-runner-protocol`.
+`plakous-mcp-fake-server`, `plakous-runner-protocol`, `plakous-runner`.
 
-`plakous-runner-protocol` (layer `common`) is the runner protocol (chapter 01
-§8.4). It stays repository-only until runners are reachable from the product;
-until then nothing published depends on it. The `common` layer admits the
-repository-only class for this reason.
+`plakous-runner-protocol` (layer `common`) is the runner protocol, and
+`plakous-runner` (layer `engine`) its host and runner ends with the in-process
+loopback (chapter 01 §8.4). They stay repository-only until runners are
+reachable from the product; until then nothing published depends on them. The
+`common` and `engine` layers admit the repository-only class for this reason.
 
 Every one of these declares its `layer` and `class` in `[package.metadata.plakous]`,
 and `tools/gate/check_workspace.py` (via `tools/gate/plakous_policy.py`) checks each
@@ -133,7 +134,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
 | `crates/common/` | attempt, http, auth, runner-protocol | common |
-| `crates/runtimes/` | cell, js-runtime, py-worker | engine |
+| `crates/runtimes/` | cell, js-runtime, py-worker, runner | engine |
 | `crates/protocols/` | Responses (with its shared dialect hosts), exchange, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
 | `crates/store/` | session-store implementations | store |

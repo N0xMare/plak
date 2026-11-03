@@ -5522,16 +5522,19 @@ pack-author helper in `plakous-tools` that the facade does not re-export,
 builds it for a tool call from the call's `ToolContext`; the owner is the one the
 agent named on its execution environment at construction
 (`ExecutionEnvironment::with_line_owner`, from the job owner of §8.5). The
-owner, class and budget are carried, not enforced: they are the fence and
-idempotency key a runner checks once execution leaves the process, and no
-backend reads them yet. When a runner does check them, the owner comes from the
-session's current job owner (§8.5), not from an owner a joined process
+direct local backend carries the owner, class and budget without reading them;
+they are the fence and idempotency key a runner checks once execution leaves
+the process (runner protocol v1, below). The owner a runner checks comes from
+the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
-**Runner protocol v1.** `plakous-runner-protocol` (repository-only, chapter
-06 §3) defines what a host and a runner say to each other over one byte
-stream. Nothing implements either end yet and no product path reaches it.
+**Runner protocol v1.** `plakous-runner-protocol` defines what a host and a
+runner say to each other over one byte stream, and `plakous-runner` implements
+both ends over an `ExecutionEnvironment` and joins them in process as a
+loopback (both repository-only, chapter 06 §3). Nothing selects a runner for a
+session yet and no product path reaches either crate; the loopback exists for
+conformance.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
@@ -5555,17 +5558,69 @@ stream. Nothing implements either end yet and no product path reaches it.
   A `BuildRead` (from `Unkeyed`) is keyed by its request id alone and is never
   recorded. The operations of this version are `workspace.read`,
   `repository.query`, `workspace.mutate` and `process.execute`, whose payloads
-  and errors are the execution environment's own schema; the protocol
-  frames, keys and orders them without interpreting them. Control frames are
-  `Cancel`, `Preempt`, `Ack`, `TransferOwner` and `Ping`; no operation of this
-  version reads a yield, so a runner accepts `Preempt` and changes nothing.
-  Services, process streams, jobs and joined sessions are not carried yet: a
-  runner that does not advertise the `streams` capability answers them
-  `Unsupported`, with no effect, as it answers the `ProcessObservation { job,
-  cursor }` and `OwnerControl { control_id }` request classes. Those classes
-  and the stream frame (`Stream { stream, seq, event }`, with data, credit and
-  close events) are already part of the grammar, so jobs and streams arrive
-  without a version change.
+  and errors are the execution environment's own schema (the runner seam of
+  §8.5); the protocol frames, keys and orders them without interpreting them.
+  Control frames are `Cancel`, `Preempt`, `Ack`, `TransferOwner` and `Ping`;
+  no operation of this version reads a yield, so a runner accepts `Preempt`
+  and changes nothing. Services, process streams, jobs and joined sessions are
+  not carried yet: a runner that does not advertise the `streams` capability
+  answers them `Unsupported`, with no effect, as it answers the
+  `ProcessObservation { job, cursor }` and `OwnerControl { control_id }`
+  request classes. Those classes and the stream frame (`Stream { stream, seq,
+  event }`, with data, credit and close events) are already part of the
+  grammar, so jobs and streams arrive without a version change.
+- **Owners.** The runner keeps, per host and line, the newest owner it has
+  accepted, ordered by `(generation, fence)`. The host sends `TransferOwner {
+  from, to }` after the new owner's lease is granted and before that owner's
+  first request; the runner accepts a `to` newer than or equal to its current
+  owner, so a transfer whose acknowledgement was lost can be sent again, and
+  otherwise answers `StaleOwner` with the owner it keeps. The fence applies to
+  work that has not run: a new key or an unkeyed request whose owner is older
+  than the accepted owner is refused `StaleOwner`, and one whose owner is newer
+  but was never transferred is refused `OwnerNotTransferred`. Neither has an
+  effect; the host reports a stale owner as
+  `ExecutionBackendError::stale_job_owner`, proven to have had no effect. A
+  resend of a key the runner already holds is answered from the op table
+  whatever its owner, since the call it names may have run.
+- **At most once.** An effect-call key runs at most once per runner instance.
+  The first send runs it. A resend with the same key and digest answers
+  `InProgress` while it runs, then the stored answer; another digest under the
+  key answers `StaleRequest`, with no effect. A replay (`replay = true`) of a
+  key the runner never saw answers `NotSeen` and leaves a tombstone, so the
+  original arriving late never runs. The host's `Ack` spends a key, and a
+  later resend answers `Spent`: the call ran, and the host treats its outcome
+  as unknown. Request ids are unique per host process, so one host instance
+  cannot acknowledge or cancel another's request. Answers and tombstones are
+  kept until `Ack` or for 24 hours.
+- **Host link.** A call waits 30 s for an answer (120 s for an effect call),
+  then its outcome is unknown. Effect calls and reads outstanding when the
+  link is lost are replayed by key and digest on the reconnection to the same
+  runner instance; an unkeyed mutation or process outstanding then is
+  `OutcomeUnknown`, since it has no key to ask by. A call made with no link is
+  unavailable and proven to have had no effect.
+
+The at-most-once law across restarts:
+
+- **Runner restart.** A new `instance` (and every new `boot_id`) has empty
+  owner and op tables. The host treats every call outstanding on the old
+  instance as of unknown outcome (`RecoveryRequired`, not proven to have had no
+  effect) and transfers each line again before its next call there. A process
+  the old instance started may still finish; nothing re-runs it, because the
+  host never resends a call whose outcome is unknown: the driver settles it
+  `OutcomeUnknown`, and a later attempt is a new key. Until a line is
+  transferred again, the new instance accepts any first owner of it, so after
+  a runner restart the fence rests on the host's lease authority; the runner
+  only reduces late effects, and runtime commit fencing prevents split brain.
+- **Host restart** (the same `host_id`, a new `host_instance`) against the same
+  runner instance. The successor replays each call it may have sent: an
+  answered key returns its stored answer and does not run again, a running key
+  answers `InProgress` and then its answer, and a key the runner never saw
+  answers `NotSeen` and is tombstoned, so nothing under it runs and the call is
+  proven to have had no effect. A replay later than the 24-hour retention must
+  not be sent: the host settles such a call `OutcomeUnknown`. The host side
+  keeps its outstanding calls in memory in this version; persisting them
+  before sending comes with runner selection.
+- **Both restarted.** Every outstanding call is of unknown outcome.
 
 Every potentially effectful invocation follows one small protocol: validate →
 authorize or approve → record identity → dispatch → observe outcome → commit or
@@ -5986,6 +6041,24 @@ descriptor written for another platform does not decode here; deriving the
 expected containment from the wire's operating system is required before a
 descriptor crosses a process boundary. Joined process sessions require the local
 runner's direct backend.
+
+The runner seam, `plakous_tools::internal::runner` (unsupported and hidden), is
+the host end of runner execution. `RunnerBackend` is a sealed execution backend
+whose read, query, mutate and execute operations go to a runner through an
+`Arc<dyn RunnerLink>` as JSON payloads in the seam's own schema, which names
+the workspace root and cwd as the runner knows them; `serve` is the runner side
+that answers them from a local `ExecutionEnvironment` over the same workspace
+and refuses any other. Its identity is always the `Runner` descriptor its
+runner announced, which must name a runner other than `local`. It resolves no
+environment delegation, since the runner applies its own delegations and
+limits, and `spawn_service` answers `Unsupported` with no effect. Backend
+errors cross with their kind, message, no-effect proof and conflict path. A
+link failure becomes `Io`, proven to have had no effect, when the call was
+never sent; `RecoveryRequired` when its outcome is unknown; the stale-owner
+`IdentityMismatch` when the runner refused its owner; and `InvalidRequest`
+when the runner refused it as malformed. The seam does not depend on the
+protocol crate, nothing in Plakous selects it, and the facade does not reach
+it.
 
 An explicit joined-process shell profile enrolls both its absolute invocation
 name and its canonical filesystem object, plus its fixed argument prefix.

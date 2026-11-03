@@ -15,6 +15,17 @@ use std::sync::Arc;
 
 pub use plakous_model::redaction as preview;
 
+/// The runner seam: a backend whose operations run on a runner, and the
+/// runner side that answers them (spec 01 §8.5). Unsupported, and never
+/// selected for a session by this crate.
+#[doc(hidden)]
+pub mod runner {
+    pub use crate::environment::runner::{
+        RunnerBackend, RunnerCall, RunnerCallFuture, RunnerFailure, RunnerLink, RunnerVerb,
+        ServeFailure, ServeFuture, answer_too_large, runner_descriptor, runner_environment, serve,
+    };
+}
+
 use plakous_model::{AttemptId, CancellationToken, Clock, Digest, RunId, Timestamp, TurnId};
 
 use crate::{

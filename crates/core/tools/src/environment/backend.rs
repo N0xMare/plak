@@ -48,6 +48,7 @@ use process::{
 use workspace::resolve_existing_no_symlink;
 mod operation;
 pub use operation::{LineOwner, OperationClass, OperationContext};
+pub(crate) mod runner;
 mod service;
 use service::spawn_host_service;
 pub use service::{

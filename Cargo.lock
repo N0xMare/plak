@@ -4362,6 +4362,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "plakous-runner"
+version = "0.0.3"
+dependencies = [
+ "plakous-model",
+ "plakous-runner-protocol",
+ "plakous-tools",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "plakous-runner-protocol"
 version = "0.0.3"
 dependencies = [

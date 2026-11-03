@@ -19,6 +19,7 @@ members = [
     "crates/runtimes/cell",
     "crates/runtimes/js-runtime",
     "crates/runtimes/py-worker",
+    "crates/runtimes/runner",
     "crates/harness/compose",
     "crates/common/http",
     "crates/protocols/chat-completions",
@@ -224,7 +225,7 @@ vendor = ["vendor/{short}"]
 [workspace.metadata.plakous.classes]
 core = ["supported"]
 common = ["published-internal", "repository-only"]
-engine = ["published-internal"]
+engine = ["published-internal", "repository-only"]
 protocol = ["published-internal"]
 provider = ["published-internal"]
 store = ["published-internal"]
