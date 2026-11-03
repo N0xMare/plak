@@ -130,11 +130,14 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         return Err(interrupted_before_dispatch("fork"));
     }
     let target_id = request.successor_product_id();
-    if let Err(error) = seed_fork_tree(config, opened, &target_id, source_locator).await {
-        restore_detached_source(config, opened, source_locator, stderr_buf).await?;
-        discard_unstarted_fork(watch, config, opened, events, &operation_id).await?;
-        return Err(error);
-    }
+    let seeded = match seed_fork_tree(config, opened, &target_id, source_locator).await {
+        Ok(seeded) => seeded,
+        Err(error) => {
+            restore_detached_source(config, opened, source_locator, stderr_buf).await?;
+            discard_unstarted_fork(watch, config, opened, events, &operation_id).await?;
+            return Err(error);
+        }
+    };
     stderr_buf.clear();
     config.state_roots.set_inherited_skills(inherited_skills);
     let built = fork_runtime_binding(config, &target_id, stderr_buf).await;
@@ -142,12 +145,14 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     let runtime = match built {
         Ok(runtime) => runtime,
         Err(error) => {
+            discard_seeded_tree(config, &target_id, seeded);
             restore_detached_source(config, opened, source_locator, stderr_buf).await?;
             discard_unstarted_fork(watch, config, opened, events, &operation_id).await?;
             return Err(error);
         }
     };
     if watch.observe_now() {
+        discard_seeded_tree(config, &target_id, seeded);
         restore_detached_source(config, opened, source_locator, stderr_buf).await?;
         discard_unstarted_fork(watch, config, opened, events, &operation_id).await?;
         return Err(interrupted_before_dispatch("fork"));
@@ -164,6 +169,7 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
                     | AgentSessionsErrorKind::StoragePressure
             ) =>
         {
+            discard_seeded_tree(config, &target_id, seeded);
             restore_detached_source(config, opened, source_locator, stderr_buf).await?;
             discard_unstarted_fork(watch, config, opened, events, &operation_id).await?;
             if let Some(refusal) = fork_refusal(error.kind(), &error.to_string()) {
@@ -352,10 +358,10 @@ pub(super) async fn seed_fork_tree<P: plakous_host_protocol::ProtocolExtension>(
     opened: &AttachedCodingSession,
     target_id: &str,
     source_locator: plakous::sessions::SessionLocator,
-) -> CliResult<()> {
+) -> CliResult<Option<u64>> {
     use crate::agent_tree::{NodeLineId, ProductAgentTree, TopologyError};
     if config.session.composition == crate::binding::CompositionSelection::PySdk {
-        return Ok(());
+        return Ok(None);
     }
     let rows = config.topology_rows();
     let source_tree = durable_tree_id(&rows, &config.session);
@@ -364,7 +370,7 @@ pub(super) async fn seed_fork_tree<P: plakous_host_protocol::ProtocolExtension>(
         Some(_) => None,
         None => match rows.tree(&source_tree).map_err(CliFailure::new)? {
             Some(tree) => Some(tree),
-            None => return Ok(()),
+            None => return Ok(None),
         },
     };
     let line = opened
@@ -382,7 +388,7 @@ pub(super) async fn seed_fork_tree<P: plakous_host_protocol::ProtocolExtension>(
             .read(ProductAgentTree::clone)
             .map_err(|error| CliFailure::new(error.message))?,
         (None, Some(source)) => source,
-        (None, None) => return Ok(()),
+        (None, None) => return Ok(None),
     };
     let mut tree = ProductAgentTree::fork_genesis(
         &source,
@@ -399,7 +405,22 @@ pub(super) async fn seed_fork_tree<P: plakous_host_protocol::ProtocolExtension>(
         ));
     }
     rows.save_tree(&mut tree)
-        .map_err(|error| CliFailure::new(error.message))
+        .map_err(|error| CliFailure::new(error.message))?;
+    Ok(Some(tree.stored_revision))
+}
+
+/// Removes the fork's seeded tree on a path where the runtime fork
+/// definitely did not commit, compare-and-swapped on the revision the seed
+/// published so a tree anything else wrote since is left alone. Best
+/// effort: a tree left behind is an unreferenced row nothing opens.
+pub(super) fn discard_seeded_tree<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    target_id: &str,
+    seeded: Option<u64>,
+) {
+    if let Some(revision) = seeded {
+        let _ = config.topology_rows().delete_tree(target_id, revision);
+    }
 }
 
 /// The runtime a fork recompiles from: this session's own binding, built

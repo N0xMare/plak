@@ -407,6 +407,9 @@ fn delete_abandon_flag_refuses_fork_source_recovery() -> TestResult {
     let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
     record.source_product_session_id = Some(f.record.id.clone());
     record.source_workflow_operation_id = Some("delete:test-fork-source".into());
+    // A successor that stayed on its source's tree (a rebind with no tree of
+    // its own) carries the source's node.
+    record.node = f.record.node.clone();
     record.bind_plakous_locator(locator).checked()?;
     f.product.commit(&mut record).checked()?;
     let root = f.record.plakous_locator.ok_or("root locator").checked()?;

@@ -416,7 +416,8 @@ fn production_api_rebind_projects_complete_staging_lineage() {
         effective_configuration: serde_json::to_string(&binding.effective_provider_configuration())
             .unwrap(),
         account_binding: serde_json::to_string(&binding.account_binding()).unwrap(),
-        own_tree: Some(sessions::RootProfile::default()),
+        // Staged on the source's tree (LookupOnly), so it stays on it.
+        own_tree: None,
     };
     let request = sessions::projector::WorkflowRequest {
         operation_id: operation.into(),
@@ -685,6 +686,38 @@ fn assert_fork_has_a_tree_of_its_own(config: &HostConfig<TestExtension>, source_
     assert_eq!(branch_id, &source_locator.branch_id().to_string());
     assert_eq!(*epoch_no, source_tree.epochs().current);
     assert_ne!(line_id.as_str(), "");
+}
+
+/// A seeded fork tree is removed on a definite no-commit path, compare-and-
+/// swapped on the revision the seed published: a tree something else moved
+/// since is left alone.
+#[test]
+fn a_fork_seed_is_discarded_only_at_its_own_revision() {
+    use crate::runtime::fork::{discard_seeded_tree, seed_fork_tree};
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (config, mut opened) = actual_api_topology_host(root.path(), &executor);
+    let source = executor.block_on(opened.detach()).unwrap().unwrap();
+    let rows = config.topology_rows();
+    let seeded = executor
+        .block_on(seed_fork_tree(&config, &opened, "fork-discard", source))
+        .expect("the executor drives the call")
+        .unwrap();
+    assert!(seeded.is_some());
+    assert!(rows.tree_exists("fork-discard").unwrap());
+    discard_seeded_tree(&config, "fork-discard", seeded);
+    assert!(!rows.tree_exists("fork-discard").unwrap());
+
+    let seeded = executor
+        .block_on(seed_fork_tree(&config, &opened, "fork-moved", source))
+        .expect("the executor drives the call")
+        .unwrap();
+    let mut moved = rows.tree("fork-moved").unwrap().unwrap();
+    let epoch = moved.current_epoch().clone();
+    moved.install_snapshot(epoch);
+    rows.save_tree(&mut moved).unwrap();
+    discard_seeded_tree(&config, "fork-moved", seeded);
+    assert!(rows.tree_exists("fork-moved").unwrap());
 }
 
 /// Skills follow `AGENTS.md`: a fork re-reads them and names the listing, an

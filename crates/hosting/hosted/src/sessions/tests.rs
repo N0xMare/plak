@@ -1097,3 +1097,20 @@ fn a_switch_selection_round_trips_and_refuses_bytes_outside_its_digest() {
     let no_profile = encoded.replacen("\"profile\":\"grok-default\",", "", 1);
     assert!(SwitchSelection::decode(&no_profile).is_err());
 }
+
+/// `own_tree` is a required key of a stored rebind selection: absent is
+/// refused, `null` is a rebind that stays on its source's tree.
+#[test]
+fn a_rebind_selection_requires_its_own_tree_key() {
+    let mut selection = rebind_selection("grok-target");
+    selection.own_tree = None;
+    let encoded = serde_json::to_value(&*selection).unwrap();
+    assert!(encoded["own_tree"].is_null());
+    assert_eq!(
+        serde_json::from_value::<RebindSelection>(encoded.clone()).unwrap(),
+        *selection
+    );
+    let mut absent = encoded;
+    absent.as_object_mut().unwrap().remove("own_tree");
+    assert!(serde_json::from_value::<RebindSelection>(absent).is_err());
+}

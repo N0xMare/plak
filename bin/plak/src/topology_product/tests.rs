@@ -203,6 +203,8 @@ fn durable_tree_id_walks_rebind_source_to_persisted_tree() {
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     let mut rebound = crate::store::sessions::SessionRecord::new(paths.home().to_path_buf());
     rebound.source_product_session_id = Some(genesis.id.clone());
+    // A rebind that stayed on its source's tree carries the source's node.
+    rebound.node = genesis.node.clone();
     assert_eq!(
         durable_topology_tree_id(&crate::shell::host::product_state_roots(&paths), &rebound),
         genesis.id
@@ -231,6 +233,8 @@ fn read_only_tree_inspection_walks_rebind_lineage_and_keeps_child_rows() {
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     let mut rebound = crate::store::sessions::SessionRecord::new(paths.home().to_path_buf());
     rebound.source_product_session_id = Some(genesis.id.clone());
+    // A rebind that stayed on its source's tree carries the source's node.
+    rebound.node = genesis.node.clone();
     rebound.source_workflow_operation_id = Some("inspect:rebind".to_owned());
     product.commit(&mut rebound).unwrap();
 
@@ -256,6 +260,10 @@ fn read_only_tree_inspection_refuses_cyclic_lineage() {
     first.source_workflow_operation_id = Some("inspect:cycle:first".to_owned());
     second.source_product_session_id = Some(first.id.clone());
     second.source_workflow_operation_id = Some("inspect:cycle:second".to_owned());
+    // Both claim to stay on a tree that is not their own.
+    let shared = plakous_hosted::sessions::SessionNode::genesis("shared-tree");
+    first.node = shared.clone();
+    second.node = shared;
     product.commit(&mut first).unwrap();
     product.commit(&mut second).unwrap();
     let error = inspect_session_tree(&paths, &first).unwrap_err();

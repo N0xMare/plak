@@ -30,7 +30,9 @@ pub struct RebindSelection {
     /// The profile of the tree named after the successor's own id that it
     /// compiles against (a profile fork's seeded tree, or a py-sdk root with
     /// none), which its record freezes; `None` when it stays on its source's
-    /// tree, node and profile.
+    /// tree, node and profile. A required key: absent is refused, `null` is
+    /// the source's tree.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub own_tree: Option<RootProfile>,
 }
 

@@ -184,6 +184,10 @@ fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
 }
 
 impl TreeStore for SqliteTreeStore {
+    fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
+        Self::delete(self, tree_id, expected_revision)
+    }
+
     fn recover_storage(&self) -> Result<(), TreeStoreError> {
         self.with_writer(|writer| {
             let tx = writer.database.connection.transaction()

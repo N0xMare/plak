@@ -201,9 +201,16 @@ attach owns the tree from then on. The runtime fork copies the job counter
 (`next_id`) and no job rows (chapter 01 §5.6). The source's tree, children and
 cards are untouched; a fork is refused while that tree has a live descendant
 or a spawn mid-mint. A source without a tree seeds nothing, and the fork
-bootstraps its own tree on first attach like any new session. No session
-inherits a tree across a fork: tree resolution stops at a fork as it stops at
-a carry.
+bootstraps its own tree on first attach like any new session. When the
+runtime fork definitely did not commit (its runtime build failed, it was
+interrupted before dispatch, or the runtime refused it outright), the host
+deletes the seeded tree again, compare-and-swapped on the revision the seed
+published; an interrupted process can leave one behind, an unreferenced tree
+nothing opens. Tree resolution follows a session's lineage only while its
+product node is its source's (a rebind that stayed on its source's tree); a
+record whose node is the root of a tree named after it (a new session,
+`/new`, a fork, an import or carry, a rebind onto a tree of its own) resolves
+that tree and never its predecessor's.
 
 All `[orchestration]` bounds are carried in the digest, including the fixed
 per-cell agent budget: a ceiling that decides whether a spawn is admitted is

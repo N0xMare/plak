@@ -33,6 +33,16 @@ pub trait TreeRows {
         &self,
         tree: &mut ProductAgentTree,
     ) -> Result<(), crate::agent_tree::TopologyError>;
+
+    /// Delete one tree's rows, compare-and-swapped on `expected_revision`;
+    /// an absent tree is not an error.
+    ///
+    /// # Errors
+    /// A moved revision, or rows that cannot delete trees.
+    fn delete_tree(&self, tree_id: &str, expected_revision: u64) -> Result<(), String> {
+        let _ = (tree_id, expected_revision);
+        Err("these tree rows do not delete trees".to_owned())
+    }
 }
 
 /// Tree rows plus session ancestry through the supplied product record service.
@@ -70,15 +80,13 @@ pub fn durable_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> Stri
     session.id.clone()
 }
 
-/// The source whose tree `session` may still be on: none past a carry (its
-/// source lives in another build's store) or a fork (which opens a tree of
-/// its own).
+/// The source whose tree `session` may still be on. A record whose node is
+/// the root of a tree named after itself opened a tree of its own (a new
+/// session, `/new`, a fork, a carry or import, a rebind onto its own tree)
+/// and inherits none; only a successor that stayed on its source's tree
+/// does. A carried-forward source lives in another build's store.
 fn inherited_tree_source(session: &SessionRecord) -> Option<String> {
-    let forked = session
-        .source_workflow_operation_id
-        .as_deref()
-        .is_some_and(|operation| operation.starts_with("plak:fork:"));
-    if forked || session.carried_forward_from().is_some() {
+    if session.node.tree_id == session.id || session.carried_forward_from().is_some() {
         return None;
     }
     session.source_product_session_id.clone()
@@ -382,6 +390,12 @@ impl TreeRows for HostRows<'_> {
             .map_err(crate::agent_tree::TopologyError::from)?;
         tree.acknowledge_revision(acknowledged);
         Ok(())
+    }
+
+    fn delete_tree(&self, tree_id: &str, expected_revision: u64) -> Result<(), String> {
+        self.trees()?
+            .delete(tree_id, expected_revision)
+            .map_err(|error| error.detail.clone())
     }
 }
 

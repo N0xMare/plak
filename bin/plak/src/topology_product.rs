@@ -23,12 +23,7 @@ pub(crate) fn inspect_session_tree(
     session: &crate::store::sessions::SessionRecord,
 ) -> plakous_hosted::CliResult<(String, TreeInspection)> {
     let mut candidate = session.id.clone();
-    // A carried-forward source lives in another build's store.
-    let mut next_source = if session.carried_forward_from().is_some() {
-        None
-    } else {
-        session.source_product_session_id.clone()
-    };
+    let mut next_source = inherited_tree_source(session);
     let mut seen = std::collections::BTreeSet::new();
     for _ in 0..64 {
         if !seen.insert(candidate.clone()) {
@@ -53,16 +48,23 @@ pub(crate) fn inspect_session_tree(
                     "could not inspect topology lineage: {error}"
                 ))
             })?;
-        next_source = if source.carried_forward_from().is_some() {
-            None
-        } else {
-            source.source_product_session_id.clone()
-        };
+        next_source = inherited_tree_source(&source);
         candidate = source.id;
     }
     Err(plakous_hosted::CliFailure::new(
         "topology session lineage exceeds its inspection bound",
     ))
+}
+
+/// The source whose tree `session` may still be on, as the host resolves
+/// it: none for a record that opened a tree of its own (its node is the root
+/// of the tree named after it) or carried forward from another build's
+/// store.
+fn inherited_tree_source(session: &crate::store::sessions::SessionRecord) -> Option<String> {
+    if session.node.tree_id == session.id || session.carried_forward_from().is_some() {
+        return None;
+    }
+    session.source_product_session_id.clone()
 }
 
 /// Stable tree identity across rebind branches. Rebind walks

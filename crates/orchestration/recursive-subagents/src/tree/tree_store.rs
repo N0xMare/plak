@@ -295,6 +295,21 @@ pub trait TreeStore: Send + Sync {
     fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError>;
     /// Raw rows; the caller applies the reopen law.
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError>;
+
+    /// Deletes every row of one tree, compare-and-swapped on the revision the
+    /// caller saw; an absent tree is not an error. A store that cannot
+    /// delete refuses.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a moved revision, an unreachable store, and a store without
+    /// deletion.
+    fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
+        let _ = (tree_id, expected_revision);
+        Err(TreeStoreError::unavailable(
+            "this tree store does not delete trees",
+        ))
+    }
 }
 
 /// The revision a store acknowledged for one published tree.
@@ -394,6 +409,23 @@ impl TreeStore for MemoryTreeStore {
             .lock()
             .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
         Ok(trees.get(tree_id).map(ProductAgentTree::to_persisted))
+    }
+
+    fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
+        let mut trees = self
+            .trees
+            .lock()
+            .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
+        match trees.get(tree_id).map(|stored| stored.revision) {
+            None => Ok(()),
+            Some(stored) if stored != expected_revision => {
+                Err(TreeStoreError::stale(stored, expected_revision))
+            }
+            Some(_) => {
+                trees.remove(tree_id);
+                Ok(())
+            }
+        }
     }
 }
 

@@ -324,6 +324,13 @@ impl super::TreeRows for MemoryRows {
         tree.acknowledge_revision(acknowledged);
         Ok(())
     }
+
+    fn delete_tree(&self, tree_id: &str, expected_revision: u64) -> Result<(), String> {
+        use crate::agent_tree::TreeStore as _;
+        self.trees
+            .delete(tree_id, expected_revision)
+            .map_err(|error| error.detail.clone())
+    }
 }
 
 impl super::TopologyRows for MemoryRows {

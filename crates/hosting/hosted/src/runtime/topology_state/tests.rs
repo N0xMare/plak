@@ -323,3 +323,64 @@ async fn a_model_rebind_epoch_keeps_the_trees_roster() {
         }
     }
 }
+
+/// A /new session opens a tree of its own: with sub-agents off its source's
+/// tree is not its tree, and once sub-agents are on it bootstraps a tree
+/// under its own id. Only a rebind that stayed on its source's tree inherits
+/// it.
+#[test]
+fn a_new_session_resolves_its_own_tree_and_a_staying_rebind_its_sources() {
+    use super::durable_tree_id;
+    use crate::agent_tree::{ProductAgentTree, TreeStore as _};
+    use crate::agent_tree_protocol::WriterMode;
+    use crate::session_store::SessionRecordStore as _;
+    use crate::sessions::{
+        SessionNode, SessionRecord, SessionWorkflowKind, projector::WorkflowRequest,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let rows = crate::runtime::test_kit::MemoryRows::new();
+    let mut source = SessionRecord::new(root.path().to_path_buf());
+    source
+        .bind_plakous_locator(
+            "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+    rows.records().save(&mut source).unwrap();
+    let seed = |tree_id: &str| {
+        let tree = ProductAgentTree::bootstrap_root_for_test(
+            tree_id,
+            tree_id,
+            "root",
+            root.path().to_path_buf(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        )
+        .unwrap();
+        let _revision = rows.trees().save(&tree).unwrap();
+    };
+    seed(&source.id);
+    let request = WorkflowRequest {
+        operation_id: "plak:new:own-tree".into(),
+        source_locator: source.plakous_locator.unwrap(),
+        kind: SessionWorkflowKind::New,
+    };
+    let fresh = source.new_session_from_request(&request).unwrap();
+    assert_eq!(fresh.node, SessionNode::genesis(&fresh.id));
+    // Sub-agents off: nothing exists under its id, and it still does not
+    // resolve its predecessor's tree.
+    assert_eq!(durable_tree_id(&rows, &fresh), fresh.id);
+    // Sub-agents on: its genesis bootstraps under that id, its own tree.
+    seed(&fresh.id);
+    assert_eq!(durable_tree_id(&rows, &fresh), fresh.id);
+    assert_eq!(durable_tree_id(&rows, &source), source.id);
+
+    // A rebind that stayed on its source's tree copies its node and
+    // resolves the source's tree.
+    let mut stayed = SessionRecord::new(root.path().to_path_buf());
+    stayed.node = source.node.clone();
+    stayed.source_product_session_id = Some(source.id.clone());
+    stayed.source_workflow_operation_id = Some("plak:rebind:stayed".into());
+    assert_eq!(durable_tree_id(&rows, &stayed), source.id);
+}
