@@ -229,8 +229,12 @@ spawned under and the spawning parent's composition (`parent_composition`), the
 one profile-dependent spawn-parent input: everything else a child's bind reads
 from its parent (tree, workspace root, product home, state roots, compaction,
 round bound, topology admission) belongs to the session, not its profile. A
-store load refuses a current or node epoch the tree does not hold and an epoch
-row whose digest is not its snapshot's.
+templated child's bind does not read `parent_composition`: its own card in its
+own epoch fixes its composition, and a card that sets none is `FollowCatalog`,
+which is itself a pin, not an inheritance of the parent's composition. The
+recorded value reaches a bind only for a node with no template binding, which
+no flow creates today. A store load refuses a current or node epoch the tree
+does not hold and an epoch row whose digest is not its snapshot's.
 
 No reader sees "the" snapshot; each names whose epoch it reads:
 
