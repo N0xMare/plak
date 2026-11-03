@@ -14,6 +14,7 @@ use plakous::agent::{CommandId, TurnControl, TurnResultHandle};
 use plakous::model::TurnId;
 
 use crate::agent::AttachedCodingSession;
+use crate::node::NodeActor;
 use crate::topology_runtime::{LiveChildHandle, LiveRelease};
 
 /// A follow-up or steer reached the child after the turn it targeted ended.
@@ -169,43 +170,73 @@ enum ChildMessage {
     },
 }
 
-/// The live child's actor (design section 3.1): the sole owner of its
-/// attached session and of the waiter loop over its turns. Everything the
-/// hub asks of a live child that touches the session (follow up, restart,
-/// release, cancel) is a message it answers in arrival order; an answer
-/// nobody waits for any more stops the work, as dropping the request's
-/// future did.
+/// A live child's port on its node actor (design §3.1): the actor is the
+/// sole owner of the child's attached session and of the waiter loop over
+/// its turns. Everything the hub asks of a live child that touches the
+/// session (follow up, restart, release, cancel) is a message it answers in
+/// arrival order; an answer nobody waits for any more stops the work, as
+/// dropping the request's future did.
 ///
 /// The watch runs beside every message, never behind one: it reaches the
 /// actor's own session only through the hub (a restart, a retirement's
 /// release), so the actor keeps serving while the watch waits on those.
 /// The actor ends once its session is gone and its watch has finished.
-struct ChildActor {
-    attached: Option<AttachedCodingSession>,
+struct ChildRole {
     shared: Arc<ChildShared>,
     watch: Option<TurnWatch>,
+    /// The actor still holds its session; a release, a detach or the
+    /// handle's drop hands it on.
+    held: bool,
 }
 
-impl ChildActor {
-    async fn run(mut self, mut mailbox: tokio::sync::mpsc::UnboundedReceiver<ChildMessage>) {
-        let mut open = true;
-        while open || self.watch.is_some() {
-            let message = tokio::select! {
-                biased;
-                message = mailbox.recv(), if open => message,
-                () = watched(&mut self.watch) => continue,
-            };
-            let Some(message) = message else {
-                // Dropped without a release: the session goes with the handle.
-                open = false;
-                self.attached = None;
-                continue;
-            };
-            Box::pin(self.serve(message)).await;
+/// What a live child's main loop borrows for the actor's life.
+struct ChildMailbox {
+    inbox: tokio::sync::mpsc::UnboundedReceiver<ChildMessage>,
+    open: bool,
+}
+
+impl crate::node::Role<ChildMailbox> for ChildRole {
+    type Input = ChildMessage;
+    type Output = ();
+
+    async fn next(
+        actor: &mut NodeActor<Self>,
+        cx: &mut ChildMailbox,
+    ) -> crate::node::Next<ChildMessage, ()> {
+        if !cx.open && actor.role.watch.is_none() {
+            return crate::node::Next::End(());
         }
+        let message = tokio::select! {
+            biased;
+            message = cx.inbox.recv(), if cx.open => message,
+            () = watched(&mut actor.role.watch) => return crate::node::Next::Again,
+        };
+        let Some(message) = message else {
+            // Dropped without a release: the session goes with the handle.
+            cx.open = false;
+            drop(actor.take_session());
+            return crate::node::Next::Again;
+        };
+        crate::node::Next::Input(message)
     }
 
-    async fn serve(&mut self, message: ChildMessage) {
+    async fn serve(
+        actor: &mut NodeActor<Self>,
+        _cx: &mut ChildMailbox,
+        message: ChildMessage,
+    ) -> crate::node::Served<()> {
+        Box::pin(actor.serve_message(message)).await;
+        crate::node::Served::Continue
+    }
+}
+
+impl NodeActor<ChildRole> {
+    /// Hands the session on; the actor holds it no more.
+    fn take_session(&mut self) -> Option<AttachedCodingSession> {
+        std::mem::take(&mut self.role.held).then(|| self.opened.take_for_release())
+    }
+
+    async fn serve_message(&mut self, message: ChildMessage) {
         match message {
             ChildMessage::FollowUp {
                 command_id,
@@ -224,29 +255,29 @@ impl ChildActor {
                 acknowledged,
                 reply,
             } => {
-                let Some(attached) = self.attached.as_ref() else {
+                let Some(attached) = self.role.held.then_some(&self.opened) else {
                     let gone = ChildRestartError::Runtime(ACTOR_GONE.to_owned());
                     let _ = reply.send(Err(gone));
                     return;
                 };
                 let work = restart(
                     attached,
-                    &self.shared,
+                    &self.role.shared,
                     &driver,
                     command_id,
                     prompt,
                     acknowledged,
                 );
-                alongside(answer(reply, work), &mut self.watch).await;
+                alongside(answer(reply, work), &mut self.role.watch).await;
             }
             ChildMessage::Release { driver, reply } => {
                 let delivery = self.reserve_release().await;
-                let Some(attached) = self.attached.take() else {
+                let Some(attached) = self.take_session() else {
                     let _ = reply.send(gone_release());
                     return;
                 };
                 let work = release(attached, delivery, driver);
-                Box::pin(alongside(answer(reply, work), &mut self.watch)).await;
+                Box::pin(alongside(answer(reply, work), &mut self.role.watch)).await;
             }
             ChildMessage::CancelAndRelease {
                 driver,
@@ -254,18 +285,18 @@ impl ChildActor {
                 reply,
             } => {
                 let delivery = self.reserve_release().await;
-                let Some(attached) = self.attached.take() else {
+                let Some(attached) = self.take_session() else {
                     let _ = reply.send(gone_release());
                     return;
                 };
-                let control = self.shared.turn().control.clone();
+                let control = self.role.shared.turn().control.clone();
                 let work = cancel_and_release(attached, control, delivery, driver, dispatched);
-                Box::pin(alongside(answer(reply, work), &mut self.watch)).await;
+                Box::pin(alongside(answer(reply, work), &mut self.role.watch)).await;
             }
-            ChildMessage::Watch { watch } => self.watch = Some(watch),
+            ChildMessage::Watch { watch } => self.role.watch = Some(watch),
             #[cfg(test)]
             ChildMessage::Detach { reply } => {
-                if let Some(attached) = self.attached.take() {
+                if let Some(attached) = self.take_session() {
                     let _ = reply.send(attached);
                 }
             }
@@ -280,19 +311,19 @@ impl ChildActor {
         delivery: tokio::sync::OwnedRwLockReadGuard<()>,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     ) {
-        let Some(attached) = self.attached.as_ref() else {
+        let Some(attached) = self.role.held.then_some(&self.opened) else {
             let _ = reply.send(Err(ACTOR_GONE.to_owned()));
             return;
         };
         let work = follow_up(
             attached,
-            &self.shared,
+            &self.role.shared,
             command_id,
             body,
             acknowledged,
             delivery,
         );
-        alongside(answer(reply, work), &mut self.watch).await;
+        alongside(answer(reply, work), &mut self.role.watch).await;
     }
 
     /// The delivery barrier's write side, for a release. Every follow-up
@@ -303,8 +334,8 @@ impl ChildActor {
     /// release consumed. Only the watch can still hold the barrier, across
     /// a transition it is in, so it runs meanwhile.
     async fn reserve_release(&mut self) -> tokio::sync::OwnedRwLockWriteGuard<()> {
-        let write = Arc::clone(&self.shared.delivery).write_owned();
-        alongside(write, &mut self.watch).await
+        let write = Arc::clone(&self.role.shared.delivery).write_owned();
+        alongside(write, &mut self.role.watch).await
     }
 }
 
@@ -619,12 +650,20 @@ impl ChildActorHandle {
             reserve: std::sync::Mutex::new(()),
         });
         let (mailbox, inbox) = tokio::sync::mpsc::unbounded_channel();
-        let actor = ChildActor {
-            attached: Some(attached),
-            shared: Arc::clone(&shared),
-            watch: None,
-        };
-        drop(owners.spawn(actor.run(inbox)));
+        let mut actor = NodeActor::new(
+            crate::node::RolePolicy::CHILD,
+            attached,
+            ChildRole {
+                shared: Arc::clone(&shared),
+                watch: None,
+                held: true,
+            },
+        );
+        drop(owners.spawn(async move {
+            actor
+                .main_loop(&mut ChildMailbox { inbox, open: true })
+                .await;
+        }));
         Self { mailbox, shared }
     }
 

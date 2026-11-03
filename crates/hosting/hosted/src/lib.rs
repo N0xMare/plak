@@ -116,6 +116,7 @@ pub use error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 mod call_detail;
 mod frozen_tables;
 pub mod mcp_binding;
+mod node;
 mod process_environment;
 pub mod runner_adoption;
 #[doc(hidden)]

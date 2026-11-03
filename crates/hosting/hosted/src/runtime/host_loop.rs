@@ -12,6 +12,7 @@ use plakous::sessions::ContextQuery;
 
 use crate::context::{ContextDisposition, scheduled_compaction_disabled_note};
 use crate::interrupt::{InterruptWatch, InterruptWatchState};
+use crate::node::NodeActor;
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions::{
     self, QueueDrainState as SessionQueueDrainState, QueueItem as SessionQueueItem,
@@ -106,23 +107,6 @@ pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(
     result
 }
 
-/// What one node's actor is for, as a value its single driver consults
-/// rather than a second driver (design §3.2): which projections it runs and
-/// what follows a turn that ends recovery-required. Only the root runs as an
-/// actor so far.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct RolePolicy {
-    /// The product projector plus the root's tree passes (spec 03 §4.4).
-    pub(super) tree_passes: bool,
-    pub(super) recovery: RecoveryPolicy,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RecoveryPolicy {
-    /// The node reopens itself in place as soon as it is idle (design §6.0).
-    EagerInPlace,
-}
-
 /// Where the root stands after a turn that ended recovery-required, or an
 /// open that found one (design §6.2's process-local `recovering` overlay).
 /// Nothing durable records it: the runtime's own state is the authority, and
@@ -144,27 +128,6 @@ impl RootRecovery {
     pub(super) const fn blocked(self) -> bool {
         !matches!(self, Self::Clear)
     }
-}
-
-impl RolePolicy {
-    /// The attached root's policy.
-    pub(super) const ROOT: Self = Self {
-        tree_passes: true,
-        recovery: RecoveryPolicy::EagerInPlace,
-    };
-}
-
-/// One node's actor (design §3.1): the single driver of a resident node,
-/// whichever its role. What only one role has lives behind the role port `R`
-/// (§3.2); the actor consults its policy value rather than running a second
-/// driver.
-struct NodeActor<R> {
-    policy: RolePolicy,
-    opened: crate::agent::AttachedCodingSession,
-    quit_started_at: Option<Instant>,
-    quit_abandoned_turn: bool,
-    quit_job_stops: Option<crate::TaskHandle<Result<(), String>>>,
-    role: R,
 }
 
 /// The attached root's actor.
@@ -634,7 +597,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .borrow_mut()
                 .restore_front(delivery);
         }
-        let mut passive_checkpoint_scheduled = false;
         if let Some(state) = one_shot.as_deref_mut()
             && let Err(error) = self.resume_one_shot_tree(state.resume_tree).await
         {
@@ -642,69 +604,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             state.attempted = true;
         }
 
-        loop {
-            if self.role.config.store.storage_unavailable() {
-                self.role.storage_interrupted |= self.role.config.store.storage_wait_cancelled();
-            } else {
-                self.role.storage_interrupted = false;
-            }
-            self.commit_notice_intents();
-            self.project().await;
-            if !passive_checkpoint_scheduled && self.role.actions.is_promptable() {
-                self.opened
-                    .schedule_passive_checkpoint(self.role.executor.tasks());
-                passive_checkpoint_scheduled = true;
-            }
-            if let Some(state) = one_shot.as_deref_mut() {
-                if state.attempted && state.run.is_none() {
-                    break;
-                }
-            }
-            let next = if let Some(state) = one_shot.as_deref_mut()
-                && state.attempted
-            {
-                self.next_run_prompt(state).await
-            } else {
-                self.next_prompt(one_shot.as_deref_mut()).await
-            };
-            let next = match next {
-                Ok(next) => next,
-                Err(error) if self.retain_interrupted_storage(&error) => continue,
-                Err(error) => return Err(error),
-            };
-            let (raw_text, queued_delivery, user_echoed) = match next {
-                HostStep::Continue => continue,
-                HostStep::Quit => break,
-                HostStep::Prompt {
-                    text,
-                    queued_delivery,
-                    user_echoed,
-                } => (text, queued_delivery, user_echoed),
-            };
-            let before = self.role.config.session.root_turn_count;
-            let step = match self
-                .run_prompt(
-                    raw_text,
-                    queued_delivery,
-                    user_echoed,
-                    one_shot.as_deref_mut(),
-                )
-                .await
-            {
-                Ok(step) => step,
-                Err(error) if self.retain_interrupted_storage(&error) => continue,
-                Err(error) => return Err(error),
-            };
-            if let Some(run) = one_shot.as_deref_mut().and_then(|state| state.run.as_mut()) {
-                run.turns = run
-                    .turns
-                    .saturating_add(u8::from(self.role.config.session.root_turn_count > before));
-            }
-            if matches!(step, HostStep::Quit) {
-                break;
-            }
-        }
-
+        self.main_loop(&mut RootLoop {
+            one_shot: one_shot.as_deref_mut(),
+            passive_checkpoint_scheduled: false,
+        })
+        .await?;
         self.commit_notice_intents();
         self.finish_projection(one_shot.is_some()).await
     }
@@ -740,6 +644,120 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             "storage write unavailable; retained work and queued inputs remain available",
         ));
         true
+    }
+}
+
+/// What the root's main loop borrows from its caller: the one-shot run it
+/// drives, if any, and whether its passive checkpoint is scheduled.
+struct RootLoop<'o> {
+    one_shot: Option<&'o mut super::oneshot::OneShotState>,
+    passive_checkpoint_scheduled: bool,
+}
+
+/// An operator prompt the root's idle step admitted.
+struct RootPrompt {
+    text: String,
+    queued_delivery: Option<SessionQueueItem>,
+    user_echoed: bool,
+}
+
+impl<'a, 'o, P: plakous_host_protocol::ProtocolExtension> crate::node::Role<RootLoop<'o>>
+    for RootRole<'a, P>
+{
+    type Input = RootPrompt;
+    /// `Ok` once the loop leaves for the root's release.
+    type Output = CliResult<()>;
+
+    async fn next(
+        actor: &mut RootActor<'a, P>,
+        cx: &mut RootLoop<'o>,
+    ) -> crate::node::Next<RootPrompt, CliResult<()>> {
+        if actor.role.config.store.storage_unavailable() {
+            actor.role.storage_interrupted |= actor.role.config.store.storage_wait_cancelled();
+        } else {
+            actor.role.storage_interrupted = false;
+        }
+        actor.commit_notice_intents();
+        actor.project().await;
+        if !cx.passive_checkpoint_scheduled && actor.role.actions.is_promptable() {
+            actor
+                .opened
+                .schedule_passive_checkpoint(actor.role.executor.tasks());
+            cx.passive_checkpoint_scheduled = true;
+        }
+        if let Some(state) = cx.one_shot.as_deref_mut() {
+            if state.attempted && state.run.is_none() {
+                return crate::node::Next::End(Ok(()));
+            }
+        }
+        let next = if let Some(state) = cx.one_shot.as_deref_mut()
+            && state.attempted
+        {
+            actor.next_run_prompt(state).await
+        } else {
+            actor.next_prompt(cx.one_shot.as_deref_mut()).await
+        };
+        let next = match next {
+            Ok(next) => next,
+            Err(error) if actor.retain_interrupted_storage(&error) => {
+                return crate::node::Next::Again;
+            }
+            Err(error) => return crate::node::Next::End(Err(error)),
+        };
+        match next {
+            HostStep::Continue => crate::node::Next::Again,
+            HostStep::Quit => crate::node::Next::End(Ok(())),
+            HostStep::Prompt {
+                text,
+                queued_delivery,
+                user_echoed,
+            } => crate::node::Next::Input(RootPrompt {
+                text,
+                queued_delivery,
+                user_echoed,
+            }),
+        }
+    }
+
+    async fn serve(
+        actor: &mut RootActor<'a, P>,
+        cx: &mut RootLoop<'o>,
+        prompt: RootPrompt,
+    ) -> crate::node::Served<CliResult<()>> {
+        let RootPrompt {
+            text: raw_text,
+            queued_delivery,
+            user_echoed,
+        } = prompt;
+        let before = actor.role.config.session.root_turn_count;
+        let step = match actor
+            .run_prompt(
+                raw_text,
+                queued_delivery,
+                user_echoed,
+                cx.one_shot.as_deref_mut(),
+            )
+            .await
+        {
+            Ok(step) => step,
+            Err(error) if actor.retain_interrupted_storage(&error) => {
+                return crate::node::Served::Continue;
+            }
+            Err(error) => return crate::node::Served::End(Err(error)),
+        };
+        if let Some(run) = cx
+            .one_shot
+            .as_deref_mut()
+            .and_then(|state| state.run.as_mut())
+        {
+            run.turns = run
+                .turns
+                .saturating_add(u8::from(actor.role.config.session.root_turn_count > before));
+        }
+        if matches!(step, HostStep::Quit) {
+            return crate::node::Served::End(Ok(()));
+        }
+        crate::node::Served::Continue
     }
 }
 

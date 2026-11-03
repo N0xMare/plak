@@ -4,6 +4,7 @@ use crate::driver::ledger::CommandLedger as _;
 
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
 use crate::driver::transient::{self, ResumeGate, ResumeOwner};
+use crate::node::AfterTerminal;
 
 use super::{
     Arc, AttachedCodingSession, ChildReopen, ChildReopenMode, ChildStartup, ChildTurnIdentity,
@@ -186,10 +187,6 @@ impl Drop for PendingLeave {
 /// the hub still lists this tree when the turn ends (a root that quit
 /// releases the hub entry while a child turn can still be unwinding). The
 /// actor runs as a release owner, which the tree's shutdown does not abort.
-#[allow(
-    clippy::too_many_lines,
-    reason = "The child waiter owns observation, transient recovery, result publication, and terminal release for exactly one bound attempt."
-)]
 pub(in crate::agent) fn turn_watch(
     registration: TurnWaiterRegistration,
     live: Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
@@ -197,377 +194,363 @@ pub(in crate::agent) fn turn_watch(
     feed: Option<ChildFeedSource>,
     result: TurnResultHandle,
 ) -> crate::agent::live::TurnWatch {
-    let driver = registration.driver.clone();
-    let agent_id = registration.agent_id.clone();
-    let attempt = registration.attempt.clone();
     Box::pin(async move {
         let registration = registration;
-        let mut pending = Some(result);
-        // What the last wake carried, so leftovers cannot wake forever.
-        let mut carried = crate::agent::park::Arrivals::new();
-        loop {
-            let Some(handle) = pending.take() else {
-                break;
-            };
-            let completed_turn = handle.turn_id();
-            let identity = ChildTurnIdentity {
-                attempt: attempt.clone(),
-                turn: completed_turn,
-            };
-            let terminal = handle.result().await;
-            // A child has no operator to wait for, so a turn its owner fenced
-            // is recovered at once: release the stopped session and reopen it,
-            // which abandons the turn exactly as a crash reattach would. The
-            // attempt then ends as an ordinary failure the parent can re-task.
-            if let Ok(result) = &terminal
-                && let TurnResultOutcome::RecoveryRequired(error) = result.outcome()
-            {
-                warn_recovery_required(&agent_id, &attempt, completed_turn, error.kind());
-                project_turn_end(&driver, feed.as_ref(), &agent_id).await;
-                if driver
-                    .read(|tree| identity.still_owns(tree, &agent_id))
-                    .unwrap_or(false)
-                    && driver
-                        .stop_agent_jobs(std::slice::from_ref(&agent_id))
-                        .await
-                        .is_err()
-                {
-                    retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                    break;
-                }
-                // The recycle may wait out the fenced owner's lease, so it
-                // never runs under the reattach lock. Under that lock the
-                // node is marked recycling before its live entry goes, which a
-                // `recover_agent` or a recovery pass treats as a live owner;
-                // the lock is retaken to record the outcome and clear the
-                // mark, so recovery either settled the attempt first (and
-                // this failure report then changes nothing) or starts after
-                // it is recorded.
-                let runtime = driver
-                    .read(|tree| tree.tree_id.clone())
-                    .ok()
-                    .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id));
-                let recycling = match runtime.as_ref() {
-                    Some(runtime) => {
-                        let _reattach = runtime.lock_reattach().await;
-                        Some(runtime.mark_recycling(&agent_id))
-                    }
-                    None => None,
-                };
-                retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                let recycled = recycle_fenced_child(&driver, &agent_id).await;
-                let reattach = match runtime.as_ref() {
-                    Some(runtime) => Some(runtime.lock_reattach().await),
-                    None => None,
-                };
-                let (disposition, message) = match recycled {
-                    Some(FencedChildRecycle::Abandoned(report)) => (
-                        crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
-                            kind: crate::agent_tree::TURN_ABANDONED,
-                        },
-                        crate::runtime::events::abandoned_turn_operator_line(&report).to_owned(),
-                    ),
-                    Some(FencedChildRecycle::Quiescent) => (
-                        crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
-                            kind: crate::agent_tree::TURN_ABANDONED,
-                        },
-                        "child session reopened quiescent after local finalization; \
-                         the attempt left no result"
-                            .to_owned(),
-                    ),
-                    Some(FencedChildRecycle::QuiescenceUnproved) => (
-                        crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                        "child session reopened but quiescence could not be established".to_owned(),
-                    ),
-                    None => (
-                        crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                        "child turn outcome is unknown and its session could not be reopened \
-                         to recover it"
-                            .to_owned(),
-                    ),
-                };
-                if !matches!(
-                    disposition,
-                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired
-                ) && end_attempt_work(&driver, &live, &agent_id, &identity)
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-                // The reopen abandoned what the fenced turn left uncommitted.
-                finalize_child_failure(
-                    &driver,
-                    &identity,
-                    &agent_id,
-                    disposition,
-                    message,
-                    FailedTurnWaits::Settle(result),
-                    observer.as_ref(),
-                )
-                .await;
-                // Cleared while the reattach lock is still held.
-                drop(recycling);
-                drop(reattach);
-                break;
-            }
-            if let Ok(result) = &terminal
-                && let Some(resumed) = try_transient_resume(
-                    &driver,
-                    &live,
-                    &agent_id,
-                    &identity,
-                    feed.as_ref(),
-                    result,
-                    observer.as_ref(),
-                )
-                .await
-            {
-                if let Ok(next) = resumed {
-                    pending = Some(next);
-                    continue;
-                }
-                retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                break;
-            }
-            if let Ok(result) = &terminal
-                && matches!(result.outcome(), TurnResultOutcome::Failed(_))
-                && end_attempt_work(&driver, &live, &agent_id, &identity)
+        let mut turns = ChildTurns {
+            driver: registration.driver.clone(),
+            agent_id: registration.agent_id.clone(),
+            attempt: registration.attempt.clone(),
+            live,
+            observer,
+            feed,
+            // What the last wake carried, so leftovers cannot wake forever.
+            carried: crate::agent::park::Arrivals::new(),
+        };
+        Box::pin(crate::node::drive_turns(&mut turns, &mut (), result)).await;
+        registration.release().await;
+    })
+}
+
+/// One bound attempt's turns, as its waiter loop drives them.
+struct ChildTurns {
+    driver: TreeDriver,
+    agent_id: String,
+    attempt: crate::agent_tree_protocol::AttemptId,
+    live: Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
+    observer: Option<Arc<dyn crate::agent_tree::TopologyObserver>>,
+    feed: Option<ChildFeedSource>,
+    carried: crate::agent::park::Arrivals,
+}
+
+/// A child turn at its terminal.
+struct ChildTerminal {
+    completed_turn: TurnId,
+    identity: ChildTurnIdentity,
+    terminal: Result<Arc<TurnResult>, plakous::agent::AgentError>,
+}
+
+impl crate::node::TurnRole<()> for ChildTurns {
+    type Turn = TurnResultHandle;
+    type Terminal = ChildTerminal;
+    type Settled = ();
+
+    async fn drive(&mut self, (): &mut (), handle: TurnResultHandle) -> ChildTerminal {
+        let completed_turn = handle.turn_id();
+        let identity = ChildTurnIdentity {
+            attempt: self.attempt.clone(),
+            turn: completed_turn,
+        };
+        let terminal = handle.result().await;
+        ChildTerminal {
+            completed_turn,
+            identity,
+            terminal,
+        }
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The child waiter owns observation, transient recovery, result publication, and terminal release for exactly one bound attempt."
+    )]
+    async fn after_terminal(
+        &mut self,
+        (): &mut (),
+        terminal: ChildTerminal,
+    ) -> AfterTerminal<TurnResultHandle, ()> {
+        let ChildTerminal {
+            completed_turn,
+            identity,
+            terminal,
+        } = terminal;
+        let (driver, agent_id) = (self.driver.clone(), self.agent_id.clone());
+        let (attempt, live, observer, feed) =
+            (&self.attempt, &self.live, &self.observer, &self.feed);
+        let carried = &mut self.carried;
+        // A child has no operator to wait for, so a turn its owner fenced
+        // is recovered at once: release the stopped session and reopen it,
+        // which abandons the turn exactly as a crash reattach would. The
+        // attempt then ends as an ordinary failure the parent can re-task.
+        if let Ok(result) = &terminal
+            && let TurnResultOutcome::RecoveryRequired(error) = result.outcome()
+        {
+            warn_recovery_required(&agent_id, attempt, completed_turn, error.kind());
+            project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+            if driver
+                .read(|tree| identity.still_owns(tree, &agent_id))
+                .unwrap_or(false)
+                && driver
+                    .stop_agent_jobs(std::slice::from_ref(&agent_id))
                     .await
                     .is_err()
             {
-                break;
+                retire_live_child(&driver, live, &agent_id, completed_turn).await;
+                return AfterTerminal::Settled(());
             }
-            if let Ok(result) = &terminal
-                && finalize_failed_child_result(
-                    &driver,
-                    &identity,
-                    &agent_id,
-                    feed.as_ref(),
-                    result,
-                    observer.as_ref(),
-                )
-                .await
-            {
-                retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                break;
-            }
-            let node_status = driver
-                .read(|tree| tree.node(&agent_id).ok().map(|node| node.status))
+            // The recycle may wait out the fenced owner's lease, so it
+            // never runs under the reattach lock. Under that lock the
+            // node is marked recycling before its live entry goes, which a
+            // `recover_agent` or a recovery pass treats as a live owner;
+            // the lock is retaken to record the outcome and clear the
+            // mark, so recovery either settled the attempt first (and
+            // this failure report then changes nothing) or starts after
+            // it is recorded.
+            let runtime = driver
+                .read(|tree| tree.tree_id.clone())
                 .ok()
-                .flatten();
-            let ending = TurnOutcome::classify(node_status, child_turn_was_cancelled(&terminal));
-            // Below this point `cancelled` means only "the host fenced the
-            // node with `close_agent`"; the other two cancel shapes have their
-            // own arms and break out of the loop.
-            let cancelled = ending == TurnOutcome::Closed;
-            if ending == TurnOutcome::CancelledOutside {
-                if end_attempt_work(&driver, &live, &agent_id, &identity)
-                    .await
-                    .is_err()
-                {
-                    break;
+                .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id));
+            let recycling = match runtime.as_ref() {
+                Some(runtime) => {
+                    let _reattach = runtime.lock_reattach().await;
+                    Some(runtime.mark_recycling(&agent_id))
                 }
-                // end the attempt as an ordinary failure so the
-                // parent's `wait_agent` settles, sealing and pushing the
-                // `result` by the usual rules.
-                if terminal.is_ok() {
-                    project_turn_end(&driver, feed.as_ref(), &agent_id).await;
-                }
-                let pending = driver
-                    .mutate({
-                        let (identity, agent_id, driver, observer) = (
-                            identity.clone(),
-                            agent_id.clone(),
-                            driver.clone(),
-                            observer.clone(),
+                None => None,
+            };
+            retire_live_child(&driver, live, &agent_id, completed_turn).await;
+            let recycled = recycle_fenced_child(&driver, &agent_id).await;
+            let reattach = match runtime.as_ref() {
+                Some(runtime) => Some(runtime.lock_reattach().await),
+                None => None,
+            };
+            let (disposition, message) = match recycled {
+                Some(FencedChildRecycle::Abandoned(report)) => (
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
+                        kind: crate::agent_tree::TURN_ABANDONED,
+                    },
+                    crate::runtime::events::abandoned_turn_operator_line(&report).to_owned(),
+                ),
+                Some(FencedChildRecycle::Quiescent) => (
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
+                        kind: crate::agent_tree::TURN_ABANDONED,
+                    },
+                    "child session reopened quiescent after local finalization; \
+                     the attempt left no result"
+                        .to_owned(),
+                ),
+                Some(FencedChildRecycle::QuiescenceUnproved) => (
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "child session reopened but quiescence could not be established".to_owned(),
+                ),
+                None => (
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "child turn outcome is unknown and its session could not be reopened \
+                     to recover it"
+                        .to_owned(),
+                ),
+            };
+            if !matches!(
+                disposition,
+                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired
+            ) && end_attempt_work(&driver, live, &agent_id, &identity)
+                .await
+                .is_err()
+            {
+                return AfterTerminal::Settled(());
+            }
+            // The reopen abandoned what the fenced turn left uncommitted.
+            finalize_child_failure(
+                &driver,
+                &identity,
+                &agent_id,
+                disposition,
+                message,
+                FailedTurnWaits::Settle(result),
+                observer.as_ref(),
+            )
+            .await;
+            // Cleared while the reattach lock is still held.
+            drop(recycling);
+            drop(reattach);
+            return AfterTerminal::Settled(());
+        }
+        if let Ok(result) = &terminal
+            && let Some(resumed) = try_transient_resume(
+                &driver,
+                live,
+                &agent_id,
+                &identity,
+                feed.as_ref(),
+                result,
+                observer.as_ref(),
+            )
+            .await
+        {
+            if let Ok(next) = resumed {
+                return AfterTerminal::Next(next);
+            }
+            retire_live_child(&driver, live, &agent_id, completed_turn).await;
+            return AfterTerminal::Settled(());
+        }
+        if let Ok(result) = &terminal
+            && matches!(result.outcome(), TurnResultOutcome::Failed(_))
+            && end_attempt_work(&driver, live, &agent_id, &identity)
+                .await
+                .is_err()
+        {
+            return AfterTerminal::Settled(());
+        }
+        if let Ok(result) = &terminal
+            && finalize_failed_child_result(
+                &driver,
+                &identity,
+                &agent_id,
+                feed.as_ref(),
+                result,
+                observer.as_ref(),
+            )
+            .await
+        {
+            retire_live_child(&driver, live, &agent_id, completed_turn).await;
+            return AfterTerminal::Settled(());
+        }
+        let node_status = driver
+            .read(|tree| tree.node(&agent_id).ok().map(|node| node.status))
+            .ok()
+            .flatten();
+        let ending = TurnOutcome::classify(node_status, child_turn_was_cancelled(&terminal));
+        // Below this point `cancelled` means only "the host fenced the
+        // node with `close_agent`"; the other two cancel shapes have their
+        // own arms and break out of the loop.
+        let cancelled = ending == TurnOutcome::Closed;
+        if ending == TurnOutcome::CancelledOutside {
+            if end_attempt_work(&driver, live, &agent_id, &identity)
+                .await
+                .is_err()
+            {
+                return AfterTerminal::Settled(());
+            }
+            // end the attempt as an ordinary failure so the
+            // parent's `wait_agent` settles, sealing and pushing the
+            // `result` by the usual rules.
+            if terminal.is_ok() {
+                project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+            }
+            let pending = driver
+                .mutate({
+                    let (identity, agent_id, driver, observer) = (
+                        identity.clone(),
+                        agent_id.clone(),
+                        driver.clone(),
+                        observer.clone(),
+                    );
+                    move |tree| {
+                        let (identity, agent_id, driver, observer) =
+                            (&identity, &agent_id, &driver, &observer);
+                        if !identity.still_owns(tree, agent_id) {
+                            return;
+                        }
+                        tree.record_fault(
+                            agent_id,
+                            "the turn was cancelled outside the host; nothing interrupted it",
                         );
-                        move |tree| {
-                            let (identity, agent_id, driver, observer) =
-                                (&identity, &agent_id, &driver, &observer);
-                            if !identity.still_owns(tree, agent_id) {
-                                return;
-                            }
-                            tree.record_fault(
-                                agent_id,
-                                "the turn was cancelled outside the host; nothing interrupted it",
-                            );
-                            // the seal is a subprocess and runs with
-                            // the lock released.
-                            let published =
-                                tree.record_host_cancellation(agent_id).and_then(|value| {
-                                    driver.apply_recorded(tree, agent_id).map(|()| value)
-                                });
-                            if let Err(error) = published {
-                                tree.record_fault(agent_id, error.message);
-                                return;
-                            }
-                            tree.try_emit_tree_node_detached(
-                                observer.as_ref(),
-                                agent_id,
-                                crate::agent_tree::NodeDetach::Failed,
-                            );
+                        // the seal is a subprocess and runs with
+                        // the lock released.
+                        let published = tree.record_host_cancellation(agent_id).and_then(|value| {
+                            driver.apply_recorded(tree, agent_id).map(|()| value)
+                        });
+                        if let Err(error) = published {
+                            tree.record_fault(agent_id, error.message);
+                            return;
                         }
+                        tree.try_emit_tree_node_detached(
+                            observer.as_ref(),
+                            agent_id,
+                            crate::agent_tree::NodeDetach::Failed,
+                        );
+                    }
+                })
+                .await
+                .map(|((), effects)| effects)
+                .unwrap_or_default();
+            settle_or_fault(&driver, pending, &agent_id).await;
+            retire_live_child(&driver, live, &agent_id, completed_turn).await;
+            return AfterTerminal::Settled(());
+        }
+        if ending == TurnOutcome::Interrupted {
+            if terminal.is_ok() {
+                project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+            }
+            finish_interrupted_turn(&driver, live, &agent_id, &identity, observer.as_ref()).await;
+            return AfterTerminal::Settled(());
+        }
+        match terminal {
+            Ok(_) if !cancelled => {
+                let ended = project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+                let (submitted, harness_nudge) = driver
+                    .read(|tree| {
+                        tree.attempt(&agent_id).map_or(
+                            (false, SubmitNudgeBudget::NONE),
+                            |assignment| {
+                                (
+                                    assignment.output_json.is_some(),
+                                    assignment.submit_harness_nudge,
+                                )
+                            },
+                        )
                     })
+                    .unwrap_or((false, SubmitNudgeBudget::NONE));
+                // Spec 03 §5.2: a turn that ends with live work of its own
+                // parks instead of being nudged; its wake is a new turn.
+                let mut turns_spent = false;
+                if !submitted {
+                    use crate::agent::park::{ParkEnd, TurnEnd};
+                    let end = match crate::agent::park::turn_end(
+                        &driver, live, &agent_id, &identity, carried,
+                    )
                     .await
-                    .map(|((), effects)| effects)
-                    .unwrap_or_default();
-                settle_or_fault(&driver, pending, &agent_id).await;
-                retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                break;
-            }
-            if ending == TurnOutcome::Interrupted {
-                if terminal.is_ok() {
-                    project_turn_end(&driver, feed.as_ref(), &agent_id).await;
-                }
-                finish_interrupted_turn(&driver, &live, &agent_id, &identity, observer.as_ref())
-                    .await;
-                break;
-            }
-            match terminal {
-                Ok(_) if !cancelled => {
-                    let ended = project_turn_end(&driver, feed.as_ref(), &agent_id).await;
-                    let (submitted, harness_nudge) = driver
-                        .read(|tree| {
-                            tree.attempt(&agent_id).map_or(
-                                (false, SubmitNudgeBudget::NONE),
-                                |assignment| {
-                                    (
-                                        assignment.output_json.is_some(),
-                                        assignment.submit_harness_nudge,
-                                    )
-                                },
-                            )
-                        })
-                        .unwrap_or((false, SubmitNudgeBudget::NONE));
-                    // Spec 03 §5.2: a turn that ends with live work of its own
-                    // parks instead of being nudged; its wake is a new turn.
-                    let mut turns_spent = false;
-                    if !submitted {
-                        use crate::agent::park::{ParkEnd, TurnEnd};
-                        let end = match crate::agent::park::turn_end(
-                            &driver, &live, &agent_id, &identity, &carried,
-                        )
-                        .await
-                        {
-                            TurnEnd::FollowUp(next) => Some(ParkEnd::Woken(next, carried.clone())),
-                            TurnEnd::Park => Some(
-                                crate::agent::park::park_until_wake(
-                                    &driver, &live, &agent_id, &identity, &carried,
-                                )
-                                .await,
-                            ),
-                            TurnEnd::Interrupted => Some(ParkEnd::Interrupted),
-                            TurnEnd::Settle => None,
-                            TurnEnd::Spent => {
-                                turns_spent = true;
-                                None
-                            }
-                        };
-                        match end {
-                            None => {}
-                            Some(ParkEnd::Woken(next, arrivals)) => {
-                                carried = arrivals;
-                                pending = Some(next);
-                                continue;
-                            }
-                            Some(ParkEnd::Ended) => break,
-                            Some(ParkEnd::Interrupted) => {
-                                finish_interrupted_turn(
-                                    &driver,
-                                    &live,
-                                    &agent_id,
-                                    &identity,
-                                    observer.as_ref(),
-                                )
-                                .await;
-                                break;
-                            }
-                            Some(ParkEnd::WakeFailed(error)) => {
-                                end_failed_wake(
-                                    &driver,
-                                    &live,
-                                    &agent_id,
-                                    &identity,
-                                    ended.clone(),
-                                    &error,
-                                    observer.as_ref(),
-                                )
-                                .await;
-                                break;
-                            }
-                        }
-                    }
-                    if submitted || turns_spent || harness_nudge.is_exhausted() {
-                        if end_attempt_work(&driver, &live, &agent_id, &identity)
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                        finalize_child_turn(
-                            &driver,
-                            &agent_id,
-                            Some(&identity),
-                            ended.clone(),
-                            cancelled,
-                            true,
-                            observer.as_ref(),
-                        )
-                        .await;
-                        retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                        break;
-                    }
-                    // `is_exhausted` above is the only exit, so the budget
-                    // always has a next round here.
-                    let next_nudge = harness_nudge.next().unwrap_or(harness_nudge);
-                    if let Ok(next) =
-                        start_submit_harness_turn(&driver, &live, &agent_id, &identity, next_nudge)
-                            .await
                     {
-                        pending = Some(next);
-                    } else {
-                        let reconciliation_required = driver.read(|tree| {
-                            tree.attempt(&agent_id).is_some_and(|attempt|
-                                attempt.status == crate::agent_tree_protocol::AttemptStatus::RecoveryRequired)
-                        }).unwrap_or(false);
-                        if reconciliation_required {
-                            retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                            break;
+                        TurnEnd::FollowUp(next) => Some(ParkEnd::Woken(next, carried.clone())),
+                        TurnEnd::Park => Some(
+                            crate::agent::park::park_until_wake(
+                                &driver, live, &agent_id, &identity, carried,
+                            )
+                            .await,
+                        ),
+                        TurnEnd::Interrupted => Some(ParkEnd::Interrupted),
+                        TurnEnd::Settle => None,
+                        TurnEnd::Spent => {
+                            turns_spent = true;
+                            None
                         }
-                        let submitted = driver
-                            .read(|tree| {
-                                tree.attempt(&agent_id)
-                                    .is_some_and(|assignment| assignment.output_json.is_some())
-                            })
-                            .unwrap_or(false);
-                        if end_attempt_work(&driver, &live, &agent_id, &identity)
-                            .await
-                            .is_err()
-                        {
-                            break;
+                    };
+                    match end {
+                        None => {}
+                        Some(ParkEnd::Woken(next, arrivals)) => {
+                            *carried = arrivals;
+                            return AfterTerminal::Next(next);
                         }
-                        finalize_child_turn(
-                            &driver,
-                            &agent_id,
-                            Some(&identity),
-                            ended.clone(),
-                            cancelled,
-                            submitted,
-                            observer.as_ref(),
-                        )
-                        .await;
-                        retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                        break;
+                        Some(ParkEnd::Ended) => return AfterTerminal::Settled(()),
+                        Some(ParkEnd::Interrupted) => {
+                            finish_interrupted_turn(
+                                &driver,
+                                live,
+                                &agent_id,
+                                &identity,
+                                observer.as_ref(),
+                            )
+                            .await;
+                            return AfterTerminal::Settled(());
+                        }
+                        Some(ParkEnd::WakeFailed(error)) => {
+                            end_failed_wake(
+                                &driver,
+                                live,
+                                &agent_id,
+                                &identity,
+                                ended.clone(),
+                                &error,
+                                observer.as_ref(),
+                            )
+                            .await;
+                            return AfterTerminal::Settled(());
+                        }
                     }
                 }
-                Ok(_) => {
-                    let ended = project_turn_end(&driver, feed.as_ref(), &agent_id).await;
-                    if end_attempt_work(&driver, &live, &agent_id, &identity)
+                if submitted || turns_spent || harness_nudge.is_exhausted() {
+                    if end_attempt_work(&driver, live, &agent_id, &identity)
                         .await
                         .is_err()
                     {
-                        break;
+                        return AfterTerminal::Settled(());
                     }
                     finalize_child_turn(
                         &driver,
@@ -579,33 +562,97 @@ pub(in crate::agent) fn turn_watch(
                         observer.as_ref(),
                     )
                     .await;
-                    retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                    break;
+                    retire_live_child(&driver, live, &agent_id, completed_turn).await;
+                    return AfterTerminal::Settled(());
                 }
-                Err(error) => {
-                    // No authoritative terminal was published. Submitted work
-                    // cannot turn this channel failure into completion.
-                    finalize_child_failure(
-                        &driver,
-                        &identity,
-                        &agent_id,
-                        crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                        format!(
-                            "child terminal publication failed ({:?}): {}",
-                            error.kind(),
-                            error.message()
-                        ),
-                        FailedTurnWaits::Keep,
-                        observer.as_ref(),
-                    )
-                    .await;
-                    retire_live_child(&driver, &live, &agent_id, completed_turn).await;
-                    break;
+                // `is_exhausted` above is the only exit, so the budget
+                // always has a next round here.
+                let next_nudge = harness_nudge.next().unwrap_or(harness_nudge);
+                if let Ok(next) =
+                    start_submit_harness_turn(&driver, live, &agent_id, &identity, next_nudge).await
+                {
+                    return AfterTerminal::Next(next);
                 }
+                let reconciliation_required = driver
+                    .read(|tree| {
+                        tree.attempt(&agent_id).is_some_and(|attempt| {
+                            attempt.status
+                                == crate::agent_tree_protocol::AttemptStatus::RecoveryRequired
+                        })
+                    })
+                    .unwrap_or(false);
+                if reconciliation_required {
+                    retire_live_child(&driver, live, &agent_id, completed_turn).await;
+                    return AfterTerminal::Settled(());
+                }
+                let submitted = driver
+                    .read(|tree| {
+                        tree.attempt(&agent_id)
+                            .is_some_and(|assignment| assignment.output_json.is_some())
+                    })
+                    .unwrap_or(false);
+                if end_attempt_work(&driver, live, &agent_id, &identity)
+                    .await
+                    .is_err()
+                {
+                    return AfterTerminal::Settled(());
+                }
+                finalize_child_turn(
+                    &driver,
+                    &agent_id,
+                    Some(&identity),
+                    ended.clone(),
+                    cancelled,
+                    submitted,
+                    observer.as_ref(),
+                )
+                .await;
+                retire_live_child(&driver, live, &agent_id, completed_turn).await;
+                return AfterTerminal::Settled(());
+            }
+            Ok(_) => {
+                let ended = project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+                if end_attempt_work(&driver, live, &agent_id, &identity)
+                    .await
+                    .is_err()
+                {
+                    return AfterTerminal::Settled(());
+                }
+                finalize_child_turn(
+                    &driver,
+                    &agent_id,
+                    Some(&identity),
+                    ended.clone(),
+                    cancelled,
+                    true,
+                    observer.as_ref(),
+                )
+                .await;
+                retire_live_child(&driver, live, &agent_id, completed_turn).await;
+                return AfterTerminal::Settled(());
+            }
+            Err(error) => {
+                // No authoritative terminal was published. Submitted work
+                // cannot turn this channel failure into completion.
+                finalize_child_failure(
+                    &driver,
+                    &identity,
+                    &agent_id,
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    format!(
+                        "child terminal publication failed ({:?}): {}",
+                        error.kind(),
+                        error.message()
+                    ),
+                    FailedTurnWaits::Keep,
+                    observer.as_ref(),
+                )
+                .await;
+                retire_live_child(&driver, live, &agent_id, completed_turn).await;
+                return AfterTerminal::Settled(());
             }
         }
-        registration.release().await;
-    })
+    }
 }
 
 /// Spec 03 §9: an interrupt cancels this turn and nothing more. The node

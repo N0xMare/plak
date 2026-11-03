@@ -125,8 +125,11 @@ it on arrival. Its workflows (compact, fork, rebind, `/new`, resume and
 pre-turn preparation) are awaited inline while the mailbox is drained as
 intents arrive. Its background work runs on the attachment's task set, which
 release ends. What differs between node roles is a value the actor consults
-(which projections it runs, what follows a recovery-required turn), not a
-second driver; only the root runs as an actor so far. Each admitted turn has one
+(which projections it runs, what follows a recovery-required turn) and the
+role's port, not a second driver. A live child runs the same actor and main
+loop, with the child's port taking hub messages instead of intents (spec 03
+§16). Both roles share one turn loop: each turn is driven to its terminal and
+the role then decides what follows. Each admitted root turn has one
 private `TurnDrive` owning its control handle, observed live projection
 (including pending approvals), cancel settlement, and terminal result. Queue
 editing and intent writes belong to the session domain and share the record's

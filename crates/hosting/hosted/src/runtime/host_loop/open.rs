@@ -509,13 +509,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 events.clone(),
             )
         });
-        let mut host = Self {
-            policy: super::RolePolicy::ROOT,
+        let mut host = Self::new(
+            crate::node::RolePolicy::ROOT,
             opened,
-            quit_started_at: None,
-            quit_abandoned_turn: false,
-            quit_job_stops: None,
-            role: super::RootRole {
+            super::RootRole {
                 _storage_notices: storage_notices,
                 config,
                 actions,
@@ -551,7 +548,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 prep_hooks: super::prompt::preparation::Hooks::new(),
                 idle_entry_pass_due: false,
             },
-        };
+        );
         host.publish_pending_continuation();
         host.publish_projected_usage();
         host.spawn_tree_recovery();

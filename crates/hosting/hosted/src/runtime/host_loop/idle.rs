@@ -89,7 +89,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     ) -> CliResult<HostStep> {
         // A quit the operator already sent is answered first; the next open
         // recovers the fenced turn.
-        if self.policy.recovery == super::RecoveryPolicy::EagerInPlace
+        if self.policy.recovery == crate::node::RecoveryPolicy::EagerInPlace
             && self.role.recovery == RootRecovery::Due
             && !self.role.interrupt_state.borrow().has_deferred_quit()
             && !self.role.actions.abandon_and_release_requested()

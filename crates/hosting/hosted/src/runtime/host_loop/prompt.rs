@@ -677,134 +677,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         .map(PromptOutcome::Dispatched)
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Prompt dispatch records delivery and reconciles definite refusal versus admitted canonical work before returning to the host loop."
-    )]
     async fn dispatch_prompt(
         &mut self,
         input: PromptInput,
         mail: PromptMail,
         pending_context: crate::context::ContextProjection,
         enrolled_source_bytes: u64,
-        one_shot: Option<&mut super::super::oneshot::OneShotState>,
+        mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
-        let PromptInput {
-            user_text,
-            queued_delivery,
-            user_echoed,
-            host_authored,
-            transient_resume,
-            images,
-        } = input;
-        let PromptMail {
-            canonical_command,
-            selected_mail,
-            ..
-        } = mail;
-        let _ = self.role.events.send(ContentEvent::SetBusy(true));
-        let _ = self.role.events.send(ContentEvent::Status {
-            phase: HostPhase::Running,
-            queue_len: self.role.config.session.pending_queue.len(),
-            detail: None,
-        });
-
-        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
-        if let Err(error) = topology_state::mark_root_live_for_prompt(&tree_id).await {
-            let _ = self.role.events.notice(TranscriptRow::error(
-                NoticeScope::Tree,
-                format!("tree admission restore failed: {error}"),
-            ));
-        }
-
-        let agent = self
-            .opened
-            .agent()
-            .ok_or_else(|| CliFailure::new("session source is detached"))?;
-        let subscription_service = self.role.config.target.native_subscriptions().cloned();
-        let turn_started = Instant::now();
-        let live_target = self.live_target();
-        let driven = Box::pin(drive_one_turn(
-            agent,
-            self.opened.sessions(),
-            user_text.clone(),
-            super::super::TurnHost {
-                job_agent: agent,
-                host_wakes: self.role.config.prompt_host_facts().host_wakes
-                    && !self.role.config.session.child_wake_suppressed,
-                quit_started_at: &mut self.quit_started_at,
-                quit_job_stops: &mut self.quit_job_stops,
-                actions: self.role.actions,
-                deferred: &self.role.interrupt_state,
-                events: &self.role.events,
-                rows: &super::super::HostRows::new(
-                    &self.role.config.state_roots,
-                    self.role.config.store.as_ref(),
-                ),
-                roots: &self.role.config.state_roots,
-                store: &*self.role.config.store,
-                projection_store: &self.role.config.store,
-                live_projector: self.role.live.as_mut(),
-                live_target,
-                home: &self.role.config.home,
-                session: &mut self.role.config.session,
-                context_projection: pending_context,
-                enrolled_source_bytes,
-                root_template: &mut self.role.config.root_template,
-                attached_one_shot: self.role.config.attached_one_shot,
-                ready_catalog: &self.role.config.ready_catalog.accounts,
-                surface: &self.role.config.surface,
-                log: self.role.log.as_ref(),
-                subscription_service,
-                subscription_usage_refresh: &self.role.subscription_usage_refresh,
-                held_usage: &self.role.held_usage,
-                ledger: &self.role.session_ledger,
-                last_tree_revision: &mut self.role.last_tree_revision,
-                job_events: &mut self.role.job_events,
-                runtime_factory: self.role.config.runtime_factory.as_ref(),
-            },
-            queued_delivery
-                .as_ref()
-                .ok_or_else(|| CliFailure::new("root start requires a queued delivery"))?,
-            user_echoed,
-            (canonical_command, selected_mail),
-        ))
-        .await;
-        self.role
-            .session_ledger
-            .record_dispatch(turn_started.elapsed());
-        if self.role.actions.abandon_and_release_requested() && driven.is_err() {
-            return Ok(HostStep::Quit);
-        }
-        if let Err(error) = &driven
-            && let Some(failure) = error.refused_failure()
-        {
-            return Err(failure);
-        }
-        // The row used to move only when a binding was republished.
-        send_session_info(&self.role.events, &self.role.config);
-        let quit_after_terminal = match &driven {
-            Ok(driven) => driven.quit_after_terminal,
-            Err(error) => error.quit_after_terminal,
+        let turn = RootTurn {
+            input,
+            mail,
+            pending_context,
+            enrolled_source_bytes,
         };
-        let drive = driven
-            .map(|driven| driven.outcome)
-            .map_err(|error| error.message);
-        self.finish_prompt(
-            PromptInput {
-                user_text,
-                queued_delivery,
-                user_echoed,
-                host_authored,
-                transient_resume,
-                images,
-            },
-            drive,
-            turn_started,
-            quit_after_terminal,
-            one_shot,
-        )
-        .await
+        crate::node::drive_turns(self, &mut one_shot, turn).await
     }
 
     #[allow(
@@ -1132,5 +1019,190 @@ const fn mail_after_scheduled_send(
         ScheduledMail::Keep
     }
 }
+
+/// A root prompt the actor admitted, as its turn loop drives it.
+pub(super) struct RootTurn {
+    input: PromptInput,
+    mail: PromptMail,
+    pending_context: crate::context::ContextProjection,
+    enrolled_source_bytes: u64,
+}
+
+/// A root turn at its terminal, or the drive's own failure before one.
+pub(super) struct RootTerminal {
+    input: PromptInput,
+    driven: Result<super::super::DrivenTurn, super::super::DriveTurnError>,
+    turn_started: Instant,
+}
+
+/// The root's turns: one per admitted prompt. What follows a root terminal
+/// (a queued item, a transient resume, a child wake) is the idle step's.
+impl<'o, P: plakous_host_protocol::ProtocolExtension>
+    crate::node::TurnRole<Option<&'o mut super::super::oneshot::OneShotState>>
+    for RootActor<'_, P>
+{
+    type Turn = RootTurn;
+    type Terminal = CliResult<RootTerminal>;
+    type Settled = CliResult<HostStep>;
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Prompt dispatch records delivery and reconciles definite refusal versus admitted canonical work before returning to the host loop."
+    )]
+    async fn drive(
+        &mut self,
+        _one_shot: &mut Option<&'o mut super::super::oneshot::OneShotState>,
+        turn: RootTurn,
+    ) -> CliResult<RootTerminal> {
+        let RootTurn {
+            input,
+            mail,
+            pending_context,
+            enrolled_source_bytes,
+        } = turn;
+        let PromptInput {
+            user_text,
+            queued_delivery,
+            user_echoed,
+            host_authored,
+            transient_resume,
+            images,
+        } = input;
+        let PromptMail {
+            canonical_command,
+            selected_mail,
+            ..
+        } = mail;
+        let _ = self.role.events.send(ContentEvent::SetBusy(true));
+        let _ = self.role.events.send(ContentEvent::Status {
+            phase: HostPhase::Running,
+            queue_len: self.role.config.session.pending_queue.len(),
+            detail: None,
+        });
+
+        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
+        if let Err(error) = topology_state::mark_root_live_for_prompt(&tree_id).await {
+            let _ = self.role.events.notice(TranscriptRow::error(
+                NoticeScope::Tree,
+                format!("tree admission restore failed: {error}"),
+            ));
+        }
+
+        let agent = self
+            .opened
+            .agent()
+            .ok_or_else(|| CliFailure::new("session source is detached"))?;
+        let subscription_service = self.role.config.target.native_subscriptions().cloned();
+        let turn_started = Instant::now();
+        let live_target = self.live_target();
+        let driven = Box::pin(drive_one_turn(
+            agent,
+            self.opened.sessions(),
+            user_text.clone(),
+            super::super::TurnHost {
+                job_agent: agent,
+                host_wakes: self.role.config.prompt_host_facts().host_wakes
+                    && !self.role.config.session.child_wake_suppressed,
+                quit_started_at: &mut self.quit_started_at,
+                quit_job_stops: &mut self.quit_job_stops,
+                actions: self.role.actions,
+                deferred: &self.role.interrupt_state,
+                events: &self.role.events,
+                rows: &super::super::HostRows::new(
+                    &self.role.config.state_roots,
+                    self.role.config.store.as_ref(),
+                ),
+                roots: &self.role.config.state_roots,
+                store: &*self.role.config.store,
+                projection_store: &self.role.config.store,
+                live_projector: self.role.live.as_mut(),
+                live_target,
+                home: &self.role.config.home,
+                session: &mut self.role.config.session,
+                context_projection: pending_context,
+                enrolled_source_bytes,
+                root_template: &mut self.role.config.root_template,
+                attached_one_shot: self.role.config.attached_one_shot,
+                ready_catalog: &self.role.config.ready_catalog.accounts,
+                surface: &self.role.config.surface,
+                log: self.role.log.as_ref(),
+                subscription_service,
+                subscription_usage_refresh: &self.role.subscription_usage_refresh,
+                held_usage: &self.role.held_usage,
+                ledger: &self.role.session_ledger,
+                last_tree_revision: &mut self.role.last_tree_revision,
+                job_events: &mut self.role.job_events,
+                runtime_factory: self.role.config.runtime_factory.as_ref(),
+            },
+            queued_delivery
+                .as_ref()
+                .ok_or_else(|| CliFailure::new("root start requires a queued delivery"))?,
+            user_echoed,
+            (canonical_command, selected_mail),
+        ))
+        .await;
+        Ok(RootTerminal {
+            input: PromptInput {
+                user_text,
+                queued_delivery,
+                user_echoed,
+                host_authored,
+                transient_resume,
+                images,
+            },
+            driven,
+            turn_started,
+        })
+    }
+
+    async fn after_terminal(
+        &mut self,
+        one_shot: &mut Option<&'o mut super::super::oneshot::OneShotState>,
+        terminal: CliResult<RootTerminal>,
+    ) -> crate::node::AfterTerminal<RootTurn, CliResult<HostStep>> {
+        crate::node::AfterTerminal::Settled(
+            self.settle_terminal(one_shot.as_deref_mut(), terminal)
+                .await,
+        )
+    }
+}
+
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    /// Publishes a driven root terminal and decides the host's next step.
+    async fn settle_terminal(
+        &mut self,
+        one_shot: Option<&mut super::super::oneshot::OneShotState>,
+        terminal: CliResult<RootTerminal>,
+    ) -> CliResult<HostStep> {
+        let RootTerminal {
+            input,
+            driven,
+            turn_started,
+        } = terminal?;
+        self.role
+            .session_ledger
+            .record_dispatch(turn_started.elapsed());
+        if self.role.actions.abandon_and_release_requested() && driven.is_err() {
+            return Ok(HostStep::Quit);
+        }
+        if let Err(error) = &driven
+            && let Some(failure) = error.refused_failure()
+        {
+            return Err(failure);
+        }
+        // The row used to move only when a binding was republished.
+        send_session_info(&self.role.events, &self.role.config);
+        let quit_after_terminal = match &driven {
+            Ok(driven) => driven.quit_after_terminal,
+            Err(error) => error.quit_after_terminal,
+        };
+        let drive = driven
+            .map(|driven| driven.outcome)
+            .map_err(|error| error.message);
+        self.finish_prompt(input, drive, turn_started, quit_after_terminal, one_shot)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests;
