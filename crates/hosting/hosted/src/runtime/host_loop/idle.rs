@@ -156,6 +156,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 );
             }
             let mut acknowledgement = None;
+            let mut command_reply = false;
             let deferred = self.role.interrupt_state.borrow_mut().take_deferred();
             let received = match deferred {
                 Some(delivery) => Ok(delivery),
@@ -163,6 +164,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             }
             .map(|delivery| {
                 if let Some(started) = delivery.started() {
+                    command_reply = matches!(&started, ContentEvent::IntentStarted(Some(_)));
                     let _ = self.role.events.send(started);
                 }
                 let (action, guard) = delivery.into_parts();
@@ -513,13 +515,38 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                         None
                     }
                 }
-                Ok(UserAction::ResolveApproval { .. }) => {
-                    // Decisions exist only inside an admitted turn; idle, there
-                    // is nothing to resolve and the runtime is not contacted.
-                    let _ = self.role.events.notice(TranscriptRow::error(
-                        NoticeScope::Approval,
-                        APPROVAL_REFUSED_NOTE,
-                    ));
+                Ok(UserAction::ResolveApproval {
+                    approval_id,
+                    choice,
+                }) => {
+                    // The root's decisions exist only inside its admitted
+                    // turn; idle, only a live child can hold one.
+                    let tree_id = crate::runtime::rebind::durable_tree_id(
+                        &self.role.config.topology_rows(),
+                        &self.role.config.session,
+                    );
+                    match crate::runtime::events::decide_on_child(&tree_id, &approval_id, choice)
+                        .await
+                    {
+                        Some(Ok(())) if command_reply => {
+                            let choice = match choice {
+                                plakous_host_protocol::ApprovalChoice::Allow => "allow",
+                                plakous_host_protocol::ApprovalChoice::Deny => "deny",
+                            };
+                            let _ = self.role.events.notice(TranscriptRow::info(
+                                NoticeScope::Approval,
+                                format!("approval accepted: {choice}"),
+                            ));
+                        }
+                        Some(Ok(())) => {}
+                        refused => {
+                            let refusal = refused.and_then(Result::err);
+                            let _ = self.role.events.notice(TranscriptRow::error(
+                                NoticeScope::Approval,
+                                refusal.unwrap_or_else(|| APPROVAL_REFUSED_NOTE.to_owned()),
+                            ));
+                        }
+                    }
                     None
                 }
                 Ok(UserAction::ResumeQueueDrain) => {

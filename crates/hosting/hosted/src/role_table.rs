@@ -198,9 +198,10 @@ pub(crate) const fn today(row: Row, column: Column) -> Cell {
         (Row::Processes, Column::Child) => Cell::Classes(&[B, R]),
         // The intent names a child as its caller and runs idle.
         (Row::InvokeTool, Column::Child) => Cell::Classes(&[I]),
+        // The child's actor is the single decider for its own decisions.
+        (Row::Approval, Column::Child) => Cell::Classes(&[B]),
         (
             Row::Queue
-            | Row::Approval
             | Row::Workflow
             | Row::Readiness
             | Row::Recover
@@ -212,14 +213,16 @@ pub(crate) const fn today(row: Row, column: Column) -> Cell {
 }
 
 /// Every cell where today differs from the design and M closes it.
-pub(crate) const DIVERGENT: [(Row, Column); 1] = [(Row::Approval, Column::Child)];
+pub(crate) const DIVERGENT: [(Row, Column); 0] = [];
 
 /// Every cell whose design letters need a node address on the wire:
 /// `Background` and the usage extension name no node until B1 (wire v2
 /// node attach), so until then they stay the root's and a child refuses
 /// them. B1 closes these.
-pub(crate) const AT_B1: [(Row, Column); 2] =
-    [(Row::Processes, Column::Child), (Row::Templates, Column::Child)];
+pub(crate) const AT_B1: [(Row, Column); 2] = [
+    (Row::Processes, Column::Child),
+    (Row::Templates, Column::Child),
+];
 
 /// The row an intent belongs to. Exhaustive: a new intent must be placed.
 pub(crate) fn row_of(action: &UserAction) -> Row {

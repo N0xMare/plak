@@ -5,11 +5,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use plakous::tools::ToolPolicy as _;
-
 use serde_json::json;
 
-use super::park::tests::{Fixture, fixture, held, leaf, parked, settled, start_job, turns};
+use super::park::tests::{
+    Fixture, fixture, fixture_deciding, held, leaf, parked, settled, start_job, turns,
+};
 use crate::agent_tree::{MailDisposition, NodeDetach, ProductAgentTree, TopologyObserver};
 use crate::agent_tree_protocol::{
     AttemptScopedRequest, AttemptStatus, MessagePriority, MessagePurpose, NodeStatus,
@@ -42,7 +42,7 @@ pub(crate) const COVERED: &[Covered] = &[
     Covered {
         row: Row::Approval,
         column: Column::Child,
-        test: child_approval_has_no_route,
+        test: child_approval_is_decided_once_by_the_child,
     },
     Covered {
         row: Row::Quit,
@@ -241,22 +241,51 @@ async fn child_process_stop_reaches_its_job_and_background_has_no_route() {
     finish(&fixture).await;
 }
 
-/// R: a child never has a pending decision to resolve. Its full fence runs
-/// under the product's allow-registered policy, and `ResolveApproval`
-/// names no node.
-#[test]
-fn child_approval_has_no_route() {
-    // M: expects B (single decider, first answer wins).
-    assert_today(Row::Approval, Column::Child, Cell::Classes(&[Class::R]));
-    let policy = crate::agent::session_tool_policy(crate::agent::SessionToolFence::Full);
+/// B: a decision a child's turn waits on routes by its handle to that
+/// child, whose actor is its single decider: the first answer resumes the
+/// turn, and a later one, like any handle no live child holds, is not
+/// routed and gets the root's refusal.
+#[tokio::test]
+async fn child_approval_is_decided_once_by_the_child() {
+    assert_today(Row::Approval, Column::Child, Cell::Classes(&[Class::B]));
+    let fixture = fixture_deciding(json!([start_job("true"), held("decided")]), leaf).await;
+    let approval_id = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let pending = {
+                let live = fixture.runtime.live.lock().await;
+                live.get(&fixture.child)
+                    .and_then(crate::runtime::child_projection::of)
+                    .map(|observation| observation.pending_decisions())
+                    .unwrap_or_default()
+            };
+            if let Some(approval_id) = pending.into_iter().next() {
+                break approval_id;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the child's turn waits on its decision");
+    let decide = |approval_id: String, allow: bool| {
+        let live = Arc::clone(&fixture.runtime.live);
+        async move { crate::topology_runtime::decide_live(&live, &approval_id, allow).await }
+    };
+    assert_eq!(decide(approval_id.clone(), true).await, Some(Ok(())));
+    // The loser's handle is consumed, so it reads like one never offered
+    // and the root refuses it with the one indistinguishable note.
+    assert_eq!(decide(approval_id, false).await, None, "the second answer");
+    assert_eq!(decide("approval-unknown".to_owned(), true).await, None);
+    // The allowed effect ran and the turn went on to its next round.
+    fixture.held_reached().await;
+    // The policy that pends is the fixture's; the product's stays
+    // allow-registered, so product children never wait on a decision.
     assert_eq!(
-        policy.revision().policy_id(),
-        crate::agent::product_effect_policy().revision().policy_id()
+        crate::agent::session_tool_policy(crate::agent::SessionToolFence::Full)
+            .revision()
+            .policy_id(),
+        "plakous.allow-registered"
     );
-    assert_eq!(policy.revision().policy_id(), "plakous.allow-registered");
-    for action in crate::role_table::intents_of(Row::Approval) {
-        assert_eq!(crate::role_table::child_address(&action), None);
-    }
+    finish(&fixture).await;
 }
 
 #[derive(Default)]

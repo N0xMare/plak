@@ -4957,7 +4957,9 @@ the tree's shutdown closes it, aborting what still runs and joining it for
 at most 250 ms.
 A live child's actor is the one owner of its attached session. The hub's
 follow-up, restart, release and cancel-and-release are messages it answers in
-arrival order, and a reply nobody awaits any more stops that work. The actor
+arrival order, and a reply nobody awaits any more stops that work. An
+operator decision its turn waits on is a message too: the actor is that
+decision's single decider (spec 02 §4.3.1). The actor
 drives the child's turn waiter beside its mailbox, so a waiter that restarts
 or retires its own child is answered by the actor it runs in. The actor ends
 once its waiter has ended and its session is gone: released, or dropped

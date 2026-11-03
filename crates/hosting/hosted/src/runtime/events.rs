@@ -32,7 +32,9 @@ pub(super) use compaction::{
     publish_compact_activity,
 };
 pub(crate) use compose::{compose_counts_subject, host_owns_subject, projected_tool_subject};
-pub(super) use decisions::resolve_approval_intent;
+pub(super) use decisions::{
+    decide_on_child, resolution_label, resolve_approval_intent, submit_decision,
+};
 pub(crate) use notes::{
     abandoned_turn_operator_detail, abandoned_turn_operator_line, output_bound_rederived_note,
 };

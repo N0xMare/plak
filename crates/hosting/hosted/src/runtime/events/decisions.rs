@@ -34,45 +34,92 @@ pub(in crate::runtime) async fn resolve_approval_intent<
     };
     // The decision→handle map survives the intent so the runtime's own
     // resolution event still retires the row truthfully.
+    if let Err(refusal) = submit_decision(control, &pending.decision, approval_id, choice).await {
+        if refusal.retained {
+            // These definite refusals leave the runtime decision pending. Do
+            // not strand the offered handle; success still consumes it once.
+            projection.approvals.insert(approval_id.to_owned(), pending);
+        }
+        let _ = events.notice(TranscriptRow::error(NoticeScope::Approval, refusal.message));
+        return false;
+    }
+    true
+}
+
+/// Why the runtime did not take an operator decision.
+pub(in crate::runtime) struct DecisionRefusal {
+    pub(in crate::runtime) message: String,
+    /// The runtime still waits on the decision, so its handle stays offered.
+    pub(in crate::runtime) retained: bool,
+}
+
+/// Hands one operator decision to the runtime that waits on it.
+pub(in crate::runtime) async fn submit_decision(
+    control: &TurnControl,
+    decision: &plakous::agent::EffectDecisionRef,
+    approval_id: &str,
+    choice: plakous_host_protocol::ApprovalChoice,
+) -> Result<(), DecisionRefusal> {
     let outcome = match choice {
         plakous_host_protocol::ApprovalChoice::Allow => {
             let Ok(audit) = plakous::tools::EffectDecisionAuditId::new(approval_id.to_owned())
             else {
-                let _ = events.notice(TranscriptRow::error(
-                    NoticeScope::Approval,
-                    "approval refused: the host decision identity was not portable",
-                ));
-                return false;
+                return Err(DecisionRefusal {
+                    message: "approval refused: the host decision identity was not portable"
+                        .to_owned(),
+                    retained: false,
+                });
             };
-            control.allow_effect(pending.decision.clone(), audit).await
+            control.allow_effect(decision.clone(), audit).await
         }
         plakous_host_protocol::ApprovalChoice::Deny => {
             control
                 .deny_tool(
-                    pending.decision.clone(),
+                    decision.clone(),
                     plakous::tools::ToolPolicyDenial::new("operator denied this tool"),
                 )
                 .await
         }
     };
-    if let Err(error) = outcome {
-        if matches!(
+    outcome.map(|_| ()).map_err(|error| DecisionRefusal {
+        retained: matches!(
             error.kind(),
             plakous::agent::ControlErrorKind::Backpressure
                 | plakous::agent::ControlErrorKind::LedgerFull
                 | plakous::agent::ControlErrorKind::StoragePressure
-        ) {
-            // These definite refusals leave the runtime decision pending. Do
-            // not strand the offered handle; success still consumes it once.
-            projection.approvals.insert(approval_id.to_owned(), pending);
-        }
-        let _ = events.notice(TranscriptRow::error(
-            NoticeScope::Approval,
-            format!("approval was not applied: {error}"),
-        ));
-        return false;
+        ),
+        message: format!("approval was not applied: {error}"),
+    })
+}
+
+/// Routes a decision the root does not hold to the live child of `tree_id`
+/// that does. `None` when no live child holds it.
+pub(in crate::runtime) async fn decide_on_child(
+    tree_id: &str,
+    approval_id: &str,
+    choice: plakous_host_protocol::ApprovalChoice,
+) -> Option<Result<(), String>> {
+    let runtime = crate::topology_runtime::lookup(tree_id)?;
+    let allow = matches!(choice, plakous_host_protocol::ApprovalChoice::Allow);
+    crate::topology_runtime::decide_live(&runtime.live, approval_id, allow).await
+}
+
+/// The label an approval's resolution row carries.
+pub(in crate::runtime) const fn resolution_label(
+    resolution: EffectDecisionResolution,
+) -> &'static str {
+    match resolution {
+        EffectDecisionResolution::Allowed => "allowed",
+        EffectDecisionResolution::Denied => "denied",
+        EffectDecisionResolution::Expired => "expired",
+        EffectDecisionResolution::Cancelled => "cancelled",
+        EffectDecisionResolution::Shutdown => "shutdown",
+        EffectDecisionResolution::Invalidated => "invalidated",
+        // The runtime enum is `#[non_exhaustive]`. A resolution this
+        // host does not know is reported as unknown rather than
+        // mislabelled as one of the six it does.
+        _ => "unknown",
     }
-    true
 }
 
 #[cfg(test)]
@@ -159,18 +206,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             return;
         };
         projection.approvals.remove(&approval_id);
-        let resolution = match resolution {
-            EffectDecisionResolution::Allowed => "allowed",
-            EffectDecisionResolution::Denied => "denied",
-            EffectDecisionResolution::Expired => "expired",
-            EffectDecisionResolution::Cancelled => "cancelled",
-            EffectDecisionResolution::Shutdown => "shutdown",
-            EffectDecisionResolution::Invalidated => "invalidated",
-            // The runtime enum is `#[non_exhaustive]`. A resolution this
-            // host does not know is reported as unknown rather than
-            // mislabelled as one of the six it does.
-            _ => "unknown",
-        };
+        let resolution = resolution_label(*resolution);
         log_event(
             log,
             observed_session_id,

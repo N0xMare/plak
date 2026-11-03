@@ -967,6 +967,48 @@ pub(super) fn transcript_ops(
             }
             ops.push(HostEvent::SetBusy(false));
         }
+        // The child's own decision handle, offered like the root's; the
+        // child's actor is its single decider.
+        AgentEventKind::EffectDecisionRequired {
+            identity,
+            decision,
+            prompt,
+            expires_at,
+        } => {
+            let approval_id = format!("approval-{}", uuid::Uuid::new_v4());
+            projection.approvals.insert(
+                approval_id.clone(),
+                super::PendingApproval {
+                    decision: decision.clone(),
+                },
+            );
+            projection
+                .approval_by_decision
+                .insert(decision.clone(), approval_id.clone());
+            ops.push(HostEvent::ApprovalRequired {
+                approval_id,
+                call_id: event.call_id().map(|id| id.as_uuid().to_string()),
+                tool_name: identity.canonical_name().as_str().to_owned(),
+                subject: None,
+                prompt: prompt.as_ref().map(|prompt| {
+                    crate::session_log::redact_text_preview(prompt.description().as_str())
+                }),
+                expires_at_ms: super::events::timestamp_ms(*expires_at),
+            });
+        }
+        AgentEventKind::EffectDecisionResolved {
+            decision,
+            resolution,
+            ..
+        } => {
+            if let Some(approval_id) = projection.approval_by_decision.remove(decision) {
+                projection.approvals.remove(&approval_id);
+                ops.push(HostEvent::ApprovalResolved {
+                    approval_id,
+                    resolution: super::events::resolution_label(*resolution).to_owned(),
+                });
+            }
+        }
         _ => {}
     }
     ops

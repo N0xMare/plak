@@ -3442,6 +3442,10 @@ and their refusals.
 `resolve_approval` uses the same single-use `ResolveApproval` intent as the
 TUI. The handle belongs to the offered decision in the currently attached
 session and turn; it is not a call id or durable runtime decision address.
+A live child's turn offers its own decisions the same way, as `approval`
+rows in that child's transcript. The host routes such a handle to the child
+that holds it, whose actor is the decision's single decider: the first answer
+is applied, and a later one is refused like any consumed handle.
 On reopen, clients must use the newly offered handle, after `hello`.
 Both choices record the durable `EffectDecision` before an effect can run;
 `allow` permits that exact call once, and `deny` dispatches no effect.

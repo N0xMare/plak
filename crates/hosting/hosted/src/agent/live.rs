@@ -161,6 +161,12 @@ enum ChildMessage {
         dispatched: Option<tokio::sync::oneshot::Sender<()>>,
         reply: tokio::sync::oneshot::Sender<LiveRelease>,
     },
+    /// An operator decision on what the running turn waits for.
+    Decide {
+        approval_id: String,
+        choice: plakous_host_protocol::ApprovalChoice,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
     /// The turn the hub occupied the slot with is now watched.
     Watch { watch: TurnWatch },
     /// Hands the attached session back.
@@ -292,6 +298,30 @@ impl NodeActor<ChildRole> {
                 let control = self.role.shared.turn().control.clone();
                 let work = cancel_and_release(attached, control, delivery, driver, dispatched);
                 Box::pin(alongside(answer(reply, work), &mut self.role.watch)).await;
+            }
+            ChildMessage::Decide {
+                approval_id,
+                choice,
+                reply,
+            } => {
+                let (observation, control) = {
+                    let turn = self.role.shared.turn();
+                    let observation = turn
+                        .observation
+                        .as_ref()
+                        .map(|projection| Arc::clone(&projection.observation));
+                    (observation, turn.control.clone())
+                };
+                let decided = async {
+                    let Some(observation) = observation else {
+                        return Err(crate::runtime::child_projection::DECISION_UNKNOWN.to_owned());
+                    };
+                    observation.decide(&control, &approval_id, choice).await
+                };
+                // A decision handed to the runtime is not withdrawn because
+                // its asker left.
+                let decided = alongside(decided, &mut self.role.watch).await;
+                let _ = reply.send(decided);
             }
             ChildMessage::Watch { watch } => self.role.watch = Some(watch),
             #[cfg(test)]
@@ -933,6 +963,32 @@ impl LiveChildHandle for ChildActorHandle {
         body: String,
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
         self.follow_up_with_ack(command_id, body, std::future::ready(()))
+    }
+
+    fn decide(
+        &self,
+        decision: &str,
+        allow: bool,
+    ) -> Option<Pin<Box<dyn Future<Output = Result<(), String>> + Send>>> {
+        let observation = Arc::clone(&self.shared.turn().observation.as_ref()?.observation);
+        if !observation.holds_decision(decision) {
+            return None;
+        }
+        let choice = if allow {
+            plakous_host_protocol::ApprovalChoice::Allow
+        } else {
+            plakous_host_protocol::ApprovalChoice::Deny
+        };
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        let sent = self.mailbox.send(ChildMessage::Decide {
+            approval_id: decision.to_owned(),
+            choice,
+            reply,
+        });
+        Some(Box::pin(async move {
+            sent.map_err(|_| ACTOR_GONE.to_owned())?;
+            answer.await.unwrap_or_else(|_| Err(ACTOR_GONE.to_owned()))
+        }))
     }
 
     fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {

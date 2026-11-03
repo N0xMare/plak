@@ -277,6 +277,11 @@ struct State {
     closed: bool,
 }
 
+/// No decision with that handle is pending on this turn. An answered or
+/// expired handle reads the same as one never offered (spec 02 section
+/// 4.3.1).
+pub(crate) const DECISION_UNKNOWN: &str = super::APPROVAL_REFUSED_NOTE;
+
 #[derive(Clone)]
 pub(super) struct Update {
     pub(super) cursor: u64,
@@ -354,6 +359,55 @@ impl ChildObservation {
             changed: self.changed.subscribe(),
         };
         (snapshot, tail)
+    }
+
+    /// The decisions this turn waits on.
+    #[cfg(test)]
+    pub(crate) fn pending_decisions(&self) -> Vec<String> {
+        self.lock()
+            .projection
+            .as_ref()
+            .map(|projection| projection.approvals.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether this turn waits on the decision `approval_id` names.
+    pub(crate) fn holds_decision(&self, approval_id: &str) -> bool {
+        self.lock()
+            .projection
+            .as_ref()
+            .is_some_and(|projection| projection.approvals.contains_key(approval_id))
+    }
+
+    /// Answers the decision `approval_id` names for this turn. The first
+    /// answer takes it; a later one is refused. A definite runtime refusal
+    /// that leaves the decision pending keeps it offered.
+    pub(crate) async fn decide(
+        &self,
+        control: &TurnControl,
+        approval_id: &str,
+        choice: plakous_host_protocol::ApprovalChoice,
+    ) -> Result<(), String> {
+        let taken = self
+            .lock()
+            .projection
+            .as_mut()
+            .and_then(|projection| projection.approvals.remove(approval_id));
+        let Some(pending) = taken else {
+            return Err(DECISION_UNKNOWN.to_owned());
+        };
+        let decision = pending.decision.clone();
+        if let Err(refusal) =
+            super::events::submit_decision(control, &decision, approval_id, choice).await
+        {
+            if refusal.retained
+                && let Some(projection) = self.lock().projection.as_mut()
+            {
+                projection.approvals.insert(approval_id.to_owned(), pending);
+            }
+            return Err(refusal.message);
+        }
+        Ok(())
     }
 
     fn close(&self) {

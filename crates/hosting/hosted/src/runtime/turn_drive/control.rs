@@ -422,14 +422,38 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     approval_id,
                     choice,
                 }) => {
-                    let applied = resolve_approval_intent(
-                        &self.control,
-                        self.host.events,
-                        &mut self.projection,
-                        &approval_id,
-                        choice,
-                    )
-                    .await;
+                    // A decision this turn did not offer is routed to the
+                    // live child that holds it.
+                    let routed = if self.projection.approvals.contains_key(&approval_id) {
+                        None
+                    } else {
+                        let tree_id = crate::runtime::rebind::durable_tree_id(
+                            self.host.rows,
+                            self.host.session,
+                        );
+                        crate::runtime::events::decide_on_child(&tree_id, &approval_id, choice)
+                            .await
+                    };
+                    let applied = match routed {
+                        Some(Ok(())) => true,
+                        Some(Err(refusal)) => {
+                            let _ = self
+                                .host
+                                .events
+                                .notice(TranscriptRow::error(NoticeScope::Approval, refusal));
+                            false
+                        }
+                        None => {
+                            resolve_approval_intent(
+                                &self.control,
+                                self.host.events,
+                                &mut self.projection,
+                                &approval_id,
+                                choice,
+                            )
+                            .await
+                        }
+                    };
                     if applied && command_reply {
                         let choice = match choice {
                             plakous_host_protocol::ApprovalChoice::Allow => "allow",

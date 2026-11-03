@@ -70,6 +70,9 @@ pub struct LiveRelease {
     pub failure: Option<String>,
 }
 
+/// A live child's answer to one operator decision.
+pub type LiveDecision = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
+
 /// One live child turn, as the hub sees it.
 ///
 /// The hub owns *whether* a turn is live and *when* it ends, and holds the one
@@ -117,6 +120,13 @@ pub trait LiveChildHandle: Send + Sync {
 
     /// Orders in-flight follow-up admission before terminal handoff.
     fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>>;
+
+    /// Answers the operator decision `decision` names, when this child's
+    /// running turn is the node that holds it: the child is that
+    /// decision's single decider. `None` when the child does not hold it.
+    fn decide(&self, _decision: &str, _allow: bool) -> Option<LiveDecision> {
+        None
+    }
 
     /// The follow-up turn admitted behind the turn that just ended, if any.
     /// It is now the session's active turn: the handle rebinds to it so the
@@ -190,6 +200,23 @@ struct Retirement {
     completion:
         futures_util::future::Shared<futures_util::future::BoxFuture<'static, Result<(), String>>>,
     abort: crate::task_set::TaskAbortHandle,
+}
+
+/// Routes an operator decision to the live child that holds it, and
+/// answers what that child's single decider said. `None` when no live
+/// child holds `decision`.
+pub async fn decide_live(
+    live: &Arc<tokio::sync::Mutex<LiveChildTable>>,
+    decision: &str,
+    allow: bool,
+) -> Option<Result<(), String>> {
+    let answer = {
+        let live = live.lock().await;
+        live.children
+            .values()
+            .find_map(|child| child.decide(decision, allow))
+    };
+    Some(answer?.await)
 }
 
 /// Releases an exact child turn, or joins its existing retirement. A failed

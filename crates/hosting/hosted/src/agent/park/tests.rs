@@ -110,6 +110,13 @@ impl Fixture {
             gate.release();
         }
     }
+
+    /// Waits until the child's model reaches its first held stream.
+    pub(in crate::agent) async fn held_reached(&self) {
+        tokio::time::timeout(Duration::from_secs(30), self.provider_gates[0].entered())
+            .await
+            .expect("the held stream is reached");
+    }
 }
 
 pub(in crate::agent) fn parked(tree: &ProductAgentTree, child: &str) -> bool {
@@ -139,10 +146,27 @@ pub(in crate::agent) async fn fixture(
     fixture_with_probe(steps, setup, None).await
 }
 
+/// A fixture whose child's tool calls wait for an operator decision.
+pub(in crate::agent) async fn fixture_deciding(
+    steps: serde_json::Value,
+    setup: impl FnOnce(&mut ProductAgentTree) -> String,
+) -> Fixture {
+    fixture_with(steps, setup, None, Some("decision_required")).await
+}
+
 async fn fixture_with_probe(
+    steps: serde_json::Value,
+    setup: impl FnOnce(&mut ProductAgentTree) -> String,
+    probe: Option<plakous::model::ReachabilityProbe>,
+) -> Fixture {
+    fixture_with(steps, setup, probe, None).await
+}
+
+async fn fixture_with(
     mut steps: serde_json::Value,
     setup: impl FnOnce(&mut ProductAgentTree) -> String,
     probe: Option<plakous::model::ReachabilityProbe>,
+    tool_policy: Option<&str>,
 ) -> Fixture {
     let root = tempfile::tempdir().unwrap();
     let runtime = Arc::new(ProductTopologyRuntime::new(
@@ -170,14 +194,16 @@ async fn fixture_with_probe(
             }
         }
     }
-    let plan: Arc<plakous_offline_crash_harness::script::ScriptPlan> = Arc::new(
-        serde_json::from_value(json!({
-            "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
-            "process_tools": true,
-            "steps": steps,
-        }))
-        .unwrap(),
-    );
+    let mut plan = json!({
+        "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+        "process_tools": true,
+        "steps": steps,
+    });
+    if let Some(tool_policy) = tool_policy {
+        plan["tool_policy"] = json!(tool_policy);
+    }
+    let plan: Arc<plakous_offline_crash_harness::script::ScriptPlan> =
+        Arc::new(serde_json::from_value(plan).unwrap());
     let registry = Arc::new(crate::jobs::JobRegistry::default());
     let controller = BoundaryController::quiet_from_evidence_path(
         CrashBoundary::None,
