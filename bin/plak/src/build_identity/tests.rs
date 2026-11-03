@@ -413,3 +413,28 @@ fn a_path_name_follows_its_symlink_and_sees_a_replaced_target() {
     let installed = FileIdentity::of(&again).unwrap();
     assert!(installed_build_is_newer(Some(&running), Some(&installed)));
 }
+
+/// What a bounded probe reports: an id the cache already holds for this
+/// image, and nothing (never a guess) where only a hash would tell.
+#[test]
+fn an_identity_known_without_hashing_comes_only_from_the_cache() {
+    let home = private_home();
+    let builds = tempfile::tempdir().unwrap();
+    let image = builds.path().join("plak");
+    std::fs::write(&image, "image").unwrap();
+    let known = |home: &Path| {
+        let mut file = std::fs::File::open(&image).unwrap();
+        let cache = Some(IdentityCache {
+            home,
+            writable: false,
+        });
+        identify_image(&mut file, Some(&image), cache, |_| None)
+    };
+    assert_eq!(known(home.path()), None);
+    assert!(!home.path().join(IDENTITY_CACHE_FILE).exists());
+    assert_eq!(counted_identify(&image, home.path()).1, 1);
+    assert_eq!(known(home.path()).as_deref(), Some("6105d6cc76af"));
+    // A rebuild in place is a new image: the old entry does not name it.
+    std::fs::write(&image, "image, rebuilt").unwrap();
+    assert_eq!(known(home.path()), None);
+}

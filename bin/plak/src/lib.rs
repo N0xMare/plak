@@ -339,6 +339,8 @@ fn log_command_start(command: &Command) {
 fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
     let command = cli::parse(arguments)?;
     build_features::admit_command(&command)?;
+    #[cfg(feature = "test-hooks")]
+    test_hooks::install_identity_hash_delay();
 
     if let Command::WriteBinaryManifest { directory } = &command {
         build_identity::write_binary_manifest(directory).map_err(|error| {
@@ -542,7 +544,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                     state_key: home::state::state_key(),
                     export_versions: carry::IMPORTABLE_VERSIONS.to_vec(),
                     config_error: Some(error.message().to_owned()),
-                    binary_id: Some(build_identity::binary_id().to_owned()),
+                    binary_id: build_identity::known_binary_id(),
                 },
             };
             serde_json::to_writer(&mut stdout, &verdict)

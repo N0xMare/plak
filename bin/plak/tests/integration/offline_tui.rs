@@ -2454,6 +2454,41 @@ fn a_reload_whose_binding_changed_carries_in_one_step_naming_the_change() {
     terminal.quit();
 }
 
+/// A build without an install manifest learns its identity by hashing its
+/// image. The reload probe never waits for that hash, so a slow one (longer
+/// than the probe's bound) still yields the destination's verdict and the
+/// binding carry, rather than an unverified resume.
+#[test]
+fn a_slow_identity_hash_still_carries_a_changed_binding() {
+    let slow = |answer: &str| {
+        let mut script = tool_then_answer(answer);
+        script["identity_hash_delay_ms"] = json!(12_000);
+        script
+    };
+    let fixture = Fixture::new(&slow("the answer before the slow hash"));
+    let fake_bin = fixture.root.join("fake-bin-slow-identity");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    terminal.send(b"carry me past the slow hash\r");
+    terminal.wait_screen("the answer before the slow hash");
+    terminal.wait_absent("Esc stop");
+    let mut script = slow("the answer after the slow hash");
+    script["adapter_profile"] = json!("offline-loopback-adapter-v2");
+    fixture.write_script(&script);
+    // No process has finished hashing this build, so the probe cannot read
+    // its identity from the home's cache.
+    assert!(!fixture.home().join("binary-ids").exists());
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("carried forward from");
+    let screen = terminal.wait_screen("offline-loopback-adapter-v2");
+    assert!(screen.contains("model adapter profile"), "{screen}");
+    terminal.wait_ready();
+    let ids: std::collections::BTreeSet<String> = fixture.session_ids().into_iter().collect();
+    assert_eq!(ids.len(), 2, "one carried successor: {ids:?}");
+    terminal.quit();
+}
+
 /// A changed binding never carries live work: a running turn refuses the
 /// reload before anything is asked or torn down, and the session stays.
 #[test]
@@ -2650,11 +2685,15 @@ fn ask_reload(fixture: &Fixture, session: &str, binary: &str) -> std::process::O
         .expect("reload request")
 }
 
-/// The running binary's id, as `version --reload-probe` reports it.
+/// The running binary's id, as plain `plak version` reports it (`binary <id>`).
+/// The reload probe reports it only once it is known without hashing.
 fn running_binary_id(fixture: &Fixture) -> String {
-    let probe = fixture.cli(&["version", "--reload-probe"]);
-    let probe: Value = serde_json::from_slice(&probe.stdout).expect("reload probe json");
-    probe["binary_id"].as_str().expect("binary id").to_owned()
+    let version = fixture.cli(&["version"]);
+    let text = String::from_utf8(version.stdout).expect("version text");
+    text.split_once("binary ")
+        .and_then(|(_, rest)| rest.get(..12))
+        .expect("binary id")
+        .to_owned()
 }
 
 /// Asks until the host has announced itself (on its installed-build check,

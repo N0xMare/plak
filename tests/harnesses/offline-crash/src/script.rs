@@ -116,6 +116,10 @@ pub struct ScriptPlan {
     /// derive a different frozen binding input.
     #[serde(default)]
     pub adapter_profile: Option<String>,
+    /// Hold every hash of the product build's image this long, so a test can
+    /// make a manifest-less build's identity slow without loading the machine.
+    #[serde(default)]
+    pub identity_hash_delay_ms: Option<u64>,
     /// Shrink the observation budget to this many bytes.
     ///
     /// The budget is otherwise derived from the prepared request's own

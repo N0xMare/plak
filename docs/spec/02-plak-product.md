@@ -2523,7 +2523,10 @@ only plain `version` obtains the id synchronously. Other commands use an already
 computed id or emit from the background identity reader without delaying startup.
 The hidden `version --state-key`, `--reload-probe`, `--carry-probe <file>`, `--export-version` and
 `--write-binary-manifest <dir>` machine probes emit no startup event and do not
-prepare a cached binary id. The install-only manifest probe hashes and stats
+prepare a cached binary id. `--reload-probe` never hashes the image: it reports
+the binary id only when the install manifest or the home's identity cache
+already names the running image, and otherwise reports none, so its answer
+never waits on a hash a manifest-less build would need. The install-only manifest probe hashes and stats
 the same running image and creates `<dir>/binary-id` with mode 0444, containing
 `id dev ino size mtime_ns`. It runs before product diagnostics and creates no
 product state.
@@ -3693,7 +3696,9 @@ unless the requesting `plak` is itself build `<binary-id>` (the agent runs the
 installed `plak`), and unless an interactive `plak` announced the session (a
 full id, or a prefix that only one announcement matches) and that announcing
 process is alive; the host checks the installed build again before it acts
-(hidden `version --reload-probe` carries the answering build's binary id). The
+(hidden `version --reload-probe` carries the answering build's binary id when
+that build's manifest or the home's identity cache names it; an id it does not
+report is unknown, never assumed, and refuses the request). The
 channel lives in the home's transient `run/reload-requests/` directory,
 outside `state/` and so outside every state key's directory, so a requester of any build
 reaches a session whose host runs another state key. The command queues the

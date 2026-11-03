@@ -1783,6 +1783,10 @@ the already-sent input frame before consuming another host event; release with
 `release` does not require input. A gate containing `idle` drains host events
 through the actual busy-false observation before checking stdin. This
 deterministic scheduling hook never applies without the offline model.
+A script's `identity_hash_delay_ms` makes every process that reads it (the
+offline model selected, `test-hooks` only) hold each hash of the build's image
+that long, so a test can make a manifest-less build's identity slow without
+loading the machine; it changes no identity and no bound.
 `PLAK_TEST_RUN_DEADLINE`, only with `test-hooks`, names a file. While that file
 exists and a `--timeout` is configured, a non-interactive run is at its
 whole-run deadline: the same timeout bound and interrupt as an elapsed

@@ -29,7 +29,9 @@ pub(crate) struct ReloadProbe {
     pub(crate) state_key: String,
     pub(crate) export_versions: Vec<u32>,
     pub(crate) config_error: Option<String>,
-    /// The answering build's binary id; absent from builds that predate it.
+    /// The answering build's binary id, when its install manifest or the
+    /// home's identity cache already names it; absent when it is not known
+    /// without hashing, and from builds that predate it.
     #[serde(default)]
     pub(crate) binary_id: Option<String>,
 }
@@ -39,7 +41,7 @@ pub(crate) fn reload_probe(paths: &PlakPaths) -> ReloadProbe {
         state_key: crate::home::state::state_key(),
         export_versions: IMPORTABLE_VERSIONS.to_vec(),
         config_error: crate::product_config::SessionPolicy::load(paths).err(),
-        binary_id: Some(crate::build_identity::binary_id().to_owned()),
+        binary_id: crate::build_identity::known_binary_id(),
     }
 }
 

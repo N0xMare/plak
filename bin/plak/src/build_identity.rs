@@ -166,6 +166,23 @@ pub(crate) fn binary_id() -> &'static str {
         .unwrap_or("unavailable")
 }
 
+/// This executable's id when the install manifest or this home's identity
+/// cache already names the running image, or when this process has computed
+/// it. It never hashes, so a bounded probe answers at once; `None` means the
+/// id is not known yet, never that it is something else.
+pub(crate) fn known_binary_id() -> Option<String> {
+    if let Some(id) = BINARY_ID.get() {
+        return id.clone();
+    }
+    let mut file = open_running_image()?;
+    let home = identity_cache_home();
+    let cache = home.as_deref().map(|home| IdentityCache {
+        home,
+        writable: false,
+    });
+    identify_image(&mut file, running_executable(), cache, |_| None)
+}
+
 fn open_running_image() -> Option<std::fs::File> {
     // /proc names the mapped image even after its launch path is replaced.
     if cfg!(target_os = "linux") {
@@ -175,7 +192,14 @@ fn open_running_image() -> Option<std::fs::File> {
     }
 }
 
+/// A delay every image hash waits out first. Only the offline test hooks set
+/// it, so a test can make a manifest-less build's identity slow.
+pub(crate) static HASH_DELAY: OnceLock<std::time::Duration> = OnceLock::new();
+
 fn hash_image(file: &mut std::fs::File) -> Option<String> {
+    if let Some(delay) = HASH_DELAY.get() {
+        std::thread::sleep(*delay);
+    }
     let mut hash = Sha256::new();
     let mut bytes = [0u8; 8 * 1024];
     loop {

@@ -60,6 +60,18 @@ pub(crate) fn storage_capacity_override() -> Option<plakous_hosted::session_stor
     }
 }
 
+/// Holds every hash of this build's image for the offline script's
+/// `identity_hash_delay_ms`, so a test can make a manifest-less build's
+/// identity slow without loading the machine. A script that cannot be read
+/// sets nothing here; the face that uses it reports that.
+pub(crate) fn install_identity_hash_delay() {
+    if let Some(Ok(selection)) = selected()
+        && let Some(delay) = selection.plan.identity_hash_delay_ms
+    {
+        let _ = crate::build_identity::HASH_DELAY.set(std::time::Duration::from_millis(delay));
+    }
+}
+
 pub(crate) fn assistant_done_release() -> Option<PathBuf> {
     if std::env::var("PLAK_TEST_MODEL").as_deref() != Ok(SELECTOR) {
         return None;
