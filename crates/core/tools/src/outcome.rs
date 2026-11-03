@@ -111,7 +111,9 @@ pub struct ToolOutcome {
     presentation_subject: Option<Arc<str>>,
     /// Set by a raising program that renders a text file read, so an
     /// observation cut can keep it head-first.
-    file_read: Option<crate::internal::RaisedFileRead>,
+    /// Boxed so the mark does not widen every outcome and every `Result` that
+    /// carries one.
+    file_read: Option<Box<crate::internal::RaisedFileRead>>,
 }
 
 impl fmt::Debug for ToolOutcome {
@@ -196,12 +198,12 @@ impl ToolOutcome {
     /// Marks this raised outcome as the file read its raising program rendered.
     #[must_use]
     pub(crate) fn into_file_read(mut self, read: crate::internal::RaisedFileRead) -> Self {
-        self.file_read = Some(read);
+        self.file_read = Some(Box::new(read));
         self
     }
 
-    pub(crate) const fn file_read(&self) -> Option<&crate::internal::RaisedFileRead> {
-        self.file_read.as_ref()
+    pub(crate) fn file_read(&self) -> Option<&crate::internal::RaisedFileRead> {
+        self.file_read.as_deref()
     }
 
     /// The host-only presentation subject, when one was attached.
