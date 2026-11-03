@@ -28,7 +28,10 @@ pub use service::{
     ServeServiceFuture, serve_service_spawn, serve_service_terminate, service_spawned,
     terminated_service,
 };
-pub use sessions::{RunnerSessions, job_capacity, line_sessions, serve_jobs_watch, serve_sessions};
+pub use sessions::{
+    RunnerSessions, decode_jobs_snapshot, job_capacity, line_sessions, serve_jobs_watch,
+    serve_sessions,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::{
@@ -45,6 +48,16 @@ use crate::{
     ExecutionEnvironmentConfig, ExecutionEnvironmentError, ExecutionEnvironmentErrorKind,
     ExecutionEnvironmentScope, RunnerId, ToolPreempt,
 };
+
+/// What a runner answers for a workspace it does not serve: one outside the
+/// roots it lists, or one holding its own home.
+#[must_use]
+pub fn workspace_refusal() -> ExecutionEnvironmentError {
+    ExecutionEnvironmentError::new(
+        ExecutionEnvironmentErrorKind::Workspace,
+        "the runner does not serve this workspace: it lies outside the runner's roots or holds the runner home",
+    )
+}
 
 /// The operations a runner answers through this seam.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

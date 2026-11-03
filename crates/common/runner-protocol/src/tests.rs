@@ -62,6 +62,7 @@ fn frames_have_their_documented_wire_shape() {
         deadline_ms: Some(1500),
         digest: "d".into(),
         replay: false,
+        age_ms: None,
         operation: Operation {
             verb: verbs::READ_WORKSPACE.into(),
             payload: json!({"path": "a.txt"}),
@@ -131,4 +132,47 @@ fn owners_of_a_line_are_ordered_by_generation_then_fence() {
     let mut other_line = owner(9, 9);
     other_line.line = "other".into();
     assert!(!other_line.is_newer_than(&owner(1, 1)));
+}
+
+#[test]
+fn optional_fields_stay_off_the_wire_until_set() {
+    let bind = Bind {
+        host_id: "h".into(),
+        host_instance: "i".into(),
+        version: VersionTriple::current("rev", "release"),
+        inspect: false,
+    };
+    assert!(
+        serde_json::to_value(&bind)
+            .unwrap()
+            .get("inspect")
+            .is_none()
+    );
+    let inspecting = Bind {
+        inspect: true,
+        ..bind
+    };
+    assert_eq!(
+        serde_json::to_value(&inspecting).unwrap()["inspect"],
+        json!(true)
+    );
+    let lines = RunnerFrame::Lines {
+        request_id: "q".into(),
+        lines: vec![LineStatus {
+            host_id: "h".into(),
+            line: "line".into(),
+            owner: Some(owner(1, 2)),
+            adopted: false,
+            jobs: json!({"jobs": []}),
+        }],
+    };
+    let body = serde_json::to_vec(&lines).unwrap();
+    assert_eq!(decode::<RunnerFrame>(&body).unwrap(), lines);
+    assert_eq!(
+        serde_json::to_value(RunnerFrame::Expired {
+            request_id: "r".into()
+        })
+        .unwrap(),
+        json!({"kind": "expired", "request_id": "r"})
+    );
 }

@@ -5533,8 +5533,10 @@ enters `plakous-model`.
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a
 loopback (both published internal, chapter 06 §3, and reached from the facade
-only through its hidden `plakous::runner` module). Nothing selects a runner
-for a session yet; the loopback exists for conformance.
+only through its hidden `plakous::runner` module). It also holds the runner
+daemon, which serves one runner on a private socket, and the stdio bridge a
+host reaches it through (`plak runner`, chapter 02 §3.1). Nothing selects a
+runner for a session yet.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
@@ -5547,11 +5549,18 @@ for a session yet; the loopback exists for conformance.
   binary id is evidence and is never compared. `instance` is fresh for every
   runner process and `boot_id` names the machine boot it runs in. The
   descriptor is the `Runner` descriptor its operations present, never
-  `local`. The host answers `Bind { host_id, host_instance, version }`. The
-  runner refuses any frame before `Bind` (`Unbound`) and a `Bind` of another
-  version; the host refuses a runner of another version before any request. A
-  `Bind` from a host instance that is already connected ends that instance's
-  older connection; answers still due there arrive on the new one.
+  `local`. The host answers `Bind { host_id, host_instance, version, inspect }`.
+  The runner refuses any frame before `Bind` (`Unbound`), a `Bind` of another
+  version, and a host whose identity its allowlist does not hold
+  (`NotPaired`); the host refuses a runner of another version before any
+  request. A `Bind` from a host instance that is already connected ends that
+  instance's older connection; answers still due there arrive on the new one.
+  An inspecting bind (`inspect = true`) needs no pairing and may only ask for
+  the line table and ping (`InspectOnly` refuses anything else). A refusal of
+  the connection itself (`Unbound`, a version mismatch, `NotPaired`,
+  `InspectOnly`) comes before any request of it ran: the host fails every
+  call and transfer waiting on that link at once, unavailable and proven to
+  have had no effect, and takes no new call on it.
 - **Liveness.** The host pings every 5 s. Either end treats a link it heard
   nothing on for 15 s as lost and closes it: the runner stops answering on
   it, ends its services and shuts its write half once what is queued is
@@ -5579,7 +5588,7 @@ for a session yet; the loopback exists for conformance.
   environment's own schema (the runner seam of §8.5); the protocol frames,
   keys and orders them without interpreting them, except that a result which
   opens a stream names it in its `stream` field. Control frames are `Cancel`,
-  `Preempt`, `Ack`, `TransferOwner` and `Ping`. `Preempt { request_id, value }`
+  `Preempt`, `Ack`, `TransferOwner`, `Lines` and `Ping`. `Preempt { request_id, value }`
   sets the running request's yield signal on the runner, as the host's own
   signal changes; a waiting `process.poll` returns as soon as a yield is
   set.
@@ -5606,12 +5615,25 @@ for a session yet; the loopback exists for conformance.
 - **Owners.** The runner keeps, per host and line, the newest owner it has
   accepted, ordered by `(generation, fence)`. The host sends `TransferOwner {
   from, to }` after the new owner's lease is granted and before that owner's
-  first request; the runner accepts a `to` newer than or equal to its current
-  owner, so a transfer whose acknowledgement was lost can be sent again, and
-  otherwise answers `StaleOwner` with the owner it keeps. The fence applies to
+  first request. A `to` equal to the accepted owner is accepted whatever
+  `from` says, so a transfer whose acknowledgement was lost can be sent again.
+  A newer `to` is a compare-and-swap: it is accepted only when `from` is the
+  accepted owner (or the line has none); otherwise, and for an older `to`, the
+  runner answers `StaleOwner` with the owner it keeps, and a host whose `to`
+  is newer (a fresher lease) transfers again from that owner, once. A `from`
+  of another line is refused (`TransferRefused`). A runner that keeps owner
+  floors records the new owner durably before it accepts it, and refuses the
+  transfer (`TransferRefused`, nothing changed) when it cannot; a restarted
+  runner starts from that record, so no owner older than one it accepted is
+  ever accepted again, and the recorded owners are not held until their host
+  transfers each line again. The fence applies to
   work that has not run: a new key or an unkeyed request whose owner is older
   than the accepted owner is refused `StaleOwner`, and one whose owner is newer
-  but was never transferred is refused `OwnerNotTransferred`. Neither has an
+  but was never transferred, or is the accepted owner of a line that is not
+  held (orphaned, or recorded before a restart), is refused
+  `OwnerNotTransferred`. A transfer of the accepted owner again holds the line
+  once more, so a host transfers every line again after each new connection,
+  before its next call there. Neither has an
   effect; the host reports a stale owner as an `IdentityMismatch` error,
   proven to have had no effect. A
   resend of a key the runner already holds is answered from the op table
@@ -5623,9 +5645,39 @@ for a session yet; the loopback exists for conformance.
   key the runner never saw answers `NotSeen` and leaves a tombstone, so the
   original arriving late never runs. The host's `Ack` spends a key, and a
   later resend answers `Spent`: the call ran, and the host treats its outcome
-  as unknown. Request ids are unique per host process, so one host instance
-  cannot acknowledge or cancel another's request. Answers and tombstones are
-  kept until `Ack` or for 24 hours.
+  as unknown. Request ids are unique per host process, and a key's answer,
+  its `Ack`, `Cancel` and `Preempt` belong to the host instance that last sent
+  it: the answer goes to that instance's connection, and another instance of
+  the same host cannot acknowledge, cancel or yield it. Answers and
+  tombstones are kept until `Ack` or for 24 hours. A replay carries `age_ms`,
+  how long ago the host first claimed it by its wall clock; an unseen key
+  replayed at least 23 hours after its claim (24 hours less a 1 hour margin
+  for that clock stepping back) answers `Expired` and is not tombstoned, since
+  the runner may have run it and forgotten it: its outcome is unknown.
+- **Line table.** `Lines` lists the lines the runner holds processes for: on
+  a host's connection its own lines; on an inspecting one bound under the
+  runner machine's own host identity (a local `plak runner ps`) every host's;
+  on any other inspecting one the inspector's own host's, with each job's
+  command and output cleared. Each names its host, line, accepted owner,
+  whether that owner holds it (`adopted`) and its jobs in the
+  `jobs.snapshot` schema.
+- **Owner leases.** A host holds its lines while it has a connection and for
+  the owner lease (300 s) after its last one ends; its services end with their
+  connection. Past the lease its lines are orphaned: their jobs keep running
+  within their own runtime caps and are listed as orphans, and the runner
+  refuses the line's calls until the same `host_id` transfers it again, of
+  the same owner or a newer one, and so re-adopts it. A different `host_id`
+  never re-adopts a line.
+- **Daemon.** The daemon serves one `RunnerService` on a socket of mode 0600
+  in a 0700 directory, named after the protocol version and a hash of the
+  version triple, and closes a connection from another user before its hello.
+  It holds an exclusive lock on the socket's lock file for its life, taken
+  before it touches the socket, so a second daemon of the same triple refuses
+  to start without unlinking or binding the first one's socket, and a socket
+  found under the lock is a dead daemon's and is replaced. It exits after its
+  idle grace with no connection, no service, no running or orphaned job and
+  no answer or tombstone a host has not acknowledged. The stdio bridge
+  connects to it, or starts it once and waits for it to listen.
 - **Host link.** A call waits 30 s for an answer (120 s for an effect call),
   then its outcome is unknown. Effect calls, owner controls, observations and
   reads outstanding when the link is lost are replayed by key and digest on
@@ -5636,30 +5688,40 @@ for a session yet; the loopback exists for conformance.
 
 The at-most-once law across restarts:
 
-- **Runner restart.** A new `instance` (and every new `boot_id`) has empty
-  owner and op tables. The host treats every call outstanding on the old
-  instance as of unknown outcome (`RecoveryRequired`, not proven to have had no
-  effect) and transfers each line again before its next call there. A process
-  the old instance started may still finish; nothing re-runs it, because the
-  host never resends a call whose outcome is unknown: the driver settles it
-  `OutcomeUnknown`, and a later attempt is a new key. Until a line is
-  transferred again, the new instance accepts any first owner of it, so after
-  a runner restart the fence rests on the host's lease authority; the runner
+- **Runner restart.** A new `instance` (and every new `boot_id`) has an empty
+  op table, and an owner table holding only its recorded floors. The host
+  treats every call outstanding on the old instance as of unknown outcome
+  (`RecoveryRequired`, not proven to have had no effect) and transfers each
+  line again before its next call there. A process the old instance started
+  may still finish; nothing re-runs it, because the host never resends a call
+  whose outcome is unknown: the driver settles it `OutcomeUnknown`, and a
+  later attempt is a new key. The floors keep every older owner off each
+  line; a runner without floors accepts any first owner after a restart, and
+  the fence rests on the host's lease authority alone. Either way the runner
   only reduces late effects, and runtime commit fencing prevents split brain.
 - **Host restart** (the same `host_id`, a new `host_instance`) against the same
   runner instance. The successor replays each call it may have sent: an
   answered key returns its stored answer and does not run again, a running key
   answers `InProgress` and then its answer, and a key the runner never saw
   answers `NotSeen` and is tombstoned, so nothing under it runs and the call is
-  proven to have had no effect. A replay later than the 24-hour retention must
-  not be sent: the host settles such a call `OutcomeUnknown`. The host side
-  keeps its outstanding calls in memory in this version; persisting them
-  before sending comes with runner selection.
+  proven to have had no effect. A replay at least 23 hours after its claim is
+  answered `Expired` unless its key is still held, and its outcome is
+  unknown. The host journals each effect call and owner control, with the
+  runner instance it goes to, before sending it, and forgets it when its
+  answer arrives; a returning host process replays every journaled call sent
+  to the same runner instance and settles the rest as of unknown outcome,
+  since a runner restart forgot them.
 - **Both restarted.** Every outstanding call is of unknown outcome.
 - **Jobs across a host restart.** A job keeps running on the runner when the
   host process that started it is lost. A successor host (the same `host_id`)
   that transfers the line to a newer owner reads the line's jobs, polls them
-  from any cursor and stops them; the lost owner is fenced off the line.
+  from any cursor and stops them; the lost owner is fenced off the line. A
+  host re-adopts its lines by holding each line's head lease-only (§5.1),
+  transferring the line to that lease's `(generation, fence)`, recording the
+  terminals of the line's ended jobs into the head's line terminal table
+  under that fence, and releasing the lease; the head's next full open folds
+  them in and transfers the line again under its own fence
+  (`plakous_hosted::runner_adoption`).
 - **Jobs across a runner restart.** The jobs and sessions the old instance
   held are gone from the new one. The host's handle on the line keeps the
   jobs it saw per instance and reports each job an earlier instance held that
@@ -6049,7 +6111,9 @@ instruction-source reader from the selected runner too, so a probe answer and a
 backend answer always describe the same filesystem: on a selected runner, the
 runner answers both (`RunnerWorkspaceProbe`, and hosted's reader over the
 `instructions.read` verb, with reads under the product home kept on the
-host). The probe is a
+host). A runner answers a probe only about an absolute path without `..`
+under its roots and outside its home (chapter 04 §2.9); any other is a
+workspace refusal, which the host sees as `Unavailable`. The probe is a
 port, not authority: it grants nothing a tool could use, and the product-state
 exclusion and copy-layout rules applied to its answers stay with the host.
 Every probe and reader answer is fallible with a distinct `Unavailable` error

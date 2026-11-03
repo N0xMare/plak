@@ -117,6 +117,7 @@ mod call_detail;
 mod frozen_tables;
 pub mod mcp_binding;
 mod process_environment;
+pub mod runner_adoption;
 #[doc(hidden)]
 pub mod runner_reader;
 

@@ -18,8 +18,8 @@ mod message;
 mod owner;
 
 pub use message::{
-    Bind, Hello, HostFrame, Operation, Refusal, Request, RequestClass, RunnerFrame, StreamEvent,
-    StreamFrame, TransferOwner, WireError, capabilities, verbs,
+    Bind, Hello, HostFrame, LineStatus, Operation, Refusal, Request, RequestClass, RunnerFrame,
+    StreamEvent, StreamFrame, TransferOwner, WireError, capabilities, verbs,
 };
 pub use owner::LineOwner;
 

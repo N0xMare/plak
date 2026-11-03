@@ -89,6 +89,10 @@ pub struct Bind {
     pub host_instance: String,
     /// The host's version triple; it must equal the runner's.
     pub version: VersionTriple,
+    /// An inspecting connection reads the runner's line table and pings,
+    /// and nothing else: it owns no line, so it needs no pairing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inspect: bool,
 }
 
 /// How a request is keyed (spec 01 §8.4).
@@ -152,6 +156,12 @@ pub struct Request {
     /// answers a key it never saw with [`RunnerFrame::NotSeen`] and runs
     /// nothing.
     pub replay: bool,
+    /// On a replay, how long ago the host first claimed the request. A
+    /// runner keeps a key's answer for 24 hours only, so a replay at least
+    /// that old is answered [`RunnerFrame::Expired`]: its key may have run
+    /// and been forgotten, and an unseen key proves nothing any more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age_ms: Option<u64>,
     /// What to do.
     pub operation: Operation,
 }
@@ -163,12 +173,35 @@ pub struct Request {
 pub struct TransferOwner {
     /// Unique per host connection lifetime; the answer names it.
     pub control_id: String,
-    /// The owner the host last transferred to, if any.
+    /// The owner the host knows the runner accepts for the line, or none
+    /// when it knows of none. A transfer to a newer owner is accepted only
+    /// from the accepted owner, a compare-and-swap; a stale `from` is
+    /// answered [`RunnerFrame::StaleOwner`] naming the accepted owner, from
+    /// which a host holding the newer lease may transfer again.
     pub from: Option<LineOwner>,
     /// The new owner: it must be the line's accepted owner or a newer one.
-    /// Sending the accepted owner again is accepted, so a lost
-    /// acknowledgement can be retried.
+    /// Sending the accepted owner again is accepted whatever `from` says, so
+    /// a lost acknowledgement can be retried.
     pub to: LineOwner,
+}
+
+/// One line a runner holds processes for, as [`RunnerFrame::Lines`] lists it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineStatus {
+    /// The host the line belongs to.
+    pub host_id: String,
+    /// The line.
+    pub line: String,
+    /// The owner the runner accepts for the line, if any transferred.
+    pub owner: Option<LineOwner>,
+    /// Whether the line's owner holds it now: false once its host's owner
+    /// lease expired with no connection, until a newer owner of the same
+    /// host takes it over. Such a line's processes are orphans.
+    pub adopted: bool,
+    /// The line's jobs, as `jobs.snapshot` answers them, in the execution
+    /// environment's schema.
+    pub jobs: Value,
 }
 
 /// One frame of a multiplexed stream: a long-lived process's output, its
@@ -232,8 +265,18 @@ pub enum Refusal {
         what: String,
     },
     /// The request's owner is newer than the line's accepted owner and was
-    /// never transferred.
+    /// never transferred, or is the accepted owner of a line orphaned since:
+    /// transfer it first.
     OwnerNotTransferred,
+    /// The host's identity is not on the runner's allowlist: pair it on
+    /// the runner first.
+    NotPaired {
+        /// The host's identity.
+        host_id: String,
+    },
+    /// An inspecting connection sent a frame other than a line-table
+    /// question or a ping.
+    InspectOnly,
     /// An effect call named no owner, or a frame was otherwise unusable.
     Malformed {
         /// What was wrong.
@@ -272,6 +315,12 @@ pub enum HostFrame {
     },
     /// An owner change.
     TransferOwner(TransferOwner),
+    /// Asks for the runner's line table: this host's lines, or every
+    /// host's on an inspecting connection.
+    Lines {
+        /// Names the answer.
+        request_id: String,
+    },
     /// Liveness.
     Ping {
         /// Echoed in [`RunnerFrame::Pong`].
@@ -341,6 +390,28 @@ pub enum RunnerFrame {
     TransferAccepted {
         /// The transfer.
         control_id: String,
+    },
+    /// The owner change could not be recorded; the line's owner is
+    /// unchanged.
+    TransferRefused {
+        /// The transfer.
+        control_id: String,
+        /// Why.
+        detail: String,
+    },
+    /// A replay at least as old as the runner's 24-hour retention: the
+    /// runner may have run its key and forgotten it, so its outcome is
+    /// unknown. Nothing ran now.
+    Expired {
+        /// The request.
+        request_id: String,
+    },
+    /// The answer to [`HostFrame::Lines`].
+    Lines {
+        /// The question.
+        request_id: String,
+        /// The lines, in line order.
+        lines: Vec<LineStatus>,
     },
     /// The frame was refused without running anything.
     Refused {

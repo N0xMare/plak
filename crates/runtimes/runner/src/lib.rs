@@ -13,14 +13,22 @@
 
 mod client;
 mod connection;
+#[cfg(unix)]
+pub mod daemon;
+mod floors;
+mod journal;
 mod loopback;
 mod service;
 mod state;
 mod streams;
 
-pub use client::{ClientWindows, ConnectError, RunnerClient};
+pub use client::{ClientWindows, ConnectError, RecoveredCall, RunnerClient};
+pub use floors::{FileOwnerFloors, OwnerFloors};
+pub use journal::{CallJournal, FileCallJournal, JournalEntry};
 pub use loopback::{Loopback, LoopbackError};
-pub use service::{RunnerIdentity, RunnerLimits, RunnerOptions, RunnerService, WorkspaceFactory};
+pub use service::{
+    HostAllowlist, RunnerIdentity, RunnerLimits, RunnerOptions, RunnerService, WorkspaceFactory,
+};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]

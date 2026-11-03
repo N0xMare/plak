@@ -521,6 +521,16 @@ pub fn serve_jobs_watch(
     Box::pin(reader)
 }
 
+/// The jobs a `jobs.snapshot` answer names, with the runner instance that
+/// answered: what a runner's line table carries for each line.
+///
+/// # Errors
+///
+/// The value is not a snapshot.
+pub fn decode_jobs_snapshot(value: Value) -> Result<(String, Vec<JobView>), ExecutionBackendError> {
+    decode_snapshot(value)
+}
+
 /// Answers one session verb from a line's `sessions`, as the runner side of
 /// a link; `instance` names this runner process in starts and snapshots. A
 /// verb of another family is [`ServeFailure::Unsupported`].

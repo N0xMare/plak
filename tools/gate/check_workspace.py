@@ -1475,6 +1475,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # The export document names its runner by the library's runner identity.
     ("plak", "src/carry/document.rs"): {"tools": {"RunnerId"}},
+    # Re-adoption of a runner's lines through a lease-only head (spec 01 §8.4).
+    ("plakous-hosted", "src/runner_adoption.rs"): {
+        "runner": {"RunnerClient"},
+        "tools": {"LineOwner", "runner::RunnerFailure", "runner::decode_jobs_snapshot"},
+    },
     # Plak owns the export document, not a second runtime. This one codec
     # reconstructs validated public content data, never mutable authority.
     ("plak", "src/carry/history.rs"): {

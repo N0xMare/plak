@@ -209,6 +209,9 @@ not (
   | test(jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen)
   | test(runner_job_survives_host_loss)
   | test(runner_restart_unknown)
+  | test(runner_killed_mid_job_restarts_with_its_owner_floor)
+  | test(host_killed_mid_call_is_recovered_and_readopted_by_its_host_id)
+  | test(a_returning_host_readopts_its_line_under_a_lease_only_head)
 )
 '''
 
@@ -366,6 +369,9 @@ default-filter = '''
   | test(jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen)
   | test(runner_job_survives_host_loss)
   | test(runner_restart_unknown)
+  | test(runner_killed_mid_job_restarts_with_its_owner_floor)
+  | test(host_killed_mid_call_is_recovered_and_readopted_by_its_host_id)
+  | test(a_returning_host_readopts_its_line_under_a_lease_only_head)
 '''
 
 # Per-test timing: each lane writes target/nextest/<profile>/junit.xml

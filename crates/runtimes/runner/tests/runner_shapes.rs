@@ -47,6 +47,7 @@ fn bind(host_instance: &str) -> Bind {
         host_id: "host-1".into(),
         host_instance: host_instance.into(),
         version: VersionTriple::current("shapes", "debug"),
+        inspect: false,
     }
 }
 

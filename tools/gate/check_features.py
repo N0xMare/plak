@@ -731,7 +731,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-tools": "2272a73bb4152af5b5f0c093c8a2b258c4b7e4ff6a64686df8bd70a9a4f7746a",
     "plakous-xai": "4b452bb53d65262dff9cc74e58ac83bb0f89ab6ad2201299eb5a7ed1238b0158",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
-    "plakous-runner": "9359c178b7ea5d1da1f7807c4fe63f7b15ae6534abd6313443c36032a336a803",
+    "plakous-runner": "66c7a127d48650f7f03d5b476cf5dd70b8bcf75ad63842ff8602c72ae8b9659e",
 }
 
 

@@ -95,13 +95,22 @@ impl WorkspaceProbe for RunnerWorkspaceProbe {
 }
 
 /// Answers one probe question from this process's filesystem, as the runner
-/// side of a link. A resolution that is not UTF-8 is refused, so the host
-/// sees no answer rather than an absent one.
-pub fn serve_probe(payload: Value) -> ServeFuture {
+/// side of a link, about a path `admits` accepts; any other path is refused
+/// as a workspace the runner does not serve. A resolution that is not UTF-8
+/// is refused, so the host sees no answer rather than an absent one.
+pub fn serve_probe(payload: Value, admits: &(dyn Fn(&Path) -> bool + Send + Sync)) -> ServeFuture {
     let question = match from_value::<ProbeWire>(payload) {
         Ok(question) => question,
         Err(error) => return Box::pin(std::future::ready(Err(backend_failure(&error)))),
     };
+    let (ProbeWire::Canonicalize { path }
+    | ProbeWire::IsFile { path }
+    | ProbeWire::TreeBytes { path }) = &question;
+    if !admits(Path::new(path)) {
+        return Box::pin(std::future::ready(Err(super::environment_failure(
+            &super::workspace_refusal(),
+        ))));
+    }
     Box::pin(async move {
         tokio::task::spawn_blocking(move || {
             let probe = LocalWorkspaceProbe;

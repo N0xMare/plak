@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 use plakous_model::{AttemptId, BranchId, CallId, CancellationToken, LineId, Timestamp};
 use plakous_runner_protocol::frame::FrameError;
 use plakous_runner_protocol::{
-    Hello, HostFrame, LineOwner, Refusal, Request, RequestClass, RunnerFrame, StreamFrame,
-    VersionTriple, WireError, capabilities,
+    Bind, Hello, HostFrame, LineOwner, LineStatus, Refusal, Request, RequestClass, RunnerFrame,
+    StreamFrame, VersionTriple, WireError, capabilities,
 };
 use plakous_tools::internal::runner::{
     RunnerExtension, RunnerVerb, RunnerVerbFamily, ServeFailure, ServeFuture, decode_preempt,
@@ -31,6 +31,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, watch};
 
 use crate::connection::{FrameStream, fits, write_frames};
+use crate::floors::OwnerFloors;
 use crate::state::{Admission, OpKey, Tables};
 use crate::streams::{
     Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
@@ -52,12 +53,26 @@ struct Inner {
     extension: Option<Arc<dyn RunnerExtension>>,
     hello: Hello,
     dead: Duration,
+    owner_lease: Duration,
     capacity: JoinedProcessHostCapacity,
     tables: Mutex<Tables>,
-    /// Each host's current connection: answers go there, so an answer that
-    /// outlives its connection reaches the host's reconnection.
-    hosts: Mutex<HashMap<String, Connection>>,
+    /// Which hosts may bind; `None` admits every host.
+    hosts_allowed: Option<Arc<HostAllowlist>>,
+    /// Which paths a probe answers about; `None` admits every path.
+    probe_paths: Option<Arc<PathAdmission>>,
+    /// The host identity of this machine's own product home: an inspection
+    /// under it is a local `plak runner ps` and sees every host's lines.
+    local_host: Option<String>,
+    /// Each host instance's current connection: a key's answer goes to the
+    /// instance that last sent the key, so an answer that outlives its
+    /// connection reaches that instance's reconnection.
+    hosts: Mutex<HashMap<(String, String), Connection>>,
+    /// Each host's owner lease: its connections, and since when it has
+    /// none.
+    leases: Mutex<HashMap<String, HostLease>>,
     next_connection: AtomicU64,
+    /// Connections open now, bound or not.
+    open: AtomicU64,
     next_stream: AtomicU64,
     /// Each running request's cancellation and yield, by its op key when it
     /// is keyed, so a replay that moved the key's request id still reaches
@@ -73,14 +88,24 @@ struct Inner {
 
 struct Connection {
     sender: mpsc::UnboundedSender<RunnerFrame>,
-    host_instance: String,
     closer: CancellationToken,
     id: u64,
 }
 
 struct Running {
+    instance: String,
     cancellation: CancellationToken,
     preempt: watch::Sender<ToolPreempt>,
+}
+
+/// One host's owner lease. Its lines are held while it has a connection
+/// and for the lease after the last one ends; then their jobs keep running
+/// as orphans until a newer owner of the same host takes each line over.
+#[derive(Default)]
+struct HostLease {
+    connections: usize,
+    released: Option<Instant>,
+    expired: bool,
 }
 
 struct Hosted {
@@ -110,6 +135,9 @@ pub struct RunnerLimits {
     /// How long a connection may stay silent before the runner ends it
     /// (15 s; the host pings every 5 s).
     pub dead: Duration,
+    /// How long a host's lines stay held after its last connection ends
+    /// (300 s): its jobs keep running either way, and are orphans after.
+    pub owner_lease: Duration,
 }
 
 impl Default for RunnerLimits {
@@ -117,9 +145,17 @@ impl Default for RunnerLimits {
         Self {
             job_bound: 128,
             dead: Duration::from_secs(15),
+            owner_lease: Duration::from_secs(300),
         }
     }
 }
+
+/// Answers whether a host identity may bind, asked at every bind so a
+/// pairing made while the runner runs takes effect at once.
+pub type HostAllowlist = dyn Fn(&str) -> bool + Send + Sync;
+
+/// Answers whether a probe may answer about a path.
+pub type PathAdmission = dyn Fn(&Path) -> bool + Send + Sync;
 
 /// Makes the environment of a workspace a request names, by root and cwd,
 /// the first time one does: a runner serves every workspace it can open.
@@ -136,6 +172,23 @@ pub struct RunnerOptions {
     pub workspaces: Option<Arc<WorkspaceFactory>>,
     /// The verbs the embedding program answers.
     pub extension: Option<Arc<dyn RunnerExtension>>,
+    /// Which hosts may bind; without it every host may.
+    pub hosts: Option<Arc<HostAllowlist>>,
+    /// Which paths a workspace probe answers about; without it every path.
+    pub probe_paths: Option<Arc<PathAdmission>>,
+    /// The host identity of the runner machine's own product home. An
+    /// inspecting connection under it sees every host's lines in full;
+    /// any other sees only its own host's, with job commands and output
+    /// redacted.
+    pub local_host: Option<String>,
+    /// Where accepted owners are recorded; without it a restart forgets
+    /// them.
+    pub floors: Option<Arc<dyn OwnerFloors>>,
+    /// The `PATH` and `HOME` the runner's processes start with, announced
+    /// in its hello.
+    pub path: Option<String>,
+    /// See [`Self::path`].
+    pub home: Option<String>,
 }
 
 impl RunnerService {
@@ -195,10 +248,13 @@ impl RunnerService {
                 capabilities::WORKSPACE_VERBS.to_owned(),
                 capabilities::STREAMS.to_owned(),
             ],
-            path: None,
-            home: None,
+            path: options.path,
+            home: options.home,
             job_bound: limits.job_bound,
         };
+        let tables = options
+            .floors
+            .map_or_else(Tables::default, Tables::with_floors);
         Ok(Self {
             inner: Arc::new(Inner {
                 environment,
@@ -207,10 +263,16 @@ impl RunnerService {
                 extension: options.extension,
                 hello,
                 dead: limits.dead,
+                owner_lease: limits.owner_lease,
                 capacity: job_capacity(usize::try_from(limits.job_bound).unwrap_or(usize::MAX)),
-                tables: Mutex::default(),
+                tables: Mutex::new(tables),
+                hosts_allowed: options.hosts,
+                probe_paths: options.probe_paths,
+                local_host: options.local_host,
                 hosts: Mutex::default(),
+                leases: Mutex::default(),
                 next_connection: AtomicU64::new(0),
+                open: AtomicU64::new(0),
                 next_stream: AtomicU64::new(0),
                 running: Mutex::default(),
                 lines: Mutex::default(),
@@ -228,8 +290,17 @@ impl RunnerService {
     /// Answers one connection until it ends, it stays silent for the dead
     /// window, or a newer connection of the same host instance binds.
     /// Requests it admitted keep running after that and answer on the
-    /// host's next connection; jobs keep running; its services end.
+    /// instance's next connection; jobs keep running; its services end.
     pub async fn serve_connection<S>(&self, stream: S)
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
+        self.inner.open.fetch_add(1, Ordering::AcqRel);
+        self.serve_open_connection(stream).await;
+        self.inner.open.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    async fn serve_open_connection<S>(&self, stream: S)
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
@@ -242,6 +313,7 @@ impl RunnerService {
         let bind = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()).await;
         let Ok(Some(Ok(HostFrame::Bind(bind)))) = bind else {
             let _ = sender.send(refused(None, Refusal::Unbound));
+            closer.cancel();
             return;
         };
         if bind.version != self.inner.hello.version {
@@ -251,26 +323,42 @@ impl RunnerService {
                     runner: self.inner.hello.version.clone(),
                 },
             ));
+            closer.cancel();
             return;
         }
-        let host = bind.host_id;
-        let connection = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
-        let previous = lock(&self.inner.hosts).insert(
-            host.clone(),
-            Connection {
-                sender: sender.clone(),
-                host_instance: bind.host_instance.clone(),
-                closer: closer.clone(),
-                id: connection,
-            },
-        );
-        // A host instance binds again only once its older connection is
-        // dead to it: that connection is drained, and its answers come here.
-        if let Some(previous) = previous
-            && previous.host_instance == bind.host_instance
-        {
-            previous.closer.cancel();
+        if bind.inspect {
+            let everyone = self.inner.local_host.as_deref() == Some(bind.host_id.as_str());
+            self.serve_inspection(
+                &mut reader,
+                &sender,
+                &closer,
+                (!everyone).then_some(&bind.host_id),
+            )
+            .await;
+            closer.cancel();
+            return;
         }
+        if self
+            .inner
+            .hosts_allowed
+            .as_ref()
+            .is_some_and(|allowed| !allowed(&bind.host_id))
+        {
+            let _ = sender.send(refused(
+                None,
+                Refusal::NotPaired {
+                    host_id: bind.host_id,
+                },
+            ));
+            closer.cancel();
+            return;
+        }
+        let Bind {
+            host_id: host,
+            host_instance: instance,
+            ..
+        } = bind;
+        let connection = self.enter(&host, &instance, &sender, &closer);
         loop {
             let frame = tokio::select! {
                 frame = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()) => frame,
@@ -294,51 +382,239 @@ impl RunnerService {
                     continue;
                 }
             };
-            self.receive(&host, connection, frame, &sender);
+            self.receive(&host, &instance, connection, frame, &sender);
         }
-        // The connection is over: answers no longer go to it, its services
-        // end, and its write half closes once what is queued is written.
+        self.leave(&host, &instance, connection);
+        closer.cancel();
+    }
+
+    /// Makes a bound connection its host instance's current one, draining
+    /// the older one, and holds the host's owner lease while it lives.
+    fn enter(
+        &self,
+        host: &str,
+        instance: &str,
+        sender: &mpsc::UnboundedSender<RunnerFrame>,
+        closer: &CancellationToken,
+    ) -> u64 {
+        let connection = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
+        let previous = lock(&self.inner.hosts).insert(
+            (host.to_owned(), instance.to_owned()),
+            Connection {
+                sender: sender.clone(),
+                closer: closer.clone(),
+                id: connection,
+            },
+        );
+        // A host instance binds again only once its older connection is
+        // dead to it: that connection is drained, and its answers come here.
+        if let Some(previous) = previous {
+            previous.closer.cancel();
+        }
+        let mut leases = lock(&self.inner.leases);
+        let lease = leases.entry(host.to_owned()).or_default();
+        lease.connections += 1;
+        lease.released = None;
+        lease.expired = false;
+        connection
+    }
+
+    /// The connection is over: answers no longer go to it, its services end,
+    /// and the host's owner lease starts running out with its last one.
+    fn leave(&self, host: &str, instance: &str, connection: u64) {
         {
             let mut hosts = lock(&self.inner.hosts);
+            let key = (host.to_owned(), instance.to_owned());
             if hosts
-                .get(&host)
+                .get(&key)
                 .is_some_and(|current| current.id == connection)
             {
-                hosts.remove(&host);
+                hosts.remove(&key);
             }
         }
-        self.end_services(&host, connection);
-        closer.cancel();
+        {
+            let mut leases = lock(&self.inner.leases);
+            if let Some(lease) = leases.get_mut(host) {
+                lease.connections = lease.connections.saturating_sub(1);
+                if lease.connections == 0 {
+                    lease.released = Some(Instant::now());
+                }
+            }
+        }
+        self.end_services(host, connection);
+    }
+
+    /// An inspecting connection: line-table questions and pings until it
+    /// ends; anything else is refused and ends it. Scoped to `host`, it sees
+    /// only that host's lines, without job commands or output; unscoped, a
+    /// local `plak runner ps`, every host's.
+    async fn serve_inspection<R: AsyncRead + Unpin>(
+        &self,
+        reader: &mut FrameStream<R>,
+        sender: &mpsc::UnboundedSender<RunnerFrame>,
+        closer: &CancellationToken,
+        host: Option<&String>,
+    ) {
+        loop {
+            let frame = tokio::select! {
+                frame = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()) => frame,
+                () = closer.cancelled() => return,
+            };
+            match frame {
+                Ok(Some(Ok(HostFrame::Ping { nonce }))) => {
+                    let _ = sender.send(RunnerFrame::Pong { nonce });
+                }
+                Ok(Some(Ok(HostFrame::Lines { request_id }))) => {
+                    let mut lines = self.lines(host.map(String::as_str)).await;
+                    if host.is_some() {
+                        lines.iter_mut().for_each(redact);
+                    }
+                    let _ = sender.send(RunnerFrame::Lines { request_id, lines });
+                }
+                Ok(Some(Ok(_))) => {
+                    let _ = sender.send(refused(None, Refusal::InspectOnly));
+                    return;
+                }
+                Ok(Some(Err(_)) | None) | Err(_) => return,
+            }
+        }
+    }
+
+    /// Ends the owner lease of every host whose last connection ended more
+    /// than the lease ago: its lines are no longer held, and their jobs keep
+    /// running as orphans until a newer owner of the same host takes each
+    /// line over.
+    fn expire_leases(&self, now: Instant) {
+        let expired: Vec<String> = {
+            let mut leases = lock(&self.inner.leases);
+            leases
+                .iter_mut()
+                .filter(|(_, lease)| {
+                    !lease.expired
+                        && lease.connections == 0
+                        && lease
+                            .released
+                            .is_some_and(|at| now.duration_since(at) >= self.inner.owner_lease)
+                })
+                .map(|(host, lease)| {
+                    lease.expired = true;
+                    host.clone()
+                })
+                .collect()
+        };
+        if expired.is_empty() {
+            return;
+        }
+        let mut tables = lock(&self.inner.tables);
+        for host in expired {
+            tables.orphan(&host);
+        }
+    }
+
+    /// The line table: every line of `host` that holds sessions here, or of
+    /// every host, with its owner, whether that owner holds it, and its jobs.
+    pub(crate) async fn lines(&self, host: Option<&str>) -> Vec<LineStatus> {
+        self.expire_leases(Instant::now());
+        let mut held: Vec<(
+            (String, String),
+            (JoinedProcessSessions, ExecutionEnvironment),
+        )> = lock(&self.inner.lines)
+            .iter()
+            .filter(|((line_host, _), _)| host.is_none_or(|host| host == line_host))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        held.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut lines = Vec::with_capacity(held.len());
+        for ((line_host, line), (sessions, environment)) in held {
+            let jobs = serve_sessions(
+                &environment,
+                &sessions,
+                &self.inner.hello.instance,
+                RunnerVerb::JobsSnapshot.as_str(),
+                Value::Null,
+                OperationContext::new(CancellationToken::new()),
+            )
+            .await
+            .unwrap_or(Value::Null);
+            let owned = lock(&self.inner.tables).owner(&line_host, &line);
+            lines.push(LineStatus {
+                adopted: owned.as_ref().is_some_and(|(_, adopted)| *adopted),
+                owner: owned.map(|(owner, _)| owner),
+                host_id: line_host,
+                line,
+                jobs,
+            });
+        }
+        lines
+    }
+
+    /// Whether the runner may exit: no connection, no service, no job
+    /// running or orphaned on any line, and no answer or tombstone a host
+    /// has not acknowledged (spec 01 §8.4).
+    #[must_use]
+    pub fn is_idle(&self) -> bool {
+        let now = Instant::now();
+        self.expire_leases(now);
+        if self.inner.open.load(Ordering::Acquire) != 0 || !lock(&self.inner.services).is_empty() {
+            return false;
+        }
+        let running = lock(&self.inner.lines).values().any(|(sessions, _)| {
+            sessions
+                .jobs()
+                .iter()
+                .any(|job| job.status == plakous_tools::JobStatus::Running)
+        });
+        !running && !lock(&self.inner.tables).holds_unacknowledged(now)
     }
 
     fn receive(
         &self,
         host: &str,
+        instance: &str,
         connection: u64,
         frame: HostFrame,
         sender: &mpsc::UnboundedSender<RunnerFrame>,
     ) {
         match frame {
-            HostFrame::Request(request) => self.admit(host, connection, request, sender),
+            HostFrame::Request(request) => {
+                self.admit(host, instance, connection, request, sender);
+            }
             HostFrame::Cancel { request_id } => {
-                let run = self.run_key(host, request_id);
-                if let Some(running) = lock(&self.inner.running).get(&(host.to_owned(), run)) {
+                let run = self.run_key(host, instance, request_id);
+                if let Some(running) = lock(&self.inner.running).get(&(host.to_owned(), run))
+                    && running.instance == instance
+                {
                     running.cancellation.cancel();
                 }
             }
             HostFrame::Preempt { request_id, value } => {
-                let run = self.run_key(host, request_id);
-                if let Some(running) = lock(&self.inner.running).get(&(host.to_owned(), run)) {
+                let run = self.run_key(host, instance, request_id);
+                if let Some(running) = lock(&self.inner.running).get(&(host.to_owned(), run))
+                    && running.instance == instance
+                {
                     let _ = running.preempt.send(decode_preempt(&value));
                 }
             }
             HostFrame::Ack { request_id } => {
-                lock(&self.inner.tables).acknowledge(host, &request_id);
+                lock(&self.inner.tables).acknowledge(host, instance, &request_id);
             }
             HostFrame::TransferOwner(transfer) => {
-                let answer =
-                    lock(&self.inner.tables).transfer(host, transfer.control_id, transfer.to);
+                let answer = lock(&self.inner.tables).transfer(
+                    host,
+                    transfer.control_id,
+                    transfer.from.as_ref(),
+                    transfer.to,
+                );
                 let _ = sender.send(answer);
+            }
+            HostFrame::Lines { request_id } => {
+                let service = self.clone();
+                let host = host.to_owned();
+                let sender = sender.clone();
+                tokio::spawn(async move {
+                    let lines = service.lines(Some(&host)).await;
+                    let _ = sender.send(RunnerFrame::Lines { request_id, lines });
+                });
             }
             HostFrame::Ping { nonce } => {
                 let _ = sender.send(RunnerFrame::Pong { nonce });
@@ -358,6 +634,7 @@ impl RunnerService {
     fn admit(
         &self,
         host: &str,
+        instance: &str,
         connection: u64,
         request: Request,
         sender: &mpsc::UnboundedSender<RunnerFrame>,
@@ -390,7 +667,7 @@ impl RunnerService {
                 return;
             }
         };
-        let key = match lock(&self.inner.tables).admit(host, &request, Instant::now()) {
+        let key = match lock(&self.inner.tables).admit(host, instance, &request, Instant::now()) {
             Admission::Answer(frame) => {
                 let _ = sender.send(frame);
                 return;
@@ -403,19 +680,24 @@ impl RunnerService {
         lock(&self.inner.running).insert(
             (host.to_owned(), run),
             Running {
+                instance: instance.to_owned(),
                 cancellation,
                 preempt,
             },
         );
         let service = self.clone();
         let host = host.to_owned();
+        let instance = instance.to_owned();
         let payload = request.operation.payload;
         let served = match verb.family() {
             RunnerVerbFamily::Environment => match self.environment_for(&payload) {
                 Ok(environment) => serve(&environment, verb.as_str(), payload, control),
                 Err(failure) => Box::pin(std::future::ready(Err(failure))),
             },
-            RunnerVerbFamily::Probe => serve_probe(payload),
+            RunnerVerbFamily::Probe => match &self.inner.probe_paths {
+                Some(admits) => serve_probe(payload, admits.as_ref()),
+                None => serve_probe(payload, &|_| true),
+            },
             RunnerVerbFamily::Extension => match &self.inner.extension {
                 Some(extension) => extension.serve(verb, payload),
                 None => Box::pin(std::future::ready(Err(ServeFailure::Unsupported))),
@@ -435,27 +717,37 @@ impl RunnerService {
         };
         tokio::spawn(async move {
             let answer = answer_frame(id.clone(), served.await);
-            service.finish(&host, &id, key.as_ref(), answer);
+            service.finish(&host, &instance, &id, key.as_ref(), answer);
         });
     }
 
-    fn finish(&self, host: &str, request_id: &str, key: Option<&OpKey>, answer: RunnerFrame) {
+    /// Records a request's answer and sends it to the host instance waiting
+    /// for it: for a key, the instance that last sent it.
+    fn finish(
+        &self,
+        host: &str,
+        instance: &str,
+        request_id: &str,
+        key: Option<&OpKey>,
+        answer: RunnerFrame,
+    ) {
         let run = key
             .cloned()
             .map_or_else(|| RunKey::Request(request_id.to_owned()), RunKey::Op);
         lock(&self.inner.running).remove(&(host.to_owned(), run));
-        let answer = match key {
+        let (answer, waiting) = match key {
             Some(key) => lock(&self.inner.tables).answer(host, key, answer, Instant::now()),
-            None => answer,
+            None => (answer, None),
         };
-        if let Some(connection) = lock(&self.inner.hosts).get(host) {
+        let waiting = waiting.unwrap_or_else(|| instance.to_owned());
+        if let Some(connection) = lock(&self.inner.hosts).get(&(host.to_owned(), waiting)) {
             let _ = connection.sender.send(answer);
         }
     }
 
-    fn run_key(&self, host: &str, request_id: String) -> RunKey {
+    fn run_key(&self, host: &str, instance: &str, request_id: String) -> RunKey {
         lock(&self.inner.tables)
-            .key_for(host, &request_id)
+            .key_for(host, instance, &request_id)
             .map_or(RunKey::Request(request_id), RunKey::Op)
     }
 
@@ -529,9 +821,8 @@ impl RunnerService {
         let Some((root, cwd)) = requested_workspace(payload) else {
             return Ok(default.clone());
         };
-        if root == default.root() && cwd == default.cwd() {
-            return Ok(default.clone());
-        }
+        // With a factory, every named workspace is admitted by it, the
+        // default one included.
         let Some(workspaces) = &self.inner.workspaces else {
             // The default environment refuses another workspace.
             return Ok(default.clone());
@@ -590,10 +881,7 @@ impl RunnerService {
         stdout: std::pin::Pin<Box<dyn AsyncRead + Send>>,
         handle: Option<ServiceHandle>,
     ) {
-        let sender = lock(&self.inner.hosts)
-            .get(host)
-            .filter(|current| current.id == connection)
-            .map(|current| current.sender.clone());
+        let sender = self.connection_sender(host, connection);
         // The spawning connection ended while the service started: nothing
         // could carry its stdio, so it ends now.
         let Some(sender) = sender else {
@@ -611,9 +899,7 @@ impl RunnerService {
             // Checked again under the services lock, which `end_services`
             // takes too, so a service is either ended with its connection or
             // never carried.
-            let current = lock(&self.inner.hosts)
-                .get(host)
-                .is_some_and(|current| current.id == connection);
+            let current = self.connection_sender(host, connection).is_some();
             if !current {
                 drop(services);
                 terminate_later(handle);
@@ -635,6 +921,18 @@ impl RunnerService {
         }
         tokio::spawn(receive_stream(stdin, received, window, Arc::clone(&out)));
         tokio::spawn(send_stream(stdout, credit, out));
+    }
+
+    /// The sender of `host`'s connection `connection`, while it is current.
+    fn connection_sender(
+        &self,
+        host: &str,
+        connection: u64,
+    ) -> Option<mpsc::UnboundedSender<RunnerFrame>> {
+        lock(&self.inner.hosts)
+            .iter()
+            .find(|((owner, _), current)| owner == host && current.id == connection)
+            .map(|(_, current)| current.sender.clone())
     }
 
     fn terminate_service(&self, host: &str, payload: Value) -> ServeFuture {
@@ -691,6 +989,21 @@ fn terminate_later(handle: Option<ServiceHandle>) {
 enum RunKey {
     Op(OpKey),
     Request(String),
+}
+
+/// Clears what a line's jobs ran and printed, for an inspector that is not
+/// the runner machine's own.
+fn redact(line: &mut LineStatus) {
+    let Some(jobs) = line.jobs.get_mut("jobs").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for job in jobs {
+        for field in ["command", "output"] {
+            if let Some(value) = job.get_mut(field) {
+                *value = Value::String(String::new());
+            }
+        }
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

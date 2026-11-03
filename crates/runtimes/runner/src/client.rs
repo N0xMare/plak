@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use plakous_model::CancellationToken;
 use plakous_runner_protocol::frame::FrameError;
 use plakous_runner_protocol::{
-    Bind, Hello, HostFrame, LineOwner, Operation, Refusal, Request, RequestClass, RunnerFrame,
-    StreamEvent, StreamFrame, TransferOwner, VersionTriple,
+    Bind, Hello, HostFrame, LineOwner, LineStatus, Operation, Refusal, Request, RequestClass,
+    RunnerFrame, StreamEvent, StreamFrame, TransferOwner, VersionTriple,
 };
 use plakous_tools::ToolPreempt;
 use plakous_tools::internal::runner::{
@@ -25,6 +25,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::connection::{FrameStream, fits, write_frames};
+use crate::journal::{CallJournal, JournalEntry};
 use crate::streams::{
     Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
 };
@@ -68,6 +69,8 @@ pub enum ConnectError {
         /// The runner's triple.
         runner: VersionTriple,
     },
+    /// The keyed calls a previous host process left could not be read.
+    Journal(String),
 }
 
 impl fmt::Display for ConnectError {
@@ -84,6 +87,12 @@ impl fmt::Display for ConnectError {
                 "the runner speaks protocol {} at {} ({})",
                 runner.protocol, runner.source_revision, runner.flavor
             ),
+            Self::Journal(detail) => {
+                write!(
+                    formatter,
+                    "the host's runner call journal is unreadable: {detail}"
+                )
+            }
         }
     }
 }
@@ -99,6 +108,11 @@ pub struct RunnerClient {
 struct Inner {
     bind: Bind,
     windows: ClientWindows,
+    /// Where keyed calls are recorded before they are sent.
+    journal: Option<Arc<dyn CallJournal>>,
+    /// The calls a previous host process left in the journal, until
+    /// [`RunnerClient::recover`] replays them.
+    left: Mutex<Vec<JournalEntry>>,
     /// Unique to this client, so its request and control ids never collide
     /// with another host process's under the same host id.
     ids: String,
@@ -116,12 +130,30 @@ struct State {
     instance: String,
     pending: HashMap<String, Pending>,
     transfers: HashMap<String, oneshot::Sender<RunnerFrame>>,
+    questions: HashMap<String, oneshot::Sender<Vec<LineStatus>>>,
+    /// Why the runner refused the connection itself, such as an unpaired
+    /// host.
+    refusal: Option<Refusal>,
     streams: HashMap<u64, StreamEnds>,
 }
 
 struct Pending {
     request: Request,
     answer: oneshot::Sender<Result<Value, RunnerFailure>>,
+    /// Recorded in the journal, so its answer settles the record.
+    journaled: bool,
+}
+
+/// A keyed call a previous host process left unsettled, and what replaying
+/// it established.
+#[derive(Debug)]
+pub struct RecoveredCall {
+    /// The call as first sent.
+    pub request: Request,
+    /// Its answer: what it returned, or why its outcome is known not to have
+    /// happened ([`RunnerFailure::Unavailable`]: the runner never saw it, so
+    /// it never will run) or is unknown ([`RunnerFailure::OutcomeUnknown`]).
+    pub answer: Result<Value, RunnerFailure>,
 }
 
 /// The owner last transferred to the current runner instance, per line. Each
@@ -149,10 +181,37 @@ impl RunnerClient {
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
+        Self::connect_journaled(stream, bind, windows, None).await
+    }
+
+    /// [`Self::connect`], recording every keyed call in `journal` before it
+    /// is sent. Calls a previous host process left there are replayed by
+    /// [`Self::recover`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::connect`], and a journal that cannot be read.
+    pub async fn connect_journaled<S>(
+        stream: S,
+        bind: Bind,
+        windows: ClientWindows,
+        journal: Option<Arc<dyn CallJournal>>,
+    ) -> Result<(Self, Hello), ConnectError>
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
+        let left = match &journal {
+            Some(journal) => journal
+                .pending()
+                .map_err(|error| ConnectError::Journal(error.to_string()))?,
+            None => Vec::new(),
+        };
         let client = Self {
             inner: Arc::new(Inner {
                 bind,
                 windows,
+                journal,
+                left: Mutex::new(left),
                 ids: uuid::Uuid::new_v4().simple().to_string(),
                 next: AtomicU64::new(0),
                 state: Mutex::new(State {
@@ -163,6 +222,8 @@ impl RunnerClient {
                     instance: String::new(),
                     pending: HashMap::new(),
                     transfers: HashMap::new(),
+                    questions: HashMap::new(),
+                    refusal: None,
                     streams: HashMap::new(),
                 }),
                 transferred: Mutex::default(),
@@ -185,6 +246,91 @@ impl RunnerClient {
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
         self.attach(stream, true).await
+    }
+
+    /// Why the runner refused this host's connection, when it did: the
+    /// connection then ends.
+    #[must_use]
+    pub fn refusal(&self) -> Option<Refusal> {
+        lock(&self.inner.state).refusal.clone()
+    }
+
+    /// The runner instance this client is bound to now.
+    #[must_use]
+    pub fn instance(&self) -> String {
+        lock(&self.inner.state).instance.clone()
+    }
+
+    /// Replays every keyed call a previous host process left in the journal
+    /// and answers what each established. A call dispatched to another
+    /// runner instance is not replayed: its outcome is unknown. Each answered
+    /// call is settled in the journal.
+    pub async fn recover(&self) -> Vec<RecoveredCall> {
+        let left = std::mem::take(&mut *lock(&self.inner.left));
+        let instance = self.instance();
+        let mut recovered = Vec::with_capacity(left.len());
+        for entry in left {
+            let answer = if entry.dispatched_to == instance {
+                self.inner.replay(&entry).await
+            } else {
+                Err(RunnerFailure::OutcomeUnknown(
+                    "the runner restarted since the call was sent".into(),
+                ))
+            };
+            // A replay the link lost stays recorded for the next recovery.
+            let answered = !matches!(&answer, Err(RunnerFailure::OutcomeUnknown(reason)) if reason == LINK_LOST);
+            if answered && let Some(journal) = &self.inner.journal {
+                let _ = journal.settle(&entry.request.request_id);
+            }
+            recovered.push(RecoveredCall {
+                request: entry.request,
+                answer,
+            });
+        }
+        recovered
+    }
+
+    /// The runner's lines of this host: each line's owner, whether that
+    /// owner holds it, and its jobs.
+    ///
+    /// # Errors
+    ///
+    /// The runner is unreachable or did not answer within the read window.
+    pub async fn lines(&self) -> Result<Vec<LineStatus>, RunnerFailure> {
+        let request_id = self.inner.next_id("q");
+        let (waiter, answer) = oneshot::channel();
+        lock(&self.inner.state)
+            .questions
+            .insert(request_id.clone(), waiter);
+        if !self.inner.send(HostFrame::Lines {
+            request_id: request_id.clone(),
+        }) {
+            lock(&self.inner.state).questions.remove(&request_id);
+            return Err(RunnerFailure::Unavailable(
+                "the runner is not connected".into(),
+            ));
+        }
+        if let Ok(Ok(lines)) = tokio::time::timeout(self.inner.windows.read, answer).await {
+            return Ok(lines);
+        }
+        lock(&self.inner.state).questions.remove(&request_id);
+        Err(RunnerFailure::Unavailable(
+            "the runner did not list its lines".into(),
+        ))
+    }
+
+    /// Makes `owner` the line's owner on the runner before its first call
+    /// (spec 01 §8.4): a no-op when it already is.
+    ///
+    /// # Errors
+    ///
+    /// The runner accepts a newer owner of the line, refused to record the
+    /// change, or did not answer.
+    pub async fn transfer_owner(
+        &self,
+        owner: &plakous_tools::LineOwner,
+    ) -> Result<(), RunnerFailure> {
+        self.inner.transfer(&wire_owner(owner)).await
     }
 
     async fn attach<S>(&self, stream: S, again: bool) -> Result<Hello, ConnectError>
@@ -211,6 +357,7 @@ impl RunnerClient {
         let connection = {
             let mut state = lock(&self.inner.state);
             let restarted = again && state.instance != hello.instance;
+            state.refusal = None;
             state.closer.cancel();
             state.lose(|request| restarted || !replayable(request), restarted);
             state.instance.clone_from(&hello.instance);
@@ -225,6 +372,12 @@ impl RunnerClient {
             state.sender = Some(sender);
             state.connection
         };
+        // A runner forgets a line's holder once its owner lease runs out, so
+        // after a new connection every line is transferred again before its
+        // next call.
+        if again {
+            *lock(&self.inner.transferred) = Transferred::default();
+        }
         let inner = Arc::clone(&self.inner);
         tokio::spawn(async move { inner.read(reader, connection, closer).await });
         let inner = Arc::clone(&self.inner);
@@ -238,6 +391,7 @@ impl State {
     /// pending call `lost` selects as of unknown outcome.
     fn lose(&mut self, lost: impl Fn(&Request) -> bool, restarted: bool) {
         self.transfers.clear();
+        self.questions.clear();
         for (_, mut stream) in self.streams.drain() {
             stream.close();
         }
@@ -321,6 +475,7 @@ impl Inner {
     fn receive(&self, frame: RunnerFrame) {
         let control = match &frame {
             RunnerFrame::TransferAccepted { control_id }
+            | RunnerFrame::TransferRefused { control_id, .. }
             | RunnerFrame::StaleOwner {
                 control_id: Some(control_id),
                 ..
@@ -334,6 +489,25 @@ impl Inner {
             return;
         }
         let (request_id, answer) = match frame {
+            RunnerFrame::Refused {
+                request_id: None,
+                refusal,
+            } => {
+                // These end the connection before any request of it ran; a
+                // malformed frame on a bound connection ends nothing.
+                if ends_connection(&refusal) {
+                    self.refused(refusal);
+                } else {
+                    lock(&self.state).refusal = Some(refusal);
+                }
+                return;
+            }
+            RunnerFrame::Lines { request_id, lines } => {
+                if let Some(waiter) = lock(&self.state).questions.remove(&request_id) {
+                    let _ = waiter.send(lines);
+                }
+                return;
+            }
             RunnerFrame::Stream(frame) => {
                 // Taken out of the state while it runs: an abort sends a
                 // close, and sending takes the state's lock.
@@ -351,60 +525,56 @@ impl Inner {
                 }
                 return;
             }
-            RunnerFrame::Result {
-                request_id,
-                payload,
-            } => {
-                self.send(HostFrame::Ack {
-                    request_id: request_id.clone(),
-                });
-                (request_id, Ok(payload))
+            other => {
+                let Some((request_id, answer, acknowledge)) = request_answer(other) else {
+                    return;
+                };
+                // The answer is recorded below, so the runner may forget it.
+                if acknowledge {
+                    self.send(HostFrame::Ack {
+                        request_id: request_id.clone(),
+                    });
+                }
+                (request_id, answer)
             }
-            RunnerFrame::Error { request_id, error } => {
-                self.send(HostFrame::Ack {
-                    request_id: request_id.clone(),
-                });
-                (request_id, Err(RunnerFailure::Backend(error.error)))
-            }
-            RunnerFrame::NotSeen { request_id } => (
-                request_id,
-                Err(RunnerFailure::Unavailable(
-                    "the runner never saw the call; nothing ran".into(),
-                )),
-            ),
-            RunnerFrame::Spent { request_id } => (
-                request_id,
-                Err(RunnerFailure::OutcomeUnknown(
-                    "the runner ran this call and its answer was already acknowledged".into(),
-                )),
-            ),
-            RunnerFrame::StaleRequest { request_id } => (
-                request_id,
-                Err(RunnerFailure::Refused(
-                    "the runner holds another request under this call's key".into(),
-                )),
-            ),
-            RunnerFrame::StaleOwner {
-                request_id: Some(request_id),
-                ..
-            } => (request_id, Err(RunnerFailure::StaleOwner)),
-            RunnerFrame::Refused {
-                request_id: Some(request_id),
-                refusal,
-            } => (
-                request_id,
-                Err(match refusal {
-                    Refusal::Unsupported { .. } => RunnerFailure::Unsupported,
-                    other => RunnerFailure::Refused(format!("{other:?}")),
-                }),
-            ),
-            // `InProgress`: the answer still comes. `Pong` only proves the
-            // link is alive. Frames without a request id refuse the
-            // connection, which then ends.
-            _ => return,
         };
-        if let Some(pending) = lock(&self.state).pending.remove(&request_id) {
-            let _ = pending.answer.send(answer);
+        let Some(pending) = lock(&self.state).pending.remove(&request_id) else {
+            return;
+        };
+        if pending.journaled
+            && let Some(journal) = &self.journal
+        {
+            let _ = journal.settle(&pending.request.request_id);
+        }
+        let _ = pending.answer.send(answer);
+    }
+
+    /// The runner refused the connection itself (an unpaired host, an
+    /// inspection asked for more): nothing this link sent ran, so every
+    /// waiting call and transfer fails now with no effect, and the link
+    /// takes no new call.
+    fn refused(&self, refusal: Refusal) {
+        let reason = format!("the runner refused this host: {refusal:?}");
+        let mut state = lock(&self.state);
+        state.refusal = Some(refusal);
+        state.sender = None;
+        state.closer.cancel();
+        state.transfers.clear();
+        state.questions.clear();
+        for (_, mut stream) in state.streams.drain() {
+            stream.close();
+        }
+        let pending: Vec<Pending> = state.pending.drain().map(|(_, pending)| pending).collect();
+        drop(state);
+        for pending in pending {
+            if pending.journaled
+                && let Some(journal) = &self.journal
+            {
+                let _ = journal.settle(&pending.request.request_id);
+            }
+            let _ = pending
+                .answer
+                .send(Err(RunnerFailure::Unavailable(reason.clone())));
         }
     }
 
@@ -424,7 +594,9 @@ impl Inner {
     }
 
     /// Sends `owner`'s transfer before its first call, unless it is the
-    /// owner last transferred for its line.
+    /// owner last transferred for its line. A transfer from an owner the
+    /// runner no longer accepts is answered with the one it does; a newer
+    /// `owner` (a fresher lease) transfers again from that one, once.
     async fn transfer(&self, owner: &LineOwner) -> Result<(), RunnerFailure> {
         let line = {
             let instance = lock(&self.state).instance.clone();
@@ -441,6 +613,33 @@ impl Inner {
         if transferred.as_ref() == Some(owner) {
             return Ok(());
         }
+        let mut from = transferred.clone();
+        for _ in 0..2 {
+            match self.send_transfer(from.clone(), owner).await? {
+                RunnerFrame::TransferAccepted { .. } => {
+                    *transferred = Some(owner.clone());
+                    return Ok(());
+                }
+                RunnerFrame::StaleOwner { current, .. }
+                    if owner.is_newer_than(&current) && from.as_ref() != Some(&current) =>
+                {
+                    from = Some(current);
+                }
+                RunnerFrame::TransferRefused { detail, .. } => {
+                    return Err(RunnerFailure::Unavailable(detail));
+                }
+                _ => return Err(RunnerFailure::StaleOwner),
+            }
+        }
+        Err(RunnerFailure::StaleOwner)
+    }
+
+    /// Sends one transfer and waits for its answer.
+    async fn send_transfer(
+        &self,
+        from: Option<LineOwner>,
+        to: &LineOwner,
+    ) -> Result<RunnerFrame, RunnerFailure> {
         let control_id = self.next_id("t");
         let (waiter, answer) = oneshot::channel();
         lock(&self.state)
@@ -448,8 +647,8 @@ impl Inner {
             .insert(control_id.clone(), waiter);
         let sent = self.send(HostFrame::TransferOwner(TransferOwner {
             control_id: control_id.clone(),
-            from: transferred.clone(),
-            to: owner.clone(),
+            from,
+            to: to.clone(),
         }));
         if !sent {
             lock(&self.state).transfers.remove(&control_id);
@@ -457,19 +656,53 @@ impl Inner {
                 "the runner is not connected".into(),
             ));
         }
-        match tokio::time::timeout(self.windows.read, answer).await {
-            Ok(Ok(RunnerFrame::TransferAccepted { .. })) => {
-                *transferred = Some(owner.clone());
-                Ok(())
-            }
-            Ok(Ok(_)) => Err(RunnerFailure::StaleOwner),
-            Ok(Err(_)) | Err(_) => {
-                lock(&self.state).transfers.remove(&control_id);
-                Err(RunnerFailure::Unavailable(
-                    "the runner did not answer the owner transfer".into(),
-                ))
+        if let Ok(Ok(frame)) = tokio::time::timeout(self.windows.read, answer).await {
+            return Ok(frame);
+        }
+        lock(&self.state).transfers.remove(&control_id);
+        Err(RunnerFailure::Unavailable(
+            "the runner did not answer the owner transfer".into(),
+        ))
+    }
+
+    /// Replays one call a previous host process left, and waits for its
+    /// answer within the call's window.
+    async fn replay(&self, entry: &JournalEntry) -> Result<Value, RunnerFailure> {
+        let mut request = entry.request.clone();
+        request.request_id = self.next_id("r");
+        request.replay = true;
+        request.age_ms = Some(plakous_model::now_unix_millis().saturating_sub(entry.claimed_at_ms));
+        let window = if matches!(request.class, RequestClass::EffectCall { .. }) {
+            self.windows.effect
+        } else {
+            self.windows.read
+        };
+        let request_id = request.request_id.clone();
+        let (answer, answered) = oneshot::channel();
+        {
+            let mut state = lock(&self.state);
+            let Some(sender) = state.sender.clone() else {
+                return Err(RunnerFailure::OutcomeUnknown(LINK_LOST.into()));
+            };
+            let frame = HostFrame::Request(request.clone());
+            state.pending.insert(
+                request_id.clone(),
+                Pending {
+                    request,
+                    answer,
+                    journaled: false,
+                },
+            );
+            if sender.send(frame).is_err() {
+                state.pending.remove(&request_id);
+                return Err(RunnerFailure::OutcomeUnknown(LINK_LOST.into()));
             }
         }
+        if let Ok(Ok(answer)) = tokio::time::timeout(window, answered).await {
+            return answer;
+        }
+        lock(&self.state).pending.remove(&request_id);
+        Err(RunnerFailure::OutcomeUnknown(LINK_LOST.into()))
     }
 
     fn request(&self, call: &RunnerCall, owner: Option<LineOwner>) -> Request {
@@ -505,6 +738,7 @@ impl Inner {
             }),
             digest: digest(&operation),
             replay: false,
+            age_ms: None,
             operation,
         }
     }
@@ -528,23 +762,7 @@ impl Inner {
         }
         let request_id = request.request_id.clone();
         let (answer, mut answered) = oneshot::channel();
-        {
-            let mut state = lock(&self.state);
-            let Some(sender) = state.sender.clone() else {
-                return Err(RunnerFailure::Unavailable(
-                    "the runner is not connected".into(),
-                ));
-            };
-            state
-                .pending
-                .insert(request_id.clone(), Pending { request, answer });
-            if sender.send(frame).is_err() {
-                state.pending.remove(&request_id);
-                return Err(RunnerFailure::Unavailable(
-                    "the runner is not connected".into(),
-                ));
-            }
-        }
+        self.dispatch(request, frame, answer)?;
         let expiry = tokio::time::sleep(window);
         tokio::pin!(expiry);
         let cancellation = call.cancellation().clone();
@@ -585,6 +803,73 @@ impl Inner {
                     ));
                 }
             }
+        }
+    }
+
+    /// Sends one request, recorded as pending its answer. A keyed call is
+    /// journaled first, with the runner instance it goes to, so a restarted
+    /// host replays it rather than guessing its outcome.
+    fn dispatch(
+        &self,
+        request: Request,
+        frame: HostFrame,
+        answer: oneshot::Sender<Result<Value, RunnerFailure>>,
+    ) -> Result<(), RunnerFailure> {
+        let request_id = request.request_id.clone();
+        let (sender, instance, refusal) = {
+            let state = lock(&self.state);
+            (
+                state.sender.clone(),
+                state.instance.clone(),
+                state.refusal.clone().filter(ends_connection),
+            )
+        };
+        let not_connected = || {
+            RunnerFailure::Unavailable(refusal.as_ref().map_or_else(
+                || "the runner is not connected".to_owned(),
+                |refusal| format!("the runner refused this host: {refusal:?}"),
+            ))
+        };
+        let sender = sender.ok_or_else(not_connected)?;
+        let journaled = match (&self.journal, keyed(&request)) {
+            (Some(journal), true) => {
+                journal
+                    .claim(&JournalEntry {
+                        request: request.clone(),
+                        claimed_at_ms: plakous_model::now_unix_millis(),
+                        dispatched_to: instance,
+                    })
+                    .map_err(|error| {
+                        RunnerFailure::Unavailable(format!(
+                            "the call could not be recorded before it was sent: {error}"
+                        ))
+                    })?;
+                true
+            }
+            _ => false,
+        };
+        let mut state = lock(&self.state);
+        state.pending.insert(
+            request_id.clone(),
+            Pending {
+                request,
+                answer,
+                journaled,
+            },
+        );
+        if sender.send(frame).is_err() {
+            state.pending.remove(&request_id);
+            drop(state);
+            self.unclaim(journaled, &request_id);
+            return Err(not_connected());
+        }
+        Ok(())
+    }
+
+    /// Forgets a claimed call that was never sent.
+    fn unclaim(&self, journaled: bool, request_id: &str) {
+        if journaled && let Some(journal) = &self.journal {
+            let _ = journal.settle(request_id);
         }
     }
 
@@ -663,6 +948,90 @@ impl RunnerLink for RunnerClient {
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The request a runner frame answers, its answer, and whether the runner
+/// keeps that answer until it is acknowledged. `InProgress` (the answer
+/// still comes), `Pong` and frames without a request id answer nothing.
+fn request_answer(frame: RunnerFrame) -> Option<(String, Result<Value, RunnerFailure>, bool)> {
+    Some(match frame {
+        RunnerFrame::Result {
+            request_id,
+            payload,
+        } => (request_id, Ok(payload), true),
+        RunnerFrame::Error { request_id, error } => {
+            (request_id, Err(RunnerFailure::Backend(error.error)), true)
+        }
+        RunnerFrame::NotSeen { request_id } => (
+            request_id,
+            Err(RunnerFailure::Unavailable(
+                "the runner never saw the call; nothing ran".into(),
+            )),
+            false,
+        ),
+        RunnerFrame::Spent { request_id } => (
+            request_id,
+            Err(RunnerFailure::OutcomeUnknown(
+                "the runner ran this call and its answer was already acknowledged".into(),
+            )),
+            false,
+        ),
+        RunnerFrame::Expired { request_id } => (
+            request_id,
+            Err(RunnerFailure::OutcomeUnknown(
+                "the call is older than the runner keeps answers, so whether it ran is unknown"
+                    .into(),
+            )),
+            false,
+        ),
+        RunnerFrame::StaleRequest { request_id } => (
+            request_id,
+            Err(RunnerFailure::Refused(
+                "the runner holds another request under this call's key".into(),
+            )),
+            false,
+        ),
+        RunnerFrame::StaleOwner {
+            request_id: Some(request_id),
+            ..
+        } => (request_id, Err(RunnerFailure::StaleOwner), false),
+        RunnerFrame::Refused {
+            request_id: Some(request_id),
+            refusal,
+        } => (
+            request_id,
+            Err(match refusal {
+                Refusal::Unsupported { .. } => RunnerFailure::Unsupported,
+                other => RunnerFailure::Refused(format!("{other:?}")),
+            }),
+            false,
+        ),
+        _ => return None,
+    })
+}
+
+/// Whether the runner refuses the connection itself with `refusal`, before
+/// any request of it ran.
+const fn ends_connection(refusal: &Refusal) -> bool {
+    matches!(
+        refusal,
+        Refusal::Unbound
+            | Refusal::VersionMismatch { .. }
+            | Refusal::NotPaired { .. }
+            | Refusal::InspectOnly
+    )
+}
+
+/// How a replay or recovery says the link was lost before an answer came.
+const LINK_LOST: &str = "the link was lost before the replay was answered";
+
+/// Whether a request runs at most once per key: an effect call or an owner
+/// control. These are the calls the journal records.
+const fn keyed(request: &Request) -> bool {
+    matches!(
+        request.class,
+        RequestClass::EffectCall { .. } | RequestClass::OwnerControl { .. }
+    )
 }
 
 /// Whether a request outstanding at a lost link may be sent again: a keyed

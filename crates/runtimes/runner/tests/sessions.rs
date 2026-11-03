@@ -55,6 +55,7 @@ fn bind() -> Bind {
         host_id: "host-1".into(),
         host_instance: "instance-1".into(),
         version: VersionTriple::current("conformance", "debug"),
+        inspect: false,
     }
 }
 

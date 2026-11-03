@@ -4,12 +4,20 @@
 //! it.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plakous_runner_protocol::{LineOwner, Refusal, Request, RequestClass, RunnerFrame};
 
+use crate::floors::OwnerFloors;
+
 /// How long an answered or tombstoned key is kept without an acknowledgement.
 pub(crate) const RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// How much a replay's age, measured on the host's wall clock, may have been
+/// shortened by that clock stepping back: a replay this close to
+/// [`RETENTION`] is already expired.
+pub(crate) const CLOCK_MARGIN: Duration = Duration::from_secs(60 * 60);
 
 /// One recorded key.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -44,7 +52,10 @@ enum OpState {
 #[derive(Debug)]
 struct Op {
     digest: String,
+    /// The request id and the host instance waiting for the key's answer:
+    /// the last ones that sent it.
     request_id: String,
+    instance: String,
     state: OpState,
     at: Instant,
 }
@@ -58,69 +69,136 @@ pub(crate) enum Admission {
     Answer(RunnerFrame),
 }
 
+/// The owner a line accepts, and whether it holds the line now.
+#[derive(Clone, Debug)]
+struct Owned {
+    owner: LineOwner,
+    /// False once the host's owner lease expired or the runner restarted,
+    /// until a transfer re-adopts the line: of the same owner again, or a
+    /// newer one. Calls of an orphaned line are refused until then.
+    adopted: bool,
+}
+
 /// The owner and op tables of one runner instance, for every host.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct Tables {
-    owners: HashMap<(String, String), LineOwner>,
+    owners: HashMap<(String, String), Owned>,
     ops: HashMap<(String, OpKey), Op>,
+    /// Where accepted owners are recorded before they are accepted, so a
+    /// restart never accepts an owner older than one it accepted before.
+    floors: Option<Arc<dyn OwnerFloors>>,
 }
 
 impl Tables {
+    /// Tables whose owners start from `floors`' record.
+    pub(crate) fn with_floors(floors: Arc<dyn OwnerFloors>) -> Self {
+        let owners = floors
+            .load()
+            .into_iter()
+            .map(|(host, owner)| {
+                (
+                    (host, owner.line.clone()),
+                    Owned {
+                        owner,
+                        adopted: false,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            owners,
+            ops: HashMap::new(),
+            floors: Some(floors),
+        }
+    }
+
     /// Records an owner change. The new owner must be the line's accepted
-    /// owner or a newer one; the accepted owner again is a retry and is
-    /// accepted.
+    /// owner or a newer one. The accepted owner again is a retry and is
+    /// accepted; a newer one is accepted only from the accepted owner
+    /// (`from`, a compare-and-swap) or onto a line with none, and is
+    /// recorded first when floors are kept.
     pub(crate) fn transfer(
         &mut self,
         host: &str,
         control_id: String,
+        from: Option<&LineOwner>,
         to: LineOwner,
     ) -> RunnerFrame {
         let line = (host.to_owned(), to.line.clone());
-        if let Some(current) = self.owners.get(&line)
-            && !to.is_at_least(current)
+        let current = self.owners.get(&line).map(|owned| owned.owner.clone());
+        if let Some(from) = from
+            && from.line != to.line
         {
-            return RunnerFrame::StaleOwner {
-                request_id: None,
-                control_id: Some(control_id),
-                current: current.clone(),
+            return RunnerFrame::TransferRefused {
+                control_id,
+                detail: "a transfer names one line".into(),
             };
         }
-        self.owners.insert(line, to);
+        match &current {
+            Some(current) if *current == to => {}
+            Some(current) if !to.is_newer_than(current) || from != Some(current) => {
+                return RunnerFrame::StaleOwner {
+                    request_id: None,
+                    control_id: Some(control_id),
+                    current: current.clone(),
+                };
+            }
+            // With no accepted owner there is nothing to fence.
+            Some(_) | None => {}
+        }
+        if current.as_ref() != Some(&to)
+            && let Some(floors) = &self.floors
+            && let Err(error) = floors.record(host, &to)
+        {
+            return RunnerFrame::TransferRefused {
+                control_id,
+                detail: format!("the owner could not be recorded: {error}"),
+            };
+        }
+        self.owners.insert(
+            line,
+            Owned {
+                owner: to,
+                adopted: true,
+            },
+        );
         RunnerFrame::TransferAccepted { control_id }
     }
 
-    /// Admits one request, at most once per effect-call key. A key already
-    /// held is answered from the table whatever its owner, since the call it
-    /// names may have run; the owner fence applies only to work that has not.
-    pub(crate) fn admit(&mut self, host: &str, request: &Request, now: Instant) -> Admission {
-        self.ops.retain(|_, op| {
-            matches!(op.state, OpState::Running) || now.duration_since(op.at) < RETENTION
-        });
+    /// Marks every line of `host` as no longer held: its owner lease
+    /// expired.
+    pub(crate) fn orphan(&mut self, host: &str) {
+        for ((owner_host, _), owned) in &mut self.owners {
+            if owner_host == host {
+                owned.adopted = false;
+            }
+        }
+    }
+
+    /// The accepted owner of `host`'s `line` and whether it holds it.
+    pub(crate) fn owner(&self, host: &str, line: &str) -> Option<(LineOwner, bool)> {
+        self.owners
+            .get(&(host.to_owned(), line.to_owned()))
+            .map(|owned| (owned.owner.clone(), owned.adopted))
+    }
+
+    /// Admits one request from `instance` of `host`, at most once per
+    /// effect-call key. A key already held is answered from the table
+    /// whatever its owner, since the call it names may have run; the owner
+    /// fence applies only to work that has not.
+    pub(crate) fn admit(
+        &mut self,
+        host: &str,
+        instance: &str,
+        request: &Request,
+        now: Instant,
+    ) -> Admission {
+        self.expire(now);
         let id = request.request_id.clone();
-        let key = match (&request.class, &request.owner) {
-            (
-                RequestClass::EffectCall {
-                    call_id,
-                    attempt_id,
-                },
-                Some(owner),
-            ) => Some(OpKey::Effect {
-                line: owner.line.clone(),
-                generation: owner.generation,
-                call_id: call_id.clone(),
-                attempt_id: attempt_id.clone(),
-                verb: request.operation.verb.clone(),
-            }),
-            (RequestClass::OwnerControl { control_id }, Some(owner)) => Some(OpKey::Control {
-                line: owner.line.clone(),
-                control_id: control_id.clone(),
-            }),
-            (
-                RequestClass::EffectCall { .. }
-                | RequestClass::OwnerControl { .. }
-                | RequestClass::ProcessObservation { .. },
-                None,
-            ) => {
+        let key = match op_key(request) {
+            Keyed::Key(key) => Some(key),
+            Keyed::Unkeyed => None,
+            Keyed::Ownerless => {
                 return Admission::Answer(RunnerFrame::Refused {
                     request_id: Some(id),
                     refusal: Refusal::Malformed {
@@ -128,7 +206,6 @@ impl Tables {
                     },
                 });
             }
-            _ => None,
         };
         if let Some(key) = &key
             && let Some(op) = self.ops.get_mut(&(host.to_owned(), key.clone()))
@@ -139,33 +216,31 @@ impl Tables {
             return Admission::Answer(match &op.state {
                 OpState::Running => {
                     op.request_id.clone_from(&id);
+                    instance.clone_into(&mut op.instance);
                     RunnerFrame::InProgress { request_id: id }
                 }
                 OpState::Answered(answer) => {
                     op.request_id.clone_from(&id);
+                    instance.clone_into(&mut op.instance);
                     with_request_id((**answer).clone(), id)
                 }
                 OpState::Tombstone => RunnerFrame::NotSeen { request_id: id },
                 OpState::Spent => RunnerFrame::Spent { request_id: id },
             });
         }
-        if let Some(owner) = &request.owner {
-            match self.owners.get(&(host.to_owned(), owner.line.clone())) {
-                Some(current) if current == owner => {}
-                Some(current) if !owner.is_newer_than(current) => {
-                    return Admission::Answer(RunnerFrame::StaleOwner {
-                        request_id: Some(id),
-                        control_id: None,
-                        current: current.clone(),
-                    });
-                }
-                _ => {
-                    return Admission::Answer(RunnerFrame::Refused {
-                        request_id: Some(id),
-                        refusal: Refusal::OwnerNotTransferred,
-                    });
-                }
-            }
+        // A key this old may have run and been forgotten: an unseen key
+        // proves nothing. The age comes from the host's wall clock, so a
+        // margin covers a step back.
+        if key.is_some()
+            && request.replay
+            && request
+                .age_ms
+                .is_some_and(|age| Duration::from_millis(age) + CLOCK_MARGIN >= RETENTION)
+        {
+            return Admission::Answer(RunnerFrame::Expired { request_id: id });
+        }
+        if let Some(refusal) = self.fence(host, request) {
+            return Admission::Answer(refusal);
         }
         let Some(key) = key else {
             return Admission::Run(None);
@@ -180,6 +255,7 @@ impl Tables {
             Op {
                 digest: request.digest.clone(),
                 request_id: id.clone(),
+                instance: instance.to_owned(),
                 state,
                 at: now,
             },
@@ -191,42 +267,133 @@ impl Tables {
         }
     }
 
-    /// The key a running or answered request id names, if it is keyed.
-    pub(crate) fn key_for(&self, host: &str, request_id: &str) -> Option<OpKey> {
+    /// The refusal of a request whose owner is not the line's accepted
+    /// owner holding it: an older one is stale, and a newer one, or the
+    /// accepted one of an orphaned line, is transferred first.
+    fn fence(&self, host: &str, request: &Request) -> Option<RunnerFrame> {
+        let owner = request.owner.as_ref()?;
+        let id = request.request_id.clone();
+        match self.owners.get(&(host.to_owned(), owner.line.clone())) {
+            Some(current) if current.owner == *owner && current.adopted => None,
+            Some(current) if current.owner == *owner => Some(RunnerFrame::Refused {
+                request_id: Some(id),
+                refusal: Refusal::OwnerNotTransferred,
+            }),
+            Some(current) if !owner.is_newer_than(&current.owner) => {
+                Some(RunnerFrame::StaleOwner {
+                    request_id: Some(id),
+                    control_id: None,
+                    current: current.owner.clone(),
+                })
+            }
+            _ => Some(RunnerFrame::Refused {
+                request_id: Some(id),
+                refusal: Refusal::OwnerNotTransferred,
+            }),
+        }
+    }
+
+    fn expire(&mut self, now: Instant) {
+        self.ops.retain(|_, op| {
+            matches!(op.state, OpState::Running) || now.duration_since(op.at) < RETENTION
+        });
+    }
+
+    /// The key a running or answered request id of `instance` names, if it
+    /// is keyed.
+    pub(crate) fn key_for(&self, host: &str, instance: &str, request_id: &str) -> Option<OpKey> {
         self.ops
             .iter()
-            .find(|((op_host, _), op)| op_host == host && op.request_id == request_id)
+            .find(|((op_host, _), op)| {
+                op_host == host && op.instance == instance && op.request_id == request_id
+            })
             .map(|((_, key), _)| key.clone())
     }
 
     /// Records a keyed request's answer and returns it addressed to the
-    /// request id the host is waiting under now.
+    /// request id and host instance waiting for it now.
     pub(crate) fn answer(
         &mut self,
         host: &str,
         key: &OpKey,
         answer: RunnerFrame,
         now: Instant,
-    ) -> RunnerFrame {
+    ) -> (RunnerFrame, Option<String>) {
         let Some(op) = self.ops.get_mut(&(host.to_owned(), key.clone())) else {
-            return answer;
+            return (answer, None);
         };
         let answer = with_request_id(answer, op.request_id.clone());
         op.state = OpState::Answered(Box::new(answer.clone()));
         op.at = now;
-        answer
+        (answer, Some(op.instance.clone()))
     }
 
-    /// The host recorded `request_id`'s answer: its key is spent.
-    pub(crate) fn acknowledge(&mut self, host: &str, request_id: &str) {
+    /// `instance` recorded `request_id`'s answer: its key is spent. Another
+    /// instance's acknowledgement under the same id spends nothing.
+    pub(crate) fn acknowledge(&mut self, host: &str, instance: &str, request_id: &str) {
         for ((op_host, _), op) in &mut self.ops {
             if op_host == host
+                && op.instance == instance
                 && op.request_id == request_id
                 && matches!(op.state, OpState::Answered(_))
             {
                 op.state = OpState::Spent;
             }
         }
+    }
+
+    /// Whether a key still holds an answer or tombstone the host has not
+    /// acknowledged, or is running.
+    pub(crate) fn holds_unacknowledged(&mut self, now: Instant) -> bool {
+        self.expire(now);
+        self.ops.values().any(|op| {
+            matches!(
+                op.state,
+                OpState::Running | OpState::Answered(_) | OpState::Tombstone
+            )
+        })
+    }
+}
+
+/// How a request is keyed.
+enum Keyed {
+    /// It runs at most once under this key.
+    Key(OpKey),
+    /// It is never recorded.
+    Unkeyed,
+    /// It needs an owner and names none: an effect call, a control or an
+    /// observation.
+    Ownerless,
+}
+
+/// The key a request runs at most once under: an effect call's or an owner
+/// control's.
+fn op_key(request: &Request) -> Keyed {
+    match (&request.class, &request.owner) {
+        (
+            RequestClass::EffectCall {
+                call_id,
+                attempt_id,
+            },
+            Some(owner),
+        ) => Keyed::Key(OpKey::Effect {
+            line: owner.line.clone(),
+            generation: owner.generation,
+            call_id: call_id.clone(),
+            attempt_id: attempt_id.clone(),
+            verb: request.operation.verb.clone(),
+        }),
+        (RequestClass::OwnerControl { control_id }, Some(owner)) => Keyed::Key(OpKey::Control {
+            line: owner.line.clone(),
+            control_id: control_id.clone(),
+        }),
+        (
+            RequestClass::EffectCall { .. }
+            | RequestClass::OwnerControl { .. }
+            | RequestClass::ProcessObservation { .. },
+            None,
+        ) => Keyed::Ownerless,
+        _ => Keyed::Unkeyed,
     }
 }
 

@@ -70,6 +70,7 @@ fn bind(host_instance: &str) -> Bind {
         host_id: "host-1".into(),
         host_instance: host_instance.into(),
         version: version(),
+        inspect: false,
     }
 }
 
@@ -522,6 +523,7 @@ fn unkeyed_request(request_id: &str, operation: &Operation) -> HostFrame {
         deadline_ms: None,
         digest: "digest".into(),
         replay: false,
+        age_ms: None,
         operation: operation.clone(),
     })
 }
@@ -648,6 +650,7 @@ fn keyed(request_id: &str, call: &str, operation: &Operation, replay: bool) -> H
         deadline_ms: None,
         digest: "digest-1".into(),
         replay,
+        age_ms: None,
         operation: operation.clone(),
     })
 }

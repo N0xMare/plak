@@ -3272,8 +3272,11 @@ transaction. The state CHECK still admits `restored_paused`.
 
 **Custody.** `agent_tree_custody` holds one fenced claim per tree, naming one
 host process by its stable `host_id`, its typed process instance, its binary id
-and its machine. It is not tree content: no tree save or whole-tree replace
-changes it, and it has no foreign key, so it may precede the tree's rows. A take
+and its machine. That `host_id` is `local` until the custody integration binds
+the home's `host-id` (chapter 02 §2.1), the identity runners pair with and key
+owner leases by, as the process's host identity (the HOST D1 step). It is not
+tree content: no tree save or whole-tree replace changes it, and it has no
+foreign key, so it may precede the tree's rows. A take
 of an absent or released record claims it under the next fence. The holder's
 own take returns its claim unchanged. Another host process is refused with the
 typed `tree_hosted_elsewhere (<binary id>)` refusal naming the holder, its

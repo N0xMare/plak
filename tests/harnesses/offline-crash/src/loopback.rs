@@ -67,6 +67,7 @@ pub fn select(extension: Arc<dyn RunnerExtension>) -> Result<(), String> {
         host_id: "loopback-host".into(),
         host_instance: uuid::Uuid::new_v4().to_string(),
         version,
+        inspect: false,
     };
     let loopback = runtime
         .block_on(Loopback::join(service, bind, ClientWindows::default()))
