@@ -1,9 +1,11 @@
 //! `SQLite` tree-store integration: indexed commit cuts, view deletion,
-//! row-level saves, and the schema-10 rows and custody.
+//! row-level saves, the schema-10 rows and custody, and the custody law both
+//! tree stores share.
 
 mod adoption_pin_cuts;
 mod commit_cut_matrix;
 mod conflict_candidates;
+mod custody_conformance;
 mod revert;
 mod row_writes;
 mod schema_ten;

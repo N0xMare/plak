@@ -3266,7 +3266,8 @@ never act again. A release keeps the fence and the last holder; repeating the
 last holder's release succeeds, and any other claim, including a stale
 lower-fence one, is not held. Each step is one `Immediate` transaction, so
 concurrent processes serialize and exactly one of them takes. Both tree stores
-implement these primitives with the same transition law.
+implement these primitives, and the fenced save and delete, with the same
+transition law, held by one conformance suite (chapter 05).
 
 **Fenced writes.** Every tree write presents a custody claim, and the store
 proves it against the stored record in the same atomic step as the write:

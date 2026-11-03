@@ -4199,6 +4199,26 @@ inspected revision exactly once, the doctor `runtime_store` thresholds, and the
 hosted capacity presentation keyed on the typed refusal class (new work
 refused versus reserve exhausted needing recovery).
 
+Tree custody evidence (chapter 03 §14) runs one custody law against both
+tree stores (`the_memory_store_keeps_the_custody_law`,
+`the_sqlite_store_keeps_the_custody_law`: takes, the holder's own take, the
+refusal by the holder's name, takeover only with a proof for the exact holder
+and fence, fenced saves and deletes refused to unminted, released and
+superseded claims, release and its repeat, the delete taking the record, and
+independent trees) and a seeded 4,000-step random walk over three hosts and two
+trees that drives both stores through every transition, granted and refused,
+and requires the same answer and the same stored record and revision after
+every step (`the_memory_and_sqlite_stores_agree_on_a_random_custody_walk`).
+Liveness is proved across processes: a live holder process keeps the tree and
+a killed one is taken over under the next fence
+(`a_dead_holder_process_is_taken_over_and_a_live_one_is_not`), and removing a
+live holder's lock file or the whole liveness directory proves nothing, before
+or after it exits, until the break-glass
+(`a_removed_liveness_lock_never_proves_a_holder_gone`). A second process's attach
+of a session whose tree a live process holds is refused with exit code 7 and
+the `tree_hosted_elsewhere` JSONL code, bringing no hub up and writing nothing
+(`a_second_process_attach_is_refused_with_exit_7_and_its_jsonl_code`).
+
 History retention evidence (Plakous sections 4 and 5.1) runs one prune
 conformance suite against both backends (`memory_prune_conformance`,
 `sqlite_prune_conformance_reopens_exact_and_verified`): the retained set is
