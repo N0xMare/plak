@@ -671,6 +671,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/interrupt.rs"): {"pin", "select"},
     # A live child's actor serves its mailbox beside its turn watch.
     ("plakous-hosted", "src/agent/live.rs"): {"pin", "select"},
+    # One turn's drive selects its result, events and role wakes, for every role.
+    ("plakous-hosted", "src/node.rs"): {"pin", "select"},
     # The product half of the session record keeps the one-entry store cache.
     ("plak", "src/store/sessions.rs"): {"thread_local"},
     # The highlighter cache is thread-local because syntect parse/highlight
@@ -1473,6 +1475,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/runtime/child_live.rs"): {
         "agent": {"TurnViewState"},
     },
+    # The turn drive's event source is the admitted turn's own event stream.
+    ("plakous-hosted", "src/node.rs"): {"agent": {"TurnEvents"}},
     ("plakous-hosted", "src/runtime/child_projection.rs"): {
         "agent": {
             "CommandAck",

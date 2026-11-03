@@ -3,7 +3,7 @@
 use super::HostBoundary;
 use super::{
     CancelRefusal, CancelSettlement, CancellationStatus, HOST_CANCEL_SETTLE_TIMEOUT, Instant,
-    SessionQueueDrainState, TryRecvError, TurnDrive, UserAction, accept_draft,
+    RootTurn, SessionQueueDrainState, TryRecvError, UserAction, accept_draft,
     apply_cancel_settlement, commit_session_update, drop_last_mutable, edit_mutable,
     emit_prompt_history, emit_queue_snapshot, flush_assistant_delta, move_mutable, note_idle_only,
     queue, queue_edit_applied, queue_edit_refused, queue_refusal, record_emitted_tree_revision,
@@ -24,7 +24,7 @@ use std::time::Duration;
 const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
 const QUIT_RESULT_JOIN: Duration = Duration::from_millis(100);
 
-impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     async fn request_cancel(&self) -> Result<CancellationStatus, plakous::agent::ControlError> {
         #[cfg(test)]
         if let Some(error) = super::quit_trace::take_cancel_refusal(&self.host.session.id) {

@@ -1,9 +1,7 @@
 //! Submit one immutable steer and let the feed projector settle its queue item.
 
 use super::super::admission::{QueuePersistAction, report_queue_persist_failed};
-use super::{
-    CommandId, TurnDrive, emit_queue_snapshot, queue, reject_stale_queue_action, sessions,
-};
+use super::{CommandId, RootTurn, emit_queue_snapshot, queue, reject_stale_queue_action, sessions};
 use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger, Settlement};
 use crate::runtime::ledger::RootLedger;
@@ -12,7 +10,7 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail, SteerSource};
 
-impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Send-now keeps durable command preparation, steering admission, queue acknowledgement, and projection-debt recovery ordered."

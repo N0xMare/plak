@@ -162,3 +162,115 @@ pub(crate) async fn drive_turns<C, R: TurnRole<C>>(
         }
     }
 }
+
+/// Where a turn's events come from.
+pub(crate) trait EventSource {
+    type Event;
+
+    fn recv(&mut self) -> impl Future<Output = Self::Event>;
+}
+
+impl EventSource for plakous::agent::TurnEvents {
+    type Event = Result<std::sync::Arc<plakous::agent::AgentEvent>, plakous::agent::TurnEventError>;
+
+    fn recv(&mut self) -> impl Future<Output = Self::Event> {
+        plakous::agent::TurnEvents::recv(self)
+    }
+}
+
+/// What the top of a pass decided.
+pub(crate) enum Pass {
+    /// Start the next pass at once.
+    Again,
+    /// Wait for the next wake.
+    Wait,
+    /// The drive is over.
+    Done,
+}
+
+/// What woke a turn's drive.
+pub(crate) enum TurnWake<T, E, W> {
+    /// The turn's result.
+    Result(T),
+    /// A role wake that outranks events.
+    Urgent(W),
+    /// The turn's next event.
+    Event(E),
+    /// A role wake events outrank.
+    Ready(W),
+}
+
+/// Whether a drive goes on after a wake.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Flow {
+    Continue,
+    Done,
+}
+
+/// A role's half of one turn's drive: the work every pass does, which
+/// arms are armed, and what each wake does.
+pub(crate) trait TurnPort {
+    type Result;
+    type Event;
+    type Wake;
+
+    /// The work at the top of every pass.
+    fn pass(&mut self) -> impl Future<Output = Pass>;
+
+    /// Whether the drive still waits for the turn's result.
+    fn awaits_result(&self) -> bool;
+
+    /// Whether the drive still takes the turn's events.
+    fn awaits_events(&self) -> bool;
+
+    /// Whether [`Self::urgent`] is armed this pass.
+    fn urgent_armed(&self) -> bool;
+
+    /// The role wake that outranks events.
+    fn urgent(&self) -> impl Future<Output = Self::Wake>;
+
+    /// The role wake events outrank; pending when the role has none.
+    fn ready(&self) -> impl Future<Output = Self::Wake>;
+
+    /// Serves one wake.
+    fn on_wake(
+        &mut self,
+        wake: TurnWake<Self::Result, Self::Event, Self::Wake>,
+    ) -> impl Future<Output = Flow>;
+}
+
+/// One turn's drive (design §3.1): the single loop that takes a turn's
+/// result and events, whichever the role. A biased select takes the result
+/// first, then the role's urgent wake, then events, then the role's other
+/// wakes; the role's work is its port `R`.
+pub(crate) struct TurnDrive<R> {
+    pub(crate) port: R,
+}
+
+impl<R: TurnPort> TurnDrive<R> {
+    pub(crate) async fn run<S, F>(&mut self, events: &mut S, result: F)
+    where
+        S: EventSource<Event = R::Event>,
+        F: Future<Output = R::Result>,
+    {
+        tokio::pin!(result);
+        loop {
+            match self.port.pass().await {
+                Pass::Again => continue,
+                Pass::Done => return,
+                Pass::Wait => {}
+            }
+            let port = &self.port;
+            let wake = tokio::select! {
+                biased;
+                result = &mut result, if port.awaits_result() => TurnWake::Result(result),
+                wake = port.urgent(), if port.urgent_armed() => TurnWake::Urgent(wake),
+                event = events.recv(), if port.awaits_events() => TurnWake::Event(event),
+                wake = port.ready() => TurnWake::Ready(wake),
+            };
+            if self.port.on_wake(wake).await == Flow::Done {
+                return;
+            }
+        }
+    }
+}

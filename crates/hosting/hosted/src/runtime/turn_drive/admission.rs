@@ -6,7 +6,7 @@ use crate::surface_protocol::ContentEvent;
 use super::super::admission::{QueuePersistAction, log_queue_persist_failed};
 use super::{
     Agent, CommandAckDisposition, CommandId, DriveTurnError, DrivenTurn,
-    HOST_CANCEL_SETTLE_TIMEOUT, SessionQueueItem, TurnDrive, TurnHost, admitted_turn_lifecycle,
+    HOST_CANCEL_SETTLE_TIMEOUT, RootTurn, SessionQueueItem, TurnHost, admitted_turn_lifecycle,
     emit_prompt_history, emit_queue_snapshot, emit_turn_lifecycle, operator_facing_agent_error,
     sessions, settle_cancel, terminal_turn_outcome, turn_lifecycle,
 };
@@ -528,7 +528,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
     let turn_observer = runtime_factory.turn_observer(&prompt);
     drop(prompt);
     let driven = Box::pin(
-        TurnDrive::new(
+        RootTurn::new(
             turn.control(),
             TurnHost {
                 job_agent,

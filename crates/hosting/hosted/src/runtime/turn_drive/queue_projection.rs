@@ -1,6 +1,6 @@
 //! Refresh queue authority without waiting for a busy turn to end.
 
-use super::{Duration, Instant, TurnDrive, emit_queue_snapshot, sessions};
+use super::{Duration, Instant, RootTurn, emit_queue_snapshot, sessions};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
@@ -9,7 +9,7 @@ pub(super) struct QueueRefresh {
     pub(super) task: crate::TaskHandle<Result<sessions::QueueCommands, String>>,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     pub(super) async fn publish_applied_steering(&mut self) {
         // SteeringApplied is an observation emitted before its commit. The
         // following prepared request is past that commit and ahead of new

@@ -2,6 +2,7 @@
 
 use super::{HostEvent, TurnProjection};
 use crate::TaskHandle;
+use crate::node::Flow;
 use plakous::agent::{
     Agent, AgentEvent, CommandAck, EventDelivery, EventSubscription, SubscriptionEnd, Turn,
     TurnControl, TurnEventError, TurnEvents, TurnResultHandle, TurnSubmission, TurnViewState,
@@ -138,10 +139,6 @@ impl ChildTurnProjection {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Child projection coordinates the bounded face stream, committed history catch-up, and cancellation lifetime in one task."
-    )]
     fn start(
         tasks: &crate::TaskSet,
         turn: TurnId,
@@ -166,99 +163,204 @@ impl ChildTurnProjection {
         });
         let observed = Arc::clone(&observation);
         let task = tasks.spawn(async move {
-            if let Some(mut source) = source.await {
-                let mut gap = false;
-                loop {
-                    let event = match source.recv().await {
-                        Received::Event(event) => event,
-                        Received::Lost => {
-                            gap = true;
-                            continue;
-                        }
-                        Received::Recover => {
-                            gap = true;
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                            let Some(next) = recover(agent.as_ref(), turn).await else {
-                                break;
-                            };
-                            source = next;
-                            if let Some(projection) = observed.lock().projection.as_mut() {
-                                projection.gap_observed = true;
-                            }
-                            continue;
-                        }
-                        Received::Closed => break,
-                    };
-                    if matches!(event.kind(), plakous::agent::AgentEventKind::AgentClosed) {
-                        break;
-                    }
-                    if event.turn_id() != Some(turn) {
-                        continue;
-                    }
-                    let terminal = {
-                        let mut state = observed.lock();
-                        let Some(projection) = state.projection.as_mut() else {
-                            break;
-                        };
-                        projection.gap_observed |= gap;
-                        let mut ops = super::child_live::transcript_ops(&event, projection);
-                        for op in &ops {
-                            if let HostEvent::ToolLine {
-                                call_id: Some(id), ..
-                            } = op
-                            {
-                                if let Some(kept) = projection.child_tools.iter_mut().find(|kept| {
-                                    matches!(kept,
-                                    HostEvent::ToolLine { call_id: Some(kept), .. } if kept == id)
-                                }) {
-                                    *kept = op.clone();
-                                } else {
-                                    projection.child_tools.push_back(op.clone());
-                                    if projection.child_tools.len() > 512 {
-                                        let oldest_settled =
-                                            projection.child_tools.iter().position(|op| {
-                                                matches!(op,
-                                            HostEvent::ToolLine { state, .. } if state != "running")
-                                            });
-                                        projection.child_tools.remove(oldest_settled.unwrap_or(0));
-                                    }
-                                }
-                            }
-                        }
-                        if gap {
-                            ops.insert(
-                                0,
-                                HostEvent::Row(crate::sessions::TranscriptRow::info(
-                                    crate::sessions::NoticeScope::Tree,
-                                    super::child_live::GAP,
-                                )),
-                            );
-                        }
-                        let terminal = projection.progress.terminal;
-                        state.progress = projection.progress.view.clone();
-                        state.terminal = terminal;
-                        state.cursor = state.cursor.saturating_add(1);
-                        let cursor = state.cursor;
-                        state.updates.push_back(Update {
-                            cursor,
-                            source_sequence: event.cursor().sequence().get(),
-                            ops: Arc::from(ops),
-                        });
-                        while state.updates.len() > RETAINED_UPDATES {
-                            state.updates.pop_front();
-                        }
-                        observed.changed.send_replace(cursor);
-                        terminal
-                    };
-                    if terminal {
-                        break;
-                    }
-                    gap = false;
-                }
+            if let Some(source) = source.await {
+                let mut events = ChildEvents {
+                    source,
+                    agent,
+                    turn,
+                };
+                let mut drive = crate::node::TurnDrive {
+                    port: ChildPort {
+                        observed: Arc::clone(&observed),
+                        turn,
+                        gap: false,
+                    },
+                };
+                drive.run(&mut events, std::future::pending::<()>()).await;
             }
             observed.close();
         });
         Self { observation, task }
+    }
+}
+
+/// A child turn's events, recovered in place when their stream breaks.
+struct ChildEvents {
+    source: Source,
+    agent: Option<Agent>,
+    turn: TurnId,
+}
+
+/// What a child turn's event stream yields.
+enum ChildEvent {
+    Event(Arc<AgentEvent>),
+    Lost,
+    /// The stream broke and was resubscribed.
+    Recovered,
+    Closed,
+}
+
+impl crate::node::EventSource for ChildEvents {
+    type Event = ChildEvent;
+
+    async fn recv(&mut self) -> ChildEvent {
+        match self.source.recv().await {
+            Received::Event(event) => ChildEvent::Event(event),
+            Received::Lost => ChildEvent::Lost,
+            Received::Recover => {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let Some(next) = recover(self.agent.as_ref(), self.turn).await else {
+                    return ChildEvent::Closed;
+                };
+                self.source = next;
+                ChildEvent::Recovered
+            }
+            Received::Closed => ChildEvent::Closed,
+        }
+    }
+}
+
+/// The child's port on its turn's drive: the reducer that folds the
+/// turn's events into the observation every face reads. The waiter, not
+/// this drive, takes the turn's result.
+struct ChildPort {
+    observed: Arc<ChildObservation>,
+    turn: TurnId,
+    /// Events were lost since the last one reduced.
+    gap: bool,
+}
+
+impl crate::node::TurnPort for ChildPort {
+    type Result = ();
+    type Event = ChildEvent;
+    type Wake = std::convert::Infallible;
+
+    fn pass(&mut self) -> impl Future<Output = crate::node::Pass> {
+        std::future::ready(crate::node::Pass::Wait)
+    }
+
+    fn awaits_result(&self) -> bool {
+        false
+    }
+
+    fn awaits_events(&self) -> bool {
+        true
+    }
+
+    fn urgent_armed(&self) -> bool {
+        false
+    }
+
+    fn urgent(&self) -> impl Future<Output = Self::Wake> {
+        std::future::pending()
+    }
+
+    fn ready(&self) -> impl Future<Output = Self::Wake> {
+        std::future::pending()
+    }
+
+    fn on_wake(
+        &mut self,
+        wake: crate::node::TurnWake<(), ChildEvent, Self::Wake>,
+    ) -> impl Future<Output = Flow> {
+        std::future::ready(self.reduce(wake))
+    }
+}
+
+impl ChildPort {
+    /// Folds one wake into the observation.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Child projection coordinates the bounded face stream, committed history catch-up, and cancellation lifetime in one task."
+    )]
+    fn reduce(
+        &mut self,
+        wake: crate::node::TurnWake<(), ChildEvent, std::convert::Infallible>,
+    ) -> Flow {
+        let event = match wake {
+            crate::node::TurnWake::Event(ChildEvent::Event(event)) => event,
+            crate::node::TurnWake::Event(ChildEvent::Lost) => {
+                self.gap = true;
+                return Flow::Continue;
+            }
+            crate::node::TurnWake::Event(ChildEvent::Recovered) => {
+                self.gap = true;
+                if let Some(projection) = self.observed.lock().projection.as_mut() {
+                    projection.gap_observed = true;
+                }
+                return Flow::Continue;
+            }
+            crate::node::TurnWake::Event(ChildEvent::Closed) => return Flow::Done,
+            crate::node::TurnWake::Result(()) => return Flow::Continue,
+            crate::node::TurnWake::Urgent(never) | crate::node::TurnWake::Ready(never) => {
+                match never {}
+            }
+        };
+        if matches!(event.kind(), plakous::agent::AgentEventKind::AgentClosed) {
+            return Flow::Done;
+        }
+        if event.turn_id() != Some(self.turn) {
+            return Flow::Continue;
+        }
+        let terminal = {
+            let mut state = self.observed.lock();
+            let Some(projection) = state.projection.as_mut() else {
+                return Flow::Done;
+            };
+            projection.gap_observed |= self.gap;
+            let mut ops = super::child_live::transcript_ops(&event, projection);
+            for op in &ops {
+                if let HostEvent::ToolLine {
+                    call_id: Some(id), ..
+                } = op
+                {
+                    if let Some(kept) = projection.child_tools.iter_mut().find(|kept| {
+                        matches!(kept,
+                            HostEvent::ToolLine { call_id: Some(kept), .. } if kept == id)
+                    }) {
+                        *kept = op.clone();
+                    } else {
+                        projection.child_tools.push_back(op.clone());
+                        if projection.child_tools.len() > 512 {
+                            let oldest_settled = projection.child_tools.iter().position(|op| {
+                                matches!(op,
+                                    HostEvent::ToolLine { state, .. } if state != "running")
+                            });
+                            projection.child_tools.remove(oldest_settled.unwrap_or(0));
+                        }
+                    }
+                }
+            }
+            if self.gap {
+                ops.insert(
+                    0,
+                    HostEvent::Row(crate::sessions::TranscriptRow::info(
+                        crate::sessions::NoticeScope::Tree,
+                        super::child_live::GAP,
+                    )),
+                );
+            }
+            let terminal = projection.progress.terminal;
+            state.progress = projection.progress.view.clone();
+            state.terminal = terminal;
+            state.cursor = state.cursor.saturating_add(1);
+            let cursor = state.cursor;
+            state.updates.push_back(Update {
+                cursor,
+                source_sequence: event.cursor().sequence().get(),
+                ops: Arc::from(ops),
+            });
+            while state.updates.len() > RETAINED_UPDATES {
+                state.updates.pop_front();
+            }
+            self.observed.changed.send_replace(cursor);
+            terminal
+        };
+        if terminal {
+            return Flow::Done;
+        }
+        self.gap = false;
+        Flow::Continue
     }
 }
 

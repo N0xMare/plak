@@ -84,7 +84,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
     }
 }
 
-struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
+struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     turn_observer: Option<Box<dyn TurnObserver>>,
     host: TurnHost<'a, P>,
     control: TurnControl,
@@ -160,7 +160,7 @@ pub(in crate::runtime) async fn drive_recovered_turn<
     let events = host.events;
     let tree_id = super::rebind::durable_tree_id(rows, host.session);
     let session_id = host.live_target.followed.session_id();
-    let driven = TurnDrive::new(turn.control(), host, None).run(turn).await;
+    let driven = RootTurn::new(turn.control(), host, None).run(turn).await;
     if let Err(error) = super::projection::root_tree_pass(
         runtime,
         rows,
@@ -182,7 +182,7 @@ pub(in crate::runtime) mod quit_trace;
 #[cfg(test)]
 pub(in crate::runtime) mod wake_trace;
 
-impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
+impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
     fn new(
         control: TurnControl,
         host: TurnHost<'a, P>,
@@ -231,281 +231,402 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The turn driver selects canonical completion, live events, operator actions, and interrupt escalation under one terminal fence."
-    )]
     async fn run(mut self, mut turn: plakous::agent::Turn) -> Result<DrivenTurn, DriveTurnError> {
         let mut event_stream = turn
             .take_events()
             .map_err(|e| format!("events unavailable: {e}"))?;
         let result_fut = turn.result();
-        tokio::pin!(result_fut);
+        let mut drive = crate::node::TurnDrive { port: self };
+        drive.run(&mut event_stream, result_fut).await;
+        self = drive.port;
+        if let Some(refresh) = self.queue_refresh.take() {
+            refresh.task.abort();
+        }
+        self.finish().await
+    }
+}
 
-        loop {
-            self.poll_queue_projection().await;
-            if let Some(through) = self.root_tree_pass_due.take() {
-                self.project_running_root_tree(through).await;
-                #[cfg(test)]
-                prefix_tests::after_round_pass(&self.host.live_target, through);
-            }
-            super::events::commit_notice_intents(
-                self.host.events,
-                self.host.store,
-                self.host.home,
-                self.host.log,
-                self.host.session,
-            );
-            for row in self
-                .host
-                .job_events
-                .emit(self.host.roots.job_registry(), self.host.events)
-            {
-                // Live only: the projector derives the stored process row.
-                self.host.session.append_transcript(row.clone());
-                let _ = self.host.events.send(ContentEvent::Row(row));
-            }
-            self.cancel_pending = observe_pending_cancel_settlement(
-                &self.control,
-                self.cancel_pending,
-                &mut self.cancel_unsettled,
-                &mut self.cancel_settle_deadline,
-                self.host.rows,
-                self.host.store,
-                self.host.home,
-                self.host.session,
-                self.host.events,
-                &mut self.projection,
-                &mut self.interrupted_status_pending,
-            )
-            .await;
-            if self.poll_actions().await {
-                continue;
-            }
+/// What wakes the root's turn besides its result and events.
+enum RootWake {
+    /// The join deadline after Quit passed.
+    QuitDeadline,
+    /// An intent arrived.
+    Intent,
+    /// A deferred intent is ready to take.
+    Deferred,
+    /// The 20 ms coalesce window closed with no other wake.
+    Tick,
+}
 
-            if self.abandoned_by_quit
-                || self
-                    .quit_join_deadline
-                    .is_some_and(|deadline| Instant::now() >= deadline)
-            {
-                self.abandoned_by_quit = true;
-                break;
-            }
-            if turn_finalization_ready(self.turn_result.is_some(), self.events_done) {
-                break;
-            }
+impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for RootTurn<'_, P> {
+    type Result = Result<TurnResult, AgentError>;
+    type Event = Result<std::sync::Arc<plakous::agent::AgentEvent>, TurnEventError>;
+    type Wake = RootWake;
 
-            let actions = self.host.actions;
-            let takes_actions = self.takes_actions();
-            let deferred_ready = takes_actions && self.host.deferred.borrow().has_deferred();
+    async fn pass(&mut self) -> crate::node::Pass {
+        self.poll_queue_projection().await;
+        if let Some(through) = self.root_tree_pass_due.take() {
+            self.project_running_root_tree(through).await;
+            #[cfg(test)]
+            prefix_tests::after_round_pass(&self.host.live_target, through);
+        }
+        super::events::commit_notice_intents(
+            self.host.events,
+            self.host.store,
+            self.host.home,
+            self.host.log,
+            self.host.session,
+        );
+        for row in self
+            .host
+            .job_events
+            .emit(self.host.roots.job_registry(), self.host.events)
+        {
+            // Live only: the projector derives the stored process row.
+            self.host.session.append_transcript(row.clone());
+            let _ = self.host.events.send(ContentEvent::Row(row));
+        }
+        self.cancel_pending = observe_pending_cancel_settlement(
+            &self.control,
+            self.cancel_pending,
+            &mut self.cancel_unsettled,
+            &mut self.cancel_settle_deadline,
+            self.host.rows,
+            self.host.store,
+            self.host.home,
+            self.host.session,
+            self.host.events,
+            &mut self.projection,
+            &mut self.interrupted_status_pending,
+        )
+        .await;
+        if self.poll_actions().await {
+            return crate::node::Pass::Again;
+        }
+
+        if self.abandoned_by_quit
+            || self
+                .quit_join_deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.abandoned_by_quit = true;
+            return crate::node::Pass::Done;
+        }
+        if turn_finalization_ready(self.turn_result.is_some(), self.events_done) {
+            return crate::node::Pass::Done;
+        }
+        crate::node::Pass::Wait
+    }
+
+    fn awaits_result(&self) -> bool {
+        self.turn_result.is_none()
+    }
+
+    fn awaits_events(&self) -> bool {
+        !self.events_done
+    }
+
+    fn urgent_armed(&self) -> bool {
+        self.quit_join_deadline.is_some()
+    }
+
+    fn urgent(&self) -> impl Future<Output = RootWake> {
+        let sleep = tokio::time::sleep(
+            self.quit_join_deadline
+                .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or(Duration::MAX),
+        );
+        async move {
+            sleep.await;
+            RootWake::QuitDeadline
+        }
+    }
+
+    fn ready(&self) -> impl Future<Output = RootWake> {
+        let actions = self.host.actions;
+        let takes_actions = self.takes_actions();
+        let deferred_ready = takes_actions && self.host.deferred.borrow().has_deferred();
+        async move {
             tokio::select! {
                 biased;
-                res = &mut result_fut, if self.turn_result.is_none() => {
-                    self.turn_result = Some(res);
-                    if let Some(observer) = &self.turn_observer { observer.observe(HostBoundary::RuntimeReturned); }
+                // An intent wakes the loop at once; the next pass takes it.
+                () = actions.ready(), if takes_actions => RootWake::Intent,
+                () = std::future::ready(()), if deferred_ready => RootWake::Deferred,
+                // Recreated every pass, so it fires only after 20 ms with no
+                // other wake. Arming it only while deltas are buffered is the
+                // host actor's job (design E1), not this loop's.
+                () = tokio::time::sleep(Duration::from_millis(20)) => RootWake::Tick,
+            }
+        }
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The turn driver selects canonical completion, live events, operator actions, and interrupt escalation under one terminal fence."
+    )]
+    async fn on_wake(
+        &mut self,
+        wake: crate::node::TurnWake<Self::Result, Self::Event, RootWake>,
+    ) -> crate::node::Flow {
+        match wake {
+            crate::node::TurnWake::Result(res) => {
+                self.turn_result = Some(res);
+                if let Some(observer) = &self.turn_observer {
+                    observer.observe(HostBoundary::RuntimeReturned);
                 }
-                () = tokio::time::sleep(
-                    self.quit_join_deadline
-                        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
-                        .unwrap_or(Duration::MAX),
-                ), if self.quit_join_deadline.is_some() => {
-                    self.abandoned_by_quit = true;
-                    break;
-                }
-                ev = event_stream.recv(), if !self.events_done => {
-                    match ev {
-                        Ok(event) => {
-                            if matches!(event.kind(), AgentEventKind::SteeringApplied) {
-                                self.steering_projection_due = true;
+            }
+            crate::node::TurnWake::Urgent(_) => {
+                self.abandoned_by_quit = true;
+                return crate::node::Flow::Done;
+            }
+            crate::node::TurnWake::Event(ev) => {
+                match ev {
+                    Ok(event) => {
+                        if matches!(event.kind(), AgentEventKind::SteeringApplied) {
+                            self.steering_projection_due = true;
+                        }
+                        if self.steering_projection_due
+                            && matches!(event.kind(), AgentEventKind::RequestPrepared { .. })
+                        {
+                            self.publish_applied_steering().await;
+                        }
+                        let refresh_at_boundary = match event.kind() {
+                            AgentEventKind::RequestPrepared {
+                                input_parts,
+                                occupied_tokens,
+                                prepared_input_upper_bound,
+                                tool_names,
+                            } => {
+                                self.host.context_projection =
+                                    self.host.context_projection.with_prepared_request(
+                                        *input_parts,
+                                        *occupied_tokens,
+                                        *prepared_input_upper_bound,
+                                    );
+                                self.live_occupancy = self
+                                    .live_occupancy
+                                    .next_request(&self.host.context_projection);
+                                self.request_tool_names = tool_names
+                                    .iter()
+                                    .map(|name| name.as_str().to_owned())
+                                    .collect();
+                                self.host
+                                    .events
+                                    .remember_request_tools(&self.request_tool_names);
+                                self.compacted_mid_turn = false;
+                                true
                             }
-                            if self.steering_projection_due && matches!(event.kind(), AgentEventKind::RequestPrepared { .. }) {
-                                self.publish_applied_steering().await;
+                            AgentEventKind::ModelStarted => {
+                                self.root_tree_pass_due =
+                                    event.feed_seq().map(plakous::sessions::feed::FeedSeq::get);
+                                debug_assert!(
+                                    self.host.session.store_revision == 0
+                                        || self.root_tree_pass_due.is_some(),
+                                    "a durable product round must name its committed prefix"
+                                );
+                                if self.root_tree_pass_due.is_none()
+                                    && !self.missing_tree_prefix_logged
+                                {
+                                    self.log_tree_projection_debt("model round has no committed feed prefix; running tree pass skipped".into());
+                                    self.missing_tree_prefix_logged = true;
+                                }
+                                self.live_occupancy.round_started();
+                                self.last_context_refresh_bytes = 0;
+                                true
                             }
-                            let refresh_at_boundary = match event.kind() {
-                                AgentEventKind::RequestPrepared { input_parts, occupied_tokens, prepared_input_upper_bound, tool_names } => {
-                                    self.host.context_projection = self.host.context_projection.with_prepared_request(*input_parts, *occupied_tokens, *prepared_input_upper_bound);
-                                    self.live_occupancy = self.live_occupancy.next_request(&self.host.context_projection);
-                                    self.request_tool_names = tool_names.iter().map(|name| name.as_str().to_owned()).collect();
-                                    self.host.events.remember_request_tools(&self.request_tool_names);
-                                    self.compacted_mid_turn = false;
-                                    true
-                                }
-                                AgentEventKind::ModelStarted => {
-                                    self.root_tree_pass_due = event.feed_seq().map(plakous::sessions::feed::FeedSeq::get);
-                                    debug_assert!(self.host.session.store_revision == 0 || self.root_tree_pass_due.is_some(), "a durable product round must name its committed prefix");
-                                    if self.root_tree_pass_due.is_none() && !self.missing_tree_prefix_logged {
-                                        self.log_tree_projection_debt("model round has no committed feed prefix; running tree pass skipped".into());
-                                        self.missing_tree_prefix_logged = true;
-                                    }
-                                    self.live_occupancy.round_started();
-                                    self.last_context_refresh_bytes = 0;
-                                    true
-                                }
-                                AgentEventKind::ModelDispatchStarted => {
-                                    self.mail_batch_notified = false;
-                                    self.mail_repeat_notified = false;
-                                    let _ = self.host.events.send(ContentEvent::ModelRequestStarted);
-                                    false
-                                }
-                                AgentEventKind::Model { event: Some(model_event), .. } => {
-                                    match model_event.as_ref() {
-                                        plakous::model::ModelEvent::TextDelta(delta) => {
-                                            self.live_occupancy.appended(u64::try_from(delta.bytes().len()).unwrap_or(u64::MAX));
-                                            let pending = self.live_occupancy.pending_round_bytes();
-                                            if pending.saturating_sub(self.last_context_refresh_bytes) >= 2048 {
-                                                self.last_context_refresh_bytes = pending;
-                                                true
-                                            } else {
-                                                false
-                                            }
-                                        }
-                                        plakous::model::ModelEvent::Usage(update) => {
-                                            self.live_occupancy.provider_input(update.usage().input_tokens());
+                            AgentEventKind::ModelDispatchStarted => {
+                                self.mail_batch_notified = false;
+                                self.mail_repeat_notified = false;
+                                let _ = self.host.events.send(ContentEvent::ModelRequestStarted);
+                                false
+                            }
+                            AgentEventKind::Model {
+                                event: Some(model_event),
+                                ..
+                            } => {
+                                match model_event.as_ref() {
+                                    plakous::model::ModelEvent::TextDelta(delta) => {
+                                        self.live_occupancy.appended(
+                                            u64::try_from(delta.bytes().len()).unwrap_or(u64::MAX),
+                                        );
+                                        let pending = self.live_occupancy.pending_round_bytes();
+                                        if pending.saturating_sub(self.last_context_refresh_bytes)
+                                            >= 2048
+                                        {
+                                            self.last_context_refresh_bytes = pending;
                                             true
+                                        } else {
+                                            false
                                         }
-                                        // A discarded response's text never reaches the
-                                        // context; only this call's text is pending here.
-                                        plakous::model::ModelEvent::Retry(retry) if retry.output_discarded() => {
-                                            self.live_occupancy.discard_round_output();
-                                            self.last_context_refresh_bytes = 0;
-                                            true
-                                        }
-                                        _ => false,
                                     }
+                                    plakous::model::ModelEvent::Usage(update) => {
+                                        self.live_occupancy
+                                            .provider_input(update.usage().input_tokens());
+                                        true
+                                    }
+                                    // A discarded response's text never reaches the
+                                    // context; only this call's text is pending here.
+                                    plakous::model::ModelEvent::Retry(retry)
+                                        if retry.output_discarded() =>
+                                    {
+                                        self.live_occupancy.discard_round_output();
+                                        self.last_context_refresh_bytes = 0;
+                                        true
+                                    }
+                                    _ => false,
                                 }
-                                AgentEventKind::ToolCompleted { observation: Some(observation), .. } => {
-                                    self.live_occupancy.appended(u64::try_from(observation.preview().len()).unwrap_or(u64::MAX));
-                                    false
-                                }
-                                AgentEventKind::CompactionFinished { outcome: plakous::agent::CompactionEventOutcome::Committed, summary: Some(summary), .. } => {
-                                    self.last_context_refresh_bytes = 0;
-                                    self.live_occupancy.compacted(summary.occupancy_tokens_after, summary.input_tokens_after);
-                                    true
-                                }
-                                _ => false,
-                            };
-                            let terminal = matches!(
-                                event.kind(),
-                                AgentEventKind::TurnCompleted { .. }
-                                    | AgentEventKind::TurnFailed { .. }
-                            );
-                            let observed_session_id = self.host.session.id.clone();
-                            apply_event(
-                                &event,
-                                self.host.roots,
-                                self.host.rows,
-                                self.host.store,
-                                self.host.home,
-                                self.host.session,
-                                self.host.events,
-                                &mut self.assistant,
-                                &mut self.delta_buf,
-                                &mut self.last_flush,
-                                &mut self.tool_subjects,
-                                &mut self.projection,
-                                self.host.log,
-                                &observed_session_id,
-                                self.host.last_tree_revision,
-                                &mut self.compacted_mid_turn,
-                                &mut self.peak_prepared_input_tokens,
-                            );
-                            if refresh_at_boundary || matches!(
+                            }
+                            AgentEventKind::ToolCompleted {
+                                observation: Some(observation),
+                                ..
+                            } => {
+                                self.live_occupancy.appended(
+                                    u64::try_from(observation.preview().len()).unwrap_or(u64::MAX),
+                                );
+                                false
+                            }
+                            AgentEventKind::CompactionFinished {
+                                outcome: plakous::agent::CompactionEventOutcome::Committed,
+                                summary: Some(summary),
+                                ..
+                            } => {
+                                self.last_context_refresh_bytes = 0;
+                                self.live_occupancy.compacted(
+                                    summary.occupancy_tokens_after,
+                                    summary.input_tokens_after,
+                                );
+                                true
+                            }
+                            _ => false,
+                        };
+                        let terminal = matches!(
+                            event.kind(),
+                            AgentEventKind::TurnCompleted { .. }
+                                | AgentEventKind::TurnFailed { .. }
+                        );
+                        let observed_session_id = self.host.session.id.clone();
+                        apply_event(
+                            &event,
+                            self.host.roots,
+                            self.host.rows,
+                            self.host.store,
+                            self.host.home,
+                            self.host.session,
+                            self.host.events,
+                            &mut self.assistant,
+                            &mut self.delta_buf,
+                            &mut self.last_flush,
+                            &mut self.tool_subjects,
+                            &mut self.projection,
+                            self.host.log,
+                            &observed_session_id,
+                            self.host.last_tree_revision,
+                            &mut self.compacted_mid_turn,
+                            &mut self.peak_prepared_input_tokens,
+                        );
+                        if refresh_at_boundary
+                            || matches!(
                                 event.kind(),
                                 AgentEventKind::Model {
                                     event: Some(model_event),
                                     ..
                                 } if matches!(model_event.as_ref(), plakous::model::ModelEvent::Usage(_))
-                            ) {
-                                emit_live_context_projection(
-                                    self.host.events,
-                                    &self.host.context_projection,
-                                    self.host.session.context_counters(),
-                                    self.host.enrolled_source_bytes,
-                                    self.compacted_mid_turn,
-                                    self.live_occupancy.tokens(),
-                                    self.live_occupancy.anchored(),
-                                    &self.request_tool_names,
-                                );
-                            }
-                            // No push here: the canvas is fed from the coalesce
-                            // tick below and from tool lifecycle terminals inside
-                            // `apply_event`. Pushing per streamed event made every
-                            // `TextDelta` pay a tree lookup for a revision that a
-                            // text delta cannot advance.
-                            // A tool row that just terminalised may be the last
-                            // one a settled cancel is waiting behind.
-                            flush_deferred_interrupted_status(
-                                &mut self.interrupted_status_pending,
-                                self.host.session,
+                            )
+                        {
+                            emit_live_context_projection(
                                 self.host.events,
-                                &mut self.projection,
+                                &self.host.context_projection,
+                                self.host.session.context_counters(),
+                                self.host.enrolled_source_bytes,
+                                self.compacted_mid_turn,
+                                self.live_occupancy.tokens(),
+                                self.live_occupancy.anchored(),
+                                &self.request_tool_names,
                             );
-                            self.events_done = terminal;
                         }
-                        Err(TurnEventError::TerminalFailure { error }) => {
-                            flush_assistant_delta(&mut self.delta_buf, &mut self.last_flush, self.host.events, true);
-                            self.event_failure = Some(operator_facing_agent_error(
-                                "turn failed",
-                                &error,
-                            ));
-                            self.events_done = true;
-                        }
-                        Err(TurnEventError::Closed) => {
-                            self.events_done = true;
-                        }
-                        Err(err) => {
-                            flush_assistant_delta(&mut self.delta_buf, &mut self.last_flush, self.host.events, true);
-                            // A lagged or failed observation stream is exactly the
-                            // event gap requires Compose counts to be
-                            // labelled by: they are no longer totals.
-                            self.projection.gap_observed = true;
-                            self.event_failure = Some(format!("event stream: {err}"));
-                            self.events_done = true;
-                        }
+                        // No push here: the canvas is fed from the coalesce
+                        // tick below and from tool lifecycle terminals inside
+                        // `apply_event`. Pushing per streamed event made every
+                        // `TextDelta` pay a tree lookup for a revision that a
+                        // text delta cannot advance.
+                        // A tool row that just terminalised may be the last
+                        // one a settled cancel is waiting behind.
+                        flush_deferred_interrupted_status(
+                            &mut self.interrupted_status_pending,
+                            self.host.session,
+                            self.host.events,
+                            &mut self.projection,
+                        );
+                        self.events_done = terminal;
                     }
-                }
-                // An intent wakes the loop at once; the next pass takes it.
-                () = actions.ready(), if takes_actions => {
-                    #[cfg(test)]
-                    {
-                        self.last_wake = "intent";
+                    Err(TurnEventError::TerminalFailure { error }) => {
+                        flush_assistant_delta(
+                            &mut self.delta_buf,
+                            &mut self.last_flush,
+                            self.host.events,
+                            true,
+                        );
+                        self.event_failure =
+                            Some(operator_facing_agent_error("turn failed", &error));
+                        self.events_done = true;
                     }
-                }
-                () = std::future::ready(()), if deferred_ready => {}
-                // Recreated every pass, so it fires only after 20 ms with no
-                // other wake. Arming it only while deltas are buffered is the
-                // host actor's job (design E1), not this loop's.
-                () = tokio::time::sleep(Duration::from_millis(20)) => {
-                    #[cfg(test)]
-                    {
-                        self.last_wake = "tick";
+                    Err(TurnEventError::Closed) => {
+                        self.events_done = true;
                     }
-                    // Coalesce window: flush buffered text deltas if due, and take
-                    // the one tree observation of this window. The emitter drops
-                    // every non-advancing revision, so an idle tree costs a lookup
-                    // and nothing leaves.
-                    if surface::usage_watch_armed(self.host.surface.as_deref()) {
-                        self.host
-                            .subscription_usage_refresh
-                            .poll_while_watched(self.host.subscription_service.clone());
+                    Err(err) => {
+                        flush_assistant_delta(
+                            &mut self.delta_buf,
+                            &mut self.last_flush,
+                            self.host.events,
+                            true,
+                        );
+                        // A lagged or failed observation stream is exactly the
+                        // event gap requires Compose counts to be
+                        // labelled by: they are no longer totals.
+                        self.projection.gap_observed = true;
+                        self.event_failure = Some(format!("event stream: {err}"));
+                        self.events_done = true;
                     }
-                    flush_assistant_delta(&mut self.delta_buf, &mut self.last_flush, self.host.events, false);
-                    emit_tree_snapshot_if_revision_advanced(
-                        self.host.rows,
-                        self.host.store,
-                        self.host.home,
-                        self.host.session,
-                        self.host.last_tree_revision,
-                        self.host.events,
-                        false,
-                    );
                 }
             }
+            crate::node::TurnWake::Ready(RootWake::Intent) => {
+                #[cfg(test)]
+                {
+                    self.last_wake = "intent";
+                }
+            }
+            crate::node::TurnWake::Ready(RootWake::Deferred | RootWake::QuitDeadline) => {}
+            crate::node::TurnWake::Ready(RootWake::Tick) => {
+                #[cfg(test)]
+                {
+                    self.last_wake = "tick";
+                }
+                // Coalesce window: flush buffered text deltas if due, and take
+                // the one tree observation of this window. The emitter drops
+                // every non-advancing revision, so an idle tree costs a lookup
+                // and nothing leaves.
+                if surface::usage_watch_armed(self.host.surface.as_deref()) {
+                    self.host
+                        .subscription_usage_refresh
+                        .poll_while_watched(self.host.subscription_service.clone());
+                }
+                flush_assistant_delta(
+                    &mut self.delta_buf,
+                    &mut self.last_flush,
+                    self.host.events,
+                    false,
+                );
+                emit_tree_snapshot_if_revision_advanced(
+                    self.host.rows,
+                    self.host.store,
+                    self.host.home,
+                    self.host.session,
+                    self.host.last_tree_revision,
+                    self.host.events,
+                    false,
+                );
+            }
         }
-
-        if let Some(refresh) = self.queue_refresh.take() {
-            refresh.task.abort();
-        }
-        self.finish().await
+        crate::node::Flow::Continue
     }
 }

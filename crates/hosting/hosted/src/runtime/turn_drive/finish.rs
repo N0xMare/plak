@@ -1,7 +1,7 @@
 //! Reconcile canonical completion or settled cancellation before publication.
 
 use super::{
-    AgentErrorKind, DriveTurnError, DrivenTurn, TurnDrive, TurnHostOutcome, TurnResultOutcome,
+    AgentErrorKind, DriveTurnError, DrivenTurn, RootTurn, TurnHostOutcome, TurnResultOutcome,
     emit_turn_lifecycle, flush_assistant_delta, flush_deferred_interrupted_status,
     observe_cancelled_tool_activity, observe_terminal_tool_activity, operator_facing_agent_error,
     reconcile_authoritative_assistant, settle_late_cancel, settle_live_thinking,
@@ -9,7 +9,7 @@ use super::{
 };
 use crate::surface_protocol::ContentEvent;
 
-impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Turn finish reconciles in-flight delivery, cancel settlement, final projection, and the authoritative terminal result before release."
