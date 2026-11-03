@@ -10,23 +10,27 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use plakous_model::{AttemptId, BranchId, CallId, CancellationToken, LineId, RunId};
-use plakous_runner::{ClientWindows, ConnectError, Loopback, RunnerIdentity, RunnerService};
+use plakous_runner::{
+    ClientWindows, ConnectError, Loopback, RunnerIdentity, RunnerLimits, RunnerService,
+};
 use plakous_runner_protocol::frame::{FrameReader, MAX_FRAME_BYTES, decode, encode};
 use plakous_runner_protocol::{
     Bind, Hello, HostFrame, Operation, Refusal, Request, RequestClass, RunnerFrame, StreamEvent,
     StreamFrame, TransferOwner, VersionTriple,
 };
 use plakous_tools::internal::runner::{
-    RunnerBackend, RunnerCall, RunnerCallFuture, RunnerFailure, RunnerLink, runner_environment,
+    RunnerBackend, RunnerCall, RunnerCallFuture, RunnerFailure, RunnerLink, RunnerOpenFuture,
+    runner_environment,
 };
 use plakous_tools::{
     ExecutionBackendErrorKind, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentLimits, ExecutionEnvironmentScope, LineOwner, LiteralProcessIntent,
     LiteralProcessRequest, OperationClass, OperationContext, RepositoryMatchCase, RepositoryQuery,
-    RepositoryQueryLimits, RunnerId, WorkspaceExpectedFileState, WorkspaceMutation,
-    WorkspaceMutationTransaction, WorkspaceReadSliceRequest, WorkspaceReplacement,
+    RepositoryQueryLimits, RunnerId, ServiceProcessRequest, WorkspaceExpectedFileState,
+    WorkspaceMutation, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
+    WorkspaceReplacement,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf};
 
 const LINE: &str = "00000000-0000-0000-0000-0000000000a1";
@@ -474,6 +478,61 @@ impl RunnerLink for Recorder {
             "recording".into(),
         ))))
     }
+
+    fn open(&self, call: RunnerCall) -> RunnerOpenFuture {
+        self.0
+            .lock()
+            .unwrap()
+            .push((call.verb().as_str().to_owned(), call.payload().clone()));
+        Box::pin(std::future::ready(Err(RunnerFailure::Unavailable(
+            "recording".into(),
+        ))))
+    }
+}
+
+/// The operation a runner backend sends to spawn `program`.
+async fn spawn_operation(
+    service: &RunnerService,
+    root: &Path,
+    program: &str,
+    args: &[&str],
+) -> Operation {
+    let recorder = Arc::new(Recorder::default());
+    let link: Arc<dyn RunnerLink> = recorder.clone();
+    let backend = RunnerBackend::new(service.hello().descriptor.clone(), link).unwrap();
+    let environment = runner_environment(scope(), root, ".", config(), Arc::new(backend)).unwrap();
+    let request = ServiceProcessRequest::new(
+        program,
+        args.iter().map(|arg| (*arg).to_owned()),
+        Vec::new(),
+        Vec::new(),
+        1024,
+    )
+    .unwrap();
+    let _ = environment.spawn_service(request, unkeyed()).await;
+    let (verb, payload) = recorder.0.lock().unwrap().pop().unwrap();
+    Operation { verb, payload }
+}
+
+fn unkeyed_request(request_id: &str, operation: &Operation) -> HostFrame {
+    HostFrame::Request(Request {
+        request_id: request_id.into(),
+        class: RequestClass::BuildRead,
+        owner: None,
+        deadline_ms: None,
+        digest: "digest".into(),
+        replay: false,
+        operation: operation.clone(),
+    })
+}
+
+/// Reads frames until a stream frame arrives, skipping others.
+async fn stream_frame(raw: &mut Raw) -> StreamFrame {
+    loop {
+        if let RunnerFrame::Stream(frame) = raw.next().await {
+            return frame;
+        }
+    }
 }
 
 /// The operation a runner backend sends for `request`.
@@ -540,6 +599,27 @@ impl Raw {
             assert_ne!(read, 0, "the runner closed the connection");
             self.frames.push(&buffer[..read]);
         }
+    }
+
+    /// As a fake runner: the next frame the host sent.
+    async fn next_host(&mut self) -> HostFrame {
+        let mut buffer = [0_u8; 4096];
+        loop {
+            if let Some(body) = self.frames.next_frame().unwrap() {
+                return decode(&body).unwrap();
+            }
+            let read = self.reader.read(&mut buffer).await.unwrap();
+            assert_ne!(read, 0, "the host closed the connection");
+            self.frames.push(&buffer[..read]);
+        }
+    }
+
+    /// As a fake runner: sends one frame to the host.
+    async fn send_runner(&mut self, frame: &RunnerFrame) {
+        self.writer
+            .write_all(&encode(frame).unwrap())
+            .await
+            .unwrap();
     }
 
     async fn ask(&mut self, frame: HostFrame) -> RunnerFrame {
@@ -771,7 +851,10 @@ async fn a_timeout_and_a_cancellation_answer_through_the_loopback_as_direct() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_oversized_frame_ends_the_runner_connection_once() {
     let root = tempfile::tempdir().unwrap();
-    let mut raw = Raw::bound(&service(root.path()), "instance-1").await;
+    // The runner outlives the connection, so only the connection's own
+    // close can end the stream.
+    let runner = service(root.path());
+    let mut raw = Raw::bound(&runner, "instance-1").await;
     let declared = u32::try_from(MAX_FRAME_BYTES + 1).unwrap();
     raw.writer.write_all(&declared.to_be_bytes()).await.unwrap();
     let refused = tokio::time::timeout(Duration::from_secs(5), raw.next())
@@ -862,4 +945,276 @@ async fn a_key_spent_under_another_host_instance_is_of_unknown_outcome() {
     assert_eq!(error.kind(), ExecutionBackendErrorKind::RecoveryRequired);
     assert!(!error.proven_no_effect());
     assert_eq!(appended(root.path()), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rebind_of_the_same_host_instance_drains_its_older_connection() {
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path());
+    let mut older = Raw::bound(&service, "instance-1").await;
+    assert_eq!(
+        older.ask(HostFrame::Ping { nonce: 1 }).await,
+        RunnerFrame::Pong { nonce: 1 }
+    );
+    let mut newer = Raw::bound(&service, "instance-1").await;
+    assert_eq!(
+        newer.ask(HostFrame::Ping { nonce: 2 }).await,
+        RunnerFrame::Pong { nonce: 2 }
+    );
+    let mut rest = [0_u8; 16];
+    let read = tokio::time::timeout(Duration::from_secs(5), older.reader.read(&mut rest))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(read, 0, "the older connection is closed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_silent_link_is_lost_at_both_ends_and_pings_keep_it() {
+    let root = tempfile::tempdir().unwrap();
+    let limits = RunnerLimits {
+        dead: Duration::from_millis(400),
+        ..RunnerLimits::default()
+    };
+    let runner = || {
+        RunnerService::with_limits(
+            host(root.path()),
+            RunnerIdentity {
+                runner_id: RunnerId::new("loopback").unwrap(),
+                version: version(),
+                boot_id: "boot-1".into(),
+                binary_id: None,
+            },
+            limits,
+        )
+        .unwrap()
+    };
+    // A host that sends nothing is closed by the runner.
+    let kept = runner();
+    let mut silent = Raw::bound(&kept, "instance-1").await;
+    let mut rest = [0_u8; 16];
+    let read = tokio::time::timeout(Duration::from_secs(5), silent.reader.read(&mut rest))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(read, 0, "the runner closes a silent connection");
+
+    // A pinging host keeps its link across many dead windows.
+    let pinging = ClientWindows {
+        ping: Duration::from_millis(100),
+        dead: Duration::from_millis(400),
+        ..windows()
+    };
+    let loopback = Loopback::join(runner(), bind("instance-1"), pinging)
+        .await
+        .unwrap();
+    let environment =
+        runner_environment(scope(), root.path(), ".", config(), loopback.backend()).unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    std::fs::write(root.path().join("a.txt"), "alpha\n").unwrap();
+    environment
+        .read_workspace(
+            WorkspaceReadSliceRequest::start("a.txt", 4).unwrap(),
+            unkeyed(),
+        )
+        .await
+        .unwrap();
+
+    // A runner that never answers is lost by the host.
+    let hello = runner().hello().clone();
+    let (host_end, runner_end) = tokio::io::duplex(1 << 16);
+    let mute = tokio::spawn(async move {
+        let (mut reader, mut writer) = tokio::io::split(runner_end);
+        writer
+            .write_all(&encode(&RunnerFrame::Hello(hello)).unwrap())
+            .await
+            .unwrap();
+        let mut sink = [0_u8; 4096];
+        while reader.read(&mut sink).await.is_ok_and(|read| read > 0) {}
+        drop(writer);
+    });
+    let (client, hello) =
+        plakous_runner::RunnerClient::connect(host_end, bind("instance-2"), pinging)
+            .await
+            .unwrap();
+    let link: Arc<dyn RunnerLink> = Arc::new(client);
+    let backend = RunnerBackend::new(hello.descriptor, link).unwrap();
+    let environment =
+        runner_environment(scope(), root.path(), ".", config(), Arc::new(backend)).unwrap();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let error = environment
+        .read_workspace(
+            WorkspaceReadSliceRequest::start("a.txt", 4).unwrap(),
+            unkeyed(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ExecutionBackendErrorKind::Io);
+    assert!(error.proven_no_effect());
+    mute.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_host_stream_gap_or_overrun_aborts_the_stream_and_ends_the_service() {
+    let root = tempfile::tempdir().unwrap();
+    let runner = service(root.path());
+    let sleeper = spawn_operation(&runner, root.path(), "/bin/sleep", &["30"]).await;
+    let mut raw = Raw::bound(&runner, "instance-1").await;
+
+    // A gap.
+    let RunnerFrame::Result { payload, .. } = raw.ask(unkeyed_request("r1", &sleeper)).await else {
+        panic!("the service spawns");
+    };
+    let stream = payload["stream"].as_u64().unwrap();
+    raw.send(&HostFrame::Stream(StreamFrame {
+        stream,
+        seq: 3,
+        event: StreamEvent::Data {
+            payload: json!("00"),
+        },
+    }))
+    .await;
+    let close = stream_frame(&mut raw).await;
+    assert_eq!(close.stream, stream);
+    assert!(matches!(
+        close.event,
+        StreamEvent::Close { reason: Some(_) }
+    ));
+    let terminate = Operation {
+        verb: "service.terminate".into(),
+        payload: json!({ "stream": stream, "grace_ms": 0 }),
+    };
+    assert!(matches!(
+        raw.ask(unkeyed_request("r2", &terminate)).await,
+        RunnerFrame::Error { .. }
+    ));
+
+    // Data beyond the credit: the service does not read its stdin.
+    let RunnerFrame::Result { payload, .. } = raw.ask(unkeyed_request("r3", &sleeper)).await else {
+        panic!("the service spawns");
+    };
+    let stream = payload["stream"].as_u64().unwrap();
+    let chunk = "ab".repeat(64 * 1024);
+    for seq in 0..8 {
+        raw.send(&HostFrame::Stream(StreamFrame {
+            stream,
+            seq,
+            event: StreamEvent::Data {
+                payload: json!(chunk),
+            },
+        }))
+        .await;
+    }
+    let close = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let frame = stream_frame(&mut raw).await;
+            if matches!(frame.event, StreamEvent::Close { .. }) {
+                return frame;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(close.stream, stream);
+    let StreamEvent::Close {
+        reason: Some(reason),
+    } = close.event
+    else {
+        panic!("an overrun aborts the stream");
+    };
+    assert!(reason.contains("credit"), "{reason}");
+    let terminate = Operation {
+        verb: "service.terminate".into(),
+        payload: json!({ "stream": stream, "grace_ms": 0 }),
+    };
+    assert!(matches!(
+        raw.ask(unkeyed_request("r4", &terminate)).await,
+        RunnerFrame::Error { .. }
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_runner_stream_gap_aborts_the_stream_on_the_host() {
+    let root = tempfile::tempdir().unwrap();
+    let hello = service(root.path()).hello().clone();
+    let (host_end, runner_end) = tokio::io::duplex(1 << 16);
+    let fake = tokio::spawn(async move {
+        let (reader, writer) = tokio::io::split(runner_end);
+        let mut raw = Raw {
+            reader,
+            writer,
+            frames: FrameReader::new(),
+        };
+        raw.writer
+            .write_all(&encode(&RunnerFrame::Hello(hello)).unwrap())
+            .await
+            .unwrap();
+        // Bind, then the spawn request: answer it with stream 7.
+        let mut request_id = None;
+        while request_id.is_none() {
+            if let HostFrame::Request(request) = raw.next_host().await {
+                request_id = Some(request.request_id);
+            }
+        }
+        raw.send_runner(&RunnerFrame::Result {
+            request_id: request_id.unwrap(),
+            payload: json!({ "stream": 7 }),
+        })
+        .await;
+        // Wait for the host's first grant, then skip a sequence number.
+        loop {
+            if let HostFrame::Stream(frame) = raw.next_host().await
+                && matches!(frame.event, StreamEvent::Credit { .. })
+            {
+                break;
+            }
+        }
+        raw.send_runner(&RunnerFrame::Stream(StreamFrame {
+            stream: 7,
+            seq: 2,
+            event: StreamEvent::Data {
+                payload: json!("6869"),
+            },
+        }))
+        .await;
+        loop {
+            if let HostFrame::Stream(frame) = raw.next_host().await
+                && let StreamEvent::Close {
+                    reason: Some(reason),
+                } = frame.event
+            {
+                return (frame.stream, reason);
+            }
+        }
+    });
+    let (client, hello) =
+        plakous_runner::RunnerClient::connect(host_end, bind("instance-1"), windows())
+            .await
+            .unwrap();
+    let link: Arc<dyn RunnerLink> = Arc::new(client);
+    let backend = RunnerBackend::new(hello.descriptor, link).unwrap();
+    let environment =
+        runner_environment(scope(), root.path(), ".", config(), Arc::new(backend)).unwrap();
+    let request = ServiceProcessRequest::new(
+        "/bin/cat",
+        Vec::<String>::new(),
+        Vec::new(),
+        Vec::new(),
+        1024,
+    )
+    .unwrap();
+    let service = environment.spawn_service(request, unkeyed()).await.unwrap();
+    let mut stdout = service.stdout;
+    let mut read = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stdout.read_to_end(&mut read))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(read.is_empty(), "nothing after the gap reaches the host");
+    let (stream, reason) = tokio::time::timeout(Duration::from_secs(5), fake)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stream, 7);
+    assert!(reason.contains("skipped"), "{reason}");
 }
