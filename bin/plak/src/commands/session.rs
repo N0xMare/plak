@@ -6,7 +6,6 @@ mod delete;
 pub(crate) mod import_export;
 mod lookup;
 mod read_only;
-#[cfg(any(test, feature = "tui"))]
 pub(crate) mod rebind;
 mod recovery;
 
@@ -18,6 +17,8 @@ pub use binding::seed_new_session_binding;
 pub(crate) use binding::{ROOT_BINDING_REMEDY, resolve_api_composition};
 
 pub use delete::confirm_session_mutation;
+#[cfg(test)]
+pub(crate) use delete::refuse_stranding_a_carry;
 pub(crate) use delete::{delete_session, gc_sessions};
 
 pub(crate) use import_export::{

@@ -131,7 +131,56 @@ impl LeaseOnlyHead {
     }
 }
 
+/// One branch's lease, held without a driver, route or credential, whether
+/// or not the branch is its line's head. While it is held no other owner
+/// opens or commits on the branch, and no rebind or carry moves its line,
+/// since both take the source branch's lease.
+#[derive(Debug)]
+pub struct BranchHold {
+    inner: plakous_agent::internal::DurableBranchHold,
+}
+
+impl BranchHold {
+    /// Releases the held lease.
+    ///
+    /// # Errors
+    /// Returns the typed store refusal.
+    pub async fn release(self) -> Result<(), AgentSessionsError> {
+        self.inner
+            .release()
+            .await
+            .map_err(|error| runtime_error(&error))
+    }
+}
+
 impl AgentSessions {
+    /// Takes `locator`'s branch lease without building a driver, for work
+    /// that must not race the branch's owner, such as settling an interrupted
+    /// carry from it.
+    ///
+    /// # Errors
+    /// [`AgentSessionsErrorKind::Ownership`] while another owner holds the
+    /// branch (it is released within [`Self::lease_period_seconds`] of its
+    /// owner's exit), and other typed lookup or backend failures.
+    pub async fn hold_branch(
+        &self,
+        operation_id: &SessionOperationId,
+        locator: SessionLocator,
+    ) -> Result<BranchHold, AgentSessionsError> {
+        self.runtime
+            .hold_branch(operation_id.as_str(), locator.session_ref())
+            .await
+            .map(|inner| BranchHold { inner })
+            .map_err(|error| runtime_error(&error).for_session(locator.session_id))
+    }
+
+    /// The lease duration this store's owners hold and renew: the longest a
+    /// lease of an exited owner can outlive it.
+    #[must_use]
+    pub fn lease_period_seconds(&self) -> u64 {
+        self.runtime.lease_seconds().get()
+    }
+
     /// Reads one agent line's current head without a lease.
     ///
     /// # Errors

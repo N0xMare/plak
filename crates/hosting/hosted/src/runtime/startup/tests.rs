@@ -154,6 +154,45 @@ fn creation_freezes_listed_mcp_tools_and_records_the_omission_notice() {
     assert!(!names.contains(&"tangled".to_owned()), "{names:?}");
 }
 
+/// A record that is an interrupted carry never gets an empty runtime under
+/// its carry's create operation: only the carry's settlement creates it.
+#[test]
+fn an_interrupted_carry_record_is_never_created_empty() {
+    use crate::sessions::CarryIntent;
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
+    config.session.carry_intent = Some(CarryIntent {
+        source: "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003"
+            .parse()
+            .unwrap(),
+        continues_line: true,
+        cause: "carried".into(),
+        orchestration: false,
+    });
+    let refused = executor
+        .block_on(build_session_from_config(&mut config, &mut Vec::new()))
+        .unwrap()
+        .err()
+        .expect("an interrupted carry's record was created empty");
+    assert!(
+        refused.message().contains("interrupted carry"),
+        "{}",
+        refused.message()
+    );
+    let operation =
+        plakous::sessions::SessionOperationId::new(config.session.create_operation_id.clone())
+            .unwrap();
+    let genesis = plakous::sessions::AgentSessions::genesis_locator_for(&operation).unwrap();
+    let sessions = config.state_roots.runtime_sessions().unwrap();
+    assert!(
+        executor
+            .block_on(sessions.line_head_of(genesis))
+            .unwrap()
+            .is_err()
+    );
+}
+
 /// The root's tools are frozen at creation: editing the `[root] agent`
 /// template afterwards changes neither the reopened record nor its
 /// rebinds, and a new session takes the edit.

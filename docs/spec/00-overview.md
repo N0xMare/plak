@@ -195,7 +195,7 @@ new ones. 0.0.2 state is left untouched for the 0.0.2 binary.
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **27** (adds the `lines` heads, each branch's line membership and `line_job_terminals`) |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **35** (adds line membership to the checkpoint topology, line-head job owners and the line feed facts, on top of reconstructive image-residency v3 plans/evidence, strategy tag 5 and explicit Released job terminals; component revisions remain frozen) |
-| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **35** |
+| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **36** (adds the write-ahead `carry_intent` of a same-store carry) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **9** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **21**, disposable, never recovery authority |
 | Session export document | Plak | version **11**, imports **11** and **10** |

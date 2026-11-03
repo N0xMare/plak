@@ -130,6 +130,7 @@ pub(crate) fn delete_session(
 ) -> CliResult<()> {
     let paths = services.paths()?;
     let record = load_exact_product_session(paths, services.session_records()?.as_ref(), id)?;
+    refuse_stranding_a_carry(services, &record)?;
     let locator = record
         .plakous_locator
         .ok_or_else(|| CliFailure::new("session has no exact canonical Plakous locator"))?;
@@ -147,6 +148,20 @@ pub(crate) fn delete_session(
         abandon_children,
     )?;
     writeln!(stdout, "deleted session {}", record.id).map_err(|_| CliFailure::new("stdout failed"))
+}
+
+/// Deleting a carry's source before the carry settles would strand it.
+pub(crate) fn refuse_stranding_a_carry(
+    services: &crate::shell::services::Services,
+    record: &product_sessions::SessionRecord,
+) -> CliResult<()> {
+    match crate::carry::pending_successor(services, record)? {
+        Some(successor) => Err(CliFailure::new(format!(
+            "session {} has an interrupted carry into session {}; resume either one to settle it, then delete",
+            record.id, successor.id
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// The confirmed deletion of one product session, in its idempotent order.

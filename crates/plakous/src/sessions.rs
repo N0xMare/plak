@@ -135,7 +135,7 @@ pub use transcript::{
     SessionTranscriptItem, SessionTranscriptPart, SessionTranscriptSource, SessionTranscriptTail,
 };
 mod line;
-pub use line::{LeaseOnlyHead, LineHead};
+pub use line::{BranchHold, LeaseOnlyHead, LineHead};
 mod registry;
 mod types;
 pub use attached::OpenedSession;

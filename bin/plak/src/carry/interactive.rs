@@ -655,6 +655,46 @@ impl super::handoff::ReloadHandoff {
     }
 }
 
+/// The record an in-session switch to `id` opens.
+///
+/// # Errors
+/// As [`super::intent::resume`].
+pub(crate) fn switch_to(
+    services: &Services,
+    store: &dyn crate::store::session_records::SessionRecordStore,
+    id: &str,
+    note: &mut Option<String>,
+) -> CliResult<SessionRecord> {
+    let record = store.load(id).map_err(CliFailure::from)?;
+    super::intent::resume(services, None, record, note)
+}
+
+/// The binding-repair `/rebind` carry of `record`.
+///
+/// # Errors
+/// Returns the carry's refusal.
+pub(crate) fn rebind_session(
+    services: &Services,
+    record: &SessionRecord,
+    cause: &str,
+) -> CliResult<(SessionRecord, String)> {
+    super::rebind::ensure_carry_quiescence(services.paths()?, record)?;
+    let document = export_session(services.paths()?, record)
+        .map_err(|error| CliFailure::new(format!("cannot carry this session: {error}")))?;
+    let paths = PlakPaths::for_workspace(
+        services.paths()?.home().to_path_buf(),
+        &record.workspace_root,
+    );
+    commands::session::rebind::rebind_document(
+        services,
+        document,
+        cause,
+        super::rebind::ReboundMode::Rebind,
+        crate::profiles::session_selection(&paths, record),
+        None,
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;

@@ -159,6 +159,73 @@ async fn confirm_head(
     Ok(loaded.head().checkpoint().checkpoint_id())
 }
 
+/// One branch's lease, held without a driver and without requiring the
+/// branch to be its line's head.
+pub struct DurableBranchHold {
+    store: Arc<dyn SessionStore>,
+    lease: BranchLease,
+    timeouts: crate::runtime::StoreTimeouts,
+}
+
+impl fmt::Debug for DurableBranchHold {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DurableBranchHold")
+            .field("branch", &self.lease.session())
+            .finish_non_exhaustive()
+    }
+}
+
+impl DurableSessionRuntime {
+    /// The lease duration this runtime grants and renews, in seconds.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn lease_seconds(&self) -> std::num::NonZeroU64 {
+        self.lease_seconds
+    }
+
+    /// Takes `branch`'s lease under a fresh fence, building no driver. A
+    /// lease another owner holds is refused as `LeaseHeld`.
+    ///
+    /// # Errors
+    /// Returns typed lookup, ownership or backend failure.
+    #[doc(hidden)]
+    pub async fn hold_branch(
+        &self,
+        operation_id: &str,
+        branch: crate::SessionRef,
+    ) -> Result<DurableBranchHold, AgentError> {
+        crate::runtime::durable::branch::validate_session_operation_id(operation_id)?;
+        let owner = operation_run_id(&self.instance_nonce, operation_id)?;
+        let lease = capacity_store_call(
+            StorePhase::Acquire,
+            self.store_timeouts.operation,
+            || {
+                self.store
+                    .acquire(AcquireBranch::new(branch, owner, self.lease_seconds))
+            },
+            || self.store.storage_wait_cancelled(),
+        )
+        .await
+        .map_err(StoreCallError::into_agent)?;
+        Ok(DurableBranchHold {
+            store: Arc::clone(&self.store),
+            lease,
+            timeouts: self.store_timeouts,
+        })
+    }
+}
+
+impl DurableBranchHold {
+    /// Releases the held lease.
+    ///
+    /// # Errors
+    /// Returns the typed store refusal.
+    pub async fn release(self) -> Result<(), AgentError> {
+        release_store_lease(self.store, self.lease, self.timeouts.cleanup).await
+    }
+}
+
 impl DurableLineHead {
     /// The line.
     #[must_use]

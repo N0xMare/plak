@@ -1,5 +1,5 @@
 //! The product carry crash law (spec 05): the real `/rebind` carry
-//! (`carry::rebind::rebind_session`) and the reload's orchestration carry
+//! (`carry::rebind_session`) and the reload's orchestration carry
 //! (`carry::apply_on_reload`), each killed before its runtime create and
 //! after the create returned but before the record that binds it is saved.
 //! A relaunch settles the write-ahead intent and must show exactly one
@@ -140,7 +140,7 @@ fn carry(layout: &Layout, path: &str) -> TestResult {
     if path == "reload" {
         crate::carry::apply_on_reload(&services, &mut record).ok_or("no orchestration carry")?;
     } else {
-        crate::carry::rebind::rebind_session(&services, &record, CAUSE)
+        crate::carry::rebind_session(&services, &record, CAUSE)
             .map_err(|error| error.message().to_owned())?;
     }
     Err("the carry finished past its cut".into())

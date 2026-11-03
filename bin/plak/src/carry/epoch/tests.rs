@@ -193,7 +193,7 @@ fn persisted_children_refuse_carry_even_without_a_root_attachment() {
     );
     let services = crate::shell::services::Services::for_home(paths);
     assert!(
-        crate::carry::rebind::rebind_session(&services, &record, "test rebind")
+        crate::carry::interactive::rebind_session(&services, &record, "test rebind")
             .unwrap_err()
             .message()
             .contains("not quiescent")

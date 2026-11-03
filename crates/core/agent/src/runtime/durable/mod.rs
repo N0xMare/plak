@@ -30,7 +30,7 @@ pub(in crate::runtime) mod composition_recovery;
 pub(in crate::runtime) mod effect_recovery;
 pub use carry::{DurableCarryHead, DurableCarrySource};
 mod line_head;
-pub use line_head::DurableLineHead;
+pub use line_head::{DurableBranchHold, DurableLineHead};
 mod recovery_publication;
 use recovery_publication::RecoveryPublicationOwner;
 mod retention;

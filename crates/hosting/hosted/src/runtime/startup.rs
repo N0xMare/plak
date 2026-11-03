@@ -392,6 +392,14 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
         ));
     }
     if config.session.plakous_locator.is_none() {
+        // An interrupted carry's record names the create it is waiting for:
+        // only its settlement may create that runtime (spec 02 §2.6).
+        if seed.is_none() && config.session.carry_intent.is_some() {
+            return Err(CliFailure::new(format!(
+                "session {} is an interrupted carry; resume it to finish the carry",
+                config.session.id
+            )));
+        }
         let line = config.seed_line.take();
         return create_session(
             config,

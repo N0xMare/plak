@@ -1525,26 +1525,47 @@ carry and the `/reload` orchestration carry, §2.5.1) saves its successor's
 record, with its stable create operation id, its carried-forward link and its
 `carry_intent`, before the runtime create, and saves the locator, clearing the
 intent, only after it. A crash in between leaves a record that names exactly
-the create it was waiting for. Every TUI startup settles the workspace's
-pending intents, and every open of a record settles its own first:
+the create it was waiting for. No other path creates that runtime: a host
+asked to open a record that still has a `carry_intent` refuses to create an
+empty session under its operation.
+
+Every startup of a working face (TUI launch and resume, the in-TUI session
+switch, `plak run --session` and `plak agent --session`) settles the
+workspace's pending intents, and every open of a record settles its own first.
+Settlement is owned: it takes the source branch's lease
+(`AgentSessions::hold_branch`), the same lease the carry itself holds from
+reading the source to its create, so a carry still running in another process
+leaves its intent pending, untouched, and an open of it answers `the carry into
+session <id> is pending: another plak holds its source; retry in <N> s` with
+the store's lease period (`AgentSessions::lease_period_seconds`). That is also
+the answer for up to one lease period after a crash, until the crashed
+process's lease lapses. Under the held lease no carry can commit, and:
 
 1. The create operation published (its genesis has a feed): the record binds
    that genesis and the projector catches it up.
-2. It did not, and the source branch is still its line's head: the carry
-   re-runs from a fresh export of the source under the same record and create
-   operation.
-3. Otherwise the source's line moved elsewhere or ended: the intent's record
-   is deleted (its create identity stays bound, so a replay is refused) and
-   the source stays live.
+2. It did not, and the source branch is still its line's head: the lease is
+   released and the carry re-runs from a fresh export of the source under the
+   same record and create operation.
+3. Otherwise (the source's line moved elsewhere or ended, its record was
+   deleted, or its runtime is archived or deleted) the publication is checked
+   once more and, still unpublished, the intent's record is deleted with a
+   note naming why; its create identity stays bound, so a replay is refused,
+   and the open lands on the source when its record is left.
+
+`plak session delete` refuses a source whose carried successor is still an
+intent: resuming either one settles it first. Read-only commands
+(`session show`, `session export`) read the exact record they name.
 
 An open of a record whose runtime branch a carry superseded, refused by the
 runtime as `NotLineHead`, follows the carried-forward link to its successor
 (settling it first if it is still an intent) and resumes that, with the
 opening note `session <id> was carried forward as <successor>; resuming it`,
-instead of a read-only refusal. This covers TUI launch and resume and the
-in-TUI session switch. For up to one lease period after a
-crash, a re-run carry may be refused as owned (the crashed process's source
-lease has not lapsed); the next open or startup settles it.
+instead of a read-only refusal; the headless faces print it on stderr.
+
+Carries keep their own write-ahead marker rather than a `workflow_requests`
+row. When live switching lands they may become a product workflow intent kind
+instead. Product schema 36 stays one open format until the 0.0.4 cut: the
+cut's other product-36 changes extend it rather than bumping it again.
 
 Transient store refusal classes on hosted session errors are attached only at
 read/preflight boundaries, not by the general session-error conversion. A

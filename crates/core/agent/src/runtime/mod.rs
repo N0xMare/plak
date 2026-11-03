@@ -68,10 +68,10 @@ pub(crate) use durable::session::validate_seed_replay;
 mod family_artifact;
 pub(crate) mod feed_views;
 
-pub use durable::DurableLineHead;
 pub use durable::DurableSessionRuntime;
 pub(crate) use durable::turn_recovery::recovery_verdict_refuses;
 pub use durable::turn_recovery::{CheckpointRecoveryVerdict, checkpoint_recovery_verdict};
+pub use durable::{DurableBranchHold, DurableLineHead};
 pub use durable::{DurableCarryHead, DurableCarrySource};
 
 mod build;

@@ -9,28 +9,6 @@ pub(crate) enum ReboundMode {
     Orchestration,
 }
 
-pub(crate) fn rebind_session(
-    services: &crate::shell::services::Services,
-    record: &crate::store::sessions::SessionRecord,
-    cause: &str,
-) -> CliResult<(crate::store::sessions::SessionRecord, String)> {
-    ensure_carry_quiescence(services.paths()?, record)?;
-    let document = export_session(services.paths()?, record)
-        .map_err(|error| CliFailure::new(format!("cannot carry this session: {error}")))?;
-    let paths = crate::home::paths::PlakPaths::for_workspace(
-        services.paths()?.home().to_path_buf(),
-        &record.workspace_root,
-    );
-    crate::commands::session::rebind::rebind_document(
-        services,
-        document,
-        cause,
-        ReboundMode::Rebind,
-        crate::profiles::session_selection(&paths, record),
-        None,
-    )
-}
-
 /// Re-runs an interrupted carry of `source` from a fresh export, under the
 /// intent record's own id and create operation (spec 02 §2.6).
 pub(crate) fn resume_carry(

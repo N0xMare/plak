@@ -919,7 +919,8 @@ fn execute_application_command(
             resume_tree,
         } => backend.continue_session(
             &admit(stderr)?,
-            &session_id,
+            // A session a carry moved on runs on its successor (spec 02 §2.6).
+            &carry::work_id(services, &session_id, stderr)?,
             prompt,
             print_session_id,
             resume_tree,

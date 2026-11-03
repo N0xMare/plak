@@ -4268,7 +4268,7 @@ after its attached driver let go (`Ownership` before), and after the head's
 session is deleted the predecessor opens as `LineEnded` and gc answers
 `PruneHistoryOutcome::LineEnded`. The product law
 `product_carry_cuts_relaunch_to_one_successor_at_the_line_head` (durability
-profile) drives the real `/rebind` carry (`carry::rebind::rebind_session`) and
+profile) drives the real `/rebind` carry (`carry::rebind_session`) and
 the reload's orchestration carry (`carry::apply_on_reload`) in a child process
 on the offline model, and kills each (a `carry-cut` file beside the offline
 model's evidence log) before its
@@ -4277,7 +4277,15 @@ it is saved. A relaunch settles the workspace's write-ahead intents and opens
 the source as a TUI launch does, and must show exactly one carried record,
 bound and with no intent, at the line's head at generation 2, the source's
 open redirected to it with a `carried forward as` note, and one source and one
-successor in the runtime store. A store reopened under a limit below its usage
+successor in the runtime store. The settlement tests (`carry::intent::tests`) withdraw an
+intent whose source's line moved elsewhere, keep an intent pending, untouched,
+while another owner holds the source branch (its open answers with the lease
+period), bind instead of withdrawing when the create publishes between the
+head check and the final published check (a seam between the two), withdraw
+an intent whose source record was deleted or whose source runtime was
+archived, and refuse deleting a source whose carry is still an intent. A host
+asked to open an intent record never creates its runtime
+(`an_interrupted_carry_record_is_never_created_empty`). A store reopened under a limit below its usage
 prunes and then admits an ordinary commit
 (`sqlite_prune_over_the_absolute_limit_frees_ordinary_headroom`), and
 incremental vacuum returns the freed pages to the file system

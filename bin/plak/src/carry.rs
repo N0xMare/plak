@@ -13,11 +13,9 @@ mod export;
 pub(crate) mod handoff;
 mod history;
 mod import;
-#[cfg(any(test, feature = "tui"))]
 pub(crate) mod intent;
 #[cfg(any(test, feature = "tui"))]
 mod interactive;
-#[cfg(any(test, feature = "tui"))]
 pub(crate) mod rebind;
 mod reference;
 mod reload;
@@ -35,14 +33,14 @@ pub(crate) use reload::{
 #[cfg(feature = "tui")]
 pub(crate) use {
     epoch::apply_on_reload,
-    intent::{resume, switch_to},
     interactive::{
-        ReloadPlan, ReloadTarget, carry_foreign_session, carry_out, reload_plan,
-        reload_target_for_session,
+        ReloadPlan, ReloadTarget, carry_foreign_session, carry_out, rebind_session, reload_plan,
+        reload_target_for_session, switch_to,
     },
 };
 
 pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
+pub(crate) use intent::{load_for_work, pending_successor, work_id};
 
 pub(crate) use reference::remove_retained_archive;
 
