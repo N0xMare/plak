@@ -7,8 +7,10 @@ use plakous_model::ContextHeadroom;
 use serde::{Deserialize, Serialize};
 
 use self::plain_read::PlainRead;
+use plakous_tools::internal::RaisedReadPage;
 
 mod plain_read;
+mod read_page;
 
 pub(in crate::runtime) const CANONICAL_RESULT_BYTES: usize =
     plakous_model::SemanticJsonV1::maximum_string_bytes() - 4_096;
@@ -129,39 +131,55 @@ pub(in crate::runtime) fn budgeted_observation_text(
 /// The least a cut is allowed to take, whatever its budget: room for the bare
 /// omitted-bytes marker, the wrapped withheld notice, or a small structured
 /// skeleton (a read's `next_offset`, a process result's exit code). A full
-/// output locator, or a withheld plain read's notice and metadata line, can
-/// raise this floor to that minimal notice.
+/// output locator, or a withheld text read's notice with its metadata line or
+/// its notes and continuation, can raise this floor to that minimal notice.
 pub(super) const CUT_FLOOR_BYTES: usize = 256;
 
 /// What a raising program rendered a tool result as. Only a declared shape
-/// earns its structured cut; text is never sniffed as a plain read.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// earns its structured cut; text is never sniffed as a file read.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(in crate::runtime) enum ObservationShape {
     /// Anything else: JSON shapes are still recognised, text is cut as text.
     #[default]
     Text,
     /// A plain-text file read: the selected text, then one read metadata line.
     PlainFileRead,
+    /// A file read page whose presentation renders its own notes and
+    /// continuation.
+    ReadPage(Box<RaisedReadPage>),
 }
 
 pub(super) fn clip_observation_text(body: &str, remaining: usize) -> String {
-    clip_observation(body, remaining, true, ObservationShape::Text)
+    clip_observation(body, remaining, true, &ObservationShape::Text)
 }
 
 /// [`clip_observation_text`] for a result of a declared shape.
 pub(super) fn clip_observation_shaped(
     body: &str,
     remaining: usize,
-    shape: ObservationShape,
+    shape: &ObservationShape,
 ) -> String {
     clip_observation(body, remaining, true, shape)
 }
 
 /// The plain read of a result declared one, when its text parses as one.
-fn plain_read(body: &str, shape: ObservationShape) -> Option<PlainRead<'_>> {
-    (shape == ObservationShape::PlainFileRead)
+fn plain_read<'a>(body: &'a str, shape: &ObservationShape) -> Option<PlainRead<'a>> {
+    matches!(shape, ObservationShape::PlainFileRead)
         .then(|| PlainRead::parse(body))
         .flatten()
+}
+
+/// The read page a result was declared, when `body` is exactly its text (the
+/// wrapped string, not its wrapper).
+fn read_page<'a>(body: &str, shape: &'a ObservationShape) -> Option<&'a RaisedReadPage> {
+    match shape {
+        ObservationShape::ReadPage(page)
+            if body.len() == page.text_bytes() && body.is_char_boundary(page.lines_bytes()) =>
+        {
+            Some(page.as_ref())
+        }
+        _ => None,
+    }
 }
 
 /// `wrappers` selects whether a raised `{"result": string}` presentation is
@@ -171,14 +189,17 @@ fn clip_observation(
     body: &str,
     remaining: usize,
     wrappers: bool,
-    shape: ObservationShape,
+    shape: &ObservationShape,
 ) -> String {
     if remaining != 0 && body.len() <= remaining {
         return body.to_owned();
     }
-    // A plain-text file read stays head-first, like the JSON read below.
+    // A text file read stays head-first, like the JSON read below.
     if let Some(read) = plain_read(body, shape) {
         return read.cut(remaining, OBSERVATION_EXHAUSTED);
+    }
+    if let Some(page) = read_page(body, shape) {
+        return read_page::cut(body, page, remaining, OBSERVATION_EXHAUSTED);
     }
     // A structured cut that cannot fit (a large field beside the one it cuts)
     // gives way to a plain cut, which always does.
@@ -221,10 +242,13 @@ fn withheld_output(body: &str) -> String {
 // A path is a read locator, not dispensable log content. Even a
 // zero-byte allowance retains the smallest notice that names it. A file read's
 // lines are file content, never a locator: its smallest notice is the withheld
-// guidance and its metadata line.
-fn full_output_notice(body: &str, wrappers: bool, shape: ObservationShape) -> Option<String> {
+// guidance and its metadata line or continuation.
+fn full_output_notice(body: &str, wrappers: bool, shape: &ObservationShape) -> Option<String> {
     if let Some(read) = plain_read(body, shape) {
         return Some(read.cut(0, OBSERVATION_EXHAUSTED));
+    }
+    if let Some(page) = read_page(body, shape) {
+        return Some(read_page::cut(body, page, 0, OBSERVATION_EXHAUSTED));
     }
     if let Some(line) = full_output_line(body) {
         return Some(format!("{OBSERVATION_EXHAUSTED}\n{line}"));
@@ -359,7 +383,7 @@ fn clip_structured_observation(
     body: &str,
     remaining: usize,
     wrappers: bool,
-    declared: ObservationShape,
+    declared: &ObservationShape,
 ) -> Option<String> {
     let mut value: serde_json::Value = serde_json::from_str(body).ok()?;
     if value
@@ -483,7 +507,7 @@ fn text_result_object(value: &serde_json::Value) -> Option<&str> {
 /// clipped as an observation of its own (a nested read or process result keeps
 /// its structure), shrinking until its encoding fits, since the wrapper escapes
 /// it once more. When nothing fits, the wrapper carries the withheld notice.
-fn clip_text_result_object(inner: &str, remaining: usize, shape: ObservationShape) -> String {
+fn clip_text_result_object(inner: &str, remaining: usize, shape: &ObservationShape) -> String {
     let wrap = |text: &str| {
         serde_json::to_string(&serde_json::json!({ "result": text }))
             .unwrap_or_else(|_| OBSERVATION_EXHAUSTED.to_owned())

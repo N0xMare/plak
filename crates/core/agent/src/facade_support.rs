@@ -399,7 +399,7 @@ pub fn history_nested_tools<S: std::hash::BuildHasher>(
     #[derive(serde::Deserialize)]
     #[serde(untagged)]
     enum Terminal {
-        Completed(ToolExecutionResult),
+        Completed(Box<ToolExecutionResult>),
         Failed(DurableAgentError),
     }
     #[derive(serde::Deserialize)]
@@ -490,6 +490,7 @@ pub fn history_nested_tools<S: std::hash::BuildHasher>(
         };
         let (result, subject) = match (tag.as_str(), outcome) {
             ("completed-tool-outcome-v1", Terminal::Completed(outcome)) => {
+                let outcome = *outcome;
                 (outcome.result, outcome.presentation_subject)
             }
             ("failed-tool-outcome-v1", Terminal::Failed(failure)) => {

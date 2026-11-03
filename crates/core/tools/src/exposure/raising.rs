@@ -9,6 +9,7 @@ use self::pi::{pi_background_notice, pi_text_from_canonical_read};
 use super::projection::{
     ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionRaisingV2,
 };
+use crate::internal::RaisedFileRead;
 use crate::{
     FrozenToolRegistry, PortableToolSchemaV2, RegisteredToolIdentity, ToolOutcome,
     ToolRuntimeError, ToolRuntimeErrorKind,
@@ -157,8 +158,10 @@ pub(super) fn validate_model_content_identity(
     outcome.validate_contract(definition.output())
 }
 
-/// Raises one canonical read result into the presentation's text: Claude's
-/// `cat -n` lines or pi's plain text with a continuation line.
+/// Raises one canonical read result into the presentation's text (Claude's
+/// `cat -n` lines, pi's plain text with a continuation line, or Grok's plain
+/// text with a metadata line) and marks how it rendered it, so the runtime's
+/// observation cut keeps the read head-first.
 pub(super) fn raise_read_observation(
     entry: &ToolProjectionExposureV2,
     outcome: &ToolOutcome,
@@ -169,10 +172,19 @@ pub(super) fn raise_read_observation(
             "read observation is not one text value",
         ));
     };
-    let numbered = match entry.lowering {
-        ToolProjectionLoweringV2::PiRead => pi_text_from_canonical_read(text.text())?,
-        ToolProjectionLoweringV2::GrokReadFile => grok_text_from_canonical_read(text.text())?,
-        ToolProjectionLoweringV2::ClaudeReadFile => claude_cat_n_from_canonical_read(text.text())?,
+    let (numbered, read) = match entry.lowering {
+        ToolProjectionLoweringV2::PiRead => {
+            let (rendered, page) = pi_text_from_canonical_read(text.text())?;
+            (rendered, RaisedFileRead::Page(page))
+        }
+        ToolProjectionLoweringV2::GrokReadFile => (
+            grok_text_from_canonical_read(text.text())?,
+            RaisedFileRead::PlainWithMetadata,
+        ),
+        ToolProjectionLoweringV2::ClaudeReadFile => {
+            let (rendered, page) = claude_cat_n_from_canonical_read(text.text())?;
+            (rendered, RaisedFileRead::Page(page))
+        }
         _ => {
             return Err(ToolRuntimeError::new(
                 ToolRuntimeErrorKind::Execution,
@@ -182,14 +194,7 @@ pub(super) fn raise_read_observation(
     };
     let update = outcome.process_session_update();
     if entry.raising() == ToolProjectionRaisingV2::TextResultObjectV1 {
-        let raised = raise_text_result_object_from_result(&numbered, update)?;
-        return Ok(
-            if entry.lowering == ToolProjectionLoweringV2::GrokReadFile {
-                raised.into_plain_file_read()
-            } else {
-                raised
-            },
-        );
+        return Ok(raise_text_result_object_from_result(&numbered, update)?.into_file_read(read));
     }
     // TextBlock forbids empty strings for Identity raising. Direct wraps an empty
     // result above; nested RawUtf8 bypasses this projection and retains neutral JSON.
@@ -204,7 +209,7 @@ pub(super) fn raise_read_observation(
         None => raised,
     };
     if entry.raising() == ToolProjectionRaisingV2::Identity {
-        return raise_identity(entry, raised);
+        return Ok(raise_identity(entry, raised)?.into_file_read(read));
     }
     if entry.raising() == ToolProjectionRaisingV2::RawUtf8V1 {
         return Ok(raised);
@@ -213,6 +218,30 @@ pub(super) fn raise_read_observation(
         ToolRuntimeErrorKind::Execution,
         "read observation raising is not enrolled",
     ))
+}
+
+/// The presentation a raised read page renders its notes and continuation in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ReadPageStyle {
+    /// Claude's `cat -n` lines.
+    CatN,
+    /// Pi's plain lines.
+    Pi,
+}
+
+/// A raised read page cut after `shown` lines; see
+/// [`crate::internal::RaisedReadPage::cut`].
+pub(crate) fn cut_read_page(
+    style: ReadPageStyle,
+    head: &str,
+    notes: &[String],
+    offset: u64,
+    shown: u64,
+) -> String {
+    match style {
+        ReadPageStyle::CatN => claude::cut_cat_n(head, notes, offset.saturating_add(shown)),
+        ReadPageStyle::Pi => pi::cut_pi(head, notes, offset, shown),
+    }
 }
 
 pub(super) fn raise_identity(

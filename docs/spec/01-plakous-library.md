@@ -918,27 +918,49 @@ including process `output` fields, multi-process `tasks` pages and one raised
 `{"result": string}` wrapper. When the allowance cannot hold the log, its
 smallest withheld notice still keeps the path and process status/identifiers.
 A paged file read stays head-first, because it continues from `next_offset`.
-Both read shapes keep whole lines from the head and rewrite their metadata to
-describe them: `lines` counts the lines shown, `eof` is false, `next_offset`
-continues after the last line shown, and `observation_truncated` is added
-(`observation_truncated: true` in the neutral JSON read). A cut that keeps
-every line keeps the page's own metadata. The Grok Direct plain read (§9.2)
-also keeps its metadata line, drops `final_newline`, and, when no line fits,
-puts the capacity-exhaustion guidance before the metadata line, so the model
-is not told to re-read the same over-budget page. The plain-read cut is chosen
-by provenance, not by text: the Grok `read_file` raising program marks its
-raised outcome as a plain file read, the runtime carries that mark (not
-persisted) to the observation cut, and only a marked result is parsed as a
-plain read. Any other text whose last line happens to match the read metadata
-grammar is cut by the text and locator rules above. A result reconciled from
-journaled evidence after a restart carries no mark and is cut as text. A
-read's lines are file content, never a `full output:` locator, so a withheld
-read keeps no such line. A
+Every read shape keeps whole lines from the head (an unterminated last line is
+never shown part-way) and says where to continue after the last line shown.
+The neutral JSON read and the Grok Direct plain read (§9.2) rewrite their
+metadata to describe the lines kept: `lines` counts the lines shown, `eof` is
+false, `next_offset` continues after the last line shown, and
+`observation_truncated` is added (`observation_truncated: true` in the neutral
+JSON read). A JSON read cut that keeps every line keeps the page's own
+metadata. The Grok plain read also keeps its metadata line and drops
+`final_newline`. The Claude Direct `cat -n` read and pi's `read` (chapter 02
+§6.3) keep their clipping and decoding notes and end in their own
+continuation for the lines shown: Claude's line numbers already give position,
+so it adds `... page truncated to fit the context budget` and then its
+documented last line `... more lines; next_offset=N`; pi's ends with
+`[Showing lines A-B. Use offset=N to continue.]`. Such a cut always shows fewer
+lines than its page. When no line fits, every text read puts the
+capacity-exhaustion guidance first, before its metadata line or notes and a
+continuation from the page's first line (pi's reads `[Use offset=N to
+continue.]`), so the model is not told to re-read the same over-budget page.
+The text read cuts are chosen by provenance, not by text: the Grok, Claude and
+pi read raising programs mark their raised outcome with how they rendered the
+read (text then one metadata line, or a page of rendered lines with its notes,
+its first line and the exact length of the text it describes), the runtime carries
+that mark (not persisted) to the observation cut, and only a marked result is
+cut as a read (a page only when the text is exactly the one its mark
+describes, so its `{"result": string}` wrapper is cut as a wrapper). Any other
+text, including a process result whose last lines happen to match the read
+metadata grammar or either continuation, is cut by the text and locator rules
+above. A result reconciled from journaled evidence after a restart carries no
+mark and is cut as text. A read's lines are file content, never a `full
+output:` locator, so a withheld read keeps no such line. A
 completed tool exchange that still exceeds next-round admission is shrunk by
 splitting what remains of the overflow's text budget fairly across its
 results: a result at or under the shared cap keeps its whole body, larger ones
 are clipped head-and-tail to the cap, and a cap under 2 KiB replaces them with
-the exhaustion marker. If the shrunk exchange still does not admit, every text
+the exhaustion marker. The exchange shrink stays head-and-tail for the text
+read presentations: it works on the canonical items of the completed exchange,
+after the per-result cut has consumed the raising mark, and canonical history
+does not carry that mark (carrying it would change a persisted format for a
+fallback path). Text is never sniffed as a read, so only the self-describing
+neutral JSON read stays head-first there; a shrunk text read keeps its
+omitted-bytes line between head and tail, and Claude's line numbers show the
+gap. The shrink runs only when results already cut to the allowance still miss
+next-round admission. If the shrunk exchange still does not admit, every text
 result body is replaced by the exhaustion marker, as the last resort. Once that
 replacement commits, the driver emits a call-scoped `ObservationReplaced`
 event for each changed result, reporting canonical text bytes before and after
@@ -6993,7 +7015,10 @@ per-result observation bound (§10.3) without a cut; a line over 2,000 character
 UTF-8 is replaced with U+FFFD and marks `lossy: true`, while an incomplete
 sequence that a read bound cut at the end of the bytes read is dropped and
 does not count; a file with a NUL byte in its first 8 KiB is refused as binary. Claude Direct's cat-n rendering adds a
-closing note for clipped lines and lossy decoding.
+closing note for clipped lines and lossy decoding. An observation cut of a
+Claude Direct page keeps whole numbered lines from the head, its notes,
+`... page truncated to fit the context budget` and `... more lines;
+next_offset=N` after the last line shown (§4).
 
 Nested delivery inspects the committed canonical tool result kind. Successful
 results preserve their existing values, including exact UTF-8 strings, except
@@ -8616,11 +8641,11 @@ Each result is additionally capped at the canonical semantic-JSON maximum
 string size minus 4096 bytes of envelope reserve, using the existing exact
 omitted-bytes clipping marker. Every cut fits its bound; only a bound below
 256 bytes may be exceeded, by at most the marker, the wrapped withheld notice,
-a small structured skeleton, or a withheld plain read's guidance and metadata
-line. A full-output path is also retained when its
+a small structured skeleton, or a withheld text read's guidance with its
+metadata line or its notes and continuation. A full-output path is also retained when its
 minimal notice and process fields exceed the allowance; the canonical
 per-result bound still applies. A cut keeps structure where it fits: a file read (the neutral
-JSON or the Grok plain-text read) stays head-first with `observation_truncated`, a process result keeps its fields
+JSON, the Grok plain-text read, or the Claude `cat -n` and pi pages) stays head-first and says where to continue (§4), a process result keeps its fields
 around a clipped `output`, and a raised `{"result": string}` presentation stays
 one valid object whose wrapped text is cut as an observation of its own (so a
 read or process result nested in it keeps its structure; a deeper wrapper is cut

@@ -6743,7 +6743,8 @@ beginning and end with the omitted byte count and ends with `[exit N]` for a
 nonzero exit. `read` is text only, as pi 1.1.0's is: an image path (`png`,
 `jpg`, `jpeg`, `gif`, `webp`, `bmp`) gets a typed text refusal, the result is
 the file's lines as they are, and a cut page ends with `[Showing lines A-B. Use
-offset=N to continue.]`. `edit` applies every `edits[]` entry against the
+offset=N to continue.]`, also when the page was cut to fit the context (whole
+lines from the head, A-B the lines shown; spec 01 §4). `edit` applies every `edits[]` entry against the
 original file in one transaction: each `oldText` must be non-empty, unique and
 not overlap another, or nothing changes. `write` creates or overwrites and
 makes missing parent directories. `wait` returns at the first terminal among
@@ -6802,7 +6803,10 @@ lines shown. It has no line numbers. The Direct `{ "result": string }` wrapper r
 not itself JSON. Nested JS and Python cells still receive the neutral JSON
 string and the parsing instructions. Claude Direct renders cat-n text (text
 only for a text file, and an image part for PNG, JPEG, GIF and WebP; a
-program cell refuses images) and pi's `read` the plain lines with its continuation line, while
+program cell refuses images) and pi's `read` the plain lines with its continuation line; a page of
+either cut to fit the context keeps whole lines from the head, and Claude's adds
+`... page truncated to fit the context budget` before `... more lines;
+next_offset=N` (spec 01 §4), while
 local composition receives the neutral JSON string and explicit parsing
 instructions. Grok `read_file`, `write`, `search_replace`, `grep` and
 `list_dir` accept a workspace-relative path or an absolute path inside the

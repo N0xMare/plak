@@ -419,7 +419,7 @@ fn plain_read_parts(raised: &str) -> Option<(&str, Vec<(&str, &str)>)> {
 }
 
 fn plain(body: &str, budget: usize) -> String {
-    super::clip_observation_shaped(body, budget, super::ObservationShape::PlainFileRead)
+    super::clip_observation_shaped(body, budget, &super::ObservationShape::PlainFileRead)
 }
 
 #[test]
@@ -545,4 +545,362 @@ fn undeclared_text_ending_in_read_metadata_keeps_its_tail_and_locator() {
             }
         }
     }
+}
+
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+/// One canonical read raised through `presentation`'s Direct read: the raised
+/// outcome and its `{"result": string}` text.
+fn raise_read(
+    presentation: plakous_tools::CodingPresentation,
+    canonical: &serde_json::Value,
+) -> TestResult<(plakous_tools::ToolOutcome, String)> {
+    use plakous_compose::{CodingPresentationExt as _, standard_coding_packs_in_memory};
+    use plakous_model::{
+        AttemptId, CallId, Digest, DigestDomain, IntegrationClass, RunId, ToolCorrelation,
+        ToolName, ToolResultPart, TurnId,
+    };
+    use plakous_tools::{
+        CodingPresentation, PROCESS_TOOL_PROJECTION_REVISION, ProviderModelProjectionIdentityV2,
+        ToolInvocationRequest, ToolOutcome, ToolRegistryBuilder, register_packs,
+    };
+    let mut builder = ToolRegistryBuilder::default();
+    register_packs(&standard_coding_packs_in_memory()?, &mut builder)?;
+    let effective = serde_json::from_value(serde_json::to_value(Digest::sha256(
+        DigestDomain::EffectiveProviderConfiguration,
+        5,
+        &[b"read-page-cut-test"],
+    )?)?)?;
+    let target = ProviderModelProjectionIdentityV2::new(
+        IntegrationClass::Standard,
+        "test.responses",
+        "test.oauth",
+        "test.read-page-cut.v1",
+        "test-family",
+        "test-model",
+        "test-model",
+        effective,
+        PROCESS_TOOL_PROJECTION_REVISION,
+    )?;
+    let map = presentation.projection_map(
+        plakous_tools::JobConfig::default(),
+        builder.freeze(),
+        target,
+    )?;
+    let (name, arguments) = match presentation {
+        CodingPresentation::Claude => ("Read", r#"{"file_path":"a.txt"}"#),
+        CodingPresentation::Grok => ("read_file", r#"{"target_file":"a.txt"}"#),
+        _ => ("read", r#"{"path":"a.txt"}"#),
+    };
+    let request = ToolInvocationRequest::new(
+        "00000000-0000-7000-8000-000000000a01".parse::<RunId>()?,
+        "00000000-0000-7000-8000-000000000a02".parse::<TurnId>()?,
+        "00000000-0000-7000-8000-000000000a03".parse::<AttemptId>()?,
+        "00000000-0000-7000-8000-000000000a04".parse::<CallId>()?,
+        ToolName::new(name)?,
+        ToolCorrelation::default(),
+        arguments,
+    );
+    let (_, receipt) = map.prepare(request)?.into_parts();
+    let raised = map.raise(
+        &receipt.ok_or("read omitted its receipt")?,
+        ToolOutcome::success_text(canonical.to_string())?,
+    )?;
+    let [ToolResultPart::Text(text)] = raised.parts() else {
+        return Err("raised read was not one text part".into());
+    };
+    let text = text.text().to_owned();
+    Ok((raised, text))
+}
+
+/// The shape a raised read's mark declares.
+fn raised_shape(raised: &plakous_tools::ToolOutcome) -> super::ObservationShape {
+    use plakous_tools::internal::{RaisedFileRead, raised_file_read};
+    match raised_file_read(raised) {
+        Some(RaisedFileRead::Page(page)) => {
+            super::ObservationShape::ReadPage(Box::new(page.clone()))
+        }
+        Some(RaisedFileRead::PlainWithMetadata) => super::ObservationShape::PlainFileRead,
+        None => super::ObservationShape::Text,
+    }
+}
+
+/// A raised page as the cut sees it, wrapped in its `{"result": string}`
+/// presentation or bare: the mark describes the wrapped string, which is
+/// also what an unwrapped (identity) raising renders.
+struct RaisedPage {
+    wrapped: String,
+    bare: String,
+    shape: super::ObservationShape,
+}
+
+impl RaisedPage {
+    fn raise(
+        presentation: plakous_tools::CodingPresentation,
+        canonical: &serde_json::Value,
+    ) -> TestResult<Self> {
+        let (raised, wrapped) = raise_read(presentation, canonical)?;
+        let shape = raised_shape(&raised);
+        if !matches!(shape, super::ObservationShape::ReadPage(_)) {
+            return Err("a Direct read page carries no page mark".into());
+        }
+        let value: serde_json::Value = serde_json::from_str(&wrapped)?;
+        let bare = value["result"].as_str().ok_or("wrapper lost")?.to_owned();
+        Ok(Self {
+            wrapped,
+            bare,
+            shape,
+        })
+    }
+
+    /// The cut at `budget`, as the wrapped string it shows, either way.
+    fn cut(&self, wrapped: bool, budget: usize) -> TestResult<(String, usize)> {
+        let body = if wrapped { &self.wrapped } else { &self.bare };
+        let clipped = super::clip_observation_shaped(body, budget, &self.shape);
+        let size = clipped.len();
+        let inner = if wrapped {
+            let value: serde_json::Value = serde_json::from_str(&clipped)?;
+            value["result"].as_str().ok_or("wrapper lost")?.to_owned()
+        } else {
+            clipped
+        };
+        Ok((inner, size))
+    }
+}
+
+fn canonical_page(content: &str, lines: usize, eof: bool) -> serde_json::Value {
+    serde_json::json!({
+        "content": content,
+        "offset": 7,
+        "lines": lines,
+        "eof": eof,
+        "next_offset": if eof { serde_json::Value::Null } else { (7 + lines).into() },
+        "clipped_lines": 3,
+        "lossy": true
+    })
+}
+
+const CAT_N_NOTES: &str = "... 3 lines longer than 2000 characters were clipped\n... invalid UTF-8 was replaced with U+FFFD\n... page truncated to fit the context budget\n";
+const PI_NOTES: &str = "\n[3 lines longer than 2000 characters were clipped]\n\n[invalid UTF-8 was replaced with U+FFFD]\n\n";
+
+/// What a cut of `bare` showing `shown` lines must be, given the lines kept.
+fn expected_cut(
+    presentation: plakous_tools::CodingPresentation,
+    head: &str,
+    shown: usize,
+) -> String {
+    let next = 7 + shown;
+    match presentation {
+        plakous_tools::CodingPresentation::Claude => {
+            format!("{head}{CAT_N_NOTES}... more lines; next_offset={next}")
+        }
+        _ if shown == 0 => format!("{head}{PI_NOTES}[Use offset={next} to continue.]"),
+        _ => format!(
+            "{head}{PI_NOTES}[Showing lines 7-{}. Use offset={next} to continue.]",
+            next - 1
+        ),
+    }
+}
+
+/// The lines a cut kept from the head of `bare`, and how many.
+fn kept_head<'a>(bare: &str, inner: &'a str) -> (&'a str, usize) {
+    let mut end = 0;
+    let mut shown = 0;
+    for line in bare.split_inclusive('\n') {
+        if !line.ends_with('\n') || !inner[end..].starts_with(line) {
+            break;
+        }
+        end += line.len();
+        shown += 1;
+    }
+    (&inner[..end], shown)
+}
+
+const PAGE_PRESENTATIONS: [plakous_tools::CodingPresentation; 2] = [
+    plakous_tools::CodingPresentation::Claude,
+    plakous_tools::CodingPresentation::Pi,
+];
+
+/// Claude's `cat -n` read and pi's read are cut head-first to whole lines, by
+/// their raising program's mark: the page's notes stay, and each says in its
+/// own words where to continue after the last line shown.
+#[test]
+fn a_cut_read_page_stays_head_first_and_continues_after_the_lines_shown() -> TestResult {
+    use super::{CUT_FLOOR_BYTES, OBSERVATION_EXHAUSTED};
+    let mut content = String::new();
+    for index in 0..2_000 {
+        writeln!(content, "line {index} \"quoted\" λ")?;
+    }
+    for presentation in PAGE_PRESENTATIONS {
+        let page = RaisedPage::raise(presentation, &canonical_page(&content, 2_000, false))?;
+        for wrapped in [false, true] {
+            for budget in [0, 160, 512, 4_096, 32_768] {
+                let (inner, size) = page.cut(wrapped, budget)?;
+                assert!(
+                    size <= budget.max(CUT_FLOOR_BYTES + OBSERVATION_EXHAUSTED.len() + 64),
+                    "{presentation:?} {wrapped} {budget}: {size} bytes"
+                );
+                let (head, shown) = kept_head(&page.bare, &inner);
+                let head = if shown == 0 {
+                    format!("{OBSERVATION_EXHAUSTED}\n")
+                } else {
+                    head.to_owned()
+                };
+                assert_eq!(
+                    inner,
+                    expected_cut(presentation, &head, shown),
+                    "{presentation:?} {wrapped} {budget}"
+                );
+                assert!(!inner.contains("omitted"), "{budget}: head and tail cut");
+                assert_eq!(
+                    budget < 512,
+                    shown == 0,
+                    "{presentation:?} {wrapped} {budget}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// CRLF lines survive whole, and an unterminated last line is never shown
+/// part-way: the continuation points at it.
+#[test]
+fn a_cut_crlf_read_page_keeps_whole_lines_and_drops_the_unterminated_tail() -> TestResult {
+    let content = "a\r\n".repeat(2_000) + "tail";
+    for presentation in PAGE_PRESENTATIONS {
+        let page = RaisedPage::raise(presentation, &canonical_page(&content, 2_001, true))?;
+        for wrapped in [false, true] {
+            let (inner, size) = page.cut(wrapped, 1_024)?;
+            assert!(size <= 1_024, "{presentation:?} {wrapped}: {size} bytes");
+            let (head, shown) = kept_head(&page.bare, &inner);
+            assert!(shown > 0, "{presentation:?} {wrapped}");
+            assert!(head.ends_with("a\r\n"), "{presentation:?} {wrapped}");
+            assert_eq!(inner, expected_cut(presentation, head, shown));
+            assert!(!inner.contains("tail"));
+        }
+    }
+    Ok(())
+}
+
+/// When no line fits, a single over-long line or a budget that fits nothing,
+/// the capacity guidance comes first and the continuation names the page's
+/// first line.
+#[test]
+fn a_read_page_that_fits_no_line_leads_with_the_capacity_guidance() -> TestResult {
+    use super::OBSERVATION_EXHAUSTED;
+    let long = format!("{}\nshort\n", "λ".repeat(1_999));
+    let many = "short line\n".repeat(500);
+    for presentation in PAGE_PRESENTATIONS {
+        for (content, lines, budget) in [(&long, 2, 1_024), (&long, 2, 0), (&many, 500, 0)] {
+            let page = RaisedPage::raise(presentation, &canonical_page(content, lines, true))?;
+            for wrapped in [false, true] {
+                let (inner, _) = page.cut(wrapped, budget)?;
+                assert_eq!(
+                    inner,
+                    expected_cut(presentation, &format!("{OBSERVATION_EXHAUSTED}\n"), 0),
+                    "{presentation:?} {wrapped} {budget}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Text is never sniffed as a read page: a process result that ends in a line
+/// like either presentation's continuation keeps its head, tail and locator,
+/// and so does a body its page mark does not describe.
+#[test]
+fn unmarked_text_ending_like_a_read_page_keeps_its_tail_and_locator() -> TestResult {
+    use super::clip_observation_text;
+    let path = "full output: /state/jobs/session/branch-p1-service.log";
+    let page = RaisedPage::raise(
+        plakous_tools::CodingPresentation::Claude,
+        &canonical_page("one\ntwo\n", 2, false),
+    )?;
+    for tail in [
+        "     1\tfoo\n... page truncated to fit the context budget\n... more lines; next_offset=12",
+        "foo\n\n[Showing lines 1-2. Use offset=3 to continue.]",
+    ] {
+        let body = format!("{}{path}\n{tail}", "build step ok\n".repeat(20_000));
+        for wrapped in [false, true] {
+            let body = if wrapped {
+                serde_json::json!({ "result": body }).to_string()
+            } else {
+                body.clone()
+            };
+            for budget in [0, 512, 4_096] {
+                for clipped in [
+                    clip_observation_text(&body, budget),
+                    super::clip_observation_shaped(&body, budget, &page.shape),
+                ] {
+                    assert!(clipped.contains(path), "{budget}: locator lost: {clipped}");
+                    if budget != 0 {
+                        assert!(clipped.contains("omitted"), "{budget}: not head and tail");
+                        let last = tail.lines().last().ok_or("tail")?;
+                        assert!(clipped.contains(last), "{budget}: tail lost");
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The mark lives only in memory: a result reconciled from its journaled
+/// evidence after a restart carries none and is cut by the text rules, while
+/// the live result is cut head-first.
+#[test]
+fn a_restart_reconciled_read_page_is_cut_as_text() -> TestResult {
+    use plakous_model::{
+        CallId, TextBlock, ToolCorrelation, ToolExecutionOwner, ToolResultBlock, ToolResultKind,
+        ToolResultPart,
+    };
+    let mut content = String::new();
+    for index in 0..2_000 {
+        writeln!(content, "line {index}")?;
+    }
+    for presentation in PAGE_PRESENTATIONS {
+        let (raised, text) = raise_read(presentation, &canonical_page(&content, 2_000, false))?;
+        let result = ToolResultBlock::new(
+            "00000000-0000-7000-8000-000000000a05".parse::<CallId>()?,
+            ToolExecutionOwner::Local,
+            ToolResultKind::Success,
+            vec![ToolResultPart::Text(TextBlock::new(text, None)?)],
+            ToolCorrelation::default(),
+        )?;
+        let live =
+            crate::runtime::ToolExecutionResult::new(result, true).with_raised_shape(&raised);
+        assert!(matches!(
+            live.observation_shape,
+            super::ObservationShape::ReadPage(_)
+        ));
+        let evidence = serde_json::to_vec(&live)?;
+        let reconciled: crate::runtime::ToolExecutionResult = serde_json::from_slice(&evidence)?;
+        assert_eq!(reconciled.observation_shape, super::ObservationShape::Text);
+        for (execution, head_first) in [(live, true), (reconciled, false)] {
+            let mut budget = super::ObservationBudget::new(4_096, None);
+            let (clipped, clip) = super::super::clip_observed_tool_result(
+                execution.result,
+                &mut budget,
+                &execution.observation_shape,
+            )?;
+            assert!(clip.is_some());
+            let [ToolResultPart::Text(text)] = clipped.parts() else {
+                return Err("clipped read was not one text part".into());
+            };
+            let text = text.text();
+            assert_eq!(
+                text.contains("omitted"),
+                !head_first,
+                "{presentation:?}: {text}"
+            );
+            assert_eq!(
+                text.contains("next_offset=2007") || text.contains("offset=2007 to continue"),
+                !head_first,
+                "{presentation:?}: {text}"
+            );
+        }
+    }
+    Ok(())
 }

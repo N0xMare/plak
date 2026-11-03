@@ -326,14 +326,14 @@ pub(super) fn clip_tool_result(
     result: ToolResultBlock,
     budget: &mut budget::ObservationBudget,
 ) -> Result<(ToolResultBlock, Option<ObservationClip>), AgentError> {
-    clip_observed_tool_result(result, budget, budget::ObservationShape::Text)
+    clip_observed_tool_result(result, budget, &budget::ObservationShape::Text)
 }
 
 /// [`clip_tool_result`] for a result whose raising program declared its shape.
 pub(super) fn clip_observed_tool_result(
     result: ToolResultBlock,
     budget: &mut budget::ObservationBudget,
-    shape: budget::ObservationShape,
+    shape: &budget::ObservationShape,
 ) -> Result<(ToolResultBlock, Option<ObservationClip>), AgentError> {
     // A nested call's result goes to the evaluator cell, not to the model:
     // only the cell's composed answer is observed, clipped and announced, so

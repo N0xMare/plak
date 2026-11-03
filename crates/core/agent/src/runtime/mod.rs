@@ -761,9 +761,13 @@ impl ToolExecutionResult {
 
     /// Records what the raising program rendered, from the raised outcome.
     fn with_raised_shape(mut self, raised: &plakous_tools::ToolOutcome) -> Self {
-        if plakous_tools::internal::raised_plain_file_read(raised) {
-            self.observation_shape = observation::budget::ObservationShape::PlainFileRead;
-        }
+        use observation::budget::ObservationShape;
+        use plakous_tools::internal::RaisedFileRead;
+        self.observation_shape = match plakous_tools::internal::raised_file_read(raised) {
+            Some(RaisedFileRead::PlainWithMetadata) => ObservationShape::PlainFileRead,
+            Some(RaisedFileRead::Page(page)) => ObservationShape::ReadPage(Box::new(page.clone())),
+            None => ObservationShape::Text,
+        };
         self
     }
 

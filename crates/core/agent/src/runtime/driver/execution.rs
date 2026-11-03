@@ -442,7 +442,7 @@ pub(in crate::runtime) fn canonicalize_observed_tool_execution(
 ) -> Result<(ConversationItem, Option<ObservationClip>), AgentError> {
     let presentation_subject = execution.presentation_subject.clone();
     let (result, clip) =
-        clip_observed_tool_result(execution.result, budget, execution.observation_shape)?;
+        clip_observed_tool_result(execution.result, budget, &execution.observation_shape)?;
     let item = canonical_tool_result_item(result_entry_id, result)?
         .with_presentation_subject(presentation_subject.as_deref());
     Ok((item, clip))

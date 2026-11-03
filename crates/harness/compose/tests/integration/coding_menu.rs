@@ -1615,3 +1615,100 @@ fn an_unflagged_host_cannot_recompile_a_claimed_slot() -> Result<(), Box<dyn std
     );
     Ok(())
 }
+
+/// One canonical success raised through `projection`'s `tool`.
+fn raise_one(
+    projection: &ToolProjectionMap,
+    tool: &str,
+    arguments: &str,
+    canonical: &str,
+) -> Result<ToolOutcome, Box<dyn std::error::Error>> {
+    let prepared = projection.prepare(request(
+        "00000000-0000-0000-0000-0000000005a0",
+        tool,
+        arguments,
+    )?)?;
+    let (_, receipt) = prepared.into_parts();
+    let receipt = receipt.ok_or("projected request omitted its receipt")?;
+    Ok(projection.raise(&receipt, ToolOutcome::success_text(canonical)?)?)
+}
+
+/// Each Direct read raising marks its outcome with how it rendered the read,
+/// for the runtime's head-first observation cut; the page mark describes the
+/// wrapped string exactly and renders the family's own continuation. A nested
+/// read and other tools carry no mark.
+#[test]
+fn direct_read_raisings_mark_how_they_rendered_the_read() -> Result<(), Box<dyn std::error::Error>>
+{
+    use plakous_tools::internal::{RaisedFileRead, raised_file_read};
+    let canonical = r#"{"content":"a\nb\n","offset":3,"lines":2,"eof":false,"next_offset":5}"#;
+    for (presentation, tool, arguments, cut) in [
+        (
+            CodingPresentation::Grok,
+            "read_file",
+            r#"{"target_file":"a.txt"}"#,
+            "",
+        ),
+        (
+            CodingPresentation::Claude,
+            "Read",
+            r#"{"file_path":"a.txt"}"#,
+            "     3\ta\n... page truncated to fit the context budget\n... more lines; next_offset=4",
+        ),
+        (
+            CodingPresentation::Pi,
+            "read",
+            r#"{"path":"a.txt"}"#,
+            "a\n\n[Showing lines 3-3. Use offset=4 to continue.]",
+        ),
+    ] {
+        let projection = presentation_projection(presentation)?;
+        let raised = raise_one(&projection, tool, arguments, canonical)?;
+        let [ToolResultPart::Text(text)] = raised.parts() else {
+            return Err("raised read was not one text part".into());
+        };
+        let value: Value = serde_json::from_str(text.text())?;
+        let inner = value["result"].as_str().ok_or("wrapper lost")?;
+        match raised_file_read(&raised) {
+            Some(RaisedFileRead::PlainWithMetadata) => {
+                assert_eq!(presentation, CodingPresentation::Grok);
+            }
+            Some(RaisedFileRead::Page(page)) => {
+                assert_eq!(page.text_bytes(), inner.len(), "{presentation:?}");
+                let lines = &inner[..page.lines_bytes()];
+                assert_eq!(lines.matches('\n').count(), 2, "{presentation:?}");
+                let first = lines.find('\n').ok_or("no line")? + 1;
+                assert_eq!(page.cut(&lines[..first], 1), cut, "{presentation:?}");
+            }
+            None => return Err(format!("{presentation:?} read carries no mark").into()),
+        }
+        let failed = projection.raise(
+            &projection
+                .prepare(request(
+                    "00000000-0000-0000-0000-0000000005a1",
+                    tool,
+                    arguments,
+                )?)?
+                .into_parts()
+                .1
+                .ok_or("projected request omitted its receipt")?,
+            ToolOutcome::failure_text("missing file")?,
+        )?;
+        assert!(raised_file_read(&failed).is_none(), "{presentation:?}");
+    }
+    let nested = raise_one(
+        &claude_read_projection(true)?,
+        "Read",
+        r#"{"file_path":"a.txt"}"#,
+        canonical,
+    )?;
+    assert!(raised_file_read(&nested).is_none());
+    let edit = raise_one(
+        &claude_projection()?,
+        "Edit",
+        r#"{"file_path":"a.txt","old_string":"a","new_string":"b"}"#,
+        "changed_files=1\nM \"a.txt\"",
+    )?;
+    assert!(raised_file_read(&edit).is_none());
+    Ok(())
+}

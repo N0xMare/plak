@@ -17,6 +17,7 @@ pub use projection::{
     ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap, ToolProjectionRaisingV2,
     ToolProjectionReceiptV2,
 };
+pub(crate) use raising::{ReadPageStyle, cut_read_page};
 
 #[cfg(test)]
 #[allow(

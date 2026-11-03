@@ -241,10 +241,68 @@ pub fn process_session_update(outcome: &ToolOutcome) -> Option<ProcessSessionUpd
     outcome.process_session_update()
 }
 
-/// Whether a raising program rendered this outcome as a plain-text file read:
-/// the selected text, then one read metadata line.
-pub fn raised_plain_file_read(outcome: &ToolOutcome) -> bool {
-    outcome.is_plain_file_read()
+/// How a raising program rendered this outcome as a text file read, if it did.
+pub fn raised_file_read(outcome: &ToolOutcome) -> Option<&RaisedFileRead> {
+    outcome.file_read()
+}
+
+/// How a raising program rendered a text file read. The runtime's observation
+/// cut keys on this mark, never on the text, to keep the read head-first.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RaisedFileRead {
+    /// The selected text, then one read metadata line the cut rewrites.
+    PlainWithMetadata,
+    /// Rendered lines, then notes and a continuation the presentation owns.
+    Page(RaisedReadPage),
+}
+
+/// One raised read page: rendered lines, then the presentation's notes and,
+/// when the page stops short of the end of the file, where to continue.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RaisedReadPage {
+    style: crate::exposure::ReadPageStyle,
+    offset: u64,
+    lines_bytes: usize,
+    text_bytes: usize,
+    /// The page's clipping and decoding notes, rendered.
+    notes: Vec<String>,
+}
+
+impl RaisedReadPage {
+    pub(crate) const fn new(
+        style: crate::exposure::ReadPageStyle,
+        offset: u64,
+        lines_bytes: usize,
+        text_bytes: usize,
+        notes: Vec<String>,
+    ) -> Self {
+        Self {
+            style,
+            offset,
+            lines_bytes,
+            text_bytes,
+            notes,
+        }
+    }
+
+    /// Length of the raised text this page describes: the wrapped string of a
+    /// `{"result": string}` presentation, or the whole text otherwise.
+    pub const fn text_bytes(&self) -> usize {
+        self.text_bytes
+    }
+
+    /// Length of the leading part of that text holding the rendered lines.
+    pub const fn lines_bytes(&self) -> usize {
+        self.lines_bytes
+    }
+
+    /// The page cut after its first `shown` lines. `head` is those lines,
+    /// each ending in a newline, or the caller's withheld notice and a
+    /// newline when `shown` is 0. The page's notes follow, then the
+    /// presentation's continuation from the line after the last one shown.
+    pub fn cut(&self, head: &str, shown: u64) -> String {
+        crate::exposure::cut_read_page(self.style, head, &self.notes, self.offset, shown)
+    }
 }
 
 #[derive(Default)]
