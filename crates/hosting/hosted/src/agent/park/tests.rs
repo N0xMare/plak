@@ -25,19 +25,23 @@ use crate::agent_tree_protocol::{
 };
 use crate::topology_runtime::ProductTopologyRuntime;
 
-struct Fixture {
+pub(in crate::agent) struct Fixture {
     provider_gates: Vec<plakous_offline_crash_harness::gate::GateHandle>,
-    root: tempfile::TempDir,
-    runtime: Arc<ProductTopologyRuntime>,
-    agent: plakous::agent::Agent,
-    registry: Arc<crate::jobs::JobRegistry>,
+    pub(in crate::agent) root: tempfile::TempDir,
+    pub(in crate::agent) runtime: Arc<ProductTopologyRuntime>,
+    pub(in crate::agent) agent: plakous::agent::Agent,
+    pub(in crate::agent) registry: Arc<crate::jobs::JobRegistry>,
     sessions: Arc<AgentSessions>,
     binding: Box<dyn Fn() -> plakous::sessions::SessionRuntimeBinding + Send + Sync>,
-    child: String,
+    pub(in crate::agent) child: String,
 }
 
 impl Fixture {
-    async fn until(&self, what: &str, done: impl Fn(&ProductAgentTree, &str) -> bool) {
+    pub(in crate::agent) async fn until(
+        &self,
+        what: &str,
+        done: impl Fn(&ProductAgentTree, &str) -> bool,
+    ) {
         let changed = self.runtime.read(ProductAgentTree::waiters).unwrap();
         tokio::time::timeout(Duration::from_secs(30), async {
             loop {
@@ -79,14 +83,17 @@ impl Fixture {
             .unwrap()
     }
 
-    async fn mutate<R>(&self, work: impl FnOnce(&mut ProductAgentTree) -> R) -> R {
+    pub(in crate::agent) async fn mutate<R>(
+        &self,
+        work: impl FnOnce(&mut ProductAgentTree) -> R,
+    ) -> R {
         self.runtime
             .mutate_then_emit_borrowed_for_test(false, |tree| Ok(work(tree)))
             .await
             .unwrap()
     }
 
-    async fn submit(&self) {
+    pub(in crate::agent) async fn submit(&self) {
         self.mutate(|tree| {
             tree.submit_result(
                 &self.child,
@@ -105,11 +112,11 @@ impl Fixture {
     }
 }
 
-fn parked(tree: &ProductAgentTree, child: &str) -> bool {
+pub(in crate::agent) fn parked(tree: &ProductAgentTree, child: &str) -> bool {
     tree.waiting_on(child).is_some()
 }
 
-fn turns(count: u32) -> impl Fn(&ProductAgentTree, &str) -> bool {
+pub(in crate::agent) fn turns(count: u32) -> impl Fn(&ProductAgentTree, &str) -> bool {
     // Acceptance is durable; the projected live turn can already be gone
     // when a loaded test next polls, even though the wake ran successfully.
     move |tree, child| {
@@ -118,14 +125,14 @@ fn turns(count: u32) -> impl Fn(&ProductAgentTree, &str) -> bool {
     }
 }
 
-fn settled(tree: &ProductAgentTree, child: &str) -> bool {
+pub(in crate::agent) fn settled(tree: &ProductAgentTree, child: &str) -> bool {
     tree.attempt(child)
         .is_some_and(|attempt| attempt.status.is_stopped())
 }
 
 /// One child with a real scripted session whose first turn is admitted
 /// and handed to the production turn waiter, exactly as a spawn does.
-async fn fixture(
+pub(in crate::agent) async fn fixture(
     steps: serde_json::Value,
     setup: impl FnOnce(&mut ProductAgentTree) -> String,
 ) -> Fixture {
@@ -294,21 +301,21 @@ async fn fixture_with_probe(
     }
 }
 
-fn start_job(command: &str) -> serde_json::Value {
+pub(in crate::agent) fn start_job(command: &str) -> serde_json::Value {
     json!({"output": {"tool": {"name": "process_session_start", "arguments": {
         "command": command, "workdir": ".", "login": false, "tty": false,
         "keep_stdin_open": true, "yield_time_ms": 0, "max_output_bytes": 8192
     }}}, "finish": "tool_calls"})
 }
 
-fn leaf(tree: &mut ProductAgentTree) -> String {
+pub(in crate::agent) fn leaf(tree: &mut ProductAgentTree) -> String {
     tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .unwrap()
         .agent_id
 }
 
 /// Hold the final stream until the test submits or cancels the model.
-fn held(text: &str) -> serde_json::Value {
+pub(in crate::agent) fn held(text: &str) -> serde_json::Value {
     json!({"stream": [{"gate": {"registry": "test-held-response"}}], "output": {"text": text}})
 }
 

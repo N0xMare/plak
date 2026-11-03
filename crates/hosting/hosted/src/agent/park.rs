@@ -1143,4 +1143,4 @@ pub(super) async fn settle_recovered_start(
 pub(super) mod hooks;
 
 #[cfg(test)]
-mod tests;
+pub(in crate::agent) mod tests;

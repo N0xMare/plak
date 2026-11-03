@@ -139,6 +139,8 @@ mod recover_tests;
 mod resources;
 pub(crate) mod result_mail;
 mod resume;
+#[cfg(test)]
+pub(crate) mod role_table_tests;
 pub mod shell;
 mod source_release;
 mod startup;

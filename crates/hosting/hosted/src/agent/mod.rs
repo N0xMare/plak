@@ -14,6 +14,8 @@ pub mod live;
 mod park;
 mod recovery;
 mod reresolve;
+#[cfg(test)]
+pub(crate) mod role_table_tests;
 pub mod roots;
 
 // The test modules below reach these through `use super::*`, as they did when
