@@ -15,6 +15,11 @@ one cross-build carrier (a build imports its own and the previous version).
   the route and model named. New sessions record a registry descriptor that
   includes `view_image`; no schema revision or state-key change. Codex native
   Code Mode does not offer `view_image`.
+- `/clear` is replaced by `/new`, which starts a new session in the same TUI; the
+  previous session is untouched and resumable. With running agents or background
+  processes, `/new` asks first and offers to stop that work before switching.
+- Claude `Read` and pi `read` results cut to fit the context keep whole leading
+  lines and say where to continue, like Grok's read.
 - Agent Skills: `SKILL.md` folders under `<workspace>/.agents/skills` and
   `~/.agents/skills` are listed in each family's native wording (the project
   wins a shared name) and frozen with the session like `AGENTS.md`. Claude
@@ -65,6 +70,18 @@ one cross-build carrier (a build imports its own and the previous version).
   OAuth web search and page fetch) report a reviewed version gate or sent-beta
   rejection as contract drift with the newer-build remedy. A 401 or 403 keeps
   the credential path.
+- Portable runtime interfaces (`plakous::model::runtime`: spawn, sleep, a
+  monotonic clock and an HTTP transport) with native implementations in
+  `plakous::runtime`; host task sets are built on them.
+- Tree mutations run through an async per-tree writer that keeps commit order;
+  a storage-full wait no longer blocks a worker thread, owed releases and effect
+  completions never give up, and host shutdown is a latched signal.
+- Storage-wait interrupts are bound per handle for the runtime and tree stores.
+- Runner ports: instruction and skill discovery read through
+  `InstructionSourceReader`, workspace probes through `WorkspaceProbe`, and job
+  services through `JoinedSessionsPort`; answers distinguish unavailable from
+  absent and discovery fails closed. `JobHost`, `discover_instruction_sources`,
+  `discover_skills`, `discover_skill_roots` and `Skill::load` signatures change.
 - Hosted and orchestration tasks have explicit owners: a session's tasks are
   aborted and joined at release, a tree's at its last root lease, and tasks
   that own a child's session or runtime authority run until they return.
