@@ -168,7 +168,7 @@ fn delete_abandonment_survives_reopen_and_cannot_be_recovered_or_overwritten() {
     .unwrap();
     assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Closed);
     let store = MemoryTreeStore::default();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let mut reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
     assert_eq!(
         reopened.recovery_need(&child).unwrap(),

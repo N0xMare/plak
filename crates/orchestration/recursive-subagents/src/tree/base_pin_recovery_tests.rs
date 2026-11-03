@@ -61,7 +61,7 @@ async fn base_pin_attachment_survives_dropped_first_mutation_effects() {
         fixture.tree.acknowledge_revision(Revision::published(0));
         fixture
             .tree
-            .acknowledge_revision(store.save(&fixture.tree).unwrap());
+            .acknowledge_revision(store.save_in_custody(&fixture.tree).unwrap());
         let driver = TreeDriver::new(
             Arc::new(Mutex::new(fixture.tree)),
             store,
@@ -104,10 +104,10 @@ async fn base_pin_attachment_publication_failure_has_a_remedy_instead_of_pending
     fixture.tree.acknowledge_revision(Revision::published(0));
     fixture
         .tree
-        .acknowledge_revision(store.save(&fixture.tree).unwrap());
+        .acknowledge_revision(store.save_in_custody(&fixture.tree).unwrap());
     let mut newer = fixture.tree.clone();
     newer.bump();
-    let _ = store.save(&newer).unwrap();
+    let _ = store.save_in_custody(&newer).unwrap();
     let driver = TreeDriver::new(
         Arc::new(Mutex::new(fixture.tree)),
         store,
@@ -139,7 +139,7 @@ async fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
     fixture.tree.acknowledge_revision(Revision::published(0));
     fixture
         .tree
-        .acknowledge_revision(store.save(&fixture.tree).unwrap());
+        .acknowledge_revision(store.save_in_custody(&fixture.tree).unwrap());
     let driver = TreeDriver::new(
         Arc::new(Mutex::new(fixture.tree)),
         store,

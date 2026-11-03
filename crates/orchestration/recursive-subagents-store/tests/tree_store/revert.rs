@@ -145,7 +145,8 @@ fn revert_removes_only_the_adopted_delta_keeping_later_edits_and_original_pins()
     }
     let tmp = tempfile::tempdir().unwrap();
     let store = SqliteTreeStore::open(&tmp.path().join("tree.sqlite3")).unwrap();
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     let reopened = ProductAgentTree::reopen(store.load("revert-tests").unwrap().unwrap());
     assert_eq!(reopened.candidates(), f.tree.candidates());
 }

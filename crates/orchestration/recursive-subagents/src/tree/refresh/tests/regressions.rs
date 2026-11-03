@@ -179,7 +179,8 @@ fn recovery_abandons_an_unstarted_refresh_with_an_externally_moved_pin() {
     let index = git(&f.path, &["write-tree"]);
     let content = std::fs::read(f.path.join("CHILD.txt")).unwrap();
     let store = MemoryTreeStore::new();
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     git(&f.path, &["update-ref", &reference, &external_pin]);
     f.tree = ProductAgentTree::reopen(store.load("tree1").unwrap().unwrap());
     assert_eq!(f.tree.settle_for_test().cleanup_failures, Vec::new());

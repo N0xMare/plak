@@ -530,7 +530,7 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
         }
         if stamp_root_account(&mut tree, root_account) {
             let acknowledged = store
-                .save(&tree)
+                .save_in_custody(&tree)
                 .map_err(|error| CliFailure::new(error.detail))?;
             tree.acknowledge_revision(acknowledged);
         }
@@ -550,7 +550,7 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
     )
     .await?;
     let acknowledged = store
-        .save(&tree)
+        .save_in_custody(&tree)
         .map_err(|error| CliFailure::new(error.detail))?;
     tree.acknowledge_revision(acknowledged);
     Ok(tree)
@@ -616,7 +616,7 @@ pub(crate) async fn seed_genesis_tree(
     .await?;
     // This handle is dropped; the session's own open reloads the tree.
     let _revision = store
-        .save(&tree)
+        .save_in_custody(&tree)
         .map_err(|error| CliFailure::new(error.detail))?;
     Ok(())
 }

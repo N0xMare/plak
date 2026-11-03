@@ -46,7 +46,7 @@ impl ChildUsageFixture {
             Vec::new(),
         ))
         .unwrap();
-        tree.acknowledge_revision(store.save(&tree).unwrap());
+        tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
         let (writer, receiver) = TelemetryWriter::detached(8);
         let observer = ProductTopologyObserver::port(Some(writer)).unwrap();
         let runtime = plakous_hosted::topology_runtime::insert_root_with(
@@ -150,6 +150,7 @@ impl TreeStore for FailingStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &plakous_hosted::agent_tree::CustodyClaim,
     ) -> Result<plakous_hosted::agent_tree::Revision, plakous_hosted::agent_tree::TreeStoreError>
     {
         if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
@@ -157,7 +158,11 @@ impl TreeStore for FailingStore {
                 "injected save failure",
             ));
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn plakous_hosted::agent_tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 

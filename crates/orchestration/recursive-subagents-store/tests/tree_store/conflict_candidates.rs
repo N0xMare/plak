@@ -271,7 +271,8 @@ fn resolver_lands_resolution_when_target_moved_and_source_is_accepted_once() {
 fn assert_lineage_reopens(f: &mut Fixture) {
     let tmp = tempfile::tempdir().unwrap();
     let store = SqliteTreeStore::open(&tmp.path().join("tree.sqlite3")).unwrap();
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     let reopened = ProductAgentTree::reopen(store.load("conflict-tests").unwrap().unwrap());
     assert_eq!(reopened.candidates(), f.tree.candidates());
     assert_eq!(reopened.workspaces(), f.tree.workspaces());
@@ -489,11 +490,13 @@ fn retry_overwrites_unrecorded_conflict_pin_and_lineage_reopens() {
     let mut f = Fixture::new(false);
     let tmp = tempfile::tempdir().unwrap();
     let store = SqliteTreeStore::open(&tmp.path().join("tree.sqlite3")).unwrap();
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     f.tree
         .begin_adopt_for_test("root", &request(&f.source, false))
         .unwrap();
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     let ticket = f.tree.take_effects().adopts.remove(0);
     let failed =
         plakous_recursive_subagents::tree::block_on_for_test(ticket.land(&SystemVcs)).unwrap_err();
@@ -536,7 +539,8 @@ fn retry_overwrites_unrecorded_conflict_pin_and_lineage_reopens() {
         .clone();
     assert_eq!(f.tree.candidates()[&conflict].commit, first);
     assert!(conflict.as_str().ends_with("-x1"));
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     let reopened = ProductAgentTree::reopen(store.load("conflict-tests").unwrap().unwrap());
     assert_eq!(reopened.candidates(), f.tree.candidates());
 }

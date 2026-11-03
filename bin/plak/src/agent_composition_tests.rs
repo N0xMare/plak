@@ -507,7 +507,7 @@ async fn child_seal_persists_after_the_root_released_the_hub() {
     binding.max_tier = Tier::Mutate;
     tree.pin_template("implement", binding);
     let store = crate::store::tree::tree_store(&paths).expect("store");
-    tree.acknowledge_revision(store.save(&tree).expect("genesis"));
+    tree.acknowledge_revision(store.save_in_custody(&tree).expect("genesis"));
     let runtime = plakous_hosted::topology_runtime::insert_root_with(
         tree_id.clone(),
         tree,

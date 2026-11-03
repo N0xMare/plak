@@ -19,7 +19,7 @@ use plakous_host_protocol::topology::CandidateId;
 
 use super::{
     CustodyClaim, CustodyError, CustodyHost, CustodyRecord, CustodyTake, HolderGone,
-    ProductAgentTree, TopologyError, TopologyErrorCode, TreeCustody,
+    ProductAgentTree, TopologyError, TopologyErrorCode, TreeCustody, TreeHostedElsewhere,
 };
 
 /// Why a [`TreeStore`] call failed. The kinds are distinguished because
@@ -44,6 +44,11 @@ pub enum TreeStoreErrorKind {
     },
     /// Rows came back that do not decode as a tree.
     Corrupt,
+    /// Another host process holds the tree's custody; nothing was written.
+    HostedElsewhere(Box<TreeHostedElsewhere>),
+    /// The write's custody claim no longer holds the tree: it was released or
+    /// superseded. Nothing was written.
+    NotInCustody,
 }
 
 /// One store failure: the kind a caller decides on, and a sentence naming
@@ -81,6 +86,24 @@ impl TreeStoreError {
     pub fn corrupt(detail: impl Into<String>) -> Self {
         Self {
             kind: TreeStoreErrorKind::Corrupt,
+            detail: detail.into(),
+        }
+    }
+
+    /// Another host process holds the tree's custody.
+    #[must_use]
+    pub fn hosted_elsewhere(refusal: TreeHostedElsewhere) -> Self {
+        Self {
+            detail: refusal.to_string(),
+            kind: TreeStoreErrorKind::HostedElsewhere(Box::new(refusal)),
+        }
+    }
+
+    /// The write's claim no longer holds the tree's custody.
+    #[must_use]
+    pub fn not_in_custody(detail: impl Into<String>) -> Self {
+        Self {
+            kind: TreeStoreErrorKind::NotInCustody,
             detail: detail.into(),
         }
     }
@@ -282,6 +305,12 @@ pub trait TreeStore: Send + Sync {
     /// that is 0) or the save is refused with `StaleRevision` and the rows
     /// are left alone. See [`fence_revision`].
     ///
+    /// The save is fenced by custody too: `claim` is proved against the
+    /// tree's custody record in the same atomic step as the write, so a
+    /// released or superseded claim writes nothing
+    /// ([`TreeStoreErrorKind::NotInCustody`],
+    /// [`TreeStoreErrorKind::HostedElsewhere`]).
+    ///
     /// The published revision comes back rather than being written into the
     /// argument: a durability port persists a tree, it does not edit one.
     /// Applying it is [`ProductAgentTree::acknowledge_revision`]'s job, and a
@@ -292,23 +321,77 @@ pub trait TreeStore: Send + Sync {
     ///
     /// Refuses a stale revision, an unreachable store, and rows that do not
     /// encode.
-    fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError>;
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<Revision, TreeStoreError>;
     /// Raw rows; the caller applies the reopen law.
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError>;
 
     /// Deletes every row of one tree, compare-and-swapped on the revision the
-    /// caller saw; an absent tree is not an error. A store that cannot
-    /// delete refuses.
+    /// caller saw and fenced by `claim`, which must hold the tree's custody;
+    /// the custody record goes with the rows. An absent tree is not an
+    /// error. A store that cannot delete refuses.
     ///
     /// # Errors
     ///
-    /// Refuses a moved revision, an unreachable store, and a store without
-    /// deletion.
-    fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
-        let _ = (tree_id, expected_revision);
+    /// Refuses a claim that does not hold the tree, a moved revision, an
+    /// unreachable store, and a store without deletion.
+    fn delete(
+        &self,
+        tree_id: &str,
+        expected_revision: u64,
+        claim: &CustodyClaim,
+    ) -> Result<(), TreeStoreError> {
+        let _ = (tree_id, expected_revision, claim);
         Err(TreeStoreError::unavailable(
             "this tree store does not delete trees",
         ))
+    }
+
+    /// The custody records of this store's trees, which every write proves.
+    fn custody_port(&self) -> &dyn TreeCustody;
+
+    /// A whole-tree publish outside any tree driver (a headless flow, a
+    /// bootstrap before the hub attaches): under this process's custody
+    /// claim when it holds one, otherwise under one taken for this save and
+    /// released after it.
+    ///
+    /// # Errors
+    ///
+    /// The custody refusal or the store's refusal of the save.
+    fn save_in_custody(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
+        super::with_custody(self.custody_port(), &tree.tree_id, |claim| {
+            self.save(tree, claim)
+        })
+    }
+    /// [`Self::delete`] outside any tree driver (a session deletion, a fork
+    /// seed's cleanup): under this process's custody claim when it holds
+    /// one, otherwise under one taken for this delete. The record goes with
+    /// the rows, so a delete that lands forgets its share.
+    ///
+    /// # Errors
+    ///
+    /// The custody refusal or the store's refusal of the delete.
+    fn delete_in_custody(
+        &self,
+        tree_id: &str,
+        expected_revision: u64,
+    ) -> Result<(), TreeStoreError> {
+        let hold = super::acquire_custody(self.custody_port(), tree_id)?;
+        match self.delete(tree_id, expected_revision, hold.claim()) {
+            Ok(()) => {
+                hold.forget();
+                Ok(())
+            }
+            Err(error) => {
+                // A release this store refuses leaves the record naming this
+                // live process, which its next take joins.
+                let _ = super::release_custody_hold(self.custody_port(), hold);
+                Err(error)
+            }
+        }
     }
 }
 
@@ -358,10 +441,21 @@ pub fn fence_revision(
 
 /// An in-process [`TreeStore`]: the rows of each tree, keyed by id. Runs the
 /// same conformance suite as the SQLite store.
-#[derive(Default)]
 pub struct MemoryTreeStore {
     trees: Mutex<BTreeMap<String, ProductAgentTree>>,
     custody: Mutex<BTreeMap<String, CustodyRecord>>,
+    scope: u64,
+}
+
+impl Default for MemoryTreeStore {
+    fn default() -> Self {
+        static NEXT_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        Self {
+            trees: Mutex::default(),
+            custody: Mutex::default(),
+            scope: NEXT_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
 }
 
 impl MemoryTreeStore {
@@ -389,7 +483,18 @@ impl TreeStore for MemoryTreeStore {
         Ok(trees.keys().cloned().collect())
     }
 
-    fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<Revision, TreeStoreError> {
+        // Custody first, then rows, for every write: the proof and the write
+        // are one step.
+        let custody = self
+            .custody
+            .lock()
+            .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
+        prove_write(custody.get(&tree.tree_id), &tree.tree_id, claim)?;
         let mut trees = self
             .trees
             .lock()
@@ -411,22 +516,56 @@ impl TreeStore for MemoryTreeStore {
         Ok(trees.get(tree_id).map(ProductAgentTree::to_persisted))
     }
 
-    fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
+    fn delete(
+        &self,
+        tree_id: &str,
+        expected_revision: u64,
+        claim: &CustodyClaim,
+    ) -> Result<(), TreeStoreError> {
+        let mut custody = self
+            .custody
+            .lock()
+            .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
+        prove_write(custody.get(tree_id), tree_id, claim)?;
         let mut trees = self
             .trees
             .lock()
             .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
-        match trees.get(tree_id).map(|stored| stored.revision) {
-            None => Ok(()),
-            Some(stored) if stored != expected_revision => {
-                Err(TreeStoreError::stale(stored, expected_revision))
-            }
-            Some(_) => {
-                trees.remove(tree_id);
-                Ok(())
-            }
+        if let Some(stored) = trees.get(tree_id).map(|tree| tree.revision)
+            && stored != expected_revision
+        {
+            return Err(TreeStoreError::stale(stored, expected_revision));
         }
+        trees.remove(tree_id);
+        custody.remove(tree_id);
+        Ok(())
     }
+
+    fn custody_port(&self) -> &dyn TreeCustody {
+        self
+    }
+}
+
+/// The custody fence of one write: `claim` must name `tree_id` and hold its
+/// stored record `current`.
+///
+/// # Errors
+///
+/// Refuses a claim for another tree and one the record does not prove.
+pub fn prove_write(
+    current: Option<&CustodyRecord>,
+    tree_id: &str,
+    claim: &CustodyClaim,
+) -> Result<(), TreeStoreError> {
+    if claim.tree_id != tree_id {
+        return Err(TreeStoreError::not_in_custody(format!(
+            "a custody claim of agent tree {} cannot write agent tree {tree_id}",
+            claim.tree_id
+        )));
+    }
+    CustodyRecord::prove(current, claim)
+        .map(|_| ())
+        .map_err(TreeStoreError::from)
 }
 
 impl MemoryTreeStore {
@@ -443,6 +582,10 @@ impl MemoryTreeStore {
 }
 
 impl TreeCustody for MemoryTreeStore {
+    fn custody_scope(&self) -> String {
+        format!("memory:{}", self.scope)
+    }
+
     fn custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, TreeStoreError> {
         let custody = self
             .custody

@@ -205,8 +205,9 @@ bootstraps its own tree on first attach like any new session. When the
 runtime fork definitely did not commit (its runtime build failed, it was
 interrupted before dispatch, or the runtime refused it outright), the host
 deletes the seeded tree again, compare-and-swapped on the revision the seed
-published; an interrupted process can leave one behind, an unreferenced tree
-nothing opens. Tree resolution follows a session's lineage only while its
+published and under a custody claim like every tree write (the seed's save
+and this delete each take one for the write, §14); an interrupted process
+can leave one behind, an unreferenced tree nothing opens. Tree resolution follows a session's lineage only while its
 product node is its source's (a rebind that stayed on its source's tree); a
 record whose node is the root of a tree named after it (a new session,
 `/new`, a fork, an import or carry, a rebind onto a tree of its own) resolves
@@ -3200,8 +3201,10 @@ record are below; §14.3 classifies every column family as an intent, a view of
 the feed, or an external-effect record.
 
 A tree save is one `Immediate` transaction under WAL and `synchronous=FULL`.
-It compare-and-swaps the `agent_trees` header with `UPDATE ... WHERE
-revision = ?` on the revision the handle last had acknowledged, requiring
+It first proves the writer's custody claim against the tree's custody record
+(below) inside that transaction, then compare-and-swaps the `agent_trees`
+header with `UPDATE ... WHERE revision = ?` on the revision the handle last
+had acknowledged, requiring
 exactly one changed row, and then writes only the rows that differ from the
 tree the same connection last committed: in-place upserts for new or changed
 keys, nodes first, and keyed deletes for removed keys, nodes last. That image
@@ -3249,9 +3252,7 @@ transaction. The state CHECK still admits `restored_paused`.
 **Custody.** `agent_tree_custody` holds one fenced claim per tree, naming one
 host process by its stable `host_id`, its typed process instance, its binary id
 and its machine. It is not tree content: no tree save or whole-tree replace
-touches it, and it has no foreign key, so it may precede the tree's rows. A tree
-deletion leaves it too; tree ids are session ids and are never reused, and the
-fenced delete of the hub integration removes the record with the rows. A take
+changes it, and it has no foreign key, so it may precede the tree's rows. A take
 of an absent or released record claims it under the next fence. The holder's
 own take returns its claim unchanged. Another host process is refused with the
 typed `tree_hosted_elsewhere (<binary id>)` refusal naming the holder, its
@@ -3266,9 +3267,40 @@ never act again. A release keeps the fence and the last holder; repeating the
 last holder's release succeeds, and any other claim, including a stale
 lower-fence one, is not held. Each step is one `Immediate` transaction, so
 concurrent processes serialize and exactly one of them takes. Both tree stores
-implement these primitives with the same transition law. No host takes custody
-yet: cross-process tree safety is still the revision compare-and-swap above,
-and behavior is unchanged.
+implement these primitives with the same transition law.
+
+**Fenced writes.** Every tree write presents a custody claim, and the store
+proves it against the stored record in the same atomic step as the write:
+`TreeStore::save(tree, claim)` and
+`TreeStore::delete(tree_id, expected_revision, claim)`, in the SQLite store's
+one `Immediate` transaction; the memory store under its custody lock. A claim that does not
+hold the tree (none was taken, it was released, or a later take superseded
+it) writes nothing and is refused `NotInCustody`, or `HostedElsewhere` with
+the typed `tree_hosted_elsewhere` refusal when another host process holds the
+record. A delete removes the custody record with the rows; tree ids are
+session ids and are never reused. There is no other tree write: the store's
+capacity probe writes only its schema row.
+
+A host process takes custody as one `CustodyHost`, fixed at its first take,
+and counts its holders per store and tree, so every holder in the process
+shares one claim and only the last one releases it. The tree driver takes
+custody when it binds a tree to its store, before its first save (the
+attachment publication included), and every save it makes presents that
+claim; a driver whose take was refused refuses every save the same way, and a
+hub does not attach it. A hub attach takes custody before it loads or
+bootstraps the tree, so that first save is fenced too, and gives its own share
+back on every exit: an attach that fails after its take leaves the record
+released, not held by the live process. The driver gives its
+share up when its last clone drops, so every writer that can still write (an
+owed release, a waiter that captured the driver) writes under it. A
+write outside a driver (a headless flow, a bootstrap before the hub attaches,
+a session deletion) uses the process's claim when it holds one, otherwise one
+taken for the write and released after it (`TreeStore::save_in_custody`,
+`delete_in_custody`). A release the store refuses leaves the record naming
+the live process, which its next take joins. Every share ends in a release,
+or is forgotten when its record went with the tree's rows; a last share
+dropped otherwise would keep the record held until the process exits, and
+debug builds refuse it.
 
 **There is no migration.** A schema change moves the product's state directory
 (chapter 02 §2.5); an older store stays in its own directory and is never read. The store fails closed on a **DDL

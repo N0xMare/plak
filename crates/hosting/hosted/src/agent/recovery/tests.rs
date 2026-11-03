@@ -28,8 +28,8 @@ use super::*;
 use crate::agent::children::spawn_topology_turn_waiter;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};
 use crate::agent_tree::{
-    MemoryTreeStore, PersistedTree, ProductAgentTree, RECOVERED_WITHOUT_TURN, Revision,
-    TURN_ABANDONED, TreeStore, TreeStoreError,
+    CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, RECOVERED_WITHOUT_TURN,
+    Revision, TURN_ABANDONED, TreeCustody, TreeStore, TreeStoreError,
 };
 use crate::agent_tree_protocol::{
     AdoptCandidateRequest, AttemptStatus, MessagePurpose, NodeStatus, SendAgentMessageRequest,
@@ -60,7 +60,11 @@ impl TreeStore for SwitchableStore {
         self.inner.ids()
     }
 
-    fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<Revision, TreeStoreError> {
         if self.capacity_full.load(Ordering::Acquire) {
             self.capacity_waiting.store(true, Ordering::Release);
             return Err(TreeStoreError::storage_full());
@@ -77,11 +81,15 @@ impl TreeStore for SwitchableStore {
         {
             return Err(TreeStoreError::unavailable("injected tree store refusal"));
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
     }
 
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {
         self.inner.load(tree_id)
+    }
+
+    fn custody_port(&self) -> &dyn TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -298,7 +306,7 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
         .read(|tree| {
             let mut unpublished = tree.clone();
             unpublished.acknowledge_revision(Revision::published(0));
-            let _ = store.save(&unpublished).unwrap();
+            let _ = store.save_in_custody(&unpublished).unwrap();
         })
         .unwrap();
     crate::topology_runtime::force_release(&fixture.tree_id).await;
@@ -2492,7 +2500,7 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
             tree.record_host_retirement(&id, "the process was lost mid-adopt".into())
                 .and_then(|value| tree.fold_due(&id).map(|_| value))
                 .unwrap();
-            tree.acknowledge_revision(fixture.store.save(tree).unwrap());
+            tree.acknowledge_revision(fixture.store.save_in_custody(tree).unwrap());
             *tree =
                 ProductAgentTree::reopen(fixture.store.load(&fixture.tree_id).unwrap().unwrap());
             tree.set_vcs(fixture.vcs.clone());

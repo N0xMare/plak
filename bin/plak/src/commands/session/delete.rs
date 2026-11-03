@@ -217,11 +217,14 @@ fn delete_confirmed_session(
     remove_job_outputs(paths, &root)?;
     reclaimed.add(runtime.delete(root)?);
     if let Some((tree_id, revision)) = &plan.tree {
+        use plakous_recursive_subagents::tree::TreeStore as _;
         crate::home::state_artifacts::remember_deleted_tree(paths, tree_id)
             .map_err(CliFailure::new)?;
+        // The tree's rows and its custody record go together, under this
+        // process's custody, so no other host is materializing it meanwhile.
         crate::store::tree::open_tree_store(paths)
             .map_err(CliFailure::new)?
-            .delete(tree_id, *revision)
+            .delete_in_custody(tree_id, *revision)
             .map_err(|error| {
                 CliFailure::new(format!("agent tree deletion failed: {}", error.detail))
             })?;
@@ -267,7 +270,7 @@ fn publish_abandoned_children(
             .map_err(|error| CliFailure::new(error.message))?;
     }
     let acknowledged = store
-        .save(&tree)
+        .save_in_custody(&tree)
         .map_err(|error| CliFailure::new(error.detail))?;
     *revision = acknowledged.value();
     Ok(())

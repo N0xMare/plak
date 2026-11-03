@@ -19,8 +19,9 @@ use plakous_recursive_subagents::protocol::{
 };
 use plakous_recursive_subagents::tools::TreeDriver;
 use plakous_recursive_subagents::tree::{
-    AgentCommand, AgentCommandKind, ChildFinalizationDecision, FailureRead, FakeOp, FakeVcs,
-    PersistedTree, ProductAgentTree, Revision, TreeFeedReads, TreeStore, TreeStoreError,
+    AgentCommand, AgentCommandKind, ChildFinalizationDecision, CustodyClaim, CustodyHost,
+    FailureRead, FakeOp, FakeVcs, HostInstance, PersistedTree, ProductAgentTree, Revision,
+    TreeCustody, TreeFeedReads, TreeStore, TreeStoreError,
 };
 use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection, rows};
 use serde_json::{Value, json};
@@ -104,13 +105,21 @@ impl TreeStore for RecordingStore {
         self.inner.load(id)
     }
 
-    fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
-        let revision = self.inner.save(tree)?;
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<Revision, TreeStoreError> {
+        let revision = self.inner.save(tree, claim)?;
         self.frames.lock().unwrap().push(Frame {
             tree: tree.to_persisted().rows().clone(),
             feeds: self.feeds.lock().unwrap().clone(),
         });
         Ok(revision)
+    }
+
+    fn custody_port(&self) -> &dyn TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -816,6 +825,28 @@ fn write_frame(path: &Path, tree: &ProductAgentTree) {
     tx.commit().unwrap();
 }
 
+/// The custody the cut database is created under. The child that replays the
+/// frames and the parent that reopens after a cut both write under this one
+/// claim, so the indexed commits are exactly the frames' saves.
+fn matrix_claim() -> CustodyClaim {
+    CustodyClaim {
+        tree_id: TREE.to_owned(),
+        host: CustodyHost {
+            host_id: "matrix".to_owned(),
+            instance: HostInstance::parse("1-0000000000000001").unwrap(),
+            binary: None,
+            host_name: "matrix".to_owned(),
+        },
+        fence: 1,
+    }
+}
+
+fn new_cut_db(db: &Path) {
+    let store = SqliteTreeStore::open(db).unwrap();
+    let claim = matrix_claim();
+    assert_eq!(store.take_custody(TREE, &claim.host, None).unwrap(), claim);
+}
+
 fn inspect(path: &Path) -> PersistedTree {
     let TreeInspection::Tree(tree) = SqliteTreeStore::inspect(path, TREE).unwrap() else {
         panic!("recorded tree is absent");
@@ -857,7 +888,7 @@ fn tree_matrix_child() {
             .clone();
         tree.stored_revision = previous;
         let _label = plakous_store::commit_trace::label("tree-matrix-frame");
-        tree.acknowledge_revision(store.save(&tree).unwrap());
+        tree.acknowledge_revision(store.save(&tree, &matrix_claim()).unwrap());
         previous = tree.revision;
     }
 }
@@ -901,7 +932,7 @@ fn open(store: &SqliteTreeStore, feeds: &[Feed], vcs: &Arc<FakeVcs>) -> ProductA
         tree.take_effects().is_empty(),
         "reopen must not reserve a second external effect"
     );
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save(&tree, &matrix_claim()).unwrap());
     tree
 }
 
@@ -935,7 +966,7 @@ async fn indexed_tree_store_commit_cut_matrix() {
     }
     std::fs::write(root.path().join("count"), frames.len().to_string()).unwrap();
     let db = root.path().join("cut.sqlite3");
-    drop(SqliteTreeStore::open(&db).unwrap());
+    new_cut_db(&db);
     let empty = root.path().join("empty.sqlite3");
     std::fs::copy(&db, &empty).unwrap();
     let pilot = run_child(root.path(), None);
@@ -1168,7 +1199,7 @@ async fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
     }
     std::fs::write(root.path().join("count"), frames.len().to_string()).unwrap();
     let db = root.path().join("cut.sqlite3");
-    drop(SqliteTreeStore::open(&db).unwrap());
+    new_cut_db(&db);
     let empty = root.path().join("empty.sqlite3");
     std::fs::copy(&db, &empty).unwrap();
     assert!(run_child(root.path(), None).status.success());
@@ -1202,11 +1233,11 @@ async fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
             effects.seals.len() <= 1,
             "cut {ordinal}: duplicate seal ticket"
         );
-        reopened.acknowledge_revision(store.save(&reopened).unwrap());
+        reopened.acknowledge_revision(store.save(&reopened, &matrix_claim()).unwrap());
         let _ = reopened.complete(plakous_recursive_subagents::tree::block_on_for_test(
             effects.run(&*vcs),
         ));
-        reopened.acknowledge_revision(store.save(&reopened).unwrap());
+        reopened.acknowledge_revision(store.save(&reopened, &matrix_claim()).unwrap());
         let mut again = ProductAgentTree::reopen(store.load(TREE).unwrap().unwrap());
         for (child, feed) in frame.feeds.iter().enumerate() {
             if !feed.records.is_empty() {
@@ -1361,7 +1392,7 @@ async fn transient_resume_decision_commit_cuts_are_conservative_then_replayable(
     }
     std::fs::write(root.path().join("count"), "2").unwrap();
     let db = root.path().join("cut.sqlite3");
-    drop(SqliteTreeStore::open(&db).unwrap());
+    new_cut_db(&db);
     let empty = root.path().join("empty.sqlite3");
     std::fs::copy(&db, &empty).unwrap();
     assert!(run_child(root.path(), None).status.success());
@@ -1393,7 +1424,7 @@ async fn transient_resume_decision_commit_cuts_are_conservative_then_replayable(
                 Some((turn(1, 1).to_string(), 1))
             );
             assert!(reopened.take_effects().is_empty());
-            reopened.acknowledge_revision(store.save(&reopened).unwrap());
+            reopened.acknowledge_revision(store.save(&reopened, &matrix_claim()).unwrap());
             let mut replay = ProductAgentTree::reopen(store.load(TREE).unwrap().unwrap());
             project(&mut replay, 1, &feed);
             assert_eq!(replay.attempt("c1"), reopened.attempt("c1"));

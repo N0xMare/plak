@@ -59,7 +59,10 @@ async fn clean_startup_release_triggers_recovery_only_for_unresolved_nodes() {
 
 #[tokio::test]
 async fn startup_publication_failure_clears_reservation_but_keeps_fault() {
-    use crate::tree::{PersistedTree, ProductAgentTree, Revision, TreeStore, TreeStoreError};
+    use crate::tree::{
+        CustodyClaim, PersistedTree, ProductAgentTree, Revision, TreeCustody, TreeStore,
+        TreeStoreError,
+    };
     use std::sync::atomic::AtomicBool;
 
     struct Store {
@@ -76,12 +79,20 @@ async fn startup_publication_failure_clears_reservation_but_keeps_fault() {
         fn load(&self, id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {
             self.inner.load(id)
         }
-        fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
+        fn save(
+            &self,
+            tree: &ProductAgentTree,
+            claim: &CustodyClaim,
+        ) -> Result<Revision, TreeStoreError> {
             if self.refuse.load(Ordering::SeqCst) {
                 Err(TreeStoreError::unavailable("injected publication failure"))
             } else {
-                self.inner.save(tree)
+                self.inner.save(tree, claim)
             }
+        }
+
+        fn custody_port(&self) -> &dyn TreeCustody {
+            self.inner.custody_port()
         }
     }
     let root = tempfile::tempdir().unwrap();

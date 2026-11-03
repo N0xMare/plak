@@ -662,6 +662,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/hub.rs"): {"error"},
     ("plakous-recursive-subagents", "src/hub/registry.rs"): {"info", "pin", "select", "warn"},
     ("plakous-recursive-subagents", "src/hub/shutdown.rs"): {"warn"},
+    # A custody release the store refused logs only the tree id and the error;
+    # a last share dropped without its release panics in debug builds only.
+    ("plakous-recursive-subagents", "src/tree/custody/custodian.rs"): {"panic", "warn"},
     # Bounded VCS refusal detail, once per workspace/detail change; never file content.
     ("plakous-recursive-subagents", "src/tree/dormancy.rs"): {"info", "warn"},
     # Completion failure logs carry only captured agent/attempt ids and the typed error kind.

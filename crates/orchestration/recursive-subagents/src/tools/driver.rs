@@ -50,12 +50,69 @@ pub struct TreeDriver {
     root_agent_id: Arc<str>,
     /// The shutdown of the host that attached this tree last.
     host_shutdown: Arc<Mutex<Option<HostShutdown>>>,
+    /// This driver's custody of the tree in its store: every save presents
+    /// its claim, which the store proves in the write's own transaction. It
+    /// is released when the last clone of this driver drops, so every writer
+    /// that can still write (an owed release, a waiter that captured the
+    /// driver) writes under it.
+    custody: Arc<DriverCustody>,
     publication_owner: Option<String>,
     capacity_retry_interval: std::time::Duration,
     checkout_sizes: Arc<Mutex<std::collections::BTreeMap<String, CheckoutSize>>>,
 }
 
 type RetirementRecovery = Arc<dyn Fn() + Send + Sync>;
+
+/// A driver's custody of its tree (spec 03 §14), taken when the driver bound
+/// the tree to its store.
+struct DriverCustody {
+    store: Arc<dyn TreeStore>,
+    /// The share this driver holds, or why its take was refused; every save
+    /// is then refused the same way.
+    hold: Result<Mutex<Option<crate::tree::CustodyHold>>, crate::tree::CustodyError>,
+}
+
+impl DriverCustody {
+    fn claim(&self) -> Result<crate::tree::CustodyClaim, crate::tree::TreeStoreError> {
+        match &self.hold {
+            Ok(hold) => hold
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .map(|hold| hold.claim().clone())
+                .ok_or_else(|| {
+                    crate::tree::TreeStoreError::not_in_custody("agent tree custody was released")
+                }),
+            Err(error) => Err(error.clone().into()),
+        }
+    }
+}
+
+impl Drop for DriverCustody {
+    /// The last clone of the driver is gone: no writer of this tree remains,
+    /// so its share is released. A release the store refuses leaves the
+    /// record naming this live process, which its next take joins and which
+    /// ends with it.
+    fn drop(&mut self) {
+        let Ok(hold) = &self.hold else {
+            return;
+        };
+        let Some(hold) = hold
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        else {
+            return;
+        };
+        if let Err(error) = crate::tree::release_custody_hold(self.store.custody_port(), hold) {
+            tracing::warn!(
+                target: "plak.topology",
+                error = %error,
+                "agent tree custody was not released when its driver ended"
+            );
+        }
+    }
+}
 
 /// One writer turn's work, with its result already handed off.
 type ErasedWork = Box<dyn FnOnce(&mut storage::TreeMutationGuard<'_>) + Send>;
@@ -190,6 +247,19 @@ impl TreeDriver {
         vcs: Arc<dyn VcsOps>,
         observer: Option<Arc<dyn TopologyObserver>>,
     ) -> Self {
+        // Custody precedes the tree's first save here, and every save after:
+        // a write without it is refused before it reaches the store.
+        let custody = {
+            let tree_id = tree
+                .lock()
+                .map(|tree| tree.tree_id.clone())
+                .unwrap_or_else(|poisoned| poisoned.into_inner().tree_id.clone());
+            DriverCustody {
+                hold: crate::tree::acquire_custody(store.custody_port(), &tree_id)
+                    .map(|hold| Mutex::new(Some(hold))),
+                store: Arc::clone(&store),
+            }
+        };
         if let Ok(mut guard) = tree.lock() {
             guard.set_vcs(Arc::clone(&vcs));
         }
@@ -220,6 +290,7 @@ impl TreeDriver {
             storage_parking: Arc::default(),
             root_agent_id,
             host_shutdown: Arc::default(),
+            custody: Arc::new(custody),
             publication_owner: None,
             capacity_retry_interval: std::time::Duration::from_secs(5),
             checkout_sizes: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
@@ -1246,7 +1317,7 @@ impl TreeDriver {
             .as_deref()
             .unwrap_or(&tree.root_agent_id);
         let wait = self.storage_parking.begin(owner);
-        let first = self.store.save(tree);
+        let first = self.save_claimed(tree);
         if matches!(&first, Err(error) if error.kind == crate::tree::TreeStoreErrorKind::StorageFull)
         {
             tree.detach();
@@ -1261,7 +1332,7 @@ impl TreeDriver {
         wait: &storage::StorageWait,
     ) -> Result<(), TopologyError> {
         let acknowledged = loop {
-            match first.take().unwrap_or_else(|| self.store.save(tree)) {
+            match first.take().unwrap_or_else(|| self.save_claimed(tree)) {
                 Ok(revision) => {
                     self.storage_waiting
                         .send_if_modified(|waiting| std::mem::replace(waiting, false));
@@ -1284,6 +1355,20 @@ impl TreeDriver {
             }
         }
         Ok(())
+    }
+
+    fn save_claimed(
+        &self,
+        tree: &ProductAgentTree,
+    ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
+        let claim = self.custody.claim()?;
+        self.store.save(tree, &claim)
+    }
+
+    /// Why this driver holds no custody of its tree, when it holds none.
+    #[must_use]
+    pub fn custody_refusal(&self) -> Option<crate::tree::TreeStoreError> {
+        self.custody.claim().err()
     }
 
     /// Process-local publication pause, readable without taking the tree lock.

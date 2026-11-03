@@ -77,7 +77,7 @@ async fn headless_successor_epoch_and_a_live_hub_cannot_overwrite_each_other() {
     let store = crate::store::tree::tree_store(&paths).unwrap();
     let attach = |tree_id: &str| {
         let mut genesis = bootstrap(tree_id, paths.home().to_path_buf());
-        genesis.acknowledge_revision(store.save(&genesis).unwrap());
+        genesis.acknowledge_revision(store.save_in_custody(&genesis).unwrap());
         let hub_copy = ProductAgentTree::reopen(store.load(tree_id).unwrap().unwrap());
         insert_root_with(tree_id.to_owned(), hub_copy, Arc::clone(&store), None)
             .block()

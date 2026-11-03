@@ -103,6 +103,7 @@ impl TreeStore for CapacityStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         self.saves.fetch_add(1, Ordering::SeqCst);
         self.offered
@@ -112,7 +113,11 @@ impl TreeStore for CapacityStore {
         if self.remain_full.load(Ordering::Acquire) || self.refuse.swap(false, Ordering::SeqCst) {
             return Err(crate::tree::TreeStoreError::storage_full());
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -411,7 +416,7 @@ async fn refused_startup_consequence_does_not_install_or_dispatch() {
         .unwrap()
         .agent_id;
     tree.record_host_cancellation(&child).unwrap();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let id = tree.tree_id.clone();
     let loaded = ProductAgentTree::reopen(store.load(&id).unwrap().unwrap());
     let hub = crate::hub::TopologyHub::new();
@@ -644,7 +649,7 @@ async fn deleted_fold_stays_deleted_without_a_live_refold_callback() {
                 .unwrap();
             tree.record_child_session(&child.agent_id,
                 "00000000-0000-4000-8000-000000000100/00000000-0000-4000-8000-00000000000b/00000000-0000-4000-8000-000000003001").unwrap();
-            tree.acknowledge_revision(store.save(&tree).unwrap());
+            tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
             let driver = driver_on(tree, store.clone());
             let calls = Arc::new(AtomicUsize::new(0));
             let observed = calls.clone();
@@ -840,6 +845,7 @@ impl TreeStore for SecondSaveStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         let save = self.saves.fetch_add(1, Ordering::SeqCst) + 1;
         if save == self.fail_at.load(Ordering::SeqCst) {
@@ -849,7 +855,11 @@ impl TreeStore for SecondSaveStore {
                 crate::tree::TreeStoreError::unavailable("second save refused")
             });
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -1218,7 +1228,7 @@ async fn followup_withdrawal_cas_refusal_restores_the_complete_opening() {
             fail_at: AtomicUsize::new(2),
             stale,
         });
-        tree.acknowledge_revision(store.save(&tree).unwrap());
+        tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
         let before_mail = tree.mail(&opener).unwrap().clone();
         let before_nodes = tree.nodes().clone();
         let before_attempts = tree.attempts().clone();

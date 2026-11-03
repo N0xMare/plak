@@ -628,6 +628,10 @@ impl TopologyHub {
             return Ok(Arc::clone(&entry.runtime));
         }
         let runtime = Arc::new(ProductTopologyRuntime::new(tree, store, vcs, observer));
+        // Only the custody holder materializes the tree (spec 03 §14).
+        if let Some(refusal) = runtime.driver.custody_refusal() {
+            return Err(refusal.into());
+        }
         let effects = match runtime.driver.reconcile_attachment().await {
             Ok(()) => runtime.driver.fold_startup().await,
             Err(error) => Err(error),
@@ -711,10 +715,23 @@ impl TopologyHub {
             ));
         } else {
             let store = store()?;
+            // Custody is taken before the load or bootstrap, whose save it
+            // fences, and kept until the driver holds its own share.
+            let custody = AttachCustody {
+                hold: Some(
+                    crate::tree::acquire_custody(store.custody_port(), tree_id).map_err(
+                        |error| TreeRuntimeError::from(crate::tree::TreeStoreError::from(error)),
+                    )?,
+                ),
+                store: Arc::clone(&store),
+            };
             let tree = load_or_bootstrap(Arc::clone(&store)).await?;
             let vcs = tree.vcs_port();
-            self.insert_root(tree_id, tree, store, vcs, observer)
-                .await?
+            let runtime = self
+                .insert_root(tree_id, tree, store, vcs, observer)
+                .await?;
+            drop(custody);
+            runtime
         };
         if attach == TopologyHubAttach::AttachRoot {
             self.acquire_root_lease(tree_id)?;
@@ -752,6 +769,29 @@ impl TopologyHub {
                 entries.remove(tree_id).map(|entry| entry.runtime)
             }
             _ => None,
+        }
+    }
+}
+
+/// An attach's own custody share, given back on every exit from the attach:
+/// after a failure it is the last share and releases the record, after a
+/// success the driver's share keeps the record held.
+struct AttachCustody {
+    store: Arc<dyn TreeStore>,
+    hold: Option<crate::tree::CustodyHold>,
+}
+
+impl Drop for AttachCustody {
+    fn drop(&mut self) {
+        let Some(hold) = self.hold.take() else {
+            return;
+        };
+        if let Err(error) = crate::tree::release_custody_hold(self.store.custody_port(), hold) {
+            tracing::error!(
+                target: "plak.topology",
+                error = %error,
+                "agent tree custody was not released after a failed attach; this process keeps it until it exits"
+            );
         }
     }
 }

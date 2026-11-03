@@ -112,7 +112,7 @@ fn lineage_rows_round_trip_through_the_memory_store() {
     node.parent_composition = Some(CompositionSelection::NativePtc);
 
     let store = MemoryTreeStore::new();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
     assert_eq!(reopened.epochs(), tree.epochs());
     assert_eq!(reopened.forked_from(), tree.forked_from());
@@ -248,7 +248,7 @@ fn an_append_moves_the_root_and_keeps_live_children_on_their_epoch() {
 
     // Both epochs survive a store round trip, and so does each node's.
     let store = MemoryTreeStore::new();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
     assert_eq!(reopened.epochs(), tree.epochs());
     assert_eq!(reopened.epoch_of(&child), tree.epoch_of(&child));
@@ -384,8 +384,8 @@ fn a_fork_genesis_is_an_independent_tree_seeded_with_the_source_epoch() {
 
     // Persisted, both trees reopen independently with their own rows.
     let store = MemoryTreeStore::new();
-    let _source_revision = store.save(&source).unwrap();
-    let _fork_revision = store.save(&fork).unwrap();
+    let _source_revision = store.save_in_custody(&source).unwrap();
+    let _fork_revision = store.save_in_custody(&fork).unwrap();
     let reopened = ProductAgentTree::reopen(store.load("fork1").unwrap().unwrap());
     assert_eq!(reopened.forked_from(), fork.forked_from());
     assert_eq!(

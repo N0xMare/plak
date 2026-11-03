@@ -289,7 +289,7 @@ async fn missing_hub_child_does_not_clobber_durable_tree() {
         None,
     )
     .unwrap();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
 
     let error = resolve_topology_runtime(
         &tree_id,
@@ -649,13 +649,18 @@ impl TreeStore for AttachProbeStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         assert!(
             self.hub.upgrade().unwrap().entries.try_lock().is_ok(),
             "attach saved under the hub entries lock"
         );
         self.saves.fetch_add(1, Ordering::SeqCst);
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -699,6 +704,7 @@ impl TreeStore for RefusingStore {
     fn save(
         &self,
         _: &ProductAgentTree,
+        _claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         Err(crate::tree::TreeStoreError::unavailable(
             "initial publish refused",
@@ -709,6 +715,12 @@ impl TreeStore for RefusingStore {
         _: &str,
     ) -> Result<Option<crate::tree::PersistedTree>, crate::tree::TreeStoreError> {
         Ok(None)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        static CUSTODY: std::sync::LazyLock<crate::tree::MemoryTreeStore> =
+            std::sync::LazyLock::new(crate::tree::MemoryTreeStore::new);
+        &*CUSTODY
     }
 }
 
@@ -2336,4 +2348,141 @@ async fn a_lookup_only_successor_keeps_the_hub_and_children_across_the_predecess
     );
     assert!(hub_attached, "the predecessor's release shut the hub down");
     assert!(child_live, "child {child} is no longer live");
+}
+
+/// The hub's driver writes only under its custody claim: once another host
+/// takes the tree over (its holder proven gone), the driver's next mutation
+/// is refused with the typed refusal and nothing it offered is published.
+#[tokio::test]
+async fn a_superseded_hub_writer_publishes_nothing() {
+    use crate::tree::{CustodyClaim, CustodyHost, HostInstance};
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let store = memory_store();
+    let runtime = TopologyHub::new()
+        .insert_root(
+            &tree_id,
+            bootstrap(&tree_id, root.path().to_path_buf()),
+            store.clone(),
+            Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+            None,
+        )
+        .await
+        .unwrap();
+    let held = store.custody_port().custody(&tree_id).unwrap().unwrap();
+    assert_eq!(&held.holding.host, crate::tree::custody_host());
+    let claim = CustodyClaim {
+        tree_id: tree_id.clone(),
+        host: held.holding.host.clone(),
+        fence: held.fence,
+    };
+    let other = CustodyHost {
+        host_id: "other".to_owned(),
+        instance: HostInstance::parse("7-0000000000000007").unwrap(),
+        binary: Some("build-other".to_owned()),
+        host_name: "elsewhere".to_owned(),
+    };
+    let taken = store
+        .custody_port()
+        .take_custody(
+            &tree_id,
+            &other,
+            Some(&ProductAgentTree::holder_gone_for_test(claim)),
+        )
+        .unwrap();
+    assert_eq!(taken.fence, held.fence + 1);
+    let before = store.load(&tree_id).unwrap().unwrap().rows().revision;
+
+    let refused = runtime
+        .mutate_then_emit(false, |tree| {
+            tree.spawn_agent(
+                "root",
+                &crate::protocol::SpawnAgentRequest::test_review(),
+                None,
+            )
+            .map(|spawned| spawned.agent_id)
+            .map_err(|error| error.message)
+        })
+        .await
+        .unwrap_err();
+    assert!(refused.contains("tree_hosted_elsewhere"), "{refused}");
+    let stored = store.load(&tree_id).unwrap().unwrap();
+    assert_eq!(stored.rows().revision, before);
+    assert_eq!(
+        stored.rows().nodes().len(),
+        1,
+        "the spawn was not published"
+    );
+}
+
+/// A hub whose driver's custody take is refused does not attach it: the
+/// insert fails with the typed refusal, the hub holds no entry and nothing
+/// is written.
+#[tokio::test]
+async fn an_insert_whose_driver_take_is_refused_attaches_nothing() {
+    use crate::tree::{CustodyHost, HostInstance};
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let store = memory_store();
+    let holder = CustodyHost {
+        host_id: "local".to_owned(),
+        instance: HostInstance::parse("11-000000000000000b").unwrap(),
+        binary: Some("build-elsewhere".to_owned()),
+        host_name: "another-machine".to_owned(),
+    };
+    store
+        .custody_port()
+        .take_custody(&tree_id, &holder, None)
+        .unwrap();
+    let hub = TopologyHub::new();
+    let error = hub
+        .insert_root(
+            &tree_id,
+            bootstrap(&tree_id, root.path().to_path_buf()),
+            Arc::clone(&store),
+            Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+            None,
+        )
+        .await
+        .err()
+        .expect("the driver's refused take refuses the insert");
+    assert_eq!(
+        error
+            .hosted_elsewhere_refusal()
+            .expect("typed refusal")
+            .holder,
+        holder
+    );
+    assert!(hub.lookup(&tree_id).is_none(), "no entry");
+    assert!(
+        store.load(&tree_id).unwrap().is_none(),
+        "nothing was written"
+    );
+    let record = store.custody_port().custody(&tree_id).unwrap().unwrap();
+    assert_eq!((&record.holding.host, record.released), (&holder, false));
+}
+
+/// An attach that fails after its custody take gives the record back: a
+/// failed load or bootstrap leaves the tree released, not held by this live
+/// process until it exits.
+#[tokio::test]
+async fn an_attach_that_fails_after_its_take_releases_custody() {
+    let tree_id = unique_tree_id();
+    let store = memory_store();
+    let error = resolve_topology_runtime(
+        &tree_id,
+        true,
+        TopologyHubAttach::AttachRoot,
+        || Ok(Arc::clone(&store)),
+        None,
+        |_| std::future::ready(Err(TreeRuntimeError::new("the bootstrap failed"))),
+    )
+    .await
+    .err()
+    .expect("the attach fails");
+    assert_eq!(error.message(), "the bootstrap failed");
+    assert!(lookup(&tree_id).is_none());
+    let record = store.custody_port().custody(&tree_id).unwrap().unwrap();
+    assert!(record.released, "the failed attach released its custody");
+    assert_eq!(&record.holding.host, crate::tree::custody_host());
 }

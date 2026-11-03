@@ -378,15 +378,14 @@ impl TreeRows for HostRows<'_> {
         &self,
         tree: &mut ProductAgentTree,
     ) -> Result<(), crate::agent_tree::TopologyError> {
-        let acknowledged = self
-            .trees()
-            .map_err(|message| {
-                crate::agent_tree::TopologyError::new(
-                    crate::agent_tree_protocol::TopologyErrorCode::OperationRecoveryRequired,
-                    message,
-                )
-            })?
-            .save(tree)
+        let store = self.trees().map_err(|message| {
+            crate::agent_tree::TopologyError::new(
+                crate::agent_tree_protocol::TopologyErrorCode::OperationRecoveryRequired,
+                message,
+            )
+        })?;
+        let acknowledged = store
+            .save_in_custody(tree)
             .map_err(crate::agent_tree::TopologyError::from)?;
         tree.acknowledge_revision(acknowledged);
         Ok(())
@@ -394,7 +393,7 @@ impl TreeRows for HostRows<'_> {
 
     fn delete_tree(&self, tree_id: &str, expected_revision: u64) -> Result<(), String> {
         self.trees()?
-            .delete(tree_id, expected_revision)
+            .delete_in_custody(tree_id, expected_revision)
             .map_err(|error| error.detail.clone())
     }
 }

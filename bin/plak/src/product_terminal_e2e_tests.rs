@@ -3510,7 +3510,7 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
         .map_err(|error| error.message)?;
         tree.install_snapshot(plakous_hosted::orchestration::OrchestrationSnapshot::freeze(roster));
         let _revision = crate::store::tree::tree_store(&paths)?
-            .save(&tree)
+            .save_in_custody(&tree)
             .map_err(|error| error.detail)?;
     }
 

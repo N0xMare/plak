@@ -319,7 +319,7 @@ impl super::TreeRows for MemoryRows {
         use crate::agent_tree::TreeStore as _;
         let acknowledged = self
             .trees
-            .save(tree)
+            .save_in_custody(tree)
             .map_err(crate::agent_tree::TopologyError::from)?;
         tree.acknowledge_revision(acknowledged);
         Ok(())
@@ -328,7 +328,7 @@ impl super::TreeRows for MemoryRows {
     fn delete_tree(&self, tree_id: &str, expected_revision: u64) -> Result<(), String> {
         use crate::agent_tree::TreeStore as _;
         self.trees
-            .delete(tree_id, expected_revision)
+            .delete_in_custody(tree_id, expected_revision)
             .map_err(|error| error.detail.clone())
     }
 }

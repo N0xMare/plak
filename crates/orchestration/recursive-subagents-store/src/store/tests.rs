@@ -178,7 +178,7 @@ mod images {
         .unwrap();
         for _ in 0..2 {
             tree.revision += 1;
-            let revision = store.save(&tree).unwrap();
+            let revision = store.save_in_custody(&tree).unwrap();
             tree.acknowledge_revision(revision);
         }
         assert_eq!(images(&store), 1);
@@ -199,7 +199,7 @@ mod images {
         let mut stale = tree.clone();
         stale.stored_revision += 1;
         stale.revision += 2;
-        let error = store.save(&stale).unwrap_err();
+        let error = store.save_in_custody(&stale).unwrap_err();
         assert!(matches!(
             error.kind,
             TreeStoreErrorKind::StaleRevision { .. }
@@ -241,7 +241,7 @@ mod images {
         .rows()
         .clone();
         broken.stored_revision = tree.revision;
-        let error = store.save(&broken).unwrap_err();
+        let error = store.save_in_custody(&broken).unwrap_err();
         assert_eq!(error.kind, TreeStoreErrorKind::Unavailable, "{error}");
         assert_eq!(images(&store), 0);
     }
@@ -251,6 +251,8 @@ mod images {
         let Fixture {
             store, mut tree, ..
         } = fixture();
+        let custody =
+            plakous_recursive_subagents::tree::acquire_custody(&store, &tree.tree_id).unwrap();
         store
             .writer
             .lock()
@@ -260,7 +262,7 @@ mod images {
             .commit_hook(Some(|| true))
             .unwrap();
         tree.revision += 1;
-        let error = store.save(&tree).unwrap_err();
+        let error = store.save(&tree, custody.claim()).unwrap_err();
         assert_eq!(
             error.detail,
             "could not durably commit agent tree: other_sqlite_failure"
@@ -274,15 +276,18 @@ mod images {
             .connection
             .commit_hook(None::<fn() -> bool>)
             .unwrap();
-        let revision = store.save(&tree).unwrap();
+        let revision = store.save_in_custody(&tree).unwrap();
         tree.acknowledge_revision(revision);
         assert_eq!(images(&store), 1);
+        plakous_recursive_subagents::tree::release_custody_hold(&store, custody).unwrap();
     }
 
     #[test]
     fn a_delete_drops_the_image() {
         let Fixture { store, tree, .. } = fixture();
-        store.delete(&tree.tree_id, tree.revision).unwrap();
+        store
+            .delete_in_custody(&tree.tree_id, tree.revision)
+            .unwrap();
         assert_eq!(images(&store), 0);
         assert!(!store.exists(&tree.tree_id).unwrap());
     }

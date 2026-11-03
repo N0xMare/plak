@@ -78,7 +78,7 @@ fn child_path(tree: &Arc<Mutex<ProductAgentTree>>, agent_id: &str) -> std::path:
 fn persist_fixture(root: &tempfile::TempDir) -> (Arc<dyn TreeStore>, ProductAgentTree) {
     let store: Arc<dyn TreeStore> = Arc::new(MemoryTreeStore::new());
     let mut tree = bootstrap_tree("tree1", root.path());
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     (store, tree)
 }
 
@@ -1020,6 +1020,7 @@ impl TreeStore for FailingStore {
     fn save(
         &self,
         _tree: &ProductAgentTree,
+        _claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         Err(crate::tree::TreeStoreError::unavailable(
             "the test store refuses every save",
@@ -1031,6 +1032,12 @@ impl TreeStore for FailingStore {
         _tree_id: &str,
     ) -> Result<Option<crate::tree::PersistedTree>, crate::tree::TreeStoreError> {
         Ok(None)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        static CUSTODY: std::sync::LazyLock<MemoryTreeStore> =
+            std::sync::LazyLock::new(MemoryTreeStore::new);
+        &*CUSTODY
     }
 }
 

@@ -203,7 +203,7 @@ fn schema_ten_rows_round_trip_through_both_save_paths() {
     let (tree, child) = spawned(root.path());
 
     let first = with_schema_ten_rows(&tree, &child, 0);
-    let acknowledged = store.save(&first).unwrap();
+    let acknowledged = store.save_in_custody(&first).unwrap();
     let loaded = store.load(TREE).unwrap().unwrap();
     assert_same_rows(loaded.rows(), &first);
     for operation in loaded.rows().operations().values() {
@@ -228,7 +228,7 @@ fn schema_ten_rows_round_trip_through_both_save_paths() {
     let mut nodes = rows.rows().nodes().clone();
     nodes.get_mut(&child).unwrap().placement = NodePlacement::default();
     let second = rebuild(&second, nodes, epochs, None, BTreeMap::new());
-    let _ = store.save(&second).unwrap();
+    let _ = store.save_in_custody(&second).unwrap();
     assert_same_rows(store.load(TREE).unwrap().unwrap().rows(), &second);
     drop(store);
     let reopened = SqliteTreeStore::open(&path).unwrap();
@@ -275,7 +275,7 @@ fn todays_tree_writes_the_schema_ten_defaults() {
     let path = root.path().join("subagents.sqlite3");
     let store = SqliteTreeStore::open(&path).unwrap();
     let (tree, _) = spawned(root.path());
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let connection = rusqlite::Connection::open(&path).unwrap();
     let header: (i64, Option<String>) = connection
         .query_row(
@@ -293,11 +293,16 @@ fn todays_tree_writes_the_schema_ten_defaults() {
         )
         .unwrap();
     assert_eq!(defaults, 2);
-    for table in [
-        "agent_tree_epochs",
-        "agent_tree_runner_ancestors",
-        "agent_tree_custody",
-    ] {
+    // The save outside a driver took custody for itself and released it.
+    let custody: (i64, i64) = connection
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(released), 0) FROM agent_tree_custody",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(custody, (1, 1), "agent_tree_custody");
+    for table in ["agent_tree_epochs", "agent_tree_runner_ancestors"] {
         let rows: i64 = connection
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
@@ -321,7 +326,7 @@ fn incoherent_lineage_rows_are_refused() {
     let mut nodes = full.nodes().clone();
     nodes.get_mut(&child).unwrap().epoch_no = 5;
     let dangling = rebuild(&full, nodes, full.epochs().clone(), None, BTreeMap::new());
-    let _ = store.save(&dangling).unwrap();
+    let _ = store.save_in_custody(&dangling).unwrap();
     assert_eq!(
         store.load(TREE).unwrap_err().kind,
         TreeStoreErrorKind::Corrupt
@@ -332,7 +337,10 @@ fn incoherent_lineage_rows_are_refused() {
     let mut shared = rebuild(&full, nodes, full.epochs().clone(), None, BTreeMap::new());
     shared.stored_revision = dangling.revision;
     shared.revision = dangling.revision + 1;
-    assert!(store.save(&shared).is_err(), "one line maps to one node");
+    assert!(
+        store.save_in_custody(&shared).is_err(),
+        "one line maps to one node"
+    );
 }
 
 const ONE: &str = "1-0000000000000001";
@@ -408,7 +416,7 @@ fn custody_survives_tree_saves() {
     let store = SqliteTreeStore::open(&path).unwrap();
     let claim = store.take_custody(TREE, &host(ONE), None).unwrap();
     let (tree, _) = spawned(root.path());
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save(&tree, &claim).unwrap();
     // Another connection's commit forces this store's next save to replace
     // the tree's rows wholesale.
     let peer = SqliteTreeStore::open(&path).unwrap();
@@ -416,8 +424,98 @@ fn custody_survives_tree_saves() {
     let mut next = tree.clone();
     next.stored_revision = tree.revision;
     next.revision = tree.revision + 1;
-    let _ = store.save(&next).unwrap();
+    let _ = store.save(&next, &claim).unwrap();
     store.prove_custody(&claim).unwrap();
+}
+
+/// Every tree write proves its claim in its own transaction: a writer whose
+/// claim a takeover superseded, or that released it, writes nothing, on
+/// either path of the save and on a delete; the delete of the holder takes
+/// the custody record with the rows.
+#[test]
+fn fenced_writes_refuse_a_superseded_writer() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("subagents.sqlite3");
+    let store = SqliteTreeStore::open(&path).unwrap();
+    let peer = SqliteTreeStore::open(&path).unwrap();
+    let (tree, _) = spawned(root.path());
+    assert!(
+        matches!(
+            store
+                .save(
+                    &tree,
+                    &CustodyClaim {
+                        tree_id: TREE.to_owned(),
+                        host: host(ONE),
+                        fence: 1
+                    }
+                )
+                .unwrap_err()
+                .kind,
+            TreeStoreErrorKind::NotInCustody
+        ),
+        "a claim no take minted writes nothing"
+    );
+    let first = store.take_custody(TREE, &host(ONE), None).unwrap();
+    let acknowledged = store.save(&tree, &first).unwrap();
+    let mut next = tree.clone();
+    next.acknowledge_revision(acknowledged);
+    next.revision += 1;
+
+    // Another instance takes over from the first, which is proven gone.
+    let second = peer
+        .take_custody(
+            TREE,
+            &host(TWO),
+            Some(&ProductAgentTree::holder_gone_for_test(first.clone())),
+        )
+        .unwrap();
+    // The superseded writer's image path and wholesale path both refuse.
+    for writer in [&store, &SqliteTreeStore::open(&path).unwrap()] {
+        let refused = writer.save(&next, &first).unwrap_err();
+        assert!(
+            matches!(refused.kind, TreeStoreErrorKind::HostedElsewhere(_)),
+            "{refused}"
+        );
+        assert!(
+            refused.detail.starts_with("tree_hosted_elsewhere"),
+            "{refused}"
+        );
+    }
+    let refused = store
+        .delete(TREE, next.stored_revision, &first)
+        .unwrap_err();
+    assert!(matches!(
+        refused.kind,
+        TreeStoreErrorKind::HostedElsewhere(_)
+    ));
+    assert!(
+        store.exists(TREE).unwrap(),
+        "the refused delete left the rows"
+    );
+    assert_eq!(
+        store.load(TREE).unwrap().unwrap().rows().revision,
+        tree.revision,
+        "nothing the superseded writer offered was written"
+    );
+
+    // The holder writes; once it releases, its own claim writes nothing.
+    let _ = peer.save(&next, &second).unwrap();
+    peer.release_custody(&second).unwrap();
+    let mut later = next.clone();
+    later.stored_revision = next.revision;
+    later.revision += 1;
+    assert!(matches!(
+        peer.save(&later, &second).unwrap_err().kind,
+        TreeStoreErrorKind::NotInCustody
+    ));
+
+    // The holder's delete takes the record with the rows.
+    let third = peer.take_custody(TREE, &host(TWO), None).unwrap();
+    assert_eq!(third.fence, 3);
+    peer.delete(TREE, next.revision, &third).unwrap();
+    assert!(!peer.exists(TREE).unwrap());
+    assert!(peer.custody(TREE).unwrap().is_none());
 }
 
 fn contenders(path: &Path, round: u32, count: u32) -> Vec<String> {

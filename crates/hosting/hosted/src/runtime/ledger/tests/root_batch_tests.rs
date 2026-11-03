@@ -7,8 +7,8 @@ use std::sync::{
 };
 
 use crate::agent_tree::{
-    MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TopologyError, TreeStore,
-    TreeStoreError,
+    CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TopologyError,
+    TreeCustody, TreeStore, TreeStoreError,
 };
 use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
 use crate::runtime::topology_state::{TopologyRows, TreeRows};
@@ -31,11 +31,19 @@ impl TreeStore for CapacityStore {
     fn load(&self, id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {
         self.inner.load(id)
     }
-    fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<Revision, TreeStoreError> {
         if self.full.load(Ordering::SeqCst) {
             return Err(TreeStoreError::storage_full());
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -56,7 +64,7 @@ impl TreeRows for Rows {
         self.trees.exists(id).map_err(|error| error.detail)
     }
     fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), TopologyError> {
-        let revision = self.trees.save(tree)?;
+        let revision = self.trees.save_in_custody(tree)?;
         tree.acknowledge_revision(revision);
         Ok(())
     }

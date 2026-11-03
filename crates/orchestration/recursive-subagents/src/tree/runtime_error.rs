@@ -12,6 +12,7 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TreeRuntimeError {
     message: String,
+    hosted_elsewhere: Option<Box<super::TreeHostedElsewhere>>,
 }
 
 impl TreeRuntimeError {
@@ -20,7 +21,23 @@ impl TreeRuntimeError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            hosted_elsewhere: None,
         }
+    }
+
+    /// The tree is in another host process's custody.
+    #[must_use]
+    pub fn hosted_elsewhere(refusal: super::TreeHostedElsewhere) -> Self {
+        Self {
+            message: refusal.to_string(),
+            hosted_elsewhere: Some(Box::new(refusal)),
+        }
+    }
+
+    /// The custody refusal behind this failure, when it is one.
+    #[must_use]
+    pub fn hosted_elsewhere_refusal(&self) -> Option<&super::TreeHostedElsewhere> {
+        self.hosted_elsewhere.as_deref()
     }
 
     /// The operator-facing detail.
@@ -37,6 +54,15 @@ impl fmt::Display for TreeRuntimeError {
 }
 
 impl std::error::Error for TreeRuntimeError {}
+
+impl From<super::TreeStoreError> for TreeRuntimeError {
+    fn from(error: super::TreeStoreError) -> Self {
+        match error.kind {
+            super::TreeStoreErrorKind::HostedElsewhere(refusal) => Self::hosted_elsewhere(*refusal),
+            _ => Self::new(error.detail),
+        }
+    }
+}
 
 /// What the tree runtime's plumbing returns.
 pub type TreeRuntimeResult<T> = Result<T, TreeRuntimeError>;

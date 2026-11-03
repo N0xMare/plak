@@ -41,11 +41,16 @@ impl TreeStore for ParkedCapacityStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         if self.full.load(Ordering::Acquire) {
             return Err(crate::tree::TreeStoreError::storage_full());
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 

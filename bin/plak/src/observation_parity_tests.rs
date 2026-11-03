@@ -754,7 +754,7 @@ fn topology_driver(workspace: &Path) -> plakous_hosted::agent_tree_tools::TreeDr
     )
     .expect("parity tree");
     let store: Arc<dyn TreeStore> = Arc::new(MemoryTreeStore::new());
-    tree.acknowledge_revision(store.save(&tree).expect("parity tree saved"));
+    tree.acknowledge_revision(store.save_in_custody(&tree).expect("parity tree saved"));
     plakous_hosted::agent_tree_tools::TreeDriver::new(
         Arc::new(std::sync::Mutex::new(tree)),
         store,

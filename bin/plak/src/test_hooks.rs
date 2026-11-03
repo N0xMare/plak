@@ -230,7 +230,7 @@ fn prepare_scripted_tree(
         // would be refused as stale.
         runtime
     } else {
-        let revision = store.save(&tree).map_err(|error| {
+        let revision = store.save_in_custody(&tree).map_err(|error| {
             format!("offline scripted tree could not be saved: {}", error.detail)
         })?;
         tree.acknowledge_revision(revision);
@@ -348,6 +348,7 @@ impl plakous_hosted::agent_tree::TreeStore for ChildLocatorDiskFullStore {
     fn save(
         &self,
         tree: &plakous_hosted::agent_tree::ProductAgentTree,
+        claim: &plakous_hosted::agent_tree::CustodyClaim,
     ) -> Result<plakous_hosted::agent_tree::Revision, plakous_hosted::agent_tree::TreeStoreError>
     {
         if tree
@@ -362,7 +363,7 @@ impl plakous_hosted::agent_tree::TreeStore for ChildLocatorDiskFullStore {
                 "could not durably commit agent tree: disk_full",
             ));
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
     }
 
     fn load(
@@ -373,6 +374,10 @@ impl plakous_hosted::agent_tree::TreeStore for ChildLocatorDiskFullStore {
         plakous_hosted::agent_tree::TreeStoreError,
     > {
         self.inner.load(tree_id)
+    }
+
+    fn custody_port(&self) -> &dyn plakous_hosted::agent_tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 

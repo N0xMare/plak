@@ -277,3 +277,45 @@ fn memory_store_custody_take_renew_release_prove() {
         "trees are independent"
     );
 }
+
+/// Every holder in a process shares one claim: a release by any share but
+/// the last writes nothing and leaves the record held; the last one releases
+/// it.
+#[test]
+fn only_the_last_share_of_a_claim_releases_the_record() {
+    use super::{acquire_custody, release_custody_hold};
+    let store = MemoryTreeStore::new();
+    let first = acquire_custody(&store, "shared").unwrap();
+    let second = acquire_custody(&store, "shared").unwrap();
+    assert_eq!(first.claim(), second.claim());
+    release_custody_hold(&store, first).unwrap();
+    assert!(
+        !store.custody("shared").unwrap().unwrap().released,
+        "a share is still held"
+    );
+    store.prove_custody(second.claim()).unwrap();
+    release_custody_hold(&store, second).unwrap();
+    assert!(store.custody("shared").unwrap().unwrap().released);
+}
+
+/// A forgotten share writes nothing; a last share dropped without its
+/// release would keep the record held until the process exits, so debug
+/// builds refuse it.
+#[test]
+fn a_last_share_is_released_or_forgotten_never_dropped() {
+    use super::acquire_custody;
+    let store = MemoryTreeStore::new();
+    acquire_custody(&store, "forgotten").unwrap().forget();
+    assert!(!store.custody("forgotten").unwrap().unwrap().released);
+    if cfg!(debug_assertions) {
+        let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drop(acquire_custody(&store, "dropped").unwrap());
+        }));
+        let message = dropped.unwrap_err();
+        let message = message.downcast_ref::<String>().unwrap();
+        assert!(
+            message.contains("dropped without release_custody_hold"),
+            "{message}"
+        );
+    }
+}

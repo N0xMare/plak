@@ -88,7 +88,7 @@ async fn startup_defers_ancestor_cascade_until_deleted_descendant_rebuilds() {
     tree.record_host_cancellation(&parent).unwrap();
     tree.clear_agent_feed_views(&child, CHILD_SESSION);
     let store = Arc::new(MemoryTreeStore::new());
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let id = tree.tree_id.clone();
     let loaded = ProductAgentTree::reopen(store.load(&id).unwrap().unwrap());
     let runtime = TopologyHub::new()

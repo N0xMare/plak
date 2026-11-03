@@ -15,6 +15,12 @@ use std::hash::{BuildHasher as _, Hasher as _};
 
 use super::TreeStoreError;
 
+mod custodian;
+pub use custodian::{
+    CustodyHold, acquire_custody, bind_custody_host, custody_host, release_custody_hold,
+    with_custody,
+};
+
 /// One host process image: its process id and a nonce drawn at start, so a
 /// reused process id is still another instance. Text form `<pid>-<16 hex>`.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -244,10 +250,24 @@ impl From<TreeStoreError> for CustodyError {
     }
 }
 
+impl From<CustodyError> for TreeStoreError {
+    fn from(error: CustodyError) -> Self {
+        match error {
+            CustodyError::HostedElsewhere(refusal) => Self::hosted_elsewhere(refusal),
+            CustodyError::NotHeld { .. } => Self::not_in_custody(error.to_string()),
+            CustodyError::Store(error) => error,
+        }
+    }
+}
+
 /// Custody of trees in one store. Each call reads and writes the record in
 /// one atomic step. A tree deletion leaves the record; tree ids are never
 /// reused.
 pub trait TreeCustody: Send + Sync {
+    /// The identity of the record set these calls read and write: two
+    /// handles of one store answer the same scope, two stores never do.
+    fn custody_scope(&self) -> String;
+
     /// The stored custody of `tree_id`, or `None` when no take ever ran.
     ///
     /// # Errors

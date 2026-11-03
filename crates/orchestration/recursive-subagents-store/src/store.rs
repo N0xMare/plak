@@ -11,7 +11,8 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use plakous_recursive_subagents::tree::{
-    PersistedTree, ProductAgentTree, Revision, TreeStore, TreeStoreError, fence_revision,
+    CustodyClaim, PersistedTree, ProductAgentTree, Revision, TreeCustody, TreeStore,
+    TreeStoreError, fence_revision,
 };
 use rusqlite::{ErrorCode, OptionalExtension};
 
@@ -26,6 +27,8 @@ use crate::rows::{
 pub struct SqliteTreeStore {
     writer: Mutex<Writer>,
     storage_waiting: std::sync::atomic::AtomicBool,
+    /// The database file, canonical when it resolves: the custody scope.
+    path: std::path::PathBuf,
 }
 
 /// The connection and, per tree, the image of its last acknowledged save.
@@ -44,6 +47,7 @@ impl SqliteTreeStore {
     /// Opens `database`, creating and versioning it when it is new.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
         Ok(Self {
+            path: std::fs::canonicalize(database).unwrap_or_else(|_| database.to_path_buf()),
             storage_waiting: std::sync::atomic::AtomicBool::new(false),
             writer: Mutex::new(Writer {
                 database: SubagentsDatabase::open(database)?,
@@ -53,15 +57,21 @@ impl SqliteTreeStore {
     }
 
     /// Deletes every row of one tree, compare-and-swapped on the revision the
-    /// caller inspected. A tree already absent is not an error, so an
-    /// interrupted deletion can be run again. The tree's custody record is
-    /// not a tree row and stays; tree ids are never reused.
+    /// caller inspected and fenced by `claim`, which must hold the tree's
+    /// custody; the custody record goes with the rows, in the same
+    /// transaction. A tree already absent is not an error, so an interrupted
+    /// deletion can be run again.
     ///
     /// # Errors
     ///
-    /// Refuses a tree whose revision moved since it was inspected, and an
-    /// unreachable store.
-    pub fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
+    /// Refuses a claim that does not hold the tree, a tree whose revision
+    /// moved since it was inspected, and an unreachable store.
+    pub fn delete(
+        &self,
+        tree_id: &str,
+        expected_revision: u64,
+        claim: &CustodyClaim,
+    ) -> Result<(), TreeStoreError> {
         self.with_writer(|writer| {
             writer.images.remove(tree_id);
             let tx = writer
@@ -69,14 +79,15 @@ impl SqliteTreeStore {
                 .connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|error| sqlite_unavailable("could not begin agent tree delete", &error))?;
+            crate::custody::prove_in(&tx, tree_id, claim)?;
             match stored_revision(&tx, tree_id)? {
-                None => return Ok(()),
+                None => {}
                 Some(stored) if stored != expected_revision => {
                     return Err(TreeStoreError::stale(stored, expected_revision));
                 }
-                Some(_) => {}
+                Some(_) => delete_agent_tree_rows(&tx, tree_id)?,
             }
-            delete_agent_tree_rows(&tx, tree_id)?;
+            crate::custody::delete_record(&tx, tree_id)?;
             tx.commit()
                 .map_err(|error| sqlite_unavailable("could not durably delete agent tree", &error))
         })
@@ -117,7 +128,11 @@ impl Writer {
     /// One publish. The image is taken out for the whole save and put back
     /// only by an acknowledged commit, so after any refused, failed or
     /// ambiguous save the next one replaces the tree wholesale.
-    fn save(&mut self, tree: &ProductAgentTree) -> Result<(), TreeStoreError> {
+    fn save(
+        &mut self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<(), TreeStoreError> {
         let tree_id = tree.tree_id.as_str();
         let image = self.images.remove(tree_id);
         let tx = self
@@ -125,6 +140,9 @@ impl Writer {
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| sqlite_unavailable("could not begin agent tree save", &error))?;
+        // The custody proof and the write are one transaction: a claim
+        // another take superseded writes nothing.
+        crate::custody::prove_in(&tx, tree_id, claim)?;
         // The `Immediate` transaction holds the write lock from here through
         // the commit, so the version read, the compare and the swap are one
         // step.
@@ -184,8 +202,13 @@ fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
 }
 
 impl TreeStore for SqliteTreeStore {
-    fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
-        Self::delete(self, tree_id, expected_revision)
+    fn delete(
+        &self,
+        tree_id: &str,
+        expected_revision: u64,
+        claim: &CustodyClaim,
+    ) -> Result<(), TreeStoreError> {
+        Self::delete(self, tree_id, expected_revision, claim)
     }
 
     fn recover_storage(&self) -> Result<(), TreeStoreError> {
@@ -244,8 +267,12 @@ impl TreeStore for SqliteTreeStore {
         })
     }
 
-    fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
-        let result = self.with_writer(|writer| writer.save(tree));
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<Revision, TreeStoreError> {
+        let result = self.with_writer(|writer| writer.save(tree, claim));
         if result.is_ok() {
             self.storage_waiting
                 .store(false, std::sync::atomic::Ordering::Release);
@@ -269,6 +296,17 @@ impl TreeStore for SqliteTreeStore {
                 .map_err(|_| TreeStoreError::unavailable("could not finish agent tree read"))?;
             Ok(tree)
         })
+    }
+
+    fn custody_port(&self) -> &dyn TreeCustody {
+        self
+    }
+}
+
+impl SqliteTreeStore {
+    /// The canonical database path custody is scoped to.
+    pub(crate) fn custody_path(&self) -> &Path {
+        &self.path
     }
 }
 

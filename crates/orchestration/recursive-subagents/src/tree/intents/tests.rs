@@ -29,7 +29,7 @@ fn round_trip(operations: Vec<OperationRecord>) -> Vec<OperationRecord> {
             .insert(operation.operation_id.clone(), operation);
     }
     let store = MemoryTreeStore::new();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
     ids.iter()
         .map(|id| reopened.operations()[id].clone())

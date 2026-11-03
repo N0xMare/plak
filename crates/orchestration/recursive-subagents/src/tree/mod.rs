@@ -831,8 +831,9 @@ pub use await_output::{
 pub use candidates::{AdoptFacts, AdoptProbe, merge_conflict_message};
 pub use commands::{AgentCommand, AgentCommandKind, CommandFact, MAX_TREE_COMMANDS};
 pub use custody::{
-    CustodyClaim, CustodyError, CustodyHolding, CustodyHost, CustodyLiveness, CustodyRecord,
-    CustodyTake, HolderGone, HostInstance, TreeCustody, TreeHostedElsewhere,
+    CustodyClaim, CustodyError, CustodyHold, CustodyHolding, CustodyHost, CustodyLiveness,
+    CustodyRecord, CustodyTake, HolderGone, HostInstance, TreeCustody, TreeHostedElsewhere,
+    acquire_custody, bind_custody_host, custody_host, release_custody_hold, with_custody,
 };
 pub use feed::TreeFeed;
 pub use intents::{
@@ -857,7 +858,7 @@ pub use recovery::{RECOVERED_WITHOUT_TURN, RecoverAgentOutput, RecoveryNeed, Rec
 pub use runtime_error::{TreeRuntimeError, TreeRuntimeResult};
 pub use tree_store::{
     MemoryTreeStore, PersistedTree, Revision, TreeStore, TreeStoreError, TreeStoreErrorKind,
-    fence_revision,
+    fence_revision, prove_write,
 };
 #[cfg(test)]
 mod base_pin_recovery_tests;

@@ -76,6 +76,7 @@ impl TreeStore for RefuseRefreshPlanStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         let publishes_plan = tree.operations().values().any(|op| {
             op.tool_name == "workspace_refresh"
@@ -87,7 +88,11 @@ impl TreeStore for RefuseRefreshPlanStore {
                 "refresh plan publication refused",
             ));
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -151,7 +156,7 @@ async fn hub_working_copy_is_shared_across_compiles_and_persists() {
     let tree_id = format!("hub-{}", uuid::Uuid::new_v4().simple());
     let mut tree = bootstrap_tree(&tree_id, root.path());
     let store: Arc<dyn TreeStore> = Arc::new(MemoryTreeStore::new());
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let runtime = crate::hub::insert_root_with(tree_id.clone(), tree, Arc::clone(&store), None)
         .await
         .unwrap();
@@ -416,6 +421,7 @@ impl TreeStore for CleanupCutStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &crate::tree::CustodyClaim,
     ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
         let mut remaining = self.remaining.lock().unwrap();
         if let Some(count) = remaining.as_mut() {
@@ -426,7 +432,11 @@ impl TreeStore for CleanupCutStore {
             }
             *count -= 1;
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 

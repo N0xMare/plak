@@ -57,7 +57,7 @@ fn pending_workspace_discard_survives_sqlite_reopen_without_removal_replay() {
     };
     tree.discard_workspace("root", &request, Some("remove-once"))
         .unwrap();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let effects = tree.take_effects();
     assert!(tree.operations()["remove-once"].terminal_response.is_none());
     drop(store);
@@ -82,7 +82,7 @@ fn pending_workspace_discard_survives_sqlite_reopen_without_removal_replay() {
     tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
         effects.run(vcs.as_ref()),
     ));
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let completed = store.load("pending-discard").unwrap().unwrap();
     assert_eq!(
         completed
@@ -228,16 +228,16 @@ fn a_tree_deletes_under_its_inspected_revision_and_only_once() {
     save_tree(&paths, &mut tree).unwrap();
     let store = open_tree_store(&paths).unwrap();
     let revision = tree.stored_revision;
-    let stale = store.delete("doomed", revision + 1).unwrap_err();
+    let stale = store.delete_in_custody("doomed", revision + 1).unwrap_err();
     assert!(matches!(
         stale.kind,
         TreeStoreErrorKind::StaleRevision { .. }
     ));
     assert!(tree_exists(&paths, "doomed").unwrap());
-    store.delete("doomed", revision).unwrap();
+    store.delete_in_custody("doomed", revision).unwrap();
     assert!(!tree_exists(&paths, "doomed").unwrap());
     assert!(load_tree(&paths, "doomed").unwrap().is_none());
-    store.delete("doomed", revision).unwrap();
+    store.delete_in_custody("doomed", revision).unwrap();
 }
 
 /// The `TreeStore` conformance suite: every
@@ -291,14 +291,14 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     // The port reports the revision it published; the caller applies it.
     // A publish leaves the tree alone, so a handle that never
     // acknowledges is refused rather than silently re-fenced.
-    let acknowledged = store.save(&tree).unwrap();
+    let acknowledged = store.save_in_custody(&tree).unwrap();
     assert_eq!(acknowledged.value(), tree.revision);
     assert_eq!(
         tree.stored_revision, 0,
         "the store did not edit the handle it persisted"
     );
     assert_eq!(
-        store.save(&tree).unwrap_err().kind,
+        store.save_in_custody(&tree).unwrap_err().kind,
         TreeStoreErrorKind::StaleRevision {
             stored: tree.revision,
             offered: tree.revision
@@ -321,7 +321,7 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
         WriterMode::SingleLease,
     )
     .unwrap();
-    aux.acknowledge_revision(store.save(&aux).unwrap());
+    aux.acknowledge_revision(store.save_in_custody(&aux).unwrap());
     assert_eq!(
         store.ids().unwrap(),
         vec!["tree-aux".to_owned(), "tree-conf".to_owned()]
@@ -340,12 +340,12 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     assert_eq!(first.stored_revision, second.stored_revision);
     first.resume_tree().unwrap();
     first.spawn_agent("root", &request, None).unwrap();
-    first.acknowledge_revision(store.save(&first).unwrap());
+    first.acknowledge_revision(store.save_in_custody(&first).unwrap());
     assert_eq!(first.stored_revision, first.revision);
     second.resume_tree().unwrap();
     second.spawn_agent("root", &request, None).unwrap();
     second.spawn_agent("root", &request, None).unwrap();
-    let refused = store.save(&second).unwrap_err();
+    let refused = store.save_in_custody(&second).unwrap_err();
     assert_eq!(
         refused.kind,
         TreeStoreErrorKind::StaleRevision {
@@ -363,7 +363,7 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     // acknowledged.
     second.revision = first.revision;
     assert_eq!(
-        store.save(&second).unwrap_err().kind,
+        store.save_in_custody(&second).unwrap_err().kind,
         TreeStoreErrorKind::StaleRevision {
             stored: first.revision,
             offered: first.revision
@@ -380,7 +380,7 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     )
     .unwrap();
     assert_eq!(
-        store.save(&fresh).unwrap_err().kind,
+        store.save_in_custody(&fresh).unwrap_err().kind,
         TreeStoreErrorKind::StaleRevision {
             stored: first.revision,
             offered: fresh.revision
@@ -388,7 +388,7 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     );
     // The acknowledged handle republishing at its own revision is a
     // compare-and-swap hit; the other tree saw none of this.
-    first.acknowledge_revision(store.save(&first).unwrap());
+    first.acknowledge_revision(store.save_in_custody(&first).unwrap());
     assert_eq!(
         fingerprint(store.load("tree-aux").unwrap().unwrap().rows()),
         aux_fingerprint
@@ -448,7 +448,7 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     fork.workspace = SpawnWorkspace::Fork;
     let sealing_id = reopened.spawn_agent("root", &fork, None).unwrap().agent_id;
     assert!(reopened.begin_seal(&sealing_id));
-    reopened.acknowledge_revision(store.save(&reopened).unwrap());
+    reopened.acknowledge_revision(store.save_in_custody(&reopened).unwrap());
     let mut recovered = ProductAgentTree::reopen(store.load("tree-conf").unwrap().unwrap());
     assert_eq!(
         recovered.node(&sealing_id).unwrap().status,

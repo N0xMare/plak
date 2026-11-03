@@ -27,13 +27,14 @@ impl crate::agent_tree::TreeStore for PausedTreeStore {
     fn save(
         &self,
         tree: &crate::agent_tree::ProductAgentTree,
+        claim: &crate::agent_tree::CustodyClaim,
     ) -> Result<crate::agent_tree::Revision, crate::agent_tree::TreeStoreError> {
         if self.full.load(std::sync::atomic::Ordering::Acquire) {
             self.waiting
                 .store(true, std::sync::atomic::Ordering::Release);
             return Err(crate::agent_tree::TreeStoreError::storage_full());
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
     }
     fn storage_unavailable(&self) -> bool {
         self.waiting.load(std::sync::atomic::Ordering::Acquire)
@@ -47,6 +48,10 @@ impl crate::agent_tree::TreeStore for PausedTreeStore {
         self.waiting
             .store(false, std::sync::atomic::Ordering::Release);
         Ok(())
+    }
+
+    fn custody_port(&self) -> &dyn crate::agent_tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -87,7 +92,7 @@ async fn next_root_prompt_retries_the_paused_tree_store_without_an_incidental_tr
     )
     .unwrap();
     store.full.store(true, Ordering::Release);
-    assert!(store.save(&tree).is_err());
+    assert!(store.save_in_custody(&tree).is_err());
     store.full.store(false, Ordering::Release);
     assert!(session.agent().storage_unavailable());
     let submission = session
@@ -239,7 +244,7 @@ fn inspecting_a_persisted_tree_compiles_its_tools_without_attaching_or_saving() 
     let tree_id = uuid::Uuid::new_v4().to_string();
     let store = roots.tree_store().unwrap();
     let _published = store
-        .save(&crate::topology_runtime::test_support::bootstrap(
+        .save_in_custody(&crate::topology_runtime::test_support::bootstrap(
             &tree_id,
             home.path().to_path_buf(),
         ))
@@ -389,7 +394,7 @@ async fn a_root_attach_keeps_the_trees_tasks_apart_from_the_session() {
     let _published = roots
         .tree_store()
         .unwrap()
-        .save(&crate::topology_runtime::test_support::bootstrap(
+        .save_in_custody(&crate::topology_runtime::test_support::bootstrap(
             &tree_id,
             home.path().to_path_buf(),
         ))

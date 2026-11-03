@@ -124,7 +124,7 @@ fn fenced_integrity_violation_restores_raw_and_driver_boundaries() {
                 },
             );
             let store = Arc::new(MemoryTreeStore::new());
-            tree.acknowledge_revision(store.save(&tree).unwrap());
+            tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
             let before = format!("{tree:?}");
             let error = if driver_boundary {
                 let driver = TreeDriver::new(Arc::new(Mutex::new(tree.clone())), store, vcs, None);

@@ -424,6 +424,7 @@ impl crate::agent_tree::TreeStore for SecondSaveStore {
     fn save(
         &self,
         tree: &ProductAgentTree,
+        claim: &crate::agent_tree::CustodyClaim,
     ) -> Result<crate::agent_tree::Revision, crate::agent_tree::TreeStoreError> {
         if self.saves.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
             return Err(if self.full {
@@ -434,7 +435,11 @@ impl crate::agent_tree::TreeStore for SecondSaveStore {
                 crate::agent_tree::TreeStoreError::unavailable("second save refused")
             });
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::agent_tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 

@@ -87,7 +87,7 @@ async fn adoption_cut(jj: bool, cut: Cut) {
         .candidate_id
         .clone()
         .unwrap();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     tree.begin_adopt_for_test(
         "root",
         &AdoptCandidateRequest {
@@ -99,7 +99,7 @@ async fn adoption_cut(jj: bool, cut: Cut) {
         },
     )
     .unwrap();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let mut effects = tree.take_effects();
     let ticket = effects.adopts.remove(0);
     assert!(effects.is_empty());
@@ -115,7 +115,7 @@ async fn adoption_cut(jj: bool, cut: Cut) {
             tree.finish_adopt(&ticket, Ok(landing)).unwrap();
         }
         if cut == Cut::AfterRecordCommit {
-            tree.acknowledge_revision(store.save(&tree).unwrap());
+            tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
         }
     }
     // Discard the unpublished in-memory outcome, exactly as a process loss does.
@@ -134,7 +134,7 @@ async fn adoption_cut(jj: bool, cut: Cut) {
     }
     // Dropping the first mutation's effects cannot lose attachment recovery.
     drop(reopened.take_effects());
-    reopened.acknowledge_revision(store.save(&reopened).unwrap());
+    reopened.acknowledge_revision(store.save_in_custody(&reopened).unwrap());
     let driver = TreeDriver::new(
         Arc::new(Mutex::new(reopened)),
         store.clone(),

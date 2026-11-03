@@ -388,7 +388,8 @@ fn refresh_recovery_retains_diverged_work_and_its_pending_intent() {
         .unwrap();
     let prepared = crate::tree::block_on_for_test(f.tree.take_effects().run(f.tree.vcs()));
     assert_eq!(f.tree.complete(prepared).cleanup_failures, Vec::new());
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     std::fs::write(f.path.join("CHILD.txt"), "operator's newer work\n").unwrap();
     f.tree = ProductAgentTree::reopen(store.load("tree1").unwrap().unwrap());
     let attach = f.tree.take_attach_effects();
@@ -537,10 +538,12 @@ fn refresh_cut(cut: &str) {
     f.tree
         .prepare_followup_refresh("root", &f.request(None), "followup", false)
         .unwrap();
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     let prepared = crate::tree::block_on_for_test(f.tree.take_effects().run(f.tree.vcs()));
     assert_eq!(f.tree.complete(prepared).cleanup_failures, Vec::new());
-    f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
+    f.tree
+        .acknowledge_revision(store.save_in_custody(&f.tree).unwrap());
     let ticket = f.tree.take_effects().refreshes.remove(0);
     let Step::Apply(plan) = &ticket.step else {
         panic!("published apply plan")

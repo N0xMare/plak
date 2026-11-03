@@ -685,7 +685,7 @@ impl Harness {
 
     /// Offers one tree to both stores and requires the same answer.
     fn publish(&mut self, tree: &ProductAgentTree) -> Result<(), TreeStoreError> {
-        let row_level = self.store.save(tree).map(|_| ());
+        let row_level = self.store.save_in_custody(tree).map(|_| ());
         let whole = self.reference.save(tree);
         match (&row_level, &whole) {
             (Ok(()), Ok(())) => {}
@@ -752,7 +752,9 @@ impl Harness {
                 if self.acknowledged == 0 {
                     return;
                 }
-                self.store.delete(TREE, self.acknowledged).unwrap();
+                self.store
+                    .delete_in_custody(TREE, self.acknowledged)
+                    .unwrap();
                 self.reference.delete(TREE, self.acknowledged);
                 self.acknowledged = 0;
             }
@@ -769,7 +771,7 @@ impl Harness {
                 peer_model.remove(8, (seed % 5) as u8);
                 let tree = peer_model.tree(&self.templates, TREE, self.acknowledged);
                 let peer = SqliteTreeStore::open(&self.rows_path()).unwrap();
-                let _ = peer.save(&tree).unwrap();
+                let _ = peer.save_in_custody(&tree).unwrap();
                 self.reference.save(&tree).unwrap();
             }
         }
@@ -859,7 +861,7 @@ fn a_stale_handle_is_refused_on_the_row_level_path_as_on_the_whole_tree_path() {
     behind.stored_revision = first.revision;
     behind.revision = current.revision + 1;
     assert_eq!(
-        harness.store.save(&behind).unwrap_err(),
+        harness.store.save_in_custody(&behind).unwrap_err(),
         TreeStoreError::stale(current.revision, behind.revision)
     );
     // A handle that claims a revision the store never acknowledged.
@@ -867,14 +869,14 @@ fn a_stale_handle_is_refused_on_the_row_level_path_as_on_the_whole_tree_path() {
     ahead.stored_revision = current.revision + 5;
     ahead.revision = current.revision + 6;
     assert_eq!(
-        harness.store.save(&ahead).unwrap_err(),
+        harness.store.save_in_custody(&ahead).unwrap_err(),
         TreeStoreError::stale(current.revision, ahead.revision)
     );
     // A handle for a tree it believes was never published.
     let mut fresh = current.clone();
     fresh.stored_revision = 0;
     assert_eq!(
-        harness.store.save(&fresh).unwrap_err(),
+        harness.store.save_in_custody(&fresh).unwrap_err(),
         TreeStoreError::stale(current.revision, fresh.revision)
     );
     assert_eq!(dump(&harness.rows_path(), TREE), before);

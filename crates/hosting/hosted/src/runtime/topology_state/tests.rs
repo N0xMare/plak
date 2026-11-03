@@ -193,11 +193,16 @@ impl crate::agent_tree::TreeStore for SwitchedCapacity {
     fn save(
         &self,
         tree: &crate::agent_tree::ProductAgentTree,
+        claim: &crate::agent_tree::CustodyClaim,
     ) -> Result<crate::agent_tree::Revision, crate::agent_tree::TreeStoreError> {
         if self.full.load(std::sync::atomic::Ordering::Acquire) {
             return Err(crate::agent_tree::TreeStoreError::storage_full());
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn crate::agent_tree::TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -280,7 +285,7 @@ async fn a_model_rebind_epoch_keeps_the_trees_roster() {
                 .await
                 .unwrap();
         } else {
-            let acknowledged = rows.trees().save(&tree).unwrap();
+            let acknowledged = rows.trees().save_in_custody(&tree).unwrap();
             tree.acknowledge_revision(acknowledged);
         }
 
@@ -358,7 +363,7 @@ fn a_new_session_resolves_its_own_tree_and_a_staying_rebind_its_sources() {
             WriterMode::SingleLease,
         )
         .unwrap();
-        let _revision = rows.trees().save(&tree).unwrap();
+        let _revision = rows.trees().save_in_custody(&tree).unwrap();
     };
     seed(&source.id);
     let request = WorkflowRequest {

@@ -1,7 +1,7 @@
 //! Attaching a reopened tree: its reconciliation runs before anything else
 //! reaches the driver.
 
-use super::{Arc, ProductAgentTree, TopologyError, TreeDriver};
+use super::{ProductAgentTree, TopologyError, TreeDriver};
 
 impl TreeDriver {
     /// Drains and completes the reopen-owned base-pin and refresh
@@ -20,15 +20,15 @@ impl TreeDriver {
         if !self.read(ProductAgentTree::owes_attach_effects)? {
             return Ok(());
         }
-        let store = Arc::clone(&self.store);
+        let driver = self.clone();
         let preparation = self
             .write_owed(move |tree| {
                 let attach = tree.take_attach_effects();
                 if attach.is_empty() {
                     return None;
                 }
-                let published = store
-                    .save(tree)
+                let published = driver
+                    .save_claimed(tree)
                     .map(|revision| tree.acknowledge_revision(revision));
                 Some((attach, published))
             })

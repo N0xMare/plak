@@ -237,6 +237,7 @@ impl crate::agent_tree::TreeStore for CloseSaveStore {
     fn save(
         &self,
         tree: &crate::agent_tree::ProductAgentTree,
+        claim: &crate::agent_tree::CustodyClaim,
     ) -> Result<crate::agent_tree::Revision, crate::agent_tree::TreeStoreError> {
         use std::sync::atomic::Ordering;
         let count = self.saves.fetch_add(1, Ordering::SeqCst) + 1;
@@ -247,7 +248,7 @@ impl crate::agent_tree::TreeStore for CloseSaveStore {
                 crate::agent_tree::TreeStoreError::unavailable("close consequence refused")
             });
         }
-        let revision = crate::agent_tree::TreeStore::save(&self.inner, tree)?;
+        let revision = crate::agent_tree::TreeStore::save(&self.inner, tree, claim)?;
         if tree
             .operations()
             .values()
@@ -257,6 +258,10 @@ impl crate::agent_tree::TreeStore for CloseSaveStore {
                 crate::agent_tree::TreeStore::load(&self.inner, &tree.tree_id)?;
         }
         Ok(revision)
+    }
+
+    fn custody_port(&self) -> &dyn crate::agent_tree::TreeCustody {
+        crate::agent_tree::TreeStore::custody_port(&self.inner)
     }
 }
 

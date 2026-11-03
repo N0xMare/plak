@@ -126,7 +126,7 @@ async fn startup_folds_a_crash_window_finalize_and_settles_its_seal_once() {
     )
     .unwrap();
     let store = Arc::new(MemoryTreeStore::new());
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let id = tree.tree_id.clone();
     let loaded = ProductAgentTree::reopen(store.load(&id).unwrap().unwrap());
     let runtime = TopologyHub::new()

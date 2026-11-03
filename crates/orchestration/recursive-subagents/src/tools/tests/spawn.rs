@@ -830,7 +830,7 @@ async fn spawn_close_emits_tree_node_spawned_and_detached() {
         WriterMode::SingleLease,
     )
     .unwrap();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let driver = driver_on(tree, store);
     let recorder = Arc::new(RecordingObserver::default());
     let observer = Arc::clone(&recorder) as Arc<dyn TopologyObserver>;

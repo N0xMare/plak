@@ -8,8 +8,8 @@ use std::sync::{
 use std::time::Duration;
 
 use crate::agent_tree::{
-    AgentCommandKind, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TreeStore,
-    TreeStoreError,
+    AgentCommandKind, CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision,
+    TreeCustody, TreeStore, TreeStoreError,
 };
 use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
 use crate::runtime::test_support::{fresh_injected_attached_host, send_attached_action};
@@ -41,7 +41,11 @@ impl TreeStore for FullRootBatches {
     fn load(&self, id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {
         self.inner.load(id)
     }
-    fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+        claim: &CustodyClaim,
+    ) -> Result<Revision, TreeStoreError> {
         if self.full.load(Ordering::Acquire)
             && tree
                 .commands()
@@ -55,7 +59,11 @@ impl TreeStore for FullRootBatches {
             self.refused.fetch_add(1, Ordering::AcqRel);
             return Err(TreeStoreError::storage_full());
         }
-        self.inner.save(tree)
+        self.inner.save(tree, claim)
+    }
+
+    fn custody_port(&self) -> &dyn TreeCustody {
+        self.inner.custody_port()
     }
 }
 
@@ -94,7 +102,7 @@ fn uncancelled_stored_only_root_batch_full_keeps_run_loop_alive_and_retries_once
     .unwrap();
     tree.record_turn_completed(&child.agent_id).unwrap();
     tree.settle_for_test();
-    let revision = trees.save(&tree).unwrap();
+    let revision = trees.save_in_custody(&tree).unwrap();
     tree.acknowledge_revision(revision);
     let original = &config.state_roots;
     config.state_roots = crate::agent::ProductStateRoots::new(

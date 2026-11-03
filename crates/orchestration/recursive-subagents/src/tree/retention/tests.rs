@@ -142,7 +142,7 @@ fn collected_records_keep_durable_pin_cleanup_until_acknowledged() {
     tree.finish_child_retention(&ticket).unwrap();
     assert!(!tree.candidates.contains_key(&candidate));
     let store = MemoryTreeStore::new();
-    let revision = store.save(&tree).unwrap();
+    let revision = store.save_in_custody(&tree).unwrap();
     tree.acknowledge_revision(revision);
     let mut reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
     let mut pending = reopened.pending_pin_cleanup().unwrap();

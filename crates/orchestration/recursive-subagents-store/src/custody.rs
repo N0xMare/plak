@@ -93,6 +93,25 @@ fn write(
     Ok(())
 }
 
+/// Proves `claim` against `tree_id`'s stored record inside the write's own
+/// transaction.
+pub(crate) fn prove_in(
+    tx: &Transaction<'_>,
+    tree_id: &str,
+    claim: &CustodyClaim,
+) -> Result<(), TreeStoreError> {
+    plakous_recursive_subagents::tree::prove_write(read(tx, tree_id)?.as_ref(), tree_id, claim)
+}
+
+/// Removes `tree_id`'s custody record with its deleted rows.
+pub(crate) fn delete_record(tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
+    tx.execute("DELETE FROM agent_tree_custody WHERE tree_id=?1", [tree_id])
+        .map_err(|error| {
+            sqlite_write_error(error, "could not delete agent tree custody".to_owned())
+        })?;
+    Ok(())
+}
+
 impl SqliteTreeStore {
     /// Runs one custody transition of `tree_id` inside one `Immediate`
     /// transaction: `step` maps the stored record to the record to write, if
@@ -121,6 +140,10 @@ impl SqliteTreeStore {
 }
 
 impl TreeCustody for SqliteTreeStore {
+    fn custody_scope(&self) -> String {
+        format!("sqlite:{}", self.custody_path().display())
+    }
+
     fn custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, TreeStoreError> {
         self.with_connection(|connection| {
             let tx = connection.transaction().map_err(|error| {

@@ -53,10 +53,8 @@ pub fn load_tree(paths: &PlakPaths, tree_id: &str) -> Result<Option<ProductAgent
 
 /// A whole-tree publish through the port's compare-and-swap.
 pub fn save_tree(paths: &PlakPaths, tree: &mut ProductAgentTree) -> Result<(), TopologyError> {
-    let acknowledged = open_tree_store(paths)
-        .map_err(TreeStoreError::unavailable)?
-        .save(tree)
-        .map_err(TopologyError::from)?;
+    let store = open_tree_store(paths).map_err(TreeStoreError::unavailable)?;
+    let acknowledged = store.save_in_custody(tree).map_err(TopologyError::from)?;
     tree.acknowledge_revision(acknowledged);
     Ok(())
 }

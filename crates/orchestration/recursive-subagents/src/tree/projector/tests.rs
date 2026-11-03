@@ -1548,7 +1548,7 @@ fn behind_retention_command_markers_survive_store_reopen_and_view_rebuild() {
     assert!(!tree.command_behind_retention("lost-a"));
     tree.seed_feed_cursor(ROOT_SESSION, 20);
     let store = MemoryTreeStore::default();
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     let mut restored = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
     assert!(restored.command("lost-b").unwrap().unresolved());
     assert!(restored.command_behind_retention("lost-b"));

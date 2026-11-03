@@ -223,7 +223,7 @@ fn assert_late_recovery_read(later_retirement: bool, retained: bool, new_termina
     assert_eq!(live.attempt(child).unwrap(), &attempt);
     let database = tmp.path().join("late-in-place.sqlite3");
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&live).unwrap();
+    let _ = store.save_in_custody(&live).unwrap();
     let mut cold = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
     let before = cold.revision;
     apply(&mut cold);
@@ -240,7 +240,7 @@ fn assert_late_recovery_read(later_retirement: bool, retained: bool, new_termina
                 let store = SqliteTreeStore::open(&database).unwrap();
                 let mut unpublished = live.clone();
                 unpublished.stored_revision = 0;
-                let _ = store.save(&unpublished).unwrap();
+                let _ = store.save_in_custody(&unpublished).unwrap();
                 drop(store);
                 delete_views(&database);
                 let store = SqliteTreeStore::open(&database).unwrap();
@@ -343,7 +343,7 @@ fn two_abandonment_reads_on_one_attempt_are_inert_on_every_reread() {
     );
     assert_eq!(law_rows(&live), expected);
     let store = SqliteTreeStore::open(&tmp.path().join("two-reads.sqlite3")).unwrap();
-    let _ = store.save(&live).unwrap();
+    let _ = store.save_in_custody(&live).unwrap();
     let mut cold = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
     let revision = cold.revision;
     cold.project_feed(child, SESSION, &feed, &reads).unwrap();
@@ -405,7 +405,7 @@ fn same_cursor_intents_after_an_intent_reserved_seal_rebuild_exactly() {
                 let mut rebuilt = if sql {
                     let database = tmp.path().join("pending.sqlite3");
                     let store = SqliteTreeStore::open(&database).unwrap();
-                    let _ = store.save(&live).unwrap();
+                    let _ = store.save_in_custody(&live).unwrap();
                     drop(store);
                     delete_views(&database);
                     let store = SqliteTreeStore::open(&database).unwrap();
@@ -583,7 +583,7 @@ fn assert_exact_single_session_rebuild(
             let store = SqliteTreeStore::open(&database).unwrap();
             let mut unpublished = live.clone();
             unpublished.stored_revision = 0;
-            let _ = store.save(&unpublished).unwrap();
+            let _ = store.save_in_custody(&unpublished).unwrap();
             drop(store);
             delete_views(&database);
             let store = SqliteTreeStore::open(&database).unwrap();
@@ -808,7 +808,7 @@ fn assert_multi_child_cascade(kind: usize, choices: usize) {
                 let store = SqliteTreeStore::open(&database).unwrap();
                 let mut unpublished = source.clone();
                 unpublished.stored_revision = 0;
-                let _ = store.save(&unpublished).unwrap();
+                let _ = store.save_in_custody(&unpublished).unwrap();
                 drop(store);
                 delete_views(&database);
                 let store = SqliteTreeStore::open(&database).unwrap();
@@ -884,7 +884,7 @@ fn assert_multi_child_cascade(kind: usize, choices: usize) {
                     let store = SqliteTreeStore::open(&database).unwrap();
                     let mut unpublished = deleted.clone();
                     unpublished.stored_revision = 0;
-                    let _ = store.save(&unpublished).unwrap();
+                    let _ = store.save_in_custody(&unpublished).unwrap();
                     drop(store);
                     delete_views(&database);
                     let store = SqliteTreeStore::open(&database).unwrap();
@@ -1034,7 +1034,7 @@ fn assert_candidate_view_rebuild(sql: bool) {
     let candidate = expected.candidate_id.clone().unwrap();
     if sql {
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -1122,7 +1122,7 @@ async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs(
     let expected_opened = tree.attempt(child).unwrap().clone();
     let expected_superseded = tree.attempts()[&spawned.attempt_id].clone();
     let store = Arc::new(SqliteTreeStore::open(&database).unwrap());
-    tree.acknowledge_revision(store.save(&tree).unwrap());
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     delete_views(&database);
     let saved = store.load("tree").unwrap().unwrap();
     assert_eq!(
@@ -1143,7 +1143,7 @@ async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs(
         expected_opened.schema_digest
     );
     assert_eq!(rebuilt.attempts()[&spawned.attempt_id], expected_superseded);
-    rebuilt.acknowledge_revision(store.save(&rebuilt).unwrap());
+    rebuilt.acknowledge_revision(store.save_in_custody(&rebuilt).unwrap());
     let driver = TreeDriver::new(Arc::new(Mutex::new(rebuilt)), store.clone(), vcs, None);
     driver.reconcile_attachment().await.unwrap();
     // The fixture has an authoritative empty runtime tail; no Start was sent.
@@ -1337,7 +1337,7 @@ fn pruned_closed_attempt_result_is_not_pushed_again_after_view_deletion() {
         let operations = tree.operations().clone();
         if sql {
             let store = SqliteTreeStore::open(&database).unwrap();
-            let _ = store.save(&tree).unwrap();
+            let _ = store.save_in_custody(&tree).unwrap();
             drop(store);
             delete_views(&database);
             let store = SqliteTreeStore::open(&database).unwrap();
@@ -1383,7 +1383,7 @@ fn sqlite_pending_close_seal_rebuilds_its_as_of_view_and_orphan_fault() {
     let expected_node = tree.node(child).unwrap().clone();
     let expected_attempt = tree.attempt(child).unwrap().clone();
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     tree.clear_feed_views();
     tree.project_feed(child, SESSION, &[], &TreeFeedReads::default())
         .unwrap();
@@ -1394,7 +1394,7 @@ fn sqlite_pending_close_seal_rebuilds_its_as_of_view_and_orphan_fault() {
     let expected_node = reopened.node(child).unwrap().clone();
     let expected_attempt = reopened.attempt(child).unwrap().clone();
     assert_eq!(expected_node.status, NodeStatus::RecoveryRequired);
-    let _ = store.save(&reopened).unwrap();
+    let _ = store.save_in_custody(&reopened).unwrap();
     drop(store);
     delete_views(&database);
     let store = SqliteTreeStore::open(&database).unwrap();
@@ -1461,7 +1461,7 @@ fn sqlite_submit_receipt_replays_by_full_digest_without_retaining_output() {
         prepared.canonical_request
     );
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     drop(store);
     let store = SqliteTreeStore::open(&database).unwrap();
     let mut cold = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
@@ -1520,7 +1520,7 @@ fn sqlite_submitted_rebuilds_output_and_status_from_its_intent() {
     let expected_attempt = tree.attempt(child).unwrap().clone();
     let expected_node = tree.node(child).unwrap().clone();
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let cold = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
     assert_eq!(
         cold.attempt(child).unwrap().output_json,
@@ -1600,7 +1600,7 @@ fn sqlite_close_survives_view_deletion_without_live_inputs() {
         let expected_attempt = tree.attempt(child).unwrap().clone();
         let expected_node = tree.node(child).unwrap().clone();
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         tree.clear_feed_views();
         tree.project_feed(child, SESSION, &[], &TreeFeedReads::default())
             .unwrap();
@@ -1645,7 +1645,7 @@ fn sqlite_recovery_abandonment_survives_view_deletion() {
     let expected_node = tree.node(child).unwrap().clone();
     let _ = tree.take_effects();
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     tree.clear_feed_views();
     tree.project_feed(child, SESSION, &[], &TreeFeedReads::default())
         .unwrap();
@@ -1667,7 +1667,7 @@ fn sqlite_recovery_abandonment_survives_view_deletion() {
         .project_feed(child, SESSION, &[], &TreeFeedReads::default())
         .unwrap();
     assert_eq!(rebuilt.revision, revision);
-    let _ = store.save(&rebuilt).unwrap();
+    let _ = store.save_in_custody(&rebuilt).unwrap();
     let mut twice = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
     twice.fold_due(child).unwrap();
     assert_eq!(twice.attempt(child).unwrap(), &expected_attempt);
@@ -1709,7 +1709,7 @@ fn sqlite_interrupt_survives_view_deletion_without_live_ownership() {
             .unwrap()
             .clone();
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -1784,7 +1784,7 @@ fn sqlite_spawn_adopt_and_cleanup_outcomes_survive_view_deletion() {
         let expected_node = tree.node(child).unwrap().clone();
         let mut expected_fault = tree.fault_reason(child).map(str::to_owned);
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         tree.clear_feed_views();
         tree.project_feed(child, SESSION, &feed, &TreeFeedReads::default())
             .unwrap();
@@ -1800,7 +1800,7 @@ fn sqlite_spawn_adopt_and_cleanup_outcomes_survive_view_deletion() {
         if outcome == 2 {
             expected_fault = reopened.fault_reason(child).map(str::to_owned);
         }
-        let _ = store.save(&reopened).unwrap();
+        let _ = store.save_in_custody(&reopened).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -1819,7 +1819,7 @@ fn sqlite_spawn_adopt_and_cleanup_outcomes_survive_view_deletion() {
         assert_eq!(rebuilt.revision, once);
         assert_eq!(rebuilt.attempt(child).unwrap(), &expected_attempt);
         assert_eq!(rebuilt.node(child).unwrap(), &expected_node);
-        let _ = store.save(&rebuilt).unwrap();
+        let _ = store.save_in_custody(&rebuilt).unwrap();
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         again
             .project_feed(child, SESSION, &feed, &TreeFeedReads::default())
@@ -1879,7 +1879,7 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
         let expected_attempt = tree.attempt(child).unwrap().clone();
         let expected_node = tree.node(child).unwrap().clone();
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -1894,7 +1894,7 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
             Some("earlier precise diagnostic")
         );
         settle_only_reopen_base_pin(&mut rebuilt, &vcs, !settled);
-        let _ = store.save(&rebuilt).unwrap();
+        let _ = store.save_in_custody(&rebuilt).unwrap();
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         again
             .project_feed(child, SESSION, &feed, &TreeFeedReads::default())
@@ -1930,7 +1930,7 @@ fn sqlite_fold_metadata_round_trips_and_rejects_invalid_positions() {
     )
     .unwrap();
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let mut cold = store.load("tree").unwrap().unwrap().rows().clone();
     let order = cold.revision;
     cold.record_host_retirement(child, "release uncertain".into())
@@ -1944,7 +1944,7 @@ fn sqlite_fold_metadata_round_trips_and_rejects_invalid_positions() {
         intent.fold,
         Some(plakous_recursive_subagents::tree::FoldAnchor { seq: 1, order })
     );
-    let _ = store.save(&cold).unwrap();
+    let _ = store.save_in_custody(&cold).unwrap();
     let loaded = store.load("tree").unwrap().unwrap();
     assert_eq!(loaded.rows().operations(), cold.operations());
     assert_eq!(loaded.rows().nodes(), cold.nodes());
@@ -1983,7 +1983,7 @@ fn sqlite_fold_metadata_round_trips_and_rejects_invalid_positions() {
             .values()
             .all(|node| node.fold_order == Some(7))
     );
-    let _ = store.save(&loaded).unwrap();
+    let _ = store.save_in_custody(&loaded).unwrap();
     assert_eq!(
         store.load("tree").unwrap().unwrap().rows().nodes(),
         loaded.nodes()
@@ -2029,7 +2029,7 @@ fn sqlite_bindings_use_plain_turn_ids_and_integer_anchors() {
     tree.project_feed(child, SESSION, &[accepted], &TreeFeedReads::default())
         .unwrap();
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let db = rusqlite::Connection::open(&database).unwrap();
     let command: (String, i64, String) = db
         .query_row(
@@ -2076,7 +2076,7 @@ fn sqlite_bindings_use_plain_turn_ids_and_integer_anchors() {
     }
     .apply(&mut tree, child)
     .unwrap();
-    let _ = store.save(&tree).unwrap();
+    let _ = store.save_in_custody(&tree).unwrap();
     let seeded: (String, i64, String) = db
         .query_row(
             "SELECT a.turn_id,n.fold_order,typeof(n.fold_order) FROM agent_attempts a JOIN agent_nodes n USING(tree_id,agent_id) WHERE a.agent_id=?1",
@@ -2171,7 +2171,7 @@ fn sqlite_view_deletion_reopens_host_intents_without_repeating_effects() {
         let expected_cursor = tree.feed_cursor(SESSION);
         let expected_mail = tree.messages().clone();
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -2235,7 +2235,7 @@ fn sqlite_orphaned_seals_rebuild_finalize_and_submitted_cancellation_once() {
         tree.fold_due(child).unwrap();
         assert_eq!(tree.take_effects().seals.len(), 1);
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         let mut reopened = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         reopened
             .project_feed(child, SESSION, &feed, &TreeFeedReads::default())
@@ -2247,7 +2247,7 @@ fn sqlite_orphaned_seals_rebuild_finalize_and_submitted_cancellation_once() {
         let expected_attempt = reopened.attempt(child).unwrap().clone();
         let expected_node = reopened.node(child).unwrap().clone();
         let expected_operations = reopened.operations().clone();
-        reopened.acknowledge_revision(store.save(&reopened).unwrap());
+        reopened.acknowledge_revision(store.save_in_custody(&reopened).unwrap());
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -2262,7 +2262,7 @@ fn sqlite_orphaned_seals_rebuild_finalize_and_submitted_cancellation_once() {
             assert_eq!(rebuilt.operations(), &expected_operations);
             assert!(rebuilt.take_effects().is_empty());
         }
-        rebuilt.acknowledge_revision(store.save(&rebuilt).unwrap());
+        rebuilt.acknowledge_revision(store.save_in_custody(&rebuilt).unwrap());
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         again
             .project_feed(child, SESSION, &feed, &TreeFeedReads::default())
@@ -2342,7 +2342,7 @@ fn both_deletion_paths_reset_mail_and_return_receipts_and_rebuild_identically() 
         MailDurableState::Acknowledged
     );
     let store = SqliteTreeStore::open(&database).unwrap();
-    let _ = store.save(&live).unwrap();
+    let _ = store.save_in_custody(&live).unwrap();
     let mut memory = live.clone();
     memory.clear_feed_views();
     delete_views(&database);
@@ -2477,7 +2477,7 @@ async fn assert_cold_host_anchor(below_retention: bool) {
             assert_eq!(tree.attempt(child).unwrap().turn_id.as_deref(), Some(TURN));
         }
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         let mut cold = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         // A real feed read fails before any projector pass can warm the caches.
         let sessions = plakous::sessions::AgentSessions::new(
@@ -2537,7 +2537,7 @@ async fn assert_cold_host_anchor(below_retention: bool) {
         let mut expected = cold.attempt(child).unwrap().clone();
         expected.usage.turns = 0;
         let expected_node = cold.node(child).unwrap().clone();
-        let _ = store.save(&cold).unwrap();
+        let _ = store.save_in_custody(&cold).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -2554,7 +2554,7 @@ async fn assert_cold_host_anchor(below_retention: bool) {
                 .count(),
             0
         );
-        let _ = store.save(&rebuilt).unwrap();
+        let _ = store.save_in_custody(&rebuilt).unwrap();
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         retained.apply(&mut again, child).unwrap();
         assert_eq!(again.attempt(child).unwrap(), &expected);
@@ -2611,7 +2611,7 @@ fn sqlite_below_retention_host_outcomes_equal_live_without_new_seals() {
             reads: TreeFeedReads::default(),
         };
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -2628,7 +2628,7 @@ fn sqlite_below_retention_host_outcomes_equal_live_without_new_seals() {
             "decision={decision}"
         );
         assert!(rebuilt.take_effects().is_empty());
-        let _ = store.save(&rebuilt).unwrap();
+        let _ = store.save_in_custody(&rebuilt).unwrap();
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         retained.apply(&mut again, child).unwrap();
         assert_eq!(again.attempt(child).unwrap(), &expected);
@@ -2678,7 +2678,7 @@ fn sqlite_orphaned_vcs_faults_survive_view_deletion_and_a_second_reopen() {
             .unwrap();
         }
         let store = SqliteTreeStore::open(&database).unwrap();
-        let _ = store.save(&tree).unwrap();
+        let _ = store.save_in_custody(&tree).unwrap();
         let mut reopened = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         assert_eq!(
             reopened.node(child).unwrap().status,
@@ -2689,7 +2689,7 @@ fn sqlite_orphaned_vcs_faults_survive_view_deletion_and_a_second_reopen() {
             .unwrap();
         let expected_attempt = reopened.attempt(child).unwrap().clone();
         let expected_node = reopened.node(child).unwrap().clone();
-        let _ = store.save(&reopened).unwrap();
+        let _ = store.save_in_custody(&reopened).unwrap();
         drop(store);
         delete_views(&database);
         let store = SqliteTreeStore::open(&database).unwrap();
@@ -2701,7 +2701,7 @@ fn sqlite_orphaned_vcs_faults_survive_view_deletion_and_a_second_reopen() {
         assert_eq!(rebuilt.attempt(child).unwrap(), &expected_attempt);
         settle_only_reopen_base_pin(&mut rebuilt, &vcs, adopt);
         assert!(rebuilt.fault_reason(child).is_some());
-        let _ = store.save(&rebuilt).unwrap();
+        let _ = store.save_in_custody(&rebuilt).unwrap();
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         again
             .project_feed(child, SESSION, &feed, &TreeFeedReads::default())
