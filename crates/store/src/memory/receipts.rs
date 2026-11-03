@@ -53,6 +53,8 @@ pub(super) fn validate_commit(
         || topology.parent_checkpoint_id != Some(request.expected().checkpoint().checkpoint_id())
         || topology.branch_revision != next.get()
         || topology.fork != expected.manifest().topology().fork
+        || topology.line != expected.manifest().topology().line
+        || topology.line_generation != expected.manifest().topology().line_generation
         || topology.lease_fence != request.lease().fence().get()
         || manifest.durability() != RuntimeDurability::Disabled
     {

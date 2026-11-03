@@ -78,6 +78,9 @@ struct CheckpointAuthority {
     pruned_horizon: u64,
     abandoned: bool,
     released: bool,
+    /// Job terminals a lease-only holder recorded for this head, folded into
+    /// and consumed by this owner's next publication.
+    pending_line_terminals: Vec<crate::manifest::LineJobTerminal>,
 }
 
 impl CheckpointAuthority {
@@ -420,6 +423,18 @@ impl CheckpointOwner {
         };
         let prior_manifest = prior.manifest();
         let prior_topology = prior_manifest.topology();
+        let pending_line_terminals = lock_mutex(&self.state).pending_line_terminals.clone();
+        let mut facts = facts;
+        if !pending_line_terminals.is_empty() {
+            facts.jobs = facts
+                .jobs
+                .with_line_terminals(&pending_line_terminals)
+                .map_err(crate::runtime::continuation::runtime_manifest_error)?;
+        }
+        let consumed_line_terminals = pending_line_terminals
+            .iter()
+            .map(|terminal| terminal.number)
+            .collect::<Vec<_>>();
         let branch_revision = prior_topology
             .branch_revision
             .checked_add(1)
@@ -460,9 +475,18 @@ impl CheckpointOwner {
             // its potentially slow store operation freshly acknowledged lease
             // authority rather than the remainder of an earlier heartbeat.
             let mut branch = renew_shared_durable_lease_under_gate(&self.state).await?;
+            let mut feed_facts = crate::feed::facts::commit_facts(&prior, &checkpoint)?;
+            if !consumed_line_terminals.is_empty() {
+                feed_facts.push(crate::feed::FeedFact::LineJobTerminalsConsumed {
+                    line: prior_topology.line,
+                    generation: prior_topology.line_generation,
+                    jobs: consumed_line_terminals.clone(),
+                });
+            }
             let request = CommitCheckpoint::new(branch.lease.clone(), branch.head, bundle.clone())
                 .with_admission(admission)
-                .with_feed_facts(crate::feed::facts::commit_facts(&prior, &checkpoint)?);
+                .with_feed_facts(feed_facts)
+                .with_consumed_line_terminals(consumed_line_terminals.clone());
             let committed = Box::pin(commit_with_acknowledgement_recovery(
                 &branch.store,
                 branch.store_timeouts.operation,
@@ -478,7 +502,7 @@ impl CheckpointOwner {
             if let Some(active) = &mut lock_mutex(&self.state).durable {
                 active.lease = branch.lease.clone();
             }
-            let receipt = committed?;
+            let receipt = committed.inspect_err(|error| self.fence_if_superseded(error))?;
             accepted_head = Some((receipt.head(), receipt.feed_seq(), branch.lease));
         }
         let mut authority = lock_mutex(&self.state);
@@ -490,6 +514,9 @@ impl CheckpointOwner {
             ));
         }
         authority.checkpoint = Arc::clone(&checkpoint);
+        authority
+            .pending_line_terminals
+            .retain(|terminal| !consumed_line_terminals.contains(&terminal.number));
         // Amortize cache trimming after acknowledged publication. Before a
         // store sweep, prune_superseded unconditionally discards old membership.
         authority.bundle = bundle.trimmed().unwrap_or(bundle);
@@ -575,10 +602,25 @@ impl CheckpointOwner {
             || branch.store.storage_wait_cancelled(),
         )
         .await
-        .map_err(StoreCallError::into_agent)?;
+        .map_err(StoreCallError::into_agent)
+        .inspect_err(|error| self.fence_if_superseded(error))?;
         let mut authority = lock_mutex(&self.state);
         authority.pruned_horizon = authority.pruned_horizon.max(receipt.horizon().get());
         Ok(Some(receipt))
+    }
+
+    /// Whether recorded line job terminals still await this owner's next
+    /// publication.
+    pub(in crate::runtime) fn has_pending_line_terminals(&self) -> bool {
+        !lock_mutex(&self.state).pending_line_terminals.is_empty()
+    }
+
+    /// A store refusal of `NotLineHead` means a rebind or carry moved this
+    /// branch's line on: the branch is read-only, so this owner is fenced.
+    fn fence_if_superseded(&self, error: &AgentError) {
+        if error.store_error() == Some(crate::SessionStoreError::NotLineHead) {
+            self.heartbeat.fence(error);
+        }
     }
 
     /// Whether the checkpoints strictly between the known horizon and the
@@ -1068,8 +1110,18 @@ impl PreparedCheckpoint {
                 pruned_horizon,
                 abandoned: false,
                 released: false,
+                pending_line_terminals: Vec::new(),
             },
         }
+    }
+
+    /// Hands the head's recorded line job terminals to the owner.
+    pub(in crate::runtime) fn with_line_terminals(
+        mut self,
+        terminals: Vec<crate::manifest::LineJobTerminal>,
+    ) -> Self {
+        self.state.pending_line_terminals = terminals;
+        self
     }
     pub(in crate::runtime) fn checkpoint(&self) -> Arc<RuntimeCheckpoint> {
         self.state.checkpoint()

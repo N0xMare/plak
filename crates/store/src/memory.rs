@@ -37,6 +37,7 @@ use receipts::{
     validate_fork, validate_fork_semantic_request, validate_genesis,
     validate_materialized_fork_receipt,
 };
+mod lines;
 mod reads;
 use reads::{branch, stored_checkpoint};
 
@@ -307,6 +308,8 @@ impl MemorySessionStore {
         }
 
         let candidate = publication_candidate(request.initial())?;
+        let topology = candidate.checkpoint.manifest().topology();
+        let line_change = lines::plan_genesis(&state, request, topology)?;
         let expires_at = expiry(self.lease_now()?, request.lease_seconds())?;
         let fence = NonZeroU64::MIN;
         let lease = BranchLease::from_store(
@@ -344,6 +347,8 @@ impl MemorySessionStore {
             FeedChange::Created {
                 genesis: candidate.reference.checkpoint_id(),
                 revision: BranchRevision::INITIAL,
+                line: topology.line,
+                generation: topology.line_generation,
             },
             request.feed_facts(),
         )?;
@@ -372,6 +377,7 @@ impl MemorySessionStore {
         state
             .creates
             .insert(request.session().session_id(), receipt.clone());
+        lines::apply(&mut state, line_change);
         retain_head_bundle(&mut state, hot_bundle);
         Ok(receipt)
     }
@@ -606,6 +612,9 @@ impl MemorySessionStore {
                 return Err(SessionStoreError::Conflict);
             }
         }
+        let topology = candidate.checkpoint.manifest().topology();
+        let (line, line_generation) = (topology.line, topology.line_generation);
+        lines::require_head(&state, request.expected().session(), line, line_generation)?;
         let next_revision = request
             .expected()
             .revision()
@@ -650,6 +659,12 @@ impl MemorySessionStore {
             install_candidate(&mut state, candidate, self.limits, request.admission())?;
         mutable_branch(&mut state, request.expected().session())?.head = head;
         memory_feed::append(&mut state.feeds, record);
+        lines::consume(
+            &mut state,
+            line,
+            line_generation,
+            request.consumed_line_terminals(),
+        );
         state.commits.insert(checkpoint_id, committed);
         retain_head_bundle(&mut state, hot_bundle);
         Ok(receipt)
@@ -689,6 +704,8 @@ impl MemorySessionStore {
             }
             branch.head
         };
+        let (line, line_generation) = lines::branch_line(&state, selector)?;
+        lines::require_head(&state, selector, line, line_generation)?;
         let checkpoint = Arc::clone(
             &state
                 .checkpoints
@@ -823,6 +840,20 @@ impl MemorySessionStore {
             ));
         }
         validate_fork(&candidate, &source_checkpoint, request, target)?;
+        let topology = candidate.checkpoint.manifest().topology();
+        let (line_change, new_head) = lines::plan_step(
+            &state,
+            target,
+            topology.line,
+            topology.line_generation,
+            Some((
+                request.source().session(),
+                request.source().checkpoint().checkpoint_id(),
+            )),
+            &plakous_agent::internal::LineOrigin::Created,
+            StoreInvalidReason::ForkCheckpointSemantics,
+        )?;
+        let (line, line_generation) = (topology.line, topology.line_generation);
         let next_revision = request
             .expected_session_revision()
             .checked_next()
@@ -883,6 +914,9 @@ impl MemorySessionStore {
                     BranchTransitionMode::OrdinaryFork => FeedBranchTransition::Fork,
                     BranchTransitionMode::Rebind => FeedBranchTransition::Rebind,
                 },
+                line,
+                new_head,
+                generation: line_generation,
             },
             request.feed_facts(),
         )?;
@@ -914,6 +948,7 @@ impl MemorySessionStore {
             },
         );
         state.forks.insert(request.workflow_id(), receipt.clone());
+        lines::apply(&mut state, line_change);
         retain_head_bundle(&mut state, hot_bundle);
         Ok(receipt)
     }
@@ -1039,6 +1074,7 @@ impl MemorySessionStore {
         // Deletion has the same all-or-nothing contract as SQLite: stage the
         // graph sweep and publish it only after every fallible check succeeds.
         let mut staged = state.clone();
+        lines::delete_session(&mut staged, request.session_id());
         staged.sessions.remove(&request.session_id());
         staged.feeds.remove(&request.session_id());
         staged.creates.remove(&request.session_id());
@@ -1278,6 +1314,35 @@ impl SessionStore for MemorySessionStore {
         Box::pin(async move { self.feed_tail_sync(session_id) })
     }
 
+    fn load_line(
+        &self,
+        line: plakous_agent::internal::LineId,
+    ) -> StoreFuture<'_, plakous_agent::internal::LineRecord> {
+        Box::pin(async move { lines::load(&*self.lock()?, line) })
+    }
+
+    fn line_job_terminals(
+        &self,
+        line: plakous_agent::internal::LineId,
+    ) -> StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>> {
+        Box::pin(async move { lines::terminals(&*self.lock()?, line) })
+    }
+
+    fn record_line_job_terminals(
+        &self,
+        request: plakous_agent::internal::RecordLineJobTerminals,
+    ) -> StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt> {
+        Box::pin(async move {
+            let now = self.lease_now()?;
+            let mut state = self.lock()?;
+            require_open(&state)?;
+            let receipt = lines::record(&mut state, &request, now)?;
+            drop(state);
+            self.trim_feed(request.lease().session().session_id());
+            Ok(receipt)
+        })
+    }
+
     fn recover_delete(&self, request: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
         Box::pin(async move { self.recover_delete_sync(request) })
     }
@@ -1307,6 +1372,7 @@ struct StoreState {
     feeds: BTreeMap<SessionId, SessionFeed>,
     feed_trims: u64,
     shutdown_report: Option<DurabilityReport>,
+    lines: lines::MemoryLines,
 }
 
 #[derive(Clone)]

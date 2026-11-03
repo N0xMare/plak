@@ -32,7 +32,7 @@ pub(in crate::runtime::durable) async fn checkpoint() -> TestResult<RuntimeCheck
             number: 7,
             command: "completed fixture".to_owned(),
             started_at: Timestamp::new(10, 0)?,
-            owner: "fixture-agent".to_owned(),
+            owner: crate::manifest::fixture_job_owner(),
             session_id: crate::manifest::ProcessSessionId::new([7; 16])?,
             owner_generation: crate::manifest::ProcessSessionOwnerGeneration::new(1)?,
             terminal: Some(crate::manifest::JobTerminal {

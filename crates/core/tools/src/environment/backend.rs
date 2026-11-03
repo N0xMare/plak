@@ -218,6 +218,16 @@ impl ExecutionBackendError {
         }
     }
 
+    /// A process-service attach by an owner that does not succeed the line's
+    /// current holder ([`crate::JobOwner::succeeds`]). Nothing was transferred.
+    #[must_use]
+    pub fn stale_job_owner() -> Self {
+        Self::new(
+            ExecutionBackendErrorKind::IdentityMismatch,
+            "a newer owner of this agent line holds its process service",
+        )
+    }
+
     /// Records whether this error was raised before the backend had an effect.
     ///
     /// The raise site knows what its category cannot: whether a child had

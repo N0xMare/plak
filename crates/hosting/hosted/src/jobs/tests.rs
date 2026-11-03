@@ -1,5 +1,5 @@
 use super::*;
-use plakous::model::{BranchId, CancellationToken, DriverInstanceId, RunId, SessionId};
+use plakous::model::{BranchId, CancellationToken, LineId, RunId, SessionId};
 use plakous::tools::{
     ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
     ExecutionOperationControl, JobStatus, JobStopReason, JoinedProcessCommand,
@@ -18,12 +18,12 @@ fn attributed_host_looks_up_only_the_exact_session_branch() -> TestResult {
     let host = registry.for_agent("root", "s");
     let service = host.attach(owner, sessions(root.path())?)?;
     let id = start(service.local())?;
-    let found = host
-        .service(owner.session_id, owner.branch_id)
-        .ok_or("missing service")?;
+    let found = host.service(owner.line).ok_or("missing service")?;
     assert!(found.local().retains_session(id));
     let foreign = BranchId::from_str("00000000-0000-0000-0000-000000000705")?;
-    assert!(host.service(owner.session_id, foreign).is_none());
+    assert!(host.service(LineId::started_by(foreign)).is_none());
+    assert!(host.service_at(owner.session_id, foreign).is_none());
+    assert!(host.service_at(owner.session_id, owner.branch_id).is_some());
     service.local().stop(id, JobStopReason::User)?;
     Ok(())
 }
@@ -59,13 +59,10 @@ fn parked_child_jobs_remain_visible_with_owner_and_hud_count() -> TestResult {
     let child_owner = owner("00000000-0000-0000-0000-000000000705")?;
     let host = registry.for_agent("c7", "s");
     let service = host.attach(child_owner, sessions(root.path())?)?;
-    plakous_tools::internal::set_job_owner(service.local(), child_owner.agent_id.to_string());
+    plakous_tools::internal::set_job_owner(service.local(), DRIVER.to_owned());
     let id = start(service.local())?;
     plakous_tools::internal::promote(service.local(), id)?;
-    plakous_tools::internal::close_job_admission(
-        service.local(),
-        &child_owner.agent_id.to_string(),
-    );
+    plakous_tools::internal::close_job_admission(service.local(), DRIVER);
     drop(host);
     assert_eq!(registry.running_count(), 1);
     let rows = registry.snapshot();
@@ -140,11 +137,10 @@ fn same_session_root_fork_keeps_the_child_and_drops_the_old_root_slice() -> Test
     );
     assert_eq!(rows[0].owner, "c1");
     assert_eq!(rows[0].status, ProcessStatus::Running);
-    let other = JobOwner {
-        session_id: SessionId::from_str("00000000-0000-0000-0000-000000000709")?,
-        branch_id: BranchId::from_str("00000000-0000-0000-0000-00000000070a")?,
-        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000703")?,
-    };
+    let other = keyed(
+        "00000000-0000-0000-0000-000000000709",
+        "00000000-0000-0000-0000-00000000070a",
+    )?;
     registry
         .for_agent("root", "other")
         .attach(other, sessions(root.path())?)?;
@@ -328,13 +324,19 @@ fn recent_terminal_snapshot_survives_notice_consumption_and_expires() -> TestRes
     Ok(())
 }
 
+/// Each branch heads a line of its own: distinct branches are distinct owners.
 fn keyed(session: &str, branch: &str) -> TestResult<JobOwner> {
+    let branch_id = BranchId::from_str(branch)?;
     Ok(JobOwner {
+        line: LineId::started_by(branch_id),
+        generation: 1,
         session_id: SessionId::from_str(session)?,
-        branch_id: BranchId::from_str(branch)?,
-        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000703")?,
+        branch_id,
+        fence: 1,
     })
 }
+
+const DRIVER: &str = "00000000-0000-0000-0000-000000000703";
 
 const S1: &str = "00000000-0000-0000-0000-0000000008a1";
 const S2: &str = "00000000-0000-0000-0000-0000000008a2";
@@ -492,7 +494,7 @@ fn owner_maps_shrink_after_retired_children() -> TestResult {
         .services
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .remove(&child_key);
+        .remove(&LineId::started_by(child_key.1));
     assert!(
         registry
             .owners
@@ -521,11 +523,7 @@ fn owner_maps_shrink_after_retired_children() -> TestResult {
 }
 
 fn owner(branch: &str) -> TestResult<JobOwner> {
-    Ok(JobOwner {
-        session_id: SessionId::from_str("00000000-0000-0000-0000-000000000701")?,
-        branch_id: BranchId::from_str(branch)?,
-        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000703")?,
-    })
+    keyed("00000000-0000-0000-0000-000000000701", branch)
 }
 
 fn sessions(root: &Path) -> TestResult<JoinedSessionsPort> {
@@ -810,7 +808,7 @@ fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> Tes
     assert!(registry.is_leftover(&views[0]));
     let replacement = registry.attach(
         JobOwner {
-            agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000706")?,
+            fence: key.fence + 1,
             ..key
         },
         sessions(root.path())?,
@@ -838,7 +836,7 @@ fn same_branch_transfer_stops_foreground_and_preserves_promoted_service() -> Tes
     let job = start(original.local())?;
     plakous_tools::internal::promote(original.local(), job)?;
     let next_owner = JobOwner {
-        agent_id: DriverInstanceId::from_str("00000000-0000-0000-0000-000000000706")?,
+        fence: key.fence + 1,
         ..key
     };
     let replacement = registry.attach(next_owner, sessions(root.path())?)?;
@@ -905,10 +903,10 @@ fn released_empty_slice_is_pruned_but_pending_notices_and_running_jobs_are_retai
     let registry = JobRegistry::default();
     let key = owner("00000000-0000-0000-0000-000000000702")?;
     let service = registry.attach(key, sessions(root.path())?)?;
-    plakous_tools::internal::set_job_owner(service.local(), key.agent_id.to_string());
+    plakous_tools::internal::set_job_owner(service.local(), DRIVER.to_owned());
     let id = start(service.local())?;
     plakous_tools::internal::promote(service.local(), id)?;
-    plakous_tools::internal::close_job_admission(service.local(), &key.agent_id.to_string());
+    plakous_tools::internal::close_job_admission(service.local(), DRIVER);
     assert_eq!(registry.running_count(), 1);
     assert_eq!(registry.services.lock().map_err(|_| "registry")?.len(), 1);
     service.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;

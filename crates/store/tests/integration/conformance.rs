@@ -406,6 +406,8 @@ pub(crate) fn topology(
         parent_checkpoint_id,
         branch_revision,
         fork,
+        line: plakous_agent::internal::LineId::started_by(branch_id),
+        line_generation: 1,
         lease_fence,
         commit_identity: Digest::sha256(
             DigestDomain::ProviderOperation,
@@ -472,7 +474,7 @@ where
         durability,
     )?;
     let genesis_bundle = bundle(&genesis_checkpoint, None)?;
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 34);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 35);
     assert!(
         genesis_bundle
             .supplied_objects()
@@ -1743,6 +1745,9 @@ impl SessionStore for LostPruneAckStore {
         delete(DeleteSession) -> plakous_agent::internal::DeleteReceipt;
         recover_delete(DeleteSession) -> plakous_agent::internal::DeleteReceipt;
         feed_tail(SessionId) -> plakous_agent::internal::FeedTail;
+        load_line(plakous_agent::internal::LineId) -> plakous_agent::internal::LineRecord;
+        line_job_terminals(plakous_agent::internal::LineId) -> Vec<plakous_agent::internal::LineJobTerminal>;
+        record_line_job_terminals(plakous_agent::internal::RecordLineJobTerminals) -> plakous_agent::internal::LineTerminalsReceipt;
     }
     fn read_feed(
         &self,

@@ -159,4 +159,4 @@ use children::{
     spawn_child_operation_id, submit_harness_prompt,
 };
 
-pub use build::SeededHistory;
+pub use build::{SeededHistory, SeededLine};

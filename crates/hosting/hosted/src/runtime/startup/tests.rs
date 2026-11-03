@@ -483,6 +483,7 @@ fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
         runtime_factory: Arc::new(ProductionRuntimeFactory),
         ready_path: ReadyPathTiming::default(),
         seed_history: None,
+        seed_line: None,
         source_releases: SourceReleases::default(),
         continuation: None,
         event_renderer: None,

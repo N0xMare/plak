@@ -394,12 +394,12 @@ impl AttachedCodingSession {
     ) -> Result<RebindSessionOutcome, AgentSessionsError> {
         Box::pin(
             self.sessions
-                .rebind(RebindSessionRequest::recompiling_target(
-                    operation_id,
-                    source,
-                    target,
-                    runtime,
-                )),
+                // A profile or model change forks onto a new line: the source
+                // stays live with its processes (spec 01 §5.7).
+                .rebind(
+                    RebindSessionRequest::recompiling_target(operation_id, source, target, runtime)
+                        .starting_line(),
+                ),
         )
         .await
     }
@@ -554,6 +554,17 @@ pub struct SeededHistory {
     pub(crate) history: PortableSessionHistory,
     preflight:
         Option<Box<dyn FnOnce(plakous::sessions::SessionInputWindow) -> CliResult<()> + Send>>,
+    line: Option<SeededLine>,
+}
+
+/// The agent line a seeded session joins.
+#[derive(Clone, Debug)]
+pub enum SeededLine {
+    /// A same-store carry: the new session becomes the next head of the line
+    /// this source branch heads.
+    Continue(SessionLocator),
+    /// A cross-state import: a new line recording its provenance text.
+    Imported(String),
 }
 
 impl SeededHistory {
@@ -561,7 +572,13 @@ impl SeededHistory {
         Self {
             history,
             preflight: None,
+            line: None,
         }
+    }
+
+    pub(crate) fn with_line(mut self, line: Option<SeededLine>) -> Self {
+        self.line = line;
+        self
     }
     pub(crate) fn with_preflight(
         history: PortableSessionHistory,
@@ -570,6 +587,7 @@ impl SeededHistory {
         Self {
             history,
             preflight: Some(Box::new(preflight)),
+            line: None,
         }
     }
     pub(crate) fn inspect(&mut self, runtime: &SessionRuntimeBinding) -> CliResult<()> {
@@ -1264,7 +1282,14 @@ fn create_request(
 ) -> CreateSessionRequest {
     let request = CreateSessionRequest::new(operation_id, runtime);
     match seed {
-        Some(history) => request.with_history(history.history),
+        Some(history) => {
+            let request = request.with_history(history.history);
+            match history.line {
+                Some(SeededLine::Continue(source)) => request.continuing_line(source),
+                Some(SeededLine::Imported(provenance)) => request.with_line_provenance(provenance),
+                None => request,
+            }
+        }
         None => request,
     }
 }

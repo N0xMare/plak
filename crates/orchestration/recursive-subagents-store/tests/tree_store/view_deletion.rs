@@ -2098,7 +2098,7 @@ fn sqlite_bindings_use_plain_turn_ids_and_integer_anchors() {
 fn record(seq: u64, fact: FeedFact) -> FeedRecord {
     let checkpoint = format!("00000000-0000-4000-8000-{:012x}", 0x3000 + seq);
     let change = if seq == 1 {
-        json!({"created": {"genesis": checkpoint, "revision": seq}})
+        json!({"created": {"genesis": checkpoint, "revision": seq, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}})
     } else {
         json!({"advanced": {"parent": "00000000-0000-4000-8000-000000003001",
             "checkpoint": checkpoint, "revision": seq, "head": "quiescent"}})

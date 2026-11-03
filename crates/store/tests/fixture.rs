@@ -341,6 +341,8 @@ pub(crate) fn topology(
         parent_checkpoint_id,
         branch_revision,
         fork,
+        line: plakous_agent::internal::LineId::started_by(branch_id),
+        line_generation: 1,
         lease_fence,
         commit_identity: Digest::sha256(
             DigestDomain::ProviderOperation,

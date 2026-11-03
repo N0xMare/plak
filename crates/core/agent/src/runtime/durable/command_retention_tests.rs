@@ -115,6 +115,8 @@ async fn full_settled_ledger_reclaims_capacity_after_durable_reopen() -> TestRes
             parent_checkpoint_id: Some(topology.checkpoint_id),
             branch_revision,
             fork: topology.fork,
+            line: topology.line,
+            line_generation: topology.line_generation,
             lease_fence: lease.fence().get(),
             commit_identity,
         },

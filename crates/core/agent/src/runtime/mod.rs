@@ -68,6 +68,7 @@ pub(crate) use durable::session::validate_seed_replay;
 mod family_artifact;
 pub(crate) mod feed_views;
 
+pub use durable::DurableLineHead;
 pub use durable::DurableSessionRuntime;
 pub(crate) use durable::turn_recovery::recovery_verdict_refuses;
 pub use durable::turn_recovery::{CheckpointRecoveryVerdict, checkpoint_recovery_verdict};
@@ -146,11 +147,22 @@ pub(crate) struct DurableRuntimeBootstrap {
     bundle: CheckpointObjectBundle,
     branch: DurableBranchFacts,
     admission: crate::RevalidationFact,
+    /// Unconsumed job terminals a lease-only holder recorded for this head;
+    /// its first commit folds and consumes them.
+    line_terminals: Vec<crate::manifest::LineJobTerminal>,
+    /// A reopen verification that never owns the branch: it attaches to no
+    /// job host, so a live owner's process service is never touched.
+    inspection: bool,
 }
 
 /// Builder for one independently owned agent actor.
 pub struct AgentBuilder {
     initial_named_state: crate::manifest::NamedState,
+    /// The line a durable genesis continues and its new generation; `None`
+    /// starts a new line.
+    line_continuation: Option<(plakous_model::LineId, u64, crate::manifest::JobLedger)>,
+    /// Provenance recorded for a new line.
+    line_origin: crate::session::LineOrigin,
     model: Arc<dyn LanguageModel>,
     provider_configuration: Arc<CompiledProviderConfiguration>,
     initial_model_authority: RuntimeModelAuthority,
@@ -201,6 +213,7 @@ struct PreparedToolInvocation {
 struct PreparedAgent {
     job_sessions: plakous_tools::JoinedProcessSessions,
     job_host: Option<Arc<dyn plakous_tools::JobHost>>,
+    job_owner: plakous_tools::JobOwner,
     model: Arc<dyn LanguageModel>,
     provider_configuration: Arc<CompiledProviderConfiguration>,
     model_error_target: ModelErrorTarget,

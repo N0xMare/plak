@@ -290,6 +290,10 @@ opaque_uuid!(
     DriverInstanceId,
     "An opaque identity of one agent driver construction; scopes late cleanup."
 );
+opaque_uuid!(
+    LineId,
+    "An opaque agent-line identity: the branch that started the line."
+);
 opaque_uuid!(SessionId, "An opaque model-session identity.");
 opaque_uuid!(BranchId, "An opaque conversation-branch identity.");
 opaque_uuid!(RunId, "An opaque run identity.");
@@ -299,6 +303,14 @@ opaque_uuid!(AttemptId, "An opaque model-attempt identity.");
 opaque_uuid!(EventId, "An opaque event identity.");
 opaque_uuid!(EntryId, "An opaque conversation-entry identity.");
 opaque_uuid!(CheckpointId, "An opaque committed-checkpoint identity.");
+
+impl LineId {
+    /// The identity of the line a branch starts: that branch's own identity.
+    #[must_use]
+    pub const fn started_by(branch: BranchId) -> Self {
+        Self(branch.0)
+    }
+}
 
 /// Fixed byte width of one session-workflow model-operation identity.
 pub const SESSION_WORKFLOW_ROOT_ID_BYTES: usize = 32;

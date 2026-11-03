@@ -12,9 +12,10 @@ use crate::{
 /// A [`crate::JobHost`] stores, returns and transfers ports, never the
 /// concrete service, so a service that lives with a remote runner can stand
 /// behind the same handle. A port is attached for one [`crate::JobOwner`]; a
-/// registry finds it again by that owner's session and branch. Today every
-/// port is the in-process [`JoinedProcessSessions`] of the host backend, and
-/// each operation has that service's exact semantics.
+/// registry finds it again by that owner's line, or by the session and branch
+/// of the head that currently owns it. Today every port is the in-process
+/// [`JoinedProcessSessions`] of the host backend, and each operation has that
+/// service's exact semantics.
 ///
 /// A remote service becomes a second variant of this handle, not a trait a
 /// caller implements. Its read accessors ([`Self::jobs`], the counts and

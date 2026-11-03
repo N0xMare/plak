@@ -150,6 +150,7 @@ impl AgentSessions {
                 PruneHistoryReport::from_receipt(locator, receipt),
             )),
             Ok(None) => Ok(PruneHistoryOutcome::RecoveryRequired),
+            Err(error) if error.is_not_line_head() => Ok(PruneHistoryOutcome::Superseded),
             Err(error) => Err(self.map_branch_runtime_error(locator, &error).await),
         }
     }

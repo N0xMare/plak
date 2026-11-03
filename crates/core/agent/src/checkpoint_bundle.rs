@@ -22,8 +22,9 @@ pub(crate) use object::{component_object_digest, object_address};
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
 /// the per-component revision constants inside the graph are frozen.
-/// Epoch 34 includes image-residency publications and explicit Released job terminals.
-pub const RUNTIME_FORMAT_EPOCH: u32 = 34;
+/// Epoch 35 adds agent lines: line membership in the checkpoint topology,
+/// line-head job owners, and the line feed facts.
+pub const RUNTIME_FORMAT_EPOCH: u32 = 35;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize =

@@ -184,6 +184,7 @@ pub fn run_actual_host(
             runtime_factory: Arc::new(plakous_hosted::runtime::ProductionRuntimeFactory),
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
+            seed_line: None,
             source_releases: product_host::SourceReleases::default(),
             continuation: None,
             event_renderer: None,

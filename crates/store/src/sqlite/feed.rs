@@ -81,6 +81,7 @@ const fn change_tag(change: &FeedChange) -> Option<i64> {
         FeedChange::LeaseReleased { .. } => Some(4),
         FeedChange::Pruned { .. } => Some(5),
         FeedChange::Archived { .. } => Some(6),
+        FeedChange::LineJobTerminals { .. } => Some(7),
         _ => None,
     }
 }

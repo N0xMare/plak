@@ -118,6 +118,20 @@ fn commit_impl(
             StoreInvalidReason::CheckpointCommitTopology,
         ));
     }
+    // The head fence: only the line's current head commits.
+    lines::require_branch_is_head(
+        &tx,
+        request.expected().session(),
+        topology.line,
+        topology.line_generation,
+        StoreInvalidReason::CheckpointCommitTopology,
+    )?;
+    lines::consume_terminals(
+        &tx,
+        topology.line,
+        topology.line_generation,
+        request.consumed_line_terminals(),
+    )?;
     let inserted = insert_candidate(&tx, &candidate, backend.limits, request.admission())?;
     let head = BranchHead::from_store(request.expected().session(), next, reference);
     tx.execute(

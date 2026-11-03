@@ -1,6 +1,6 @@
 use super::{
     BranchHead, BranchLease, CheckpointObjectBundle, CheckpointObjectRef, Digest, FeedFact,
-    FeedSeq, NonZeroU64, RunId, SessionHead, SessionRef, StoreAdmission, Timestamp,
+    FeedSeq, LineOrigin, NonZeroU64, RunId, SessionHead, SessionRef, StoreAdmission, Timestamp,
 };
 
 /// Atomic session creation, genesis checkpoint, and fence-1 lease request.
@@ -13,6 +13,7 @@ pub struct CreateSession {
     initial: CheckpointObjectBundle,
     admission: StoreAdmission,
     feed_facts: Vec<FeedFact>,
+    line_origin: LineOrigin,
 }
 
 impl CreateSession {
@@ -33,7 +34,24 @@ impl CreateSession {
             initial,
             admission: StoreAdmission::Ordinary,
             feed_facts: Vec::new(),
+            line_origin: LineOrigin::Created,
         }
+    }
+
+    /// Records where a new line came from; only [`LineOrigin::Imported`] is
+    /// meaningful here. A genesis that continues a line (its topology names a
+    /// generation above 1) ignores it. Provenance is not part of the create's
+    /// exact identity.
+    #[must_use]
+    pub fn with_line_origin(mut self, origin: LineOrigin) -> Self {
+        self.line_origin = origin;
+        self
+    }
+
+    /// Returns the recorded origin of a new line.
+    #[must_use]
+    pub const fn line_origin(&self) -> &LineOrigin {
+        &self.line_origin
     }
 
     /// Selects the retention reserve this creation may consume.

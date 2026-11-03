@@ -221,12 +221,12 @@ impl LanguageModel for SdkModel {
 
 #[tokio::test]
 async fn real_python_sdk_driver_values_edits_state_and_quotas() -> TestResult {
-    sdk_driver(false).await
+    Box::pin(sdk_driver(false)).await
 }
 
 #[tokio::test]
 async fn real_python_sdk_driver_foreground_stop() -> TestResult {
-    sdk_driver(true).await
+    Box::pin(sdk_driver(true)).await
 }
 
 async fn sdk_driver(foreground_stop: bool) -> TestResult {
@@ -396,7 +396,7 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
 
 struct SdkJobHost(plakous_tools::JobOutputRoot);
 impl plakous_tools::JobHost for SdkJobHost {
-    fn service(&self, _: SessionId, _: BranchId) -> Option<plakous_tools::JoinedSessionsPort> {
+    fn service(&self, _: plakous_model::LineId) -> Option<plakous_tools::JoinedSessionsPort> {
         None
     }
     fn attach(

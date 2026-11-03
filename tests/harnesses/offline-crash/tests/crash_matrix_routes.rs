@@ -387,7 +387,7 @@ fn crash_matrix_routes_child() {
     };
     let reply = runtime.block_on(async {
         match command.mode {
-            Mode::Run => run_child(&command).await,
+            Mode::Run => Box::pin(run_child(&command)).await,
             Mode::Probe => probe_child(&command).await,
         }
     });

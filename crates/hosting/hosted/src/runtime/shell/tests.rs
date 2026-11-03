@@ -496,6 +496,7 @@ fn attached_oauth_ready_refresh_never_rebinds_canonical_agent() {
         runtime_factory: Arc::new(ProductionRuntimeFactory),
         ready_path: ReadyPathTiming::default(),
         seed_history: None,
+        seed_line: None,
         source_releases: SourceReleases::default(),
         continuation: None,
         event_renderer: None,

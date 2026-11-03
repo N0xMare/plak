@@ -188,7 +188,8 @@ async fn capacity_checkpoint_commit(
                         request.checkpoint().clone(),
                     )
                     .with_admission(request.admission())
-                    .with_feed_facts(request.feed_facts().to_vec());
+                    .with_feed_facts(request.feed_facts().to_vec())
+                    .with_consumed_line_terminals(request.consumed_line_terminals().to_vec());
                 }
                 Ok(_) => {
                     return (

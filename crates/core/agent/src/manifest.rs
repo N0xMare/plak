@@ -43,7 +43,9 @@ pub(crate) use encoding::{
     encode_bundle_provider_configuration, encode_bundle_stable_prefix, encode_bundle_tools,
 };
 pub(crate) use jobs::MAX_JOB_ROWS;
-pub use jobs::{JobLedger, JobRow, JobTerminal, JobTerminalStatus};
+#[cfg(test)]
+pub(crate) use jobs::fixture_job_owner;
+pub use jobs::{JobLedger, JobRow, JobTerminal, JobTerminalStatus, LineJobTerminal};
 use operations::validate_composition_graph;
 
 pub(crate) use ledger::OperationLedgerMutationRef;
@@ -76,7 +78,7 @@ use plakous_model::ContextHistoryPlan;
 use plakous_model::{
     ActiveFamilyArtifact, AttemptId, BranchId, CallId, CanonicalHistory, CheckpointId,
     CompiledProviderConfiguration, ContextAnchor, ConversationView, Digest, DigestAlgorithm,
-    DigestDomain, EntryId, HistorySegment, HistorySegmentKind, LocalDurabilityDisposition,
+    DigestDomain, EntryId, HistorySegment, HistorySegmentKind, LineId, LocalDurabilityDisposition,
     ModelAdapterProfileId, ModelCacheAffinity, ModelFamilyId, ModelId, ModelOperationRoot,
     ProtocolId, ReasoningEffortDisposition, ReasoningPolicy, RouteId,
     SealedFamilyArtifactCandidate, SemanticCompactionCut, SessionId, SessionWorkflowRootId,
@@ -549,6 +551,12 @@ pub struct RuntimeTopology {
     pub branch_revision: u64,
     /// Exact fork lineage, if this branch was forked.
     pub fork: Option<ForkLineage>,
+    /// The agent line this branch belongs to, fixed for the branch's life.
+    pub line: LineId,
+    /// The line generation at which this branch became its line's head.
+    /// It is 1 for a branch that started its line and increases by one with
+    /// every head advance; fixed for the branch's life.
+    pub line_generation: u64,
     /// Lease/fence value under which this checkpoint committed.
     pub lease_fence: u64,
     /// Exact commit operation identity.

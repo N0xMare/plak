@@ -1,7 +1,7 @@
 //! Neutral session-owned process observations and host ownership seam.
 
 use crate::ExecutionBackendError;
-use plakous_model::{BranchId, DriverInstanceId, SessionId, Timestamp};
+use plakous_model::{BranchId, LineId, SessionId, Timestamp};
 use std::time::Duration;
 
 mod port;
@@ -123,26 +123,58 @@ pub struct JobView {
     pub owner_generation: u64,
 }
 
-/// Stable host key for one runtime's process service.
+/// Owner of one line's process service: the line head that holds it.
+///
+/// A line's head moves only forward, so `(generation, fence)` orders every
+/// owner of one line: a rebind advances `generation` and hands the service to
+/// the new head; a same-branch reopen keeps `generation` and takes a higher
+/// `fence`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct JobOwner {
-    /// Runtime session.
+    /// The agent line that owns the processes.
+    pub line: LineId,
+    /// The line generation of the owning head branch.
+    pub generation: u64,
+    /// The head branch's runtime session.
     pub session_id: SessionId,
-    /// Runtime branch.
+    /// The head branch.
     pub branch_id: BranchId,
-    /// Agent attribution.
-    pub agent_id: DriverInstanceId,
+    /// The owning lease fence (0 for an ephemeral agent).
+    pub fence: u64,
 }
 
-/// Optional host-owned registry. Without it the agent privately owns its service.
+impl JobOwner {
+    /// Whether `self` may take a service `previous` holds: the same line, and
+    /// either a later generation (a line hand-off) or the same head branch
+    /// under an equal or later fence (a same-branch reopen).
+    #[must_use]
+    pub fn succeeds(&self, previous: &Self) -> bool {
+        self.line == previous.line
+            && (self.generation > previous.generation
+                || (self.generation == previous.generation
+                    && self.session_id == previous.session_id
+                    && self.branch_id == previous.branch_id
+                    && self.fence >= previous.fence))
+    }
+}
+
+/// Optional host-owned registry, keyed by agent line. Without it the agent
+/// privately owns its service, and its jobs stop when it drops.
 ///
-/// A host holds each owner's service as a [`JoinedSessionsPort`]. It may
-/// transfer the same service on a same-branch reopen. It must stop foreground
-/// sessions before returning transferred authority, and must not transfer
-/// services across branches.
+/// A host holds each line's service as a [`JoinedSessionsPort`] and transfers
+/// it only to a [`JobOwner::succeeds`] owner: the line's next head after a
+/// rebind, or the same head on a reopen. It must stop foreground sessions
+/// before returning transferred authority, and must never hand a service to
+/// another line or to an older owner.
 pub trait JobHost: Send + Sync {
-    /// Reads only the service owned by this exact runtime session and branch.
-    fn service(&self, session: SessionId, branch: BranchId) -> Option<JoinedSessionsPort>;
+    /// Reads only the service owned by this exact line.
+    fn service(&self, line: LineId) -> Option<JoinedSessionsPort>;
+    /// Reads the service whose current owner is this exact head branch, for
+    /// a host that knows a branch rather than its line. The default finds
+    /// none.
+    fn service_at(&self, _session: SessionId, _branch: BranchId) -> Option<JoinedSessionsPort> {
+        None
+    }
     /// Observes terminal process snapshots immediately before committed notice
     /// consumption removes them. Observation grants no process authority.
     fn observe_terminal(&self, _owner: JobOwner, _jobs: &[JobView]) {}
@@ -150,10 +182,86 @@ pub trait JobHost: Send + Sync {
     /// Installs or transfers the exact process service for this owner.
     ///
     /// # Errors
-    /// Returns a typed error when host ownership cannot be established.
+    /// Returns a typed error when host ownership cannot be established,
+    /// including an attach by an owner that does not succeed the holder.
     fn attach(
         &self,
         owner: JobOwner,
         fresh: JoinedSessionsPort,
     ) -> Result<JoinedSessionsPort, ExecutionBackendError>;
+}
+
+/// An in-memory [`JobHost`] keyed by agent line.
+///
+/// Installing one on every agent of a line gives an embedder process
+/// continuity across a rebind: the rebind's target head takes the source's
+/// live service, running jobs included. Services live as long as this value.
+#[derive(Default)]
+pub struct LocalJobHost {
+    services: std::sync::Mutex<std::collections::HashMap<LineId, (JobOwner, JoinedSessionsPort)>>,
+    capacity: JobHostCapacity,
+}
+
+impl LocalJobHost {
+    /// Creates an empty registry with the shared 128-running host bound.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for LocalJobHost {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lines = self.services.lock().map_or(0, |services| services.len());
+        formatter
+            .debug_struct("LocalJobHost")
+            .field("lines", &lines)
+            .finish_non_exhaustive()
+    }
+}
+
+impl JobHost for LocalJobHost {
+    fn service(&self, line: LineId) -> Option<JoinedSessionsPort> {
+        self.services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&line)
+            .map(|(_, service)| service.clone())
+    }
+
+    fn service_at(&self, session: SessionId, branch: BranchId) -> Option<JoinedSessionsPort> {
+        self.services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .find(|(owner, _)| owner.session_id == session && owner.branch_id == branch)
+            .map(|(_, service)| service.clone())
+    }
+
+    fn attach(
+        &self,
+        owner: JobOwner,
+        fresh: JoinedSessionsPort,
+    ) -> Result<JoinedSessionsPort, ExecutionBackendError> {
+        let mut services = self
+            .services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        services.retain(|_, (_, service)| !service.job_admission_closed() || service.has_jobs());
+        let service = if let Some((holder, service)) = services.get_mut(&owner.line) {
+            if !owner.succeeds(holder) {
+                return Err(ExecutionBackendError::stale_job_owner());
+            }
+            *holder = owner;
+            service.clone()
+        } else {
+            fresh.bind_host_capacity(self.capacity.clone());
+            services.insert(owner.line, (owner, fresh.clone()));
+            fresh
+        };
+        drop(services);
+        // Foreground calls belong to the previous owner's turn.
+        service.stop_foreground()?;
+        Ok(service)
+    }
 }

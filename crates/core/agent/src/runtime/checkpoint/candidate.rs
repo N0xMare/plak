@@ -82,6 +82,8 @@ pub(in crate::runtime) fn successor_candidate(
                     parent_checkpoint_id: Some(topology.checkpoint_id),
                     branch_revision,
                     fork: topology.fork,
+                    line: topology.line,
+                    line_generation: topology.line_generation,
                     lease_fence,
                     commit_identity,
                 },

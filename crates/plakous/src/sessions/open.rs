@@ -53,9 +53,11 @@ impl AgentSessions {
     ) -> Result<CreateSessionOutcome, AgentSessionsError> {
         let CreateSessionRequest {
             operation_id,
-            runtime,
+            mut runtime,
             history,
+            line,
         } = request;
+        runtime.builder = self.line_builder(runtime.builder, line).await?;
         let mut replay_validation_error = None;
         let named_state = history
             .as_ref()

@@ -182,6 +182,8 @@ fn topology(
         parent_checkpoint_id: parent,
         branch_revision: 1,
         fork: None,
+        line: plakous_model::LineId::started_by(source.branch_id),
+        line_generation: 1,
         lease_fence: 1,
         commit_identity: digest(b"commit")?,
     })

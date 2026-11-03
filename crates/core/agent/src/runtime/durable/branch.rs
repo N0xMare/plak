@@ -88,6 +88,7 @@ impl DurableSessionRuntime {
         effective_provider_configuration: EffectiveProviderConfigurationId,
         account_binding: Digest,
         recompile_target_tools: bool,
+        new_line: bool,
         builder: AgentBuilder,
     ) -> Result<DurableRuntimeBranchOutcome, AgentError> {
         self.branch(
@@ -108,6 +109,7 @@ impl DurableSessionRuntime {
                     },
                 },
                 builder,
+                new_line,
             })),
         )
         .await
@@ -265,6 +267,9 @@ impl DurableSessionRuntime {
             return Err(conflict.into_agent());
         }
 
+        // A rebind advances the source's line; every fork starts a new one.
+        let advances_line =
+            matches!(&request, DurableBranchRequest::Rebind(rebind) if !rebind.new_line);
         let (transition, target_selectors, prepared_target) = match request {
             DurableBranchRequest::OrdinaryFork => (BranchTransitionMode::OrdinaryFork, None, None),
             DurableBranchRequest::RecompilingFork(builder) => {
@@ -332,6 +337,7 @@ impl DurableSessionRuntime {
             material,
             transition,
             prepared_target,
+            advances_line,
         )?;
         let target_bundle =
             RuntimeCheckpointCodec::advance(&target_checkpoint, loaded.checkpoint().bundle())
@@ -693,6 +699,7 @@ async fn prepare_fork_target(
         DurableRebindRequest {
             target: target.clone(),
             builder,
+            new_line: true,
         },
         run_id,
         "fork",
@@ -911,10 +918,13 @@ fn prepare_branch_checkpoint(
     material: DurableBranchMaterial,
     transition: BranchTransitionMode,
     rebind: Option<PreparedRebindTarget>,
+    advances_line: bool,
 ) -> Result<RuntimeCheckpoint, AgentError> {
     let source_manifest = source.manifest();
     let source_topology = source_manifest.topology();
     let target_session = source_topology.session_id;
+    let (line, line_generation, jobs) =
+        target_line_and_jobs(source_manifest, identity.target_branch, advances_line)?;
     let context = match transition {
         BranchTransitionMode::OrdinaryFork => source_manifest.canonical().context().ordinary_fork(
             source_topology.checkpoint_id,
@@ -978,6 +988,8 @@ fn prepare_branch_checkpoint(
                 checkpoint_id: source_topology.checkpoint_id,
                 branch_revision: source_topology.branch_revision,
             }),
+            line,
+            line_generation,
             lease_fence: 1,
             commit_identity: material.commit_identity,
         },
@@ -990,12 +1002,47 @@ fn prepare_branch_checkpoint(
         source_manifest.ledger().clone(),
         None,
         None,
-        source_manifest.jobs().clone(),
+        jobs,
         source_manifest.named_state().clone(),
         source_manifest.durability(),
     )
     .map_err(runtime_manifest_error)?;
     RuntimeCheckpoint::new(manifest).map_err(runtime_manifest_error)
+}
+
+/// The target's line membership and job ledger. A rebind's target becomes
+/// the line's next head: every job row, running or awaiting its notice,
+/// continues under it. A fork is a new line: it continues the job numbers,
+/// never the source line's processes or their notices.
+fn target_line_and_jobs(
+    source_manifest: &RuntimeManifest,
+    target_branch: BranchId,
+    advances_line: bool,
+) -> Result<(plakous_model::LineId, u64, crate::manifest::JobLedger), AgentError> {
+    let source_topology = source_manifest.topology();
+    if !advances_line {
+        return Ok((
+            plakous_model::LineId::started_by(target_branch),
+            1,
+            source_manifest.jobs().cleared(),
+        ));
+    }
+    let generation = source_topology
+        .line_generation
+        .checked_add(1)
+        .ok_or_else(|| AgentError::new(AgentErrorKind::Session, "line generations exhausted"))?;
+    let owner = plakous_tools::JobOwner {
+        line: source_topology.line,
+        generation,
+        session_id: source_topology.session_id,
+        branch_id: target_branch,
+        fence: 1,
+    };
+    Ok((
+        source_topology.line,
+        generation,
+        source_manifest.jobs().handed_off(owner),
+    ))
 }
 
 pub(in crate::runtime) fn validate_session_operation_id(
@@ -1100,7 +1147,7 @@ mod jobs_carry_tests {
     use super::*;
 
     #[tokio::test]
-    async fn jobs_carry_branch_seed_fork_and_rebind_copy_terminal_rows_and_counter()
+    async fn fork_starts_a_new_line_and_rebind_hands_the_jobs_to_the_next_head()
     -> Result<(), Box<dyn std::error::Error>> {
         let source = crate::runtime::durable::tests::jobs_carry_fixture::checkpoint().await?;
         let prior = source.manifest();
@@ -1137,13 +1184,40 @@ mod jobs_carry_tests {
                 DurableBranchMaterial::new(operation)?,
                 transition,
                 target,
+                transition == BranchTransitionMode::Rebind,
             )?;
-            assert_ne!(
-                seeded.manifest().topology().branch_id,
-                prior.topology().branch_id
-            );
-            assert_eq!(seeded.manifest().jobs(), prior.jobs());
-            assert_eq!(seeded.manifest().jobs().rows().len(), 1);
+            let topology = seeded.manifest().topology();
+            assert_ne!(topology.branch_id, prior.topology().branch_id);
+            assert_eq!(seeded.manifest().jobs().next_id(), prior.jobs().next_id());
+            if transition == BranchTransitionMode::Rebind {
+                // The same line one generation on, owning every row.
+                assert_eq!(topology.line, prior.topology().line);
+                assert_eq!(
+                    topology.line_generation,
+                    prior.topology().line_generation + 1
+                );
+                assert_eq!(seeded.manifest().jobs().rows().len(), 1);
+                let row = &seeded.manifest().jobs().rows()[0];
+                assert_eq!(row.terminal, prior.jobs().rows()[0].terminal);
+                assert_eq!(
+                    row.owner,
+                    plakous_tools::JobOwner {
+                        line: topology.line,
+                        generation: topology.line_generation,
+                        session_id: topology.session_id,
+                        branch_id: topology.branch_id,
+                        fence: 1,
+                    }
+                );
+            } else {
+                // A new line named by its own branch, with no process rows.
+                assert_eq!(
+                    topology.line,
+                    plakous_model::LineId::started_by(topology.branch_id)
+                );
+                assert_eq!(topology.line_generation, 1);
+                assert_eq!(seeded.manifest().jobs().rows().len(), 0);
+            }
             assert_eq!(seeded.manifest().named_state(), prior.named_state());
             let bundle = RuntimeCheckpointCodec::bundle(&seeded, None)?;
             assert_eq!(

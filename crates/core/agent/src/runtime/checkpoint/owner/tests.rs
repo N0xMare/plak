@@ -3,10 +3,12 @@ use crate::checkpoint_bundle::tests::{
     fixture_with_history, fixture_with_history_and_ledger, history_segment, without_cached_objects,
 };
 use crate::internal::{LeaseDomain, LeaseInstant, RuntimeObject};
+use crate::manifest::LineJobTerminal;
 use crate::runtime::ToolExecutionResult;
 use crate::runtime::continuation::runtime_component;
 use crate::runtime::driver::DurableUndispatchedToolRequest;
 use crate::runtime::operation_record::{tool_operation_terminal_state, working_lifecycle};
+use crate::session::{LineRecord, LineTerminalsReceipt, RecordLineJobTerminals};
 use crate::*;
 use plakous_model::{
     AttemptId, CallId, CanonicalHistory, DigestDomain, EntryId, ToolCallBlock, ToolCallState,
@@ -182,6 +184,9 @@ impl SessionStore for SweepStore {
         delete(request: DeleteSession) -> DeleteReceipt;
         recover_delete(request: DeleteSession) -> DeleteReceipt;
         feed_tail(session: SessionId) -> feed::FeedTail;
+        load_line(line: LineId) -> LineRecord;
+        line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
+        record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
     }
 
     fn read_feed(
@@ -414,6 +419,9 @@ impl SessionStore for FlakyRenewStore {
         delete(request: DeleteSession) -> DeleteReceipt;
         recover_delete(request: DeleteSession) -> DeleteReceipt;
         feed_tail(session: SessionId) -> feed::FeedTail;
+        load_line(line: LineId) -> LineRecord;
+        line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
+        record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
     }
 
     fn renew(&self, lease: BranchLease) -> StoreFuture<'_, BranchLease> {

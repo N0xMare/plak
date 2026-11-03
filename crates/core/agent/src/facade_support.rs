@@ -15,6 +15,34 @@ pub fn agent_builder_with_named_state(
     builder.seed_named_state(state)
 }
 
+/// Makes a durable genesis the next head of `line` at `generation` (a
+/// same-store carry) instead of starting a new line. The genesis takes the
+/// source head's job ledger, every row handed to the new head.
+#[must_use]
+pub fn agent_builder_continuing_line(
+    builder: AgentBuilder,
+    line: plakous_model::LineId,
+    generation: u64,
+    jobs: crate::manifest::JobLedger,
+) -> AgentBuilder {
+    builder.continue_line(line, generation, jobs)
+}
+
+/// Records the provenance of the new line a durable genesis starts.
+#[must_use]
+pub fn agent_builder_with_line_origin(
+    builder: AgentBuilder,
+    origin: crate::session::LineOrigin,
+) -> AgentBuilder {
+    builder.with_line_origin(origin)
+}
+
+/// Whether the builder installs a host-owned process registry.
+#[must_use]
+pub fn agent_builder_has_job_host(builder: &AgentBuilder) -> bool {
+    builder.has_job_host()
+}
+
 use crate::internal::{Agent, AgentBuilder, AgentError, SessionStoreCapacity, SessionStoreError};
 pub use crate::internal::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason,
@@ -63,6 +91,8 @@ pub enum SessionStoreOrigin {
     IdentityConflict,
     /// Revision, lease, or fencing authority was refused.
     Ownership,
+    /// The branch is not its line's head: it is read-only history.
+    NotLineHead,
     /// A retention bound refused the write; deleting sessions frees it.
     Capacity(SessionStoreCapacity),
     /// Physical storage is exhausted, not a logical retention bound.
@@ -197,6 +227,7 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
         | SessionStoreError::LeaseExpired
         | SessionStoreError::LeaseDomainMismatch
         | SessionStoreError::FenceSuperseded => SessionStoreOrigin::Ownership,
+        SessionStoreError::NotLineHead => SessionStoreOrigin::NotLineHead,
         SessionStoreError::Capacity(capacity) => SessionStoreOrigin::Capacity(capacity),
         SessionStoreError::StorageFull => SessionStoreOrigin::StorageFull,
         SessionStoreError::BackendBusy => SessionStoreOrigin::Busy,

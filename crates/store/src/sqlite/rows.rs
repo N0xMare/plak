@@ -59,6 +59,7 @@ pub(super) fn insert_branch(
     source: Option<BranchHead>,
     fence: u64,
     active: Option<&BranchLease>,
+    line: (plakous_agent::internal::LineId, u64),
 ) -> Result<(), SessionStoreError> {
     let l = source.map(|x| ForkLineage {
         session_id: x.session().session_id(),
@@ -69,7 +70,8 @@ pub(super) fn insert_branch(
     tx.execute(
         "INSERT INTO branches(session_id,branch_id,revision,checkpoint_id,last_fence,
         fork_session,fork_branch,fork_checkpoint,fork_revision,active_owner,active_fence,
-        active_time,active_ns,active_duration) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        active_time,active_ns,active_duration,line_id,line_generation)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             id(h.session().session_id()),
             id(h.session().branch_id()),
@@ -84,7 +86,9 @@ pub(super) fn insert_branch(
             active.map(|x| u64b(x.fence().get())),
             active.map(|x| lease_time_bytes(x.expires_at())),
             active.map(|x| i64::from(x.expires_at().nanoseconds())),
-            active.map(|x| u64b(x.lease_seconds().get()))
+            active.map(|x| u64b(x.lease_seconds().get())),
+            id(line.0),
+            u64b(line.1)
         ],
     )
     .map_err(map_sqlite)?;

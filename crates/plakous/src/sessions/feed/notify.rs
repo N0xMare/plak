@@ -385,6 +385,32 @@ impl SessionStore for NotifyingStore {
         self.inner.feed_tail(session_id)
     }
 
+    fn load_line(
+        &self,
+        line: plakous_model::LineId,
+    ) -> StoreFuture<'_, plakous_agent::internal::LineRecord> {
+        self.inner.load_line(line)
+    }
+
+    fn line_job_terminals(
+        &self,
+        line: plakous_model::LineId,
+    ) -> StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>> {
+        self.inner.line_job_terminals(line)
+    }
+
+    fn record_line_job_terminals(
+        &self,
+        request: plakous_agent::internal::RecordLineJobTerminals,
+    ) -> StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt> {
+        Box::pin(async move {
+            let session = request.lease().session().session_id();
+            let result = self.inner.record_line_job_terminals(request).await;
+            self.after(&result, session);
+            result
+        })
+    }
+
     fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
         self.inner.flush()
     }

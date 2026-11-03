@@ -452,12 +452,17 @@ fn composite_rebind_both_sides_obey_all_three_sqlite_laws() {
     let sessions = runtime_sessions(&fixture);
     let executor = plakous::application::ApplicationExecutor::new().unwrap();
     let outcome = executor
-        .block_on(sessions.rebind(RebindSessionRequest::recompiling_target(
-            SessionOperationId::new(&request.operation_id).unwrap(),
-            request.source_locator,
-            binding,
-            runtime,
-        )))
+        .block_on(
+            sessions.rebind(
+                RebindSessionRequest::recompiling_target(
+                    SessionOperationId::new(&request.operation_id).unwrap(),
+                    request.source_locator,
+                    binding,
+                    runtime,
+                )
+                .starting_line(),
+            ),
+        )
         .unwrap()
         .unwrap();
     let RebindSessionOutcome::Rebound { target, .. } = outcome else {

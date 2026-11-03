@@ -525,6 +525,9 @@ impl LiveChildHandle for ProductLiveChild {
 mod job_release_tests;
 
 #[cfg(test)]
+mod line_tests;
+
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]

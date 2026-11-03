@@ -134,6 +134,8 @@ mod transcript;
 pub use transcript::{
     SessionTranscriptItem, SessionTranscriptPart, SessionTranscriptSource, SessionTranscriptTail,
 };
+mod line;
+pub use line::{LeaseOnlyHead, LineHead};
 mod registry;
 mod types;
 pub use attached::OpenedSession;
@@ -147,8 +149,8 @@ pub use types::{
     ArtifactPortability, CompactReason, CompactSessionOutcome, CompactSessionRequest, ContextQuery,
     ContextStatusRequest, CreateSessionOutcome, CreateSessionRequest, DeleteSessionReport,
     ForkSessionOutcome, ForkSessionRequest, OpenSessionOutcome, OpenSessionRequest,
-    PruneHistoryOutcome, PruneHistoryReport, RebindSessionOutcome, RebindSessionRequest,
-    RebindToolTransition, ReclaimReport, RecoverEffectEvidenceOutcome,
+    PruneHistoryOutcome, PruneHistoryReport, RebindRefused, RebindSessionOutcome,
+    RebindSessionRequest, RebindToolTransition, ReclaimReport, RecoverEffectEvidenceOutcome,
     RecoverEffectEvidenceRequest, RecoverSessionOutcome, RecoverSessionRequest,
     RecoveryObligationReport, RecoveryRequiredReport, SESSION_HISTORY_VISIBILITY_REVISION,
     SessionBindingReport, SessionContextStatus, SessionContextStatusKind, SessionEffectEvidence,

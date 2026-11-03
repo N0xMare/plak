@@ -1295,7 +1295,7 @@ impl Feed {
     fn push(&mut self, facts: Vec<FeedFact>) {
         let seq = self.offset + self.records.len() as u64 + 1;
         let change = if seq == 1 {
-            serde_json::json!({"created": {"genesis": uuid(0x3000 + seq), "revision": 1}})
+            serde_json::json!({"created": {"genesis": uuid(0x3000 + seq), "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}})
         } else {
             serde_json::json!({"advanced": {
                 "parent": uuid(0x3000 + seq - 1),

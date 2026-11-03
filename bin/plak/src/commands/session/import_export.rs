@@ -80,6 +80,9 @@ pub(crate) struct PreparedImport {
     /// a same-store source's tree answers, and failing that the home default
     /// applies.
     pub(super) profile: Option<crate::profiles::SessionSelection>,
+    /// A same-store carry (binding repair or orchestration apply) continues
+    /// its source's agent line; every other import starts a new line.
+    pub(super) continues_line: bool,
 }
 
 impl PreparedImport {
@@ -98,6 +101,7 @@ impl PreparedImport {
             estimated_tokens,
             messages,
             profile: None,
+            continues_line: false,
         })
     }
 }
@@ -135,6 +139,7 @@ pub(crate) fn import_reload_handoff(
             estimated_tokens,
             messages,
             profile,
+            continues_line: false,
         },
     )
 }
@@ -156,6 +161,7 @@ pub(super) fn import_prepared_with_fallback(
         estimated_tokens,
         messages,
         profile,
+        continues_line,
     } = prepared;
     let crate::carry::CarriedImport {
         record,
@@ -189,6 +195,7 @@ pub(super) fn import_prepared_with_fallback(
     let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
     keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
     config.seed_history = Some(history);
+    config.seed_line = Some(seed_line(services, continues_line, &source_id, &source_key));
     let created = product_host::create_seeded_session_with_preflight(config, move |window| {
         let capacity =
             super::attached::carry_capacity_from_window(window, estimated_tokens, messages);
@@ -240,6 +247,30 @@ pub(super) fn import_prepared_with_fallback(
         );
     }
     Ok((record, note))
+}
+
+/// The agent line a carried session joins: a same-store carry continues its
+/// source's line, and any other import starts a new line naming its origin.
+fn seed_line(
+    services: &crate::shell::services::Services,
+    continues_line: bool,
+    source_id: &str,
+    source_key: &str,
+) -> plakous_hosted::agent::SeededLine {
+    let source = (continues_line && source_key == crate::home::state::state_key())
+        .then(|| {
+            services
+                .session_records()
+                .ok()?
+                .load(source_id)
+                .ok()?
+                .plakous_locator
+        })
+        .flatten();
+    source.map_or_else(
+        || plakous_hosted::agent::SeededLine::Imported(format!("{source_key}/{source_id}")),
+        plakous_hosted::agent::SeededLine::Continue,
+    )
 }
 
 /// A source this store still holds names its own profile in its tree.

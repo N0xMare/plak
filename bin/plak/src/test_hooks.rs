@@ -1220,6 +1220,7 @@ impl OfflineSelection {
             runtime_factory: injection,
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
+            seed_line: None,
             source_releases: product_host::SourceReleases::default(),
             continuation: (face == OfflineFace::Attached)
                 .then(crate::reload_request::take_reload_continuation)

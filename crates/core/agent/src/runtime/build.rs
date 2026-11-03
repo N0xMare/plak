@@ -163,6 +163,22 @@ impl AgentBuilder {
         self.initial_named_state = state;
         self
     }
+    pub(crate) fn continue_line(
+        mut self,
+        line: plakous_model::LineId,
+        generation: u64,
+        jobs: crate::manifest::JobLedger,
+    ) -> Self {
+        self.line_continuation = Some((line, generation, jobs));
+        self
+    }
+    pub(crate) fn with_line_origin(mut self, origin: crate::session::LineOrigin) -> Self {
+        self.line_origin = origin;
+        self
+    }
+    pub(crate) fn has_job_host(&self) -> bool {
+        self.job_host.is_some()
+    }
     pub(crate) fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
         self.model.reachability_probe()
     }
@@ -237,6 +253,8 @@ impl AgentBuilder {
         let initial_model_authority = configured_model.initial_authority().clone();
         Self {
             initial_named_state: crate::manifest::NamedState::default(),
+            line_continuation: None,
+            line_origin: crate::session::LineOrigin::Created,
             model,
             provider_configuration,
             initial_model_authority,
@@ -585,9 +603,18 @@ impl AgentBuilder {
         let store = Arc::clone(bootstrap.branch.store());
         let lease = bootstrap.branch.lease().clone();
         let cleanup_timeout = bootstrap.branch.store_timeouts().cleanup;
+        let folds_line_terminals = !bootstrap.line_terminals.is_empty();
         match PreparedAgent::new_durable(self, bootstrap) {
             Ok(mut prepared) => match prepared.publish_recovered_turn().await {
-                Ok(()) => Ok(prepared.spawn()),
+                Ok(()) => {
+                    let agent = prepared.spawn();
+                    if folds_line_terminals {
+                        // Fold recorded line terminals now on a Quiescent
+                        // head; otherwise the next publication folds them.
+                        let _deferred = agent.record_job_terminals().await;
+                    }
+                    Ok(agent)
+                }
                 Err(error) => {
                     let lease = prepared
                         .authority
@@ -670,14 +697,9 @@ impl PreparedAgent {
             run: run_id,
             close_event: close_event_id,
         } = construction_identities(&builder, bootstrap.as_ref(), restored_frame.as_ref())?;
-        let (environment, job_sessions) = attach_job_environment(
-            &builder,
-            bootstrap.as_ref(),
-            agent_id,
-            session_id,
-            branch_id,
-            run_id,
-        )?;
+        let job_owner = job_owner_for(bootstrap.as_ref(), session_id, branch_id);
+        let (environment, job_sessions) =
+            attach_job_environment(&builder, bootstrap.as_ref(), agent_id, job_owner, run_id)?;
         let event_limits = subscription_limits(config)?;
         let telemetry_context = TelemetryContext::new(agent_id, session_id, branch_id, run_id);
         let tools = construction_tool_runtime(&mut builder, environment);
@@ -753,6 +775,7 @@ impl PreparedAgent {
         Ok(Self {
             job_sessions,
             job_host: builder.job_host,
+            job_owner,
             model: builder.model,
             provider_configuration: builder.provider_configuration,
             model_error_target,
@@ -1064,12 +1087,39 @@ fn install_visual_read(
 
 /// Builds the run environment and joins it to the job host, restoring the
 /// persisted job counter and terminal job rows of a reopened session.
+/// The line head this construction owns processes as: a durable branch's
+/// line, generation and lease fence; an ephemeral agent's own line.
+fn job_owner_for(
+    bootstrap: Option<&DurableRuntimeBootstrap>,
+    session_id: SessionId,
+    branch_id: BranchId,
+) -> plakous_tools::JobOwner {
+    match bootstrap {
+        Some(bootstrap) => {
+            let topology = bootstrap.checkpoint.manifest().topology();
+            plakous_tools::JobOwner {
+                line: topology.line,
+                generation: topology.line_generation,
+                session_id,
+                branch_id,
+                fence: bootstrap.branch.lease().fence().get(),
+            }
+        }
+        None => plakous_tools::JobOwner {
+            line: plakous_model::LineId::started_by(branch_id),
+            generation: 1,
+            session_id,
+            branch_id,
+            fence: 0,
+        },
+    }
+}
+
 fn attach_job_environment(
     builder: &AgentBuilder,
     bootstrap: Option<&DurableRuntimeBootstrap>,
     agent_id: DriverInstanceId,
-    session_id: SessionId,
-    branch_id: BranchId,
+    job_owner: plakous_tools::JobOwner,
     run_id: RunId,
 ) -> Result<(ExecutionEnvironment, plakous_tools::JoinedProcessSessions), AgentError> {
     let mut environment = run_environment(
@@ -1089,14 +1139,11 @@ fn attach_job_environment(
         .joined_process_sessions()
         .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
     plakous_tools::internal::seed_job_counter(&fresh_sessions, builder.job_counter_seed);
-    let job_sessions = if let Some(host) = &builder.job_host {
+    let inspection = bootstrap.is_some_and(|bootstrap| bootstrap.inspection);
+    let job_sessions = if let Some(host) = builder.job_host.as_ref().filter(|_| !inspection) {
         let port = host
             .attach(
-                plakous_tools::JobOwner {
-                    session_id,
-                    branch_id,
-                    agent_id,
-                },
+                job_owner,
                 plakous_tools::JoinedSessionsPort::local(fresh_sessions),
             )
             .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
@@ -1130,12 +1177,17 @@ fn attach_job_environment(
             .map(|view| view.number)
             .collect::<Vec<_>>();
         plakous_tools::internal::consume_jobs(&job_sessions, &unmatched);
+        // Recorded line terminals answer polls before the first commit
+        // folds them into the ledger.
+        let jobs = bootstrap
+            .checkpoint
+            .manifest()
+            .jobs()
+            .with_line_terminals(&bootstrap.line_terminals)
+            .map_err(runtime_manifest_error)?;
         plakous_tools::internal::restore_job_terminals(
             &job_sessions,
-            &bootstrap
-                .checkpoint
-                .manifest()
-                .jobs()
+            &jobs
                 .rows()
                 .iter()
                 .map(crate::manifest::JobRow::view)

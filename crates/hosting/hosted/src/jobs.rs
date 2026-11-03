@@ -1,4 +1,5 @@
-//! Process services retained across same-branch owner replacement.
+//! Process services keyed by agent line: retained across a same-branch owner
+//! replacement and handed to the line's next head on a rebind.
 
 use plakous::tools::{
     ExecutionBackendError, JobHost, JobHostCapacity, JobOutputRoot, JobOwner, JoinedSessionsPort,
@@ -11,6 +12,19 @@ use std::{
 };
 
 type BranchKey = (plakous::model::SessionId, plakous::model::BranchId);
+
+/// One line's service and the head that currently owns it.
+struct LineService {
+    owner: JobOwner,
+    service: JoinedSessionsPort,
+}
+
+impl LineService {
+    /// The owning head's branch, under which its rows are shown.
+    const fn key(&self) -> BranchKey {
+        (self.owner.session_id, self.owner.branch_id)
+    }
+}
 
 fn project_job(
     key: BranchKey,
@@ -93,7 +107,7 @@ fn release_stopping_rows(stopping: &mut HashMap<String, usize>, rows: &[String])
 
 #[derive(Default)]
 pub(crate) struct JobRegistry {
-    services: Mutex<HashMap<BranchKey, JoinedSessionsPort>>,
+    services: Mutex<HashMap<plakous::model::LineId, LineService>>,
     capacity: JobHostCapacity,
     events: Arc<Mutex<JobQueue>>,
     owners: Mutex<ProcessOwners>,
@@ -129,12 +143,16 @@ struct AttributedJobHost {
 }
 
 impl JobHost for AttributedJobHost {
-    fn service(
+    fn service(&self, line: plakous::model::LineId) -> Option<JoinedSessionsPort> {
+        self.registry.service(line)
+    }
+
+    fn service_at(
         &self,
         session: plakous::model::SessionId,
         branch: plakous::model::BranchId,
     ) -> Option<JoinedSessionsPort> {
-        self.registry.service(session, branch)
+        self.registry.service_at(session, branch)
     }
 
     fn observe_terminal(&self, owner: JobOwner, jobs: &[plakous::tools::JobView]) {
@@ -344,8 +362,9 @@ impl JobRegistry {
             .cloned()
             .collect::<BTreeSet<_>>();
         let mut rows = Vec::new();
-        for (key, service) in services.iter() {
-            for job in service.jobs() {
+        for entry in services.values() {
+            let key = &entry.key();
+            for job in entry.service.jobs() {
                 let mut row = project_job(*key, job, owners.labels.get(key));
                 if row.status == ProcessStatus::Running && stopping.contains(&row.id) {
                     row.status = ProcessStatus::Stopping;
@@ -371,14 +390,19 @@ impl JobRegistry {
         // Keep the expiry tombstone while the service still exposes its pending notice.
         recent.retain(|id, (_, _, finished)| {
             now.saturating_duration_since(*finished) < Duration::from_secs(300)
-                || services.iter().any(|(key, service)| {
-                    service
+                || services.values().any(|entry| {
+                    let key = entry.key();
+                    entry
+                        .service
                         .jobs()
                         .iter()
                         .any(|job| *id == format!("{}:{}:p{}", key.0, key.1, job.number))
                 })
         });
-        let live = services.keys().copied().collect::<BTreeSet<_>>();
+        let live = services
+            .values()
+            .map(LineService::key)
+            .collect::<BTreeSet<_>>();
         retain_owner_maps(&mut owners, &recent, &live, now);
         rows.sort_by(|a, b| {
             a.started_at
@@ -405,9 +429,9 @@ impl JobRegistry {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             services
-                .iter()
-                .filter(|(key, _)| owners.visible(**key))
-                .map(|(key, service)| (*key, service.clone()))
+                .values()
+                .filter(|entry| owners.visible(entry.key()))
+                .map(|entry| (entry.key(), entry.service.clone()))
                 .collect::<Vec<_>>()
         };
         let mut targets = Vec::new();
@@ -556,7 +580,7 @@ impl JobRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
-            .cloned()
+            .map(|entry| entry.service.clone())
             .collect::<Vec<_>>();
         services.iter().flat_map(JoinedSessionsPort::jobs).collect()
     }
@@ -566,11 +590,16 @@ impl JobRegistry {
                 .services
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            services.retain(|_, service| !service.job_admission_closed() || service.has_jobs());
-            let live = services.keys().copied().collect::<BTreeSet<_>>();
+            services.retain(|_, entry| {
+                !entry.service.job_admission_closed() || entry.service.has_jobs()
+            });
+            let live = services
+                .values()
+                .map(LineService::key)
+                .collect::<BTreeSet<_>>();
             let count = services
                 .values()
-                .map(JoinedSessionsPort::running_job_count)
+                .map(|entry| entry.service.running_job_count())
                 .sum();
             (live, count)
         };
@@ -600,6 +629,7 @@ impl JobRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
+            .map(|entry| &entry.service)
             .any(|service| {
                 service.jobs().iter().any(|view| {
                     view.session_id == job.session_id
@@ -616,7 +646,7 @@ impl JobRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
-            .cloned()
+            .map(|entry| entry.service.clone())
             .collect::<Vec<_>>();
         let mut workers = tokio::task::JoinSet::new();
         for service in services {
@@ -647,6 +677,7 @@ impl JobRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
+            .map(|entry| &entry.service)
             .filter(|service| {
                 service.jobs().iter().any(|job| {
                     job.status == plakous::tools::JobStatus::Running && !owners.contains(&job.owner)
@@ -686,13 +717,17 @@ impl JobRegistry {
             .services
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let count = services.get(&(session, branch)).map_or(0, |service| {
-            service
-                .jobs()
-                .iter()
-                .filter(|job| job.status == plakous::tools::JobStatus::Running)
-                .count()
-        });
+        let count = services
+            .values()
+            .find(|entry| entry.key() == (session, branch))
+            .map_or(0, |entry| {
+                entry
+                    .service
+                    .jobs()
+                    .iter()
+                    .filter(|job| job.status == plakous::tools::JobStatus::Running)
+                    .count()
+            });
         (count != 0).then_some(RunningProcesses { count })
     }
 }
@@ -718,7 +753,15 @@ impl std::fmt::Display for RunningProcesses {
 }
 
 impl JobHost for JobRegistry {
-    fn service(
+    fn service(&self, line: plakous::model::LineId) -> Option<JoinedSessionsPort> {
+        self.services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&line)
+            .map(|entry| entry.service.clone())
+    }
+
+    fn service_at(
         &self,
         session: plakous::model::SessionId,
         branch: plakous::model::BranchId,
@@ -726,8 +769,9 @@ impl JobHost for JobRegistry {
         self.services
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&(session, branch))
-            .cloned()
+            .values()
+            .find(|entry| entry.key() == (session, branch))
+            .map(|entry| entry.service.clone())
     }
 
     fn observe_terminal(&self, owner: JobOwner, jobs: &[plakous::tools::JobView]) {
@@ -752,32 +796,44 @@ impl JobHost for JobRegistry {
             .services
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let service = services
-            .entry((owner.session_id, owner.branch_id))
-            .or_insert_with(|| {
-                fresh.bind_host_capacity(self.capacity.clone());
-                if let Some(root) = output_root {
-                    fresh.bind_job_outputs(root, owner.session_id, owner.branch_id);
-                }
-                let queue = Arc::clone(&self.events);
-                let room = Arc::clone(&self.events);
-                let key = (owner.session_id, owner.branch_id);
-                fresh.observe_jobs(
-                    move |job| {
-                        queue
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .record(key, job)
-                    },
-                    move || {
-                        room.lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .has_room()
-                    },
-                );
-                fresh
-            })
-            .clone();
+        // The line's next head, or the same head reopened, takes the service
+        // with its running jobs; an older owner never does.
+        let service = if let Some(entry) = services.get_mut(&owner.line) {
+            if !owner.succeeds(&entry.owner) {
+                return Err(ExecutionBackendError::stale_job_owner());
+            }
+            entry.owner = owner;
+            entry.service.clone()
+        } else {
+            fresh.bind_host_capacity(self.capacity.clone());
+            if let Some(root) = output_root {
+                fresh.bind_job_outputs(root, owner.session_id, owner.branch_id);
+            }
+            let queue = Arc::clone(&self.events);
+            let room = Arc::clone(&self.events);
+            let key = (owner.session_id, owner.branch_id);
+            fresh.observe_jobs(
+                move |job| {
+                    queue
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .record(key, job)
+                },
+                move || {
+                    room.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .has_room()
+                },
+            );
+            services.insert(
+                owner.line,
+                LineService {
+                    owner,
+                    service: fresh.clone(),
+                },
+            );
+            fresh
+        };
         drop(services);
         // Foreground calls belong to the old turn, never the replacement owner.
         service.stop_foreground()?;

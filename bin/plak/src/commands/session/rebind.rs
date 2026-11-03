@@ -29,6 +29,7 @@ pub(crate) fn rebind_document(
             estimated_tokens,
             messages,
             profile,
+            continues_line: true,
         },
         (mode != crate::carry::rebind::ReboundMode::Orchestration).then_some(&config),
     )

@@ -654,12 +654,16 @@ async fn run_rebind(
     )?;
     cuts.reach(ProductCrashBoundary::Prepared).await?;
     let outcome = sessions
-        .rebind(RebindSessionRequest::recompiling_target(
-            SessionOperationId::new(OPERATION)?,
-            source,
-            binding,
-            runtime,
-        ))
+        .rebind(
+            // The product's profile rebind forks onto a new line.
+            RebindSessionRequest::recompiling_target(
+                SessionOperationId::new(OPERATION)?,
+                source,
+                binding,
+                runtime,
+            )
+            .starting_line(),
+        )
         .await?;
     let RebindSessionOutcome::Rebound { target, .. } = outcome else {
         return Err(format!("rebind did not publish: {outcome:?}").into());

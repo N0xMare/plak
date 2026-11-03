@@ -1174,6 +1174,167 @@ async fn sigkill_prune_cuts_reopen_as_exact_unpruned_or_pruned_history() -> Test
     Ok(())
 }
 
+#[cfg(unix)]
+const LINE_CRASH_DB_ENV: &str = "PLAKOUS_SQLITE_TEST_LINE_CRASH_DB";
+#[cfg(unix)]
+const LINE_CRASH_CHILD_TEST: &str = "sqlite::tests::sqlite_line_advance_crash_cut_child";
+
+/// The head advance of `seed`'s line onto a new branch: the store reads the
+/// step from the target topology, so an exact fork transition carries it.
+#[cfg(unix)]
+fn line_advance(
+    seed: &CrashSeed,
+    created: &CreateReceipt,
+) -> TestResult<plakous_agent::internal::ForkBranch> {
+    let target_branch = fixture::id::<BranchId>(70_501)?;
+    let source = seed.checkpoint.manifest().topology();
+    let mut topology = fixture::topology(
+        source.session_id,
+        target_branch,
+        fixture::id::<CheckpointId>(70_502)?,
+        Some(source.checkpoint_id),
+        0,
+        Some(plakous_agent::internal::ForkLineage {
+            session_id: source.session_id,
+            branch_id: source.branch_id,
+            checkpoint_id: source.checkpoint_id,
+            branch_revision: 0,
+        }),
+        1,
+    )?;
+    topology.line = source.line;
+    topology.line_generation = 2;
+    let context = seed
+        .checkpoint
+        .manifest()
+        .canonical()
+        .context()
+        .ordinary_fork(
+            source.checkpoint_id,
+            source.session_id,
+            target_branch,
+            [0x77; 32],
+        )?;
+    let target =
+        fixture::checkpoint_with_context(topology, 1, RuntimeDurability::Required, context)?;
+    Ok(plakous_agent::internal::ForkBranch::new(
+        plakous_agent::internal::SessionWorkflowId::new([0x77; 32])?,
+        plakous_agent::internal::Digest::sha256(
+            plakous_agent::internal::DigestDomain::RequestPlan,
+            1,
+            &[b"line-advance"],
+        )?,
+        created.lease().clone(),
+        created.session().revision(),
+        created.branch(),
+        target_branch,
+        fixture::id::<RunId>(70_503)?,
+        NonZeroU64::new(3_600).ok_or("nonzero lease")?,
+        fixture::bundle(&target, Some(&seed.bundle))?,
+    ))
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_line_advance_crash_cut_child() {
+    let Some(path) = std::env::var_os(LINE_CRASH_DB_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let store = SqliteSessionStore::open(path).expect("open child store");
+    let seed = crash_seed(70_000).expect("seed");
+    let created = store.create(seed.request.clone()).await.expect("create");
+    let fork = line_advance(&seed, &created).expect("fork request");
+    let result = store.fork(fork).await;
+    panic!("configured crash cut did not stop the child: {result:?}");
+}
+
+/// A head advance killed inside or just after its transaction reopens,
+/// fully verified, with exactly one head: the source at generation 1 and
+/// no target, or the target at generation 2 with the source fenced.
+#[cfg(unix)]
+#[tokio::test]
+async fn sigkill_line_advance_cuts_reopen_with_exactly_one_head() -> TestResult {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    for (stage, committed) in [("fork-before-commit", false), ("fork-after-commit", true)] {
+        let database = CrashDatabase::new()?;
+        let marker = database.directory.join(format!("{stage}.reached"));
+        let child = Command::new(std::env::current_exe()?)
+            .arg("--exact")
+            .arg(LINE_CRASH_CHILD_TEST)
+            .arg("--nocapture")
+            .env(LINE_CRASH_DB_ENV, &database.path)
+            .env(CRASH_CUT_STAGE_ENV, stage)
+            .env(CRASH_CUT_MARKER_ENV, &marker)
+            .env("RUST_TEST_THREADS", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let mut child = KillOnDrop::new(child);
+        wait_for_marker(child.child(), &marker)?;
+        let status = child.sigkill()?;
+        assert_eq!(status.signal(), Some(9));
+
+        drop(SqliteSessionStore::open_verified(&database.path)?);
+        let reopened = SqliteSessionStore::open(&database.path)?;
+        let seed = crash_seed(70_000)?;
+        let line = seed.checkpoint.manifest().topology().line;
+        let record = reopened.load_line(line).await?;
+        let target = SessionRef::new(seed.selector.session_id(), fixture::id(70_501)?);
+        let lease = reopened
+            .acquire(AcquireBranch::new(
+                seed.selector,
+                fixture::id(70_504)?,
+                NonZeroU64::new(30).ok_or("lease")?,
+            ))
+            .await?;
+        let next = fixture::checkpoint(
+            fixture::topology(
+                seed.selector.session_id(),
+                seed.selector.branch_id(),
+                fixture::id(70_505)?,
+                Some(seed.checkpoint_id),
+                1,
+                None,
+                lease.fence().get(),
+            )?,
+            2,
+            RuntimeDurability::Required,
+        )?;
+        let source_commit = reopened
+            .commit(CommitCheckpoint::new(
+                lease.clone(),
+                reopened.load_branch(seed.selector).await?.head(),
+                fixture::bundle(&next, Some(&seed.bundle))?,
+            ))
+            .await
+            .map(|_| ());
+        if committed {
+            assert_eq!((record.head(), record.generation()), (target, 2), "{stage}");
+            assert_eq!(
+                source_commit,
+                Err(SessionStoreError::NotLineHead),
+                "{stage}"
+            );
+        } else {
+            assert_eq!(
+                (record.head(), record.generation()),
+                (seed.selector, 1),
+                "{stage}"
+            );
+            assert_eq!(
+                reopened.load_branch(target).await.map(|_| ()),
+                Err(SessionStoreError::NotFound),
+                "{stage}"
+            );
+            assert_eq!(source_commit, Ok(()), "{stage}");
+        }
+        reopened.shutdown().await?;
+    }
+    Ok(())
+}
+
 #[cfg(not(unix))]
 #[test]
 fn sigkill_commit_cuts_reopen_as_exact_old_or_new_authority() -> TestResult {

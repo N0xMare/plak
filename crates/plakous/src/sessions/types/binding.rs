@@ -123,6 +123,7 @@ impl RebindSessionRequest {
             target,
             runtime,
             tool_transition: RebindToolTransition::PreserveExact,
+            new_line: false,
         }
     }
 
@@ -141,7 +142,19 @@ impl RebindSessionRequest {
             target,
             runtime,
             tool_transition: RebindToolTransition::RecompileForTarget,
+            new_line: false,
         }
+    }
+
+    /// Publishes the target as the first branch of a new agent line: a fork
+    /// onto the new binding. The source keeps its line, stays writable and
+    /// keeps its processes; the target continues only their numbering.
+    /// Without this a rebind advances the source's line: the target becomes
+    /// its next head, takes its jobs, and the source becomes read-only.
+    #[must_use]
+    pub const fn starting_line(mut self) -> Self {
+        self.new_line = true;
+        self
     }
 }
 
@@ -154,6 +167,7 @@ impl fmt::Debug for RebindSessionRequest {
             .field("target", &self.target)
             .field("runtime", &self.runtime)
             .field("tool_transition", &self.tool_transition)
+            .field("new_line", &self.new_line)
             .finish()
     }
 }

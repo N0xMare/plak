@@ -2,7 +2,7 @@
 
 use super::{ProcessSessionId, ProcessSessionOwnerGeneration, RuntimeManifestError};
 use plakous_model::Timestamp;
-use plakous_tools::{JobStatus, JobStopReason, JobView};
+use plakous_tools::{JobOwner, JobStatus, JobStopReason, JobView};
 use std::time::Duration;
 
 /// Maximum unconsumed process notices in one checkpoint.
@@ -68,6 +68,57 @@ impl JobTerminal {
     }
 }
 
+/// Terminal evidence for one job, recorded under a lease-only open of its
+/// line head and folded into the head's ledger by its next commit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LineJobTerminal {
+    /// The job number, `p<N>`.
+    pub number: u32,
+    /// Allocation-local process identity the row must match.
+    pub session_id: ProcessSessionId,
+    /// Allocation-local owner generation the row must match.
+    pub owner_generation: ProcessSessionOwnerGeneration,
+    /// Exact terminal evidence.
+    pub terminal: JobTerminal,
+}
+
+impl LineJobTerminal {
+    /// Captures a terminal snapshot; running and unknown snapshots carry no
+    /// evidence and return `None`.
+    pub fn from_view(view: &JobView) -> Result<Option<Self>, RuntimeManifestError> {
+        let Some(terminal) = JobTerminal::from_view(view) else {
+            return Ok(None);
+        };
+        let terminal = Self {
+            number: view.number,
+            session_id: ProcessSessionId::new(view.session_id)?,
+            owner_generation: ProcessSessionOwnerGeneration::new(view.owner_generation)?,
+            terminal,
+        };
+        terminal.validate()?;
+        Ok(Some(terminal))
+    }
+
+    /// Canonical evidence bytes, as the store keeps them.
+    pub fn encode(&self) -> Result<Vec<u8>, RuntimeManifestError> {
+        super::encoding::encode_line_job_terminal(self)
+    }
+
+    /// Decodes canonical evidence bytes.
+    pub fn decode(bytes: &[u8]) -> Result<Self, RuntimeManifestError> {
+        super::encoding::decode_line_job_terminal(bytes)
+    }
+
+    pub(super) fn validate(&self) -> Result<(), RuntimeManifestError> {
+        if self.number == 0 {
+            return Err(RuntimeManifestError::InvalidText {
+                field: "job number",
+            });
+        }
+        self.terminal.validate()
+    }
+}
+
 /// Durable metadata for one promoted process, including exact terminal evidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JobRow {
@@ -77,8 +128,9 @@ pub struct JobRow {
     pub command: String,
     /// UTC start time.
     pub started_at: Timestamp,
-    /// Non-secret owning agent identity.
-    pub owner: String,
+    /// The line head that owns the process: the promoting owner, or the head
+    /// a rebind handed the row to.
+    pub owner: JobOwner,
     /// Allocation-local process identity; never an OS PID.
     pub session_id: ProcessSessionId,
     /// Allocation-local process owner generation.
@@ -93,7 +145,7 @@ impl JobRow {
             number: self.number,
             command: self.command.clone(),
             started_at: self.started_at,
-            owner: self.owner.clone(),
+            owner: self.owner.line.to_string(),
             elapsed: self
                 .terminal
                 .as_ref()
@@ -124,9 +176,7 @@ impl JobRow {
             || self.command.is_empty()
             || self.command.len() > 1024
             || self.command.contains('\0')
-            || self.owner.is_empty()
-            || self.owner.len() > 128
-            || self.owner.chars().any(char::is_control)
+            || self.owner.generation == 0
         {
             return Err(RuntimeManifestError::InvalidText { field: "job row" });
         }
@@ -234,6 +284,42 @@ impl JobLedger {
         Self::new(self.next_id.max(next_id), rows)
     }
 
+    /// Hands every row to `owner`, the head a rebind publishes: running rows
+    /// and pending notices continue under the target, never the source.
+    #[must_use]
+    pub fn handed_off(&self, owner: JobOwner) -> Self {
+        let mut rows = self.rows.clone();
+        for row in &mut rows {
+            row.owner = owner;
+        }
+        Self {
+            next_id: self.next_id,
+            rows,
+        }
+    }
+
+    /// Folds line job terminals into rows that lack terminal evidence and
+    /// match the terminal's process identity. Already durable evidence is
+    /// never replaced.
+    pub fn with_line_terminals(
+        &self,
+        terminals: &[LineJobTerminal],
+    ) -> Result<Self, RuntimeManifestError> {
+        let mut rows = self.rows.clone();
+        for row in &mut rows {
+            if row.terminal.is_none()
+                && let Some(line) = terminals.iter().find(|terminal| {
+                    terminal.number == row.number
+                        && terminal.session_id == row.session_id
+                        && terminal.owner_generation == row.owner_generation
+                })
+            {
+                row.terminal = Some(line.terminal.clone());
+            }
+        }
+        Self::new(self.next_id, rows)
+    }
+
     /// Seeds a cleared branch without carrying pending notices.
     #[must_use]
     pub fn cleared(&self) -> Self {
@@ -241,6 +327,19 @@ impl JobLedger {
             next_id: self.next_id,
             rows: Vec::new(),
         }
+    }
+}
+
+/// A fixed job owner for tests that need a valid row.
+#[cfg(test)]
+pub(crate) fn fixture_job_owner() -> JobOwner {
+    let id = uuid::Uuid::from_u128(0x5eed);
+    JobOwner {
+        line: plakous_model::LineId::try_from(id).unwrap_or_else(|_| unreachable!()),
+        generation: 1,
+        session_id: plakous_model::SessionId::try_from(id).unwrap_or_else(|_| unreachable!()),
+        branch_id: plakous_model::BranchId::try_from(id).unwrap_or_else(|_| unreachable!()),
+        fence: 1,
     }
 }
 
@@ -303,7 +402,7 @@ mod tests {
             number: 1,
             command: "test".into(),
             started_at: Timestamp::new(1, 0).expect("timestamp"),
-            owner: "agent".into(),
+            owner: fixture_job_owner(),
             session_id: ProcessSessionId::new([1; 16]).expect("session"),
             owner_generation: ProcessSessionOwnerGeneration::new(1).expect("generation"),
             terminal: Some(JobTerminal {

@@ -127,7 +127,7 @@ INSERT INTO store_meta VALUES(1,0,0,0,0,0,0,0,0,0,zeroblob(48));
 CREATE TABLE runtime_objects (
  id INTEGER PRIMARY KEY,
  kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 20),
- codec INTEGER NOT NULL CHECK(codec=34), digest BLOB NOT NULL CHECK(length(digest)=32),
+ codec INTEGER NOT NULL CHECK(codec=35), digest BLOB NOT NULL CHECK(length(digest)=32),
  byte_len INTEGER NOT NULL CHECK(byte_len>=0), UNIQUE(kind,codec,digest));
 CREATE TABLE runtime_object_bytes (
  id INTEGER PRIMARY KEY REFERENCES runtime_objects(id), bytes BLOB NOT NULL);
@@ -175,6 +175,7 @@ CREATE TABLE branches (
  active_owner TEXT, active_fence BLOB, active_time BLOB CHECK(active_time IS NULL OR length(active_time)=56), active_ns INTEGER, active_duration BLOB,
  previous_time BLOB CHECK(previous_time IS NULL OR length(previous_time)=56), previous_ns INTEGER,
  released_owner TEXT, released_fence BLOB, released_time BLOB CHECK(released_time IS NULL OR length(released_time)=56), released_ns INTEGER, released_duration BLOB,
+ line_id TEXT NOT NULL, line_generation BLOB NOT NULL CHECK(length(line_generation)=8),
  PRIMARY KEY(session_id,branch_id), FOREIGN KEY(session_id) REFERENCES sessions(session_id),
  FOREIGN KEY(checkpoint_id) REFERENCES checkpoints(checkpoint_id),
  FOREIGN KEY(fork_checkpoint) REFERENCES checkpoints(checkpoint_id),
@@ -242,10 +243,19 @@ CREATE TABLE pruned_checkpoints (
  FOREIGN KEY(session_id,branch_id) REFERENCES branches(session_id,branch_id)) WITHOUT ROWID;
 CREATE TABLE session_feed (
  session_id TEXT NOT NULL, seq INTEGER NOT NULL CHECK(seq>=1), branch_id TEXT NOT NULL,
- change INTEGER NOT NULL CHECK(change BETWEEN 1 AND 6), checkpoint_id TEXT,
+ change INTEGER NOT NULL CHECK(change BETWEEN 1 AND 7), checkpoint_id TEXT,
  record BLOB NOT NULL, integrity BLOB NOT NULL CHECK(length(integrity)=32),
  CHECK((change IN(1,2,3))=(checkpoint_id IS NOT NULL)),
  PRIMARY KEY(session_id,seq), FOREIGN KEY(session_id) REFERENCES sessions(session_id)) WITHOUT ROWID;
+CREATE TABLE lines (
+ line_id TEXT PRIMARY KEY, head_session TEXT NOT NULL, head_branch TEXT NOT NULL,
+ generation BLOB NOT NULL CHECK(length(generation)=8 AND generation<>zeroblob(8)),
+ forked_from TEXT CHECK(forked_from IS NULL OR length(forked_from) BETWEEN 1 AND 512),
+ FOREIGN KEY(head_session,head_branch) REFERENCES branches(session_id,branch_id)) WITHOUT ROWID;
+CREATE TABLE line_job_terminals (
+ line_id TEXT NOT NULL, generation BLOB NOT NULL CHECK(length(generation)=8),
+ job INTEGER NOT NULL CHECK(job BETWEEN 1 AND 4294967295), evidence BLOB NOT NULL,
+ PRIMARY KEY(line_id,generation,job), FOREIGN KEY(line_id) REFERENCES lines(line_id)) WITHOUT ROWID;
 CREATE INDEX checkpoints_branch_revision ON checkpoints(session_id,branch_id,revision);
 CREATE INDEX checkpoints_root ON checkpoints(root_kind,root_codec,root_digest);
 CREATE INDEX checkpoints_parent ON checkpoints(parent_id);
@@ -261,6 +271,7 @@ CREATE INDEX fork_receipts_target ON fork_receipts(target_checkpoint);
 CREATE INDEX fork_receipts_source_session ON fork_receipts(source_session);
 CREATE INDEX branch_horizons_checkpoint ON branch_horizons(horizon_checkpoint);
 CREATE INDEX pruned_checkpoints_branch ON pruned_checkpoints(session_id,branch_id);
+CREATE INDEX lines_head ON lines(head_session,head_branch);
 ";
 
 /// Admits shape, schema, domain and counter integrity. Retained state over
@@ -416,9 +427,32 @@ fn schema_objects(
 
 fn verify_authority(c: &Connection) -> Result<(), SessionStoreError> {
     verify_receipt_completeness(c)?;
+    verify_lines(c)?;
     let snapshot = AuthoritySnapshot::load(c)?;
     snapshot.verify()?;
     feed::verify(c)
+}
+
+/// Every line head names a branch of that line at the line's generation, and
+/// every recorded terminal belongs to its line's current generation.
+fn verify_lines(c: &Connection) -> Result<(), SessionStoreError> {
+    let broken = c
+        .query_row(
+            "SELECT 1 WHERE
+             EXISTS(SELECT 1 FROM lines l JOIN branches b
+                    ON b.session_id=l.head_session AND b.branch_id=l.head_branch
+                    WHERE b.line_id<>l.line_id OR b.line_generation<>l.generation)
+             OR EXISTS(SELECT 1 FROM line_job_terminals t JOIN lines l USING(line_id)
+                    WHERE t.generation<>l.generation)",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(map_sqlite)?;
+    if broken.is_some() {
+        return Err(SessionStoreError::corrupt());
+    }
+    Ok(())
 }
 
 fn verify_receipt_completeness(c: &Connection) -> Result<(), SessionStoreError> {

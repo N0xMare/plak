@@ -174,9 +174,11 @@ fn process_wait_uses_its_result_after_timeout_exit_race() {
         // The wait timed out, then the process exited before the host consumed it.
         roots.job_registry().observe_terminal(
             JobOwner {
+                line: plakous::model::LineId::started_by(locator.branch_id()),
+                generation: 1,
                 session_id: locator.session_id(),
                 branch_id: locator.branch_id(),
-                agent_id: plakous::model::DriverInstanceId::try_from(uuid).unwrap(),
+                fence: 1,
             },
             &[JobView {
                 number: 7,

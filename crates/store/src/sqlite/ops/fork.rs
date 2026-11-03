@@ -120,7 +120,26 @@ pub(in super::super) fn fork(
         params![id(target.session_id()), u64b(revision.get())],
     )
     .map_err(map_sqlite)?;
-    insert_branch(&tx, head, Some(r.source()), 1, Some(&lease))?;
+    insert_branch(
+        &tx,
+        head,
+        Some(r.source()),
+        1,
+        Some(&lease),
+        (t.line, t.line_generation),
+    )?;
+    let new_head = lines::apply_step(
+        &tx,
+        target,
+        t.line,
+        t.line_generation,
+        Some((
+            r.source().session(),
+            r.source().checkpoint().checkpoint_id(),
+        )),
+        &LineOrigin::Created,
+        StoreInvalidReason::ForkCheckpointSemantics,
+    )?;
     let feed_seq = feed::append(
         &tx,
         target,
@@ -136,6 +155,9 @@ pub(in super::super) fn fork(
                 BranchTransitionMode::OrdinaryFork => FeedBranchTransition::Fork,
                 BranchTransitionMode::Rebind => FeedBranchTransition::Rebind,
             },
+            line: t.line,
+            new_head,
+            generation: t.line_generation,
         },
         r.feed_facts(),
     )?;
@@ -201,7 +223,11 @@ pub(in super::super) fn fork(
         .map_err(map_sqlite)?,
     )?;
     meta(&tx, 0, 1)?;
+    #[cfg(test)]
+    test_crash_cut("fork-before-commit");
     super::lease::commit_claimed(tx, &mut b.holders, target, lease_fence)?;
+    #[cfg(test)]
+    test_crash_cut("fork-after-commit");
     b.checkpoints
         .seed_fork(target, reference, r.target(), source_id);
     Ok(receipt)

@@ -469,7 +469,7 @@ fn duplicate_projection_second_save_refusal_restores_command_and_cursor() {
         let header = serde_json::from_value(serde_json::json!({
             "session_id": "00000000-0000-4000-8000-000000000001", "seq": 1,
             "branch_id": "00000000-0000-4000-8000-000000000002", "committed_at_ms": 1000,
-            "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": 1}}
+            "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
         })).unwrap();
         let record = FeedRecord::from_store(
             header,
@@ -531,7 +531,7 @@ fn project_acceptance(
     let header = serde_json::from_value(serde_json::json!({
         "session_id": "00000000-0000-4000-8000-000000000001", "seq": 1,
         "branch_id": "00000000-0000-4000-8000-000000000002", "committed_at_ms": 1000,
-        "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": 1}}
+        "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
     }))
     .unwrap();
     let record = FeedRecord::from_store(

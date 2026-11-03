@@ -262,7 +262,7 @@ fn send_tool(driver: TreeDriver, deliverer: Option<Arc<dyn ChildController>>) ->
                     let header = serde_json::from_value(json!({
                         "session_id": session, "seq": seq,
                         "branch_id": "00000000-0000-4000-8000-000000000002", "committed_at_ms": seq,
-                        "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": seq}}
+                        "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": seq, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
                     })).unwrap();
                     tree.record_command(crate::tree::AgentCommand::intent(&command, &request.agent_id, None,
                         crate::tree::AgentCommandKind::MailStart, request.body.clone(), vec![request.message_id.clone()]))?;
@@ -896,7 +896,11 @@ async fn until_calls(deliverer: &StubDeliverer, count: usize) {
 struct FixtureJobHost(Mutex<Option<plakous::tools::JoinedSessionsPort>>);
 
 impl plakous::tools::JobHost for FixtureJobHost {
-    fn service(
+    fn service(&self, _: plakous::model::LineId) -> Option<plakous::tools::JoinedSessionsPort> {
+        None
+    }
+
+    fn service_at(
         &self,
         _: plakous::model::SessionId,
         _: plakous::model::BranchId,

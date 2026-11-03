@@ -309,7 +309,8 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
         .seed_history
         .take()
         .ok_or_else(|| CliFailure::new("no carried history to seed the session with"))?;
-    let seed = crate::agent::SeededHistory::with_preflight(history, preflight);
+    let seed = crate::agent::SeededHistory::with_preflight(history, preflight)
+        .with_line(config.seed_line.take());
     let executor = ApplicationExecutor::new().map_err(|e| CliFailure::new(e.to_string()))?;
     let mut stderr_buf = Vec::new();
     let opened = executor
@@ -378,9 +379,10 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
         ));
     }
     if config.session.plakous_locator.is_none() {
+        let line = config.seed_line.take();
         return create_session(
             config,
-            seed.map(crate::agent::SeededHistory::new),
+            seed.map(|history| crate::agent::SeededHistory::new(history).with_line(line)),
             stderr_buf,
         )
         .await;

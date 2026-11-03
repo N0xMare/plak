@@ -60,7 +60,7 @@ pub(super) use session::reopen_refusal;
 pub(super) use session::require_reconstructed_coding_projection;
 pub use session::{
     AttachedCodingSession, AttachedReleaseError, CodingSessionOpenFailure, SeededHistory,
-    build_api_root_coding_session, build_coding_session, build_runtime_session,
+    SeededLine, build_api_root_coding_session, build_coding_session, build_runtime_session,
     open_api_root_coding_session, open_coding_session,
 };
 pub(crate) use session::{

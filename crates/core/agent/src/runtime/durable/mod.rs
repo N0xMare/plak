@@ -27,6 +27,8 @@ pub(in crate::runtime) mod compaction_recovery;
 pub(in crate::runtime) use compaction_inspection::checkpoint_can_abandon_compaction;
 pub(in crate::runtime) mod composition_recovery;
 pub(in crate::runtime) mod effect_recovery;
+mod line_head;
+pub use line_head::DurableLineHead;
 mod recovery_publication;
 use recovery_publication::RecoveryPublicationOwner;
 mod retention;
@@ -321,6 +323,9 @@ pub struct DurableBranchPublication {
 pub(in crate::runtime) struct DurableRebindRequest {
     target: DurableTargetSelectors,
     builder: AgentBuilder,
+    /// The target starts a new line (a fork onto the new binding) instead of
+    /// becoming the source line's next head.
+    new_line: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

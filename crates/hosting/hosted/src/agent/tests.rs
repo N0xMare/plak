@@ -4282,7 +4282,7 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
             SessionToolFence::OccupancyExecute,
             SessionToolFence::OccupancyReadOnly,
         ] {
-            let outcome: Result<(), String> = async {
+            let outcome: Result<(), String> = Box::pin(async {
                 let (_workspace_dir, workspace_root, _) = fixture_workspace();
                 let workspace = Arc::new(
                     stamped_workspace_policy(
@@ -4449,7 +4449,7 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
                     Ok(_) => Err("reopen: not opened".into()),
                     Err(e) => Err(format!("reopen [{:?}]: {e}", e.kind())),
                 }
-            }
+            })
             .await;
             if let Err(error) = outcome {
                 failures.push(format!("{model_name} {fence:?}: {error}"));

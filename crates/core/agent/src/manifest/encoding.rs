@@ -46,33 +46,12 @@ pub(crate) fn encode_bundle_metadata_value(
         writer.string(&row.command, 1024)?;
         writer.u64(row.started_at.seconds());
         writer.u32(row.started_at.nanoseconds());
-        writer.string(&row.owner, 128)?;
+        write_job_owner(&mut writer, row.owner);
         writer.bytes.extend_from_slice(&row.session_id.as_bytes());
         writer.u64(row.owner_generation.get());
         writer.optional(row.terminal.is_some());
         if let Some(terminal) = &row.terminal {
-            writer.u8(match terminal.status {
-                JobTerminalStatus::Exited => 1,
-                JobTerminalStatus::Stopped => 2,
-                JobTerminalStatus::Released => 3,
-            });
-            writer.optional(terminal.exit_code.is_some());
-            if let Some(code) = terminal.exit_code {
-                writer.u32(u32::from_be_bytes(code.to_be_bytes()));
-            }
-            writer.optional(terminal.stopper.is_some());
-            if let Some(stopper) = terminal.stopper {
-                writer.u8(match stopper {
-                    plakous_tools::JobStopReason::Model => 1,
-                    plakous_tools::JobStopReason::User => 2,
-                    plakous_tools::JobStopReason::SessionExit => 3,
-                    plakous_tools::JobStopReason::AttemptEnded => 4,
-                    plakous_tools::JobStopReason::HardCap => 5,
-                });
-            }
-            writer.u64(terminal.elapsed.as_secs());
-            writer.u32(terminal.elapsed.subsec_nanos());
-            writer.string(&terminal.tail, 4096)?;
+            write_job_terminal(&mut writer, terminal)?;
         }
     }
     writer.optional(metadata.interpreter_observation.is_some());
@@ -143,62 +122,12 @@ pub(crate) fn decode_bundle_metadata(
             command: reader.string(1024)?,
             started_at: Timestamp::new(reader.u64()?, reader.u32()?)
                 .map_err(|_| RuntimeManifestError::Malformed)?,
-            owner: reader.string(128)?,
+            owner: read_job_owner(&mut reader)?,
             session_id: reader.process_session_id()?,
             owner_generation: reader.process_session_owner_generation()?,
             terminal: reader
                 .optional()?
-                .then(|| {
-                    let status = match reader.u8()? {
-                        1 => JobTerminalStatus::Exited,
-                        2 => JobTerminalStatus::Stopped,
-                        3 => JobTerminalStatus::Released,
-                        tag => {
-                            return Err(RuntimeManifestError::UnknownTag {
-                                field: "job terminal status",
-                                tag,
-                            });
-                        }
-                    };
-                    let exit_code = reader
-                        .optional()?
-                        .then(|| {
-                            reader
-                                .u32()
-                                .map(|code| i32::from_be_bytes(code.to_be_bytes()))
-                        })
-                        .transpose()?;
-                    let stopper = reader
-                        .optional()?
-                        .then(|| {
-                            Ok(match reader.u8()? {
-                                1 => plakous_tools::JobStopReason::Model,
-                                2 => plakous_tools::JobStopReason::User,
-                                3 => plakous_tools::JobStopReason::SessionExit,
-                                4 => plakous_tools::JobStopReason::AttemptEnded,
-                                5 => plakous_tools::JobStopReason::HardCap,
-                                tag => {
-                                    return Err(RuntimeManifestError::UnknownTag {
-                                        field: "job stopper",
-                                        tag,
-                                    });
-                                }
-                            })
-                        })
-                        .transpose()?;
-                    let seconds = reader.u64()?;
-                    let nanos = reader.u32()?;
-                    if nanos >= 1_000_000_000 {
-                        return Err(RuntimeManifestError::Malformed);
-                    }
-                    Ok(JobTerminal {
-                        status,
-                        exit_code,
-                        stopper,
-                        elapsed: std::time::Duration::new(seconds, nanos),
-                        tail: reader.string(4096)?,
-                    })
-                })
+                .then(|| read_job_terminal(&mut reader))
                 .transpose()?,
         });
     }
@@ -483,4 +412,134 @@ pub(crate) fn decode_bundle_digest(bytes: &[u8]) -> Result<Digest, RuntimeManife
     let digest = reader.digest(None)?;
     reader.finish()?;
     Ok(digest)
+}
+
+fn write_job_owner(writer: &mut Writer, owner: plakous_tools::JobOwner) {
+    writer.id(owner.line.as_uuid());
+    writer.u64(owner.generation);
+    writer.id(owner.session_id.as_uuid());
+    writer.id(owner.branch_id.as_uuid());
+    writer.u64(owner.fence);
+}
+
+fn read_job_owner(
+    reader: &mut Reader<'_>,
+) -> Result<plakous_tools::JobOwner, RuntimeManifestError> {
+    Ok(plakous_tools::JobOwner {
+        line: reader.line_id()?,
+        generation: reader.u64()?,
+        session_id: reader.session_id()?,
+        branch_id: reader.branch_id()?,
+        fence: reader.u64()?,
+    })
+}
+
+fn write_job_terminal(
+    writer: &mut Writer,
+    terminal: &JobTerminal,
+) -> Result<(), RuntimeManifestError> {
+    writer.u8(match terminal.status {
+        JobTerminalStatus::Exited => 1,
+        JobTerminalStatus::Stopped => 2,
+        JobTerminalStatus::Released => 3,
+    });
+    writer.optional(terminal.exit_code.is_some());
+    if let Some(code) = terminal.exit_code {
+        writer.u32(u32::from_be_bytes(code.to_be_bytes()));
+    }
+    writer.optional(terminal.stopper.is_some());
+    if let Some(stopper) = terminal.stopper {
+        writer.u8(match stopper {
+            plakous_tools::JobStopReason::Model => 1,
+            plakous_tools::JobStopReason::User => 2,
+            plakous_tools::JobStopReason::SessionExit => 3,
+            plakous_tools::JobStopReason::AttemptEnded => 4,
+            plakous_tools::JobStopReason::HardCap => 5,
+        });
+    }
+    writer.u64(terminal.elapsed.as_secs());
+    writer.u32(terminal.elapsed.subsec_nanos());
+    writer.string(&terminal.tail, 4096)
+}
+
+fn read_job_terminal(reader: &mut Reader<'_>) -> Result<JobTerminal, RuntimeManifestError> {
+    let status = match reader.u8()? {
+        1 => JobTerminalStatus::Exited,
+        2 => JobTerminalStatus::Stopped,
+        3 => JobTerminalStatus::Released,
+        tag => {
+            return Err(RuntimeManifestError::UnknownTag {
+                field: "job terminal status",
+                tag,
+            });
+        }
+    };
+    let exit_code = reader
+        .optional()?
+        .then(|| {
+            reader
+                .u32()
+                .map(|code| i32::from_be_bytes(code.to_be_bytes()))
+        })
+        .transpose()?;
+    let stopper = reader
+        .optional()?
+        .then(|| {
+            Ok(match reader.u8()? {
+                1 => plakous_tools::JobStopReason::Model,
+                2 => plakous_tools::JobStopReason::User,
+                3 => plakous_tools::JobStopReason::SessionExit,
+                4 => plakous_tools::JobStopReason::AttemptEnded,
+                5 => plakous_tools::JobStopReason::HardCap,
+                tag => {
+                    return Err(RuntimeManifestError::UnknownTag {
+                        field: "job stopper",
+                        tag,
+                    });
+                }
+            })
+        })
+        .transpose()?;
+    let seconds = reader.u64()?;
+    let nanos = reader.u32()?;
+    if nanos >= 1_000_000_000 {
+        return Err(RuntimeManifestError::Malformed);
+    }
+    Ok(JobTerminal {
+        status,
+        exit_code,
+        stopper,
+        elapsed: std::time::Duration::new(seconds, nanos),
+        tail: reader.string(4096)?,
+    })
+}
+
+/// Canonical bytes of one line job terminal's evidence.
+pub(crate) fn encode_line_job_terminal(
+    terminal: &LineJobTerminal,
+) -> Result<Vec<u8>, RuntimeManifestError> {
+    let mut writer = Writer::default();
+    writer.u32(terminal.number);
+    writer
+        .bytes
+        .extend_from_slice(&terminal.session_id.as_bytes());
+    writer.u64(terminal.owner_generation.get());
+    write_job_terminal(&mut writer, &terminal.terminal)?;
+    Ok(writer.bytes)
+}
+
+/// Decodes and validates canonical line job terminal evidence.
+pub(crate) fn decode_line_job_terminal(
+    bytes: &[u8],
+) -> Result<LineJobTerminal, RuntimeManifestError> {
+    let mut reader = Reader::new(bytes);
+    let terminal = LineJobTerminal {
+        number: reader.u32()?,
+        session_id: reader.process_session_id()?,
+        owner_generation: reader.process_session_owner_generation()?,
+        terminal: read_job_terminal(&mut reader)?,
+    };
+    reader.finish()?;
+    terminal.validate()?;
+    Ok(terminal)
 }

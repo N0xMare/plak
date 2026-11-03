@@ -78,13 +78,32 @@ pub(in super::super) fn create(
         ],
     )
     .map_err(map_sqlite)?;
-    insert_branch(&tx, head, None, 1, Some(&lease))?;
+    let topology = x.checkpoint.manifest().topology();
+    insert_branch(
+        &tx,
+        head,
+        None,
+        1,
+        Some(&lease),
+        (topology.line, topology.line_generation),
+    )?;
+    lines::apply_step(
+        &tx,
+        r.session(),
+        topology.line,
+        topology.line_generation,
+        None,
+        r.line_origin(),
+        StoreInvalidReason::GenesisCheckpointTopology,
+    )?;
     let feed_seq = feed::append(
         &tx,
         r.session(),
         FeedChange::Created {
             genesis: x.reference.checkpoint_id(),
             revision: BranchRevision::INITIAL,
+            line: topology.line,
+            generation: topology.line_generation,
         },
         r.feed_facts(),
     )?;

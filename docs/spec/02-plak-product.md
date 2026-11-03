@@ -272,7 +272,7 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r26.e34.p35.t9/             this build's state (§2.5)
+    r27.e35.p35.t9/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 26, epoch 34
       product.sqlite3             Plak intents and feed-derived views, schema 35
@@ -818,7 +818,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r26.e34.p35.t9`. The key is derived from the stores'
+schema>`, for example `r27.e35.p35.t9`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -1242,7 +1242,12 @@ before it can export; lease release alone is not terminal evidence.
 `plak session import <path>` creates a new id, seeds its new runtime, links it
 to the source id/key and prints the provenance, carry summary and resume line.
 Lineage uses `plak:carry-forward:` and stops tree walks at the boundary. The new
-session starts a new tree. Importing the same source session/key into the same
+session starts a new tree. An import starts a new agent line (chapter 01
+§5.1) whose provenance names the source key and id. The same-state carries,
+the binding-repair `/rebind` carry and the `/reload` orchestration carry,
+instead continue the source's line: the new runtime session becomes the line's
+next head in its create transaction, takes the source head's process rows, and
+the source's runtime branch becomes read-only history. Importing the same source session/key into the same
 workspace twice refuses and names its existing successor. `session list`,
 `session show` and the TUI opening note name the link. Opening notes follow the
 same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
@@ -1414,7 +1419,10 @@ the home, not just this workspace, and first finishes interrupted deletes
 (below).
 Sub-agent runtime sessions no product record names are pruned only by their own
 turns. A session whose branch lease is live is skipped as open in a running
-plak; one whose head is Working is skipped as needing `plak session recover`.
+plak; one whose head is Working is skipped as needing `plak session recover`; one
+whose runtime branch is a superseded predecessor of a live agent line is
+skipped as `superseded: its agent line continues in a later session; kept
+as read-only history` (chapter 01 §5.9).
 `gc` first applies the session's projector to the feed tail and prunes at the
 head that view names. A session with a workflow request that has no feed fact
 yet is skipped as `workflow pending`, because that request still names its

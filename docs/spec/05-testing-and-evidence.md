@@ -4212,7 +4212,30 @@ present nor a recorded pruned id (also a case of
 `sigkill_prune_cuts_reopen_as_exact_unpruned_or_pruned_history`
 kills a child at `prune-after-enqueue`, `prune-before-commit` and
 `prune-after-commit` and requires a fully verified reopen that is exactly the
-unpruned or the pruned store. A store reopened under a limit below its usage
+unpruned or the pruned store. Agent lines have one ordered corpus for both
+backends (`memory_backend_satisfies_line_conformance`,
+`sqlite_backend_satisfies_line_conformance`, the latter under full
+verification): a rebind moves the head and generation in its publication; the
+source, its lease still live, is refused `NotLineHead` for a commit, a prune and
+a second rebind and its head is unchanged; a fork of the predecessor starts a
+line whose origin names it; only the head records line job terminals, a repeat
+records nothing and appends nothing, the head cannot advance while they wait
+(`Conflict`) and its next commit consumes them; a same-store carry continues the
+line across sessions and fences the previous head; deleting the head's session
+ends the line. `sigkill_line_advance_cuts_reopen_with_exactly_one_head` kills a
+child at `fork-before-commit` and `fork-after-commit` of a head advance and
+requires a fully verified reopen with exactly one head: the source at
+generation 1 with no target and still committing, or the target at generation 2
+with the source fenced. The hosted line tests
+(`agent::live::line_tests::`) drive real promoted processes through the host
+registry: a line-continuing carry hands the running job, with its number, to
+the next head, the source refuses to open, and the job's exit lands in the new
+head's ledger exactly once and survives a fresh-process reopen; a lease-only
+holder records the job's stop, keeps other owners off the head, and the head's
+open answers the recorded stop and folds it once (one `LineJobTerminalRecorded`,
+one `LineJobTerminalsConsumed`); and a head-advancing rebind of an attached
+source with a running job and no `JobHost` is refused
+`RunningJobsWithoutJobHost` with the job still running. A store reopened under a limit below its usage
 prunes and then admits an ordinary commit
 (`sqlite_prune_over_the_absolute_limit_frees_ordinary_headroom`), and
 incremental vacuum returns the freed pages to the file system

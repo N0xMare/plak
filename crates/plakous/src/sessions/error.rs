@@ -362,6 +362,10 @@ pub(super) fn store_origin_error(origin: SessionStoreOrigin) -> AgentSessionsErr
             AgentSessionsErrorKind::Ownership,
             "ownership: the session is busy; its lease is held by another owner",
         ),
+        SessionStoreOrigin::NotLineHead => (
+            AgentSessionsErrorKind::NotLineHead,
+            "the branch is not its line's head and is read-only; continue on the head or fork it",
+        ),
         SessionStoreOrigin::Busy => (AgentSessionsErrorKind::StorageBusy, "storage busy"),
         SessionStoreOrigin::Unavailable => (
             AgentSessionsErrorKind::StorageUnavailable,

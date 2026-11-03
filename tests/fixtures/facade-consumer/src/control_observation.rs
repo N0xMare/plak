@@ -62,11 +62,7 @@ pub(crate) async fn jobs(
 struct HostRegistry;
 
 impl plakous::tools::JobHost for HostRegistry {
-    fn service(
-        &self,
-        _: plakous::model::SessionId,
-        _: plakous::model::BranchId,
-    ) -> Option<plakous::tools::JoinedSessionsPort> {
+    fn service(&self, _: plakous::model::LineId) -> Option<plakous::tools::JoinedSessionsPort> {
         None
     }
 

@@ -191,7 +191,11 @@ struct RecoverDuringJobStop {
 }
 
 impl plakous::tools::JobHost for RecoverDuringJobStop {
-    fn service(
+    fn service(&self, _: plakous::model::LineId) -> Option<plakous::tools::JoinedSessionsPort> {
+        None
+    }
+
+    fn service_at(
         &self,
         _: plakous::model::SessionId,
         _: plakous::model::BranchId,

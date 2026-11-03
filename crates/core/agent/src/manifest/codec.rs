@@ -5,7 +5,7 @@ use super::{
     DigestAlgorithm, DigestDomain, DurableCommandDisposition, DurableCommandRecord,
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
     DurableOperationTransition, FamilyArtifact, ForkLineage, HistorySegment, LIFECYCLE_MAGIC,
-    MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES, MAX_DURABLE_OPERATION_TRANSITIONS, MAX_ID_BYTES,
+    LineId, MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES, MAX_DURABLE_OPERATION_TRANSITIONS, MAX_ID_BYTES,
     MAX_RUNTIME_COMPONENT_BYTES, MAX_RUNTIME_LIFECYCLE_BYTES, MAX_RUNTIME_RECORDS,
     ModelAdapterProfileId, ModelFamilyId, ModelId, ModelRouteBinding, PROCESS_SESSION_ID_BYTES,
     PendingEffectDecisionState, ProcessSessionId, ProcessSessionOwnerGeneration, ProtocolId,
@@ -142,6 +142,8 @@ impl Writer {
             self.id(fork.checkpoint_id.as_uuid());
             self.u64(fork.branch_revision);
         }
+        self.id(topology.line.as_uuid());
+        self.u64(topology.line_generation);
         self.u64(topology.lease_fence);
         self.digest(topology.commit_identity)
     }
@@ -532,6 +534,9 @@ impl<'a> Reader<'a> {
     pub(super) fn branch_id(&mut self) -> Result<BranchId, RuntimeManifestError> {
         BranchId::try_from(self.uuid()?).map_err(|_| RuntimeManifestError::Malformed)
     }
+    pub(super) fn line_id(&mut self) -> Result<LineId, RuntimeManifestError> {
+        LineId::try_from(self.uuid()?).map_err(|_| RuntimeManifestError::Malformed)
+    }
     pub(super) fn checkpoint_id(&mut self) -> Result<CheckpointId, RuntimeManifestError> {
         CheckpointId::try_from(self.uuid()?).map_err(|_| RuntimeManifestError::Malformed)
     }
@@ -643,6 +648,8 @@ impl<'a> Reader<'a> {
         } else {
             None
         };
+        let line = self.line_id()?;
+        let line_generation = self.u64()?;
         let lease_fence = self.u64()?;
         let commit_identity = self.digest(Some(DigestDomain::ProviderOperation))?;
         Ok(RuntimeTopology {
@@ -652,6 +659,8 @@ impl<'a> Reader<'a> {
             parent_checkpoint_id,
             branch_revision,
             fork,
+            line,
+            line_generation,
             lease_fence,
             commit_identity,
         })

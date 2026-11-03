@@ -277,16 +277,35 @@ async fn command_admission_sequences_follow_rebind_ancestry_not_the_rebound_sour
     }
     session.release().await?;
 
-    // The rebound source never saw the target's own admission.
-    let OpenSessionOutcome::Opened { session, .. } = sessions
+    // The rebound source is read-only, and never saw the target's own
+    // admission: a fork of it (a new line) admits the same command afresh.
+    let refused = sessions
         .open(OpenSessionRequest::new(
             SessionOperationId::new("open:rebind-ancestry:source")?,
             source,
             source_binding()?,
         ))
+        .await
+        .expect_err("a rebound source opened for work");
+    assert_eq!(refused.kind(), AgentSessionsErrorKind::NotLineHead);
+    let ForkSessionOutcome::Forked { target: fork, .. } = sessions
+        .fork(ForkSessionRequest::new(
+            SessionOperationId::new("fork:rebind-ancestry:source")?,
+            source,
+        ))
         .await?
     else {
-        return Err("open rebound source".into());
+        return Err("fork rebound source".into());
+    };
+    let OpenSessionOutcome::Opened { session, .. } = sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("open:rebind-ancestry:fork")?,
+            fork,
+            source_binding()?,
+        ))
+        .await?
+    else {
+        return Err("open fork of rebound source".into());
     };
     let started = session.agent().start(local, "local").await?;
     assert_eq!(started.acknowledgement().disposition(), Accepted);

@@ -75,9 +75,42 @@ pub struct CreateSessionRequest {
     pub(super) operation_id: SessionOperationId,
     pub(super) runtime: SessionRuntimeBinding,
     pub(super) history: Option<super::PortableSessionHistory>,
+    pub(super) line: Option<CreateLine>,
+}
+
+/// Which line a new session's genesis joins.
+#[derive(Clone, Debug)]
+pub(super) enum CreateLine {
+    /// Become the next head of the line `source` heads (a same-store carry).
+    Continue(SessionLocator),
+    /// Start a new line recording where its history came from.
+    Imported(String),
 }
 
 impl CreateSessionRequest {
+    /// Makes the new session the next head of the agent line whose head is
+    /// `source`'s branch (a same-store carry), in the create's own
+    /// transaction: that branch becomes read-only history. A branch that is
+    /// already superseded has no line to continue, and the new session
+    /// starts a new line naming the branch it was carried from. The create
+    /// is refused with [`AgentSessionsErrorKind::NotLineHead`] if the head
+    /// moves between that read and the create. Without this, a new session
+    /// starts a new line.
+    #[must_use]
+    pub fn continuing_line(mut self, source: SessionLocator) -> Self {
+        self.line = Some(CreateLine::Continue(source));
+        self
+    }
+
+    /// Records where an imported history came from on the new line it
+    /// starts: 1 to 256 bytes of single-line provenance text, which names
+    /// nothing this store resolves. Invalid text is refused at create.
+    #[must_use]
+    pub fn with_line_provenance(mut self, provenance: impl Into<String>) -> Self {
+        self.line = Some(CreateLine::Imported(provenance.into()));
+        self
+    }
+
     /// Seeds the new session with a carried conversation instead of an empty
     /// one. Its provider replay material is kept only when `runtime` binds the
     /// account and model it was produced under; see
@@ -407,6 +440,7 @@ pub struct RebindSessionRequest {
     pub(super) target: SessionTargetBinding,
     pub(super) runtime: SessionRuntimeBinding,
     pub(super) tool_transition: RebindToolTransition,
+    pub(super) new_line: bool,
 }
 
 /// Tool-authority behavior for one explicit canonical rebind.
@@ -957,6 +991,28 @@ pub enum RebindSessionOutcome {
         /// Persisted recovery-only authority.
         recovery: RecoveryRequiredReport,
     },
+    /// The rebind was refused before anything was written.
+    Refused {
+        /// Exact caller workflow identity.
+        operation_id: SessionOperationId,
+        /// Why.
+        reason: RebindRefused,
+    },
+}
+
+/// Why a rebind was refused before it was attempted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum RebindRefused {
+    /// The attached source owns running jobs in its private process service
+    /// and the target binding installs no `JobHost`: the service dies with the
+    /// source's driver, so nothing could carry the jobs to the target. Install
+    /// a `JobHost` (for example `plakous::tools::LocalJobHost`) on both
+    /// bindings, or stop the jobs first.
+    RunningJobsWithoutJobHost {
+        /// Running jobs of the source.
+        running: usize,
+    },
 }
 
 /// Stable category for a high-level session workflow failure.
@@ -980,6 +1036,10 @@ pub enum AgentSessionsErrorKind {
     IdentityConflict,
     /// Session ownership or optimistic concurrency was lost.
     Ownership,
+    /// The branch is not its agent line's head: a rebind or carry moved the
+    /// line on, so the branch is read-only history. View, export or fork it;
+    /// continue work on the line's head.
+    NotLineHead,
     /// A workflow reply was lost or its admitted outcome is unknown. A model
     /// call or commit may have occurred; the change feed remains authoritative.
     OutcomeUnknown,
@@ -1041,6 +1101,10 @@ pub enum PruneHistoryOutcome {
     /// The head is an unfinished turn; recover it first, since recovery may
     /// still read older checkpoints.
     RecoveryRequired,
+    /// The branch is a predecessor of a live agent line (a rebind or carry
+    /// moved the line's head on): it is kept whole as read-only history until
+    /// it, or its line, is deleted explicitly.
+    Superseded,
 }
 
 /// Redaction-safe account of one history prune.

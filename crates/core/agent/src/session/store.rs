@@ -2,10 +2,13 @@ use super::{
     AcquireBranch, ArchiveReceipt, ArchiveSession, BranchLease, BranchRevision, CheckpointId,
     CommitCheckpoint, CommitReceipt, CommittedCheckpoint, CreateReceipt, CreateSession,
     DeleteReceipt, DeleteSession, DurabilityReport, FeedPage, FeedSeq, FeedTail, ForkBranch,
-    ForkReceipt, Future, LeaseInstant, LoadedBranch, NonZeroUsize, Page, Pin, PruneBranch,
-    PruneReceipt, RecoverFork, SessionId, SessionQuery, SessionRef, SessionStoreError,
-    SessionSummary, StoreReclaimMode, StoreReclaimReport, StoreUsage, StoredCheckpoint,
+    ForkReceipt, Future, LeaseInstant, LineRecord, LineTerminalsReceipt, LoadedBranch,
+    NonZeroUsize, Page, Pin, PruneBranch, PruneReceipt, RecordLineJobTerminals, RecoverFork,
+    SessionId, SessionQuery, SessionRef, SessionStoreError, SessionSummary, StoreReclaimMode,
+    StoreReclaimReport, StoreUsage, StoredCheckpoint,
 };
+use crate::manifest::LineJobTerminal;
+use plakous_model::LineId;
 
 /// Boxed future returned by object-safe store operations.
 pub type StoreFuture<'a, T> =
@@ -62,6 +65,9 @@ pub trait SessionStore: Send + Sync + 'static {
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError>;
 
     /// Atomically creates a session, genesis checkpoint, and fence-1 lease.
+    /// A genesis at line generation 1 starts its own line; a genesis at a
+    /// higher generation advances that line's head across sessions under the
+    /// same rules as a fork's advance.
     fn create(&self, request: CreateSession) -> StoreFuture<'_, CreateReceipt>;
 
     /// Recovers one exact accepted create operation after acknowledgement loss.
@@ -115,7 +121,9 @@ pub trait SessionStore: Send + Sync + 'static {
     }
 
     /// CAS-publishes one exact immutable checkpoint under the current lease.
-    /// `Corrupt`, `StorageFull`, `Invalid`, and `Capacity` must only be returned
+    /// Inside the same transaction the branch must be its line's head at the
+    /// checkpoint's line generation, or the commit is refused with
+    /// `NotLineHead`. `Corrupt`, `StorageFull`, `Invalid`, and `Capacity` must only be returned
     /// when nothing was published. If publication cannot be ruled out, return
     /// `BackendUnavailable` so the caller reconciles the exact acknowledgement.
     fn commit(&self, request: CommitCheckpoint) -> StoreFuture<'_, CommitReceipt>;
@@ -124,7 +132,13 @@ pub trait SessionStore: Send + Sync + 'static {
     fn recover_commit(&self, checkpoint: CheckpointId) -> StoreFuture<'_, CommittedCheckpoint>;
 
     /// Atomically creates one independently fenced branch from an exact
-    /// quiescent source checkpoint.
+    /// quiescent source checkpoint. The target's topology names its line
+    /// ([`super::LineStep::of`]): a new line records the source as its
+    /// origin; an advance moves the source line's head to the target and
+    /// adds one to its generation in the same transaction, refused with
+    /// `NotLineHead` unless the source is still the head at the step's
+    /// generation and with `Conflict` while the line has unconsumed job
+    /// terminals.
     fn fork(&self, request: ForkBranch) -> StoreFuture<'_, ForkReceipt>;
 
     /// Recovers one exact accepted fork operation after acknowledgement loss.
@@ -185,6 +199,26 @@ pub trait SessionStore: Send + Sync + 'static {
 
     /// Reads one session's retained feed window without a lease or a write.
     fn feed_tail(&self, session_id: SessionId) -> StoreFuture<'_, FeedTail>;
+
+    /// Reads one line's head without a lease or a write. A line whose head
+    /// session was deleted is `NotFound`.
+    fn load_line(&self, line: LineId) -> StoreFuture<'_, LineRecord>;
+
+    /// Reads the recorded, unconsumed job terminals of one line at its
+    /// current generation, ordered by job number, without a lease.
+    fn line_job_terminals(&self, line: LineId) -> StoreFuture<'_, Vec<LineJobTerminal>>;
+
+    /// Records job terminals for a line head under that head's exact lease,
+    /// fenced like a commit: the lease must be live and the branch must be the
+    /// line's head at `generation`, or nothing is written
+    /// ([`SessionStoreError::NotLineHead`]). A job already recorded keeps its
+    /// first evidence. Newly recorded jobs append one `LineJobTerminals`
+    /// record to the head session's feed in the same transaction; a write that
+    /// adds nothing appends nothing.
+    fn record_line_job_terminals(
+        &self,
+        request: RecordLineJobTerminals,
+    ) -> StoreFuture<'_, LineTerminalsReceipt>;
 
     /// Waits behind all accepted work and truthfully reports durability debt.
     fn flush(&self) -> StoreFuture<'_, DurabilityReport>;

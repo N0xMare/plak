@@ -1002,6 +1002,7 @@ impl Fixture {
             runtime_factory: injection,
             ready_path: ReadyPathTiming::default(),
             seed_history: None,
+            seed_line: None,
             source_releases: crate::product_host::SourceReleases::default(),
             continuation: None,
             event_renderer: None,

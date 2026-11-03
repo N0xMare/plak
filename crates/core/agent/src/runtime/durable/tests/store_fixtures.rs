@@ -378,6 +378,8 @@ impl SessionStore for TestCreateStore {
                     change: crate::feed::FeedChange::Created {
                         genesis: receipt.branch().checkpoint().checkpoint_id(),
                         revision: receipt.branch().revision(),
+                        line: stored.checkpoint().manifest().topology().line,
+                        generation: stored.checkpoint().manifest().topology().line_generation,
                     },
                 },
                 request.feed_facts().to_vec(),
@@ -1408,6 +1410,41 @@ impl SessionStore for TestCreateStore {
 
     fn feed_tail(&self, _session_id: SessionId) -> crate::StoreFuture<'_, crate::feed::FeedTail> {
         self.record_admission_job("feed_tail");
+        Self::unsupported()
+    }
+
+    fn load_line(
+        &self,
+        line: plakous_model::LineId,
+    ) -> crate::StoreFuture<'_, crate::session::LineRecord> {
+        // One branch: the current head is its line's only head.
+        Box::pin(async move {
+            let state = lock_mutex(&self.state);
+            let loaded = state.loaded.as_ref().ok_or(SessionStoreError::NotFound)?;
+            let topology = loaded.checkpoint().checkpoint().manifest().topology();
+            if topology.line != line {
+                return Err(SessionStoreError::NotFound);
+            }
+            Ok(crate::session::LineRecord::from_store(
+                line,
+                loaded.head().session(),
+                topology.line_generation,
+                crate::session::LineOrigin::Created,
+            ))
+        })
+    }
+
+    fn line_job_terminals(
+        &self,
+        _line: plakous_model::LineId,
+    ) -> crate::StoreFuture<'_, Vec<crate::manifest::LineJobTerminal>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn record_line_job_terminals(
+        &self,
+        _request: crate::session::RecordLineJobTerminals,
+    ) -> crate::StoreFuture<'_, crate::session::LineTerminalsReceipt> {
         Self::unsupported()
     }
 

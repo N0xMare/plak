@@ -671,6 +671,10 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// the first runtime construction and valid only for a record that has no
     /// runtime yet (`plak session import`).
     pub seed_history: Option<plakous::sessions::PortableSessionHistory>,
+    /// Which agent line a seeded session joins: the carried source's line for
+    /// a same-store carry, or a new line naming an imported document's
+    /// origin. `None` starts a plain new line.
+    pub seed_line: Option<crate::agent::SeededLine>,
     /// Attachment releases this host started; constructed empty
     /// (`SourceReleases::default()`). Switch-back joins that source's release;
     /// host exit joins every outstanding release under one bounded deadline.

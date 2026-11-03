@@ -180,6 +180,14 @@ impl AgentError {
         self.store_error == Some(SessionStoreError::StorageFull)
     }
 
+    /// Returns whether the store refused the originating commit because its
+    /// branch is no longer its line's head: a rebind or carry moved the line
+    /// on, the branch is read-only and its owner is fenced.
+    #[must_use]
+    pub fn is_not_line_head(&self) -> bool {
+        self.store_error == Some(SessionStoreError::NotLineHead)
+    }
+
     pub(crate) const fn store_error(&self) -> Option<SessionStoreError> {
         self.store_error
     }

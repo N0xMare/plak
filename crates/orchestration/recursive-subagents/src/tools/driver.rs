@@ -534,7 +534,7 @@ impl TreeDriver {
             .lock()
             .ok()?
             .as_ref()?
-            .service(locator.session_id(), locator.branch_id())
+            .service_at(locator.session_id(), locator.branch_id())
     }
 
     /// Terminal-change edges of one agent's own process service, so a host

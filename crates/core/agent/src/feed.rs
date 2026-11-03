@@ -10,7 +10,7 @@ pub(crate) mod facts;
 mod wire;
 
 use plakous_model::{
-    AttemptId, BranchId, CallId, CheckpointId, EntryId, FinishReason, HistorySegmentKind,
+    AttemptId, BranchId, CallId, CheckpointId, EntryId, FinishReason, HistorySegmentKind, LineId,
     ModelErrorKind, NamespaceId, SessionId, ToolName, TurnId, TurnOrigin,
 };
 use serde::{Deserialize, Serialize};
@@ -120,6 +120,12 @@ pub enum FeedChange {
         /// Its branch revision.
         #[serde(with = "branch_revision")]
         revision: BranchRevision,
+        /// The genesis branch's line.
+        line: LineId,
+        /// Its line generation: 1 for a new line; above 1 when the genesis
+        /// became the next head of an existing line (a same-store carry), so
+        /// the line's previous head is now read-only.
+        generation: u64,
     },
     /// A commit advanced the branch head.
     Advanced {
@@ -144,6 +150,14 @@ pub enum FeedChange {
         revision: SessionRevision,
         /// Fork or rebind.
         transition: FeedBranchTransition,
+        /// The target branch's line.
+        line: LineId,
+        /// True when the target became the new head of the source's line (a
+        /// rebind), so the source is now read-only; false when the target
+        /// started a new line (a fork).
+        new_head: bool,
+        /// The target's line generation.
+        generation: u64,
     },
     /// A lease release or abandonment released this branch.
     LeaseReleased {
@@ -159,6 +173,12 @@ pub enum FeedChange {
         /// The new pruning horizon.
         #[serde(with = "branch_revision")]
         horizon: BranchRevision,
+    },
+    /// A lease-only holder of this line head recorded job terminals into
+    /// the line's terminal table; the facts name the jobs.
+    LineJobTerminals {
+        /// The head checkpoint the evidence was recorded against.
+        head: CheckpointId,
     },
     /// The session was archived. The record names the session's initial
     /// branch and applies to every branch.
@@ -553,6 +573,26 @@ pub enum FeedFact {
         operation_id: Option<String>,
         /// Workflow class.
         kind: FeedWorkflowKind,
+    },
+    /// A lease-only open of a line head recorded one job's terminal into
+    /// the line's terminal table.
+    LineJobTerminalRecorded {
+        /// The line.
+        line: LineId,
+        /// The head generation it was recorded under.
+        generation: u64,
+        /// The job number.
+        job: u32,
+    },
+    /// This commit folded recorded line job terminals into its job ledger
+    /// and removed them from the line's terminal table.
+    LineJobTerminalsConsumed {
+        /// The line.
+        line: LineId,
+        /// The head generation they were recorded under.
+        generation: u64,
+        /// The job numbers, ascending.
+        jobs: Vec<u32>,
     },
     /// A workflow was settled.
     WorkflowSettled {

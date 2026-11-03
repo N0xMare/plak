@@ -243,6 +243,7 @@ impl DurableSessionRuntime {
             self.lease_seconds,
             bundle,
         )
+        .with_line_origin(builder.line_origin.clone())
         .with_feed_facts(crate::feed::facts::genesis_facts(operation_id, &checkpoint));
         let receipt = recover_or_create(
             Arc::clone(&self.store),
@@ -419,6 +420,13 @@ impl DurableSessionRuntime {
         .await
         .map_err(StoreCallError::into_agent)?;
         validate_loaded_address(&loaded, address, self.durability)?;
+        let topology = loaded.checkpoint().checkpoint().manifest().topology();
+        let line = self.line(topology.line).await?;
+        if line.head() != address.session() || line.generation() != topology.line_generation {
+            return Err(AgentError::from_store(
+                crate::SessionStoreError::NotLineHead,
+            ));
+        }
         if checkpoint_requires_closed_recovery(loaded.checkpoint().checkpoint()) {
             return Ok(DurableOpenVerification::UnsettledWork);
         }

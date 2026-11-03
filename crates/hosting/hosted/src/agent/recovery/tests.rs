@@ -4160,7 +4160,7 @@ async fn refold_reread_spans_more_than_sixty_four_synthetic_pages() {
             "session_id": session, "seq": seq,
             "branch_id": "00000000-0000-4000-8000-00000000000b",
             "committed_at_ms": seq,
-            "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": seq}}
+            "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": seq, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
         })).unwrap();
         FeedRecord::from_store(header, Vec::new())
     }).collect();
@@ -4215,7 +4215,7 @@ async fn refold_reread_refuses_a_short_run_at_the_record_cap() {
                     "session_id": session, "seq": seq,
                     "branch_id": "00000000-0000-4000-8000-00000000000b",
                     "committed_at_ms": seq,
-                    "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": seq}}
+                    "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": seq, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
                 })).unwrap();
                 FeedRecord::from_store(header, Vec::new())
             })
@@ -4267,7 +4267,7 @@ async fn cursor_read_only_pages_new_records_of_a_ten_thousand_record_feed() {
                     "session_id": session, "seq": seq,
                     "branch_id": "00000000-0000-4000-8000-00000000000b",
                     "committed_at_ms": seq,
-                    "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": seq}}
+                    "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": seq, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
                 })).unwrap();
                 FeedRecord::from_store(header, Vec::new())
             }).collect();

@@ -9,7 +9,7 @@ use super::*;
 struct RetainedJobHost(Mutex<Option<plakous_tools::JoinedSessionsPort>>);
 
 impl plakous_tools::JobHost for RetainedJobHost {
-    fn service(&self, _: SessionId, _: BranchId) -> Option<plakous_tools::JoinedSessionsPort> {
+    fn service(&self, _: plakous_model::LineId) -> Option<plakous_tools::JoinedSessionsPort> {
         lock_mutex(&self.0).clone()
     }
     fn attach(

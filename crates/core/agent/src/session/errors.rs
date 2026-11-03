@@ -378,6 +378,11 @@ pub enum SessionStoreError {
     /// A newer or renewed fence value superseded the supplied token.
     #[error("session branch fence is superseded")]
     FenceSuperseded,
+    /// The branch is not its line's head at its generation: a rebind or
+    /// carry moved the head on, so the branch is read-only. Nothing was
+    /// written; continue on the head or fork the branch.
+    #[error("session branch is not its line's head")]
+    NotLineHead,
     /// The session is archived and closed to ordinary mutation/load.
     #[error("session is archived")]
     Archived,

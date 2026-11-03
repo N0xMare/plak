@@ -13,6 +13,8 @@ use super::{
 impl RuntimeTopology {
     pub(super) fn validate(self) -> Result<Self, RuntimeManifestError> {
         if self.lease_fence == 0
+            || self.line_generation == 0
+            || (self.line_generation == 1 && self.line.as_uuid() != self.branch_id.as_uuid())
             || self.parent_checkpoint_id == Some(self.checkpoint_id)
             || self.fork.is_some_and(|fork| {
                 fork.session_id == self.session_id

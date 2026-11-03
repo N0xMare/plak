@@ -1006,6 +1006,8 @@ async fn completed_process_evidence_reopen_preserves_settled_work_and_abandons_o
             parent_checkpoint_id: Some(topology.checkpoint_id),
             branch_revision,
             fork: topology.fork,
+            line: topology.line,
+            line_generation: topology.line_generation,
             lease_fence: lease.fence().get(),
             commit_identity,
         },

@@ -19,7 +19,7 @@ impl Driver {
             .jobs()
             .with_terminals(&self.job_sessions.jobs())
             .map_err(runtime_manifest_error)?;
-        if jobs == *manifest.jobs() {
+        if jobs == *manifest.jobs() && !self.authority.has_pending_line_terminals() {
             return Ok(false);
         }
         let history = manifest.canonical().history().clone();

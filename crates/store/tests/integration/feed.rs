@@ -100,6 +100,8 @@ pub(crate) async fn run_feed_conformance(
         FeedChange::Created {
             genesis: chain.ids[0],
             revision: plakous_agent::internal::BranchRevision::INITIAL,
+            line: plakous_agent::internal::LineId::started_by(source_branch),
+            generation: 1,
         }
     );
     for (index, record) in created.iter().enumerate() {

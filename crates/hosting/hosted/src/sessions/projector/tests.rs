@@ -89,7 +89,7 @@ impl Feed {
         let genesis = feed.head;
         feed.push(
             feed.branch,
-            serde_json::json!({"created": {"genesis": genesis.to_string(), "revision": 1}}),
+            serde_json::json!({"created": {"genesis": genesis.to_string(), "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}),
             genesis,
             vec![FeedFact::SessionCreated {
                 operation_id: "plak:create:s1".to_owned(),
@@ -962,7 +962,7 @@ proptest! {
                 },
                 "target": target.to_string(),
                 "revision": 4,
-                "transition": if rebind { "rebind" } else { "fork" },
+                "transition": if rebind { "rebind" } else { "fork" }, "line": "00000000-0000-4000-8000-00000000c0de", "new_head": rebind, "generation": if rebind { 2 } else { 1 },
             }}),
             target,
             vec![
@@ -1078,7 +1078,7 @@ fn append_test_branch(feed: &mut Feed, rebind: bool, operation: &str) {
     };
     feed.push(target_branch, serde_json::json!({"branched": {
         "source": { "session_id": source.session_id().to_string(), "branch_id": source.branch_id().to_string(), "checkpoint_id": source.checkpoint_id().to_string() },
-        "target": target.to_string(), "revision": 4, "transition": if rebind { "rebind" } else { "fork" },
+        "target": target.to_string(), "revision": 4, "transition": if rebind { "rebind" } else { "fork" }, "line": "00000000-0000-4000-8000-00000000c0de", "new_head": rebind, "generation": if rebind { 2 } else { 1 },
     }}), target, vec![
         FeedFact::WorkflowAdmitted { workflow_id, operation_id: Some(operation.to_owned()), kind },
         FeedFact::WorkflowSettled { workflow_id, operation_id: Some(operation.to_owned()), kind,

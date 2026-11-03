@@ -6,7 +6,8 @@
 )]
 
 use plakous_model::{
-    Digest, DigestDomain, FinishReason, HistorySegmentKind, ModelErrorKind, NamespaceId, TurnOrigin,
+    Digest, DigestDomain, FinishReason, HistorySegmentKind, LineId, ModelErrorKind, NamespaceId,
+    TurnOrigin,
 };
 use uuid::Uuid;
 
@@ -278,11 +279,23 @@ fn every_shape() -> TestResult<Vec<FeedRecord>> {
                 target: locator(22)?,
             },
         },
+        FeedFact::LineJobTerminalRecorded {
+            line: LineId::try_from(Uuid::from_u128(30))?,
+            generation: 2,
+            job: 7,
+        },
+        FeedFact::LineJobTerminalsConsumed {
+            line: LineId::try_from(Uuid::from_u128(30))?,
+            generation: 2,
+            jobs: vec![7, 9],
+        },
     ];
     let changes = [
         FeedChange::Created {
             genesis: id(20)?,
             revision: BranchRevision::INITIAL,
+            line: LineId::try_from(Uuid::from_u128(30))?,
+            generation: 1,
         },
         FeedChange::Advanced {
             parent: id(20)?,
@@ -295,7 +308,11 @@ fn every_shape() -> TestResult<Vec<FeedRecord>> {
             target: id(22)?,
             revision: SessionRevision::from_store(1),
             transition: FeedBranchTransition::Rebind,
+            line: LineId::try_from(Uuid::from_u128(30))?,
+            new_head: true,
+            generation: 2,
         },
+        FeedChange::LineJobTerminals { head: id(22)? },
         FeedChange::LeaseReleased {
             head: id(21)?,
             fence: 2,
@@ -371,13 +388,14 @@ fn a_record_above_the_page_bound_does_not_encode() -> TestResult {
 /// bump (or a runtime epoch bump), never a silent re-pin.
 #[test]
 fn every_record_shape_has_frozen_bytes() -> TestResult {
-    const GOLDEN: [&str; 6] = [
-        "3c36ee923adfebb5b14c4119f3cdfcad4417f12fe71cc56d2424a8b0f40a6404",
-        "7f4570c826c2e60dcfb0a36ca594ba4f2e7d7adf8d3cc6baad6db17f00529ceb",
-        "f31813a9b14a515293a7815dd1d02d319526a14809c4b3ed7478a54667e01730",
-        "12e78ad89b4f9821070faa2fcaf4e5cf3d6de0b50e745da7b47237e048757d61",
-        "2d1111879744c2decedef4fb1ce996a51260d0fa438a4b17a7e6cef266f32d7a",
-        "2a9c70a48286f0820c0382f469cff7fed65677f2a56da8368cedeb6cd0e65bd4",
+    const GOLDEN: [&str; 7] = [
+        "acf564a9eefd8ba04f8044cc6b0d2b75cd2544d7c2dc38742483ccc16437264f",
+        "e2de9dc183a6c95a0b6f9bdd013588ea61b202c1c1f8062fd0e82218acab05b5",
+        "63134aa97d484d4b4605bd0d617d1f61eb6fb403507a2d2d005962bc9f6bae6e",
+        "1a317141c7e1329b080503a271c82d2ed34e41430eb1f044bf029f0dd0781d38",
+        "0e87c69a435119875e56da75f35485a7995a9cde0ce348fccd77440ec762d19f",
+        "1b1d8526a6f15faee9e7728cade9e2c1cde3098366a7fe9564fabd5b2627cc6a",
+        "3677bfb459132679a5bea77a252bfae6de8d55a74df49ca67316fc5fb4a935b1",
     ];
     let actual = every_shape()?
         .iter()

@@ -86,6 +86,7 @@ mod cell_crashes;
 mod debt;
 #[cfg(feature = "sessions-sqlite")]
 mod feed;
+mod lines;
 #[cfg(feature = "composition")]
 mod python;
 #[cfg(all(unix, feature = "sessions-sqlite"))]
@@ -1375,6 +1376,29 @@ impl SessionStore for LoseForkAckStore {
         self.inner.feed_tail(session_id)
     }
 
+    fn load_line(
+        &self,
+        line: plakous_model::LineId,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineRecord> {
+        self.inner.load_line(line)
+    }
+
+    fn line_job_terminals(
+        &self,
+        line: plakous_model::LineId,
+    ) -> plakous_agent::internal::StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>>
+    {
+        self.inner.line_job_terminals(line)
+    }
+
+    fn record_line_job_terminals(
+        &self,
+        request: plakous_agent::internal::RecordLineJobTerminals,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt>
+    {
+        self.inner.record_line_job_terminals(request)
+    }
+
     fn flush(
         &self,
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
@@ -1464,6 +1488,8 @@ async fn install_family_artifact(
             parent_checkpoint_id: Some(source.checkpoint_id()),
             branch_revision: loaded.head().revision().get() + 1,
             fork: source_manifest.topology().fork,
+            line: source_manifest.topology().line,
+            line_generation: source_manifest.topology().line_generation,
             lease_fence: lease.fence().get(),
             commit_identity: Digest::sha256(
                 DigestDomain::ProviderOperation,
@@ -2082,6 +2108,29 @@ impl SessionStore for CrashCutStore {
         session_id: SessionId,
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedTail> {
         self.inner.feed_tail(session_id)
+    }
+
+    fn load_line(
+        &self,
+        line: plakous_model::LineId,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineRecord> {
+        self.inner.load_line(line)
+    }
+
+    fn line_job_terminals(
+        &self,
+        line: plakous_model::LineId,
+    ) -> plakous_agent::internal::StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>>
+    {
+        self.inner.line_job_terminals(line)
+    }
+
+    fn record_line_job_terminals(
+        &self,
+        request: plakous_agent::internal::RecordLineJobTerminals,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt>
+    {
+        self.inner.record_line_job_terminals(request)
     }
 
     fn flush(
@@ -5673,7 +5722,21 @@ async fn rebind_requires_fresh_matching_authority_and_recovers_without_reauth() 
     else {
         return Err("fresh rebind target did not reopen with its exact builder".into());
     };
-    session.release().await?;
+    let target_head = session.release().await?;
+    // The rebind moved the line's head: the source is read-only history.
+    let superseded = sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("open:rebound-source")?,
+            source,
+            completing_runtime_binding_for(
+                Arc::clone(&workspace),
+                descriptor()?,
+                b"account-alpha",
+            )?,
+        ))
+        .await
+        .expect_err("a rebind source opened for work");
+    assert_eq!(superseded.kind(), AgentSessionsErrorKind::NotLineHead);
     let accepted_stats = store.stats()?;
 
     let recovered = Box::pin(sessions.rebind(RebindSessionRequest::new(
@@ -5784,9 +5847,23 @@ async fn rebind_requires_fresh_matching_authority_and_recovers_without_reauth() 
         composition_marker_registry()?,
     )?;
     let marker_target = marker_runtime.target_binding();
+    let second_source = Box::pin(sessions.rebind(RebindSessionRequest::recompiling_target(
+        SessionOperationId::new("rebind:target-presentation-from-source")?,
+        source,
+        marker_target.clone(),
+        runtime_binding_with_registry(
+            Arc::clone(&workspace),
+            target_descriptor.clone(),
+            b"account-beta",
+            composition_marker_registry()?,
+        )?,
+    )))
+    .await
+    .expect_err("a superseded source rebound a second time");
+    assert_eq!(second_source.kind(), AgentSessionsErrorKind::NotLineHead);
     let tool_rebind = Box::pin(sessions.rebind(RebindSessionRequest::recompiling_target(
         SessionOperationId::new("rebind:target-presentation")?,
-        source,
+        target_head,
         marker_target,
         marker_runtime,
     )))
@@ -6301,6 +6378,8 @@ async fn sqlite_recovery_inspection_reports_working_obligations_without_mutation
             parent_checkpoint_id: Some(source_topology.checkpoint_id),
             branch_revision: 1,
             fork: None,
+            line: source_topology.line,
+            line_generation: source_topology.line_generation,
             lease_fence: lease.fence().get(),
             commit_identity: Digest::sha256(
                 DigestDomain::ProviderOperation,
@@ -7098,6 +7177,8 @@ async fn scripted_working_checkpoint_is_recovery_only_and_never_mutated() -> Tes
             parent_checkpoint_id: Some(topology.checkpoint_id),
             branch_revision: 1,
             fork: None,
+            line: topology.line,
+            line_generation: topology.line_generation,
             lease_fence: lease.fence().get(),
             commit_identity: Digest::sha256(
                 DigestDomain::ProviderOperation,

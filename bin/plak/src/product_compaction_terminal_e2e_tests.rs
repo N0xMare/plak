@@ -158,6 +158,7 @@ impl TuiAttacher for CompactionAttacher {
             runtime_factory: injection,
             ready_path: crate::product_host::ReadyPathTiming::default(),
             seed_history: None,
+            seed_line: None,
             source_releases: crate::product_host::SourceReleases::default(),
             continuation: None,
             event_renderer: None,

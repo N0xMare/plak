@@ -25,12 +25,12 @@ use plakous_agent::internal::{
     CreateOperation, CreateReceipt, CreateSession, DeleteReceipt, DeleteSession, Digest,
     DigestDomain, DurabilityReport, FeedBranchTransition, FeedChange, FeedLocator, FeedPage,
     FeedSeq, FeedTail, ForkBranch, ForkLineage, ForkOperation, ForkReceipt, LeaseClock,
-    LeaseDomain, LeaseInstant, LoadedBranch, Page, PruneBranch, PruneReceipt, RecoverFork, RunId,
-    RuntimeCheckpoint, RuntimeCheckpointKind, RuntimeDurability, RuntimeManifest, RuntimeObject,
-    RuntimeObjectAddress, RuntimeObjectKind, SessionHead, SessionId, SessionQuery, SessionRef,
-    SessionRevision, SessionStore, SessionStoreError, SessionSummary, SessionWorkflowId,
-    StoreAdmission, StoreCapacityBound, StoreFuture, StoreInvalidReason, StoreUsage,
-    StoredCheckpoint, Timestamp,
+    LeaseDomain, LeaseInstant, LineOrigin, LoadedBranch, Page, PruneBranch, PruneReceipt,
+    RecoverFork, RunId, RuntimeCheckpoint, RuntimeCheckpointKind, RuntimeDurability,
+    RuntimeManifest, RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind, SessionHead,
+    SessionId, SessionQuery, SessionRef, SessionRevision, SessionStore, SessionStoreError,
+    SessionSummary, SessionWorkflowId, StoreAdmission, StoreCapacityBound, StoreFuture,
+    StoreInvalidReason, StoreUsage, StoredCheckpoint, Timestamp,
 };
 use rusqlite::{
     Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
@@ -55,6 +55,7 @@ mod gc_tests;
 mod index_tests;
 #[cfg(test)]
 mod lease_sync_tests;
+mod lines;
 mod objects;
 mod open;
 mod ops;
@@ -90,7 +91,7 @@ use rows::*;
 use schema::*;
 
 /// The runtime store's schema version. Only this exact version opens.
-pub const SQLITE_SCHEMA_VERSION: i64 = 26;
+pub const SQLITE_SCHEMA_VERSION: i64 = 27;
 /// Reviewed `SQLite` release statically embedded by the workspace dependency.
 pub const BUNDLED_SQLITE_VERSION: &str = "3.53.2";
 /// Upstream source identity of [`BUNDLED_SQLITE_VERSION`].
@@ -1435,6 +1436,35 @@ impl SessionStore for SqliteSessionStore {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("feed_tail");
             feed::tail(&b.connection, session_id)
+        })
+    }
+    fn load_line(
+        &self,
+        line: plakous_agent::internal::LineId,
+    ) -> StoreFuture<'_, plakous_agent::internal::LineRecord> {
+        self.dispatch_read("load_line", move |b| {
+            b.require_open()?;
+            lines::load_line(&b.connection, line)
+        })
+    }
+    fn line_job_terminals(
+        &self,
+        line: plakous_agent::internal::LineId,
+    ) -> StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>> {
+        self.dispatch_read("line_job_terminals", move |b| {
+            b.require_open()?;
+            let snapshot = b.connection.transaction().map_err(map_sqlite)?;
+            lines::line_job_terminals(&snapshot, line)
+        })
+    }
+    fn record_line_job_terminals(
+        &self,
+        r: plakous_agent::internal::RecordLineJobTerminals,
+    ) -> StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt> {
+        self.dispatch("record_line_job_terminals", move |b| {
+            let receipt = lines::record_line_job_terminals(b, &r)?;
+            feed::trim(b, r.lease().session().session_id());
+            Ok(receipt)
         })
     }
     fn flush(&self) -> StoreFuture<'_, DurabilityReport> {

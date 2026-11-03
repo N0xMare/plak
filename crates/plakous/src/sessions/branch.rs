@@ -1,7 +1,8 @@
 use super::{
     AgentSessions, AgentSessionsError, AgentSessionsErrorKind, ArtifactPortability,
-    DurableRuntimeBranchOutcome, ForkSessionOutcome, ForkSessionRequest, RebindSessionOutcome,
-    RebindSessionRequest, RebindToolTransition, SessionBindingReport, SessionLocator,
+    DurableRuntimeBranchOutcome, ForkSessionOutcome, ForkSessionRequest, RebindRefused,
+    RebindSessionOutcome, RebindSessionRequest, RebindToolTransition, SessionBindingReport,
+    SessionLocator,
 };
 
 impl AgentSessions {
@@ -86,7 +87,34 @@ impl AgentSessions {
             target,
             runtime,
             tool_transition,
+            new_line,
         } = request;
+        // Without a JobHost a running job lives in the attached source's
+        // private service and dies with its driver: nothing can hand it to
+        // the target.
+        if !new_line
+            && !plakous_agent::internal::facade_support::agent_builder_has_job_host(
+                &runtime.builder,
+            )
+            && let Some(source) = self
+                .drivers
+                .attached(super::registry::SessionBranchKey::new(
+                    locator.session_id,
+                    locator.branch_id,
+                ))
+        {
+            let running = source
+                .jobs()
+                .iter()
+                .filter(|job| job.status == plakous_tools::JobStatus::Running)
+                .count();
+            if running != 0 {
+                return Ok(RebindSessionOutcome::Refused {
+                    operation_id,
+                    reason: RebindRefused::RunningJobsWithoutJobHost { running },
+                });
+            }
+        }
         match Box::pin(self.runtime.rebind(
             operation_id.as_str(),
             locator.durable(),
@@ -97,6 +125,7 @@ impl AgentSessions {
             target.effective_provider_configuration,
             target.account_binding,
             tool_transition == RebindToolTransition::RecompileForTarget,
+            new_line,
             runtime.builder,
         ))
         .await

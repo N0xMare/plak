@@ -118,6 +118,14 @@ impl LeaseHeartbeat {
         Ok(())
     }
 
+    /// Ends this owner's authority for good after the store fenced it: a
+    /// commit found its branch no longer its line's head. Admission closes,
+    /// and every later commit or start fails with the fencing error.
+    pub(super) fn fence(&self, error: &AgentError) {
+        lock_mutex(&self.failure).get_or_insert_with(|| error.clone());
+        self.lost.cancel();
+    }
+
     pub(super) fn failure(&self) -> AgentError {
         lock_mutex(&self.failure)
             .clone()

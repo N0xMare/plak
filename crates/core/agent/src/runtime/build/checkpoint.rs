@@ -103,7 +103,14 @@ pub(super) fn reopened_checkpoint_authority(
         bootstrap.checkpoint,
         bootstrap.bundle,
         Some(bootstrap.branch),
-    ))
+    )
+    .with_line_terminals(bootstrap.line_terminals))
+}
+
+/// The membership of a branch that starts its own line: the line is named
+/// by that branch, at generation 1.
+pub(in crate::runtime) fn new_line(branch_id: BranchId) -> (plakous_model::LineId, u64) {
+    (plakous_model::LineId::started_by(branch_id), 1)
 }
 
 /// Builds the in-memory initial checkpoint of a fresh session.
@@ -121,6 +128,7 @@ pub(super) fn fresh_checkpoint_authority(
         session_id,
         branch_id,
         checkpoint_id,
+        new_line(branch_id),
         stable_request_prefix,
         harness_plan,
         &builder.provider_configuration,
@@ -134,7 +142,8 @@ pub(super) fn fresh_checkpoint_authority(
         RuntimeDurability::Disabled,
         CanonicalHistory::default(),
         builder.initial_named_state.clone(),
-        builder.job_counter_seed,
+        crate::manifest::JobLedger::new(builder.job_counter_seed, Vec::new())
+            .map_err(runtime_manifest_error)?,
     )?;
     let bundle =
         RuntimeCheckpointCodec::bundle(&checkpoint, None).map_err(checkpoint_bundle_error)?;
@@ -411,6 +420,7 @@ pub(in crate::runtime) fn initial_memory_checkpoint(
     session_id: SessionId,
     branch_id: BranchId,
     checkpoint_id: CheckpointId,
+    (line, line_generation): (plakous_model::LineId, u64),
     stable_prefix: &StableRequestPrefix,
     harness_plan: &ResolvedHarnessPlan,
     provider_configuration: &CompiledProviderConfiguration,
@@ -424,7 +434,7 @@ pub(in crate::runtime) fn initial_memory_checkpoint(
     durability: RuntimeDurability,
     history: CanonicalHistory,
     named_state: crate::manifest::NamedState,
-    job_counter_seed: u32,
+    jobs: crate::manifest::JobLedger,
 ) -> Result<RuntimeCheckpoint, AgentError> {
     let (binding, tool_manifest) = runtime_manifest_binding_and_tools(
         model,
@@ -474,6 +484,8 @@ pub(in crate::runtime) fn initial_memory_checkpoint(
             parent_checkpoint_id: None,
             branch_revision: 0,
             fork: None,
+            line,
+            line_generation,
             lease_fence: 1,
             commit_identity,
         },
@@ -486,8 +498,7 @@ pub(in crate::runtime) fn initial_memory_checkpoint(
         RuntimeOperationLedger::new(Vec::new(), Vec::new()).map_err(runtime_manifest_error)?,
         None,
         None,
-        crate::manifest::JobLedger::new(job_counter_seed, Vec::new())
-            .map_err(runtime_manifest_error)?,
+        jobs,
         named_state,
         durability,
     )

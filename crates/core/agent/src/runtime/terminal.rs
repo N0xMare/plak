@@ -678,6 +678,7 @@ impl DurableSessionStoreError {
             SessionStoreError::LeaseExpired => Self::LeaseExpired,
             SessionStoreError::LeaseDomainMismatch => Self::LeaseDomainMismatch,
             SessionStoreError::FenceSuperseded => Self::FenceSuperseded,
+            SessionStoreError::NotLineHead => Self::NotLineHead,
             SessionStoreError::Archived => Self::Archived,
             SessionStoreError::Capacity(capacity) => Self::Capacity {
                 bound: capacity.bound,
@@ -708,6 +709,7 @@ impl DurableSessionStoreError {
             Self::LeaseExpired => SessionStoreError::LeaseExpired,
             Self::LeaseDomainMismatch => SessionStoreError::LeaseDomainMismatch,
             Self::FenceSuperseded => SessionStoreError::FenceSuperseded,
+            Self::NotLineHead => SessionStoreError::NotLineHead,
             Self::Archived => SessionStoreError::Archived,
             Self::Capacity {
                 bound,
@@ -1136,6 +1138,7 @@ pub(in crate::runtime) enum DurableSessionStoreError {
     LeaseExpired,
     LeaseDomainMismatch,
     FenceSuperseded,
+    NotLineHead,
     Archived,
     Capacity {
         bound: StoreCapacityBound,

@@ -187,7 +187,7 @@ impl Driver {
                     terminal: None,
                     command: plakous_tools::internal::sanitize_job_command(&view.command),
                     started_at: view.started_at,
-                    owner: view.owner,
+                    owner: self.job_owner,
                     session_id: ProcessSessionId::new(view.session_id)
                         .map_err(runtime_manifest_error)?,
                     owner_generation: ProcessSessionOwnerGeneration::new(view.owner_generation)

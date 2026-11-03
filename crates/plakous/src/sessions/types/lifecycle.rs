@@ -12,6 +12,7 @@ impl CreateSessionRequest {
             operation_id,
             runtime,
             history: None,
+            line: None,
         }
     }
 }

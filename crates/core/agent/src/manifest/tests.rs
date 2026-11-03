@@ -746,6 +746,8 @@ fn manifest_with_bounds(
             parent_checkpoint_id: Some(id(4)?),
             branch_revision: 5,
             fork: None,
+            line: LineId::started_by(id(2)?),
+            line_generation: 1,
             lease_fence: 6,
             commit_identity: digest(DigestDomain::ProviderOperation, b"commit")?,
         },
@@ -2906,7 +2908,7 @@ fn effect_decision_pause_is_exact_pre_dispatch_and_closed() -> TestResult {
 
 #[test]
 fn lifecycle_codec_golden_matrix_is_closed_bounded_and_tamper_checked() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 34);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 35);
     assert_eq!(RUNTIME_LIFECYCLE_CODEC_REVISION, 3);
     let signature = RecoveryHandlerSignature::new;
     let command = RecoveryObligation::new(
@@ -3507,7 +3509,7 @@ fn job_row(number: u32) -> TestResult<JobRow> {
         number,
         command: "sleep 60".to_owned(),
         started_at: Timestamp::new(10, 0)?,
-        owner: "agent-1".to_owned(),
+        owner: fixture_job_owner(),
         session_id: ProcessSessionId::new([7; 16])?,
         owner_generation: ProcessSessionOwnerGeneration::new(1)?,
         terminal: None,
@@ -3516,7 +3518,7 @@ fn job_row(number: u32) -> TestResult<JobRow> {
 
 #[test]
 fn quiescent_job_ledger_and_terminal_evidence_round_trip() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 34);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 35);
     let mut manifest = manifest(ProducerProvenance::new("plakous", "jobs", "offline")?, None)?;
     let mut row = job_row(3)?;
     row.terminal = Some(JobTerminal {

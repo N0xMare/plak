@@ -53,7 +53,7 @@ impl Feed {
     fn push(&mut self, child: usize, facts: Vec<FeedFact>) {
         let seq = self.records.len() as u64 + 1;
         let change = if seq == 1 {
-            json!({"created": {"genesis": uuid(0x3000 + seq), "revision": seq}})
+            json!({"created": {"genesis": uuid(0x3000 + seq), "revision": seq, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}})
         } else {
             json!({"advanced": {"parent": uuid(0x3000 + seq - 1),
                 "checkpoint": uuid(0x3000 + seq), "revision": seq, "head": "quiescent"}})

@@ -1263,6 +1263,8 @@ async fn abandonment_terminal_report_survives_parent_pruning_and_sqlite_inspecti
             parent_checkpoint_id: Some(source_topology.checkpoint_id),
             branch_revision: 1,
             fork: None,
+            line: source_topology.line,
+            line_generation: source_topology.line_generation,
             lease_fence: lease.fence().get(),
             commit_identity: Digest::sha256(
                 DigestDomain::ProviderOperation,

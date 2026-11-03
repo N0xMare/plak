@@ -702,7 +702,7 @@ automatically.
 
 Each plak build keeps its state in `~/.plak/state/<format key>/`, where the
 key names the database schemas and runtime format it reads, for example
-`r26.e34.p35.t9`. When you run a build whose formats differ from the last one,
+`r27.e35.p35.t9`. When you run a build whose formats differ from the last one,
 it starts fresh in its own directory and prints this notice once, naming the
 state root it will not open as session authority. Size accounting is best-effort
 and cannot fail a command. Nothing was moved, upgraded or deleted: the old

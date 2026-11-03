@@ -13,7 +13,7 @@ compile_error!("plakous-tools requires a unix target (spec 06 supported platform
 mod jobs;
 pub use jobs::{
     JobConfig, JobHost, JobHostCapacity, JobOwner, JobStatus, JobStopReason, JobView,
-    JoinedSessionsPort,
+    JoinedSessionsPort, LocalJobHost,
 };
 
 mod admission;

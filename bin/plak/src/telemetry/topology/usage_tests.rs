@@ -63,7 +63,7 @@ impl ChildUsageFixture {
         "session_id": session, "seq": 1,
         "branch_id": "00000000-0000-4000-8000-00000000000b",
         "committed_at_ms": 1000,
-        "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": 1}}
+        "change": {"created": {"genesis": "00000000-0000-4000-8000-000000003001", "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
     }))
     .unwrap();
         let usage = TurnUsage::new(Usage::new(123, 45, 6, 7, 8), 1, 1, 0).unwrap();

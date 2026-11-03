@@ -11,6 +11,7 @@ pub struct CommitCheckpoint {
     checkpoint: CheckpointObjectBundle,
     admission: StoreAdmission,
     feed_facts: Vec<FeedFact>,
+    consumed_line_terminals: Vec<u32>,
 }
 
 impl CommitCheckpoint {
@@ -27,7 +28,23 @@ impl CommitCheckpoint {
             checkpoint,
             admission: StoreAdmission::Ordinary,
             feed_facts: Vec::new(),
+            consumed_line_terminals: Vec::new(),
         }
+    }
+
+    /// Deletes these jobs' `line_job_terminals` rows of the checkpoint's line
+    /// and generation in the same transaction: this checkpoint folds them
+    /// into its job ledger. Rows already gone are not an error.
+    #[must_use]
+    pub fn with_consumed_line_terminals(mut self, jobs: Vec<u32>) -> Self {
+        self.consumed_line_terminals = jobs;
+        self
+    }
+
+    /// Returns the line terminals this commit consumes.
+    #[must_use]
+    pub fn consumed_line_terminals(&self) -> &[u32] {
+        &self.consumed_line_terminals
     }
 
     /// Selects the retention reserve this commit may consume.

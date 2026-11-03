@@ -223,6 +223,29 @@ impl SessionStore for CountingReads {
         self.inner.feed_tail(session_id)
     }
 
+    fn load_line(
+        &self,
+        line: plakous_model::LineId,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineRecord> {
+        self.inner.load_line(line)
+    }
+
+    fn line_job_terminals(
+        &self,
+        line: plakous_model::LineId,
+    ) -> plakous_agent::internal::StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>>
+    {
+        self.inner.line_job_terminals(line)
+    }
+
+    fn record_line_job_terminals(
+        &self,
+        request: plakous_agent::internal::RecordLineJobTerminals,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt>
+    {
+        self.inner.record_line_job_terminals(request)
+    }
+
     fn flush(
         &self,
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {

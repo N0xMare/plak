@@ -202,11 +202,7 @@ impl PreparedAgent {
             credential_wait: Arc::clone(&credential_wait),
             job_sessions: self.job_sessions,
             job_host: self.job_host,
-            job_owner: plakous_tools::JobOwner {
-                session_id: self.session_id,
-                branch_id: self.branch_id,
-                agent_id: self.agent_id,
-            },
+            job_owner: self.job_owner,
             job_release_mode: Arc::clone(&job_release_mode),
             pending_job_promotions: Vec::new(),
             pending_job_consumptions: Vec::new(),

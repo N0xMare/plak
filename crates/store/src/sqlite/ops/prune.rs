@@ -43,6 +43,10 @@ pub(in super::super) fn prune(
     if row.head != r.expected() {
         return Err(SessionStoreError::Conflict);
     }
+    // A predecessor branch of a live line is read-only history: never pruned.
+    let (line, generation) =
+        lines::branch_line(&tx, selector)?.ok_or_else(SessionStoreError::corrupt)?;
+    lines::require_line_head(&tx, selector, line, generation)?;
     let head = checkpoint_row(&tx, row.head.checkpoint().checkpoint_id())?
         .ok_or(SessionStoreError::corrupt())?;
     if head.kind != RuntimeCheckpointKind::Quiescent {

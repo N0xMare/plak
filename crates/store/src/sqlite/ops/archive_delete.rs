@@ -154,8 +154,12 @@ fn load_archive(
 pub(in super::super) const SESSION_FOREIGN_DEPENDENCY: &str = "SELECT 1 FROM checkpoints c WHERE c.session_id<>?1 AND (c.parent_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id=?1) OR c.fork_checkpoint IN (SELECT checkpoint_id FROM checkpoints WHERE session_id=?1)) LIMIT 1";
 
 /// Session `?1`'s dependent rows, children before parents; its checkpoints
-/// and session row go after their released roots are queued.
-pub(in super::super) const SESSION_ROW_DELETES: [&str; 9] = [
+/// and session row go after their released roots are queued. The lines whose
+/// head is in the session go with it; a line whose head moved to another
+/// session keeps going, and its branches here were read-only predecessors.
+pub(in super::super) const SESSION_ROW_DELETES: [&str; 11] = [
+    "DELETE FROM line_job_terminals WHERE line_id IN (SELECT line_id FROM lines WHERE head_session=?1)",
+    "DELETE FROM lines WHERE head_session=?1",
     "DELETE FROM fork_receipts WHERE source_session=?1",
     "DELETE FROM fork_receipts WHERE target_session=?1",
     "DELETE FROM commit_receipts WHERE session_id=?1",

@@ -204,15 +204,36 @@ impl DurableRuntimeBootstrap {
         )
         .await
         .map_err(StoreCallError::into_agent)?;
-        Self::from_loaded(
-            store,
-            lease,
+        let mut bootstrap = Self::from_loaded(
+            Arc::clone(&store),
+            lease.clone(),
             &loaded,
             expected,
             durability,
             admission,
             store_timeouts,
+        )?;
+        // Only a line's head opens for work; a superseded branch is
+        // read-only history (view, export, fork).
+        let topology = bootstrap.checkpoint.manifest().topology();
+        let line = store_call(
+            StorePhase::LoadBranch,
+            store_timeouts.operation,
+            store.load_line(topology.line),
         )
+        .await
+        .map_err(StoreCallError::into_agent)?;
+        if line.head() != lease.session() || line.generation() != topology.line_generation {
+            return Err(AgentError::from_store(SessionStoreError::NotLineHead));
+        }
+        bootstrap.line_terminals = store_call(
+            StorePhase::LoadBranch,
+            store_timeouts.operation,
+            store.line_job_terminals(topology.line),
+        )
+        .await
+        .map_err(StoreCallError::into_agent)?;
+        Ok(bootstrap)
     }
 
     /// Validates an already loaded exact branch for a reopen verification
@@ -250,6 +271,10 @@ impl DurableRuntimeBootstrap {
             admission,
             store_timeouts,
         )
+        .map(|bootstrap| Self {
+            inspection: true,
+            ..bootstrap
+        })
     }
 
     fn from_loaded(
@@ -302,6 +327,8 @@ impl DurableRuntimeBootstrap {
             branch: DurableBranchFacts::new(store, head, lease, store_timeouts)
                 .with_pruned_horizon(loaded.horizon()),
             admission: admission.fact,
+            line_terminals: Vec::new(),
+            inspection: false,
         })
     }
 }
@@ -367,6 +394,10 @@ pub(super) fn prepare_durable_genesis(
         identities.session_id,
         identities.branch_id,
         identities.checkpoint_id,
+        builder.line_continuation.as_ref().map_or(
+            (plakous_model::LineId::started_by(identities.branch_id), 1),
+            |(line, generation, _)| (*line, *generation),
+        ),
         &stable_prefix,
         &harness_plan,
         &builder.provider_configuration,
@@ -380,8 +411,32 @@ pub(super) fn prepare_durable_genesis(
         durability,
         history,
         builder.initial_named_state.clone(),
-        builder.job_counter_seed,
+        genesis_jobs(builder, identities)?,
     )
+}
+
+/// A carry's genesis takes its source head's jobs, handed to the new head;
+/// any other genesis starts with no rows.
+fn genesis_jobs(
+    builder: &AgentBuilder,
+    identities: DurableGenesisIdentities,
+) -> Result<crate::manifest::JobLedger, AgentError> {
+    let jobs = match &builder.line_continuation {
+        Some((line, generation, jobs)) => crate::manifest::JobLedger::new(
+            jobs.next_id().max(builder.job_counter_seed),
+            jobs.handed_off(plakous_tools::JobOwner {
+                line: *line,
+                generation: *generation,
+                session_id: identities.session_id,
+                branch_id: identities.branch_id,
+                fence: 1,
+            })
+            .rows()
+            .to_vec(),
+        ),
+        None => crate::manifest::JobLedger::new(builder.job_counter_seed, Vec::new()),
+    };
+    jobs.map_err(crate::runtime::continuation::runtime_manifest_error)
 }
 
 pub(super) async fn recover_or_create(
