@@ -7,6 +7,8 @@
 //! owns ([`wire`]); the link frames, keys and fences them. Nothing here
 //! selects a runner for a session.
 
+mod probe;
+mod process;
 mod service;
 mod sessions;
 mod sessions_wire;
@@ -18,6 +20,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use plakous_model::{AttemptId, CallId, CancellationToken, Timestamp};
+pub use probe::{RunnerWorkspaceProbe, serve_probe};
+pub use process::{ProcessRunner, process_runner, select_process_runner, workspace_probe};
 use serde_json::Value;
 pub(super) use service::RunnerServiceOwner;
 pub use service::{
@@ -73,6 +77,11 @@ pub enum RunnerVerb {
     ServiceSpawn,
     /// [`crate::ServiceHandle::terminate`] of a spawned service.
     ServiceTerminate,
+    /// One [`crate::WorkspaceProbe`] question.
+    ProbeWorkspace,
+    /// One instruction-source read, answered by the runner's registered
+    /// extension.
+    ReadInstructions,
 }
 
 /// Which runner part answers a verb.
@@ -84,11 +93,15 @@ pub enum RunnerVerbFamily {
     Sessions,
     /// Services and their streams.
     Service,
+    /// Workspace probes ([`serve_probe`]).
+    Probe,
+    /// What the runner's [`RunnerExtension`] answers.
+    Extension,
 }
 
 impl RunnerVerb {
     /// Every verb.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::ReadWorkspace,
         Self::QueryRepository,
         Self::MutateWorkspace,
@@ -103,6 +116,8 @@ impl RunnerVerb {
         Self::JobsDisown,
         Self::ServiceSpawn,
         Self::ServiceTerminate,
+        Self::ProbeWorkspace,
+        Self::ReadInstructions,
     ];
 
     /// The verb's wire name.
@@ -123,6 +138,8 @@ impl RunnerVerb {
             Self::JobsDisown => "jobs.disown",
             Self::ServiceSpawn => "service.spawn",
             Self::ServiceTerminate => "service.terminate",
+            Self::ProbeWorkspace => "probe.workspace",
+            Self::ReadInstructions => "instructions.read",
         }
     }
 
@@ -141,6 +158,8 @@ impl RunnerVerb {
             | Self::MutateWorkspace
             | Self::ExecuteLiteralProcess => RunnerVerbFamily::Environment,
             Self::ServiceSpawn | Self::ServiceTerminate => RunnerVerbFamily::Service,
+            Self::ProbeWorkspace => RunnerVerbFamily::Probe,
+            Self::ReadInstructions => RunnerVerbFamily::Extension,
             Self::ProcessStart
             | Self::ProcessWrite
             | Self::ProcessPoll
@@ -157,7 +176,12 @@ impl RunnerVerb {
     pub const fn is_read(self) -> bool {
         matches!(
             self,
-            Self::ReadWorkspace | Self::QueryRepository | Self::ProcessPoll | Self::JobsSnapshot
+            Self::ReadWorkspace
+                | Self::QueryRepository
+                | Self::ProcessPoll
+                | Self::JobsSnapshot
+                | Self::ProbeWorkspace
+                | Self::ReadInstructions
         )
     }
 }
@@ -224,6 +248,16 @@ impl RunnerCall {
             cancellation: control.cancellation().clone(),
             preempt: control.preempt().clone(),
         }
+    }
+
+    /// An unkeyed call no line owns: a host's own question to its runner.
+    #[must_use]
+    pub fn unkeyed(verb: RunnerVerb, payload: Value) -> Self {
+        Self::new(
+            verb,
+            payload,
+            &OperationContext::new(CancellationToken::new()),
+        )
     }
 
     const fn with_class(mut self, class: RunnerClass) -> Self {
@@ -360,6 +394,36 @@ pub trait RunnerLink: Send + Sync + 'static {
         drop(call);
         Box::pin(std::future::ready(Err(RunnerFailure::Unsupported)))
     }
+}
+
+/// Answers the verbs of [`RunnerVerbFamily::Extension`] on a runner: what
+/// the embedding program registers beyond the execution environment, such as
+/// instruction-source reads.
+pub trait RunnerExtension: Send + Sync + 'static {
+    /// Answers one call of `verb`.
+    fn serve(&self, verb: RunnerVerb, payload: Value) -> ServeFuture;
+}
+
+/// Sends `call` and waits for its answer on a thread of its own, for a
+/// synchronous port whose callers run off the async workers; `runtime` must
+/// be a multi-thread runtime that drives the link.
+///
+/// # Errors
+/// The link's failure, or an outcome-unknown failure when the waiting
+/// thread failed.
+pub fn call_blocking(
+    link: &dyn RunnerLink,
+    runtime: &tokio::runtime::Handle,
+    call: RunnerCall,
+) -> Result<Value, RunnerFailure> {
+    let answer = link.call(call);
+    std::thread::scope(|scope| scope.spawn(|| runtime.block_on(answer)).join()).unwrap_or_else(
+        |_| {
+            Err(RunnerFailure::OutcomeUnknown(
+                "the waiting thread failed".into(),
+            ))
+        },
+    )
 }
 
 /// An execution backend whose operations run on a runner. Its identity is
@@ -662,6 +726,22 @@ pub fn serve(
     })
 }
 
+/// The workspace root and cwd a request names, as the runner knows them;
+/// `None` for a request that names none. A runner uses it to find, or
+/// register, the environment that answers the request.
+#[must_use]
+pub fn requested_workspace(payload: &Value) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    wire::envelope_workspace(payload)
+}
+
+/// The error of a runner effect whose waiting thread failed: it may have run.
+pub(crate) fn waiter_failed() -> ExecutionBackendError {
+    ExecutionBackendError::new(
+        ExecutionBackendErrorKind::RecoveryRequired,
+        "the runner effect's waiter failed; its outcome is unknown",
+    )
+}
+
 /// The error a runner answers in place of a result too large for one frame.
 /// The operation ran, so its outcome is not proven to have had no effect.
 #[must_use]
@@ -673,6 +753,16 @@ pub fn answer_too_large() -> Value {
         )
         .with_proven_no_effect(false),
     )
+}
+
+/// The answer to a request for a workspace the runner could not open; it
+/// had no effect.
+#[must_use]
+pub fn environment_failure(error: &ExecutionEnvironmentError) -> ServeFailure {
+    backend_failure(&ExecutionBackendError::new(
+        ExecutionBackendErrorKind::WorkspacePolicy,
+        format!("the runner could not open the workspace: {error}"),
+    ))
 }
 
 /// A runner-side error as the answer it becomes.

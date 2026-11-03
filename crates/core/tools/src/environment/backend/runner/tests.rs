@@ -290,3 +290,27 @@ fn wire_values_refuse_what_no_constructor_produces() {
     assert_eq!(error.kind(), ExecutionBackendErrorKind::RecoveryRequired);
     assert!(!error.proven_no_effect());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_runner_environment_refuses_every_process_start() {
+    let workspace = tempfile::tempdir().unwrap();
+    let (_, remote) = pair(workspace.path());
+    let sessions = remote.joined_process_sessions().unwrap();
+    let request = crate::JoinedProcessStartRequest::new(
+        crate::JoinedProcessCommand::literal(
+            "/bin/sh",
+            ["-c".to_owned(), "printf ran > ran.txt".to_owned()],
+        )
+        .unwrap(),
+        ".",
+        Vec::new(),
+        false,
+        crate::JoinedProcessTerminalMode::Pipes,
+    )
+    .unwrap();
+    let error = sessions.start(request, control()).unwrap_err();
+    assert_eq!(error.kind(), ExecutionBackendErrorKind::Unsupported);
+    assert!(error.proven_no_effect());
+    assert!(!workspace.path().join("ran.txt").exists());
+    assert_eq!(sessions.jobs(), Vec::new());
+}

@@ -81,6 +81,13 @@ pub(super) fn envelope(
     })
 }
 
+/// The workspace root and cwd `payload` names, when it is an envelope.
+pub(super) fn envelope_workspace(payload: &Value) -> Option<(PathBuf, PathBuf)> {
+    let root = payload.get("root")?.as_str()?;
+    let cwd = payload.get("cwd")?.as_str()?;
+    Some((PathBuf::from(root), PathBuf::from(cwd)))
+}
+
 /// The request inside `payload`, which must name `environment`'s own
 /// workspace.
 pub(super) fn open_envelope(

@@ -21,6 +21,11 @@ impl JoinedProcessSessionId {
     pub(crate) const fn runtime_bytes(self) -> [u8; 16] {
         self.0
     }
+
+    /// The session a job view names, as a runner issued it.
+    pub(crate) const fn from_runtime_bytes(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
 }
 
 impl fmt::Debug for JoinedProcessSessionId {

@@ -3,6 +3,7 @@
 //! and the services of this instance.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -15,9 +16,10 @@ use plakous_runner_protocol::{
     VersionTriple, WireError, capabilities,
 };
 use plakous_tools::internal::runner::{
-    RunnerVerb, RunnerVerbFamily, ServeFailure, ServeFuture, decode_preempt, job_capacity,
-    line_sessions, runner_descriptor, serve, serve_failure, serve_service_spawn,
-    serve_service_terminate, serve_sessions, service_spawned, terminated_service,
+    RunnerExtension, RunnerVerb, RunnerVerbFamily, ServeFailure, ServeFuture, decode_preempt,
+    environment_failure, job_capacity, line_sessions, requested_workspace, runner_descriptor,
+    serve, serve_failure, serve_probe, serve_service_spawn, serve_service_terminate,
+    serve_sessions, service_spawned, terminated_service,
 };
 use plakous_tools::{
     ExecutionEnvironment, ExecutionEnvironmentError, JoinedProcessHostCapacity,
@@ -43,6 +45,11 @@ pub struct RunnerService {
 
 struct Inner {
     environment: ExecutionEnvironment,
+    workspaces: Option<Arc<WorkspaceFactory>>,
+    /// Environments registered for workspaces other than the default one,
+    /// by root and cwd as requests name them.
+    registered: Mutex<HashMap<(PathBuf, PathBuf), ExecutionEnvironment>>,
+    extension: Option<Arc<dyn RunnerExtension>>,
     hello: Hello,
     dead: Duration,
     capacity: JoinedProcessHostCapacity,
@@ -58,7 +65,7 @@ struct Inner {
     running: Mutex<HashMap<(String, RunKey), Running>>,
     /// Each line's process sessions, per host. They outlive connections and
     /// owner changes: a newer owner of the line finds its jobs here.
-    lines: Mutex<HashMap<(String, String), JoinedProcessSessions>>,
+    lines: Mutex<HashMap<(String, String), (JoinedProcessSessions, ExecutionEnvironment)>>,
     /// Each service, per host and stream. A service lives as long as the
     /// connection that spawned it.
     services: Mutex<HashMap<(String, u64), Hosted>>,
@@ -114,6 +121,23 @@ impl Default for RunnerLimits {
     }
 }
 
+/// Makes the environment of a workspace a request names, by root and cwd,
+/// the first time one does: a runner serves every workspace it can open.
+pub type WorkspaceFactory =
+    dyn Fn(&Path, &Path) -> Result<ExecutionEnvironment, ExecutionEnvironmentError> + Send + Sync;
+
+/// What a runner serves beyond its default environment.
+#[derive(Clone, Default)]
+pub struct RunnerOptions {
+    /// Its bounds.
+    pub limits: RunnerLimits,
+    /// Environments for other workspaces; without it, a request naming
+    /// another workspace is refused.
+    pub workspaces: Option<Arc<WorkspaceFactory>>,
+    /// The verbs the embedding program answers.
+    pub extension: Option<Arc<dyn RunnerExtension>>,
+}
+
 impl RunnerService {
     /// A new runner instance answering from `environment`, with the default
     /// limits.
@@ -138,6 +162,27 @@ impl RunnerService {
         identity: RunnerIdentity,
         limits: RunnerLimits,
     ) -> Result<Self, ExecutionEnvironmentError> {
+        Self::with_options(
+            environment,
+            identity,
+            RunnerOptions {
+                limits,
+                ..RunnerOptions::default()
+            },
+        )
+    }
+
+    /// A new runner instance answering from `environment` with `options`.
+    ///
+    /// # Errors
+    ///
+    /// Refuses the reserved `local` runner id.
+    pub fn with_options(
+        environment: ExecutionEnvironment,
+        identity: RunnerIdentity,
+        options: RunnerOptions,
+    ) -> Result<Self, ExecutionEnvironmentError> {
+        let limits = options.limits;
         let descriptor = runner_descriptor(&environment, identity.runner_id.clone())?;
         let hello = Hello {
             version: identity.version,
@@ -157,6 +202,9 @@ impl RunnerService {
         Ok(Self {
             inner: Arc::new(Inner {
                 environment,
+                workspaces: options.workspaces,
+                registered: Mutex::default(),
+                extension: options.extension,
                 hello,
                 dead: limits.dead,
                 capacity: job_capacity(usize::try_from(limits.job_bound).unwrap_or(usize::MAX)),
@@ -363,9 +411,15 @@ impl RunnerService {
         let host = host.to_owned();
         let payload = request.operation.payload;
         let served = match verb.family() {
-            RunnerVerbFamily::Environment => {
-                serve(&self.inner.environment, verb.as_str(), payload, control)
-            }
+            RunnerVerbFamily::Environment => match self.environment_for(&payload) {
+                Ok(environment) => serve(&environment, verb.as_str(), payload, control),
+                Err(failure) => Box::pin(std::future::ready(Err(failure))),
+            },
+            RunnerVerbFamily::Probe => serve_probe(payload),
+            RunnerVerbFamily::Extension => match &self.inner.extension {
+                Some(extension) => extension.serve(verb, payload),
+                None => Box::pin(std::future::ready(Err(ServeFailure::Unsupported))),
+            },
             RunnerVerbFamily::Sessions => {
                 let line = request.owner.map(|owner| owner.line).unwrap_or_default();
                 self.sessions(&host, &line, verb, payload, control)
@@ -413,25 +467,52 @@ impl RunnerService {
         let sessions = {
             let mut lines = lock(&self.inner.lines);
             match lines.get(&(host.to_owned(), line.to_owned())) {
-                Some(sessions) => Ok(sessions.clone()),
-                None => line_sessions(&self.inner.environment, &self.inner.capacity).inspect(
-                    |sessions| {
-                        lines.insert((host.to_owned(), line.to_owned()), sessions.clone());
-                    },
-                ),
+                Some(found) => Ok(found.clone()),
+                None => self.environment_for(&payload).and_then(|environment| {
+                    line_sessions(&environment, &self.inner.capacity)
+                        .map(|sessions| {
+                            let found = (sessions, environment);
+                            lines.insert((host.to_owned(), line.to_owned()), found.clone());
+                            found
+                        })
+                        .map_err(|error| serve_failure(&error))
+                }),
             }
         };
         match sessions {
-            Ok(sessions) => serve_sessions(
-                &self.inner.environment,
+            Ok((sessions, environment)) => serve_sessions(
+                &environment,
                 &sessions,
                 &self.inner.hello.instance,
                 verb.as_str(),
                 payload,
                 control,
             ),
-            Err(error) => Box::pin(std::future::ready(Err(serve_failure(&error)))),
+            Err(failure) => Box::pin(std::future::ready(Err(failure))),
         }
+    }
+
+    /// The environment answering a request: the default one, or the one
+    /// registered for the workspace the request names, made on first use.
+    fn environment_for(&self, payload: &Value) -> Result<ExecutionEnvironment, ServeFailure> {
+        let default = &self.inner.environment;
+        let Some((root, cwd)) = requested_workspace(payload) else {
+            return Ok(default.clone());
+        };
+        if root == default.root() && cwd == default.cwd() {
+            return Ok(default.clone());
+        }
+        let Some(workspaces) = &self.inner.workspaces else {
+            // The default environment refuses another workspace.
+            return Ok(default.clone());
+        };
+        let mut registered = lock(&self.inner.registered);
+        if let Some(environment) = registered.get(&(root.clone(), cwd.clone())) {
+            return Ok(environment.clone());
+        }
+        let environment = workspaces(&root, &cwd).map_err(|error| environment_failure(&error))?;
+        registered.insert((root, cwd), environment.clone());
+        Ok(environment)
     }
 
     /// Spawns a service and carries its stdio as a new stream of this
@@ -443,7 +524,11 @@ impl RunnerService {
         payload: Value,
         control: OperationContext,
     ) -> ServeFuture {
-        let spawned = serve_service_spawn(&self.inner.environment, payload, control);
+        let environment = match self.environment_for(&payload) {
+            Ok(environment) => environment,
+            Err(failure) => return Box::pin(std::future::ready(Err(failure))),
+        };
+        let spawned = serve_service_spawn(&environment, payload, control);
         let service = self.clone();
         let host = host.to_owned();
         Box::pin(async move {

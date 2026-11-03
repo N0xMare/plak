@@ -20,7 +20,7 @@ mod streams;
 
 pub use client::{ClientWindows, ConnectError, RunnerClient};
 pub use loopback::{Loopback, LoopbackError};
-pub use service::{RunnerIdentity, RunnerLimits, RunnerService};
+pub use service::{RunnerIdentity, RunnerLimits, RunnerOptions, RunnerService, WorkspaceFactory};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]

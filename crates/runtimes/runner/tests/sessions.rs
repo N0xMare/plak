@@ -444,3 +444,45 @@ async fn a_service_streams_through_the_loopback_as_direct() {
     assert_eq!(refused.kind(), ExecutionBackendErrorKind::Unsupported);
     assert!(refused.proven_no_effect());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_runner_port_mirrors_the_lines_jobs_and_stops_them_on_the_runner() {
+    let root = tempfile::tempdir().unwrap();
+    let (loopback, environment) = loopback(root.path(), RunnerLimits::default()).await;
+    let sessions = std::sync::Arc::new(RunnerSessions::new(
+        &loopback.backend(),
+        &environment,
+        owner(1, 1),
+    ));
+    let port = plakous_tools::JoinedSessionsPort::runner(
+        std::sync::Arc::clone(&sessions),
+        tokio::runtime::Handle::current(),
+    );
+    assert!(port.as_local().is_none());
+    let id = sessions
+        .start(literal("sleep 30", false), effect(1))
+        .await
+        .unwrap();
+    sessions.promote(id).await.unwrap();
+    assert!(!port.has_jobs(), "the mirror holds what the last read saw");
+    sessions.jobs().await.unwrap();
+    assert_eq!(port.running_job_count(), 1);
+    assert_eq!(port.session_for_number(port.jobs()[0].number), Some(id));
+    let generation = port.job_terminal_generation();
+    // The port's effects wait on a thread of their own, from any caller.
+    port.stop_jobs(JobStopReason::Model, Duration::from_millis(200))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while sessions
+        .jobs()
+        .await
+        .unwrap()
+        .iter()
+        .any(|job| job.status == JobStatus::Running)
+    {
+        assert!(Instant::now() < deadline, "the job did not stop");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(port.running_job_count(), 0);
+    assert!(port.job_terminal_generation() > generation);
+}

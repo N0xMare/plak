@@ -39,6 +39,8 @@ pub struct RunnerSessions {
     workspace: ExecutionWorkspace,
     owner: Mutex<LineOwner>,
     mirror: Mutex<Mirror>,
+    /// Bumped whenever a read of the line's jobs finds one newly ended.
+    terminal_changes: tokio::sync::watch::Sender<u64>,
 }
 
 /// The jobs this handle has seen, by the runner instance that held them and
@@ -102,6 +104,7 @@ impl RunnerSessions {
             workspace: ExecutionWorkspace::from_environment(environment),
             owner: Mutex::new(owner),
             mirror: Mutex::default(),
+            terminal_changes: tokio::sync::watch::channel(0).0,
         }
     }
 
@@ -272,11 +275,45 @@ impl RunnerSessions {
             .await?;
         let (instance, jobs) = decode_snapshot(snapshot)?;
         let mut mirror = lock(&self.mirror);
+        let ended = |jobs: &[JobView]| {
+            jobs.iter()
+                .filter(|job| job.status != JobStatus::Running)
+                .count()
+        };
+        let before = ended(&mirror.jobs());
         let current = mirror.observe(&instance);
         for job in jobs {
             current.insert(job.number, job);
         }
-        Ok(mirror.jobs())
+        let jobs = mirror.jobs();
+        if ended(&jobs) != before {
+            self.terminal_changes
+                .send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
+        Ok(jobs)
+    }
+
+    /// The line's jobs as the last read found them, without asking the
+    /// runner.
+    #[must_use]
+    pub fn cached_jobs(&self) -> Vec<JobView> {
+        lock(&self.mirror).jobs()
+    }
+
+    /// The revision [`Self::jobs`] bumps when it finds a job newly ended.
+    #[must_use]
+    pub fn terminal_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.terminal_changes.subscribe()
+    }
+
+    /// The session of the current instance's job `number`, when a read saw
+    /// it.
+    #[must_use]
+    pub fn session_for_number(&self, number: u32) -> Option<JoinedProcessSessionId> {
+        let mirror = lock(&self.mirror);
+        let (_, jobs) = mirror.instances.last()?;
+        jobs.get(&number)
+            .map(|job| JoinedProcessSessionId::from_runtime_bytes(job.session_id))
     }
 
     /// Stops every job of the line.

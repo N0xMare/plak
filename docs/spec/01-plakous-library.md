@@ -6107,8 +6107,11 @@ hands the line to a newer head). It mirrors the jobs it has seen, so a
 runner restart reports them as of unknown outcome. The runner side answers
 these from one `JoinedProcessSessions` per line (`line_sessions`,
 `serve_sessions`), counted against one shared bound (`job_capacity`).
-`JoinedSessionsPort` does not yet hold a runner variant; that comes with
-runner selection. Backend errors cross with their kind, message, no-effect
+`JoinedSessionsPort::runner` holds a line's `RunnerSessions`: its reads answer
+from the mirror the last job read left, its stops and disowns wait for the
+runner on a thread of their own, and capacity and job outputs are the
+runner's own. Nothing attaches one yet: the agent's job restore and the shell
+tool use the in-process service. Backend errors cross with their kind, message, no-effect
 proof and conflict path. A link failure becomes `Io`, proven to have had no
 effect, when the call was never sent; `RecoveryRequired` when its outcome is
 unknown; the stale-owner `IdentityMismatch` when the runner refused its owner;

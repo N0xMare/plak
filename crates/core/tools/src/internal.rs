@@ -21,12 +21,14 @@ pub use plakous_model::redaction as preview;
 #[doc(hidden)]
 pub mod runner {
     pub use crate::environment::runner::{
-        RunnerBackend, RunnerCall, RunnerCallFuture, RunnerClass, RunnerFailure, RunnerLink,
-        RunnerOpenFuture, RunnerSessions, RunnerStreams, RunnerVerb, RunnerVerbFamily,
-        ServeFailure, ServeFuture, ServeServiceFuture, answer_too_large, decode_preempt,
-        encode_preempt, job_capacity, line_sessions, runner_descriptor, runner_environment, serve,
-        serve_failure, serve_service_spawn, serve_service_terminate, serve_sessions,
-        service_spawned, terminated_service,
+        ProcessRunner, RunnerBackend, RunnerCall, RunnerCallFuture, RunnerClass, RunnerExtension,
+        RunnerFailure, RunnerLink, RunnerOpenFuture, RunnerSessions, RunnerStreams, RunnerVerb,
+        RunnerVerbFamily, RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
+        answer_too_large, call_blocking, decode_preempt, encode_preempt, environment_failure,
+        job_capacity, line_sessions, process_runner, requested_workspace, runner_descriptor,
+        runner_environment, select_process_runner, serve, serve_failure, serve_probe,
+        serve_service_spawn, serve_service_terminate, serve_sessions, service_spawned,
+        terminated_service, workspace_probe,
     };
 }
 

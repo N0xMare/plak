@@ -38,6 +38,12 @@ impl JoinedProcessSessions {
         control: OperationContext,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
         control.check_cancelled()?;
+        let Some(process) = self.inner.process.clone() else {
+            return Err(backend_error(
+                ExecutionBackendErrorKind::Unsupported,
+                "process sessions of a session on another runner are not carried yet",
+            ));
+        };
         let control = control.with_preempt(tokio::sync::watch::channel(crate::ToolPreempt::None).1);
         let _host_reservation = lock(&self.inner.host_capacity)
             .as_ref()
@@ -89,7 +95,7 @@ impl JoinedProcessSessions {
         };
         let started = start_joined_host_process(
             &self.inner.workspace,
-            &self.inner.process,
+            &process,
             &self.inner.environment,
             self.inner.limits,
             self.inner.queue_limit,

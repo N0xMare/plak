@@ -438,7 +438,9 @@ pub(super) struct JoinedProcessServiceInner {
     pub(super) owner: [u8; 8],
     pub(super) owner_generation: NonZeroU64,
     pub(super) workspace: ExecutionWorkspace,
-    pub(super) process: Arc<HostProcessContext>,
+    /// `None` for the service of an environment whose processes run on
+    /// another runner: it refuses every start.
+    pub(super) process: Option<Arc<HostProcessContext>>,
     pub(super) environment: Arc<[(EnvironmentVariableName, EnvironmentVariableValue)]>,
     pub(super) limits: ExecutionEnvironmentLimits,
     pub(super) active_limit: usize,
@@ -577,6 +579,18 @@ impl JoinedProcessSessions {
                     .map(|value| (binding.name().clone(), value))
             })
             .collect::<Vec<_>>();
+        let process = environment
+            .host_process
+            .clone()
+            .ok_or_else(|| invalid_request("host process construction material is unavailable"))?;
+        Self::build(environment, Some(process), resolved.into())
+    }
+
+    fn build(
+        environment: &ExecutionEnvironment,
+        process: Option<Arc<HostProcessContext>>,
+        resolved: Arc<[(EnvironmentVariableName, EnvironmentVariableValue)]>,
+    ) -> Result<Self, ExecutionBackendError> {
         let authority = environment.backend().authority_id().bytes();
         let generation = JOINED_PROCESS_SERVICE_GENERATION
             .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
@@ -593,10 +607,8 @@ impl JoinedProcessSessions {
                 owner,
                 owner_generation,
                 workspace: ExecutionWorkspace::from_environment(environment),
-                process: environment.host_process.clone().ok_or_else(|| {
-                    invalid_request("host process construction material is unavailable")
-                })?,
-                environment: resolved.into(),
+                process,
+                environment: resolved,
                 limits: environment.config().limits(),
                 active_limit: MAX_JOINED_PROCESS_SESSIONS,
                 queue_limit: MAX_JOINED_PROCESS_SESSION_QUEUE,
@@ -619,6 +631,17 @@ impl JoinedProcessSessions {
                 }),
             }),
         })
+    }
+
+    /// The service of an environment whose operations run on another
+    /// runner. Its jobs and sessions are this process's bookkeeping only:
+    /// every start is refused with no effect, since process sessions on a
+    /// runner are carried by [`crate::internal::runner::RunnerSessions`],
+    /// not by this service.
+    pub(crate) fn refusing(
+        environment: &ExecutionEnvironment,
+    ) -> Result<Self, ExecutionBackendError> {
+        Self::build(environment, None, Arc::from(Vec::new()))
     }
 
     /// The joined process sessions this environment still holds.
@@ -843,7 +866,15 @@ impl ExecutionEnvironment {
         if let Some(inner) = cached.clone() {
             return Ok(JoinedProcessSessions { inner });
         }
-        let created = JoinedProcessSessions::new(self)?;
+        // An environment whose operations run on another runner holds a
+        // service that refuses every start: its shell runs nowhere.
+        let created = if self.backend().kind() == ExecutionBackendKind::Runner
+            && !self.backend().runner_id().is_some_and(RunnerId::is_local)
+        {
+            JoinedProcessSessions::refusing(self)?
+        } else {
+            JoinedProcessSessions::new(self)?
+        };
         *cached = Some(Arc::clone(&created.inner));
         Ok(created)
     }
