@@ -31,7 +31,8 @@ an export.
   successor epochs, fork provenance, runner ancestors and the tree custody
   record (one live `plak` process holds a tree; see Plak below).
 - Holder claims are `plak-holder-v3`: one lock per process and one record per
-  grant, with no 128-claim cap.
+  grant, with no 128-claim cap. Tree custody proves a holder gone by its own
+  host-lifetime lock in `custody-hosts/`, beside `subagents.sqlite3`.
 - Session export version 12 adds the session's runner (today always the local
   runner) and its profile (root template and working set). It imports versions
   12 and 11 and refuses 10; `plak session --help` names those versions from the
@@ -52,34 +53,52 @@ an export.
   validated and inert until node recovery and runner placement land. `plak`
   writes them only when you set them, and `plak doctor` warns `config uses
   0.0.4-only keys` while one is set.
-- Plakous embedder break: the per-construction `AgentId` is renamed
-  `DriverInstanceId`.
-- Plakous embedder break: every branch belongs to an agent line. A
-  head-advancing rebind's source becomes read-only (`NotLineHead`);
-  `RebindSessionRequest::starting_line` forks onto a new line instead. A fork
-  or new-line rebind copies no running job rows.
-- Plakous embedder break: `JobOwner` is `{ line, generation, session_id,
-  branch_id, fence }`; `JobHost::service` takes a `LineId` (`service_at` takes
-  a session and branch), and `JobView::owner` names the line for a durable
-  row. A head-advancing rebind or carry whose source has running jobs is
-  refused without a target `JobHost` (`RebindRefused::RunningJobsWithoutJobHost`,
-  `UnsettledProcesses`), and `OpenedSession::release_for_transfer` without one
+- Plakous embedder break (agent lines): a head-advancing rebind's source
+  becomes read-only, a non-head branch; opening it for work, committing on
+  it, rebinding or pruning it is refused `NotLineHead`. An embedder that
+  compares two bindings on one history forks, or uses
+  `RebindSessionRequest::starting_line`.
+- Plakous embedder break (agent lines): `JobOwner` is `{ line, generation,
+  session_id, branch_id, fence }`, and `JobHost::service` takes a `LineId`
+  (`service_at` takes a session and branch). A `JobHost` transfers a line's
+  service only to an owner that `JobOwner::succeeds` its holder.
+- Plakous embedder break (agent lines): the per-construction `AgentId` is
+  renamed `DriverInstanceId`.
+- Plakous embedder break (agent lines): a head-advancing rebind or carry whose
+  source head has running jobs is refused (`RebindRefused::RunningJobsWithoutJobHost`,
+  or `UnsettledProcesses` for a carry) unless the target binding installs a
+  `JobHost`; `plakous::tools::LocalJobHost` is the in-process one. Without a
+  `JobHost`, `OpenedSession::release_for_transfer` is a terminal release that
   stops the jobs.
-- Plakous embedder break: a same-store carry
+- Plakous embedder break (agent lines): a same-store carry
   (`CreateSessionRequest::continuing_line`) takes the source head's lease, so
-  it is refused as `Ownership` while the source is held and as `NotQuiescent`
-  while its head has an unfinished turn. History pruning keeps a line's
-  predecessors (`PruneHistoryOutcome::Superseded`, `LineEnded`).
-- Plakous embedder break: `ExecutionOperationControl` is `OperationContext`
-  (adding `owner`, `class` and `budget`) and `operation_control` is
-  `operation_context`; `RetrievalPort::retrieve` and `ImageGenPort::generate`
-  take an `OperationContext`.
-- Plakous embedder break: `ExecutionBackendKind::Host` is gone. The in-process
-  backend reports `ExecutionBackendKind::Runner` on `RunnerId::local()`,
-  `ExecutionBackendDescriptor::current_host` is `local_runner`, and the
-  descriptor's wire encoding and `Debug` output gain `runner_id`. A rebind or
-  fork whose target names another runner is refused (`InvalidInput`,
-  `BindingChange::Runner`).
+  it is refused as `Ownership` while the source is attached or held lease-only
+  and as `NotQuiescent` while its head has an unfinished turn.
+- Plakous embedder break (agent lines): history pruning (`gc`) keeps a line's
+  predecessor branches whole (`PruneHistoryOutcome::Superseded`, or `LineEnded`
+  once the session holding the head was deleted); deleting the session is the
+  reclaim.
+- Plakous embedder break (agent lines): a fork or new-line rebind copies no
+  running job rows; it keeps the job numbers and the rows of jobs with
+  terminal evidence, under its own owner.
+- Plakous embedder break (agent lines): `JobView::owner` names the owning line
+  (`LineId`) for a durable job row and the driver instance
+  (`DriverInstanceId`) for a live process snapshot. It is display attribution,
+  never authority.
+- Plakous embedder break (runners): `ExecutionOperationControl` is renamed
+  `OperationContext` (adding `owner`, `class` and `budget`) and
+  `plakous_tools::operation_control` is `operation_context`;
+  `RetrievalPort::retrieve` and `ImageGenPort::generate` take an
+  `OperationContext`.
+- Plakous embedder break (runners): `ExecutionBackendKind::Host` is gone. The
+  in-process backend reports `ExecutionBackendKind::Runner` on
+  `RunnerId::local()`, and `ExecutionBackendDescriptor::current_host` is
+  renamed `local_runner`.
+- Plakous embedder break (runners): the descriptor wire encoding gains
+  `runner_id` (also in its `Debug` output), so every environment descriptor,
+  plan digest and runtime environment component changes.
+- Plakous embedder break (runners): a rebind or fork whose target names
+  another runner is refused (`InvalidInput`, `BindingChange::Runner`).
 
 ### Plak
 
