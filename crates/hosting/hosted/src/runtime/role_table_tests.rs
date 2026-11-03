@@ -341,7 +341,6 @@ fn status_detail(seen: &[HostEvent], wanted: impl Fn(&HostStatusDetail) -> bool)
 
 #[test]
 fn root_prompt_starts_when_idle_and_queues_when_busy() {
-    // M: expects I, B (today a workflow also defers it).
     assert_today(Row::Prompt, Column::Root, Cell::Classes(&[I, B, W]));
     let host = Host::idle();
     // I: the idle prompt starts the turn that reaches the gate.
@@ -364,7 +363,6 @@ fn root_prompt_starts_when_idle_and_queues_when_busy() {
 
 #[test]
 fn root_steer_is_taken_only_while_busy() {
-    // M: expects B (today a workflow also defers it).
     assert_today(Row::Steer, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::idle();
     host.send(UserAction::Steer("left".into()));
@@ -431,7 +429,6 @@ fn root_interrupt_cancels_the_turn_and_is_observed_by_a_workflow() {
 
 #[test]
 fn root_process_intents_are_handled_while_busy() {
-    // M: expects B (today a workflow also defers them).
     assert_today(Row::Processes, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::busy();
     host.send(UserAction::Background);
@@ -460,7 +457,6 @@ fn root_process_intents_are_handled_while_busy() {
 
 #[test]
 fn root_queue_edits_are_handled_while_busy() {
-    // M: expects B (today a workflow also defers them).
     assert_today(Row::Queue, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::busy();
     host.send(UserAction::FollowUp("queued".into()));
@@ -490,7 +486,6 @@ fn root_queue_edits_are_handled_while_busy() {
 
 #[test]
 fn root_approval_reaches_the_running_turns_decisions() {
-    // M: expects B (today a workflow also defers it).
     assert_today(Row::Approval, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::busy();
     host.send(UserAction::ResolveApproval {
@@ -548,8 +543,6 @@ fn root_workflows_are_refused_while_busy() {
 
 #[test]
 fn root_readiness_is_read_while_busy_and_retry_attach_waits() {
-    // M: expects I (today `RefreshReadiness` is answered mid-turn, and a
-    // workflow defers both).
     assert_today(Row::Readiness, Column::Root, Cell::Classes(&[I, B, W]));
     let host = Host::busy();
     let before = host.surface_calls("publish_template_readiness");
@@ -568,7 +561,6 @@ fn root_readiness_is_read_while_busy_and_retry_attach_waits() {
 
 #[test]
 fn root_recover_is_refused_while_busy() {
-    // M: expects I (today a workflow also defers it).
     assert_today(Row::Recover, Column::Root, Cell::Classes(&[I, W]));
     let host = Host::busy();
     host.send(UserAction::Recover);
@@ -579,7 +571,6 @@ fn root_recover_is_refused_while_busy() {
 
 #[test]
 fn root_navigator_is_answered_while_busy() {
-    // M: expects B (today a workflow also defers them).
     assert_today(Row::Navigator, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::busy();
     host.send(UserAction::OpenTopologyNavigator);
@@ -599,7 +590,6 @@ fn root_navigator_is_answered_while_busy() {
 
 #[test]
 fn root_transcript_resync_is_answered_while_busy() {
-    // M: expects B (today a workflow also defers them).
     assert_today(Row::Transcript, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::busy();
     host.send(UserAction::ResyncTranscript {
@@ -621,7 +611,6 @@ fn root_transcript_resync_is_answered_while_busy() {
 
 #[test]
 fn root_invoke_tool_runs_only_when_idle() {
-    // M: expects B.
     assert_today(Row::InvokeTool, Column::Root, Cell::Classes(&[I, W]));
     let invoke = || UserAction::InvokeTool {
         correlation_id: None,
@@ -649,7 +638,6 @@ fn root_invoke_tool_runs_only_when_idle() {
 
 #[test]
 fn root_call_detail_is_answered_while_busy() {
-    // M: expects B (today a workflow also defers it).
     assert_today(Row::CallDetail, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::busy();
     host.send(UserAction::RequestCallDetail {
@@ -673,7 +661,6 @@ fn root_call_detail_is_answered_while_busy() {
 
 #[test]
 fn root_templates_and_extensions_are_handled_while_busy() {
-    // M: expects B (today a workflow also defers them).
     assert_today(Row::Templates, Column::Root, Cell::Classes(&[B, W]));
     let host = Host::busy();
     let (templates, extensions) = (
@@ -735,7 +722,7 @@ fn child_recover_names_no_child() {
 
 #[test]
 fn child_templates_and_extensions_name_no_child() {
-    // M: expects B for the usage extension; the rest stay R.
+    // B1: expects B for the usage extension; the rest stay R.
     assert_today(Row::Templates, Column::Child, Cell::Classes(&[R]));
     assert_names_no_child(Row::Templates);
 }

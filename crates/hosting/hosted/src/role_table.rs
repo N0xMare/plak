@@ -14,7 +14,8 @@
 //! Each test file lists its cells in a `COVERED` table, and
 //! [`every_cell_has_exactly_one_test`] holds the union to one test per cell.
 //! Where today differs from the design the cell's test carries an
-//! `// M: expects <design class>` note, and [`DIVERGENT`] lists the cell.
+//! `// M: expects <design class>` note and [`DIVERGENT`] lists the cell, or
+//! a `// B1: expects <design class>` note and [`AT_B1`] lists it.
 
 #![allow(clippy::unwrap_used, reason = "role table tests")]
 
@@ -125,39 +126,44 @@ impl Row {
 
 use Class::{B, I, R, U, W};
 
-/// The design's cell.
+/// The design's cell. A root workflow is awaited with urgent-only
+/// observation (HOST v2 section 3.1), so every root row but the urgent ones
+/// is also deferred while one runs. `RefreshReadiness` is a read and stays
+/// busy-handled; `InvokeTool` is idle-only, and a child may be its caller.
 pub(crate) const fn design(row: Row, column: Column) -> Cell {
     match (row, column) {
-        (Row::Prompt, Column::Root) => Cell::Classes(&[I, B]),
-        (Row::Workflow, Column::Root) => Cell::Classes(&[I, W]),
-        (Row::Readiness | Row::Recover, Column::Root) => Cell::Classes(&[I]),
+        (Row::Prompt | Row::Readiness, Column::Root) => Cell::Classes(&[I, B, W]),
+        (Row::Workflow | Row::Recover | Row::InvokeTool, Column::Root) => Cell::Classes(&[I, W]),
         (Row::Interrupt, _) | (Row::Quit, Column::Root) => Cell::Classes(&[U]),
         (Row::Quit, Column::Child) => Cell::Detach,
         (Row::ChildOnly, Column::Root) => Cell::Absent,
         (Row::ChildOnly, Column::Child) => Cell::ChildPolicy,
+        (Row::InvokeTool, Column::Child) => Cell::Classes(&[I]),
         (
-            Row::Queue
-            | Row::Workflow
-            | Row::Readiness
-            | Row::Recover
-            | Row::Navigator
-            | Row::InvokeTool,
+            Row::Queue | Row::Workflow | Row::Readiness | Row::Recover | Row::Navigator,
             Column::Child,
         ) => Cell::Classes(&[R]),
         // Refused, except the usage extension, which is busy-handled.
         (Row::Templates, Column::Child) => Cell::Classes(&[R, B]),
         (
-            Row::Prompt
-            | Row::Steer
+            Row::Steer
             | Row::Processes
             | Row::Queue
             | Row::Approval
             | Row::Navigator
             | Row::Transcript
-            | Row::InvokeTool
             | Row::CallDetail
             | Row::Templates,
-            _,
+            Column::Root,
+        ) => Cell::Classes(&[B, W]),
+        (
+            Row::Prompt
+            | Row::Steer
+            | Row::Processes
+            | Row::Approval
+            | Row::Transcript
+            | Row::CallDetail,
+            Column::Child,
         ) => Cell::Classes(&[B]),
     }
 }
@@ -205,27 +211,15 @@ pub(crate) const fn today(row: Row, column: Column) -> Cell {
     }
 }
 
-/// Every cell where today differs from the design. M closes these.
-/// The root's differ only by today's workflow deferral (`W`), except
-/// `Readiness`, `Recover` and `InvokeTool`, whose idle-only set differs.
-pub(crate) const DIVERGENT: [(Row, Column); 16] = [
-    (Row::Prompt, Column::Root),
-    (Row::Steer, Column::Root),
-    (Row::Processes, Column::Root),
-    (Row::Queue, Column::Root),
-    (Row::Approval, Column::Root),
-    (Row::Readiness, Column::Root),
-    (Row::Recover, Column::Root),
-    (Row::Navigator, Column::Root),
-    (Row::Transcript, Column::Root),
-    (Row::InvokeTool, Column::Root),
-    (Row::CallDetail, Column::Root),
-    (Row::Templates, Column::Root),
-    (Row::Processes, Column::Child),
-    (Row::Approval, Column::Child),
-    (Row::InvokeTool, Column::Child),
-    (Row::Templates, Column::Child),
-];
+/// Every cell where today differs from the design and M closes it.
+pub(crate) const DIVERGENT: [(Row, Column); 1] = [(Row::Approval, Column::Child)];
+
+/// Every cell whose design letters need a node address on the wire:
+/// `Background` and the usage extension name no node until B1 (wire v2
+/// node attach), so until then they stay the root's and a child refuses
+/// them. B1 closes these.
+pub(crate) const AT_B1: [(Row, Column); 2] =
+    [(Row::Processes, Column::Child), (Row::Templates, Column::Child)];
 
 /// The row an intent belongs to. Exhaustive: a new intent must be placed.
 pub(crate) fn row_of(action: &UserAction) -> Row {
@@ -460,9 +454,13 @@ fn the_divergent_cells_are_exactly_where_today_differs_from_the_design() {
     for row in Row::ALL {
         for column in [Column::Root, Column::Child] {
             let differs = design(row, column) != today(row, column);
+            assert!(
+                !(DIVERGENT.contains(&(row, column)) && AT_B1.contains(&(row, column))),
+                "{row:?} x {column:?}: one step closes a cell"
+            );
             assert_eq!(
                 differs,
-                DIVERGENT.contains(&(row, column)),
+                DIVERGENT.contains(&(row, column)) || AT_B1.contains(&(row, column)),
                 "{row:?} x {column:?}: design {:?}, today {:?}",
                 design(row, column),
                 today(row, column)

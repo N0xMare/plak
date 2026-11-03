@@ -232,7 +232,7 @@ async fn child_process_stop_reaches_its_job_and_background_has_no_route() {
     assert_eq!(rows.len(), 1, "{rows:?}");
     fixture.registry.stop_user(Some(&rows[0].id)).unwrap();
     fixture.until("the wake turn", turns(2)).await;
-    // M: expects B (`Background` moves the child's own foreground call).
+    // B1: expects B (`Background` moves the child's own foreground call).
     // Today `Background` names no node and only the root turn takes it.
     assert_eq!(
         crate::role_table::child_address(&UserAction::Background),
@@ -339,11 +339,10 @@ fn child_tree_operations_are_refused_to_a_child_caller() {
         .expect("the root face runs the same operation");
 }
 
-/// I today: `InvokeTool` names a child as the caller, and the hub runs the
-/// tool under that child's grant.
+/// I: `InvokeTool` names a child as the caller, and the hub runs the tool
+/// under that child's grant.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn child_invoke_tool_runs_as_the_named_child() {
-    // M: expects R (a child face has no `InvokeTool`).
     assert_today(Row::InvokeTool, Column::Child, Cell::Classes(&[Class::I]));
     let root = tempfile::tempdir().unwrap();
     let tree_id = format!("role-table-invoke-{}", uuid::Uuid::new_v4());
