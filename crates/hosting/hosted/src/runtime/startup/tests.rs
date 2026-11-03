@@ -674,3 +674,61 @@ fn a_refusal_without_a_binding_change_is_never_typed_as_one() {
         AttachFailure::BindingChanged
     );
 }
+
+/// `/compact` (role `Compact`) and the API fork path (role `Primary`) build an
+/// API-target root's runtime through the production factory from inside the
+/// host executor. The build must run there and reach the route's own answer;
+/// doubled credentials and catalog refuse it offline, before any request.
+#[test]
+fn api_target_runtime_builds_run_inside_the_host_executor() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = test_support::no_effort_openrouter_injected_host(root.path());
+    config.runtime_factory = Arc::new(ProductionRuntimeFactory);
+    let subscriptions = NativeSubscriptions::new(
+        plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(root.path().join("xdg"))
+            .unwrap(),
+    );
+    let executor = ApplicationExecutor::new().unwrap();
+    let mut platform = config.session.clone();
+    platform.account = Some(crate::binding::PlatformProvider::Anthropic.account().into());
+    platform.target_selection = TargetSelection::Platform {
+        provider: crate::binding::PlatformProvider::Anthropic,
+    };
+    platform.effort = Some("medium".into());
+    for (target, session, expected) in [
+        (
+            HostTargetAuthority::OpenRouter {
+                subscriptions: subscriptions.clone(),
+                evidence: None,
+            },
+            config.session.clone(),
+            "OpenRouter API key is unavailable",
+        ),
+        (
+            HostTargetAuthority::Platform {
+                provider: crate::binding::PlatformProvider::Anthropic,
+                subscriptions: subscriptions.clone(),
+            },
+            platform.clone(),
+            "anthropic does not list model `vendor/model-v1`; inspect the account's available models",
+        ),
+    ] {
+        config.target = target;
+        config.session = session;
+        for role in [RuntimeRole::Compact, RuntimeRole::Primary] {
+            let mut stderr = Vec::new();
+            let Err(refused) = executor
+                .block_on(host_runtime_binding(&config, &mut stderr, role))
+                .unwrap()
+            else {
+                panic!("doubled credentials refuse the API build");
+            };
+            assert_eq!(
+                refused.message(),
+                expected,
+                "{role:?} on {:?}",
+                config.session.target_selection
+            );
+        }
+    }
+}

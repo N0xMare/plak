@@ -888,23 +888,18 @@ pub(super) fn openrouter_cached_evidence<P: plakous_host_protocol::ProtocolExten
     }
 }
 
-pub(super) fn api_host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn api_host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
 ) -> CliResult<SessionRuntimeBinding> {
     let parent = api_parent_from_config(config, &config.session)?;
-    ApplicationExecutor::new()
-        .map_err(|_| CliFailure::new("application executor unavailable"))?
-        .block_on(async {
-            api_session_runtime_binding(
-                &parent,
-                true,
-                SessionToolFence::Full,
-                openrouter_cached_evidence(config),
-            )
-            .await
-            .map(|prepared| prepared.runtime)
-        })
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    api_session_runtime_binding(
+        &parent,
+        true,
+        SessionToolFence::Full,
+        openrouter_cached_evidence(config),
+    )
+    .await
+    .map(|prepared| prepared.runtime)
 }
 
 pub(super) async fn production_api_runtime_for_record<
@@ -933,7 +928,7 @@ pub(super) async fn production_api_runtime_for_record<
     )
 }
 
-pub(super) fn api_compaction_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn api_compaction_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
 ) -> CliResult<SessionRuntimeBinding> {
     let target = config
@@ -965,16 +960,11 @@ pub(super) fn api_compaction_runtime_binding<P: plakous_host_protocol::ProtocolE
         config.topology_enabled,
     );
     parent.tool_selection = root_tool_selection(&config.session);
-    ApplicationExecutor::new()
-        .map_err(|_| CliFailure::new("application executor unavailable"))?
-        .block_on(async {
-            api_session_runtime_binding(&parent, true, SessionToolFence::Full, cached_evidence)
-                .await?
-                .runtime
-                .with_compaction_output_limit()
-                .map_err(|_| CliFailure::new("compaction generation policy is invalid"))
-        })
-        .map_err(|error| CliFailure::new(format!("application execution failed: {error}")))?
+    api_session_runtime_binding(&parent, true, SessionToolFence::Full, cached_evidence)
+        .await?
+        .runtime
+        .with_compaction_output_limit()
+        .map_err(|_| CliFailure::new("compaction generation policy is invalid"))
 }
 
 pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::ProtocolExtension>(
@@ -1038,10 +1028,10 @@ pub(super) async fn production_host_runtime_binding<P: plakous_host_protocol::Pr
     role: RuntimeRole,
 ) -> CliResult<SessionRuntimeBinding> {
     if role == RuntimeRole::Compact && config.target.is_api() {
-        return api_compaction_runtime_binding(config);
+        return api_compaction_runtime_binding(config).await;
     }
     if config.target.is_api() {
-        return api_host_runtime_binding(config);
+        return api_host_runtime_binding(config).await;
     }
     let resolved = config
         .target
