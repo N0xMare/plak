@@ -1107,24 +1107,31 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
         )
         .await;
     });
-    let recovery: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::default();
-    let recovered = recovery.clone();
+    // The first request after the release owner freed its slot decides;
+    // the test waits for that decision, not for a number of polls.
+    let (decided, recovered) = tokio::sync::oneshot::channel();
+    let decided = Arc::new(Mutex::new(Some(decided)));
     let weak = Arc::downgrade(&runtime);
     let id = child.clone();
     runtime
         .set_retirement_recovery(Arc::new(move || {
             let owner = weak.upgrade().unwrap();
-            // The deadline's early recovery request cannot reopen a live owner.
-            if owner.live.try_lock().unwrap().contains_key(&id) {
-                return;
-            }
-            let id = id.clone();
-            let decided = tokio::spawn(async move {
+            let (id, decided) = (id.clone(), decided.clone());
+            tokio::spawn(async move {
+                // A request while the owner is live cannot reopen it.
+                if owner.live.lock().await.contains_key(&id) {
+                    return;
+                }
+                // Only the first request after the release decides.
+                let Some(decided) = decided.lock().unwrap().take() else {
+                    return;
+                };
+                let deciding = id.clone();
                 owner
                     .mutate_then_emit(false, move |tree| {
-                        let attempt = tree.attempt(&id).unwrap().attempt_id.clone();
+                        let attempt = tree.attempt(&deciding).unwrap().attempt_id.clone();
                         tree.recover_host_decision(
-                            &id,
+                            &deciding,
                             &attempt,
                             crate::agent_tree::RecoveryResolution::RecoveredWithoutTurn {
                                 message: "late release is quiescent".into(),
@@ -1135,10 +1142,11 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
                     })
                     .await
                     .unwrap();
+                let _ = decided.send(());
             });
-            *recovery.lock().unwrap() = Some(decided);
         }))
         .await;
+    let mut faults = runtime.observe_retirement_faults();
     entered.notified().await;
     tokio::time::advance(
         plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
@@ -1146,13 +1154,17 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
             + std::time::Duration::from_secs(1),
     )
     .await;
-    tokio::task::yield_now().await;
+    // The owner's deadline fault is recorded while its release is in flight.
+    let (faulted, _) = faults.recv().await.expect("the deadline fault");
+    assert_eq!(faulted, child);
     finish.notify_one();
     closing.await.expect("the close finished");
-    let recovery = recovered.lock().unwrap().take();
-    if let Some(recovery) = recovery {
-        recovery.await.expect("the recovery decision finished");
-    }
+    // A hang guard only: the paused clock reaches it only if nothing else
+    // can make progress.
+    tokio::time::timeout(std::time::Duration::from_secs(86_400), recovered)
+        .await
+        .expect("the released child's recovery was requested")
+        .expect("the recovery decision was published");
     runtime
         .read(|tree| {
             assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Closed);
