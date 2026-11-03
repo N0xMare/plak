@@ -1114,6 +1114,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "AgentSessions",
         # Settling an interrupted carry holds its source branch (spec 02 §2.6).
         "BranchHold",
+        "carried_from_provenance",
         # The change feed and its bounded reads (spec 01 §5.11): the one
         # projector's only inputs (spec 02 §2.6).
         "feed",

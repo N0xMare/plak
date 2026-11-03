@@ -227,6 +227,26 @@ impl AgentSessions {
         }
     }
 
+    /// The provenance text a line was started with when it was imported or
+    /// carried from a branch that was already superseded; `None` for a line
+    /// a new session or a fork started.
+    ///
+    /// # Errors
+    /// An unknown or ended line is [`AgentSessionsErrorKind::NotFound`].
+    pub async fn line_provenance(
+        &self,
+        line: LineId,
+    ) -> Result<Option<String>, AgentSessionsError> {
+        self.runtime
+            .line(line)
+            .await
+            .map(|record| match record.origin() {
+                LineOrigin::Imported { provenance } => Some(provenance.clone()),
+                _ => None,
+            })
+            .map_err(|error| runtime_error(&error))
+    }
+
     /// Takes the lease and a fresh fence of `line`'s head without building a
     /// driver, so no route, catalog or credential is needed.
     ///
@@ -333,20 +353,24 @@ impl AgentSessions {
             DurableCarrySource::Superseded => {
                 // A superseded source has no line to continue: its carry
                 // starts a new line that names where it came from.
-                let origin = LineOrigin::imported(format!(
-                    "carried from {}:{}",
-                    source.session_id, source.branch_id
-                ))
-                .ok_or_else(|| {
-                    AgentSessionsError::new(
-                        AgentSessionsErrorKind::Internal,
-                        "carry provenance is not single-line text",
-                    )
-                })?;
+                let origin =
+                    LineOrigin::imported(carried_from_provenance(source)).ok_or_else(|| {
+                        AgentSessionsError::new(
+                            AgentSessionsErrorKind::Internal,
+                            "carry provenance is not single-line text",
+                        )
+                    })?;
                 Ok(agent_builder_with_line_origin(builder, origin))
             }
         }
     }
+}
+
+/// The provenance a carry from an already superseded `source` records on the
+/// new line it starts.
+#[must_use]
+pub fn carried_from_provenance(source: SessionLocator) -> String {
+    format!("carried from {}:{}", source.session_id, source.branch_id)
 }
 
 impl OpenedSession {

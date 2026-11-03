@@ -1539,13 +1539,21 @@ leaves its intent pending, untouched, and an open of it answers `the carry into
 session <id> is pending: another plak holds its source; retry in <N> s` with
 the store's lease period (`AgentSessions::lease_period_seconds`). That is also
 the answer for up to one lease period after a crash, until the crashed
-process's lease lapses. Under the held lease no carry can commit, and:
+process's lease lapses. The settlement releases its hold on every exit,
+including a refusal or failure partway through, so a failed settlement never
+leaves the source leased. Under the held lease no carry can commit, and:
 
 1. The create operation published (its genesis has a feed): the record binds
-   that genesis and the projector catches it up.
+   that genesis and the projector catches it up, once the genesis is a carry
+   of the intent's source: the next head of the source's line, or a new line
+   whose provenance is `carried from <source session>:<branch>`
+   (`plakous::sessions::carried_from_provenance`, read back through
+   `AgentSessions::line_provenance`). Any other session under the carry's
+   operation is an integrity failure that leaves the record as it is.
 2. It did not, and the source branch is still its line's head: the lease is
    released and the carry re-runs from a fresh export of the source under the
-   same record and create operation.
+   same record and create operation; another owner that takes the source's
+   lease first leaves the intent pending, as above.
 3. Otherwise (the source's line moved elsewhere or ended, its record was
    deleted, or its runtime is archived or deleted) the publication is checked
    once more and, still unpublished, the intent's record is deleted with a
@@ -1553,8 +1561,10 @@ process's lease lapses. Under the held lease no carry can commit, and:
    and the open lands on the source when its record is left.
 
 `plak session delete` refuses a source whose carried successor is still an
-intent: resuming either one settles it first. Read-only commands
-(`session show`, `session export`) read the exact record they name.
+intent: resuming either one settles it first. The working faces accept an
+intent record's id, which has no locator yet, and land on the record its
+settlement leaves; read-only commands (`session show`, `session export`) read
+the exact record they name and refuse a record with no locator.
 
 An open of a record whose runtime branch a carry superseded, refused by the
 runtime as `NotLineHead`, follows the carried-forward link to its successor

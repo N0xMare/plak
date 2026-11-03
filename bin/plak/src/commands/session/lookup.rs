@@ -9,7 +9,7 @@ pub fn load_exact_product_session(
     store: &dyn crate::store::session_records::SessionRecordStore,
     session_id: &str,
 ) -> CliResult<product_sessions::SessionRecord> {
-    load_product_session(paths, store, session_id, |_| Ok(()))
+    load_product_session(paths, store, session_id, |_| Ok(()), false)
 }
 
 pub(crate) fn load_admitted_product_session(
@@ -22,6 +22,7 @@ pub(crate) fn load_admitted_product_session(
         store,
         session_id,
         crate::build_features::admit_session,
+        true,
     )
 }
 
@@ -30,6 +31,7 @@ fn load_product_session(
     store: &dyn crate::store::session_records::SessionRecordStore,
     session_id: &str,
     admit: impl FnOnce(&product_sessions::SessionRecord) -> CliResult<()>,
+    for_work: bool,
 ) -> CliResult<product_sessions::SessionRecord> {
     let cwd = std::env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
     let record = (|| {
@@ -54,7 +56,9 @@ fn load_product_session(
             recorded.display()
         )));
     }
-    if record.plakous_locator.is_none() {
+    // A face that works on the session settles an interrupted carry's
+    // record first (spec 02 §2.6); a read names the exact record only.
+    if record.plakous_locator.is_none() && !(for_work && record.carry_intent.is_some()) {
         return Err(CliFailure::new(
             "session has no exact canonical Plakous locator",
         ));

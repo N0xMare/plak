@@ -166,30 +166,75 @@ fn an_intent_whose_source_is_held_stays_pending() -> TestResult {
     Ok(())
 }
 
-/// A create that publishes after the head check is seen by the second
-/// published check: the intent binds instead of being withdrawn.
+/// A carry that publishes after the head check is seen by the second
+/// published check: the intent binds instead of being withdrawn. A session
+/// under the carry's operation that is not a carry of its source is refused
+/// as an integrity failure and the record is kept.
 #[test]
-fn a_create_published_after_the_head_check_binds_instead_of_withdrawing() -> TestResult {
+fn a_carry_published_after_the_head_check_binds_and_a_foreign_one_is_refused() -> TestResult {
+    for carry in [true, false] {
+        let (fixture, intent) = Fixture::new()?;
+        fixture.move_line_elsewhere()?;
+        let operation = SessionOperationId::new(&intent.create_operation_id)?;
+        let sessions = fixture.sessions()?;
+        let workspace = fixture.workspace.clone();
+        let source = fixture.source_locator()?;
+        let settled = settle_with(&fixture.services, intent.clone(), &|| {
+            let request = CreateSessionRequest::new(
+                operation.clone(),
+                binding(&workspace).map_err(|error| CliFailure::new(error.to_string()))?,
+            );
+            // The source is superseded: its carry starts a new line that
+            // names it, and needs no lease of it.
+            let request = if carry {
+                request.continuing_line(source)
+            } else {
+                request
+            };
+            block_on(create_released(&sessions, request))
+                .map_err(|error| CliFailure::new(error.to_string()))?
+                .map_err(CliFailure::new)?;
+            Ok(())
+        });
+        if carry {
+            let Settled::Landed(record, _) = settled? else {
+                return Err("the raced carry was withdrawn".into());
+            };
+            assert_eq!(record.id, intent.id);
+            let genesis = AgentSessions::genesis_locator_for(&operation)?;
+            assert_eq!(record.plakous_locator, Some(genesis));
+            assert!(record.carry_intent.is_none());
+        } else {
+            let refused = settled.err().ok_or("a foreign session bound as a carry")?;
+            assert!(
+                refused.message().contains("not a carry of its source"),
+                "{}",
+                refused.message()
+            );
+            let kept = fixture.services.session_records()?.load(&intent.id)?;
+            assert!(kept.carry_intent.is_some() && kept.plakous_locator.is_none());
+        }
+    }
+    Ok(())
+}
+
+/// A settlement that fails after taking the source's lease releases it: the
+/// source is not left leased for a lease period.
+#[test]
+fn a_failed_settlement_releases_the_source() -> TestResult {
     let (fixture, intent) = Fixture::new()?;
     fixture.move_line_elsewhere()?;
-    let operation = SessionOperationId::new(&intent.create_operation_id)?;
-    let sessions = fixture.sessions()?;
-    let workspace = fixture.workspace.clone();
-    let settled = settle_with(&fixture.services, intent.clone(), &|| {
-        let _ = binding(&workspace).and_then(|runtime| {
-            block_on(create_released(
-                &sessions,
-                CreateSessionRequest::new(operation.clone(), runtime),
-            ))
-        });
-    })?;
-    let Settled::Landed(record, _) = settled else {
-        return Err("the raced create was withdrawn".into());
-    };
-    assert_eq!(record.id, intent.id);
-    let genesis = AgentSessions::genesis_locator_for(&operation)?;
-    assert_eq!(record.plakous_locator, Some(genesis));
-    assert!(record.carry_intent.is_none());
+    let failed = settle_with(&fixture.services, intent.clone(), &|| {
+        Err(CliFailure::new("injected settlement failure"))
+    });
+    assert!(failed.is_err());
+    assert!(fixture.intent_exists(&intent)?);
+    let hold = block_on(fixture.sessions()?.hold_branch(
+        &SessionOperationId::new("settle:after-failure")?,
+        fixture.source_locator()?,
+    ))?
+    .map_err(|error| format!("the failed settlement left its source held: {error}"))?;
+    block_on(hold.release())??;
     Ok(())
 }
 

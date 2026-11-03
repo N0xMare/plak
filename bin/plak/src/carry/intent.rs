@@ -116,6 +116,9 @@ pub(crate) fn resolve_open(
     let mut notes = Vec::new();
     for _ in 0..MAX_FOLLOWED {
         if record.carry_intent.is_some() && record.plakous_locator.is_none() {
+            record = current_record(services, &record)?;
+        }
+        if record.carry_intent.is_some() && record.plakous_locator.is_none() {
             match settle(services, record)? {
                 Settled::Landed(next, note) | Settled::Withdrawn(Some(next), note) => {
                     record = next;
@@ -151,6 +154,38 @@ pub(crate) fn resolve_open(
         record = next;
     }
     Ok((record, (!notes.is_empty()).then(|| notes.join("; "))))
+}
+
+/// The store's current copy of an intent record the startup settlement may
+/// already have bound, or, when it withdrew the intent, the intent's source.
+///
+/// # Errors
+/// Returns the store's failure, or a refusal when a withdrawn intent's source
+/// is gone too.
+fn current_record(
+    services: &crate::shell::services::Services,
+    record: &SessionRecord,
+) -> CliResult<SessionRecord> {
+    let store = services.session_records()?;
+    let error = match store.load(&record.id) {
+        Ok(current) => return Ok(current),
+        Err(error) => error,
+    };
+    let listed = store
+        .list_for_workspace(&record.workspace_root)
+        .map_err(CliFailure::new)?;
+    if listed.iter().any(|listed| listed.id == record.id) {
+        return Err(CliFailure::new(error));
+    }
+    record
+        .carried_forward_from()
+        .and_then(|(source_id, _)| store.load(source_id).ok())
+        .ok_or_else(|| {
+            CliFailure::new(format!(
+                "the interrupted carry {} was withdrawn and its source no longer exists",
+                record.id
+            ))
+        })
 }
 
 /// The carried successor of `source` that is still an interrupted carry,
@@ -204,16 +239,50 @@ fn settle(
     services: &crate::shell::services::Services,
     record: SessionRecord,
 ) -> CliResult<Settled> {
-    settle_with(services, record, &|| {})
+    settle_with(services, record, &|| Ok(()))
+}
+
+/// The settlement's hold on the source branch: released on every exit, so
+/// an early refusal never leaves the source leased for a lease period.
+struct SourceHold<'a> {
+    executor: &'a plakous::application::ApplicationExecutor,
+    hold: Option<BranchHold>,
+}
+
+impl SourceHold<'_> {
+    const fn is_held(&self) -> bool {
+        self.hold.is_some()
+    }
+
+    fn release(&mut self) {
+        if let Some(hold) = self.hold.take() {
+            // A release that fails leaves a lease that lapses on its own.
+            let _ = self.executor.block_on(hold.release());
+        }
+    }
+}
+
+impl Drop for SourceHold<'_> {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+fn pending(record: &SessionRecord, sessions: &AgentSessions) -> Settled {
+    Settled::Pending(format!(
+        "the carry into session {} is pending: another plak holds its source; retry in {} s",
+        record.id,
+        sessions.lease_period_seconds()
+    ))
 }
 
 /// Settles one interrupted carry under its source branch's lease.
 /// `after_head` runs between seeing that the source's line moved and the
-/// final published check; a test races a create in there.
+/// final published check; a test races a create, or a failure, in there.
 fn settle_with(
     services: &crate::shell::services::Services,
     record: SessionRecord,
-    after_head: &dyn Fn(),
+    after_head: &dyn Fn() -> CliResult<()>,
 ) -> CliResult<Settled> {
     let intent = record
         .carry_intent
@@ -227,7 +296,7 @@ fn settle_with(
     let genesis = AgentSessions::genesis_locator_for(&operation)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     if published(&executor, &sessions, genesis)? {
-        return bind(services, &executor, &sessions, record, genesis);
+        return bind(services, &executor, &sessions, record, &intent, genesis);
     }
     let store = services.session_records()?;
     let source = record
@@ -235,63 +304,62 @@ fn settle_with(
         .and_then(|(source_id, _)| store.load(source_id).ok());
     let hold_operation = SessionOperationId::new(format!("plak:carry-settle:{}", record.id))
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    let hold = match executor
-        .block_on(sessions.hold_branch(&hold_operation, intent.source))
-        .map_err(|_| CliFailure::new("application execution failed"))?
-    {
-        Ok(hold) => Some(hold),
-        Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
-            return Ok(Settled::Pending(format!(
-                "the carry into session {} is pending: another plak holds its source; retry in {} s",
-                record.id,
-                sessions.lease_period_seconds()
-            )));
-        }
-        // The source runtime is archived or deleted: only a published
-        // create could still be this carry's successor.
-        Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => None,
-        Err(error) => return Err(CliFailure::new(error.to_string())),
-    };
-    let release = |hold: Option<BranchHold>| {
-        if let Some(hold) = hold {
-            let _ = executor.block_on(hold.release());
-        }
+    let mut hold = SourceHold {
+        executor: &executor,
+        hold: match executor
+            .block_on(sessions.hold_branch(&hold_operation, intent.source))
+            .map_err(|_| CliFailure::new("application execution failed"))?
+        {
+            Ok(hold) => Some(hold),
+            Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
+                return Ok(pending(&record, &sessions));
+            }
+            // The source runtime is archived or deleted: only a published
+            // create could still be this carry's successor.
+            Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => None,
+            Err(error) => return Err(CliFailure::new(error.to_string())),
+        },
     };
     // Under the source's lease no carry can commit, so these reads are final.
     if published(&executor, &sessions, genesis)? {
-        release(hold);
-        return bind(services, &executor, &sessions, record, genesis);
+        hold.release();
+        return bind(services, &executor, &sessions, record, &intent, genesis);
     }
-    if let (Some(_), Some(source)) = (&hold, &source)
+    if let (true, Some(source)) = (hold.is_held(), &source)
         && is_head(&executor, &sessions, intent.source)?
     {
-        // The re-run takes the source's lease itself.
-        release(hold);
-        let (next, note) = super::rebind::resume_carry(
+        // The re-run takes the source's lease itself; another owner that
+        // takes it first leaves the carry pending.
+        hold.release();
+        let busy = pending(&record, &sessions);
+        return match super::rebind::resume_carry(
             services,
             source,
             &intent.cause,
             intent.orchestration,
             record,
-        )?;
-        return Ok(Settled::Landed(
-            next,
-            format!("finished the interrupted carry: {note}"),
-        ));
+        ) {
+            Ok((next, note)) => Ok(Settled::Landed(
+                next,
+                format!("finished the interrupted carry: {note}"),
+            )),
+            // The create path names its refusal's kind.
+            Err(error) if error.message().contains("(Ownership)") => Ok(busy),
+            Err(error) => Err(error),
+        };
     }
-    after_head();
+    after_head()?;
     if published(&executor, &sessions, genesis)? {
-        release(hold);
-        return bind(services, &executor, &sessions, record, genesis);
+        hold.release();
+        return bind(services, &executor, &sessions, record, &intent, genesis);
     }
-    let reason = match (&source, &hold) {
+    let reason = match (&source, hold.is_held()) {
         (None, _) => "its source session no longer exists",
-        (Some(_), None) => "its source's runtime is archived or deleted",
-        (Some(_), Some(_)) => "its source is no longer its line's head",
+        (Some(_), false) => "its source's runtime is archived or deleted",
+        (Some(_), true) => "its source is no longer its line's head",
     };
-    let withdrawn = withdraw(services, &record);
-    release(hold);
-    withdrawn?;
+    withdraw(services, &record)?;
+    drop(hold);
     let note = match &source {
         Some(source) => format!(
             "withdrew the interrupted carry {}: {reason}; resuming its source {}",
@@ -302,14 +370,25 @@ fn settle_with(
     Ok(Settled::Withdrawn(source, note))
 }
 
-/// Binds an intent record to the genesis its create published.
+/// Binds an intent record to the genesis its create published, once that
+/// genesis is a carry of the intent's source: the next head of the source's
+/// line, or a new line whose provenance names the source. Any other session
+/// under the carry's operation is an integrity failure, never a finished
+/// carry.
 fn bind(
     services: &crate::shell::services::Services,
     executor: &plakous::application::ApplicationExecutor,
     sessions: &std::sync::Arc<AgentSessions>,
     mut record: SessionRecord,
+    intent: &plakous_hosted::sessions::CarryIntent,
     genesis: SessionLocator,
 ) -> CliResult<Settled> {
+    if !carries_source(executor, sessions, intent.source, genesis)? {
+        return Err(CliFailure::new(format!(
+            "session {}'s create published a session that is not a carry of its source {}; the record is left as it is",
+            record.id, intent.source
+        )));
+    }
     let store = services.session_records()?;
     record.carry_intent = None;
     record
@@ -324,6 +403,34 @@ fn bind(
         .map_err(CliFailure::new)?;
     let note = format!("finished the interrupted carry into session {}", record.id);
     Ok(Settled::Landed(record, note))
+}
+
+/// Whether `genesis` continues `source`'s line, or starts a line carried
+/// from `source` because it was already superseded.
+fn carries_source(
+    executor: &plakous::application::ApplicationExecutor,
+    sessions: &AgentSessions,
+    source: SessionLocator,
+    genesis: SessionLocator,
+) -> CliResult<bool> {
+    let read = |locator| {
+        executor
+            .block_on(sessions.line_head_of(locator))
+            .map_err(|_| CliFailure::new("application execution failed"))
+    };
+    let Ok(target) = read(genesis)? else {
+        return Ok(false);
+    };
+    if read(source)?.is_ok_and(|head| head.line() == target.line()) {
+        return Ok(true);
+    }
+    let provenance = executor
+        .block_on(sessions.line_provenance(target.line()))
+        .map_err(|_| CliFailure::new("application execution failed"))?;
+    Ok(provenance
+        .ok()
+        .flatten()
+        .is_some_and(|text| text == plakous::sessions::carried_from_provenance(source)))
 }
 
 /// Deletes an intent record; its create identity stays bound, so a replay of

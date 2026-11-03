@@ -9243,6 +9243,8 @@ mod durability {
     }
 }
 
+#[path = "offline_e2e/carried_sessions.rs"]
+mod carried_sessions;
 #[path = "offline_e2e/cell_startup.rs"]
 mod cell_startup;
 #[path = "offline_e2e/running_root_waits.rs"]

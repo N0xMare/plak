@@ -4280,12 +4280,19 @@ open redirected to it with a `carried forward as` note, and one source and one
 successor in the runtime store. The settlement tests (`carry::intent::tests`) withdraw an
 intent whose source's line moved elsewhere, keep an intent pending, untouched,
 while another owner holds the source branch (its open answers with the lease
-period), bind instead of withdrawing when the create publishes between the
-head check and the final published check (a seam between the two), withdraw
-an intent whose source record was deleted or whose source runtime was
-archived, and refuse deleting a source whose carry is still an intent. A host
-asked to open an intent record never creates its runtime
-(`an_interrupted_carry_record_is_never_created_empty`). A store reopened under a limit below its usage
+period), bind a real carry of the superseded source that publishes between
+the head check and the final published check and refuse, keeping the record,
+a create there that is not a carry of the source (a seam between the two),
+release the source's hold when the settlement fails partway
+(`a_failed_settlement_releases_the_source`), withdraw an intent whose source
+record was deleted or whose source runtime was archived, and refuse deleting
+a source whose carry is still an intent. A host asked to open an intent record
+never creates its runtime
+(`an_interrupted_carry_record_is_never_created_empty`). The headless faces
+are pinned end to end in `offline_e2e::carried_sessions`: `plak run --session
+<source>` over an interrupted carry finishes it, runs on the successor and
+prints the `carried forward as` note, and `plak agent --session <intent>`
+finishes the carry and attaches the successor. A store reopened under a limit below its usage
 prunes and then admits an ordinary commit
 (`sqlite_prune_over_the_absolute_limit_frees_ordinary_headroom`), and
 incremental vacuum returns the freed pages to the file system

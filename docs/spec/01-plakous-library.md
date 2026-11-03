@@ -2607,7 +2607,11 @@ without a driver, head or not, so a host can settle work that must not race
 the branch's owner or a carry from it; `lease_period_seconds` is how long an
 exited owner's lease can outlive it. A source that is already superseded, or whose line ended, has no line to
 continue: the new session starts a new line whose provenance names the branch
-it was carried from. `CreateSessionRequest::with_line_provenance(text)`
+it was carried from, exactly `plakous::sessions::carried_from_provenance(source)`
+(`carried from <session>:<branch>`). `AgentSessions::line_provenance(line)`
+reads a line's provenance back (`None` for a line a new session or a fork
+started), so a host can check that a published create is a carry of the
+source it expected. `CreateSessionRequest::with_line_provenance(text)`
 records 1 to 256 bytes of single-line provenance on the new line an import from
 another store starts; it names nothing this store resolves.
 
@@ -9663,6 +9667,7 @@ implementations, `TokioRuntime` and the feature-gated
 
 **Agent lines** (§5.1, §5.7, §8.5) are on the facade:
 `plakous::model::LineId`, `AgentSessions::line_head`, `line_head_of` and `LineHead`,
+`AgentSessions::line_provenance` and `plakous::sessions::carried_from_provenance`,
 `AgentSessions::hold_branch`, `BranchHold` and `lease_period_seconds`,
 `AgentSessions::open_lease_only` and `LeaseOnlyHead`, `OpenedSession::line`,
 `CreateSessionRequest::continuing_line` and `with_line_provenance`,
