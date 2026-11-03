@@ -1,9 +1,12 @@
 //! Process-local topology hub: one working copy and live-child map per tree.
 //!
-//! SQLite remains durable authority. The hub is the in-memory working copy for
-//! one root session attach. Catalog compile looks the hub up; it must not
-//! `load_tree` on child or mail-reopen catalogs (that would pause the tree and
-//! mint a new `Arc`). Hub lifetime is root attach → last root lease release.
+//! SQLite remains durable authority. The hub is the in-memory working copy of
+//! a tree this process holds in custody (spec 03 §14). Catalog compile looks
+//! the hub up; a hub hit opens no store. Any node may bring the hub up from
+//! the tree's durable rows; only a root attach may bootstrap a new tree. Hub
+//! lifetime follows custody: it lives while a root is attached or resident or
+//! a child is live, and ends when the whole tree is dormant or its host shuts
+//! down.
 
 mod startup;
 pub use startup::{ChildStartup, ChildStartupStage, STARTUP_SLOT_OCCUPIED};
@@ -11,10 +14,11 @@ pub use startup::{ChildStartup, ChildStartupStage, STARTUP_SLOT_OCCUPIED};
 mod registry;
 mod runtime;
 mod shutdown;
-pub use shutdown::{abandon_live_agents, release_root_lease};
-
-#[cfg(any(test, feature = "test-support"))]
 use shutdown::shutdown_runtime;
+pub use shutdown::{
+    abandon_live_agents, release_root_lease, release_root_lease_for_handoff,
+    shut_down_handed_off_trees,
+};
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -164,6 +168,16 @@ pub struct LiveChildTable {
     retiring: HashMap<String, Retirement>,
     starting: HashMap<String, ChildStartup>,
     retirement_recovery: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Signalled whenever a child leaves the table or a resident root goes:
+    /// the hub then checks whether the whole tree is dormant.
+    quiet: Arc<tokio::sync::Notify>,
+}
+
+impl LiveChildTable {
+    /// Whether no child turn is live, starting or retiring.
+    fn is_quiet(&self) -> bool {
+        self.children.is_empty() && self.retiring.is_empty() && self.starting.is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -477,6 +491,24 @@ pub struct ProductTopologyRuntime {
     explicit_recovers: Mutex<Vec<crate::task_set::TaskHandle<()>>>,
     rejoin_spec: Mutex<Option<Arc<dyn Any + Send + Sync>>>,
     observer: Option<Arc<dyn TopologyObserver>>,
+    /// Root runtimes built against this tree without a session attachment
+    /// (a rebind's successor before it is opened): each keeps the tree
+    /// resident while it lives.
+    residents: std::sync::atomic::AtomicUsize,
+    /// The live table's dormancy signal.
+    quiet: Arc<tokio::sync::Notify>,
+}
+
+/// A root runtime's residency in its tree's hub: while it lives the tree is
+/// not dormant, so its custody and children outlive the release of every
+/// root session attachment (spec 03 §14).
+pub struct HubResidency(Arc<ProductTopologyRuntime>);
+
+impl Drop for HubResidency {
+    fn drop(&mut self) {
+        self.0.residents.fetch_sub(1, Ordering::AcqRel);
+        self.0.note_quiet();
+    }
 }
 
 /// What one [`ProductTopologyRuntime::cancel_live`] did.
@@ -566,21 +598,46 @@ impl LiveCancelReport {
     }
 }
 
+/// How a root session gives back its attachment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RootRelease {
+    /// A rebind hands its tree to its successor: the tree stays up while any
+    /// of its nodes is live or resident.
+    Detach,
+    /// The host that attached it is shutting the session down: the last
+    /// attachment runs the tree's joined shutdown.
+    Shutdown,
+}
+
 struct HubEntry {
     runtime: Arc<ProductTopologyRuntime>,
-    root_leases: u32,
+    /// Root session attachments: each `AttachRoot` takes one and its session
+    /// release gives it back.
+    attachments: u32,
+    /// A rebind's hand-off gave back the last attachment while the tree was
+    /// not dormant, so the hub keeps it until it is, or until the host quits.
+    handed_off: bool,
 }
+
+type HubEntries = Arc<Mutex<HashMap<String, HubEntry>>>;
 
 /// The process's attached trees: one working copy and live-child map per
 /// tree, keyed by tree id. Owned by whoever attaches roots — nothing here is
 /// a static — and looked up by every child compile, mail reopen, and rebind.
-/// Hub lifetime per tree is root attach → last root lease release.
+///
+/// A tree's entry lives with its custody (spec 03 §14): while a root session
+/// is attached, a root runtime is resident, or a child turn is live,
+/// starting or retiring. It ends when the whole tree is dormant, or when the
+/// host that attached it shuts down; a rebind's hand-off alone never ends it.
 ///
 /// The hub mutex is held only to read or edit the map; no tree mutex is ever
 /// taken under it, so a tree-holding caller may look the hub up.
 #[derive(Default)]
 pub struct TopologyHub {
-    entries: Mutex<HashMap<String, HubEntry>>,
+    entries: HubEntries,
+    /// Held shared by each dormancy watcher through its own shutdown of a
+    /// tree it removed, so the host's quit can join that shutdown too.
+    ending: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl TopologyHub {
@@ -647,7 +704,8 @@ impl TopologyHub {
                         tree_id,
                         HubEntry {
                             runtime: Arc::clone(&runtime),
-                            root_leases: 0,
+                            attachments: 0,
+                            handed_off: false,
                         },
                     );
                 }
@@ -672,8 +730,8 @@ impl TopologyHub {
         Ok(runtime)
     }
 
-    /// Takes one root lease on an attached tree, so the hub outlives every
-    /// root that is still using it.
+    /// Takes one root attachment on an attached tree, so the hub outlives
+    /// every root session that is still using it.
     ///
     /// # Errors
     ///
@@ -683,13 +741,14 @@ impl TopologyHub {
         let entry = entries.get_mut(tree_id).ok_or_else(|| {
             TreeRuntimeError::new("topology hub is not attached; cannot acquire a root lease")
         })?;
-        entry.root_leases = entry.root_leases.saturating_add(1);
+        entry.attachments = entry.attachments.saturating_add(1);
         Ok(())
     }
 
-    /// Looks the tree up, or load/bootstraps it only for an attaching root.
-    /// `store` is asked for only on that bootstrap path: a hub hit opens
-    /// nothing.
+    /// Looks the tree up, or brings it up from the store: any node may load
+    /// the tree's durable rows, and only an attaching root may bootstrap a
+    /// new tree through `load_or_bootstrap`. `store` is asked for only on
+    /// that path: a hub hit opens nothing.
     pub async fn resolve<B, F>(
         &self,
         tree_id: &str,
@@ -705,13 +764,9 @@ impl TopologyHub {
     {
         let runtime = if let Some(runtime) = self.lookup(tree_id) {
             runtime
-        } else if !is_root {
+        } else if attach == TopologyHubAttach::Inspect {
             return Err(TreeRuntimeError::new(
-                "topology hub is not attached; child catalog compile cannot load or bootstrap a tree",
-            ));
-        } else if attach != TopologyHubAttach::AttachRoot {
-            return Err(TreeRuntimeError::new(
-                "topology hub is not attached; root catalog compile cannot bootstrap outside session attach",
+                "topology hub is not attached; an inspection never brings a tree up",
             ));
         } else {
             let store = store()?;
@@ -725,7 +780,24 @@ impl TopologyHub {
                 ),
                 store: Arc::clone(&store),
             };
-            let tree = load_or_bootstrap(Arc::clone(&store)).await?;
+            let tree = if is_root && attach == TopologyHubAttach::AttachRoot {
+                load_or_bootstrap(Arc::clone(&store)).await?
+            } else {
+                // A child, or a root that is not attaching, brings up only the
+                // tree that is already durable; it never bootstraps one.
+                let persisted = store.load(tree_id)?.ok_or_else(|| {
+                    TreeRuntimeError::new(
+                        "topology tree is not in the store; only a root attach bootstraps a tree",
+                    )
+                })?;
+                let tree = ProductAgentTree::reopen(persisted);
+                if !tree.epoch_digests_match() {
+                    return Err(TreeRuntimeError::new(
+                        "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
+                    ));
+                }
+                tree
+            };
             let vcs = tree.vcs_port();
             let runtime = self
                 .insert_root(tree_id, tree, store, vcs, observer)
@@ -739,24 +811,87 @@ impl TopologyHub {
         Ok(runtime)
     }
 
-    /// Drops a root session lease; the last lease hands the runtime back
-    /// for shutdown.
-    fn release_root_lease(
+    /// Gives back a root session attachment. The last one hands the runtime
+    /// back for its joined shutdown when `release` is the host's shutdown,
+    /// when that host's shutdown is latched, or when the whole tree is
+    /// dormant; otherwise the tree stays in custody and the hub ends it once
+    /// it goes dormant.
+    async fn release_root_lease(
         &self,
         tree_id: &str,
+        release: RootRelease,
     ) -> TreeRuntimeResult<Option<Arc<ProductTopologyRuntime>>> {
-        let mut entries = self.entries()?;
-        let Some(entry) = entries.get_mut(tree_id) else {
-            return Ok(None);
+        let runtime = {
+            let mut entries = self.entries()?;
+            let Some(entry) = entries.get_mut(tree_id) else {
+                return Ok(None);
+            };
+            if entry.attachments == 0 {
+                return Ok(None);
+            }
+            entry.attachments -= 1;
+            if entry.attachments > 0 {
+                return Ok(None);
+            }
+            Arc::clone(&entry.runtime)
         };
-        if entry.root_leases == 0 {
+        if release == RootRelease::Detach
+            && !runtime.driver.host_shutdown_latched()
+            && !runtime.is_dormant().await
+        {
+            // Root dormancy never ends the tree: its live children and
+            // resident roots keep it, and the hub ends it once they are gone.
+            if let Some(entry) = self.entries()?.get_mut(tree_id)
+                && Arc::ptr_eq(&entry.runtime, &runtime)
+            {
+                entry.handed_off = true;
+            }
+            watch_dormancy(
+                Arc::downgrade(&self.entries),
+                Arc::clone(&self.ending),
+                tree_id.to_owned(),
+                &runtime,
+            );
             return Ok(None);
         }
-        entry.root_leases -= 1;
-        if entry.root_leases > 0 {
-            return Ok(None);
+        Ok(remove_unattached(&self.entries, tree_id, &runtime))
+    }
+
+    /// The host's quit: removes every tree a rebind's hand-off left in
+    /// custody that no root session holds again and runs each one's joined
+    /// shutdown, then joins the shutdowns dormancy watchers already began.
+    async fn shut_down_handed_off(&self) -> Result<(), TopologyShutdownError> {
+        let runtimes = {
+            let mut entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let handed_off = entries
+                .iter()
+                .filter(|(_, entry)| entry.attachments == 0 && entry.handed_off)
+                .map(|(tree_id, _)| tree_id.clone())
+                .collect::<Vec<_>>();
+            handed_off
+                .iter()
+                .filter_map(|tree_id| entries.remove(tree_id))
+                .map(|entry| entry.runtime)
+                .collect::<Vec<_>>()
+        };
+        let mut failure = TopologyShutdownError::default();
+        for result in
+            futures_util::future::join_all(runtimes.into_iter().map(shutdown_runtime)).await
+        {
+            if let Err(error) = result {
+                failure.child_failures.extend(error.child_failures);
+                failure.tree_failure = failure.tree_failure.or(error.tree_failure);
+            }
         }
-        Ok(entries.remove(tree_id).map(|entry| entry.runtime))
+        drop(self.ending.write().await);
+        if failure.child_failures.is_empty() && failure.tree_failure.is_none() {
+            Ok(())
+        } else {
+            Err(failure)
+        }
     }
 
     /// Removes a tree regardless of leases (a failed root attach, a test
@@ -765,7 +900,7 @@ impl TopologyHub {
     fn evict(&self, tree_id: &str, unleased_only: bool) -> Option<Arc<ProductTopologyRuntime>> {
         let mut entries = self.entries.lock().ok()?;
         match entries.get(tree_id) {
-            Some(entry) if !unleased_only || entry.root_leases == 0 => {
+            Some(entry) if !unleased_only || entry.attachments == 0 => {
                 entries.remove(tree_id).map(|entry| entry.runtime)
             }
             _ => None,
@@ -794,6 +929,68 @@ impl Drop for AttachCustody {
             );
         }
     }
+}
+
+fn remove_unattached(
+    entries: &Mutex<HashMap<String, HubEntry>>,
+    tree_id: &str,
+    runtime: &Arc<ProductTopologyRuntime>,
+) -> Option<Arc<ProductTopologyRuntime>> {
+    let mut entries = entries
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match entries.get(tree_id) {
+        Some(entry) if Arc::ptr_eq(&entry.runtime, runtime) && entry.attachments == 0 => {
+            entries.remove(tree_id).map(|entry| entry.runtime)
+        }
+        _ => None,
+    }
+}
+
+/// Ends a tree's hub entry once the whole tree is dormant and no root is
+/// attached, armed when the last root detached from a tree that was not:
+/// woken whenever a child leaves the live table or a resident root goes, it
+/// removes the entry and runs the joined shutdown, after which the driver's
+/// last clone gives the tree's custody up. It ends with the entry, or when a
+/// root attaches again.
+fn watch_dormancy(
+    entries: std::sync::Weak<Mutex<HashMap<String, HubEntry>>>,
+    ending: Arc<tokio::sync::RwLock<()>>,
+    tree_id: String,
+    runtime: &Arc<ProductTopologyRuntime>,
+) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let quiet = runtime.quiet();
+    let runtime = Arc::downgrade(runtime);
+    drop(handle.spawn(async move {
+        loop {
+            quiet.notified().await;
+            let (Some(runtime), Some(entries)) = (runtime.upgrade(), entries.upgrade()) else {
+                return;
+            };
+            let attached = entries
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&tree_id)
+                .map(|entry| (Arc::ptr_eq(&entry.runtime, &runtime), entry.attachments));
+            if attached != Some((true, 0)) {
+                return;
+            }
+            if !runtime.is_dormant().await {
+                continue;
+            }
+            let _ending = Arc::clone(&ending).read_owned().await;
+            if let Some(runtime) = remove_unattached(&entries, &tree_id, &runtime) {
+                if let Err(error) = shutdown_runtime(runtime).await {
+                    tracing::error!(target: "plak.topology", tree_id = %tree_id, error = %error,
+                        "a dormant tree did not shut down cleanly");
+                }
+                return;
+            }
+        }
+    }));
 }
 
 /// The process's one hub, until the product's runtime roots carry it as an

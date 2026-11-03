@@ -4,15 +4,39 @@ use super::{
     record_retirement_fault,
 };
 
-/// Drops a root session lease. The last lease drains live children and removes the hub.
+/// Gives back a root session attachment as its host's shutdown of that
+/// session (every release but a rebind's hand-off): the last one drains live
+/// children and removes the hub.
 pub async fn release_root_lease(tree_id: &str) -> Result<(), TopologyShutdownError> {
-    let runtime =
-        process_hub()
-            .release_root_lease(tree_id)
-            .map_err(|error| TopologyShutdownError {
-                tree_failure: Some(error.to_string()),
-                child_failures: Vec::new(),
-            })?;
+    release_root(tree_id, super::RootRelease::Shutdown).await
+}
+
+/// Gives back a root session attachment as a rebind's hand-off to its
+/// successor. The last one drains live children and removes the hub only
+/// when the whole tree is dormant or its host's shutdown is latched;
+/// otherwise the tree stays in custody with its children (spec 03 §14).
+pub async fn release_root_lease_for_handoff(tree_id: &str) -> Result<(), TopologyShutdownError> {
+    release_root(tree_id, super::RootRelease::Detach).await
+}
+
+/// The host's quit: ends every tree a rebind's hand-off left in custody
+/// that no root session holds again with its joined shutdown, and joins the
+/// dormant trees' shutdowns already under way (spec 03 §14).
+pub async fn shut_down_handed_off_trees() -> Result<(), TopologyShutdownError> {
+    process_hub().shut_down_handed_off().await
+}
+
+async fn release_root(
+    tree_id: &str,
+    release: super::RootRelease,
+) -> Result<(), TopologyShutdownError> {
+    let runtime = process_hub()
+        .release_root_lease(tree_id, release)
+        .await
+        .map_err(|error| TopologyShutdownError {
+            tree_failure: Some(error.to_string()),
+            child_failures: Vec::new(),
+        })?;
     if let Some(runtime) = runtime {
         shutdown_runtime(runtime).await?;
     }

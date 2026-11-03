@@ -242,12 +242,12 @@ async fn missing_hub_child_fails_closed_without_bootstrap() {
     )
     .await
     .err()
-    .expect("child compile without hub must fail closed");
-    assert!(!loaded.load(Ordering::SeqCst));
+    .expect("a child brings up only a durable tree, and there is none");
+    assert!(!loaded.load(Ordering::SeqCst), "a child never bootstraps");
     assert!(
         error
             .message()
-            .contains("child catalog compile cannot load")
+            .contains("only a root attach bootstraps a tree")
     );
     assert!(lookup(&tree_id).is_none());
 }
@@ -271,9 +271,13 @@ async fn missing_hub_root_lookup_does_not_bootstrap() {
     )
     .await
     .err()
-    .expect("root lookup-only without hub must fail closed");
+    .expect("a root that is not attaching brings up only a durable tree");
     assert!(!loaded.load(Ordering::SeqCst));
-    assert!(error.message().contains("outside session attach"));
+    assert!(
+        error
+            .message()
+            .contains("only a root attach bootstraps a tree")
+    );
     assert!(lookup(&tree_id).is_none());
 }
 
@@ -291,25 +295,32 @@ async fn missing_hub_child_does_not_clobber_durable_tree() {
     .unwrap();
     tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
 
-    let error = resolve_topology_runtime(
+    // Any node may bring the hub up, but a child only from the durable rows:
+    // the bootstrap a root would run is never asked for, even when attach is
+    // requested.
+    let bootstrapped = AtomicBool::new(false);
+    let runtime = resolve_topology_runtime(
         &tree_id,
         false,
         TopologyHubAttach::AttachRoot,
-        || Ok(memory_store()),
+        || Ok(Arc::clone(&store)),
         None,
-        |_| std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf()))),
+        |_| {
+            bootstrapped.store(true, Ordering::SeqCst);
+            std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf())))
+        },
     )
     .await
-    .err()
-    .expect("child miss must not bootstrap even when attach is requested");
-    assert!(
-        error
-            .message()
-            .contains("child catalog compile cannot load")
-    );
+    .unwrap();
+    assert!(!bootstrapped.load(Ordering::SeqCst));
+    assert!(runtime.read(|tree| tree.node("c1").is_ok()).unwrap());
 
     let loaded = ProductAgentTree::reopen(store.load(&tree_id).unwrap().unwrap());
-    assert!(loaded.node("c1").is_ok());
+    assert!(
+        loaded.node("c1").is_ok(),
+        "the durable tree was not clobbered"
+    );
+    force_release(&tree_id).await;
 }
 
 #[tokio::test]
@@ -2267,16 +2278,13 @@ async fn abandon_live_agents_aborts_an_explicit_child_recover() {
     force_release(&tree_id).await;
 }
 
-/// The hub defect live succession must not inherit, reproduced and left
-/// unfixed. A successor root that reaches the attached tree through
-/// `LookupOnly` (the rebind runtime build of a rebind that stays on its tree)
-/// holds no root lease. When the predecessor's release drops the one lease
-/// it holds, that is the last lease: the hub shuts down and retires the
-/// running child. This asserts the behavior tree custody gives (the hub and
-/// the child outlive a root's release) and fails until custody lands.
+/// The hub defect live succession must not inherit. A successor root that
+/// reaches the attached tree through `LookupOnly` (the rebind runtime build
+/// of a rebind that stays on its tree) holds no root attachment, so the
+/// predecessor's release gives back the last one. The tree is not dormant: a
+/// child turn is live, so the hub keeps the tree in custody and the child
+/// runs on (spec 03 §14).
 #[tokio::test]
-#[ignore = "documents the hub defect: a LookupOnly successor holds no root lease, so the \
-            predecessor's release shuts the hub down and retires the children; tree custody fixes it"]
 async fn a_lookup_only_successor_keeps_the_hub_and_children_across_the_predecessors_release() {
     let tree_id = unique_tree_id();
     let root = tempfile::tempdir().unwrap();
@@ -2326,7 +2334,8 @@ async fn a_lookup_only_successor_keeps_the_hub_and_children_across_the_predecess
     assert!(Arc::ptr_eq(&predecessor, &successor));
 
     let release_id = tree_id.clone();
-    let mut release = tokio::spawn(async move { release_root_lease(&release_id).await });
+    let mut release =
+        tokio::spawn(async move { release_root_lease_for_handoff(&release_id).await });
     let (child_retired, released) = tokio::select! {
         () = entered.notified() => (true, false),
         joined = &mut release => {
@@ -2415,6 +2424,83 @@ async fn a_superseded_hub_writer_publishes_nothing() {
     );
 }
 
+/// Custody follows the tree, not its root: a tree whose last root detached
+/// while a child turn ran stays up until that child leaves the live table,
+/// then the hub ends it on its own, and the driver's last clone releases its
+/// custody record.
+#[tokio::test]
+async fn a_detached_tree_ends_and_releases_custody_once_it_goes_dormant() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let store = memory_store();
+    let runtime = resolve_topology_runtime(
+        &tree_id,
+        true,
+        TopologyHubAttach::AttachRoot,
+        || Ok(Arc::clone(&store)),
+        None,
+        |_| std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf()))),
+    )
+    .await
+    .unwrap();
+    let child = runtime
+        .mutate_then_emit(false, |tree| {
+            Ok(tree
+                .spawn_agent(
+                    "root",
+                    &crate::protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id)
+        })
+        .await
+        .unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    assert!(
+        runtime
+            .try_occupy_live(child.clone(), Box::new(barrier_child(&entered, &finish)))
+            .await
+            .is_ok()
+    );
+    release_root_lease_for_handoff(&tree_id).await.unwrap();
+    assert!(
+        lookup(&tree_id).is_some(),
+        "a live child keeps the tree in custody"
+    );
+    assert!(
+        !store
+            .custody_port()
+            .custody(&tree_id)
+            .unwrap()
+            .unwrap()
+            .released,
+        "custody is held"
+    );
+
+    // The child's turn ends: it leaves the live table and the tree is dormant.
+    let canceller = Arc::clone(&runtime);
+    let cancel = tokio::spawn(async move { canceller.cancel_live(&child).await });
+    entered.notified().await;
+    finish.notify_one();
+    cancel.await.unwrap().unwrap();
+    drop(runtime);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while lookup(&tree_id).is_some()
+            || !store
+                .custody_port()
+                .custody(&tree_id)
+                .unwrap()
+                .is_some_and(|record| record.released)
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the dormant tree's hub ended and its custody was released");
+}
+
 /// A hub whose driver's custody take is refused does not attach it: the
 /// insert fails with the typed refusal, the hub holds no entry and nothing
 /// is written.
@@ -2485,4 +2571,262 @@ async fn an_attach_that_fails_after_its_take_releases_custody() {
     let record = store.custody_port().custody(&tree_id).unwrap().unwrap();
     assert!(record.released, "the failed attach released its custody");
     assert_eq!(&record.holding.host, crate::tree::custody_host());
+
+    // A child bring-up of a tree that is not durable fails the same way.
+    let error = resolve_topology_runtime(
+        &tree_id,
+        false,
+        TopologyHubAttach::LookupOnly,
+        || Ok(Arc::clone(&store)),
+        None,
+        |_| async { unreachable!("a child never bootstraps") },
+    )
+    .await
+    .err()
+    .expect("a child cannot bring up an absent tree");
+    assert!(error.message().contains("not in the store"), "{error:?}");
+    let record = store.custody_port().custody(&tree_id).unwrap().unwrap();
+    assert_eq!((record.fence, record.released), (2, true));
+}
+
+/// A hub-local attached tree with one live child turn held at a barrier.
+struct LiveChildTree {
+    runtime: Arc<ProductTopologyRuntime>,
+    child: String,
+    entered: Arc<tokio::sync::Notify>,
+    finish: Arc<tokio::sync::Notify>,
+}
+
+async fn tree_with_a_live_child(
+    hub: &TopologyHub,
+    tree_id: &str,
+    root: &Path,
+    store: &Arc<dyn TreeStore>,
+) -> LiveChildTree {
+    let runtime = hub
+        .resolve(
+            tree_id,
+            true,
+            TopologyHubAttach::AttachRoot,
+            || Ok(Arc::clone(store)),
+            None,
+            |_| std::future::ready(Ok(bootstrap(tree_id, root.to_path_buf()))),
+        )
+        .await
+        .unwrap();
+    let child = runtime
+        .mutate_then_emit(false, |tree| {
+            Ok(tree
+                .spawn_agent(
+                    "root",
+                    &crate::protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id)
+        })
+        .await
+        .unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    assert!(
+        runtime
+            .try_occupy_live(child.clone(), Box::new(barrier_child(&entered, &finish)))
+            .await
+            .is_ok()
+    );
+    LiveChildTree {
+        runtime,
+        child,
+        entered,
+        finish,
+    }
+}
+
+async fn custody_released(store: &Arc<dyn TreeStore>, tree_id: &str) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !store
+            .custody_port()
+            .custody(tree_id)
+            .unwrap()
+            .is_some_and(|record| record.released)
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the tree's custody was released");
+}
+
+/// The host's shutdown of a session (quit, a headless exit, a failed open,
+/// and every switch but a rebind's hand-off) gives back the last root
+/// attachment as a shutdown: the hub entry goes at once and the joined
+/// shutdown retires the live child, though the tree was not dormant.
+#[tokio::test]
+async fn a_shutdown_release_retires_live_children_and_ends_the_hub() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let store = memory_store();
+    let hub = TopologyHub::new();
+    let LiveChildTree {
+        runtime,
+        child,
+        entered,
+        finish,
+    } = tree_with_a_live_child(&hub, &tree_id, root.path(), &store).await;
+
+    let released = hub
+        .release_root_lease(&tree_id, RootRelease::Shutdown)
+        .await
+        .unwrap()
+        .expect("the last attachment's shutdown hands the runtime back");
+    assert!(hub.lookup(&tree_id).is_none(), "the hub entry goes first");
+    let (shut_down, ()) = tokio::join!(shutdown_runtime(released), async {
+        entered.notified().await;
+        finish.notify_one();
+    });
+    shut_down.unwrap();
+    assert!(
+        !runtime.live.lock().await.contains_key(&child),
+        "the live child was retired"
+    );
+    drop(runtime);
+    custody_released(&store, &tree_id).await;
+}
+
+/// The host's quit ends every tree a rebind's hand-off left in custody: the
+/// detached tree's live child is retired and its custody released, while a
+/// tree a root session still holds is left to that session's release, and a
+/// tree no hand-off left is left to whoever brought it up.
+#[tokio::test]
+async fn the_hosts_quit_ends_the_trees_a_hand_off_left_in_custody() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let store = memory_store();
+    let hub = TopologyHub::new();
+    let LiveChildTree {
+        runtime,
+        child,
+        entered,
+        finish,
+    } = tree_with_a_live_child(&hub, &tree_id, root.path(), &store).await;
+    assert!(
+        hub.release_root_lease(&tree_id, RootRelease::Detach)
+            .await
+            .unwrap()
+            .is_none(),
+        "a hand-off keeps a tree that is not dormant"
+    );
+    assert!(hub.lookup(&tree_id).is_some());
+    let attached_id = unique_tree_id();
+    let attached = hub
+        .resolve(
+            &attached_id,
+            true,
+            TopologyHubAttach::AttachRoot,
+            memory_store_ok,
+            None,
+            |_| std::future::ready(Ok(bootstrap(&attached_id, root.path().to_path_buf()))),
+        )
+        .await
+        .unwrap();
+
+    let unattached_id = unique_tree_id();
+    let unattached = hub
+        .insert_root(
+            &unattached_id,
+            bootstrap(&unattached_id, root.path().to_path_buf()),
+            memory_store(),
+            Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let (drained, ()) = tokio::join!(hub.shut_down_handed_off(), async {
+        entered.notified().await;
+        finish.notify_one();
+    });
+    drained.unwrap();
+    assert!(hub.lookup(&tree_id).is_none(), "the detached tree ended");
+    assert!(
+        !runtime.live.lock().await.contains_key(&child),
+        "its live child was retired"
+    );
+    drop(runtime);
+    custody_released(&store, &tree_id).await;
+
+    assert!(
+        hub.lookup(&attached_id).is_some(),
+        "an attached tree ends with its session's release"
+    );
+    assert!(
+        hub.lookup(&unattached_id).is_some(),
+        "a tree no hand-off left is not the quit's to end"
+    );
+    drop(unattached);
+    shutdown_runtime(hub.evict(&unattached_id, true).unwrap())
+        .await
+        .unwrap();
+    drop(attached);
+    let released = hub
+        .release_root_lease(&attached_id, RootRelease::Shutdown)
+        .await
+        .unwrap()
+        .unwrap();
+    shutdown_runtime(released).await.unwrap();
+}
+
+fn memory_store_ok() -> TreeRuntimeResult<Arc<dyn TreeStore>> {
+    Ok(memory_store())
+}
+
+/// A starting slot whose owner never finishes it (a startup owner cancelled
+/// before it cleared the slot) keeps the tree from going dormant: after a
+/// hand-off no dormancy wake ends the tree, and only the host's quit does.
+#[tokio::test(start_paused = true)]
+async fn an_abandoned_startup_slot_keeps_a_detached_tree_until_the_hosts_quit() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let hub = TopologyHub::new();
+    let runtime = hub
+        .resolve(
+            &tree_id,
+            true,
+            TopologyHubAttach::AttachRoot,
+            memory_store_ok,
+            None,
+            |_| std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf()))),
+        )
+        .await
+        .unwrap();
+    let child = runtime
+        .mutate_then_emit(false, |tree| {
+            tree.spawn_agent(
+                "root",
+                &crate::protocol::SpawnAgentRequest::test_review(),
+                None,
+            )
+            .map(|spawned| spawned.agent_id)
+            .map_err(|error| error.message)
+        })
+        .await
+        .unwrap();
+    drop(runtime.reserve_startup(&child).await.unwrap());
+    assert!(
+        hub.release_root_lease(&tree_id, RootRelease::Detach)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    runtime.note_quiet();
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert!(
+        !runtime.is_dormant().await,
+        "the starting slot is in flight"
+    );
+    assert!(hub.lookup(&tree_id).is_some(), "no dormancy wake ends it");
+
+    let _ = hub.shut_down_handed_off().await;
+    assert!(hub.lookup(&tree_id).is_none(), "the host's quit ends it");
 }

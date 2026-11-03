@@ -22,7 +22,7 @@ use super::factory::observe_boundary;
 use super::info::{effort_label, send_binding, send_last_user_prompt_at};
 use super::models::{effort_from_config, native_compact_facet, oauth_provider_for_account};
 use super::shell::{api_root_binding, profile_target_selection};
-use super::source_release::release_source_attachment;
+use super::source_release::{SourceRelease, release_source_attachment};
 use super::startup::{
     api_runtime_for_record, bounded_transition_stage, observe_phase, open_session_for_host,
 };

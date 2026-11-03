@@ -17,7 +17,7 @@ use super::info::{emit_agent_plan_notes, send_binding, send_last_user_prompt_at}
 use super::logging::{log_ev, project_session_snapshot};
 use super::models::native_compact_facet;
 use super::reconcile::persist;
-use super::source_release::{Settlement, release_source_attachment};
+use super::source_release::{Settlement, SourceRelease, release_source_attachment};
 use super::startup::{cached_api_runtime_for_record, observe_phase, open_session_for_host};
 use super::usage::report_context;
 use super::{HostConfig, HostLifecyclePhase, HostTargetAuthority, RuntimeRole, Sender};
@@ -124,6 +124,7 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         source.id,
         events.pinned_to(&config.session.id),
         "clear",
+        SourceRelease::Shutdown,
         config.runtime_factory.clone(),
     ));
     persist(&*config.store, &mut config.session);
@@ -419,6 +420,7 @@ async fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
             source.id,
             events.pinned_to(&config.session.id),
             "resume",
+            SourceRelease::Shutdown,
             config.runtime_factory.clone(),
         ));
     });

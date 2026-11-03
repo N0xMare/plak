@@ -3326,6 +3326,40 @@ waits for the break-glass. With that
 another machine, or one that cannot be proven gone, is never taken over by a
 clock: there is no time-based expiry.
 
+**The hub holds custody.** Only the custody holder materializes a tree's
+nodes. A process's hub entry for a tree exists while that process holds the
+tree's custody, and it follows custody rather than root leases. Any node may
+bring the hub up: a root attach loads or bootstraps the tree, while a child,
+or a root that is not attaching, loads only rows that are already durable
+(and refuses a tree that is absent or whose snapshot digests do not match);
+custody is taken first in every case. The tree stays in custody while any
+node is resident or has work in flight: a root session is attached, a root
+runtime built against the hub without an attachment (a rebind's successor
+before it is opened) lives, or a child turn is live, starting or retiring.
+Root dormancy alone never ends it. Only a rebind's hand-off to its successor
+detaches the last root attachment: from a tree that is not dormant the hub
+then keeps the tree and its children running and ends it once the whole tree
+goes dormant, woken whenever a child leaves the live table or a resident root
+goes. Every other release of a session is its host's shutdown of that session
+and runs the tree's joined shutdown at the last attachment, retiring live
+children: quit, a headless exit, a failed open, and the session a fork,
+`/new`, a session switch or a recovery leaves behind. So does a hand-off
+after its host's shutdown is latched. At its quit the host releases the
+attachments its switches left behind, then ends every tree a hand-off left in
+custody that no root session holds again with its joined shutdown, and joins
+the dormant trees' shutdowns already under way. Either way the hub entry goes first and
+custody is released when the tree driver's last clone drops, after every
+writer that can still write has returned. A starting or retiring slot is work
+in flight until its owner clears it, so an owner cancelled before it clears
+its slot keeps the tree from going dormant; such a tree ends at a shutdown
+release or at its host's quit. A tree brought up without a root attachment (by
+a child, or by a root that is not attaching) arms no dormancy watch and is not
+ended at the host's quit either: it stays resident until a root attaches and
+releases it, or the process ends (an open residency item). A takeover needs `HolderGone` or a
+released record; another process's attach is refused with the typed
+`tree_hosted_elsewhere` refusal. After a takeover the reopen hold and the
+background recovery pass run unchanged.
+
 **There is no migration.** A schema change moves the product's state directory
 (chapter 02 §2.5); an older store stays in its own directory and is never read. The store fails closed on a **DDL
 fingerprint**, not the version integer alone, so a store written by an earlier
@@ -4879,8 +4913,8 @@ on cancelled startups, as above, and leaves the other owners running
 detached. Process-exit abandonment aborts release workers; the other owners
 end with the exiting process's executor. The rest (projections, join
 observers, recovery passes) is the tree's task set: after the joins above,
-the shutdown of the last root lease closes it, aborting what still runs and
-joining it for at most 250 ms.
+the tree's shutdown closes it, aborting what still runs and joining it for
+at most 250 ms.
 Admission checks active and retiring slots under the same mutex as the closed
 flag. Batch cancellation starts and joins siblings concurrently; its report retains
 input order, while independent retirement workers may publish in completion order.

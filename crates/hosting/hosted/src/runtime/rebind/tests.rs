@@ -1703,19 +1703,15 @@ fn production_api_detached_source_restoration_retires_previous_root_lease() {
     );
 }
 
-/// The hub defect on the production attach path, reproduced and left
-/// unfixed. A model rebind that stays on its tree builds the successor's
-/// runtime with `LookupOnly` (`prepare_profile_runtime` with no own tree):
-/// it compiles against the attached hub and takes no root lease. Today the
-/// successor's second open (`open_target`) takes one before the predecessor
-/// is released, which is what keeps the hub alive. A hand-off that releases
-/// the predecessor right after the commit and activates the attached
-/// successor without opening it again (live succession step 6) drops the
-/// last lease instead, and the hub shuts down with its children. This
-/// asserts the custody behavior and fails until tree custody lands.
+/// The hub defect on the production attach path. A model rebind that stays
+/// on its tree builds the successor's runtime with `LookupOnly`
+/// (`prepare_profile_runtime` with no own tree): it compiles against the
+/// attached hub and takes no root attachment. A hand-off that releases the
+/// predecessor right after the commit and activates the attached successor
+/// without opening it again (live succession step 6) gives back the last
+/// attachment, but the successor's runtime is resident in the tree, so the
+/// tree stays in custody and the hub keeps it (spec 03 §14).
 #[test]
-#[ignore = "documents the hub defect: the LookupOnly successor attach holds no root lease, so \
-            the predecessor's release shuts the hub down; tree custody fixes it"]
 fn a_lookup_only_successor_attach_keeps_the_hub_across_the_predecessors_release() {
     let root = tempfile::tempdir().unwrap();
     let executor = ApplicationExecutor::new().unwrap();
@@ -1738,7 +1734,10 @@ fn a_lookup_only_successor_attach_keeps_the_hub_across_the_predecessors_release(
         .unwrap();
     assert_eq!(attached, None, "the successor's attach took a root lease");
 
-    executor.block_on(opened.release()).unwrap().unwrap();
+    executor
+        .block_on(opened.release_for_handoff())
+        .unwrap()
+        .unwrap();
 
     let survived = crate::topology_runtime::lookup(&tree_id)
         .is_some_and(|runtime| Arc::ptr_eq(&runtime, &hub));

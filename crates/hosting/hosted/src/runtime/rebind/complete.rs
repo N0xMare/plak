@@ -4,7 +4,7 @@ use super::{
     AgentSessionsErrorKind, AttachedCodingSession, CliFailure, CliResult, HostBoundary, HostConfig,
     HostLifecyclePhase, HostTargetAuthority, HostWorkflow, Instant, InterruptWatch, NoticeScope,
     RebindBefore, RebindRoute, RebindSessionOutcome, ResolvedRebindTarget, Sender,
-    SessionOperationId, SessionRecord, SessionRuntimeBinding, TranscriptRow,
+    SessionOperationId, SessionRecord, SessionRuntimeBinding, SourceRelease, TranscriptRow,
     abandon_prepared_rebind, durable_tree_id, emit_queue_snapshot, interrupted_before_dispatch,
     observe_boundary, observe_phase, rebind_note, release_source_attachment, report_rebind_context,
     restore_detached_source, send_binding, send_last_user_prompt_at, sessions, topology_state,
@@ -449,6 +449,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             source.id,
             events.pinned_to(&config.session.id),
             "rebind",
+            SourceRelease::HandOff,
             config.runtime_factory.clone(),
         ));
         send_binding(events, config);

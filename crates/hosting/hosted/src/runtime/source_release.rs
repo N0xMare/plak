@@ -91,11 +91,23 @@ impl Drop for SourceReleases {
     }
 }
 
+/// How a switch gives back the attachment it left behind (spec 03 §14).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SourceRelease {
+    /// A rebind hands its tree to the successor: a tree that is not dormant
+    /// stays in custody with its children.
+    HandOff,
+    /// Every other switch: the tree's last root attachment retires its
+    /// children.
+    Shutdown,
+}
+
 pub(super) fn release_source_attachment<P: plakous_host_protocol::ProtocolExtension>(
     previous: AttachedCodingSession,
     source_id: String,
     events: Sender<P>,
     label: &'static str,
+    mode: SourceRelease,
     runtime_factory: Arc<dyn RuntimeFactory<P>>,
 ) -> PendingRelease {
     let (done, outcome) = mpsc::sync_channel(1);
@@ -104,7 +116,7 @@ pub(super) fn release_source_attachment<P: plakous_host_protocol::ProtocolExtens
         .name(format!("plak-{label}-release"))
         .spawn(move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                let released = release(previous);
+                let released = release(previous, mode);
                 super::factory::observe_boundary(
                     runtime_factory.as_ref(),
                     super::HostWorkflow::SourceRelease,
@@ -138,11 +150,19 @@ pub(super) fn release_source_attachment<P: plakous_host_protocol::ProtocolExtens
     }
 }
 
-fn release(previous: AttachedCodingSession) -> Result<(), String> {
+fn release(previous: AttachedCodingSession, mode: SourceRelease) -> Result<(), String> {
     let executor =
         ApplicationExecutor::new().map_err(|_| "release executor unavailable".to_owned())?;
     executor
-        .block_on(async { tokio::time::timeout(HOST_RELEASE_DEADLINE, previous.release()).await })
+        .block_on(async {
+            let release = async {
+                match mode {
+                    SourceRelease::HandOff => previous.release_for_handoff().await,
+                    SourceRelease::Shutdown => previous.release().await,
+                }
+            };
+            tokio::time::timeout(HOST_RELEASE_DEADLINE, release).await
+        })
         .map_err(|_| "release join failed".to_owned())?
         .map_err(|_| "release exceeded its deadline".to_owned())?
         .map(|_| ())

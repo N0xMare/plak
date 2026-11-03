@@ -373,6 +373,7 @@ impl ProductTopologyRuntime {
                 .is_some_and(|entry| entry.same_owner(startup))
             {
                 live.starting.remove(agent_id);
+                live.quiet.notify_one();
                 let (writer, agent, released) =
                     (self.driver.clone(), agent_id.to_owned(), result.is_ok());
                 let _ = self

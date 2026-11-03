@@ -99,6 +99,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     "session release exceeded its shutdown deadline; cleanup is incomplete and recovery may be required",
                 ))
         };
+        let trees_failure = if abandon {
+            None
+        } else {
+            // The attachments the host's switches left behind are released
+            // first, so a tree a hand-off among them kept attached is
+            // unattached now. Their join blocks, so it runs off the actor.
+            let left_behind = std::mem::take(&mut self.config.source_releases);
+            let joined = tokio::task::spawn_blocking(move || drop(left_behind)).await;
+            let ended = end_handed_off_trees().await;
+            match (joined, ended) {
+                (Ok(()), ended) => ended,
+                (Err(_), Some(ended)) => Some(format!("source releases did not join; {ended}")),
+                (Err(_), None) => Some("source releases did not join".to_owned()),
+            }
+        };
+        let stop_failure = match (stop_failure, trees_failure) {
+            (Some(stop), Some(trees)) => Some(format!("{stop}; {trees}")),
+            (stop, trees) => stop.or(trees),
+        };
         let (locator, release_failure) = match released {
             Ok(Ok(locator)) => (Some(locator), None),
             Ok(Err(error)) => (
@@ -186,6 +205,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             );
         }
         CliFailure::shutdown(release_failure, cleanup_failure)
+    }
+}
+
+/// The host's quit ends every tree a rebind's hand-off left in custody with
+/// its joined shutdown (spec 03 §14).
+async fn end_handed_off_trees() -> Option<String> {
+    match tokio::time::timeout(
+        super::super::HOST_RELEASE_DEADLINE,
+        crate::topology_runtime::shut_down_handed_off_trees(),
+    )
+    .await
+    {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(error.to_string()),
+        Err(_) => Some("agent tree shutdown exceeded its deadline".to_owned()),
     }
 }
 

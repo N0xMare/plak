@@ -24,8 +24,12 @@ impl ProductTopologyRuntime {
     ) -> Self {
         let tree = Arc::new(Mutex::new(tree));
         let driver = TreeDriver::new(tree, store, vcs, observer.clone());
+        let quiet = Arc::new(tokio::sync::Notify::new());
         Self {
-            live: Arc::new(tokio::sync::Mutex::new(LiveChildTable::default())),
+            live: Arc::new(tokio::sync::Mutex::new(LiveChildTable {
+                quiet: Arc::clone(&quiet),
+                ..LiveChildTable::default()
+            })),
             driver,
             closed: AtomicBool::new(false),
             reattach: tokio::sync::Mutex::new(()),
@@ -34,7 +38,32 @@ impl ProductTopologyRuntime {
             explicit_recovers: Mutex::new(Vec::new()),
             rejoin_spec: Mutex::new(None),
             observer,
+            residents: std::sync::atomic::AtomicUsize::new(0),
+            quiet,
         }
+    }
+
+    /// Makes a root runtime built against this tree without a session
+    /// attachment resident in it for as long as the returned guard lives.
+    #[must_use]
+    pub fn reside(self: &Arc<Self>) -> super::HubResidency {
+        self.residents.fetch_add(1, Ordering::AcqRel);
+        super::HubResidency(Arc::clone(self))
+    }
+
+    /// Whether the whole tree is dormant here: no resident root runtime and
+    /// no child turn live, starting or retiring.
+    pub async fn is_dormant(&self) -> bool {
+        self.residents.load(Ordering::Acquire) == 0 && self.live.lock().await.is_quiet()
+    }
+
+    /// Asks the hub to check whether the tree went dormant.
+    pub(super) fn note_quiet(&self) {
+        self.quiet.notify_one();
+    }
+
+    pub(super) fn quiet(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.quiet)
     }
 
     /// The tree with its store and VCS port. Every mutation, effect and

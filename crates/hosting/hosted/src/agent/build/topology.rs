@@ -416,7 +416,7 @@ fn inspected_topology_extensions(
         vcs,
         None,
     ));
-    topology_extensions_from_runtime(detached, parent, spawn_parent_caller_id(parent))
+    topology_extensions_from_runtime(detached, parent, spawn_parent_caller_id(parent), None)
 }
 
 async fn topology_extensions_from_hub_with_owner(
@@ -472,7 +472,11 @@ async fn topology_extensions_from_hub_with_owner(
             runtime.driver().bind_host_shutdown(host);
         }
     }
-    topology_extensions_from_runtime(runtime, parent, caller_id)
+    // A root built without a session attachment (a rebind's successor) keeps
+    // the tree resident while its tools live (spec 03 §14).
+    let residency = (is_root && attach == crate::topology_runtime::TopologyHubAttach::LookupOnly)
+        .then(|| runtime.reside());
+    topology_extensions_from_runtime(runtime, parent, caller_id, residency)
 }
 
 /// The account spelling the roster freezes for this parent's root.
@@ -652,6 +656,7 @@ pub(in crate::agent) fn topology_extensions_from_runtime(
     runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
     parent: &SpawnParent,
     caller_id: &str,
+    residency: Option<crate::topology_runtime::HubResidency>,
 ) -> CliResult<ProductToolExtensions> {
     let caller_id = if spawn_parent_is_root(parent) {
         runtime
@@ -664,7 +669,7 @@ pub(in crate::agent) fn topology_extensions_from_runtime(
     let registrations = crate::agent_tree_tools::topology_tool_registrations_on(
         runtime.driver().clone(),
         caller_id,
-        topology_host_ports(&runtime, Some(parent.clone()))?,
+        topology_host_ports(&runtime, Some(parent.clone()), residency)?,
     )?;
     ProductToolExtensions::from_nested_registrations(registrations).map(|extensions| {
         extensions.with_host_facts(match parent {
@@ -733,6 +738,7 @@ fn parent_coding_presentation(parent: &SpawnParent) -> CliResult<CodingPresentat
 fn topology_host_ports(
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
     parent: Option<SpawnParent>,
+    residency: Option<crate::topology_runtime::HubResidency>,
 ) -> CliResult<crate::agent_tree_tools::TopologyHostPorts> {
     let observer = parent
         .as_ref()
@@ -758,6 +764,7 @@ fn topology_host_ports(
                 parent,
                 runtime: Arc::clone(runtime),
             },
+            _residency: residency,
         })),
         observer,
     })
@@ -791,7 +798,7 @@ pub async fn invoke_topology_tool_on_hub(
             })
         })
         .map_err(|error| error.message)??;
-    let ports = topology_host_ports(&runtime, rejoin_parent(&runtime))
+    let ports = topology_host_ports(&runtime, rejoin_parent(&runtime), None)
         .map_err(|error| error.message().to_owned())?;
     let outcome = crate::agent_tree_tools::invoke_granted_topology_tool_on(
         runtime.driver().clone(),

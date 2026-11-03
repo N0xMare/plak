@@ -12,6 +12,9 @@ pub(in crate::agent) struct ProductChildController {
     pub(in crate::agent) deliverer: ProductMailDeliverer,
     pub(in crate::agent) canceller: ProductLiveCanceller,
     pub(in crate::agent) recoverer: ProductChildRecoverer,
+    /// A root runtime built against the hub without a session attachment
+    /// keeps the tree resident while its tools live.
+    pub(in crate::agent) _residency: Option<crate::topology_runtime::HubResidency>,
 }
 
 type Boxed<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

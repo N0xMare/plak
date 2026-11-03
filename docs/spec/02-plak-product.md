@@ -142,8 +142,13 @@ task started for the agent tree's children belongs to the tree's own set.
 Release aborts and joins the attachment's set, so no attachment task outlives
 release. A root's release, including a predecessor's under a rebind that keeps
 the tree, never touches the tree's tasks: they are released with the tree's
-last root lease, except work that owns a child's session or runtime
-authority, which runs until it returns (chapter 03 §16).
+hub when the tree goes dormant or its host shuts the session down (chapter 03
+§14), except work that owns a child's session or runtime authority, which
+runs until it returns (chapter 03 §16). Every release of a session is that
+shutdown (quit, headless exit, a failed open, and the session a fork, `/new`,
+a session switch or a recovery leaves behind) except a rebind's release of its
+predecessor, which is a detach: the tree's live children keep running in its
+custody, and the host's quit ends every tree its detaches left behind.
 
 The attached host's idle loop, a running turn's drive loop and its workflows
 take operator intents in one order and by one classification. (A session

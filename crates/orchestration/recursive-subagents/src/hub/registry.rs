@@ -131,6 +131,7 @@ impl LiveChildTable {
                     .is_some_and(|retirement| retirement.turn == turn)
                 {
                     live.retiring.remove(&worker_id);
+                    live.quiet.notify_one();
                     let (writer, agent, released) =
                         (driver.clone(), worker_id.clone(), result.is_ok());
                     let _ = driver

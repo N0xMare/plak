@@ -418,15 +418,48 @@ impl AttachedCodingSession {
             .await
     }
 
+    /// Releases this session as its host's shutdown of it: the tree's last
+    /// root attachment retires its children and ends its hub (spec 03 §14).
     #[allow(
         clippy::result_large_err,
         reason = "the error carries the released locator and both lease failures; it is returned once at session teardown"
     )]
-    pub async fn release(mut self) -> Result<SessionLocator, AttachedReleaseError> {
+    pub async fn release(self) -> Result<SessionLocator, AttachedReleaseError> {
+        self.release_root(true).await
+    }
+
+    /// [`Self::release`] as a rebind's hand-off of its tree to the successor:
+    /// the tree's last root attachment leaves a tree that is not dormant in
+    /// custody with its children, rather than retiring them (spec 03 §14).
+    #[allow(
+        clippy::result_large_err,
+        reason = "the error carries the released locator and both lease failures; it is returned once at session teardown"
+    )]
+    pub async fn release_for_handoff(self) -> Result<SessionLocator, AttachedReleaseError> {
+        self.release_root(false).await
+    }
+
+    #[allow(
+        clippy::result_large_err,
+        reason = "the error carries the released locator and both lease failures; it is returned once at session teardown"
+    )]
+    async fn release_root(
+        mut self,
+        shutdown: bool,
+    ) -> Result<SessionLocator, AttachedReleaseError> {
+        // Boxed: either release may run the tree's joined shutdown, which
+        // every open path's failure cleanup would otherwise carry inline.
         let topology = match self.topology_owner.take() {
-            Some(tree_id) => crate::topology_runtime::release_root_lease(&tree_id)
-                .await
-                .err(),
+            Some(tree_id) if shutdown => {
+                Box::pin(crate::topology_runtime::release_root_lease(&tree_id))
+                    .await
+                    .err()
+            }
+            Some(tree_id) => Box::pin(crate::topology_runtime::release_root_lease_for_handoff(
+                &tree_id,
+            ))
+            .await
+            .err(),
             None => None,
         };
         // A child's failure cannot retain the parent's canonical lease.

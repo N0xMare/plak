@@ -1398,6 +1398,12 @@ impl TreeDriver {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(signal);
     }
 
+    /// Whether the host that attached this tree last is shutting down.
+    pub(crate) fn host_shutdown_latched(&self) -> bool {
+        self.host_shutdown_signal()
+            .is_some_and(|signal| signal.is_cancelled())
+    }
+
     fn host_shutdown_signal(&self) -> Option<tokio_util::sync::CancellationToken> {
         self.host_shutdown
             .lock()
