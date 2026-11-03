@@ -8,8 +8,20 @@ use super::{
 };
 use super::{NodePlacement, TreeLineage};
 
+/// The VCS port of this process's sessions: the system `git`/`jj` port on
+/// the local runner, and on another runner a port that refuses every effect,
+/// since version control there is not carried yet.
+fn session_vcs() -> Arc<dyn VcsOps> {
+    if plakous::tools::runner::process_runner().is_some() {
+        Arc::new(plakous_workspace::occupancy_vcs::UnavailableVcs)
+    } else {
+        Arc::new(SystemVcs)
+    }
+}
+
 impl ProductAgentTree {
-    /// Bootstraps a root over the system `git`/`jj` port.
+    /// Bootstraps a root over the system `git`/`jj` port, or the selected
+    /// runner's refusing port.
     ///
     /// # Errors
     ///
@@ -23,7 +35,7 @@ impl ProductAgentTree {
         writer_mode: WriterMode,
     ) -> Result<Self, TopologyError> {
         Self::bootstrap_root_with(
-            Arc::new(SystemVcs),
+            session_vcs(),
             tree_id,
             root_agent_id,
             root_role,
@@ -353,7 +365,7 @@ impl ProductAgentTree {
             max_attempts: MAX_TREE_ATTEMPTS,
             prompt_attempt_base: 0,
             notify: Arc::new(tokio::sync::Notify::new()),
-            vcs: TreeVcs(Arc::new(SystemVcs)),
+            vcs: TreeVcs(session_vcs()),
             cell_budgets,
         }
     }

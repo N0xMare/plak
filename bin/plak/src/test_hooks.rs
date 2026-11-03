@@ -64,12 +64,27 @@ pub(crate) fn storage_capacity_override() -> Option<plakous_hosted::session_stor
 /// `identity_hash_delay_ms`, so a test can make a manifest-less build's
 /// identity slow without loading the machine. A script that cannot be read
 /// sets nothing here; the face that uses it reports that.
-pub(crate) fn install_identity_hash_delay() {
+fn install_identity_hash_delay() {
     if let Some(Ok(selection)) = selected()
         && let Some(delay) = selection.plan.identity_hash_delay_ms
     {
         let _ = crate::build_identity::HASH_DELAY.set(std::time::Duration::from_millis(delay));
     }
+}
+
+/// Installs the process-wide test hooks: the identity hash delay, and the
+/// loopback runner when the offline script asks for it (spec 01 §8.5).
+/// Nothing else selects a runner.
+pub(crate) fn install() -> Result<(), String> {
+    install_identity_hash_delay();
+    if let Some(Ok(selection)) = selected()
+        && selection.plan.loopback_runner
+    {
+        plakous_offline_crash_harness::loopback::select(
+            plakous_hosted::runner_reader::instruction_reader_extension(),
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) fn assistant_done_release() -> Option<PathBuf> {

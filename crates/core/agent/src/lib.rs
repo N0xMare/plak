@@ -88,6 +88,18 @@ mod usage;
 /// Items in this namespace are deliberately nameable but are not part of the
 /// supported `plakous-agent` compatibility inventory.
 pub mod internal {
+    /// Runs `builder`'s agent on the runner behind `backend` instead of the
+    /// local runner (spec 01 §8.5): its environment's operations go to that
+    /// runner, its process sessions refuse every start, and a checkpoint of
+    /// another runner does not reopen on it. Unsupported: only a test route
+    /// selects a runner until runner pairing exists.
+    #[must_use]
+    pub fn select_runner_backend(
+        builder: AgentBuilder,
+        backend: std::sync::Arc<plakous_tools::internal::runner::RunnerBackend>,
+    ) -> AgentBuilder {
+        builder.with_runner_backend(backend)
+    }
     pub use crate::binding_change::BindingChange;
     pub use crate::checkpoint_bundle::{
         CheckpointBundleError, CheckpointBundleStats, CheckpointObjectBundle, RUNTIME_FORMAT_EPOCH,

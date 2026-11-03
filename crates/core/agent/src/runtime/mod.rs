@@ -193,6 +193,9 @@ pub struct AgentBuilder {
     post_compaction_note: Option<PostCompactionNote>,
     model_reresolver: Option<(Arc<dyn ModelReresolver>, plakous_model::Timestamp)>,
     request_slots: Option<RequestSlots>,
+    /// The runner the run's environment executes on, when it is not the
+    /// local runner (unsupported; see [`crate::internal::select_runner_backend`]).
+    runner_backend: Option<Arc<plakous_tools::internal::runner::RunnerBackend>>,
     /// Another runner's backend descriptor a test stands in for a branch
     /// target's own.
     #[cfg(test)]

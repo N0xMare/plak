@@ -1,4 +1,5 @@
 use super::*;
+use plakous::prompts::instructions::LocalInstructionSourceReader;
 use std::fs;
 
 const DEPLOY: &str =

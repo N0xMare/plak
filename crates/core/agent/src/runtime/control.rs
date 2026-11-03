@@ -12,39 +12,55 @@ use crate::{
     SteeringStatus, SubscriptionLimits, TurnCommand, UsageAggregationError, ViewError,
 };
 use plakous_model::{Digest, DigestDomain, ModelResponse, RunId, ValidatedRequestPlan};
+use plakous_tools::internal::runner::{RunnerBackend, runner_environment};
 use plakous_tools::{
     EffectAuthorizationGrantSource, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentScope, WorkspacePolicy,
 };
+use std::sync::Arc;
+/// The run's environment: the local runner's host backend, or the runner
+/// backend the builder selected. A runner applies its own process options.
 pub(super) fn run_environment(
     workspace: &WorkspacePolicy,
     run_id: RunId,
     host_process_options: plakous_tools::HostProcessOptions,
     job_config: plakous_tools::JobConfig,
+    runner: Option<&Arc<RunnerBackend>>,
 ) -> Result<ExecutionEnvironment, AgentError> {
-    ExecutionEnvironment::host_with_policy_and_process_options(
-        ExecutionEnvironmentScope::Run(run_id),
-        workspace.clone(),
-        ExecutionEnvironmentConfig::new(
-            job_config
-                .limits(plakous_tools::ExecutionEnvironmentLimits::default())
-                .map_err(|_| {
-                    AgentError::new(
-                        AgentErrorKind::InvalidInput,
-                        "job construction bounds are invalid",
-                    )
-                })?,
-            [],
-            [],
-        )
-        .map_err(|_| {
-            AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "job environment could not be initialized",
-            )
-        })?,
-        host_process_options,
+    let config = ExecutionEnvironmentConfig::new(
+        job_config
+            .limits(plakous_tools::ExecutionEnvironmentLimits::default())
+            .map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    "job construction bounds are invalid",
+                )
+            })?,
+        [],
+        [],
     )
+    .map_err(|_| {
+        AgentError::new(
+            AgentErrorKind::InvalidInput,
+            "job environment could not be initialized",
+        )
+    })?;
+    let scope = ExecutionEnvironmentScope::Run(run_id);
+    match runner {
+        Some(backend) => runner_environment(
+            scope,
+            workspace.root(),
+            workspace.cwd(),
+            config,
+            Arc::clone(backend),
+        ),
+        None => ExecutionEnvironment::host_with_policy_and_process_options(
+            scope,
+            workspace.clone(),
+            config,
+            host_process_options,
+        ),
+    }
     .map_err(|_| {
         AgentError::new(
             AgentErrorKind::InvalidInput,

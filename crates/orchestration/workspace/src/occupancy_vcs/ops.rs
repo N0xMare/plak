@@ -837,3 +837,122 @@ impl VcsOps for SystemVcs {
         )
     }
 }
+
+/// The port of a session whose workspace lives on another runner: version
+/// control there is not carried yet, so every question that gates an effect
+/// is refused, never answered as absent, and presentation reads see nothing.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UnavailableVcs;
+
+fn unavailable() -> VcsError {
+    VcsError::mint_unavailable("version control on another runner is not carried yet")
+}
+
+impl VcsOps for UnavailableVcs {
+    fn path_exists<'a>(&'a self, _path: &'a Path) -> VcsFuture<'a, Result<bool, VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn jj_copy_dirs<'a>(
+        &'a self,
+        _launch: &'a Path,
+    ) -> VcsFuture<'a, Result<BTreeSet<String>, VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn mint_from<'a>(
+        &'a self,
+        _request: &'a MintRequest<'_>,
+    ) -> VcsFuture<'a, Result<MintedCopy, VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn seal<'a>(
+        &'a self,
+        _child_path: &'a Path,
+        _namespace: &'a str,
+        _candidate_id: &'a str,
+        _base_commit: &'a str,
+    ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn unpin<'a>(
+        &'a self,
+        _child_path: &'a Path,
+        _namespace: &'a str,
+        _candidate_id: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn restore_copy_base<'a>(
+        &'a self,
+        _path: &'a Path,
+        _namespace: &'a str,
+        _agent: &'a str,
+        _base: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn adopt<'a>(
+        &'a self,
+        _request: &'a AdoptRequest<'_>,
+    ) -> VcsFuture<'a, Result<AdoptLanding, AdoptFailure>> {
+        ready(Err(AdoptFailure::Unavailable(unavailable().detail)))
+    }
+
+    fn run_mint_hook<'a>(
+        &'a self,
+        _cwd: &'a Path,
+        _command: &'a str,
+        _env: &'a BTreeMap<String, String>,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn unmint<'a>(
+        &'a self,
+        _launch: &'a Path,
+        _path: &'a Path,
+        _namespace: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn dirty<'a>(&'a self, _path: &'a Path) -> VcsFuture<'a, bool> {
+        ready(false)
+    }
+
+    fn ahead_behind<'a>(
+        &'a self,
+        _child: &'a Path,
+        _parent: &'a Path,
+        _base: Option<&'a str>,
+    ) -> VcsFuture<'a, Option<(u64, u64)>> {
+        ready(None)
+    }
+
+    fn label<'a>(&'a self, _path: &'a Path) -> VcsFuture<'a, Option<String>> {
+        ready(None)
+    }
+
+    fn diverged_from_base<'a>(
+        &'a self,
+        _path: &'a Path,
+        _base_change_id: Option<&'a str>,
+        _base_commit: &'a str,
+    ) -> VcsFuture<'a, Result<bool, VcsError>> {
+        ready(Err(unavailable()))
+    }
+
+    fn copy_is_over_candidate<'a>(
+        &'a self,
+        _launch: &'a Path,
+        _copy_id: &'a str,
+        _candidate: &'a VcsSnapshot,
+    ) -> VcsFuture<'a, Result<bool, VcsError>> {
+        ready(Err(unavailable()))
+    }
+}

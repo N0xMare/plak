@@ -602,6 +602,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # remedy text, which names no secret.
     ("plak", "src/commands/host_config.rs"): {"warn"},
     ("plakous-hosted", "src/mcp_binding/available.rs"): {"warn"},
+    # The instruction-read wire of the hidden runner seam (spec 01 §8.5).
+    ("plakous-hosted", "src/runner_reader.rs"): {"json"},
     # `test-hooks` only: scripted offline model plans for child fixtures.
     ("plak", "src/test_hooks.rs"): {"json"},
     ("plak", "src/build_identity.rs"): {"cfg"},
@@ -1419,10 +1421,18 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
         | {
             "CodexMinimalLocalCodeModeDescriptorV1",
             "preview_redaction",
+            # Hidden, unsupported runner seam: the selected runner's probe
+            # and reader (spec 01 §8.5).
+            "runner",
         },
     },
     "plakous-workspace": _SHARED_PLAKOUS_SYMBOLS,
-    "plakous-recursive-subagents": _SHARED_PLAKOUS_SYMBOLS,
+    "plakous-recursive-subagents": {
+        **_SHARED_PLAKOUS_SYMBOLS,
+        # Hidden, unsupported runner seam: the selected runner's probe and
+        # whether the tree's VCS port refuses (spec 01 §8.5).
+        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"] | {"runner"},
+    },
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
@@ -1437,6 +1447,29 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "SubscriptionEnd",
             "AgentViewState",
             "TurnViewState",
+        },
+    },
+    # The hidden runner seam's instruction reads (spec 01 §8.5): the reader
+    # contract's answer types, and the seam's call, link and extension.
+    ("plakous-hosted", "src/runner_reader.rs"): {
+        "prompts": {
+            "DirectoryAnswer",
+            "DirectoryRefusal",
+            "InstructionChainEntry",
+            "SourceEntryKind",
+            "SourceFile",
+            "SourceReadError",
+            "SourceResolution",
+        },
+        "tools": {
+            "RunnerCall",
+            "RunnerExtension",
+            "RunnerLink",
+            "RunnerVerb",
+            "ServeFailure",
+            "ServeFuture",
+            "call_blocking",
+            "process_runner",
         },
     },
     # The export document names its runner by the library's runner identity.

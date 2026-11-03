@@ -340,7 +340,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let command = cli::parse(arguments)?;
     build_features::admit_command(&command)?;
     #[cfg(feature = "test-hooks")]
-    test_hooks::install_identity_hash_delay();
+    test_hooks::install().map_err(CliFailure::new)?;
 
     if let Command::WriteBinaryManifest { directory } = &command {
         build_identity::write_binary_manifest(directory).map_err(|error| {

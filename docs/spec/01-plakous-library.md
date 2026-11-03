@@ -6037,8 +6037,13 @@ construction, go through `plakous::tools::WorkspaceProbe`: the physical path of 
 recorded root or cwd (`canonicalize`, which is also the existence check), whether
 a copy-shim file is installed (`is_file`), and the bytes under a copy
 (`tree_bytes`, without following links). `LocalWorkspaceProbe` answers from the
-embedding process's filesystem; it is today's only implementation, so a probe
-answer and a backend answer always describe the same filesystem. The probe is a
+embedding process's filesystem. A host and the orchestration tree take their
+probe from `plakous::tools::runner::workspace_probe()` and their
+instruction-source reader from the selected runner too, so a probe answer and a
+backend answer always describe the same filesystem: on a selected runner, the
+runner answers both (`RunnerWorkspaceProbe`, and hosted's reader over the
+`instructions.read` verb, with reads under the product home kept on the
+host). The probe is a
 port, not authority: it grants nothing a tool could use, and the product-state
 exclusion and copy-layout rules applied to its answers stay with the host.
 Every probe and reader answer is fallible with a distinct `Unavailable` error
@@ -6055,12 +6060,16 @@ outside every lock and never inside a tree writer. Session construction makes
 its calls in its construction batch, off any turn; a call on a tool's or the
 tree's path runs on a blocking worker, never on an async worker: the `Skill`
 load and the copy-size pass. A remote implementation answers each call as one
-request from that worker. They become async only with an async session
-construction, which a WebAssembly core requires. `JoinedSessionsPort` stays
-synchronous over the in-process service, and every caller runs its stops on a
-thread of its own or a blocking worker. The orchestration VCS port is async:
-every answer is awaited outside the tree's lock and its writers (chapter 03
-§16).
+request from that worker, waited for on a thread of its own
+(`call_blocking`), so a caller on any thread gets the answer and a link failure
+is `Unavailable`. They become async only with an async session construction,
+which a WebAssembly core requires. `JoinedSessionsPort` stays synchronous, and
+every caller runs its stops on a thread of its own or a blocking worker. The
+orchestration VCS port is async: every answer is awaited outside the tree's
+lock and its writers (chapter 03 §16). On a selected runner it is
+`UnavailableVcs`, which refuses every mint, seal, adopt, unmint and copy
+question as unavailable, never as absent, and reads no presentation facts,
+until version control on a runner is carried.
 The run-stable workspace facts that plan compilation and the runtime
 environment component bind (`plakous-agent/workspace-environment-v2`) name the
 operating system and the runner of the execution backend's descriptor
@@ -6116,8 +6125,23 @@ proof and conflict path. A link failure becomes `Io`, proven to have had no
 effect, when the call was never sent; `RecoveryRequired` when its outcome is
 unknown; the stale-owner `IdentityMismatch` when the runner refused its owner;
 and `InvalidRequest` when the runner refused it as malformed. The seam does
-not depend on the protocol crate, nothing in Plakous selects it, and the
-facade does not reach it.
+not depend on the protocol crate.
+
+Runner selection (unsupported). A process selects at most one runner, once,
+before its first session (`select_process_runner`); without one, every
+session runs on the local runner as before. Only the test-only loopback route
+selects one (an offline script's `loopback_runner` in a `test-hooks` build): a
+runner in the same process that registers every workspace a request names,
+reached only through the seam. `SessionRuntimeBinding::new` then hands the builder the
+runner's backend (`plakous::agent::select_runner_backend`), so the run's
+environment is a runner environment: its reads, queries, mutations, literal
+processes and services go to the runner, and its descriptor names the runner,
+so its sessions do not reopen on another runner or on the local one. Its
+in-process process-session service refuses every start, `Unsupported` with no
+effect, so the shell tool fails closed on a runner session until process
+sessions move onto `JoinedSessionsPort`. No production configuration can name
+a runner. The facade reaches the seam only through the hidden
+`plakous::tools::runner` and `plakous::agent::select_runner_backend`.
 
 An explicit joined-process shell profile enrolls both its absolute invocation
 name and its canonical filesystem object, plus its fixed argument prefix.
@@ -10319,6 +10343,11 @@ retention, attributed stops and job views remain available to host embedders.
 The shared best-effort preview redactor is the unsupported
 `plakous_tools::internal::preview` seam, reached by the agent directly and
 by hosted through the hidden `plakous::tools::preview_redaction` bridge.
+The runner seam is the unsupported `plakous_tools::internal::runner` and
+`plakous_agent::internal::select_runner_backend`, reached by hosted and the
+orchestration tree through the hidden `plakous::tools::runner` and
+`plakous::agent::select_runner_backend` bridges (§8.5). The hidden
+`JoinedSessionsPort::runner` constructor is part of the same seam.
 It is display minimization, not credential authority (chapter 04 §5).
 
 ### 12.1 Feature closures

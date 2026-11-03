@@ -15,8 +15,8 @@ use plakous::model::{ConfiguredLanguageModel, ConfiguredTool, ContextAdmissionRe
 use plakous::sessions::SessionRuntimeBinding;
 use plakous::tools::CodingPresentationExt as _;
 use plakous::tools::{
-    CodexMinimalLocalCodeModeV1, CodingPresentation, CompiledSurface, LocalWorkspaceProbe,
-    ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1, WorkspaceProbe,
+    CodexMinimalLocalCodeModeV1, CodingPresentation, CompiledSurface,
+    ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1,
 };
 
 use super::policy::{
@@ -74,7 +74,8 @@ pub(crate) fn runtime_binding(
         session_id = spec.plan_state_authority,
     )
     .entered();
-    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let probe = plakous::tools::runner::workspace_probe();
+    let probe = probe.as_ref();
     let physical_root = probe
         .canonicalize(spec.workspace_root)
         .map_err(crate::process_environment::probe_unavailable)?

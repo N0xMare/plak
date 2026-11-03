@@ -244,8 +244,17 @@ impl SessionRuntimeBinding {
     /// A caller-supplied revalidation witness is intentionally not accepted:
     /// copying facts from a manifest cannot prove fresh auth, workspace, tool,
     /// environment, or policy authority.
+    ///
+    /// When the process selected a runner (unsupported; only a test route
+    /// does, spec 01 §8.5), the builder runs its agent on that runner.
     #[must_use]
     pub fn new(builder: AgentBuilder) -> Self {
+        let builder = match plakous_tools::internal::runner::process_runner() {
+            Some(runner) => {
+                plakous_agent::internal::select_runner_backend(builder, runner.backend())
+            }
+            None => builder,
+        };
         Self { builder }
     }
 

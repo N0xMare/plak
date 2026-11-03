@@ -15,7 +15,7 @@ use plakous::agent::RegisteredContextSource;
 use plakous::model::{
     ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolName, ToolOutputContract,
 };
-use plakous::prompts::instructions::{InstructionSourceReader, LocalInstructionSourceReader};
+use plakous::prompts::instructions::InstructionSourceReader;
 use plakous::prompts::skills::{
     Skill, SkillDiscovery, SkillRoot, SkillScope, SkillsPresentation, discover_skill_roots,
     discover_skills,
@@ -137,7 +137,8 @@ impl NodeSkills {
         presentation: SkillsPresentation,
     ) -> CliResult<Self> {
         let roots = setting.roots(workspace_root);
-        let reader: Arc<dyn InstructionSourceReader> = Arc::new(LocalInstructionSourceReader);
+        let reader: Arc<dyn InstructionSourceReader> =
+            crate::runner_reader::instruction_reader(None);
         let unreadable =
             |error| CliFailure::new(format!("skills could not be discovered: {error}"));
         let fresh = |on: bool| {

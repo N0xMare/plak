@@ -26,6 +26,8 @@ futures-util = { workspace = true, features = ["std"] }
 plakous = { workspace = true, features = ["composition", "sessions-sqlite"] }
 plakous-agent.workspace = true
 plakous-model.workspace = true
+plakous-runner = { path = "../../../crates/runtimes/runner" }
+plakous-runner-protocol = { path = "../../../crates/common/runner-protocol" }
 plakous-store = { workspace = true, features = ["commit-trace"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -235,20 +235,17 @@ impl TreeDriver {
         }
         let inventory = self.read(ProductAgentTree::checkout_size_probes)?;
         let cache = Arc::clone(&self.checkout_sizes);
+        let probe = plakous::tools::runner::workspace_probe();
         let sizes = tokio::task::spawn_blocking(move || {
             let mut cache = cache.lock().map_err(|_| Self::lock_poisoned())?;
-            let sizes = probe_checkout_sizes(&mut cache, inventory, now, |path| {
-                plakous::tools::WorkspaceProbe::tree_bytes(
-                    &plakous::tools::LocalWorkspaceProbe,
-                    path,
-                )
-            })
-            .map_err(|error| {
-                TopologyError::new(
-                    TopologyErrorCode::MintUnavailable,
-                    format!("copy sizes could not be probed: {error}"),
-                )
-            })?;
+            let sizes =
+                probe_checkout_sizes(&mut cache, inventory, now, |path| probe.tree_bytes(path))
+                    .map_err(|error| {
+                        TopologyError::new(
+                            TopologyErrorCode::MintUnavailable,
+                            format!("copy sizes could not be probed: {error}"),
+                        )
+                    })?;
             Ok::<_, TopologyError>(sizes)
         })
         .await

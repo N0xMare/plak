@@ -826,6 +826,42 @@ fn failing_command_script(answer: &str) -> Value {
     })
 }
 
+/// A session on the test-only loopback runner (spec 01 §8.5): its shell
+/// refuses with no effect, since process sessions on a runner are not carried
+/// yet, and the turn still answers.
+#[test]
+fn a_session_on_the_loopback_runner_refuses_its_shell_with_no_effect() {
+    let mut script = failing_command_script("the shell is elsewhere");
+    script["steps"][0]["output"]["tool"]["arguments"]["command"] = json!("printf ran > ran.txt");
+    script["loopback_runner"] = json!(true);
+    let fixture = Fixture::new(&script);
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    agent.wait_for("ready", |record| record["kind"] == "ready");
+    agent.send(&prompt_frame("run it"));
+    agent.wait_for("assistant_done", |record| {
+        record["kind"] == "assistant_done"
+    });
+    agent.send(&quit_frame());
+    let outcome = agent.finish();
+    assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
+    assert_eq!(
+        outcome.assistant_text(),
+        vec!["the shell is elsewhere".to_owned()]
+    );
+    let terminal = outcome
+        .records()
+        .into_iter()
+        .rfind(|record| record["kind"] == "tool" && record["name"] == "process_session_start")
+        .expect("the command's tool record");
+    let state = terminal["state"].as_str().unwrap_or_default();
+    assert!(
+        state.starts_with("failed") && state != "failed:exit 0",
+        "stream:\n{}",
+        outcome.lines.join("\n")
+    );
+    assert!(!fixture.workspace().join("ran.txt").exists());
+}
+
 /// The tool call succeeded, the command it ran did not. The `tool`
 /// record names how the command ended instead of reporting `done`.
 #[test]

@@ -371,6 +371,7 @@ pub(super) fn prepare_durable_genesis(
         identities.run_id,
         builder.host_process_options.clone(),
         builder.job_config,
+        builder.runner_backend.as_ref(),
     )?;
     let tools = ToolRuntime::new(
         builder.tools.clone(),

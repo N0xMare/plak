@@ -279,9 +279,20 @@ impl AgentBuilder {
             post_compaction_note: None,
             model_reresolver: None,
             request_slots: None,
+            runner_backend: None,
             #[cfg(test)]
             target_backend: None,
         }
+    }
+
+    /// Runs the agent's environment on `backend`'s runner instead of the
+    /// local runner. Unsupported; see [`crate::internal::select_runner_backend`].
+    pub(crate) fn with_runner_backend(
+        mut self,
+        backend: Arc<plakous_tools::internal::runner::RunnerBackend>,
+    ) -> Self {
+        self.runner_backend = Some(backend);
+        self
     }
 
     /// Stands `backend` in for the backend a branch target compiles against.
@@ -1136,6 +1147,7 @@ fn attach_job_environment(
         run_id,
         builder.host_process_options.clone(),
         builder.job_config,
+        builder.runner_backend.as_ref(),
     )?
     .with_line_owner(plakous_tools::LineOwner::from(&job_owner));
     if let Some(normalizer) = &builder.image_normalizer {

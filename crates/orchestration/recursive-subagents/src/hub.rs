@@ -33,7 +33,7 @@ use futures_util::FutureExt;
 
 use plakous::agent::{Agent, CommandId, TurnControl, TurnResultHandle};
 use plakous::model::TurnId;
-use plakous::tools::{LocalWorkspaceProbe, ProbeError, WorkspaceProbe};
+use plakous::tools::{ProbeError, WorkspaceProbe};
 
 use crate::tools::TreeDriver;
 use crate::tree::{ProductAgentTree, TopologyObserver, TreeStore};
@@ -1024,7 +1024,8 @@ fn resolved_or_recorded(probe: &dyn WorkspaceProbe, path: &Path) -> Result<PathB
 pub fn generation_stamp_for_workspace_root(
     root: &Path,
 ) -> Result<Option<Arc<AtomicU64>>, ProbeError> {
-    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let probe = plakous::tools::runner::workspace_probe();
+    let probe = probe.as_ref();
     let root = resolved_or_recorded(probe, root)?;
     for runtime in process_hub().runtimes() {
         let Ok(rows) = runtime.driver().read(ProductAgentTree::workspace_paths) else {
@@ -1050,7 +1051,8 @@ pub fn generation_stamp_for_workspace_root(
 /// # Errors
 /// Returns [`ProbeError::Unavailable`] when the workspace cannot be probed.
 pub fn workspace_base_for_root(root: &Path) -> Result<Option<String>, ProbeError> {
-    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let probe = plakous::tools::runner::workspace_probe();
+    let probe = probe.as_ref();
     let root = resolved_or_recorded(probe, root)?;
     for runtime in process_hub().runtimes() {
         let Ok(rows) = runtime.driver().read(|tree| {

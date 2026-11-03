@@ -1,7 +1,7 @@
 //! Host workspace policy resolution; core tools only enforces the supplied facts.
 
 use crate::{CliFailure, CliResult};
-use plakous::tools::{HostProcessOptions, LocalWorkspaceProbe, ProbeError, WorkspaceProbe};
+use plakous::tools::{HostProcessOptions, ProbeError};
 use std::path::{Path, PathBuf};
 
 /// The one refusal for a workspace probe that cannot answer: construction
@@ -11,7 +11,8 @@ pub(crate) fn probe_unavailable(error: ProbeError) -> CliFailure {
 }
 
 pub(crate) fn options(workspace: &Path) -> CliResult<HostProcessOptions> {
-    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let probe = plakous::tools::runner::workspace_probe();
+    let probe = probe.as_ref();
     let relative = PathBuf::from(".plak/bin");
     let directory = workspace.join(&relative);
     let shim_present = probe

@@ -831,6 +831,7 @@ async fn compile_branch_target(
         run_id,
         request.builder.host_process_options.clone(),
         request.builder.job_config,
+        request.builder.runner_backend.as_ref(),
     )?;
     let tools = ToolRuntime::new(
         request.builder.tools.clone(),

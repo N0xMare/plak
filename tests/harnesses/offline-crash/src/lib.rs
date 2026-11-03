@@ -17,6 +17,8 @@ mod fixture;
 pub mod gate;
 /// Read-only decoded ledger facts for crash-sweep tests.
 pub mod ledger_signature;
+/// The test-only route that runs sessions on a loopback runner.
+pub mod loopback;
 /// Versioned parent/child control protocol.
 pub mod protocol;
 /// Declarative offline model scripts.

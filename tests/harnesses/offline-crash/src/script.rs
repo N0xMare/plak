@@ -157,6 +157,10 @@ pub struct ScriptPlan {
     /// test reaches the process backend's spawn and teardown.
     #[serde(default)]
     pub process_tools: bool,
+    /// Run the process's sessions on the in-process loopback runner instead of
+    /// the local runner (spec 01 §8.5), through the runner seam alone.
+    #[serde(default)]
+    pub loopback_runner: bool,
     /// Seal the final provider response with managed family replay artifacts.
     #[serde(default)]
     pub seal_family_artifacts: bool,

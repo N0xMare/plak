@@ -180,6 +180,9 @@ pub mod agent {
     };
     // The one compaction-scheduling rule (spec 01 §10.3), from the
     // unsupported internal tier: a host's idle fence reads it.
+    /// Unsupported runner selection for official hosting (spec 01 §8.5).
+    #[doc(hidden)]
+    pub use plakous_agent::internal::select_runner_backend;
     pub use plakous_agent::internal::{CompactionMeasure, CompactionVerdict, MeasuredFit};
     pub use plakous_agent::{
         AbandonedTurnClaim,
@@ -1324,6 +1327,10 @@ pub mod tools {
     /// Unsupported preview-minimization seam for official observation and hosting.
     #[doc(hidden)]
     pub use plakous_tools::internal::preview as preview_redaction;
+    /// Unsupported runner seam for official hosting (spec 01 §8.5): nothing
+    /// selects a runner for a session but a test route.
+    #[doc(hidden)]
+    pub use plakous_tools::internal::runner;
     pub use plakous_tools::{
         AlwaysAllowPolicy, ArgumentLimits, CodingPresentation, CompiledSurface, CompositionRuntime,
         DelegationSourceRevision, Earned, EffectAuthorizationBinding, EffectDecision,

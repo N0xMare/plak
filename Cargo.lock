@@ -4204,6 +4204,8 @@ dependencies = [
  "plakous-messages",
  "plakous-model",
  "plakous-responses",
+ "plakous-runner",
+ "plakous-runner-protocol",
  "plakous-store",
  "portable-pty",
  "rusqlite",

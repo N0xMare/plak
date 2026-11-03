@@ -1084,7 +1084,8 @@ pub(in crate::agent) fn child_session_workspace_root(
     if parent_root == child_path {
         return Ok(parent_root.to_path_buf());
     }
-    let probe: &dyn plakous::tools::WorkspaceProbe = &plakous::tools::LocalWorkspaceProbe;
+    let probe = plakous::tools::runner::workspace_probe();
+    let probe = probe.as_ref();
     let unavailable = crate::process_environment::probe_unavailable;
     Ok(
         match (

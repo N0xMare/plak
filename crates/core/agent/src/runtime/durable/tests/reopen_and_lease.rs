@@ -155,6 +155,7 @@ fn revalidation_witness_for(
         run_id,
         builder.host_process_options.clone(),
         builder.job_config,
+        builder.runner_backend.as_ref(),
     )?;
     let tools = ToolRuntime::new(
         builder.tools.clone(),

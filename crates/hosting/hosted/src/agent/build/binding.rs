@@ -40,9 +40,8 @@ use plakous::subscriptions::{
     NativeProvider, NativeToolMode, ResolvedProvider, native_provider_route_selection,
 };
 use plakous::tools::{
-    CodexMinimalLocalCodeModeV1, CompositionRuntime, LocalWorkspaceProbe,
-    ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1, WorkspaceProbe,
-    plan_restoration_note,
+    CodexMinimalLocalCodeModeV1, CompositionRuntime, ProductJavaScriptCompositionV1,
+    PythonPtcPresentationV1, PythonPtcV1, plan_restoration_note,
 };
 use std::io::Write;
 use std::num::NonZeroU32;
@@ -753,7 +752,8 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
             "resolved provider tool configuration does not match the product registry",
         ));
     }
-    let probe: &dyn WorkspaceProbe = &LocalWorkspaceProbe;
+    let probe = plakous::tools::runner::workspace_probe();
+    let probe = probe.as_ref();
     let physical_root = probe
         .canonicalize(&workspace_root)
         .map_err(probe_unavailable)?
