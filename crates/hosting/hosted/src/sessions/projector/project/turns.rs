@@ -117,18 +117,12 @@ impl Applier<'_> {
     }
 
     /// Spec 02 §4.2: the commit that closes a fenced root turn carries no
-    /// fact of its own. The turn's recovery-required pause names it, and the
-    /// closure's note on that turn's history marks the record; the notice is
-    /// derived from the abandonment its terminal record now carries. The
-    /// runtime appends that note once per turn, so the notice is derived once.
+    /// fact of its own. Its note on the turn's history, in a record with no
+    /// `TurnTerminal`, after the turn's own terminal took it off the open
+    /// turns, marks the record; the notice is derived from the abandonment
+    /// the turn's `RecoveryRequired` terminal record now carries. The runtime
+    /// appends that note once per turn, so the notice is derived once.
     pub(super) fn fenced_abandonment(&mut self) -> Result<(), ProjectError> {
-        let Some(Anchored {
-            value: Some(PauseCause::RecoveryRequired { turn_id: fenced }),
-            ..
-        }) = &self.views.state.pause
-        else {
-            return Ok(());
-        };
         let facts = self.record.facts();
         if facts
             .iter()
@@ -140,7 +134,7 @@ impl Applier<'_> {
             FeedFact::HistoryAppended {
                 turn_id: Some(turn),
                 ..
-            } if turn.to_string() == *fenced => Some(*turn),
+            } if !self.views.state.open_turns.contains_key(&turn.to_string()) => Some(*turn),
             _ => None,
         }) else {
             return Ok(());

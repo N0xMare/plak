@@ -62,14 +62,15 @@ pub enum ReadRequest {
         turn_id: TurnId,
     },
     /// The abandonment report of a fenced root turn's terminal, through
-    /// `feed_terminal`. No record names it: the projector asks for it, from
-    /// the views, when it applies the commit that closed the fenced turn.
+    /// `feed_terminal`. No record names it: the projector asks for it when a
+    /// record appends history for a turn it no longer holds open, which is
+    /// how the commit that closes a fenced turn looks.
     Abandoned {
         /// The record's branch.
         branch: BranchId,
         /// The record's checkpoint.
         checkpoint: CheckpointId,
-        /// The fenced root turn.
+        /// The turn the record's history names.
         turn_id: TurnId,
     },
 }
@@ -230,6 +231,12 @@ impl ReadCache {
     /// Records a read's value.
     pub fn insert(&mut self, request: ReadRequest, value: ReadValue) {
         self.0.insert(request, value);
+    }
+
+    /// Forgets a read, so a test can show a page asking for it.
+    #[cfg(test)]
+    pub(crate) fn remove(&mut self, request: &ReadRequest) {
+        self.0.remove(request);
     }
 }
 
@@ -484,18 +491,35 @@ pub async fn load_reads(
                         checkpoint,
                         turn_id,
                     })
-                    .await?,
-            )),
+                    .await,
+            )?),
         };
         cache.insert(request, value);
     }
     Ok(())
 }
 
-fn abandoned_read(outcome: FeedTerminalOutcome) -> Option<plakous::agent::AbandonedTurnReport> {
+/// The abandonment a fenced turn's terminal record carries: only a
+/// `RecoveryRequired` terminal a later closure abandoned has one to report.
+/// A checkpoint that holds no terminal for the turn (its history continued
+/// from before a retained window) reports none rather than refusing.
+fn abandoned_read(
+    outcome: Result<FeedTerminalOutcome, AgentSessionsError>,
+) -> Result<Option<plakous::agent::AbandonedTurnReport>, AgentSessionsError> {
     match outcome {
-        FeedTerminalOutcome::Terminal(terminal) => terminal.abandoned_turn().cloned(),
-        _ => None,
+        Ok(FeedTerminalOutcome::Terminal(terminal))
+            if matches!(
+                terminal.result().outcome(),
+                plakous::agent::TurnResultOutcome::RecoveryRequired(_)
+            ) =>
+        {
+            Ok(terminal.abandoned_turn().cloned())
+        }
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == plakous::sessions::AgentSessionsErrorKind::InvalidInput => {
+            Ok(None)
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -602,15 +626,17 @@ pub fn load_reads_sqlite(
                 branch,
                 checkpoint,
                 turn_id,
-            } => ReadValue::Abandoned(abandoned_read(AgentSessions::inspect_feed_terminal_sqlite(
-                path,
-                &FeedTerminalRequest {
-                    session,
-                    branch,
-                    checkpoint,
-                    turn_id,
-                },
-            )?)),
+            } => ReadValue::Abandoned(abandoned_read(
+                AgentSessions::inspect_feed_terminal_sqlite(
+                    path,
+                    &FeedTerminalRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        turn_id,
+                    },
+                ),
+            )?),
         };
         cache.insert(request, value);
     }

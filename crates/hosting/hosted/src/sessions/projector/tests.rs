@@ -179,6 +179,31 @@ impl Feed {
                 "the corpus provides every planned read: {request:?}"
             );
         }
+        // History of a turn the projector may not hold open asks for that
+        // turn's abandonment; a turn that was not fenced has none, which is
+        // what the loader answers. A test fencing a turn inserts its own.
+        if !record
+            .facts()
+            .iter()
+            .any(|fact| matches!(fact, FeedFact::TurnTerminal { .. }))
+        {
+            for fact in record.facts() {
+                if let FeedFact::HistoryAppended {
+                    turn_id: Some(turn_id),
+                    ..
+                } = fact
+                {
+                    let request = ReadRequest::Abandoned {
+                        branch,
+                        checkpoint,
+                        turn_id: *turn_id,
+                    };
+                    if self.reads.read(&request).is_none() {
+                        self.reads.insert(request, ReadValue::Abandoned(None));
+                    }
+                }
+            }
+        }
         self.records.push(record);
     }
 
@@ -1651,11 +1676,34 @@ fn an_abandoned_turn_derives_the_live_recovery_line() {
 /// derives nothing more, and a rebuild of the whole feed the same one line.
 #[test]
 fn a_fenced_turns_closure_derives_its_recovery_line_once() {
+    fenced_closure_derives_its_line_once(false);
+}
+
+/// The derivation is keyed on the closing record and the turn's terminal,
+/// not on the views' pause: a session-wide refusal that replaces the pause
+/// between the fence and the closure changes nothing.
+#[test]
+fn a_fenced_turns_closure_derives_its_line_after_the_pause_moved() {
+    fenced_closure_derives_its_line_once(true);
+}
+
+fn fenced_closure_derives_its_line_once(refused_between: bool) {
     let (mut feed, fenced) = single_turn(End::RecoveryRequired, true, false);
     let Some(PauseCause::RecoveryRequired { turn_id }) = fenced.pause_cause(&feed.intents) else {
         panic!("the terminal fences the turn");
     };
     let turn_id: TurnId = turn_id.parse().unwrap();
+    let fenced = if refused_between {
+        apply_step(&mut feed, &Step::Rejected);
+        let views = project_all(&feed).views;
+        assert!(matches!(
+            views.pause_cause(&feed.intents),
+            Some(PauseCause::SessionRefusal { .. })
+        ));
+        views
+    } else {
+        fenced
+    };
     let report: plakous::agent::AbandonedTurnReport = serde_json::from_value(serde_json::json!({
         "model_round_completed": false,
         "tool_round_completed": false,
@@ -1687,8 +1735,10 @@ fn a_fenced_turns_closure_derives_its_recovery_line_once() {
         checkpoint: record_checkpoint(&closure[0]).unwrap(),
         turn_id,
     };
+    let mut unasked = feed.reads.clone();
+    unasked.remove(&request);
     assert_eq!(
-        project(fenced.clone(), &feed.intents, closure, &feed.reads),
+        project(fenced.clone(), &feed.intents, closure, &unasked),
         Err(ProjectError::MissingRead(request)),
         "no record names the read: the views ask for it"
     );

@@ -152,24 +152,31 @@ pub async fn run(
 }
 
 /// Whether applying `records` to `views` may ask for a read no record
-/// names: a fenced turn is pending, or the page fences one.
+/// names: a fenced turn's closure appends history for a turn that is not
+/// open, either since before this page or after a terminal in it. Turns the
+/// page itself admits are open until a terminal, which this also counts.
 #[must_use]
 pub fn asks_reads(views: &SessionViews, records: &[FeedRecord]) -> bool {
-    matches!(
-        views.state.pause,
-        Some(Anchored {
-            value: Some(PauseCause::RecoveryRequired { .. }),
-            ..
-        })
-    ) || records.iter().any(|record| {
-        record.facts().iter().any(|fact| {
-            matches!(
-                fact,
-                plakous::sessions::feed::FeedFact::TurnTerminal {
-                    outcome: plakous::sessions::feed::FeedTurnOutcome::RecoveryRequired,
-                    ..
-                }
-            )
+    use plakous::sessions::feed::FeedFact;
+    let mut admitted = std::collections::BTreeSet::new();
+    records.iter().any(|record| {
+        record.facts().iter().any(|fact| match fact {
+            FeedFact::TurnTerminal { .. } => true,
+            FeedFact::CommandAccepted {
+                kind: plakous::sessions::feed::FeedCommandKind::Root { .. },
+                turn_id: Some(turn),
+                ..
+            } => {
+                admitted.insert(*turn);
+                false
+            }
+            FeedFact::HistoryAppended {
+                turn_id: Some(turn),
+                ..
+            } => {
+                !admitted.contains(turn) && !views.state.open_turns.contains_key(&turn.to_string())
+            }
+            _ => false,
         })
     })
 }
