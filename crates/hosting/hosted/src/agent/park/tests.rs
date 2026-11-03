@@ -269,21 +269,20 @@ async fn fixture_with_probe(
         topology_owner: None,
     };
     let feed = super::super::children::ChildFeedSource::of(&attached);
+    let live = ChildActorHandle::new(
+        &crate::TaskSet::new(),
+        &runtime.driver().release_owners(),
+        attached,
+        turn,
+        control,
+    );
+    let watcher = live.watcher();
     runtime
-        .try_occupy_live(
-            child.clone(),
-            Box::new(ChildActorHandle::new(
-                &crate::TaskSet::new(),
-                &crate::TaskSet::new(),
-                attached,
-                turn,
-                control,
-            )),
-        )
+        .try_occupy_live(child.clone(), Box::new(live))
         .await
         .map_err(|_| "live slot refused")
         .unwrap();
-    super::super::children::spawn_topology_turn_waiter(
+    watcher.watch(
         registration,
         Arc::clone(&runtime.live),
         None,

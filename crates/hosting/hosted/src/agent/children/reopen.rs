@@ -10,7 +10,7 @@ use super::{
     SessionRecoveryAction, SessionToolFence, SpawnParent, ToolExecutorId, ToolOutcome, TurnId,
     TurnResultHandle, TurnWaiterRegistration, child_session_runtime_binding, mail_command_id,
     mutate_child, occupancy_session_fence, persist_or_fault,
-    require_reconstructed_coding_projection, spawn_parent_tree_id, spawn_topology_turn_waiter,
+    require_reconstructed_coding_projection, spawn_parent_tree_id,
 };
 
 /// Rejoins the turn a mail Start's reopen recovered unbound: a Start the
@@ -153,18 +153,19 @@ async fn occupy_recovered_turn(
     registration: &mut Option<TurnWaiterRegistration>,
 ) -> Result<TurnId, String> {
     let feed = ChildFeedSource::of(&attached);
-    let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
-        Box::new(crate::agent::live::ChildActorHandle::new(
-            &runtime.driver().tasks(),
-            &runtime.driver().release_owners(),
-            attached,
-            turn,
-            control,
-        ));
+    let actor = crate::agent::live::ChildActorHandle::new(
+        &runtime.driver().tasks(),
+        &runtime.driver().release_owners(),
+        attached,
+        turn,
+        control,
+    );
+    let watcher = actor.watcher();
+    let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(actor);
     match runtime.try_occupy_live(agent_id.clone(), child).await {
         Ok(turn_id) => {
             if let Some(registration) = registration.take() {
-                spawn_topology_turn_waiter(
+                watcher.watch(
                     registration,
                     Arc::clone(&runtime.live),
                     runtime.observer(),

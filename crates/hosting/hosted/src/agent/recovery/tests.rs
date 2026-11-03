@@ -25,7 +25,6 @@ use plakous_offline_crash_harness::{
 use serde_json::json;
 
 use super::*;
-use crate::agent::children::spawn_topology_turn_waiter;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};
 use crate::agent_tree::{
     CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, RECOVERED_WITHOUT_TURN,
@@ -1476,7 +1475,7 @@ impl Fixture {
         self.bind_turn(&id, &locator, turn);
         let live = crate::agent::live::ChildActorHandle::new(
             &crate::TaskSet::new(),
-            &crate::TaskSet::new(),
+            &self.runtime.driver().release_owners(),
             AttachedCodingSession {
                 output_bound_rederived: None,
                 reachability_probe: None,
@@ -1489,6 +1488,7 @@ impl Fixture {
             turn,
             control,
         );
+        let watcher = live.watcher();
         assert!(
             self.runtime
                 .try_occupy_live(id.clone(), Box::new(live))
@@ -1496,7 +1496,7 @@ impl Fixture {
                 .is_ok()
         );
         refuse_checkpoints(&self.database());
-        spawn_topology_turn_waiter(
+        watcher.watch(
             crate::agent::children::TurnWaiterRegistration::register(self.runtime.driver(), &id)
                 .await
                 .unwrap(),
@@ -1507,7 +1507,7 @@ impl Fixture {
         );
         assert!(
             self.has_turn_waiter(&id),
-            "the waiter registers before it is spawned"
+            "the waiter registers before its watch starts"
         );
         tokio::time::timeout(Duration::from_secs(60), async {
             // The waiter's registration ends with its task.
@@ -3414,7 +3414,7 @@ async fn a_recycling_waiter_is_an_owner_that_recovery_never_waits_on() {
     reinstate_released_lease(&fixture.database());
     let live = crate::agent::live::ChildActorHandle::new(
         &crate::TaskSet::new(),
-        &crate::TaskSet::new(),
+        &fixture.runtime.driver().release_owners(),
         AttachedCodingSession {
             output_bound_rederived: None,
             reachability_probe: None,
@@ -3427,6 +3427,7 @@ async fn a_recycling_waiter_is_an_owner_that_recovery_never_waits_on() {
         turn,
         control,
     );
+    let watcher = live.watcher();
     assert!(
         fixture
             .runtime
@@ -3434,7 +3435,7 @@ async fn a_recycling_waiter_is_an_owner_that_recovery_never_waits_on() {
             .await
             .is_ok()
     );
-    spawn_topology_turn_waiter(
+    watcher.watch(
         crate::agent::children::TurnWaiterRegistration::register(fixture.runtime.driver(), &id)
             .await
             .unwrap(),
@@ -3521,7 +3522,7 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
     fixture.bind_turn(&id, &locator, turn);
     let live = crate::agent::live::ChildActorHandle::new(
         &crate::TaskSet::new(),
-        &crate::TaskSet::new(),
+        &fixture.runtime.driver().release_owners(),
         AttachedCodingSession {
             output_bound_rederived: None,
             reachability_probe: None,
@@ -3534,6 +3535,7 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
         turn,
         control,
     );
+    let watcher = live.watcher();
     assert!(
         fixture
             .runtime
@@ -3541,7 +3543,7 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
             .await
             .is_ok()
     );
-    spawn_topology_turn_waiter(
+    watcher.watch(
         crate::agent::children::TurnWaiterRegistration::register(fixture.runtime.driver(), &id)
             .await
             .unwrap(),

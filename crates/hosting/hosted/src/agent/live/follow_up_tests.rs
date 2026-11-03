@@ -766,3 +766,69 @@ async fn a_follow_up_reserved_before_a_release_is_served_first() {
     )
     .await;
 }
+
+/// A message's work that needs the watch to move completes: the actor
+/// drives its watch while it serves a message.
+#[tokio::test]
+async fn a_served_message_completes_once_the_watch_moves() {
+    let (fixture, live) = Fixture::unoccupied().await;
+    let (entered, entering) = tokio::sync::oneshot::channel::<()>();
+    let (moved, moving) = tokio::sync::oneshot::channel::<()>();
+    live.watcher().watch_with(Box::pin(async move {
+        let _ = entering.await;
+        let _ = moved.send(());
+    }));
+    let delivery = live.follow_up_with_ack(
+        CommandId::new("fixture:watched").unwrap(),
+        "watched".into(),
+        async move {
+            let _ = entered.send(());
+            let _ = moving.await;
+        },
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), delivery)
+        .await
+        .expect("the watch moves while the follow-up is served")
+        .unwrap();
+    Box::new(live)
+        .cancel_and_release(fixture.runtime.driver().clone(), None)
+        .await;
+    crate::topology_runtime::force_release(
+        &fixture.runtime.read(|tree| tree.tree_id.clone()).unwrap(),
+    )
+    .await;
+}
+
+/// A release waits out the watch's hold on the delivery barrier, and the
+/// actor drives the watch meanwhile, so the hold ends and the release
+/// proceeds.
+#[tokio::test]
+async fn a_release_reserved_behind_the_watchs_transition_proceeds_after_it() {
+    let (fixture, live) = Fixture::unoccupied().await;
+    let barrier = live.follow_up_barrier().unwrap();
+    let (held, holding) = tokio::sync::oneshot::channel::<()>();
+    let (sent, release_sent) = tokio::sync::oneshot::channel::<()>();
+    live.watcher().watch_with(Box::pin(async move {
+        let transition = barrier.write_owned().await;
+        let _ = held.send(());
+        let _ = release_sent.await;
+        drop(transition);
+    }));
+    holding.await.unwrap();
+    let release =
+        tokio::spawn(Box::new(live).cancel_and_release(fixture.runtime.driver().clone(), None));
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(
+        !release.is_finished(),
+        "the release waits for the transition"
+    );
+    sent.send(()).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), release)
+        .await
+        .expect("the watch ends its transition while the release waits")
+        .unwrap();
+    crate::topology_runtime::force_release(
+        &fixture.runtime.read(|tree| tree.tree_id.clone()).unwrap(),
+    )
+    .await;
+}

@@ -4946,8 +4946,8 @@ aborts these workers.
 Every task the tree runs for its children belongs to the tree, never to a
 root, so no root's release touches it. Work that owns a child's session or
 runtime authority until it returns (startup and resume owners and their
-cleanups, turn waiters, follow-up deliveries, release workers and the
-retirement tasks they own) is tracked as the tree's release owners, which no
+cleanups, each live child's actor, release workers and the retirement tasks
+they own) is tracked as the tree's release owners, which no
 shutdown aborts. Shutdown bounds its join only on retirement completions and
 on cancelled startups, as above, and leaves the other owners running
 detached. Process-exit abandonment aborts release workers; the other owners
@@ -4955,6 +4955,13 @@ end with the exiting process's executor. The rest (projections, join
 observers, recovery passes) is the tree's task set: after the joins above,
 the tree's shutdown closes it, aborting what still runs and joining it for
 at most 250 ms.
+A live child's actor is the one owner of its attached session. The hub's
+follow-up, restart, release and cancel-and-release are messages it answers in
+arrival order, and a reply nobody awaits any more stops that work. The actor
+drives the child's turn waiter beside its mailbox, so a waiter that restarts
+or retires its own child is answered by the actor it runs in. The actor ends
+once its waiter has ended and its session is gone: released, or dropped
+with its last handle when the hub drops that handle without a release.
 Admission checks active and retiring slots under the same mutex as the closed
 flag. Batch cancellation starts and joins siblings concurrently; its report retains
 input order, while independent retirement workers may publish in completion order.

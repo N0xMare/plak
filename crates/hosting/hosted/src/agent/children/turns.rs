@@ -7,7 +7,7 @@ use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
 use super::{
     Arc, AttachedCodingSession, ChildFeedSource, ChildStartup, ChildStartupStage, CommandId,
     Future, LiveRelease, SPAWN_MATERIALIZE_TIMEOUT, SessionLocator, StartupCaller, TreeDriver,
-    TurnId, finalize_child_turn, register_admitted_turn, spawn_topology_turn_waiter,
+    TurnId, finalize_child_turn, register_admitted_turn,
 };
 
 /// Starts `prompt` on an opened child session and installs it as the live
@@ -623,15 +623,16 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             turn_id,
         )
     });
-    let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
-        Box::new(crate::agent::live::ChildActorHandle::admitted(
-            &runtime.driver().tasks(),
-            &runtime.driver().release_owners(),
-            attached,
-            turn_id,
-            control,
-            projection,
-        ));
+    let actor = crate::agent::live::ChildActorHandle::admitted(
+        &runtime.driver().tasks(),
+        &runtime.driver().release_owners(),
+        attached,
+        turn_id,
+        control,
+        projection,
+    );
+    let watcher = actor.watcher();
+    let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(actor);
     startup.set_stage(ChildStartupStage::Registering);
     let accepted = matches!(
         submission.acknowledgement.disposition(),
@@ -666,7 +667,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     {
         Ok(turn_id) => {
             if let Some(registration) = registration {
-                spawn_topology_turn_waiter(
+                watcher.watch(
                     registration,
                     Arc::clone(&runtime.live),
                     runtime.observer(),
@@ -677,7 +678,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             Ok(turn_id)
         }
         Err(loser) => {
-            // No waiter will be spawned: release must not wait for its notice.
+            // No watch will start: release must not wait for its notice.
             super::TurnWaiterRegistration::release_taken(&mut registration).await;
             startup.set_stage(ChildStartupStage::Releasing);
             runtime

@@ -15,6 +15,8 @@ use super::{
 
 #[cfg(test)]
 mod diagnostics;
+#[cfg(test)]
+mod leave_tests;
 mod resume;
 
 #[cfg(test)]
@@ -36,9 +38,9 @@ fn warn_recovery_required(
 
 /// A turn waiter's registration on the tree. It is taken before the turn
 /// it watches is bound or occupies the live slot, so a bound turn some
-/// waiter will release always reads as watched; the waiter task holds it for
-/// its life however it ends (a panic or an aborted task included), and a turn
-/// that never gets its waiter drops it. A send tells a bound turn its waiter
+/// waiter will release always reads as watched; the child actor's watch
+/// holds it for its life however it ends (a panic or an aborted actor
+/// included), and a turn that never gets its watch drops it. A send tells a bound turn its waiter
 /// will still release from one nobody watches by it (spec 03 section 9).
 ///
 /// Leave it with [`Self::release`]; a registration dropped instead (a
@@ -178,26 +180,27 @@ impl Drop for PendingLeave {
     }
 }
 
-/// The waiter owns the driver it was registered with: its saves and settles
-/// go to the store the hub bound, whether or not the hub still lists this
-/// tree when the turn ends (a root that quit releases the hub entry while a
-/// child turn can still be unwinding). It runs as a release owner, which the
-/// tree's shutdown does not abort.
+/// The waiter loop over one bound attempt's turns, which the child's actor
+/// drives (`ChildWatcher::watch`). It owns the driver it was registered
+/// with: its saves and settles go to the store the hub bound, whether or not
+/// the hub still lists this tree when the turn ends (a root that quit
+/// releases the hub entry while a child turn can still be unwinding). The
+/// actor runs as a release owner, which the tree's shutdown does not abort.
 #[allow(
     clippy::too_many_lines,
     reason = "The child waiter owns observation, transient recovery, result publication, and terminal release for exactly one bound attempt."
 )]
-pub(in crate::agent) fn spawn_topology_turn_waiter(
+pub(in crate::agent) fn turn_watch(
     registration: TurnWaiterRegistration,
     live: Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
     observer: Option<Arc<dyn crate::agent_tree::TopologyObserver>>,
     feed: Option<ChildFeedSource>,
     result: TurnResultHandle,
-) {
+) -> crate::agent::live::TurnWatch {
     let driver = registration.driver.clone();
     let agent_id = registration.agent_id.clone();
     let attempt = registration.attempt.clone();
-    registration.driver.clone().spawn_release_owner(async move {
+    Box::pin(async move {
         let registration = registration;
         let mut pending = Some(result);
         // What the last wake carried, so leftovers cannot wake forever.
@@ -373,34 +376,41 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
                 }
                 let pending = driver
                     .mutate({
-let (identity, agent_id, driver, observer) = (identity.clone(), agent_id.clone(), driver.clone(), observer.clone());
-move |tree| {
-let (identity, agent_id, driver, observer) = (&identity, &agent_id, &driver, &observer);
-if !identity.still_owns(tree, agent_id) {
-                            return;
-                        }
-                        tree.record_fault(
-                            agent_id,
-                            "the turn was cancelled outside the host; nothing interrupted it",
+                        let (identity, agent_id, driver, observer) = (
+                            identity.clone(),
+                            agent_id.clone(),
+                            driver.clone(),
+                            observer.clone(),
                         );
-                        // the seal is a subprocess and runs with
-                        // the lock released.
-                        let published =
-                            tree.record_host_cancellation(agent_id).and_then(|value| {
-                                driver.apply_recorded(tree, agent_id).map(|()| value)
-                            });
-                        if let Err(error) = published {
-                            tree.record_fault(agent_id, error.message);
-                            return;
+                        move |tree| {
+                            let (identity, agent_id, driver, observer) =
+                                (&identity, &agent_id, &driver, &observer);
+                            if !identity.still_owns(tree, agent_id) {
+                                return;
+                            }
+                            tree.record_fault(
+                                agent_id,
+                                "the turn was cancelled outside the host; nothing interrupted it",
+                            );
+                            // the seal is a subprocess and runs with
+                            // the lock released.
+                            let published =
+                                tree.record_host_cancellation(agent_id).and_then(|value| {
+                                    driver.apply_recorded(tree, agent_id).map(|()| value)
+                                });
+                            if let Err(error) = published {
+                                tree.record_fault(agent_id, error.message);
+                                return;
+                            }
+                            tree.try_emit_tree_node_detached(
+                                observer.as_ref(),
+                                agent_id,
+                                crate::agent_tree::NodeDetach::Failed,
+                            );
                         }
-                        tree.try_emit_tree_node_detached(
-                            observer.as_ref(),
-                            agent_id,
-                            crate::agent_tree::NodeDetach::Failed,
-                        );
-}
-})
-                    .await.map(|((), effects)| effects)
+                    })
+                    .await
+                    .map(|((), effects)| effects)
                     .unwrap_or_default();
                 settle_or_fault(&driver, pending, &agent_id).await;
                 retire_live_child(&driver, &live, &agent_id, completed_turn).await;
@@ -503,7 +513,8 @@ if !identity.still_owns(tree, agent_id) {
                             cancelled,
                             true,
                             observer.as_ref(),
-                        ).await;
+                        )
+                        .await;
                         retire_live_child(&driver, &live, &agent_id, completed_turn).await;
                         break;
                     }
@@ -544,7 +555,8 @@ if !identity.still_owns(tree, agent_id) {
                             cancelled,
                             submitted,
                             observer.as_ref(),
-                        ).await;
+                        )
+                        .await;
                         retire_live_child(&driver, &live, &agent_id, completed_turn).await;
                         break;
                     }
@@ -565,7 +577,8 @@ if !identity.still_owns(tree, agent_id) {
                         cancelled,
                         true,
                         observer.as_ref(),
-                    ).await;
+                    )
+                    .await;
                     retire_live_child(&driver, &live, &agent_id, completed_turn).await;
                     break;
                 }
@@ -592,7 +605,7 @@ if !identity.still_owns(tree, agent_id) {
             }
         }
         registration.release().await;
-    });
+    })
 }
 
 /// Spec 03 §9: an interrupt cancels this turn and nothing more. The node

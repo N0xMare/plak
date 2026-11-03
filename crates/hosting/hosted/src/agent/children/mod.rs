@@ -77,7 +77,7 @@ pub(super) use turns::{
 };
 pub(super) use waiter::{
     ChildFeedSource, FailedTurnWaits, TurnWaiterRegistration, finalize_child_failure,
-    read_finalize_terminal, spawn_topology_turn_waiter, wait_resume_gate,
+    read_finalize_terminal, turn_watch, wait_resume_gate,
 };
 #[cfg(test)]
 pub(super) use waiter::{child_turn_was_cancelled, start_instruction_turn, transient_resume_bound};

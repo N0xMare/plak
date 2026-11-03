@@ -848,7 +848,7 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
             };
             let live_child = super::super::live::ChildActorHandle::new(
                 &crate::TaskSet::new(),
-                &crate::TaskSet::new(),
+                &runtime.driver().release_owners(),
                 AttachedCodingSession {
                     output_bound_rederived: None,
                     reachability_probe: None,
@@ -861,13 +861,14 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                 turn,
                 control,
             );
+            let watcher = live_child.watcher();
             assert!(
                 runtime
                     .try_occupy_live(child.clone(), Box::new(live_child))
                     .await
                     .is_ok()
             );
-            spawn_topology_turn_waiter(
+            watcher.watch(
                 TurnWaiterRegistration::register(runtime.driver(), &child)
                     .await
                     .unwrap(),

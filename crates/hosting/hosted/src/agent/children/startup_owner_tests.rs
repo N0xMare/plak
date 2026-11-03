@@ -98,20 +98,24 @@ async fn a_startup_in_flight_at_the_last_lease_shutdown_finishes_its_release() {
 /// Every spawn in the files that own child sessions is a release owner, at
 /// exactly these sites, so moving one onto the abortable tree task set (or a
 /// bare `tokio::spawn`) fails here. The other spawns are a local JoinSet
-/// its caller joins and the thread a dropped turn waiter registration leaves
-/// on.
+/// its caller joins, the thread a dropped turn waiter registration leaves
+/// on, and the child's actor, which every production caller starts on the
+/// driver's release owners.
 #[test]
 fn child_owner_spawns_stay_release_owners() {
-    let files: [(&str, &str, usize); 5] = [
+    let files: [(&str, &str, usize); 6] = [
         ("bind.rs", include_str!("bind.rs"), 3),
         ("turns.rs", include_str!("turns.rs"), 2),
-        ("waiter.rs", include_str!("waiter.rs"), 3),
+        ("waiter.rs", include_str!("waiter.rs"), 2),
+        ("live.rs", include_str!("../live.rs"), 0),
         ("deliver.rs", include_str!("deliver.rs"), 1),
         ("park.rs", include_str!("../park.rs"), 1),
     ];
     let allowed = [
         ("turns.rs", "retirements.spawn"),
         ("waiter.rs", "leaver.spawn"),
+        // The child's actor, on the release owners its constructor is given.
+        ("live.rs", "owners.spawn"),
     ];
     for (name, source, owners) in files {
         let code = source.split_whitespace().collect::<String>();
