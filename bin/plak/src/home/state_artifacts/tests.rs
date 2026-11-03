@@ -1244,7 +1244,7 @@ fn current_schema_tree_allows_prune_and_doctor_inventory() {
     );
     let db = rusqlite::Connection::open(paths.subagents_database()).unwrap();
     db.execute(
-        "INSERT INTO agent_trees VALUES(?1,'root',1,1,'live','single_lease','tuple',?2,'{}')",
+        "INSERT INTO agent_trees VALUES(?1,'root',1,1,'live','single_lease','tuple',?2,'{}',0,NULL)",
         rusqlite::params![record.id, repo.path().display().to_string()],
     )
     .unwrap();
@@ -1252,7 +1252,7 @@ fn current_schema_tree_allows_prune_and_doctor_inventory() {
         rusqlite::params![record.id, copy.display().to_string()]).unwrap();
     // Current inventory owns this shared legacy artifact by its recorded
     // branch, not by applying legacy naming to the copy directory.
-    db.execute("INSERT INTO agent_nodes(tree_id,agent_id,parent_agent_id,depth,description,prompt,output_schema_json,schema_digest,tuple_id,account,status,workspace_id,tier,path,branch,active_turn) VALUES(?1,'c1','root',1,'worker','task','{}','digest','tuple','account','running','workspace','mutate',?2,'plak/old-c1',0)",
+    db.execute("INSERT INTO agent_nodes(tree_id,agent_id,parent_agent_id,depth,description,prompt,output_schema_json,schema_digest,tuple_id,account,status,workspace_id,tier,path,branch,active_turn,epoch_no) VALUES(?1,'c1','root',1,'worker','task','{}','digest','tuple','account','running','workspace','mutate',?2,'plak/old-c1',0,0)",
         rusqlite::params![record.id, copy.display().to_string()]).unwrap();
     drop(db);
     let unowned = repo.path().join(".plak/worktrees/unowned");

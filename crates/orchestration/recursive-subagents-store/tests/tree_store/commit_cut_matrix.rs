@@ -543,6 +543,9 @@ fn snapshot(tree: &ProductAgentTree) -> Value {
             "agent_messages",
             "agent_nodes",
             "agent_operations",
+            "agent_tree_custody",
+            "agent_tree_epochs",
+            "agent_tree_runner_ancestors",
             "agent_trees",
             "agent_workspaces"
         ]

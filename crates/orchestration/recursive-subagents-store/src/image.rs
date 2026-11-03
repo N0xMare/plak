@@ -6,8 +6,9 @@
 //! trusted only while `PRAGMA data_version` is unchanged, that is while no
 //! other connection has committed to the file since.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use plakous_recursive_subagents::epoch::OrchestrationSnapshot;
 use plakous_recursive_subagents::protocol::{AttemptId, CandidateId, TopologyGrant};
 use plakous_recursive_subagents::tree::{
     AgentCommand, AttemptRecord, CandidateRecord, MailRecord, NodeRecord, OperationRecord,
@@ -29,6 +30,8 @@ pub(crate) struct TreeImage {
     operations: BTreeMap<String, OperationRecord>,
     commands: BTreeMap<String, AgentCommand>,
     feed_cursors: BTreeMap<String, u64>,
+    epochs: BTreeMap<u64, OrchestrationSnapshot>,
+    runner_ancestors: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl TreeImage {
@@ -46,6 +49,8 @@ impl TreeImage {
             operations: tree.operations().clone(),
             commands: tree.commands().clone(),
             feed_cursors: tree.feed_cursors().clone(),
+            epochs: tree.epochs().successors.clone(),
+            runner_ancestors: tree.runner_ancestors().clone(),
         }
     }
 
@@ -81,6 +86,8 @@ impl TreeImage {
             operations: Changes::between(&self.operations, tree.operations()),
             commands: Changes::between(&self.commands, tree.commands()),
             feed_cursors: Changes::between(&self.feed_cursors, tree.feed_cursors()),
+            epochs: Changes::between(&self.epochs, &tree.epochs().successors),
+            runner_ancestors: Changes::between(&self.runner_ancestors, tree.runner_ancestors()),
         };
         delta.nodes.upsert(tx, tree_id)?;
         delta.grants.replace(tx, tree_id)?;
@@ -91,6 +98,8 @@ impl TreeImage {
         delta.operations.replace(tx, tree_id)?;
         delta.commands.replace(tx, tree_id)?;
         delta.feed_cursors.replace(tx, tree_id)?;
+        delta.epochs.replace(tx, tree_id)?;
+        delta.runner_ancestors.replace(tx, tree_id)?;
         delta.nodes.delete(tx, tree_id)?;
         Ok(delta)
     }
@@ -107,6 +116,8 @@ pub(crate) struct Delta<'t> {
     operations: Changes<'t, OperationRecord>,
     commands: Changes<'t, AgentCommand>,
     feed_cursors: Changes<'t, u64>,
+    epochs: Changes<'t, OrchestrationSnapshot>,
+    runner_ancestors: Changes<'t, BTreeSet<String>>,
 }
 
 impl Delta<'_> {
@@ -122,6 +133,8 @@ impl Delta<'_> {
         self.operations.fold_into(&mut image.operations);
         self.commands.fold_into(&mut image.commands);
         self.feed_cursors.fold_into(&mut image.feed_cursors);
+        self.epochs.fold_into(&mut image.epochs);
+        self.runner_ancestors.fold_into(&mut image.runner_ancestors);
     }
 }
 

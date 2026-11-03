@@ -1109,8 +1109,10 @@ internal process-dispatch seam, runtime checkpoints and codecs, the session
 store, the durable session runtime and driver endpoint, opaque invocation and
 turn-result construction, credential byte exposure, family transports, Standard
 integration authority, family-artifact sealing, the raw Anthropic transport,
-the OpenRouter model lane, xAI Platform authority, and the local composition
-session. The hosted construction pins provide every required factory method
+the OpenRouter model lane, xAI Platform authority, the local composition
+session, and tree custody liveness, whose external implementation must fail the
+sealed `CustodyLiveness` bound with E0277 so no crate outside the tree can mint
+a `HolderGone`. The hosted construction pins provide every required factory method
 but must fail the sealed `RuntimeFactory` bound with E0277, and must fail direct
 `RegisteredRuntimeAuthority(())` construction with E0423. Their dependency
 probe first proves the hosted types remain nameable without test support;
@@ -1230,7 +1232,7 @@ The `tests/` tree holds the consumer packages:
 | `tests/support/plakous-test-support` | `plakous-test-support` | Scripted models and tools, scenario and barrier helpers, conformance drivers. Reachable only through the public `plakous-model` and `plakous-tools` contracts; never reexported by the facade |
 | `tests/harnesses/offline-crash` | `plakous-offline-crash-harness` | Public-facade SQLite `SIGKILL`/reopen matrices, and the declarative offline model script (§2.6). Depends on `plakous` with `sessions-sqlite` and exports narrow loopback builders to `plak` as a dev-dependency, and as a `test-hooks`-only optional dependency. Its finalization-debt fixture uses `plakous-agent` and `plakous-store` to commit a real debt-only checkpoint for hosted recovery tests without exposing checkpoint internals to the hosted crate |
 | `tests/fixtures/{agent,facade,model,tools}-consumer` | not workspace members for the first two | The supported external workflow inventories driven by `check_public_compile.py` |
-| `tests/fixtures/authority-negative` | — | The 26 compile-fail import pins |
+| `tests/fixtures/authority-negative` | — | The 28 compile-fail pins |
 | `tests/performance/baselines` | — | The perf-smoke seed rows and the allocation probe |
 | `tests/live` | — | The live drivers, the status page, and the pre-release bar (§3.2, §3.4) |
 
@@ -1974,7 +1976,7 @@ Conflict laws run the real topology tool with distinct operation ids, then
 present its terminals with reused, absent and empty display ids. Every
 operation retains one keyed conflict notice and its own whole path; conflict
 facts still cross the existing process-local tool boundary, not a new store
-encoding. Product schema 36, tree schema 9 and export v11 importing v10 stay
+encoding. Product schema 36, tree schema 10 and export v11 importing v10 stay
 unchanged by these notice corrections.
 The bounded result-mail observation law requires start and finished milestones
 before its result row even on the first read. The spawn/wait/adopt parity

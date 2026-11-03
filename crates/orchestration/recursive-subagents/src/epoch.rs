@@ -81,6 +81,12 @@ pub struct RosterBinding {
     /// Whether the card's capability line may name the model. Off by default,
     /// so a spawn menu never leaks the roster's bind.
     pub show_model: bool,
+    /// The runner a child on this card is placed on, by name; `None` places
+    /// it on its parent's runner. Inside the snapshot and its digest only
+    /// when set, so a card without one keeps the encoding and digest it
+    /// always had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
 }
 
 impl RosterBinding {
@@ -108,6 +114,7 @@ impl RosterBinding {
             on_mint: None,
             env: BTreeMap::new(),
             show_model: false,
+            runner: None,
         }
     }
 

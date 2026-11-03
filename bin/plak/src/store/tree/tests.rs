@@ -618,12 +618,12 @@ fn orchestration_snapshot_roundtrip_preserves_max_depth_and_digest() {
 /// card and each card's `spawns` list come back exactly, under the same
 /// digest.
 #[test]
-fn a_nested_spawn_roster_round_trips_at_tree_schema_9() {
+fn a_nested_spawn_roster_round_trips_at_tree_schema_10() {
     use crate::product_config::{AgentTemplate, ProductConfig};
     use plakous_hosted::agent_tree::ProductAgentTree;
     use plakous_hosted::agent_tree_protocol::{TemplateName, WorkingSet, WriterMode};
 
-    assert_eq!(plakous_recursive_subagents_store::SCHEMA_VERSION, 9);
+    assert_eq!(plakous_recursive_subagents_store::SCHEMA_VERSION, 10);
     let name = |name: &str| TemplateName::parse(name).unwrap();
     let card = |spawns: Vec<TemplateName>| AgentTemplate {
         account: "codex".to_owned(),

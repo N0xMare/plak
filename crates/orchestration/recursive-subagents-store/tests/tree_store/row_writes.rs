@@ -11,19 +11,20 @@
 #![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used, reason = "deterministic offline law fixtures")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use plakous_recursive_subagents::epoch::OrchestrationSnapshot;
 use plakous_recursive_subagents::protocol::{
     AttemptId, AttemptStatus, CandidateId, MessagePriority, MessagePurpose, NodeStatus,
     SpawnAgentRequest, SpawnWorkspace, Tier, TopologyGrant, TreeAdmissionState, WriterMode,
 };
 use plakous_recursive_subagents::tree::{
     AgentCommand, AgentCommandKind, AttemptRecord, CandidateRecord, CommandFact, FakeVcs,
-    FoldAnchor, MailDisposition, MailDurableState, MailRecord, NodeRecord, OperationRecord,
-    PersistedTree, ProductAgentTree, TreeStore, TreeStoreError, TreeStoreErrorKind,
-    WorkspaceRecord, fence_revision,
+    FoldAnchor, ForkedFrom, MailDisposition, MailDurableState, MailRecord, NodeLineId,
+    NodePlacement, NodeRecord, NodeWorkspace, OperationRecord, PersistedTree, ProductAgentTree,
+    TreeEpochs, TreeStore, TreeStoreError, TreeStoreErrorKind, WorkspaceRecord, fence_revision,
 };
 use plakous_recursive_subagents_store::{SqliteTreeStore, rows};
 use proptest::prelude::*;
@@ -45,6 +46,8 @@ const TABLES: &[(&str, &str)] = &[
     ("agent_operations", "operation_id"),
     ("agent_commands", "command_id"),
     ("agent_feed_cursors", "runtime_session_id"),
+    ("agent_tree_epochs", "epoch_no"),
+    ("agent_tree_runner_ancestors", "runner_id"),
 ];
 
 /// Every column of every row of one tree, ordered by key.
@@ -180,6 +183,15 @@ fn request_key(slot: u8) -> String {
     format!("key-{slot}")
 }
 
+/// One canonical line id per node slot: a line maps to one node.
+fn line_id(slot: u8) -> NodeLineId {
+    NodeLineId::parse(&format!(
+        "00000000-0000-4000-8000-{:012x}",
+        u32::from(slot) + 1
+    ))
+    .unwrap()
+}
+
 fn node_id(slot: u8) -> String {
     if slot == 0 {
         ROOT.to_owned()
@@ -204,6 +216,9 @@ struct Model {
     operations: BTreeMap<String, OperationRecord>,
     commands: BTreeMap<String, AgentCommand>,
     cursors: BTreeMap<String, u64>,
+    forked_from: Option<ForkedFrom>,
+    epochs: BTreeMap<u64, OrchestrationSnapshot>,
+    ancestors: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Model {
@@ -226,6 +241,9 @@ impl Model {
             operations: BTreeMap::new(),
             commands: BTreeMap::new(),
             cursors: BTreeMap::new(),
+            forked_from: None,
+            epochs: BTreeMap::new(),
+            ancestors: BTreeMap::new(),
         }
     }
 
@@ -246,6 +264,21 @@ impl Model {
                 node.active_turn = seed.is_multiple_of(2);
                 node.fold_order = (!seed.is_multiple_of(3)).then_some(u64::from(seed % 7));
                 node.session_locator = seed.is_multiple_of(4).then(|| text("locator", seed));
+                node.line_id = seed.is_multiple_of(2).then(|| line_id(slot));
+                node.placement = if seed.is_multiple_of(3) {
+                    NodePlacement {
+                        runner_id: Some(text("runner", seed)),
+                        workspace: Some(NodeWorkspace {
+                            root: PathBuf::from(text("root", seed)),
+                            cwd: PathBuf::from(text("cwd", seed)),
+                        }),
+                    }
+                } else {
+                    NodePlacement::default()
+                };
+                node.parent_composition = seed
+                    .is_multiple_of(5)
+                    .then(|| serde_json::from_value(serde_json::json!("js-ptc")).unwrap());
                 self.nodes.insert(node.agent_id.clone(), node);
             }
             1 => {
@@ -408,9 +441,21 @@ impl Model {
                 command.accepted_seq = (seed % 2 == 1).then_some(1 + u64::from(seed % 9));
                 self.commands.insert(command.command_id.clone(), command);
             }
-            _ => {
+            8 => {
                 self.cursors
                     .insert(format!("session-{slot}"), u64::from(seed));
+            }
+            9 => {
+                let mut snapshot = templates.tree.snapshot.clone();
+                snapshot.transient_resumes = (seed % 3) as u8;
+                snapshot.digest = snapshot.compute_digest();
+                self.epochs.insert(1 + u64::from(slot), snapshot);
+            }
+            _ => {
+                self.ancestors.insert(
+                    format!("runner-{slot}"),
+                    (0..seed % 4).map(|index| text("commit", index)).collect(),
+                );
             }
         }
     }
@@ -449,8 +494,14 @@ impl Model {
             7 => {
                 self.commands.remove(&format!("cmd{slot}"));
             }
-            _ => {
+            8 => {
                 self.cursors.remove(&format!("session-{slot}"));
+            }
+            9 => {
+                self.epochs.remove(&(1 + u64::from(slot)));
+            }
+            _ => {
+                self.ancestors.remove(&format!("runner-{slot}"));
             }
         }
     }
@@ -489,6 +540,19 @@ impl Model {
         ][(seed % 3) as usize];
         self.host_generation = 1 + u64::from(seed % 5);
         self.selected_tuple = format!("tuple-{}", seed % 3);
+        self.forked_from = match seed % 3 {
+            0 => None,
+            1 => Some(ForkedFrom::Node {
+                tree_id: text("source-tree", seed),
+                agent_id: ROOT.to_owned(),
+                line_id: line_id(0),
+                branch_id: line_id(9).to_string(),
+                epoch_no: u64::from(seed % 2),
+            }),
+            _ => Some(ForkedFrom::Import {
+                provenance: text("imported", seed),
+            }),
+        };
     }
 
     fn tree(&self, templates: &Templates, tree_id: &str, stored_revision: u64) -> ProductAgentTree {
@@ -535,6 +599,14 @@ impl Model {
             operations,
         )
         .with_feed_rows(self.commands.clone(), self.cursors.clone())
+        .with_lineage_rows(
+            TreeEpochs {
+                current: 0,
+                successors: self.epochs.clone(),
+            },
+            self.forked_from.clone(),
+            self.ancestors.clone(),
+        )
         .rows()
         .clone();
         tree.stored_revision = stored_revision;
@@ -568,8 +640,8 @@ enum Step {
 
 fn step() -> impl Strategy<Value = Step> {
     prop_oneof![
-        6 => (0..9_u8, 0..5_u8, any::<u32>()).prop_map(|(table, slot, seed)| Step::Put { table, slot, seed }),
-        2 => (0..9_u8, 0..5_u8).prop_map(|(table, slot)| Step::Remove { table, slot }),
+        6 => (0..11_u8, 0..5_u8, any::<u32>()).prop_map(|(table, slot, seed)| Step::Put { table, slot, seed }),
+        2 => (0..11_u8, 0..5_u8).prop_map(|(table, slot)| Step::Remove { table, slot }),
         1 => any::<u32>().prop_map(|seed| Step::Header { seed }),
         4 => any::<bool>().prop_map(|bump| Step::Save { bump }),
         1 => any::<bool>().prop_map(|ahead| Step::Stale { ahead }),
@@ -726,6 +798,9 @@ impl Harness {
         assert_eq!(loaded.commands(), expected.commands());
         assert_eq!(loaded.feed_cursors(), expected.feed_cursors());
         assert_eq!(loaded.nodes(), expected.nodes());
+        assert_eq!(loaded.epochs(), expected.epochs());
+        assert_eq!(loaded.forked_from(), expected.forked_from());
+        assert_eq!(loaded.runner_ancestors(), expected.runner_ancestors());
         let tx = self.reference.0.unchecked_transaction().unwrap();
         let whole = rows::load_agent_tree(&tx, TREE).unwrap().unwrap();
         assert_eq!(whole.rows().attempts(), expected.attempts());

@@ -282,7 +282,10 @@ impl ProductAgentTree {
                 self.record_operator_intent(
                     &id,
                     node.attempt_id.clone(),
-                    super::operator_intents::Decision::Interrupt { effective: true },
+                    super::operator_intents::Decision::Interrupt {
+                        effective: true,
+                        cause: None,
+                    },
                 )?;
                 interrupted.push(id);
             }

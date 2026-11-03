@@ -18,6 +18,34 @@ fn an_epoch_without_tools_keeps_its_pre_tool_encoding_and_digest() {
     assert!(!json.contains("tool_sections"));
 }
 
+/// A card's runner is placement authority: set, it is inside the stored
+/// snapshot and rolls the digest; unset, the card encodes as it always did.
+#[test]
+fn a_card_runner_is_inside_the_snapshot_and_digest_only_when_set() {
+    let base = RosterInput::test_working_set("fixture-tuple");
+    let plain = OrchestrationSnapshot::freeze(base.clone());
+    assert!(
+        !serde_json::to_string(&plain)
+            .unwrap()
+            .contains("\"runner\"")
+    );
+
+    let mut placed = base;
+    let review = TemplateName::parse("review").unwrap();
+    placed.templates.get_mut(&review).unwrap().runner = Some("build-box".to_owned());
+    let placed = OrchestrationSnapshot::freeze(placed);
+    assert_ne!(placed.digest, plain.digest);
+    assert!(placed.digest_matches());
+    let json = serde_json::to_string(&placed).unwrap();
+    assert!(json.contains(r#""runner":"build-box""#));
+    let back: OrchestrationSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, placed);
+    assert_eq!(
+        back.binding(&review).unwrap().runner.as_deref(),
+        Some("build-box")
+    );
+}
+
 /// A card's tool list and the frozen tool tables are bind authority:
 /// both roll the digest, both round-trip through the stored JSON.
 #[test]

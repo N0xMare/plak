@@ -10,8 +10,8 @@ use std::collections::BTreeSet;
 use super::{
     AbandonedChildTurn, Arc, AttemptFailure, AttemptId, AttemptRecord, AttemptScopedRequest,
     AttemptStatus, BlockedReason, CandidateId, FollowupRollback, MAX_DIRECT_CHILDREN,
-    MAX_PENDING_SPAWNS, MAX_TREE_DEPTH, MAX_TREE_NODES, MintedCopy, NodeDetach, NodeRecord,
-    NodeStatus, ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest,
+    MAX_PENDING_SPAWNS, MAX_TREE_DEPTH, MAX_TREE_NODES, MintedCopy, NodeDetach, NodePlacement,
+    NodeRecord, NodeStatus, ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest,
     SpawnIdentity, SpawnReservation, SubmitNudgeBudget, SubmitResultOutput, SubmitResultRequest,
     TemplateName, TopologyError, TopologyErrorCode, TopologyGrant, TopologyObserver,
     TreeAdmissionState, UsageRow, VcsError, VcsSnapshot, WorkspaceMode, WorkspacePlan,
@@ -67,6 +67,7 @@ impl ProductAgentTree {
             attempt_id,
             super::operator_intents::Decision::Interrupt {
                 effective: owned || parked,
+                cause: None,
             },
         )?;
         let status = self.node(&request.agent_id)?.status;

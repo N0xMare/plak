@@ -17,7 +17,10 @@ use std::sync::Mutex;
 
 use plakous_host_protocol::topology::CandidateId;
 
-use super::{ProductAgentTree, TopologyError, TopologyErrorCode};
+use super::{
+    CustodyClaim, CustodyError, CustodyHost, CustodyRecord, CustodyTake, HolderGone,
+    ProductAgentTree, TopologyError, TopologyErrorCode, TreeCustody,
+};
 
 /// Why a [`TreeStore`] call failed. The kinds are distinguished because
 /// they need different answers: retry, fail closed, or reload and re-apply.
@@ -181,6 +184,23 @@ impl PersistedTree {
         self
     }
 
+    /// Attaches the tree-schema-10 lineage rows a store read back: the
+    /// epochs, the fork provenance and the per-runner ancestors.
+    #[must_use]
+    pub fn with_lineage_rows(
+        mut self,
+        epochs: super::TreeEpochs,
+        forked_from: Option<super::ForkedFrom>,
+        runner_ancestors: BTreeMap<String, std::collections::BTreeSet<String>>,
+    ) -> Self {
+        self.0.lineage = super::TreeLineage {
+            epochs,
+            forked_from,
+            runner_ancestors,
+        };
+        self
+    }
+
     /// The raw rows, for a store that needs to inspect them (a revision
     /// fence, a conformance check) without reopening.
     #[must_use]
@@ -226,6 +246,7 @@ impl ProductAgentTree {
         );
         rows.commands.clone_from(&self.commands);
         rows.feed_cursors.clone_from(&self.feed_cursors);
+        rows.lineage.clone_from(&self.lineage);
         PersistedTree(rows)
     }
 }
@@ -323,6 +344,7 @@ pub fn fence_revision(
 #[derive(Default)]
 pub struct MemoryTreeStore {
     trees: Mutex<BTreeMap<String, ProductAgentTree>>,
+    custody: Mutex<BTreeMap<String, CustodyRecord>>,
 }
 
 impl MemoryTreeStore {
@@ -370,5 +392,78 @@ impl TreeStore for MemoryTreeStore {
             .lock()
             .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
         Ok(trees.get(tree_id).map(ProductAgentTree::to_persisted))
+    }
+}
+
+impl MemoryTreeStore {
+    fn with_custody<T>(
+        &self,
+        work: impl FnOnce(&mut BTreeMap<String, CustodyRecord>) -> Result<T, CustodyError>,
+    ) -> Result<T, CustodyError> {
+        let mut custody = self
+            .custody
+            .lock()
+            .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
+        work(&mut custody)
+    }
+}
+
+impl TreeCustody for MemoryTreeStore {
+    fn custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, TreeStoreError> {
+        let custody = self
+            .custody
+            .lock()
+            .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
+        Ok(custody.get(tree_id).cloned())
+    }
+
+    fn take_custody(
+        &self,
+        tree_id: &str,
+        host: &CustodyHost,
+        takeover: Option<&HolderGone>,
+    ) -> Result<CustodyClaim, CustodyError> {
+        self.with_custody(|custody| {
+            match CustodyRecord::take(
+                custody.get(tree_id),
+                tree_id,
+                host,
+                takeover,
+                plakous::model::now_unix_millis(),
+            )? {
+                CustodyTake::Held(claim) => Ok(claim),
+                CustodyTake::Claimed { record, claim } => {
+                    custody.insert(tree_id.to_owned(), record);
+                    Ok(claim)
+                }
+            }
+        })
+    }
+
+    fn renew_custody(&self, claim: &CustodyClaim) -> Result<(), CustodyError> {
+        self.with_custody(|custody| {
+            let record = CustodyRecord::renew(
+                custody.get(&claim.tree_id),
+                claim,
+                plakous::model::now_unix_millis(),
+            )?;
+            custody.insert(claim.tree_id.clone(), record);
+            Ok(())
+        })
+    }
+
+    fn release_custody(&self, claim: &CustodyClaim) -> Result<(), CustodyError> {
+        self.with_custody(|custody| {
+            if let Some(record) = CustodyRecord::release(custody.get(&claim.tree_id), claim)? {
+                custody.insert(claim.tree_id.clone(), record);
+            }
+            Ok(())
+        })
+    }
+
+    fn prove_custody(&self, claim: &CustodyClaim) -> Result<(), CustodyError> {
+        self.with_custody(|custody| {
+            CustodyRecord::prove(custody.get(&claim.tree_id), claim).map(|_| ())
+        })
     }
 }

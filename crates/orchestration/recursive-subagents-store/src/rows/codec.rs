@@ -1,13 +1,16 @@
 //! The per-table row codecs a save writes: each persisted map's table, key
 //! and column values.
 
+use rusqlite::types::Value;
 use rusqlite::{Transaction, params};
 
+use plakous_recursive_subagents::epoch::OrchestrationSnapshot;
 use plakous_recursive_subagents::protocol::{AttemptId, CandidateId, TemplateName, TopologyGrant};
 use plakous_recursive_subagents::tree::{
-    AgentCommand, AttemptRecord, CandidateRecord, MailRecord, NodeRecord, OperationRecord,
-    WorkspaceRecord,
+    AgentCommand, AttemptRecord, CandidateRecord, MailRecord, NodeLineId, NodeRecord,
+    OperationRecord, WorkspaceRecord,
 };
+use std::collections::BTreeSet;
 
 use super::{agent_tree_enum_text, encode_id_list};
 use crate::to_i64;
@@ -58,13 +61,42 @@ impl Table {
     }
 }
 
+/// A persisted map's key as the `SQLite` value of its key column.
+pub(crate) trait RowKey: Ord + Clone {
+    fn sql(&self) -> Value;
+}
+
+impl RowKey for String {
+    fn sql(&self) -> Value {
+        Value::Text(self.clone())
+    }
+}
+
+impl RowKey for AttemptId {
+    fn sql(&self) -> Value {
+        Value::Text(self.as_str().to_owned())
+    }
+}
+
+impl RowKey for CandidateId {
+    fn sql(&self) -> Value {
+        Value::Text(self.as_str().to_owned())
+    }
+}
+
+/// An epoch number. Only keys a save already wrote through `to_i64` are ever
+/// deleted, so the fallback never names a stored row.
+impl RowKey for u64 {
+    fn sql(&self) -> Value {
+        Value::Integer(i64::try_from(*self).unwrap_or(i64::MAX))
+    }
+}
+
 /// The row codec of one persisted map: its key, its table, and its values in
 /// the table's column order.
 pub(crate) trait Row: Clone + PartialEq {
-    type Key: Ord + Clone;
+    type Key: RowKey;
     const TABLE: Table;
-
-    fn key_text(key: &Self::Key) -> &str;
 
     /// Executes `sql` with this row's parameters. The outer error is a value
     /// that does not encode; the inner one is `SQLite`'s.
@@ -112,12 +144,14 @@ impl Row for NodeRecord {
             "branch",
             "active_turn",
             "fold_order",
+            "line_id",
+            "epoch_no",
+            "runner_id",
+            "workspace_root",
+            "workspace_cwd",
+            "parent_composition",
         ],
     };
-
-    fn key_text(key: &Self::Key) -> &str {
-        key
-    }
 
     fn write(
         &self,
@@ -151,6 +185,20 @@ impl Row for NodeRecord {
                 node.branch,
                 i64::from(node.active_turn),
                 node.fold_order.map(to_i64).transpose()?,
+                node.line_id.as_ref().map(NodeLineId::as_str),
+                to_i64(node.epoch_no)?,
+                node.placement.runner_id,
+                node.placement
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.root.to_string_lossy().into_owned()),
+                node.placement
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.cwd.to_string_lossy().into_owned()),
+                node.parent_composition
+                    .map(agent_tree_enum_text)
+                    .transpose()?,
             ],
         ))
     }
@@ -180,6 +228,10 @@ impl Row for NodeRecord {
             branch,
             active_turn,
             fold_order,
+            line_id,
+            epoch_no,
+            placement,
+            parent_composition,
             abandoned_turn: _,
         } = self;
         *agent_id == other.agent_id
@@ -202,6 +254,10 @@ impl Row for NodeRecord {
             && *branch == other.branch
             && *active_turn == other.active_turn
             && *fold_order == other.fold_order
+            && *line_id == other.line_id
+            && *epoch_no == other.epoch_no
+            && *placement == other.placement
+            && *parent_composition == other.parent_composition
     }
 }
 
@@ -225,10 +281,6 @@ impl Row for TopologyGrant {
             "close_ids",
         ],
     };
-
-    fn key_text(key: &Self::Key) -> &str {
-        key
-    }
 
     fn write(
         &self,
@@ -292,10 +344,6 @@ impl Row for AttemptRecord {
             "applied_terminal_read_seqs",
         ],
     };
-
-    fn key_text(key: &Self::Key) -> &str {
-        key.as_str()
-    }
 
     fn write(
         &self,
@@ -437,10 +485,6 @@ impl Row for CandidateRecord {
         ],
     };
 
-    fn key_text(key: &Self::Key) -> &str {
-        key.as_str()
-    }
-
     fn write(
         &self,
         tx: &Transaction<'_>,
@@ -511,10 +555,6 @@ impl Row for WorkspaceRecord {
         ],
     };
 
-    fn key_text(key: &Self::Key) -> &str {
-        key
-    }
-
     fn write(
         &self,
         tx: &Transaction<'_>,
@@ -570,10 +610,6 @@ impl Row for MailRecord {
         ],
     };
 
-    fn key_text(key: &Self::Key) -> &str {
-        key
-    }
-
     fn write(
         &self,
         tx: &Transaction<'_>,
@@ -618,10 +654,6 @@ impl Row for OperationRecord {
             "fold_order",
         ],
     };
-
-    fn key_text(key: &Self::Key) -> &str {
-        key
-    }
 
     fn write(
         &self,
@@ -673,10 +705,6 @@ impl Row for AgentCommand {
         ],
     };
 
-    fn key_text(key: &Self::Key) -> &str {
-        key
-    }
-
     fn write(
         &self,
         tx: &Transaction<'_>,
@@ -713,10 +741,6 @@ impl Row for u64 {
         columns: &["tree_id", "runtime_session_id", "applied_seq"],
     };
 
-    fn key_text(key: &Self::Key) -> &str {
-        key
-    }
-
     fn write(
         &self,
         tx: &Transaction<'_>,
@@ -725,5 +749,52 @@ impl Row for u64 {
         session: &Self::Key,
     ) -> Result<rusqlite::Result<usize>, String> {
         Ok(tx.execute(sql, params![tree_id, session, to_i64(*self)?]))
+    }
+}
+
+/// A successor epoch: its frozen snapshot, keyed by epoch number.
+impl Row for OrchestrationSnapshot {
+    type Key = u64;
+    const TABLE: Table = Table {
+        name: "agent_tree_epochs",
+        noun: "agent tree epoch",
+        columns: &["tree_id", "epoch_no", "snapshot_json", "digest"],
+    };
+
+    fn write(
+        &self,
+        tx: &Transaction<'_>,
+        sql: &str,
+        tree_id: &str,
+        epoch_no: &Self::Key,
+    ) -> Result<rusqlite::Result<usize>, String> {
+        let snapshot_json = serde_json::to_string(self)
+            .map_err(|_| "agent tree epoch snapshot is not serializable".to_owned())?;
+        Ok(tx.execute(
+            sql,
+            params![tree_id, to_i64(*epoch_no)?, snapshot_json, self.digest],
+        ))
+    }
+}
+
+/// The commits one runner already holds for the tree, keyed by runner id.
+impl Row for BTreeSet<String> {
+    type Key = String;
+    const TABLE: Table = Table {
+        name: "agent_tree_runner_ancestors",
+        noun: "agent tree runner ancestor",
+        columns: &["tree_id", "runner_id", "commits"],
+    };
+
+    fn write(
+        &self,
+        tx: &Transaction<'_>,
+        sql: &str,
+        tree_id: &str,
+        runner_id: &Self::Key,
+    ) -> Result<rusqlite::Result<usize>, String> {
+        let commits = serde_json::to_string(self)
+            .map_err(|_| "runner ancestors are not serializable".to_owned())?;
+        Ok(tx.execute(sql, params![tree_id, runner_id, commits]))
     }
 }

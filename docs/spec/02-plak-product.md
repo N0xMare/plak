@@ -272,11 +272,11 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r27.e35.p36.t9/             this build's state (§2.5)
+    r27.e35.p36.t10/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 35
       product.sqlite3             Plak intents and feed-derived views, schema 36
-      subagents.sqlite3           the agent tree, schema 9
+      subagents.sqlite3           the agent tree, schema 10
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
@@ -818,7 +818,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r27.e35.p36.t9`. The key is derived from the stores'
+schema>`, for example `r27.e35.p36.t10`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup. State-directory
@@ -892,9 +892,9 @@ are maintenance inventory, never session opens or resume authority. Maintenance
 inventory accepts tree schemas from 1 through the tree store's current
 `SCHEMA_VERSION`, including the current-key store; unknown versions fail closed.
 For schemas through 8 it derives legacy `refs/heads/plak/<directory>` names;
-schema 9 reads recorded Git branches from `agent_nodes.branch`, including
-`plak/<tree8>/<agent>`, and inventories base, candidate-base and adoption pins.
-Schema 9 also derives child outputs from submitted intents rather than an
+schemas 9 and 10 read recorded Git branches from `agent_nodes.branch`, including
+`plak/<tree8>/<agent>`, and inventory base, candidate-base and adoption pins.
+Schemas 9 and 10 also derive child outputs from submitted intents rather than an
 attempt output column; the export document does not carry tree rows.
 Doctor uses the same version bound for its unowned-worktree inventory. Current
 sessions and their lineage, including carried-forward source ids in the

@@ -10,7 +10,8 @@
 //! [`admission`] holds the single-file `SQLite` admission steps this store
 //! shares with the product store, [`database`] owns the file and its
 //! descriptors, [`rows`] the codecs, `image` the row-level diff against the
-//! last acknowledged save, and [`store`] the `TreeStore` port over them. The
+//! last acknowledged save, [`store`] the `TreeStore` port over them, and
+//! `custody` the store's `TreeCustody` over the custody record. The
 //! tree tables are separate from `product.sqlite3`: the two files carry their
 //! own schema versions; no transaction spans both.
 
@@ -20,6 +21,7 @@
 )]
 
 pub mod admission;
+mod custody;
 pub mod database;
 mod image;
 pub mod rows;

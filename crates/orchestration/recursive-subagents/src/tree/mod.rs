@@ -652,8 +652,10 @@ pub struct ProductAgentTree {
     /// and every adopt lands back onto it.
     pub launch_checkout: PathBuf,
     /// This epoch's frozen bind authority: root bind, bounds, working set,
-    /// and the product's account roster.
+    /// and the product's account roster. Epoch 0 of [`Self::epochs`].
     pub snapshot: OrchestrationSnapshot,
+    /// The epochs, the fork provenance and the per-runner ancestors.
+    lineage: TreeLineage,
     nodes: BTreeMap<String, NodeRecord>,
     grants: BTreeMap<String, TopologyGrant>,
     attempts: BTreeMap<AttemptId, AttemptRecord>,
@@ -792,16 +794,19 @@ mod await_output;
 mod candidates;
 mod commands;
 mod conflicts;
+mod custody;
 mod dormancy;
 mod effect_outcomes;
 mod epoch;
 mod feed;
 mod followup;
+mod intents;
 mod lifecycle;
+mod lineage;
 mod mail;
 pub mod observer;
 mod operator_intents;
-pub use operator_intents::submitted_output;
+pub use operator_intents::{InterruptCause, interrupt_cause, submitted_output};
 mod park;
 mod projection;
 mod projector;
@@ -821,7 +826,17 @@ pub use await_output::{
 };
 pub use candidates::{AdoptFacts, AdoptProbe, merge_conflict_message};
 pub use commands::{AgentCommand, AgentCommandKind, CommandFact, MAX_TREE_COMMANDS};
+pub use custody::{
+    CustodyClaim, CustodyError, CustodyHolding, CustodyHost, CustodyLiveness, CustodyRecord,
+    CustodyTake, HolderGone, HostInstance, TreeCustody, TreeHostedElsewhere,
+};
 pub use feed::TreeFeed;
+pub use intents::{
+    ContinuationAnchor, ContinuationCause, ContinuationDecision, ContinuationIntent, EpochPending,
+    TerminalRefusalIntent, VcsExpectedOutcome, VcsStageClass, VcsStageIntent, VcsStageKind,
+};
+use lineage::TreeLineage;
+pub use lineage::{ForkedFrom, NodeLineId, NodePlacement, NodeWorkspace, TreeEpochs};
 pub use observer::{NodeDetach, TopologyObserver};
 pub use park::WaitingOn;
 /// The recording VCS double, for the topology crates' tests at the cut.

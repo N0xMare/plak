@@ -1,4 +1,4 @@
-//! The ten `agent_*` row codecs.
+//! The twelve tree-row codecs.
 //!
 //! A whole tree in, a whole tree out, or single keyed rows for a row-level
 //! save, over one `rusqlite` transaction the caller hands in. It owns no
@@ -10,7 +10,7 @@ mod codec;
 
 use rusqlite::{OptionalExtension, Transaction, params};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use plakous_recursive_subagents::epoch::OrchestrationSnapshot;
@@ -19,11 +19,12 @@ use plakous_recursive_subagents::protocol::{
 };
 use plakous_recursive_subagents::tree::{
     AgentCommand, AttemptFailure, AttemptRecord, BlockedReason, CandidateRecord, FoldAnchor,
-    MailRecord, NodeRecord, OperationRecord, PersistedTree, ProductAgentTree, SubmitNudgeBudget,
-    TreeAdmissionState, TreeStoreError, UsageRow, WorkspaceRecord,
+    ForkedFrom, MailRecord, NodeLineId, NodePlacement, NodeRecord, NodeWorkspace, OperationRecord,
+    PersistedTree, ProductAgentTree, SubmitNudgeBudget, TreeAdmissionState, TreeEpochs,
+    TreeStoreError, UsageRow, WorkspaceRecord,
 };
 
-pub(crate) use codec::Row;
+pub(crate) use codec::{Row, RowKey};
 
 use crate::{from_i64, to_i64};
 
@@ -65,6 +66,8 @@ fn decode_id_list(value: &str) -> Result<Vec<String>, String> {
 /// never see a parent disappear under a child.
 pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
     for statement in [
+        "DELETE FROM agent_tree_runner_ancestors WHERE tree_id=?1",
+        "DELETE FROM agent_tree_epochs WHERE tree_id=?1",
         "DELETE FROM agent_feed_cursors WHERE tree_id=?1",
         "DELETE FROM agent_commands WHERE tree_id=?1",
         "DELETE FROM agent_messages WHERE tree_id=?1",
@@ -84,7 +87,8 @@ pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(),
 }
 
 /// Writes every row of one tree: the header, then nodes, grants, attempts,
-/// candidates, workspaces, mail and the operation ledger.
+/// candidates, workspaces, mail, the operation ledger, commands, feed
+/// cursors, successor epochs and runner ancestors.
 ///
 /// Each insert asserts it changed exactly one row, so a constraint that
 /// silently dropped a write fails the save instead of persisting a tree the
@@ -96,7 +100,7 @@ pub fn insert_agent_tree_rows(
     let header = Header::of(tree)?;
     let changed = tx
         .execute(
-            "INSERT INTO agent_trees(tree_id, root_agent_id, revision, host_generation, state, writer_mode, selected_tuple, launch_checkout, snapshot_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            "INSERT INTO agent_trees(tree_id, root_agent_id, revision, host_generation, state, writer_mode, selected_tuple, launch_checkout, snapshot_json, current_epoch, forked_from) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             params![
                 tree.tree_id,
                 tree.root_agent_id,
@@ -107,6 +111,8 @@ pub fn insert_agent_tree_rows(
                 tree.selected_tuple,
                 header.launch_checkout,
                 header.snapshot_json,
+                header.current_epoch,
+                header.forked_from,
             ],
         )
         .map_err(|error| crate::store::sqlite_write_error(error, "could not insert agent tree row".to_owned()))?;
@@ -122,7 +128,9 @@ pub fn insert_agent_tree_rows(
     insert_rows(tx, tree_id, tree.messages())?;
     insert_rows(tx, tree_id, tree.operations())?;
     insert_rows(tx, tree_id, tree.commands())?;
-    insert_rows(tx, tree_id, tree.feed_cursors())
+    insert_rows(tx, tree_id, tree.feed_cursors())?;
+    insert_rows(tx, tree_id, &tree.epochs().successors)?;
+    insert_rows(tx, tree_id, tree.runner_ancestors())
 }
 
 /// The compare-and-swap of a row-level save: rewrites the header only while
@@ -134,7 +142,7 @@ pub(crate) fn swap_agent_tree_header(
 ) -> Result<usize, TreeStoreError> {
     let header = Header::of(tree)?;
     tx.execute(
-        "UPDATE agent_trees SET root_agent_id=?2, revision=?3, host_generation=?4, state=?5, writer_mode=?6, selected_tuple=?7, launch_checkout=?8, snapshot_json=?9 WHERE tree_id=?1 AND revision=?10",
+        "UPDATE agent_trees SET root_agent_id=?2, revision=?3, host_generation=?4, state=?5, writer_mode=?6, selected_tuple=?7, launch_checkout=?8, snapshot_json=?9, current_epoch=?10, forked_from=?11 WHERE tree_id=?1 AND revision=?12",
         params![
             tree.tree_id,
             tree.root_agent_id,
@@ -145,6 +153,8 @@ pub(crate) fn swap_agent_tree_header(
             tree.selected_tuple,
             header.launch_checkout,
             header.snapshot_json,
+            header.current_epoch,
+            header.forked_from,
             to_i64(tree.stored_revision)?,
         ],
     )
@@ -160,6 +170,8 @@ struct Header {
     writer_mode: String,
     launch_checkout: String,
     snapshot_json: String,
+    current_epoch: i64,
+    forked_from: Option<String>,
 }
 
 impl Header {
@@ -172,6 +184,12 @@ impl Header {
             launch_checkout: tree.launch_checkout.to_string_lossy().into_owned(),
             snapshot_json: serde_json::to_string(&tree.snapshot)
                 .map_err(|_| "orchestration snapshot is not serializable".to_owned())?,
+            current_epoch: to_i64(tree.epochs().current)?,
+            forked_from: tree
+                .forked_from()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|_| "agent tree provenance is not serializable".to_owned())?,
         })
     }
 }
@@ -218,7 +236,7 @@ pub(crate) fn delete_row<R: Row>(
 ) -> Result<(), TreeStoreError> {
     let noun = R::TABLE.noun;
     let changed = tx
-        .execute(sql, params![tree_id, R::key_text(key)])
+        .execute(sql, params![tree_id, key.sql()])
         .map_err(|error| {
             crate::store::sqlite_write_error(error, format!("could not delete {noun} row"))
         })?;
@@ -240,7 +258,7 @@ pub fn load_agent_tree(
 ) -> Result<Option<PersistedTree>, String> {
     let header = tx
         .query_row(
-            "SELECT root_agent_id, revision, host_generation, state, writer_mode, selected_tuple, launch_checkout, snapshot_json FROM agent_trees WHERE tree_id=?1",
+            "SELECT root_agent_id, revision, host_generation, state, writer_mode, selected_tuple, launch_checkout, snapshot_json, current_epoch, forked_from FROM agent_trees WHERE tree_id=?1",
             [tree_id],
             |row| {
                 Ok((
@@ -252,6 +270,8 @@ pub fn load_agent_tree(
                     row.get::<_, String>(5)?,
                     PathBuf::from(row.get::<_, String>(6)?),
                     row.get::<_, String>(7)?,
+                    from_i64(row.get(8)?)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
@@ -266,6 +286,8 @@ pub fn load_agent_tree(
         selected_tuple,
         launch_checkout,
         snapshot_json,
+        current_epoch,
+        forked_from,
     )) = header
     else {
         return Ok(None);
@@ -284,6 +306,18 @@ pub fn load_agent_tree(
     restore_submitted_outputs(&operations, &mut attempts)?;
     let commands = load_commands(tx, tree_id)?;
     let feed_cursors = load_feed_cursors(tx, tree_id)?;
+    let epochs = TreeEpochs {
+        current: current_epoch,
+        successors: load_epochs(tx, tree_id)?,
+    };
+    if !epochs.is_coherent() || nodes.values().any(|node| !epochs.holds(node.epoch_no)) {
+        return Err("agent tree epoch rows are incoherent".to_owned());
+    }
+    let forked_from = forked_from
+        .map(|text| serde_json::from_str::<ForkedFrom>(&text))
+        .transpose()
+        .map_err(|_| "agent tree provenance is invalid".to_owned())?;
+    let runner_ancestors = load_runner_ancestors(tx, tree_id)?;
     Ok(Some(
         PersistedTree::from_rows(
             tree_id.to_owned(),
@@ -303,7 +337,8 @@ pub fn load_agent_tree(
             messages,
             operations,
         )
-        .with_feed_rows(commands, feed_cursors),
+        .with_feed_rows(commands, feed_cursors)
+        .with_lineage_rows(epochs, forked_from, runner_ancestors),
     ))
 }
 
@@ -311,7 +346,7 @@ fn load_nodes(tx: &Transaction<'_>, tree_id: &str) -> Result<BTreeMap<String, No
     let mut nodes = BTreeMap::new();
     let mut node_statement = tx
         .prepare(
-            "SELECT agent_id, parent_agent_id, depth, description, prompt, output_schema_json, schema_digest, template, tuple_id, account, effort, status, workspace_id, tier, attempt_id, session_locator, path, branch, active_turn, fold_order FROM agent_nodes WHERE tree_id=?1",
+            "SELECT agent_id, parent_agent_id, depth, description, prompt, output_schema_json, schema_digest, template, tuple_id, account, effort, status, workspace_id, tier, attempt_id, session_locator, path, branch, active_turn, fold_order, line_id, epoch_no, runner_id, workspace_root, workspace_cwd, parent_composition FROM agent_nodes WHERE tree_id=?1",
         )
         .map_err(|_| "could not query agent nodes".to_owned())?;
     let node_rows = node_statement
@@ -361,6 +396,36 @@ fn load_nodes(tx: &Transaction<'_>, tree_id: &str) -> Result<BTreeMap<String, No
                 branch: row.get(17)?,
                 active_turn: row.get::<_, i64>(18)? != 0,
                 fold_order: row.get::<_, Option<i64>>(19)?.map(from_i64).transpose()?,
+                line_id: row
+                    .get::<_, Option<String>>(20)?
+                    .map(|text| {
+                        NodeLineId::parse(&text).map_err(|_| {
+                            rusqlite::Error::InvalidColumnType(
+                                20,
+                                "line_id".to_owned(),
+                                rusqlite::types::Type::Text,
+                            )
+                        })
+                    })
+                    .transpose()?,
+                epoch_no: from_i64(row.get(21)?)?,
+                placement: NodePlacement {
+                    runner_id: row.get(22)?,
+                    workspace: match (
+                        row.get::<_, Option<String>>(23)?,
+                        row.get::<_, Option<String>>(24)?,
+                    ) {
+                        (Some(root), Some(cwd)) => Some(NodeWorkspace {
+                            root: PathBuf::from(root),
+                            cwd: PathBuf::from(cwd),
+                        }),
+                        _ => None,
+                    },
+                },
+                parent_composition: row
+                    .get::<_, Option<String>>(25)?
+                    .map(|text| parse_sql_enum(&text))
+                    .transpose()?,
             })
         })
         .map_err(|_| "could not query agent nodes".to_owned())?;
@@ -864,4 +929,57 @@ fn load_feed_cursors(tx: &Transaction<'_>, tree_id: &str) -> Result<BTreeMap<Str
         cursors.insert(session, applied);
     }
     Ok(cursors)
+}
+
+fn load_epochs(
+    tx: &Transaction<'_>,
+    tree_id: &str,
+) -> Result<BTreeMap<u64, OrchestrationSnapshot>, String> {
+    let mut statement = tx
+        .prepare("SELECT epoch_no, snapshot_json, digest FROM agent_tree_epochs WHERE tree_id=?1")
+        .map_err(|_| "could not query agent tree epochs".to_owned())?;
+    let rows = statement
+        .query_map([tree_id], |row| {
+            Ok((
+                from_i64(row.get(0)?)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|_| "could not query agent tree epochs".to_owned())?;
+    let mut epochs = BTreeMap::new();
+    for row in rows {
+        let (epoch_no, snapshot_json, digest) =
+            row.map_err(|_| "agent tree epoch row is invalid".to_owned())?;
+        let snapshot: OrchestrationSnapshot = serde_json::from_str(&snapshot_json)
+            .map_err(|_| "agent tree epoch snapshot is invalid".to_owned())?;
+        if snapshot.digest != digest {
+            return Err("agent tree epoch digest does not match its snapshot".to_owned());
+        }
+        epochs.insert(epoch_no, snapshot);
+    }
+    Ok(epochs)
+}
+
+fn load_runner_ancestors(
+    tx: &Transaction<'_>,
+    tree_id: &str,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let mut statement = tx
+        .prepare("SELECT runner_id, commits FROM agent_tree_runner_ancestors WHERE tree_id=?1")
+        .map_err(|_| "could not query agent tree runner ancestors".to_owned())?;
+    let rows = statement
+        .query_map([tree_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|_| "could not query agent tree runner ancestors".to_owned())?;
+    let mut ancestors = BTreeMap::new();
+    for row in rows {
+        let (runner_id, commits) =
+            row.map_err(|_| "agent tree runner ancestor row is invalid".to_owned())?;
+        let commits: BTreeSet<String> = serde_json::from_str(&commits)
+            .map_err(|_| "agent tree runner ancestor commits are invalid".to_owned())?;
+        ancestors.insert(runner_id, commits);
+    }
+    Ok(ancestors)
 }

@@ -54,7 +54,8 @@ impl SqliteTreeStore {
 
     /// Deletes every row of one tree, compare-and-swapped on the revision the
     /// caller inspected. A tree already absent is not an error, so an
-    /// interrupted deletion can be run again.
+    /// interrupted deletion can be run again. The tree's custody record is
+    /// not a tree row and stays; tree ids are never reused.
     ///
     /// # Errors
     ///
@@ -79,6 +80,16 @@ impl SqliteTreeStore {
             tx.commit()
                 .map_err(|error| sqlite_unavailable("could not durably delete agent tree", &error))
         })
+    }
+
+    /// The writer connection, for a step the tree save does not own (the
+    /// custody record), under the same lock.
+    pub(crate) fn with_connection<T, E: From<TreeStoreError>>(
+        &self,
+        work: impl FnOnce(&mut rusqlite::Connection) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.with_writer(|writer| Ok(work(&mut writer.database.connection)))
+            .unwrap_or_else(|error| Err(error.into()))
     }
 
     fn with_database<T>(
@@ -257,7 +268,7 @@ impl TreeStore for SqliteTreeStore {
     }
 }
 
-fn sqlite_unavailable(phase: &'static str, error: &rusqlite::Error) -> TreeStoreError {
+pub(crate) fn sqlite_unavailable(phase: &'static str, error: &rusqlite::Error) -> TreeStoreError {
     if error.sqlite_error_code() == Some(ErrorCode::DiskFull) {
         return TreeStoreError::storage_full();
     }

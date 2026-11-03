@@ -1,10 +1,10 @@
 use super::{
     AttemptId, AttemptRecord, AttemptStatus, BTreeSet, CandidateId, MAX_DIRECT_CHILDREN,
-    MAX_PENDING_SPAWNS, MAX_TREE_DEPTH, MAX_TREE_NODES, MintedCopy, NodeRecord, NodeStatus,
-    ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest, SpawnIdentity,
-    SpawnReservation, SubmitNudgeBudget, TemplateName, TopologyError, TopologyErrorCode,
-    TopologyGrant, UsageRow, VcsError, WorkspacePlan, WorkspaceReceipt, admit_output_schema,
-    next_child_id, now_unix_millis, topology_error_from_vcs,
+    MAX_PENDING_SPAWNS, MAX_TREE_DEPTH, MAX_TREE_NODES, MintedCopy, NodePlacement, NodeRecord,
+    NodeStatus, ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest,
+    SpawnIdentity, SpawnReservation, SubmitNudgeBudget, TemplateName, TopologyError,
+    TopologyErrorCode, TopologyGrant, UsageRow, VcsError, WorkspacePlan, WorkspaceReceipt,
+    admit_output_schema, next_child_id, now_unix_millis, topology_error_from_vcs,
 };
 
 impl ProductAgentTree {
@@ -347,6 +347,10 @@ impl ProductAgentTree {
             path: bound.path,
             branch: bound.branch,
             active_turn: false,
+            line_id: None,
+            epoch_no: self.epochs().current,
+            placement: NodePlacement::default(),
+            parent_composition: None,
         };
         self.nodes.insert(agent_id.clone(), child);
         self.grants.insert(caller_id.clone(), parent_grant);

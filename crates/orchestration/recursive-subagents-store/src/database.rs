@@ -18,7 +18,7 @@ use crate::rows::load_agent_tree;
 /// `subagents.sqlite3` starts at schema version 1. It is not the
 /// product schema's number and never follows it; both name the state
 /// directory.
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// Every object the tree's database holds, name and exact DDL. The
 /// fingerprint is taken over this list, so a changed byte here needs a new
@@ -30,11 +30,11 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "agent_trees",
-        "CREATE TABLE agent_trees(tree_id TEXT PRIMARY KEY,root_agent_id TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),host_generation INTEGER NOT NULL CHECK(host_generation>0),state TEXT NOT NULL CHECK(state IN('live','interrupted','restored_paused','tree_terminal','closed')),writer_mode TEXT NOT NULL CHECK(writer_mode IN('single_lease')),selected_tuple TEXT NOT NULL,launch_checkout TEXT NOT NULL,snapshot_json TEXT NOT NULL)",
+        "CREATE TABLE agent_trees(tree_id TEXT PRIMARY KEY,root_agent_id TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),host_generation INTEGER NOT NULL CHECK(host_generation>0),state TEXT NOT NULL CHECK(state IN('live','interrupted','restored_paused','tree_terminal','closed')),writer_mode TEXT NOT NULL CHECK(writer_mode IN('single_lease')),selected_tuple TEXT NOT NULL,launch_checkout TEXT NOT NULL,snapshot_json TEXT NOT NULL,current_epoch INTEGER NOT NULL CHECK(current_epoch>=0),forked_from TEXT CHECK(forked_from IS NULL OR json_valid(forked_from)))",
     ),
     (
         "agent_nodes",
-        "CREATE TABLE agent_nodes(tree_id TEXT NOT NULL,agent_id TEXT NOT NULL,parent_agent_id TEXT,depth INTEGER NOT NULL CHECK(depth>=0 AND depth<=4),description TEXT NOT NULL,prompt TEXT NOT NULL,output_schema_json TEXT NOT NULL,schema_digest TEXT NOT NULL,template TEXT,tuple_id TEXT NOT NULL,account TEXT NOT NULL,effort TEXT,status TEXT NOT NULL CHECK(status IN('pending','running','paused','sealing','completed','interrupted','failed','closed','recovery_required')),workspace_id TEXT NOT NULL,tier TEXT NOT NULL CHECK(tier IN('read_only','execute','mutate')),attempt_id TEXT,session_locator TEXT,path TEXT NOT NULL,branch TEXT,active_turn INTEGER NOT NULL CHECK(active_turn IN(0,1)),fold_order INTEGER CHECK(fold_order>=0),PRIMARY KEY(tree_id,agent_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+        "CREATE TABLE agent_nodes(tree_id TEXT NOT NULL,agent_id TEXT NOT NULL,parent_agent_id TEXT,depth INTEGER NOT NULL CHECK(depth>=0 AND depth<=4),description TEXT NOT NULL,prompt TEXT NOT NULL,output_schema_json TEXT NOT NULL,schema_digest TEXT NOT NULL,template TEXT,tuple_id TEXT NOT NULL,account TEXT NOT NULL,effort TEXT,status TEXT NOT NULL CHECK(status IN('pending','running','paused','sealing','completed','interrupted','failed','closed','recovery_required')),workspace_id TEXT NOT NULL,tier TEXT NOT NULL CHECK(tier IN('read_only','execute','mutate')),attempt_id TEXT,session_locator TEXT,path TEXT NOT NULL,branch TEXT,active_turn INTEGER NOT NULL CHECK(active_turn IN(0,1)),fold_order INTEGER CHECK(fold_order>=0),line_id TEXT CHECK(line_id IS NULL OR length(line_id)=36),epoch_no INTEGER NOT NULL CHECK(epoch_no>=0),runner_id TEXT CHECK(runner_id IS NULL OR length(runner_id)>0),workspace_root TEXT,workspace_cwd TEXT,parent_composition TEXT,CHECK((workspace_root IS NULL)=(workspace_cwd IS NULL)),PRIMARY KEY(tree_id,agent_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
     ),
     (
         "agent_grants",
@@ -75,6 +75,22 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     (
         "agent_nodes_tree",
         "CREATE INDEX agent_nodes_tree ON agent_nodes(tree_id,parent_agent_id,agent_id)",
+    ),
+    (
+        "agent_nodes_line",
+        "CREATE UNIQUE INDEX agent_nodes_line ON agent_nodes(line_id) WHERE line_id IS NOT NULL",
+    ),
+    (
+        "agent_tree_epochs",
+        "CREATE TABLE agent_tree_epochs(tree_id TEXT NOT NULL,epoch_no INTEGER NOT NULL CHECK(epoch_no>=1),snapshot_json TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(tree_id,epoch_no),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+    ),
+    (
+        "agent_tree_runner_ancestors",
+        "CREATE TABLE agent_tree_runner_ancestors(tree_id TEXT NOT NULL,runner_id TEXT NOT NULL CHECK(length(runner_id)>0),commits TEXT NOT NULL CHECK(json_valid(commits) AND json_type(commits)='array'),PRIMARY KEY(tree_id,runner_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+    ),
+    (
+        "agent_tree_custody",
+        "CREATE TABLE agent_tree_custody(tree_id TEXT PRIMARY KEY,fence INTEGER NOT NULL CHECK(fence>=1),host_id TEXT NOT NULL CHECK(length(host_id)>0),host_instance TEXT NOT NULL CHECK(length(host_instance)>0),host_binary TEXT CHECK(host_binary IS NULL OR length(host_binary)>0),host_name TEXT NOT NULL CHECK(length(host_name)>0),claimed_at INTEGER NOT NULL CHECK(claimed_at>=0),renewed_at INTEGER NOT NULL CHECK(renewed_at>=0),released INTEGER NOT NULL CHECK(released IN(0,1)))",
     ),
 ];
 

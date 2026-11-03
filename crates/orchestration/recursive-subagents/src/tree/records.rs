@@ -1,3 +1,6 @@
+use plakous_host_protocol::selection::CompositionSelection;
+
+use super::lineage::{NodeLineId, NodePlacement};
 use super::{
     AdoptOutcome, AttemptId, AttemptStatus, BTreeMap, BTreeSet, CandidateId, Deserialize,
     MessagePriority, MessagePurpose, NodeStatus, PathBuf, RefreshReport, Serialize,
@@ -80,6 +83,16 @@ pub struct NodeRecord {
     pub active_turn: bool,
     /// Last intent order applied at the session's tree cursor; NULL restarts the fold.
     pub fold_order: Option<u64>,
+    /// The L0 agent line this node maps to for life; `None` until the line
+    /// integration records it.
+    pub line_id: Option<NodeLineId>,
+    /// The tree epoch this node was spawned under; 0 is the header snapshot.
+    pub epoch_no: u64,
+    /// Where this node's tools run; the default is the local runner at `path`.
+    pub placement: NodePlacement,
+    /// The spawning parent's tool composition, frozen at spawn; `None` when
+    /// it was not recorded.
+    pub parent_composition: Option<CompositionSelection>,
     /// What a reopen had to abandon to get this node's session back, if
     /// anything, until the caller's face has said it once.
     pub abandoned_turn: Option<AbandonedChildTurn>,

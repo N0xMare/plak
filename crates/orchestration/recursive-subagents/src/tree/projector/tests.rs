@@ -542,6 +542,60 @@ fn first_cascade_after_deletion_refuses_parent_first_then_matches_postorder() {
     }
 }
 
+/// An interrupt intent may carry its cause; one without a cause keeps
+/// exactly today's bytes.
+#[test]
+fn interrupt_intents_carry_an_optional_cause_without_changing_todays_bytes() {
+    let (_tmp, mut tree) = tree();
+    let (child, first) = running_child(&mut tree);
+    let interrupts = |tree: &ProductAgentTree| {
+        tree.operations
+            .values()
+            .filter(|operation| operation.tool_name == "interrupt")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    tree.record_operator_intent(
+        &child,
+        Some(first.clone()),
+        operator_intents::Decision::Interrupt {
+            effective: true,
+            cause: None,
+        },
+    )
+    .unwrap();
+    let today = interrupts(&tree).pop().unwrap();
+    assert_eq!(
+        today.canonical_request,
+        format!(r#"{{"attempt_id":"{first}","decision":{{"Interrupt":{{"effective":true}}}}}}"#)
+    );
+    assert_eq!(interrupt_cause(&today).unwrap(), Some(None));
+    tree.record_operator_intent(
+        &child,
+        Some(first.clone()),
+        operator_intents::Decision::Interrupt {
+            effective: true,
+            cause: Some(InterruptCause::OwnerLost),
+        },
+    )
+    .unwrap();
+    let caused = interrupts(&tree)
+        .into_iter()
+        .find(|operation| operation.operation_id != today.operation_id)
+        .unwrap();
+    assert!(caused.canonical_request.contains(r#""cause":"owner_lost""#));
+    assert_eq!(
+        interrupt_cause(&caused).unwrap(),
+        Some(Some(InterruptCause::OwnerLost))
+    );
+    let mut other = caused.clone();
+    other.tool_name = "close".to_owned();
+    assert_eq!(interrupt_cause(&other).unwrap(), None);
+    let mut broken = caused;
+    broken.canonical_request = r#"{"attempt_id":null,"decision":"Nope"}"#.to_owned();
+    assert!(interrupt_cause(&broken).is_err());
+}
+
 #[test]
 fn followup_opening_rebuilds_supersession_at_its_captured_stamp() {
     let (_tmp, mut tree) = tree();
@@ -549,7 +603,10 @@ fn followup_opening_rebuilds_supersession_at_its_captured_stamp() {
     tree.record_operator_intent(
         &child,
         Some(first.clone()),
-        operator_intents::Decision::Interrupt { effective: true },
+        operator_intents::Decision::Interrupt {
+            effective: true,
+            cause: None,
+        },
     )
     .unwrap();
     tree.open_followup_attempt(&child, "followup", String::new(), String::new())
@@ -574,7 +631,10 @@ fn followup_withdrawal_refuses_another_intent_without_partial_write() {
     tree.record_operator_intent(
         &child,
         Some(opened),
-        operator_intents::Decision::Interrupt { effective: false },
+        operator_intents::Decision::Interrupt {
+            effective: false,
+            cause: None,
+        },
     )
     .unwrap();
     let before = rows(&tree);

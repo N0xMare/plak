@@ -1,16 +1,16 @@
 use super::{SCHEMA_OBJECTS, SCHEMA_VERSION, SubagentsDatabase, expected_schema_fingerprint};
 
-/// Identity golden for the unreleased t9 cohort's durable format.
+/// Identity golden for the unreleased t10 cohort's durable format.
 #[test]
 fn the_tree_schema_fingerprint_is_pinned() {
-    assert_eq!(SCHEMA_VERSION, 9);
+    assert_eq!(SCHEMA_VERSION, 10);
     assert_eq!(
         expected_schema_fingerprint(),
-        "2ac9e68f09089d3188fe3d5231396bf5262c8c5e1ebbe146cb35b4e39d0be4e7"
+        "aad61f5a559e15c43774eda2aee30ea040e1e09226121ab75c092d396fac480c"
     );
 }
 
-/// The thirteen objects, in the order the fingerprint is taken over.
+/// The seventeen objects, in the order the fingerprint is taken over.
 #[test]
 fn the_tree_schema_holds_its_own_identity_row_and_the_agent_tables() {
     let names: Vec<&str> = SCHEMA_OBJECTS.iter().map(|(name, _)| *name).collect();
@@ -19,7 +19,7 @@ fn the_tree_schema_holds_its_own_identity_row_and_the_agent_tables() {
         names[1..].iter().all(|name| name.starts_with("agent_")),
         "{names:?}"
     );
-    assert_eq!(names.len(), 13);
+    assert_eq!(names.len(), 17);
 }
 
 /// A fresh file is created, versioned, fingerprinted, and reopens clean.
@@ -94,7 +94,7 @@ fn tree_admission_refusals_are_exact() {
         refusal("version"),
         (
             super::OpenErrorKind::UnsupportedPersistence,
-            "subagents schema 99, expected 9: this subagents.sqlite3 was created by an incompatible plak build; move it aside to start fresh".to_owned()
+            "subagents schema 99, expected 10: this subagents.sqlite3 was created by an incompatible plak build; move it aside to start fresh".to_owned()
         )
     );
 }
@@ -102,8 +102,8 @@ fn tree_admission_refusals_are_exact() {
 /// A file at any other version is refused as unsupported, never migrated.
 #[test]
 fn a_foreign_schema_version_is_refused_as_unsupported() {
-    // Earlier cohorts have no transient-resume command or decision.
-    for foreign in [4_i64, 5, 6, 7, 8, 99] {
+    // Earlier cohorts have no lineage rows or custody record.
+    for foreign in [4_i64, 5, 6, 7, 8, 9, 99] {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("subagents.sqlite3");
         drop(SubagentsDatabase::open(&database).unwrap());
@@ -119,7 +119,7 @@ fn a_foreign_schema_version_is_refused_as_unsupported() {
         assert!(
             error
                 .message()
-                .contains(&format!("subagents schema {foreign}, expected 9")),
+                .contains(&format!("subagents schema {foreign}, expected 10")),
             "{error}"
         );
     }

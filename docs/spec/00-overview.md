@@ -196,10 +196,13 @@ new ones. 0.0.2 state is left untouched for the 0.0.2 binary.
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **27** (adds the `lines` heads, each branch's line membership and `line_job_terminals`) |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **35** (adds line membership to the checkpoint topology, line-head job owners and the line feed facts, on top of reconstructive image-residency v3 plans/evidence, strategy tag 5 and explicit Released job terminals; component revisions remain frozen) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **36** (adds the write-ahead `carry_intent` of a same-store carry) |
-| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **9** |
+| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **21**, disposable, never recovery authority |
 | Session export document | Plak | version **11**, imports **11** and **10** |
 
+Tree schema 10 adds the node's line, epoch and runner placement, successor
+epochs, fork provenance, runner ancestors and the tree custody record (chapter
+03 §14); today's flows write only their defaults.
 Tree schema 9 records candidate `target_before` provenance and each workspace's
 `input_candidate_id`; retained snapshots have independent Git-backend pins.
 Candidate rows also record work/conflict kind, source and resolver lineage,
@@ -227,7 +230,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r27.e35.p36.t9`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r27.e35.p36.t10`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

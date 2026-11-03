@@ -7,7 +7,27 @@ use super::{
     topology_error_from_vcs,
 };
 
+/// Liveness that holds every holder gone: the stores' tests take over a
+/// claim without a host liveness lock.
+struct AssumeHolderGone;
+
+impl super::custody::sealed::Sealed for AssumeHolderGone {}
+
+impl super::CustodyLiveness for AssumeHolderGone {
+    fn holder_gone(&self, _holder: &super::CustodyHost) -> bool {
+        true
+    }
+}
+
 impl ProductAgentTree {
+    /// A takeover proof for `claim` as if its holder were proven gone, for
+    /// store tests that have no host liveness lock.
+    #[must_use]
+    pub fn holder_gone_for_test(claim: super::CustodyClaim) -> super::HolderGone {
+        super::HolderGone::prove(claim, &AssumeHolderGone)
+            .unwrap_or_else(|| unreachable!("assumed liveness proves every holder gone"))
+    }
+
     /// Spends one admitted submit-harness Start on the current attempt.
     /// The budget is persisted, so a crash-cut rejoin cannot
     /// reset it, and the harness counts against the template's turn ceiling

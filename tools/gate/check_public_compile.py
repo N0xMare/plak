@@ -322,6 +322,7 @@ AUTHORITY_NEGATIVE_BINS = (
     "openrouter_model_lane",
     "xai_platform_authority",
     "local_composition_session",
+    "tree_custody_liveness",
 )
 AUTHORITY_NEGATIVE_IMPORTS = {
     "hosted_runtime_factory": "use plakous_hosted::runtime::RuntimeFactory;",
@@ -353,6 +354,7 @@ AUTHORITY_NEGATIVE_IMPORTS = {
     "openrouter_model_lane": "use plakous::openrouter::OpenRouterLanguageModel;",
     "xai_platform_authority": "use plakous::xai::XaiPlatformApiKeyAuthority;",
     "local_composition_session": "use plakous::agent::LocalCompositionSession;",
+    "tree_custody_liveness": "use plakous_hosted::agent_tree::CustodyLiveness;",
 }
 AUTHORITY_NEGATIVE_MARKERS = {
     binary: statement.rsplit("::", maxsplit=1)[-1].rstrip(";").split(",", maxsplit=1)[0].strip("{}")
@@ -504,6 +506,21 @@ fn main() {
 }
 """
 AUTHORITY_NEGATIVE_MARKERS["hosted_runtime_factory"] = "ExternalFactory"
+AUTHORITY_NEGATIVE_SOURCES[
+    "tree_custody_liveness"
+] = """use plakous_hosted::agent_tree::CustodyLiveness;
+
+struct ForgedLiveness;
+
+impl CustodyLiveness for ForgedLiveness {
+    fn holder_gone(&self, _holder: &plakous_hosted::agent_tree::CustodyHost) -> bool {
+        true
+    }
+}
+
+fn main() {}
+"""
+AUTHORITY_NEGATIVE_MARKERS["tree_custody_liveness"] = "ForgedLiveness"
 AUTHORITY_NEGATIVE_MARKERS["api_key_admission"] = "api_key"
 AUTHORITY_NEGATIVE_SOURCES["api_key_admission"] = """use plakous::openrouter::{
     OpenRouterApiKeySelection, OpenRouterKeyGeneration, OpenRouterKeySource,
@@ -535,6 +552,7 @@ AUTHORITY_NEGATIVE_ERROR_CODES["component_checkpoint"] = "E0603"
 AUTHORITY_NEGATIVE_ERROR_CODES["issued_invocation"] = None
 AUTHORITY_NEGATIVE_ERROR_CODES["terminal_result"] = None
 AUTHORITY_NEGATIVE_ERROR_CODES["credential_bytes"] = "E0599"
+AUTHORITY_NEGATIVE_ERROR_CODES["tree_custody_liveness"] = "E0277"
 AUTHORITY_NEGATIVE_ERROR_MESSAGES = {
     "hosted_runtime_factory": (
         "the trait bound `ExternalFactory: plakous_hosted::runtime::factory::sealed::Sealed` "
@@ -542,6 +560,9 @@ AUTHORITY_NEGATIVE_ERROR_MESSAGES = {
     ),
     "hosted_registered_authority": (
         "cannot initialize a tuple struct which contains private fields"
+    ),
+    "tree_custody_liveness": (
+        "the trait bound `ForgedLiveness: agent_tree::custody::sealed::Sealed` is not satisfied"
     ),
     "issued_invocation": (
         "cannot construct `ToolInvocation` with struct literal syntax due to private fields"
@@ -556,6 +577,7 @@ AUTHORITY_NEGATIVE_ERROR_LINES["hosted_registered_authority"] = 4
 AUTHORITY_NEGATIVE_ERROR_LINES["issued_invocation"] = 4
 AUTHORITY_NEGATIVE_ERROR_LINES["terminal_result"] = 4
 AUTHORITY_NEGATIVE_ERROR_LINES["credential_bytes"] = 5
+AUTHORITY_NEGATIVE_ERROR_LINES["tree_custody_liveness"] = 5
 for binary in ("xai_platform_authority",):
     AUTHORITY_NEGATIVE_ERROR_CODES[binary] = "E0624"
     AUTHORITY_NEGATIVE_ERROR_LINES[binary] = 4

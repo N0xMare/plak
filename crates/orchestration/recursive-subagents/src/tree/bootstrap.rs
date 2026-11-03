@@ -6,6 +6,7 @@ use super::{
     SystemVcs, Tier, TopologyError, TopologyErrorCode, TopologyGrant, TreeAdmissionState, TreeVcs,
     VcsOps, WorkspaceMode, WorkspaceRecord, WorkspaceStatus, WriterMode, valid_id,
 };
+use super::{NodePlacement, TreeLineage};
 
 impl ProductAgentTree {
     /// Bootstraps a root over the system `git`/`jj` port.
@@ -87,6 +88,10 @@ impl ProductAgentTree {
             path: launch_checkout.clone(),
             branch,
             active_turn: false,
+            line_id: None,
+            epoch_no: 0,
+            placement: NodePlacement::default(),
+            parent_composition: None,
         };
         let grant = TopologyGrant {
             visible_ids: vec![root_agent_id.clone()],
@@ -160,6 +165,7 @@ impl ProductAgentTree {
             selected_tuple: selected_tuple.clone(),
             launch_checkout,
             snapshot: OrchestrationSnapshot::unpinned(selected_tuple),
+            lineage: TreeLineage::default(),
             nodes,
             grants,
             attempts: BTreeMap::new(),
@@ -302,6 +308,7 @@ impl ProductAgentTree {
             selected_tuple,
             launch_checkout,
             snapshot,
+            lineage: TreeLineage::default(),
             nodes,
             grants,
             attempts,

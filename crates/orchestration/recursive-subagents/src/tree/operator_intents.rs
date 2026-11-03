@@ -30,11 +30,61 @@ pub(super) enum Decision {
     },
     Interrupt {
         effective: bool,
+        /// Why the turn was interrupted; `None` where the writer recorded no
+        /// cause, which is every interrupt today.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cause: Option<InterruptCause>,
     },
     RecoveryAbandoned {
         abandoned_at_ms: u64,
         failure: AttemptFailure,
     },
+}
+
+/// Why an anchored interrupt intent interrupted its node's turn.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptCause {
+    /// The operator interrupted this node.
+    Operator,
+    /// A managing parent's `interrupt_agent`.
+    Parent,
+    /// The root's interrupt cascading to its descendants.
+    Cascade,
+    /// The turn's owner was lost (a crash, a fence, a lease loss).
+    OwnerLost,
+    /// A planned handoff released the node to another host.
+    Handoff,
+    /// An explicit stop.
+    Stopped,
+}
+
+/// The cause an interrupt intent recorded: `Ok(None)` for another kind,
+/// `Ok(Some(None))` for an interrupt that recorded none.
+///
+/// # Errors
+///
+/// Refuses a malformed interrupt intent.
+pub fn interrupt_cause(
+    operation: &OperationRecord,
+) -> Result<Option<Option<InterruptCause>>, TopologyError> {
+    if operation.tool_name != INTERRUPT_KIND {
+        return Ok(None);
+    }
+    let intent: OperatorIntent =
+        serde_json::from_str(&operation.canonical_request).map_err(|_| {
+            TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "interrupt intent is invalid",
+            )
+        })?;
+    match intent.decision {
+        Decision::Interrupt { cause, .. } => Ok(Some(cause)),
+        _ => Err(TopologyError::new(
+            TopologyErrorCode::OperationRecoveryRequired,
+            "interrupt intent is invalid",
+        )),
+    }
 }
 
 /// The attempt and exact output carried by a submitted intent, without folding views.
@@ -215,7 +265,7 @@ impl ProductAgentTree {
                     }
                 }
             }
-            Decision::Interrupt { effective } => {
+            Decision::Interrupt { effective, .. } => {
                 if current && effective && self.node(agent_id)?.status == NodeStatus::Running {
                     if let Some(node) = self.nodes.get_mut(agent_id) {
                         node.status = NodeStatus::Interrupted;

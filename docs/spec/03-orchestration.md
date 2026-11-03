@@ -188,6 +188,20 @@ All `[orchestration]` bounds are carried in the digest, including the fixed
 per-cell agent budget: a ceiling that decides whether a spawn is admitted is
 bind authority like the other four.
 
+A tree holds its genesis snapshot as epoch 0 in its header, successor epochs
+as `agent_tree_epochs` rows numbered from 1, and `current_epoch`, the epoch new
+spawns bind (§14). Each node records the `epoch_no` it was spawned under and
+the spawning parent's composition (`parent_composition`), the one
+profile-dependent spawn-parent input. A store load refuses a current or node
+epoch the tree does not hold and an epoch row whose digest is not its
+snapshot's. Every tree stays on epoch 0 today: a successor epoch that installs
+on a quiescent tree replaces the header snapshot, and no successor rows or
+parent compositions are written. A template card may carry a `runner` name
+that places a child on that runner rather than its parent's. The field is
+frozen on the card inside the snapshot JSON and its digest only when set, so a
+card without one keeps its encoding and digest. No template file sets it yet,
+and every node is placed on the local runner.
+
 The snapshot also freezes the product's **account roster** as two membership
 sets: which accounts a template card may pin at all, and which speak no native
 protocol (so a `native-ptc` card on them is refused). The tree itself names no
@@ -3049,7 +3063,7 @@ reload still regenerate its shim. Sealing records `history_left_base` in the
 canonical `seal_outcome` payload and result-mail replay emits `history left
 plak_base(); the candidate is the whole tree` when true. The transient snapshot
 observation uses the sealed commit and recorded base under the unlocked seal
-phase, never a later working-copy observation. Tree schema 9 includes this
+phase, never a later working-copy observation. Tree schema 10 includes this
 payload; the versioned state key identifies its store tuple. A JJ copy
 with no owning tree row refuses with `jj copy has no recorded tree row; launch
 from its owning session, or discard or close it and respawn`.
@@ -3120,10 +3134,10 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 Product state lives in `product.sqlite3` at **schema 36**: intents and
 feed-derived views (chapter 02 §2.6). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
-intent. The tree lives separately in `subagents.sqlite3` at **schema 9**, owned
-by `plakous-recursive-subagents-store`. Its ten domain tables are below; §14.3
-classifies every column family as an intent, a view of the feed, or an
-external-effect record.
+intent. The tree lives separately in `subagents.sqlite3` at **schema 10**, owned
+by `plakous-recursive-subagents-store`. Its twelve domain tables and its custody
+record are below; §14.3 classifies every column family as an intent, a view of
+the feed, or an external-effect record.
 
 A tree save is one `Immediate` transaction under WAL and `synchronous=FULL`.
 It compare-and-swaps the `agent_trees` header with `UPDATE ... WHERE
@@ -3146,8 +3160,8 @@ operator must not repair it by guessing a new tree locator.
 
 | Table | Key | Holds |
 | --- | --- | --- |
-| `agent_trees` | `tree_id` | root agent, revision, host generation, admission state, `writer_mode` (`single_lease` only), selected tuple, launch checkout, the frozen orchestration snapshot |
-| `agent_nodes` | `(tree_id, agent_id)` | ancestry, depth ≤ 4, brief, template, bind tuple, `NodeStatus`, workspace id, tier, current `attempt_id`, session locator, path, branch, active-turn flag, nullable INTEGER `fold_order` view position |
+| `agent_trees` | `tree_id` | root agent, revision, host generation, admission state, `writer_mode` (`single_lease` only), selected tuple, launch checkout, the frozen orchestration snapshot (epoch 0), INTEGER `current_epoch`, nullable JSON `forked_from` provenance (`node` with source tree, agent, line, branch and the source epoch whose bytes seeded it, or `import` with provenance text) |
+| `agent_nodes` | `(tree_id, agent_id)` | ancestry, depth ≤ 4, brief, template, bind tuple, `NodeStatus`, workspace id, tier, current `attempt_id`, session locator, path, branch, active-turn flag, nullable INTEGER `fold_order` view position, nullable `line_id` (the node's L0 agent line, canonical UUID text, unique across the store: a line maps to one node for life and never moves to another node; a fork or import makes a new line), INTEGER `epoch_no`, nullable `runner_id` (NULL is the local runner), paired nullable `workspace_root` / `workspace_cwd` on that runner (NULL is the node's path), nullable `parent_composition` |
 | `agent_grants` | `(tree_id, agent_id)` | `may_spawn`, `may_adopt`, depth and node and child ceilings, and the visible / peer / managed / interrupt / close id sets |
 | `agent_operations` | `(tree_id, operation_id)` | the canonical request, its digest, the terminal code and response for replay, and paired nullable INTEGER `fold_anchor` / `fold_order` for host fold intents |
 | `agent_messages` | `(tree_id, message_id)` | body, `purpose` (including `followup` and the host-authored `result`), priority, reply link, disposition, durable state |
@@ -3156,9 +3170,41 @@ operator must not repair it by guessing a new tree locator.
 | `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, nullable `input_candidate_id`, immutable resolver `resolves` / `conflict_base` / `conflict_target` / JSON `conflict_paths`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
 | `agent_commands` | `(tree_id, command_id)` | every runtime command the tree prepares — a root admission's result-mail batch, a child Start, wake, mail Start, followup or corrective round — with its recipient, attempt, kind, exact canonical text and message ids, all immutable; the tree's withdrawal of a command no fact settled; and, as a view, the fact the recipient's feed recorded for it (`accepted`, `rejected`, or `returned` by a withheld terminal) with the plain turn id it bound and nullable INTEGER `accepted_seq` |
 | `agent_feed_cursors` | `(tree_id, runtime_session_id)` | the last feed sequence the tree projector applied for that session, root or child |
+| `agent_tree_epochs` | `(tree_id, epoch_no)` | a successor epoch (`epoch_no` ≥ 1): its frozen snapshot JSON and digest |
+| `agent_tree_runner_ancestors` | `(tree_id, runner_id)` | the JSON array of commits that runner already holds for the tree, for incremental bundles |
+| `agent_tree_custody` | `tree_id` | the custody record: `fence` ≥ 1, the last holder's `host_id`, typed `host_instance` (`<pid>-<16 hex nonce>`), nullable `host_binary` (build id) and `host_name` (machine), `claimed_at`, `renewed_at`, and `released` |
 
 One in-flight status per row: a node seals, a workspace adopts, and neither
 status appears on the other.
+
+Today's flows write only the schema-10 defaults: `current_epoch` 0, no
+provenance, and for every node no line, epoch 0, the local runner, no
+workspace pair and no parent composition. The epoch, ancestor and custody
+tables stay empty. The state CHECK still admits `restored_paused`.
+
+**Custody.** `agent_tree_custody` holds one fenced claim per tree, naming one
+host process by its stable `host_id`, its typed process instance, its binary id
+and its machine. It is not tree content: no tree save or whole-tree replace
+touches it, and it has no foreign key, so it may precede the tree's rows. A tree
+deletion leaves it too; tree ids are session ids and are never reused, and the
+fenced delete of the hub integration removes the record with the rows. A take
+of an absent or released record claims it under the next fence. The holder's
+own take returns its claim unchanged. Another host process is refused with the
+typed `tree_hosted_elsewhere (<binary id>)` refusal naming the holder, its
+machine and its fence, unless it presents a `HolderGone` for exactly that
+holder at exactly that fence; it then takes over under the next fence.
+`HolderGone` is minted only through the sealed `CustodyLiveness` interface, so
+no crate outside the tree can forge one (a negative compile pin holds this,
+chapter 05); the host-start custody liveness lock that implements it lands with
+the hub integration. Renew, release and prove succeed only for the stored
+holder at the stored fence while the record is held, so a superseded claim can
+never act again. A release keeps the fence and the last holder; repeating the
+last holder's release succeeds, and any other claim, including a stale
+lower-fence one, is not held. Each step is one `Immediate` transaction, so
+concurrent processes serialize and exactly one of them takes. Both tree stores
+implement these primitives with the same transition law. No host takes custody
+yet: cross-process tree safety is still the revision compare-and-swap above,
+and behavior is unchanged.
 
 **There is no migration.** A schema change moves the product's state directory
 (chapter 02 §2.5); an older store stays in its own directory and is never read. The store fails closed on a **DDL
@@ -3671,6 +3717,40 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Orphaned VCS operation and its settlement | intent, joined into views | anchored `agent_operations` of kinds `vcs_fault` and `vcs_fault_settled`, per affected agent and attempt; reopen records seal, adopt and removal ambiguity, and acknowledged workspace completion records settlement |
 | Spawn refusal, adoption acceptance and failed workspace removal | intent, joined into views | anchored `agent_operations` of kinds `spawn_refused`, `attempt_adopted` for the producer's attempt, and `workspace_cleanup` per occupant; captured failure, diagnostic and spawn end stamp derive agent-local consequences |
 | Feed cursors (`agent_feed_cursors`), node fold order | view metadata | cursor per runtime session and last applied intent order at the agent cursor; NULL node order restarts the fold |
+| Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn; written today as no line, epoch 0, the local runner and no composition |
+| Successor epochs, current epoch | intent | an epoch append; none today |
+| Tree provenance (`forked_from`) | intent | the fork or import that created the tree; none today |
+| Runner ancestors | external-effect record | completed bundle stages; none today |
+| Custody | ownership record, never tree content | the custody steps above |
+| Interrupt cause | intent | an optional `cause` field (`operator`, `parent`, `cascade`, `owner_lost`, `handoff`, `stopped`) of the anchored `interrupt` intent, omitted when the writer records none, which every interrupt does today; such a row keeps its earlier bytes |
+| Root and child continuation decisions | intent | `agent_operations` of kind `continuation`, keyed `plak:continuation:<agent>:<attempt or root>:<cause>:<host generation>:<round>:<turn or command>:<anchor id>`, so root decisions in different turns and decisions after another host loss never collide; with cause `transient`, `owner_lost` or `handoff`, a one-based 32-bit round, the anchoring stopped turn or unfacted command, the decision stamp, and a decision: `new_turn` (its command id and the unfacted commands it replaces), `resubmit` (the one unfacted command) or `withdrawn` (at least one command); none today, where child transient decisions remain `child_finalization` `Resume` intents and root decisions are process-local |
+| Terminal recovery refusals | intent | kind `terminal_refusal`, keyed `plak:terminal_refusal:<agent>:<attempt>`, with the refusal and its observation stamp; none today, where they remain process-local |
+| VCS stages | external-effect record | kind `vcs_stage`, written before the stage runs: the stage (`mint`, `seal`, `adopt`, `unmint`, `refresh`, `base_snapshot`, `bundle_create`, `relay`, `bundle_apply`), its class (`reproducible`, `verifiable`, `ambiguous`), the node it serves, and exactly the inputs its kind takes (below), plus for exactly the verifiable class the expected `refs/` reference and commit; none today |
+| Pending epoch | intent | kind `epoch_pending`, with the epoch number it installs as (from 1), the workflow whose published settlement validates it, and the successor snapshot's exact JSON bytes and digest; the bytes must decode to a snapshot whose digest matches; none today |
+
+Each of the last five payloads is decoded only through its own codec, which
+also requires the row's request digest to match its canonical request and a
+keyed row to sit under its own identity. These payloads and `forked_from` are
+frozen as complete: they refuse unknown fields, so a later field is a tree
+schema change and moves the state key like any other.
+
+A VCS stage's inputs by kind (R required, O optional, — absent). Every stage
+names its node; commits are lowercase SHA-1 or SHA-256 hex, the bundle digest
+is lowercase SHA-256 hex, runner ids carry no whitespace, and a stage naming
+both runners names two different ones. Base snapshot, bundle create and relay
+are reproducible only; bundle apply is never ambiguous.
+
+| Stage | Candidate | Source runner | Target runner | Base | Tip | Bundle digest |
+| --- | --- | --- | --- | --- | --- | --- |
+| `mint` | O | — | O | O | — | — |
+| `seal` | R | — | O | R | — | — |
+| `adopt` | R | — | O | O | — | — |
+| `unmint` | — | — | O | — | — | — |
+| `refresh` | — | — | O | R | — | — |
+| `base_snapshot` | — | R | — | R | — | — |
+| `bundle_create` | O | R | R | O | R | — |
+| `relay` | O | R | R | O | R | R |
+| `bundle_apply` | O | R | R | O | R | R |
 
 **An unstarted followup is withdrawn, not reversed by another event.** Only a
 followup's first acknowledged fold may reactivate an adopted workspace, from

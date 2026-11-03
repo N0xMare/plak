@@ -53,6 +53,7 @@ pub fn roster_binding_from_template(
         on_mint: template.on_mint.clone(),
         env: template.env.clone(),
         show_model: template.show_model,
+        runner: None,
     }
 }
 
