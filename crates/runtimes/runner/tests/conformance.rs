@@ -1128,6 +1128,10 @@ async fn a_host_stream_gap_or_overrun_aborts_the_stream_and_ends_the_service() {
         panic!("an overrun aborts the stream");
     };
     assert!(reason.contains("credit"), "{reason}");
+    // The aborted stream grants nothing more, even for data its service
+    // took before the abort.
+    let after = tokio::time::timeout(Duration::from_millis(500), stream_frame(&mut raw)).await;
+    assert!(after.is_err(), "a frame after the abort: {after:?}");
     let terminate = Operation {
         verb: "service.terminate".into(),
         payload: json!({ "stream": stream, "grace_ms": 0 }),

@@ -5598,8 +5598,8 @@ conformance.
   new stream until the host grants credit; the host may send up to 256 KiB
   before its first grant. A close without a reason ends one direction. An end
   that finds a gap in the sequence, undecodable data or data beyond its credit
-  sends a close with a reason and stops; a close with a reason ends both
-  directions, and on the runner it ends the service. A service lives as long
+  sends a close with a reason and stops, granting nothing after it; a close
+  with a reason ends both directions, and on the runner it ends the service. A service lives as long
   as the connection that spawned it: a spawn that completes after that
   connection ended terminates the service at once. Its secret environment
   values never cross the link.

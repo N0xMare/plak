@@ -137,28 +137,39 @@ pub(crate) async fn send_stream<R: AsyncRead + Unpin>(
     }
 }
 
-/// The bytes this end granted the other and has not received yet.
-pub(crate) struct Window(Mutex<u64>);
+/// The bytes this end granted the other and has not received yet, or none
+/// once the stream ended in both directions: an ended stream grants nothing.
+pub(crate) struct Window(Mutex<Option<u64>>);
 
 impl Window {
     pub(crate) fn new(granted: u64) -> Arc<Self> {
-        Arc::new(Self(Mutex::new(granted)))
+        Arc::new(Self(Mutex::new(Some(granted))))
     }
 
     /// Takes `bytes` of received data from the window; `false` when they
     /// exceed what was granted.
     fn take(&self, bytes: u64) -> bool {
         let mut window = lock(&self.0);
-        let Some(left) = window.checked_sub(bytes) else {
+        let Some(left) = window.and_then(|window| window.checked_sub(bytes)) else {
             return false;
         };
-        *window = left;
+        *window = Some(left);
         true
     }
 
-    fn give(&self, bytes: u64) {
+    /// Grants `bytes` back through `out`, unless the stream ended. The grant
+    /// is sent under the window's lock, so it cannot follow a close.
+    fn give(&self, bytes: u64, out: &Outbound) {
         let mut window = lock(&self.0);
-        *window = window.saturating_add(bytes);
+        let Some(granted) = window.as_mut() else {
+            return;
+        };
+        *granted = granted.saturating_add(bytes);
+        out.send(StreamEvent::Credit { bytes });
+    }
+
+    fn close(&self) {
+        *lock(&self.0) = None;
     }
 }
 
@@ -174,9 +185,7 @@ pub(crate) async fn receive_stream<W: AsyncWrite + Unpin>(
         if writer.write_all(&chunk).await.is_err() || writer.flush().await.is_err() {
             break;
         }
-        let bytes = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
-        window.give(bytes);
-        out.send(StreamEvent::Credit { bytes });
+        window.give(u64::try_from(chunk.len()).unwrap_or(u64::MAX), &out);
     }
     let _ = writer.shutdown().await;
 }
@@ -242,10 +251,11 @@ impl StreamEnds {
     }
 
     fn abort(&mut self, reason: &str) -> bool {
+        // Closed first, so no grant follows the abort.
+        self.close();
         self.out.send(StreamEvent::Close {
             reason: Some(reason.to_owned()),
         });
-        self.close();
         false
     }
 
@@ -253,6 +263,7 @@ impl StreamEnds {
     pub(crate) fn close(&mut self) {
         self.inbound = None;
         self.credit.close();
+        self.window.close();
     }
 }
 
