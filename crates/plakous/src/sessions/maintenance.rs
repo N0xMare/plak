@@ -139,7 +139,13 @@ impl AgentSessions {
     ) -> Result<PruneHistoryOutcome, AgentSessionsError> {
         const OPERATION: &str = "session-history-prune";
         let _reservation = self.drivers.reserve_session(locator.session_id)?;
-        self.load_exact(locator).await?;
+        let line = self
+            .load_exact(locator)
+            .await?
+            .checkpoint
+            .manifest()
+            .topology()
+            .line;
         let address = DurableSessionAddress::new(
             locator.session_id,
             locator.branch_id,
@@ -150,7 +156,11 @@ impl AgentSessions {
                 PruneHistoryReport::from_receipt(locator, receipt),
             )),
             Ok(None) => Ok(PruneHistoryOutcome::RecoveryRequired),
-            Err(error) if error.is_not_line_head() => Ok(PruneHistoryOutcome::Superseded),
+            Err(error) if error.is_not_line_head() => Ok(if self.line_ended(line).await {
+                PruneHistoryOutcome::LineEnded
+            } else {
+                PruneHistoryOutcome::Superseded
+            }),
             Err(error) => Err(self.map_branch_runtime_error(locator, &error).await),
         }
     }

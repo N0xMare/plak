@@ -274,7 +274,7 @@ launch directory — the cwd of the process, resolved once.
   state/
     r27.e35.p35.t9/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 26, epoch 34
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 35
       product.sqlite3             Plak intents and feed-derived views, schema 35
       subagents.sqlite3           the agent tree, schema 9
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
@@ -1246,8 +1246,17 @@ session starts a new tree. An import starts a new agent line (chapter 01
 §5.1) whose provenance names the source key and id. The same-state carries,
 the binding-repair `/rebind` carry and the `/reload` orchestration carry,
 instead continue the source's line: the new runtime session becomes the line's
-next head in its create transaction, takes the source head's process rows, and
-the source's runtime branch becomes read-only history. Importing the same source session/key into the same
+next head in its create transaction, takes the source head's process rows and
+pending notices, and the source's runtime branch becomes read-only history. The
+carry holds the source head's lease from reading its rows to that transaction,
+so it is refused while the source is open in any plak or held lease-only, and
+while its head has an unfinished turn (chapter 01 §5.10). A profile rebind
+(Fork now) and a binding rebind instead start a new agent line, as a fork does
+(chapter 01 §5.7): the successor keeps the job numbers and the rows, with their
+pending notices, of jobs that already exited, so a notice the source still owed
+reaches the successor too; running processes are never carried (a transition
+with running processes is refused before durable work, §5.1), and the source
+keeps its line. Importing the same source session/key into the same
 workspace twice refuses and names its existing successor. `session list`,
 `session show` and the TUI opening note name the link. Opening notes follow the
 same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
@@ -1422,7 +1431,10 @@ turns. A session whose branch lease is live is skipped as open in a running
 plak; one whose head is Working is skipped as needing `plak session recover`; one
 whose runtime branch is a superseded predecessor of a live agent line is
 skipped as `superseded: its agent line continues in a later session; kept
-as read-only history` (chapter 01 §5.9).
+as read-only history`, and one whose line ended when the session holding its
+head was deleted as `superseded: its agent line ended when the session holding
+its head was deleted; kept as read-only history until it is deleted` (chapter
+01 §5.9).
 `gc` first applies the session's projector to the feed tail and prunes at the
 head that view names. A session with a workflow request that has no feed fact
 yet is skipped as `workflow pending`, because that request still names its

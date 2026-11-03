@@ -3,7 +3,7 @@ use plakous_agent::internal::facade_support::{
     SessionStoreOrigin, agent_store_origin, session_store_origin,
 };
 use plakous_agent::internal::{
-    SessionStoreCapacity, SessionStoreError, StoreAdmission, StoreCapacityBound,
+    SessionStoreCapacity, SessionStoreError, StoreAdmission, StoreCapacityBound, StoreInvalidReason,
 };
 use plakous_agent::{AgentError, AgentErrorKind, BindingChange};
 use plakous_model::StableRequestPrefixField;
@@ -371,7 +371,18 @@ pub(super) fn store_origin_error(origin: SessionStoreOrigin) -> AgentSessionsErr
             AgentSessionsErrorKind::StorageUnavailable,
             "storage unavailable",
         ),
-        SessionStoreOrigin::InvalidInput => (AgentSessionsErrorKind::InvalidInput, "invalid input"),
+        SessionStoreOrigin::InvalidInput(StoreInvalidReason::CarrySourceNotQuiescent) => {
+            return AgentSessionsError::new(
+                AgentSessionsErrorKind::NotQuiescent,
+                "the carry source has an unfinished turn or workflow; open it so it recovers, then carry it",
+            );
+        }
+        SessionStoreOrigin::InvalidInput(reason) => {
+            return AgentSessionsError::new(
+                AgentSessionsErrorKind::InvalidInput,
+                format!("semantic session store refused the workflow: invalid input: {reason}"),
+            );
+        }
         SessionStoreOrigin::UnsupportedPersistence => return incompatible(),
         SessionStoreOrigin::Integrity => (AgentSessionsErrorKind::Integrity, "integrity"),
     };

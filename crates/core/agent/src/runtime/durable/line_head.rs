@@ -19,6 +19,32 @@ use plakous_tools::JobView;
 use std::fmt;
 use std::sync::Arc;
 
+/// Refuses `branch` for work unless it is its line's head at `generation`.
+/// A line whose head session was deleted has ended, and its predecessors
+/// stay read-only history: they are refused as `NotLineHead` too.
+pub(in crate::runtime) async fn require_line_head(
+    store: &Arc<dyn SessionStore>,
+    timeouts: crate::runtime::StoreTimeouts,
+    branch: crate::SessionRef,
+    line: LineId,
+    generation: u64,
+) -> Result<(), AgentError> {
+    match store_call(
+        StorePhase::LoadBranch,
+        timeouts.operation,
+        store.load_line(line),
+    )
+    .await
+    {
+        Ok(record) if record.head() == branch && record.generation() == generation => Ok(()),
+        Ok(_) => Err(AgentError::from_store(SessionStoreError::NotLineHead)),
+        Err(error) if error.is(SessionStoreError::NotFound) => {
+            Err(AgentError::from_store(SessionStoreError::NotLineHead))
+        }
+        Err(error) => Err(error.into_agent()),
+    }
+}
+
 /// The lease of one line's head, held without a driver.
 pub struct DurableLineHead {
     store: Arc<dyn SessionStore>,

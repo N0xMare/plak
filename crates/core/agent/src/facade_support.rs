@@ -15,17 +15,24 @@ pub fn agent_builder_with_named_state(
     builder.seed_named_state(state)
 }
 
-/// Makes a durable genesis the next head of `line` at `generation` (a
-/// same-store carry) instead of starting a new line. The genesis takes the
-/// source head's job ledger, every row handed to the new head.
+/// Makes a durable genesis take over a carry source's held line head (a
+/// same-store carry): it becomes the line's next head with the head's job
+/// ledger, and the source lease ends once the create settles.
 #[must_use]
-pub fn agent_builder_continuing_line(
+pub fn agent_builder_carrying_head(
     builder: AgentBuilder,
-    line: plakous_model::LineId,
-    generation: u64,
-    jobs: crate::manifest::JobLedger,
+    head: Box<crate::runtime::DurableCarryHead>,
 ) -> AgentBuilder {
-    builder.continue_line(line, generation, jobs)
+    builder.carry_head(head)
+}
+
+/// Rebuilds the genesis of an already published carry exactly.
+#[must_use]
+pub fn agent_builder_replaying_carry(
+    builder: AgentBuilder,
+    replay: crate::runtime::DurableCarryReplay,
+) -> AgentBuilder {
+    builder.replay_carry(replay)
 }
 
 /// Records the provenance of the new line a durable genesis starts.
@@ -101,8 +108,8 @@ pub enum SessionStoreOrigin {
     Busy,
     /// Backend availability or shutdown prevented the operation.
     Unavailable,
-    /// The store rejected the caller's semantic input.
-    InvalidInput,
+    /// The store rejected the caller's semantic input for this closed reason.
+    InvalidInput(crate::session::StoreInvalidReason),
     /// Persistent data uses a schema or codec unsupported by this release.
     UnsupportedPersistence,
     /// Stored semantics failed an integrity check.
@@ -234,7 +241,7 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
         SessionStoreError::BackendUnavailable | SessionStoreError::Shutdown => {
             SessionStoreOrigin::Unavailable
         }
-        SessionStoreError::Invalid(_) => SessionStoreOrigin::InvalidInput,
+        SessionStoreError::Invalid(reason) => SessionStoreOrigin::InvalidInput(reason),
         SessionStoreError::UnsupportedSchema | SessionStoreError::UnsupportedCodec => {
             SessionStoreOrigin::UnsupportedPersistence
         }

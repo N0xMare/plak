@@ -89,13 +89,21 @@ pub(super) enum CreateLine {
 
 impl CreateSessionRequest {
     /// Makes the new session the next head of the agent line whose head is
-    /// `source`'s branch (a same-store carry), in the create's own
-    /// transaction: that branch becomes read-only history. A branch that is
-    /// already superseded has no line to continue, and the new session
-    /// starts a new line naming the branch it was carried from. The create
-    /// is refused with [`AgentSessionsErrorKind::NotLineHead`] if the head
-    /// moves between that read and the create. Without this, a new session
-    /// starts a new line.
+    /// `source`'s branch (a same-store carry), fenced like a rebind: the
+    /// create takes the head's lease, reads its job ledger and folds the
+    /// line's pending job terminals, and its transaction moves the head only
+    /// if that exact head is still current, so the branch becomes read-only
+    /// history with every job row and notice handed over exactly once. A
+    /// branch that is already superseded has no line to continue, and the
+    /// new session starts a new line naming the branch it was carried from.
+    ///
+    /// The create is refused with [`AgentSessionsErrorKind::Ownership`]
+    /// while another owner, including a lease-only holder, holds the head;
+    /// [`AgentSessionsErrorKind::NotQuiescent`] while the head has an
+    /// unfinished turn or workflow; and
+    /// [`AgentSessionsErrorKind::UnsettledProcesses`] when the head has
+    /// running jobs and `runtime` installs no `JobHost`. Without this, a new
+    /// session starts a new line.
     #[must_use]
     pub fn continuing_line(mut self, source: SessionLocator) -> Self {
         self.line = Some(CreateLine::Continue(source));
@@ -1004,11 +1012,12 @@ pub enum RebindSessionOutcome {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum RebindRefused {
-    /// The attached source owns running jobs in its private process service
-    /// and the target binding installs no `JobHost`: the service dies with the
-    /// source's driver, so nothing could carry the jobs to the target. Install
-    /// a `JobHost` (for example `plakous::tools::LocalJobHost`) on both
-    /// bindings, or stop the jobs first.
+    /// The source's durable job ledger has rows without terminal evidence
+    /// and the target binding installs no `JobHost`, so no process service
+    /// could take the jobs over. Install a `JobHost` (for example
+    /// `plakous::tools::LocalJobHost`) on the bindings, or stop the jobs
+    /// first. A source released for transfer without a `JobHost` stopped
+    /// and recorded its jobs, so it is never refused for them.
     RunningJobsWithoutJobHost {
         /// Running jobs of the source.
         running: usize,
@@ -1036,10 +1045,16 @@ pub enum AgentSessionsErrorKind {
     IdentityConflict,
     /// Session ownership or optimistic concurrency was lost.
     Ownership,
+    /// The source head has an unfinished admitted turn or workflow. Open it
+    /// so it recovers, then retry.
+    NotQuiescent,
     /// The branch is not its agent line's head: a rebind or carry moved the
     /// line on, so the branch is read-only history. View, export or fork it;
     /// continue work on the line's head.
     NotLineHead,
+    /// The branch's agent line ended when the session holding its head was
+    /// deleted: the branch is read-only history. View, export or fork it.
+    LineEnded,
     /// A workflow reply was lost or its admitted outcome is unknown. A model
     /// call or commit may have occurred; the change feed remains authoritative.
     OutcomeUnknown,
@@ -1105,6 +1120,10 @@ pub enum PruneHistoryOutcome {
     /// moved the line's head on): it is kept whole as read-only history until
     /// it, or its line, is deleted explicitly.
     Superseded,
+    /// The branch is a predecessor of an agent line that ended when the
+    /// session holding its head was deleted: it stays whole as read-only
+    /// history until it is deleted explicitly.
+    LineEnded,
 }
 
 /// Redaction-safe account of one history prune.

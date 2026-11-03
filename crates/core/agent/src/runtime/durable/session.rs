@@ -223,6 +223,27 @@ impl DurableSessionRuntime {
         builder: AgentBuilder,
         history: CanonicalHistory,
     ) -> Result<Agent, AgentError> {
+        // A carry's source lease ends once its create settles: the store
+        // moved the head away from it, or the carry failed.
+        let held = builder
+            .line_carry
+            .as_ref()
+            .and_then(super::carry::LineCarry::held_lease);
+        let created = Box::pin(self.create_genesis(operation_id, builder, history)).await;
+        if let Some(lease) = held {
+            let _unreleased =
+                release_store_lease(Arc::clone(&self.store), lease, self.store_timeouts.cleanup)
+                    .await;
+        }
+        created
+    }
+
+    async fn create_genesis(
+        &self,
+        operation_id: &str,
+        builder: AgentBuilder,
+        history: CanonicalHistory,
+    ) -> Result<Agent, AgentError> {
         validate_session_operation_id(operation_id)?;
         validate_durable_builder(&builder)?;
         let admission = sealed_runtime_admission(&builder).await?;
@@ -243,8 +264,26 @@ impl DurableSessionRuntime {
             self.lease_seconds,
             bundle,
         )
-        .with_line_origin(builder.line_origin.clone())
-        .with_feed_facts(crate::feed::facts::genesis_facts(operation_id, &checkpoint));
+        .with_line_origin(builder.line_origin.clone());
+        let mut facts = crate::feed::facts::genesis_facts(operation_id, &checkpoint);
+        let request = match builder
+            .line_carry
+            .as_ref()
+            .and_then(super::carry::LineCarry::continuation)
+        {
+            Some((continuation, line, generation)) => {
+                if !continuation.consumed_terminals().is_empty() {
+                    facts.push(crate::feed::FeedFact::LineJobTerminalsConsumed {
+                        line,
+                        generation,
+                        jobs: continuation.consumed_terminals().to_vec(),
+                    });
+                }
+                request.continuing_line(continuation)
+            }
+            None => request,
+        }
+        .with_feed_facts(facts);
         let receipt = recover_or_create(
             Arc::clone(&self.store),
             request,
@@ -421,12 +460,14 @@ impl DurableSessionRuntime {
         .map_err(StoreCallError::into_agent)?;
         validate_loaded_address(&loaded, address, self.durability)?;
         let topology = loaded.checkpoint().checkpoint().manifest().topology();
-        let line = self.line(topology.line).await?;
-        if line.head() != address.session() || line.generation() != topology.line_generation {
-            return Err(AgentError::from_store(
-                crate::SessionStoreError::NotLineHead,
-            ));
-        }
+        super::line_head::require_line_head(
+            &self.store,
+            self.store_timeouts,
+            address.session(),
+            topology.line,
+            topology.line_generation,
+        )
+        .await?;
         if checkpoint_requires_closed_recovery(loaded.checkpoint().checkpoint()) {
             return Ok(DurableOpenVerification::UnsettledWork);
         }

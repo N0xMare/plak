@@ -320,6 +320,26 @@ impl JobLedger {
         Self::new(self.next_id, rows)
     }
 
+    /// Seeds a new line's branch: the job numbers and the pending notices of
+    /// jobs with terminal evidence, under `owner`; running processes stay
+    /// with the source's line.
+    #[must_use]
+    pub fn forked(&self, owner: JobOwner) -> Self {
+        let rows = self
+            .rows
+            .iter()
+            .filter(|row| row.terminal.is_some())
+            .map(|row| JobRow {
+                owner,
+                ..row.clone()
+            })
+            .collect();
+        Self {
+            next_id: self.next_id,
+            rows,
+        }
+    }
+
     /// Seeds a cleared branch without carrying pending notices.
     #[must_use]
     pub fn cleared(&self) -> Self {

@@ -57,7 +57,6 @@ impl AgentSessions {
             history,
             line,
         } = request;
-        runtime.builder = self.line_builder(runtime.builder, line).await?;
         let mut replay_validation_error = None;
         let named_state = history
             .as_ref()
@@ -84,6 +83,9 @@ impl AgentSessions {
             None => plakous_model::CanonicalHistory::default(),
         };
         let _reservation = self.drivers.reserve(&operation_id)?;
+        // Last before the create: a carry holds its source head's lease from
+        // here until the create settles.
+        runtime.builder = Box::pin(self.line_builder(&operation_id, runtime.builder, line)).await?;
         match Box::pin(self.runtime.create_seeded(
             operation_id.as_str(),
             plakous_agent::internal::facade_support::agent_builder_with_named_state(
@@ -186,7 +188,11 @@ impl AgentSessions {
                 if error.kind() == AgentErrorKind::Session && agent_store_origin(&error).is_none() {
                     self.load_exact(locator).await?;
                 }
-                Err(runtime_error(&error).for_session(locator.session_id))
+                let line = exact.checkpoint.manifest().topology().line;
+                Err(self
+                    .line_refusal(line, runtime_error(&error))
+                    .await
+                    .for_session(locator.session_id))
             }
         }
     }
@@ -224,7 +230,13 @@ impl AgentSessions {
                 Ok(OpenVerification::Opens)
             }
             Ok(_) => Ok(OpenVerification::UnsettledWork),
-            Err(error) => Err(runtime_error(&error).for_session(locator.session_id)),
+            Err(error) => {
+                let line = exact.checkpoint.manifest().topology().line;
+                Err(self
+                    .line_refusal(line, runtime_error(&error))
+                    .await
+                    .for_session(locator.session_id))
+            }
         }
     }
 }

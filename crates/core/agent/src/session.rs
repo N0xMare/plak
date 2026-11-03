@@ -14,6 +14,7 @@ mod create;
 pub use create::CreateOperation;
 pub use create::CreateReceipt;
 pub use create::CreateSession;
+pub use create::LineContinuation;
 mod fork;
 pub use fork::BranchTransitionMode;
 pub use fork::ForkBranch;

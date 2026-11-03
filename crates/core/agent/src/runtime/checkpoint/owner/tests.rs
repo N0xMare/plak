@@ -557,3 +557,187 @@ async fn a_revival_the_store_cannot_answer_is_not_reported_as_takeover() -> Test
     }
     Ok(())
 }
+
+/// A store whose head moved on: every commit and prune is refused as
+/// `NotLineHead`, while the lease itself still renews.
+struct SupersededStore {
+    commits: std::sync::atomic::AtomicUsize,
+    prunes: std::sync::atomic::AtomicUsize,
+}
+
+impl SessionStore for SupersededStore {
+    fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
+        LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 0, 0)
+    }
+
+    unused_store_methods! {
+        create(request: CreateSession) -> CreateReceipt;
+        recover_create(request: CreateSession) -> CreateReceipt;
+        load_branch(session: SessionRef) -> LoadedBranch;
+        load_checkpoint(checkpoint: CheckpointId) -> StoredCheckpoint;
+        acquire(request: AcquireBranch) -> BranchLease;
+        release(lease: BranchLease) -> ();
+        fork(request: ForkBranch) -> ForkReceipt;
+        recover_fork(request: RecoverFork) -> ForkReceipt;
+        list(query: SessionQuery) -> Page<SessionSummary>;
+        archive(request: ArchiveSession) -> ArchiveReceipt;
+        delete(request: DeleteSession) -> DeleteReceipt;
+        recover_delete(request: DeleteSession) -> DeleteReceipt;
+        feed_tail(session: SessionId) -> feed::FeedTail;
+        load_line(line: LineId) -> LineRecord;
+        line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
+        record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
+    }
+
+    fn renew(&self, lease: BranchLease) -> StoreFuture<'_, BranchLease> {
+        Box::pin(async move { Ok(lease) })
+    }
+
+    fn commit(&self, _: CommitCheckpoint) -> StoreFuture<'_, CommitReceipt> {
+        self.commits
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Box::pin(async { Err(SessionStoreError::NotLineHead) })
+    }
+
+    fn recover_commit(&self, _: CheckpointId) -> StoreFuture<'_, CommittedCheckpoint> {
+        Box::pin(async { Err(SessionStoreError::NotFound) })
+    }
+
+    fn prune(&self, _: PruneBranch) -> StoreFuture<'_, PruneReceipt> {
+        self.prunes
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Box::pin(async { Err(SessionStoreError::NotLineHead) })
+    }
+
+    fn read_feed(
+        &self,
+        _: SessionId,
+        _: FeedSeq,
+        _: std::num::NonZeroUsize,
+    ) -> StoreFuture<'_, feed::FeedPage> {
+        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
+    }
+
+    fn usage(&self) -> StoreFuture<'_, StoreUsage> {
+        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
+    }
+    fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
+        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
+    }
+    fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
+        self.flush()
+    }
+}
+
+fn superseded_owner(store: Arc<SupersededStore>) -> TestResult<CheckpointOwner> {
+    let first = checkpoint(1, 1_000)?;
+    let bundle = RuntimeCheckpointCodec::bundle(&first, None)?;
+    let topology = first.manifest().topology();
+    let session = SessionRef::new(topology.session_id, topology.branch_id);
+    let head = BranchHead::from_store(
+        session,
+        BranchRevision::from_store(topology.branch_revision),
+        CheckpointObjectRef::from_store(topology.checkpoint_id, bundle.root(), first.integrity()),
+    );
+    let lease = BranchLease::from_store(
+        session,
+        RunId::try_from(uuid::Uuid::from_u128(99))?,
+        NonZeroU64::new(1).ok_or("nonzero fence")?,
+        LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 1_000, 0)?,
+        NonZeroU64::new(1_000).ok_or("nonzero interval")?,
+    );
+    Ok(PreparedCheckpoint::new(
+        first,
+        bundle,
+        Some(DurableBranchFacts::new(
+            store,
+            head,
+            lease,
+            StoreTimeouts::default(),
+        )),
+    )
+    .start())
+}
+
+/// A commit the head fence refuses fences the owner itself: nothing it
+/// would publish later reaches the store.
+#[tokio::test]
+async fn a_commit_refused_as_not_line_head_fences_the_owner() -> TestResult {
+    let store = Arc::new(SupersededStore {
+        commits: std::sync::atomic::AtomicUsize::new(0),
+        prunes: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let mut owner = superseded_owner(Arc::clone(&store))?;
+    let prior = owner.checkpoint();
+    let manifest = prior.manifest();
+    let facts = || -> TestResult<SuccessorFacts> {
+        Ok(SuccessorFacts {
+            checkpoint_id: CheckpointId::try_from(uuid::Uuid::from_u128(0x5e_0001))?,
+            lifecycle: RuntimeLifecycle::Quiescent,
+            history: manifest.canonical().history().clone(),
+            ledger: manifest.ledger().clone(),
+            jobs: manifest.jobs().clone(),
+            named_state: manifest.named_state().clone(),
+            context: manifest.canonical().context().retained_for_exact_resume(),
+            family: manifest.family_artifact().cloned(),
+        })
+    };
+    let telemetry = DurabilityCommitTelemetry {
+        emitter: Arc::new(TelemetryEmitter::disabled()),
+        clock: Arc::new(SystemClock),
+        context: TelemetryContext::new(
+            DriverInstanceId::try_from(uuid::Uuid::from_u128(0x5e_0002))?,
+            manifest.topology().session_id,
+            manifest.topology().branch_id,
+            RunId::try_from(uuid::Uuid::from_u128(0x5e_0003))?,
+        ),
+    };
+    let refused = owner
+        .publish(facts()?, None, &telemetry, StoreAdmission::Ordinary)
+        .await
+        .err()
+        .ok_or("a superseded commit published")?;
+    assert_eq!(refused.store_error(), Some(SessionStoreError::NotLineHead));
+    assert_eq!(
+        owner
+            .heartbeat
+            .check()
+            .err()
+            .and_then(|error| error.store_error()),
+        Some(SessionStoreError::NotLineHead)
+    );
+    assert!(
+        owner
+            .publish(facts()?, None, &telemetry, StoreAdmission::Ordinary)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store.commits.load(std::sync::atomic::Ordering::Acquire),
+        1,
+        "a fenced owner never commits again"
+    );
+    let _ = owner.heartbeat.stop_and_join(Duration::from_secs(1)).await;
+    Ok(())
+}
+
+/// A prune the head fence refuses fences the owner the same way.
+#[tokio::test]
+async fn a_prune_refused_as_not_line_head_fences_the_owner() -> TestResult {
+    let store = Arc::new(SupersededStore {
+        commits: std::sync::atomic::AtomicUsize::new(0),
+        prunes: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let mut owner = superseded_owner(Arc::clone(&store))?;
+    let refused = owner
+        .prune_superseded(0)
+        .await
+        .err()
+        .ok_or("a superseded prune succeeded")?;
+    assert_eq!(refused.store_error(), Some(SessionStoreError::NotLineHead));
+    assert!(owner.heartbeat.check().is_err());
+    assert!(owner.prune_superseded(0).await.is_err());
+    assert_eq!(store.prunes.load(std::sync::atomic::Ordering::Acquire), 1);
+    let _ = owner.heartbeat.stop_and_join(Duration::from_secs(1)).await;
+    Ok(())
+}

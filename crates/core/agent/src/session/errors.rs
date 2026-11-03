@@ -7,6 +7,10 @@ pub enum StoreInvalidReason {
     #[serde(rename = "branch revision exhausted")]
     #[error("branch revision exhausted")]
     BranchRevisionExhausted,
+    /// A line-continuing genesis's source head is not quiescent.
+    #[serde(rename = "carry source is not quiescent")]
+    #[error("carry source is not quiescent")]
+    CarrySourceNotQuiescent,
     /// Checkpoint commit topology.
     #[serde(rename = "checkpoint commit topology")]
     #[error("checkpoint commit topology")]
@@ -55,6 +59,10 @@ pub enum StoreInvalidReason {
     #[serde(rename = "lease expiry overflow")]
     #[error("lease expiry overflow")]
     LeaseExpiryOverflow,
+    /// A head move did not fold exactly the line's pending job terminals.
+    #[serde(rename = "head move did not fold the line's pending job terminals")]
+    #[error("head move did not fold the line's pending job terminals")]
+    LineTerminalsNotFolded,
     /// Manifest root delta.
     #[serde(rename = "manifest root delta")]
     #[error("manifest root delta")]

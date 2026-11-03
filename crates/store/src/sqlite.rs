@@ -25,7 +25,7 @@ use plakous_agent::internal::{
     CreateOperation, CreateReceipt, CreateSession, DeleteReceipt, DeleteSession, Digest,
     DigestDomain, DurabilityReport, FeedBranchTransition, FeedChange, FeedLocator, FeedPage,
     FeedSeq, FeedTail, ForkBranch, ForkLineage, ForkOperation, ForkReceipt, LeaseClock,
-    LeaseDomain, LeaseInstant, LineOrigin, LoadedBranch, Page, PruneBranch, PruneReceipt,
+    LeaseDomain, LeaseInstant, LineOrigin, LineStep, LoadedBranch, Page, PruneBranch, PruneReceipt,
     RecoverFork, RunId, RuntimeCheckpoint, RuntimeCheckpointKind, RuntimeDurability,
     RuntimeManifest, RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind, SessionHead,
     SessionId, SessionQuery, SessionRef, SessionRevision, SessionStore, SessionStoreError,

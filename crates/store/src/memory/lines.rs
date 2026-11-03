@@ -58,35 +58,108 @@ pub(super) fn require_head(
     }
 }
 
-/// Validates a genesis's line step: a new line, or a carry's head advance.
+/// Validates a genesis's line step: a new line, or a carry that takes over
+/// the current head its continuation names, fenced like a rebind.
 pub(super) fn plan_genesis(
     state: &StoreState,
     request: &plakous_agent::internal::CreateSession,
     topology: plakous_agent::internal::RuntimeTopology,
+    now: plakous_agent::internal::LeaseInstant,
 ) -> Result<LineChange, SessionStoreError> {
-    plan_step(
-        state,
-        request.session(),
+    let invalid = StoreInvalidReason::GenesisCheckpointTopology;
+    let step = LineStep::of(
+        request.session().branch_id(),
         topology.line,
         topology.line_generation,
-        None,
-        request.line_origin(),
-        StoreInvalidReason::GenesisCheckpointTopology,
+    );
+    let source = match (request.continuation(), step) {
+        (Some(continuation), Some(LineStep::Advance { .. })) => {
+            Some(carry_source(state, continuation, now)?)
+        }
+        (None, Some(LineStep::NewLine)) => None,
+        _ => return Err(SessionStoreError::Invalid(invalid)),
+    };
+    plan_step(
+        state,
+        &Step {
+            target: request.session(),
+            line: topology.line,
+            generation: topology.line_generation,
+            source,
+            consumed: request
+                .continuation()
+                .map_or(&[], |continuation| continuation.consumed_terminals()),
+            origin: request.line_origin(),
+            invalid,
+        },
     )
     .map(|(change, _)| change)
+}
+
+/// The rebind fence of a carry's source: its current lease, its exact head
+/// since the ledger was read, and a quiescent head checkpoint.
+fn carry_source(
+    state: &StoreState,
+    continuation: &plakous_agent::internal::LineContinuation,
+    now: plakous_agent::internal::LeaseInstant,
+) -> Result<(SessionRef, CheckpointId), SessionStoreError> {
+    let source = continuation.source();
+    let session = state
+        .sessions
+        .get(&source.session().session_id())
+        .ok_or(SessionStoreError::NotFound)?;
+    if session.head.is_archived() {
+        return Err(SessionStoreError::Archived);
+    }
+    let row = branch(state, source.session())?;
+    require_lease(row, continuation.lease(), now)?;
+    if row.head != source {
+        return Err(SessionStoreError::Conflict);
+    }
+    let checkpoint = source.checkpoint().checkpoint_id();
+    if state
+        .checkpoints
+        .get(&checkpoint)
+        .ok_or(SessionStoreError::corrupt())?
+        .checkpoint
+        .kind()
+        != plakous_agent::internal::RuntimeCheckpointKind::Quiescent
+    {
+        return Err(SessionStoreError::Invalid(
+            StoreInvalidReason::CarrySourceNotQuiescent,
+        ));
+    }
+    Ok((source.session(), checkpoint))
+}
+
+/// One new branch's line step.
+pub(super) struct Step<'a> {
+    pub(super) target: SessionRef,
+    pub(super) line: LineId,
+    pub(super) generation: u64,
+    /// A fork's source, or the head a carry takes over.
+    pub(super) source: Option<(SessionRef, CheckpointId)>,
+    /// The pending line job terminals an advancing target folded.
+    pub(super) consumed: &'a [u32],
+    pub(super) origin: &'a LineOrigin,
+    pub(super) invalid: StoreInvalidReason,
 }
 
 /// Validates a new branch's line step; returns the change to apply and
 /// whether the branch becomes the next head of an existing line.
 pub(super) fn plan_step(
     state: &StoreState,
-    target: SessionRef,
-    line: LineId,
-    generation: u64,
-    source: Option<(SessionRef, CheckpointId)>,
-    origin: &LineOrigin,
-    invalid: StoreInvalidReason,
+    step: &Step<'_>,
 ) -> Result<(LineChange, bool), SessionStoreError> {
+    let Step {
+        target,
+        line,
+        generation,
+        source,
+        consumed,
+        origin,
+        invalid,
+    } = *step;
     match LineStep::of(target.branch_id(), line, generation)
         .ok_or(SessionStoreError::Invalid(invalid))?
     {
@@ -115,9 +188,10 @@ pub(super) fn plan_step(
             ))
         }
         LineStep::Advance { line, from } => {
-            if let Some((source, _)) = source
-                && branch_line(state, source)? != (line, from)
-            {
+            let Some((source, _)) = source else {
+                return Err(SessionStoreError::Invalid(invalid));
+            };
+            if branch_line(state, source)? != (line, from) {
                 return Err(SessionStoreError::Invalid(invalid));
             }
             let row = state
@@ -125,17 +199,24 @@ pub(super) fn plan_step(
                 .lines
                 .get(&line)
                 .ok_or(SessionStoreError::NotLineHead)?;
-            if row.generation != from || source.is_some_and(|(source, _)| source != row.head) {
+            if row.generation != from || source != row.head {
                 return Err(SessionStoreError::NotLineHead);
             }
-            if state
+            let mut pending = state
                 .lines
                 .terminals
                 .range((line, 0, 0)..=(line, u64::MAX, u32::MAX))
-                .next()
-                .is_some()
-            {
-                return Err(SessionStoreError::Conflict);
+                .map(|((_, _, job), _)| *job)
+                .collect::<Vec<_>>();
+            pending.sort_unstable();
+            pending.dedup();
+            let mut folded = consumed.to_vec();
+            folded.sort_unstable();
+            folded.dedup();
+            if pending != folded {
+                return Err(SessionStoreError::Invalid(
+                    StoreInvalidReason::LineTerminalsNotFolded,
+                ));
             }
             Ok((LineChange::Advance(line, target, generation), true))
         }
@@ -152,6 +233,12 @@ pub(super) fn apply(state: &mut StoreState, change: LineChange) {
                 row.head = head;
                 row.generation = generation;
             }
+            // The moving head's pending evidence was folded into the ledger
+            // the new head took over.
+            state
+                .lines
+                .terminals
+                .retain(|(terminal_line, _, _), _| *terminal_line != line);
         }
     }
 }

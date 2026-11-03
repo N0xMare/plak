@@ -309,8 +309,9 @@ impl MemorySessionStore {
 
         let candidate = publication_candidate(request.initial())?;
         let topology = candidate.checkpoint.manifest().topology();
-        let line_change = lines::plan_genesis(&state, request, topology)?;
-        let expires_at = expiry(self.lease_now()?, request.lease_seconds())?;
+        let now = self.lease_now()?;
+        let line_change = lines::plan_genesis(&state, request, topology, now)?;
+        let expires_at = expiry(now, request.lease_seconds())?;
         let fence = NonZeroU64::MIN;
         let lease = BranchLease::from_store(
             request.session(),
@@ -843,15 +844,18 @@ impl MemorySessionStore {
         let topology = candidate.checkpoint.manifest().topology();
         let (line_change, new_head) = lines::plan_step(
             &state,
-            target,
-            topology.line,
-            topology.line_generation,
-            Some((
-                request.source().session(),
-                request.source().checkpoint().checkpoint_id(),
-            )),
-            &plakous_agent::internal::LineOrigin::Created,
-            StoreInvalidReason::ForkCheckpointSemantics,
+            &lines::Step {
+                target,
+                line: topology.line,
+                generation: topology.line_generation,
+                source: Some((
+                    request.source().session(),
+                    request.source().checkpoint().checkpoint_id(),
+                )),
+                consumed: request.consumed_line_terminals(),
+                origin: &plakous_agent::internal::LineOrigin::Created,
+                invalid: StoreInvalidReason::ForkCheckpointSemantics,
+            },
         )?;
         let (line, line_generation) = (topology.line, topology.line_generation);
         let next_revision = request

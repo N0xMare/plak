@@ -285,7 +285,7 @@ keep the stop name process-allowlist gated without changing its effect tag.
 The job-ledger fixture carries a promoted row across later turns and their operation-only and
 terminal commits, copies terminal evidence in a history-unchanged Quiescent
 checkpoint, and proves repeated recording is a no-op. Manifest round trips pin
-the row/terminal bounds, same-batch consumption, clear counter and epoch 34.
+the row/terminal bounds, same-batch consumption, clear counter and epoch 35.
 Fresh-service reopen retains exit-code and output-tail answers until consumption;
 stop on an already terminal snapshot preserves its original outcome. Row-cap
 fixtures keep foreground retention separate from promoted, unconsumed jobs.
@@ -3008,7 +3008,7 @@ the session-level test also requires a joined worker.
 SDK stub/bootstrap hashes and generated-validator keyword coverage are pinned;
 the SDK descriptor identity is pinned beside the existing goldens. Existing
 text pins are unchanged; descriptors naming the revised cell protocol rotate
-in unreleased epoch 34.
+with the runtime format epoch.
 
 Harbor's opt-in `plak-py-ptc`/`plak-py-sdk` A/B recipe declares composition
 per arm in a digest-bound campaign. Default arms do not admit overrides;
@@ -4218,24 +4218,55 @@ backends (`memory_backend_satisfies_line_conformance`,
 verification): a rebind moves the head and generation in its publication; the
 source, its lease still live, is refused `NotLineHead` for a commit, a prune and
 a second rebind and its head is unchanged; a fork of the predecessor starts a
-line whose origin names it; only the head records line job terminals, a repeat
-records nothing and appends nothing, the head cannot advance while they wait
-(`Conflict`) and its next commit consumes them; a same-store carry continues the
-line across sessions and fences the previous head; deleting the head's session
-ends the line. `sigkill_line_advance_cuts_reopen_with_exactly_one_head` kills a
-child at `fork-before-commit` and `fork-after-commit` of a head advance and
-requires a fully verified reopen with exactly one head: the source at
-generation 1 with no target and still committing, or the target at generation 2
-with the source fenced. The hosted line tests
-(`agent::live::line_tests::`) drive real promoted processes through the host
-registry: a line-continuing carry hands the running job, with its number, to
-the next head, the source refuses to open, and the job's exit lands in the new
-head's ledger exactly once and survives a fresh-process reopen; a lease-only
-holder records the job's stop, keeps other owners off the head, and the head's
-open answers the recorded stop and folds it once (one `LineJobTerminalRecorded`,
-one `LineJobTerminalsConsumed`); and a head-advancing rebind of an attached
-source with a running job and no `JobHost` is refused
-`RunningJobsWithoutJobHost` with the job still running. A store reopened under a limit below its usage
+line whose origin names it; only the head records line job terminals, under its
+current head checkpoint (another checkpoint is `Conflict`), a repeat records
+nothing and appends nothing, and its next commit consumes them; a head advance
+folds the pending terminals instead of waiting for them, and any other folded
+set is refused `LineTerminalsNotFolded` with the head unchanged; a same-store
+carry is refused without a continuation, when it names a head a commit has
+since replaced (`Conflict`), and under a lease a lease-only holder has since
+superseded, then continues the line across sessions under the holder's lease,
+folding its recorded terminal, an exact replay answers from the receipt, and
+the predecessor is fenced even under its live lease; deleting the head's
+session ends the line. `sigkill_line_advance_cuts_reopen_with_exactly_one_head`
+kills a child at `fork-before-commit` and `fork-after-commit` of a rebind's head
+advance, at `carry-before-commit` and `carry-after-commit` of a carry's create,
+and at `record-terminals-before-commit` and `record-terminals-after-commit` of a
+lease-only terminal record, and requires a fully verified reopen with exactly
+one head: the source at generation 1 with no target and still committing, or
+the target at generation 2 with the source fenced; a recording is there wholly
+or not at all. The owner tests
+`a_commit_refused_as_not_line_head_fences_the_owner` and
+`a_prune_refused_as_not_line_head_fences_the_owner` require a driver whose
+commit or prune the head fence refuses to fence itself, so it never reaches the
+store again. The host registry and `LocalJobHost` share one attach-precedence
+case (`*_hands_a_line_service_only_to_a_succeeding_owner`): the line's next
+generation and the same head under a higher fence take the very service; an
+older generation, a lower fence and a sibling branch are refused; a foreign
+line never sees it. The hosted line tests (`agent::live::line_tests::`) drive
+real promoted processes through the host registry: a line-continuing carry and
+a head-advancing rebind each hand the running job, with its number, to the next
+head, the source refuses to open or verify, and the job's exit lands in the new
+head's ledger exactly once and survives a fresh-process reopen; a carry is
+refused as `Ownership` while a lease-only holder holds the head and as
+`NotQuiescent` once the head has an unfinished turn, and a carry after the
+holder released folds its recorded stop (`LineJobTerminalsConsumed` on the
+`Created` record); a lease-only holder records the job's stop, keeps other
+owners off the head, and the head's open answers the recorded stop and folds it
+once (one `LineJobTerminalRecorded`, one `LineJobTerminalsConsumed`); a
+new-line rebind keeps an exited job's pending notice; a transfer release
+without a `JobHost` stops and records its job, so the head advance that follows
+is not refused; and a head-advancing rebind whose source head has a running job
+row and no `JobHost` on the target is refused `RunningJobsWithoutJobHost` with
+the job still running. The facade line test carries a released source only
+after its attached driver let go (`Ownership` before), and after the head's
+session is deleted the predecessor opens as `LineEnded` and gc answers
+`PruneHistoryOutcome::LineEnded`. The product law
+`product_carry_sigkill_cuts_leave_one_successor_at_the_line_head` (durability
+profile) SIGKILLs a product carry before it runs, right after its create
+returns and after it committed, relaunches the exact carry, and requires one
+source and one successor in the runtime store, the successor at generation 2
+as the line's head, and the source refused `NotLineHead`. A store reopened under a limit below its usage
 prunes and then admits an ordinary commit
 (`sqlite_prune_over_the_absolute_limit_frees_ordinary_headroom`), and
 incremental vacuum returns the freed pages to the file system

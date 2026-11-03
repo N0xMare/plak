@@ -1,7 +1,9 @@
-//! Agent-line hand-off through the host registry (spec 01 §5.1, §5.3, §8.5):
-//! a line-continuing carry takes the source's running job, a lease-only open
-//! records terminals the head folds once, and a rebind without a `JobHost`
-//! refuses running jobs.
+//! Agent-line hand-off through the host registry (spec 01 §5.1, §5.3, §5.7,
+//! §8.5): a line-continuing carry or a head-advancing rebind takes the
+//! source's running job, a carry is fenced like a rebind, a lease-only open
+//! records terminals the head folds once, a new-line rebind keeps pending
+//! exit notices, and a head advance without a `JobHost` refuses running jobs
+//! on durable state.
 #![allow(clippy::unwrap_used, reason = "offline line fixture")]
 
 use plakous::sessions::feed::{FeedCursor, FeedFact, FeedPage, FeedPageRequest};
@@ -64,6 +66,33 @@ impl Fixture {
     fn binding(&self) -> plakous::sessions::SessionRuntimeBinding {
         scripted_runtime_binding(self.root.path(), self.controller.clone(), self.plan.clone())
             .unwrap()
+    }
+
+    /// The same scripted binding with another admitted window: a rebind
+    /// onto it changes a bound configuration fact.
+    fn rebound_binding(&self) -> plakous::sessions::SessionRuntimeBinding {
+        let mut plan = (*self.plan).clone();
+        plan.maximum_projected_input = 30_000;
+        scripted_runtime_binding(self.root.path(), self.controller.clone(), Arc::new(plan)).unwrap()
+    }
+
+    async fn carry(
+        &self,
+        operation: &str,
+        source: plakous::sessions::SessionLocator,
+        binding: plakous::sessions::SessionRuntimeBinding,
+    ) -> Result<OpenedSession, plakous::sessions::AgentSessionsError> {
+        let CreateSessionOutcome::Created { session, .. } = self
+            .sessions
+            .create(
+                CreateSessionRequest::new(SessionOperationId::new(operation).unwrap(), binding)
+                    .continuing_line(source),
+            )
+            .await?
+        else {
+            panic!("carried session required")
+        };
+        Ok(session)
     }
 
     fn path(&self) -> &Path {
@@ -177,7 +206,17 @@ async fn a_line_carry_hands_the_running_job_to_the_next_head_and_its_exit_lands_
     assert_eq!(job.number, number);
     assert_eq!(job.status, JobStatus::Running);
 
-    // The source is read-only history now.
+    // The source is read-only history now: neither an open nor its
+    // verification attaches it.
+    let unverified = fixture
+        .sessions
+        .verify_open(
+            source_locator,
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(unverified.kind(), AgentSessionsErrorKind::NotLineHead);
     let refused = fixture
         .sessions
         .open(OpenSessionRequest::new(
@@ -324,5 +363,314 @@ async fn a_rebind_with_running_jobs_and_no_job_host_is_refused() {
         }
     ));
     assert_eq!(session.agent().jobs()[0].status, JobStatus::Running);
+    session.release().await.unwrap();
+}
+
+/// A carry is fenced like a rebind: it never moves the head while another
+/// owner, here a lease-only holder, holds it, nor while the head has an
+/// unfinished turn.
+#[tokio::test]
+async fn a_carry_is_refused_while_the_head_is_held_or_mid_turn() {
+    let fixture = Fixture::new();
+    let registry = Arc::new(crate::jobs::JobRegistry::default());
+    let session = fixture
+        .create(
+            "carry-fence:create",
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await;
+    let line = session.line();
+    start_job(&fixture, &session).await;
+    let locator = session.release_for_transfer().await.unwrap();
+
+    let holder = fixture
+        .sessions
+        .open_lease_only(&SessionOperationId::new("carry-fence:hold").unwrap(), line)
+        .await
+        .unwrap();
+    let busy = fixture
+        .carry(
+            "carry-fence:busy",
+            locator,
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(busy.kind(), AgentSessionsErrorKind::Ownership);
+    assert_eq!(
+        fixture.sessions.line_head(line).await.unwrap().session_id(),
+        locator.session_id()
+    );
+    // The holder's recorded terminal moves with the head on the next carry.
+    registry.stop_all(Duration::from_millis(250)).await.unwrap();
+    let number = holder
+        .record_job_terminals(&registry.views())
+        .await
+        .unwrap()[0];
+    holder.release().await.unwrap();
+    let carried = fixture
+        .carry(
+            "carry-fence:carry",
+            locator,
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await
+        .unwrap();
+    let jobs = carried.agent().jobs();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].number, number);
+    assert_eq!(
+        jobs[0].status,
+        JobStatus::Stopped(JobStopReason::SessionExit)
+    );
+    let facts = feed_facts(&fixture.sessions, carried.locator().session_id()).await;
+    assert!(facts.iter().any(|fact| matches!(
+        fact,
+        FeedFact::LineJobTerminalsConsumed { jobs, .. } if jobs == &[number]
+    )));
+    let carried_locator = carried.locator();
+
+    // A head whose turn is unfinished is not carried.
+    let dispatched = || {
+        plakous_offline_crash_harness::evidence::read_evidence(
+            fixture.path().join("evidence.jsonl"),
+        )
+        .unwrap()
+        .iter()
+        .filter(|record| {
+            record.kind == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched
+        })
+        .count()
+    };
+    let before = dispatched();
+    let _turn = carried.agent().prompt("stall").await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while dispatched() < before + 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let working = carried
+        .abandon_and_release(&[], Duration::from_millis(250))
+        .await
+        .unwrap();
+    assert_ne!(working, carried_locator);
+    let mid_turn = fixture
+        .carry(
+            "carry-fence:mid-turn",
+            working,
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(mid_turn.kind(), AgentSessionsErrorKind::NotQuiescent);
+    let head = fixture.sessions.line_head(line).await.unwrap();
+    assert_eq!(head.session_id(), working.session_id());
+    assert_eq!(head.generation(), 2);
+    registry.stop_all(Duration::from_millis(250)).await.unwrap();
+}
+
+/// The default rebind hands the running job, through the shared `JobHost`,
+/// to the line's next head; its exit lands there exactly once.
+#[tokio::test]
+async fn a_head_advancing_rebind_hands_a_running_job_to_the_next_head() {
+    let fixture = Fixture::new();
+    let registry = Arc::new(crate::jobs::JobRegistry::default());
+    let source = fixture
+        .create(
+            "line-rebind:source",
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await;
+    let line = source.line();
+    let number = start_job(&fixture, &source).await;
+    let source_locator = source.release_for_transfer().await.unwrap();
+
+    let runtime = fixture.rebound_binding().with_job_host(registry.clone());
+    let target = runtime.target_binding();
+    let RebindSessionOutcome::Rebound {
+        target: target_locator,
+        ..
+    } = fixture
+        .sessions
+        .rebind(RebindSessionRequest::recompiling_target(
+            SessionOperationId::new("line-rebind:rebind").unwrap(),
+            source_locator,
+            target,
+            runtime,
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("rebind required")
+    };
+    let head = fixture.sessions.line_head(line).await.unwrap();
+    assert_eq!(head.branch_id(), target_locator.branch_id());
+    assert_eq!(head.generation(), 2);
+
+    let OpenSessionOutcome::Opened { session, .. } = fixture
+        .sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("line-rebind:open").unwrap(),
+            target_locator,
+            fixture.rebound_binding().with_job_host(registry.clone()),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("rebound head required")
+    };
+    let job = session.agent().jobs()[0].clone();
+    assert_eq!(job.number, number);
+    assert_eq!(job.status, JobStatus::Running);
+    registry.stop_all(Duration::from_millis(250)).await.unwrap();
+    assert!(session.agent().record_job_terminals().await.unwrap());
+    assert!(!session.agent().record_job_terminals().await.unwrap());
+    let released = session.release().await.unwrap();
+    let OpenSessionOutcome::Opened { session, .. } = fixture
+        .sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("line-rebind:reopen").unwrap(),
+            released,
+            fixture
+                .rebound_binding()
+                .with_job_host(Arc::new(crate::jobs::JobRegistry::default())),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("reopened head required")
+    };
+    let jobs = session.agent().jobs();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(
+        jobs[0].status,
+        JobStatus::Stopped(JobStopReason::SessionExit)
+    );
+    session.release().await.unwrap();
+    // The source never records the exit: it is read-only history.
+    let source_jobs = fixture
+        .sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("line-rebind:source-open").unwrap(),
+            source_locator,
+            fixture.binding().with_job_host(registry.clone()),
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(source_jobs.kind(), AgentSessionsErrorKind::NotLineHead);
+}
+
+/// A new-line rebind (`/model`, a profile rebind) keeps the pending notice
+/// of an exited job, never its running processes.
+#[tokio::test]
+async fn a_new_line_rebind_keeps_pending_exit_notices() {
+    let fixture = Fixture::new();
+    let registry = Arc::new(crate::jobs::JobRegistry::default());
+    let source = fixture
+        .create(
+            "line-notice:source",
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await;
+    let number = start_job(&fixture, &source).await;
+    registry.stop_all(Duration::from_millis(250)).await.unwrap();
+    assert!(source.agent().record_job_terminals().await.unwrap());
+    let source_locator = source.release().await.unwrap();
+
+    let runtime = fixture.rebound_binding().with_job_host(registry.clone());
+    let target = runtime.target_binding();
+    let RebindSessionOutcome::Rebound {
+        target: target_locator,
+        ..
+    } = fixture
+        .sessions
+        .rebind(
+            RebindSessionRequest::recompiling_target(
+                SessionOperationId::new("line-notice:rebind").unwrap(),
+                source_locator,
+                target,
+                runtime,
+            )
+            .starting_line(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("rebind required")
+    };
+    let OpenSessionOutcome::Opened { session, .. } = fixture
+        .sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("line-notice:open").unwrap(),
+            target_locator,
+            fixture.rebound_binding().with_job_host(registry.clone()),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("rebound target required")
+    };
+    assert_ne!(
+        session.line(),
+        plakous::model::LineId::started_by(source_locator.branch_id())
+    );
+    let jobs = session.agent().jobs();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].number, number);
+    assert_eq!(
+        jobs[0].status,
+        JobStatus::Stopped(JobStopReason::SessionExit)
+    );
+    session.release().await.unwrap();
+}
+
+/// Without a `JobHost` a transfer release has nothing to transfer to: it
+/// stops and records the jobs, so a later head advance is not refused.
+#[tokio::test]
+async fn a_transfer_release_without_a_job_host_stops_and_records_its_jobs() {
+    let fixture = Fixture::new();
+    let source = fixture
+        .create("line-private:create", fixture.binding())
+        .await;
+    let number = start_job(&fixture, &source).await;
+    let locator = source.release_for_transfer().await.unwrap();
+    let runtime = fixture.rebound_binding();
+    let target = runtime.target_binding();
+    let RebindSessionOutcome::Rebound {
+        target: target_locator,
+        ..
+    } = fixture
+        .sessions
+        .rebind(RebindSessionRequest::recompiling_target(
+            SessionOperationId::new("line-private:rebind").unwrap(),
+            locator,
+            target,
+            runtime,
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("rebind required")
+    };
+    let OpenSessionOutcome::Opened { session, .. } = fixture
+        .sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("line-private:open").unwrap(),
+            target_locator,
+            fixture.rebound_binding(),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("rebound head required")
+    };
+    let jobs = session.agent().jobs();
+    assert_eq!(jobs[0].number, number);
+    assert_eq!(
+        jobs[0].status,
+        JobStatus::Stopped(JobStopReason::SessionExit)
+    );
     session.release().await.unwrap();
 }

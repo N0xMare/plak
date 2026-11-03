@@ -377,6 +377,86 @@ fn actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers() -> T
     Ok(())
 }
 
+/// A same-store carry killed before it ran, right after its create
+/// returned, or after the product committed it, relaunches to exactly one
+/// successor: the carried session is its line's next head, the source is
+/// read-only history, and no second session was created.
+#[test]
+fn product_carry_sigkill_cuts_leave_one_successor_at_the_line_head() -> TestResult {
+    use plakous::sessions::{
+        AgentSessions, AgentSessionsErrorKind, OpenSessionRequest, SessionBackend, SessionLocator,
+        SessionOperationId,
+    };
+    use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
+
+    for cut in [
+        ProductCrashBoundary::Prepared,
+        ProductCrashBoundary::RuntimeReturned,
+        ProductCrashBoundary::ProductCommitted,
+    ] {
+        let fixture = Fixture::new()?;
+        let run = ControlCommand::ProductRun {
+            version: PROTOCOL_VERSION,
+            home: fixture.home.clone(),
+            workspace: fixture.workspace.clone(),
+            state: fixture.state.clone(),
+            workflow: ProductWorkflow::Carry,
+            cut,
+        };
+        kill_at(&run, ProductWorkflow::Carry, cut)?;
+        let recover = ControlCommand::ProductRecover {
+            version: PROTOCOL_VERSION,
+            home: fixture.home.clone(),
+            workspace: fixture.workspace.clone(),
+            state: fixture.state.clone(),
+        };
+        let report = request_report(&recover)?;
+        let state: serde_json::Value = serde_json::from_slice(&std::fs::read(&fixture.state)?)?;
+        let target: SessionLocator = state["runtime_target"]
+            .as_str()
+            .ok_or("carry target missing")?
+            .parse()?;
+        let source: SessionLocator = report.locator.ok_or("source locator missing")?.parse()?;
+        let paths = PlakPaths::explicit(fixture.home.clone());
+        let sessions = rusqlite::Connection::open(paths.runtime_database())?.query_row(
+            "SELECT count(*) FROM sessions",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        assert_eq!(sessions, 2, "{cut:?}: one source and one successor");
+        let runtime = AgentSessions::new(SessionBackend::sqlite(paths.runtime_database())?)?;
+        let executor = plakous::application::ApplicationExecutor::new()?;
+        let line = plakous::model::LineId::started_by(source.branch_id());
+        let head = executor.block_on(runtime.line_head(line))??;
+        assert_eq!(
+            (head.session_id(), head.branch_id(), head.generation()),
+            (target.session_id(), target.branch_id(), 2),
+            "{cut:?}"
+        );
+        let controller = BoundaryController::quiet_from_evidence_path(
+            plakous_offline_crash_harness::protocol::CrashBoundary::None,
+            fixture.home.join("product-physical.jsonl"),
+        )?;
+        let refused = executor
+            .block_on(
+                runtime.open(OpenSessionRequest::new(
+                    SessionOperationId::new("carry-law:source")?,
+                    source,
+                    runtime_binding(&fixture.workspace, controller)
+                        .map_err(|error| -> Box<dyn Error> { error })?,
+                )),
+            )?
+            .err()
+            .ok_or("the carried source opened")?;
+        assert_eq!(
+            refused.kind(),
+            AgentSessionsErrorKind::NotLineHead,
+            "{cut:?}"
+        );
+    }
+    Ok(())
+}
+
 fn reclaimed_delivery_after_another_face_advances(fixture: &Fixture) -> TestResult {
     use plakous::agent::{CommandAckDisposition, CommandId, ControlErrorKind};
     use plakous::sessions::{

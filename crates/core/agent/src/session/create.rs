@@ -14,6 +14,49 @@ pub struct CreateSession {
     admission: StoreAdmission,
     feed_facts: Vec<FeedFact>,
     line_origin: LineOrigin,
+    continuation: Option<LineContinuation>,
+}
+
+/// The current head a line-continuing genesis (a same-store carry) takes
+/// over, fenced like a rebind: the store refuses the create unless `lease`
+/// is the head's current lease, `source` is still its exact head, that head
+/// is quiescent, and `consumed_terminals` are exactly the line's pending job
+/// terminals, which it removes in the same transaction.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LineContinuation {
+    lease: BranchLease,
+    source: BranchHead,
+    consumed_terminals: Vec<u32>,
+}
+
+impl LineContinuation {
+    /// Names the held head, its exact checkpoint, and the folded terminals.
+    #[must_use]
+    pub const fn new(lease: BranchLease, source: BranchHead, consumed_terminals: Vec<u32>) -> Self {
+        Self {
+            lease,
+            source,
+            consumed_terminals,
+        }
+    }
+
+    /// The current head's lease.
+    #[must_use]
+    pub const fn lease(&self) -> &BranchLease {
+        &self.lease
+    }
+
+    /// The exact head the ledger was read from.
+    #[must_use]
+    pub const fn source(&self) -> BranchHead {
+        self.source
+    }
+
+    /// The pending line job terminals the genesis folded.
+    #[must_use]
+    pub fn consumed_terminals(&self) -> &[u32] {
+        &self.consumed_terminals
+    }
 }
 
 impl CreateSession {
@@ -35,12 +78,29 @@ impl CreateSession {
             admission: StoreAdmission::Ordinary,
             feed_facts: Vec::new(),
             line_origin: LineOrigin::Created,
+            continuation: None,
         }
     }
 
+    /// Makes the genesis the next head of its topology's line, taking over
+    /// the current head `continuation` names. A genesis whose topology
+    /// continues a line is refused without one, and a new line with one.
+    /// Not part of the create's exact identity: an exact replay is answered
+    /// from its receipt.
+    #[must_use]
+    pub fn continuing_line(mut self, continuation: LineContinuation) -> Self {
+        self.continuation = Some(continuation);
+        self
+    }
+
+    /// Returns the head a line-continuing genesis takes over.
+    #[must_use]
+    pub const fn continuation(&self) -> Option<&LineContinuation> {
+        self.continuation.as_ref()
+    }
+
     /// Records where a new line came from; only [`LineOrigin::Imported`] is
-    /// meaningful here. A genesis that continues a line (its topology names a
-    /// generation above 1) ignores it. Provenance is not part of the create's
+    /// meaningful here. A genesis that continues a line ignores it. Provenance is not part of the create's
     /// exact identity.
     #[must_use]
     pub fn with_line_origin(mut self, origin: LineOrigin) -> Self {

@@ -28,6 +28,79 @@ fn attributed_host_looks_up_only_the_exact_session_branch() -> TestResult {
     Ok(())
 }
 
+/// Attach precedence for one line's service: only a succeeding owner takes
+/// it (the line's next generation, or the same head under a higher fence);
+/// an older generation, a lower fence or a sibling branch is refused, and a
+/// foreign line never sees it.
+fn assert_attach_precedence(host: &dyn JobHost, root: &Path) -> TestResult {
+    const HEAD: &str = "00000000-0000-0000-0000-000000000710";
+    const NEXT: &str = "00000000-0000-0000-0000-000000000711";
+    let branch = BranchId::from_str("00000000-0000-0000-0000-000000000710")?;
+    let line = LineId::started_by(branch);
+    let at = |generation: u64, branch: &str, fence: u64| -> TestResult<JobOwner> {
+        Ok(JobOwner {
+            line,
+            generation,
+            session_id: SessionId::from_str("00000000-0000-0000-0000-000000000701")?,
+            branch_id: BranchId::from_str(branch)?,
+            fence,
+        })
+    };
+    let service = host.attach(at(2, HEAD, 3)?, sessions(root)?)?;
+    let id = start(service.local())?;
+    // Only promoted jobs outlive their owner's turn.
+    plakous_tools::internal::promote(service.local(), id)?;
+    // The line's next head takes the very service.
+    assert!(
+        host.attach(at(3, NEXT, 1)?, sessions(root)?)?
+            .local()
+            .retains_session(id)
+    );
+    // The same head reopened under a higher fence takes it too.
+    assert!(
+        host.attach(at(3, NEXT, 2)?, sessions(root)?)?
+            .local()
+            .retains_session(id)
+    );
+    for stale in [at(2, HEAD, 9)?, at(3, NEXT, 1)?, at(3, HEAD, 5)?] {
+        assert!(
+            host.attach(stale, sessions(root)?).is_err(),
+            "{stale:?} took the line's service"
+        );
+    }
+    let foreign = BranchId::from_str("00000000-0000-0000-0000-000000000712")?;
+    let elsewhere = host.attach(
+        JobOwner {
+            line: LineId::started_by(foreign),
+            branch_id: foreign,
+            ..at(9, NEXT, 9)?
+        },
+        sessions(root)?,
+    )?;
+    assert!(!elsewhere.local().retains_session(id));
+    assert!(
+        host.service(line)
+            .ok_or("line service")?
+            .local()
+            .retains_session(id)
+    );
+    service.local().stop(id, JobStopReason::User)?;
+    Ok(())
+}
+
+#[test]
+fn the_registry_hands_a_line_service_only_to_a_succeeding_owner() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let registry = Arc::new(JobRegistry::default());
+    assert_attach_precedence(registry.for_agent("root", "s").as_ref(), root.path())
+}
+
+#[test]
+fn the_local_job_host_hands_a_line_service_only_to_a_succeeding_owner() -> TestResult {
+    let root = tempfile::tempdir()?;
+    assert_attach_precedence(&plakous::tools::LocalJobHost::new(), root.path())
+}
+
 #[test]
 fn recent_terminal_rows_stay_with_their_source_branch() -> TestResult {
     let root = tempfile::tempdir()?;

@@ -86,7 +86,14 @@ pub async fn shutdown_for_transfer(agent: &Agent) -> Result<(), AgentError> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *mode == super::JobReleaseMode::Pending {
-            *mode = super::JobReleaseMode::Transfer;
+            // Without a JobHost the process service dies with this driver:
+            // nothing can take the jobs over, so the release is terminal and
+            // records their stops (spec 01 §5.7).
+            *mode = if agent.inner.has_job_host {
+                super::JobReleaseMode::Transfer
+            } else {
+                super::JobReleaseMode::Terminal
+            };
         }
         agent.inner.accepting.store(false, Ordering::Release);
         agent.inner.shutdown.cancel();

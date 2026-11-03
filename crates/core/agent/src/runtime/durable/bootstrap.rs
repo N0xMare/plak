@@ -216,16 +216,14 @@ impl DurableRuntimeBootstrap {
         // Only a line's head opens for work; a superseded branch is
         // read-only history (view, export, fork).
         let topology = bootstrap.checkpoint.manifest().topology();
-        let line = store_call(
-            StorePhase::LoadBranch,
-            store_timeouts.operation,
-            store.load_line(topology.line),
+        super::line_head::require_line_head(
+            &store,
+            store_timeouts,
+            lease.session(),
+            topology.line,
+            topology.line_generation,
         )
-        .await
-        .map_err(StoreCallError::into_agent)?;
-        if line.head() != lease.session() || line.generation() != topology.line_generation {
-            return Err(AgentError::from_store(SessionStoreError::NotLineHead));
-        }
+        .await?;
         bootstrap.line_terminals = store_call(
             StorePhase::LoadBranch,
             store_timeouts.operation,
@@ -394,10 +392,12 @@ pub(super) fn prepare_durable_genesis(
         identities.session_id,
         identities.branch_id,
         identities.checkpoint_id,
-        builder.line_continuation.as_ref().map_or(
-            (plakous_model::LineId::started_by(identities.branch_id), 1),
-            |(line, generation, _)| (*line, *generation),
-        ),
+        match &builder.line_carry {
+            Some(carry) => carry
+                .line_and_jobs()
+                .map(|(line, generation, _)| (line, generation))?,
+            None => (plakous_model::LineId::started_by(identities.branch_id), 1),
+        },
         &stable_prefix,
         &harness_plan,
         &builder.provider_configuration,
@@ -421,12 +421,17 @@ fn genesis_jobs(
     builder: &AgentBuilder,
     identities: DurableGenesisIdentities,
 ) -> Result<crate::manifest::JobLedger, AgentError> {
-    let jobs = match &builder.line_continuation {
+    let carried = builder
+        .line_carry
+        .as_ref()
+        .map(super::carry::LineCarry::line_and_jobs)
+        .transpose()?;
+    let jobs = match carried {
         Some((line, generation, jobs)) => crate::manifest::JobLedger::new(
             jobs.next_id().max(builder.job_counter_seed),
             jobs.handed_off(plakous_tools::JobOwner {
-                line: *line,
-                generation: *generation,
+                line,
+                generation,
                 session_id: identities.session_id,
                 branch_id: identities.branch_id,
                 fence: 1,

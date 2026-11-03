@@ -109,7 +109,9 @@ pub struct JobView {
     pub command: String,
     /// UTC process start.
     pub started_at: Timestamp,
-    /// Owning agent's non-secret identifier.
+    /// Display attribution of the owner: the driver instance for a live
+    /// process snapshot, the owning agent line for a view read from a
+    /// durable job row. Never authority.
     pub owner: String,
     /// Time since process start (fixed after exit).
     pub elapsed: Duration,
@@ -263,5 +265,41 @@ impl JobHost for LocalJobHost {
         // Foreground calls belong to the previous owner's turn.
         service.stop_foreground()?;
         Ok(service)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BranchId, JobOwner, LineId, SessionId};
+
+    fn owner(line: &str, generation: u64, branch: &str, fence: u64) -> JobOwner {
+        let line: BranchId = line.parse().unwrap_or_else(|_| unreachable!());
+        JobOwner {
+            line: LineId::started_by(line),
+            generation,
+            session_id: "00000000-0000-0000-0000-000000000001"
+                .parse::<SessionId>()
+                .unwrap_or_else(|_| unreachable!()),
+            branch_id: branch.parse().unwrap_or_else(|_| unreachable!()),
+            fence,
+        }
+    }
+
+    /// Only the same line's next generation, or the same head under an equal
+    /// or higher fence, succeeds a holder; never another line.
+    #[test]
+    fn only_the_same_lines_later_owner_succeeds() {
+        const LINE: &str = "00000000-0000-0000-0000-00000000000a";
+        const OTHER: &str = "00000000-0000-0000-0000-00000000000b";
+        const HEAD: &str = "00000000-0000-0000-0000-00000000000c";
+        const NEXT: &str = "00000000-0000-0000-0000-00000000000d";
+        let holder = owner(LINE, 2, HEAD, 3);
+        assert!(owner(LINE, 3, NEXT, 1).succeeds(&holder));
+        assert!(owner(LINE, 2, HEAD, 3).succeeds(&holder));
+        assert!(owner(LINE, 2, HEAD, 4).succeeds(&holder));
+        assert!(!owner(LINE, 2, HEAD, 2).succeeds(&holder));
+        assert!(!owner(LINE, 1, HEAD, 9).succeeds(&holder));
+        assert!(!owner(LINE, 2, NEXT, 9).succeeds(&holder));
+        assert!(!owner(OTHER, 9, HEAD, 9).succeeds(&holder));
     }
 }

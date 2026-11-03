@@ -176,6 +176,7 @@ impl PreparedAgent {
             context_anchor = None;
         }
         let job_sessions = self.job_sessions.clone();
+        let has_job_host = self.job_host.is_some();
         let job_release_mode = Arc::new(Mutex::new(crate::runtime::JobReleaseMode::default()));
         // Only a nonempty root genesis is a seed; fork/rebind successors have
         // a parent checkpoint and must not gain seed-only occupancy scheduling.
@@ -303,6 +304,7 @@ impl PreparedAgent {
                 job_stop: Mutex::new(crate::runtime::JobStopState::Idle),
                 job_runtime: tokio::runtime::Handle::current(),
                 job_sessions,
+                has_job_host,
                 job_release_mode,
                 agent_id: self.agent_id,
                 session_id: self.session_id,

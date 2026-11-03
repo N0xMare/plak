@@ -16,6 +16,8 @@ pub(super) enum ProductWorkflow {
     Fork,
     Rebind,
     Compact,
+    /// A same-store carry: a create that continues the source's line.
+    Carry,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

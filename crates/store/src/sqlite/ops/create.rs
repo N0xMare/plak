@@ -25,7 +25,8 @@ pub(in super::super) fn create(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
     require_bound_domain(&tx, b.domain)?;
-    let expires = expiry(sample_clock(b.clock.as_ref(), b.domain)?, r.lease_seconds())?;
+    let now = sample_clock(b.clock.as_ref(), b.domain)?;
+    let expires = expiry(now, r.lease_seconds())?;
     if let Some(old) = load_create(&tx, r.session().session_id())? {
         let result = if create_matches(
             &old,
@@ -87,15 +88,43 @@ pub(in super::super) fn create(
         Some(&lease),
         (topology.line, topology.line_generation),
     )?;
+    // A carry continues its line only by taking over the current head.
+    let source = match (
+        r.continuation(),
+        LineStep::of(
+            r.session().branch_id(),
+            topology.line,
+            topology.line_generation,
+        ),
+    ) {
+        (Some(continuation), Some(LineStep::Advance { .. })) => {
+            Some(lines::require_carry_source(&tx, continuation, now)?)
+        }
+        (None, Some(LineStep::NewLine)) => None,
+        _ => {
+            return Err(SessionStoreError::Invalid(
+                StoreInvalidReason::GenesisCheckpointTopology,
+            ));
+        }
+    };
     lines::apply_step(
         &tx,
-        r.session(),
-        topology.line,
-        topology.line_generation,
-        None,
-        r.line_origin(),
-        StoreInvalidReason::GenesisCheckpointTopology,
+        &lines::Step {
+            target: r.session(),
+            line: topology.line,
+            generation: topology.line_generation,
+            source,
+            consumed: r
+                .continuation()
+                .map_or(&[], |continuation| continuation.consumed_terminals()),
+            origin: r.line_origin(),
+            invalid: StoreInvalidReason::GenesisCheckpointTopology,
+        },
     )?;
+    #[cfg(test)]
+    if r.continuation().is_some() {
+        test_crash_cut("carry-before-commit");
+    }
     let feed_seq = feed::append(
         &tx,
         r.session(),
@@ -145,6 +174,10 @@ pub(in super::super) fn create(
     )?;
     meta(&tx, 1, 1)?;
     super::lease::commit_claimed(tx, &mut b.holders, r.session(), lease_fence)?;
+    #[cfg(test)]
+    if r.continuation().is_some() {
+        test_crash_cut("carry-after-commit");
+    }
     Ok(receipt)
 }
 

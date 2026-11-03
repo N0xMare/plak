@@ -72,6 +72,7 @@ pub use durable::DurableLineHead;
 pub use durable::DurableSessionRuntime;
 pub(crate) use durable::turn_recovery::recovery_verdict_refuses;
 pub use durable::turn_recovery::{CheckpointRecoveryVerdict, checkpoint_recovery_verdict};
+pub use durable::{DurableCarryHead, DurableCarryReplay, DurableCarrySource};
 
 mod build;
 pub use build::compile_explicit_runtime_profile;
@@ -158,9 +159,9 @@ pub(crate) struct DurableRuntimeBootstrap {
 /// Builder for one independently owned agent actor.
 pub struct AgentBuilder {
     initial_named_state: crate::manifest::NamedState,
-    /// The line a durable genesis continues and its new generation; `None`
+    /// The line a durable genesis continues (a same-store carry); `None`
     /// starts a new line.
-    line_continuation: Option<(plakous_model::LineId, u64, crate::manifest::JobLedger)>,
+    line_carry: Option<durable::carry::LineCarry>,
     /// Provenance recorded for a new line.
     line_origin: crate::session::LineOrigin,
     model: Arc<dyn LanguageModel>,
@@ -269,6 +270,9 @@ struct AgentInner {
     job_stop: Mutex<JobStopState>,
     job_runtime: tokio::runtime::Handle,
     job_sessions: plakous_tools::JoinedProcessSessions,
+    /// Whether a host-owned `JobHost` holds the process service, so a
+    /// transfer release can leave running jobs for the next owner.
+    has_job_host: bool,
     job_release_mode: Arc<Mutex<JobReleaseMode>>,
     agent_id: DriverInstanceId,
     session_id: SessionId,

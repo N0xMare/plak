@@ -9,8 +9,8 @@
 
 use super::*;
 use plakous_agent::internal::{
-    FeedFact, LineId, LineJobTerminal, LineOrigin, LineRecord, LineStep, LineTerminalsReceipt,
-    RecordLineJobTerminals,
+    FeedFact, LineContinuation, LineId, LineJobTerminal, LineOrigin, LineRecord, LineStep,
+    LineTerminalsReceipt, RecordLineJobTerminals,
 };
 
 /// A branch's fixed line membership.
@@ -85,19 +85,33 @@ pub(super) fn require_branch_is_head(
     require_line_head(c, s, line, generation)
 }
 
-/// Applies a new branch's line step inside its publishing transaction, after
-/// the branch row (which already names `line` and `generation`) exists.
-/// `source` names the branch a fork published from; a genesis has none.
-/// Returns whether the branch became the next head of an existing line.
-pub(super) fn apply_step(
-    tx: &Transaction<'_>,
-    target: SessionRef,
-    line: LineId,
-    generation: u64,
-    source: Option<(SessionRef, CheckpointId)>,
-    origin: &LineOrigin,
-    invalid: StoreInvalidReason,
-) -> Result<bool, SessionStoreError> {
+/// One new branch's line step, applied inside its publishing transaction
+/// after the branch row (which already names `line` and `generation`) exists.
+pub(super) struct Step<'a> {
+    pub(super) target: SessionRef,
+    pub(super) line: LineId,
+    pub(super) generation: u64,
+    /// The branch the target publishes from: a fork's source, or the head a
+    /// carry takes over. A genesis that starts a line has none.
+    pub(super) source: Option<(SessionRef, CheckpointId)>,
+    /// The pending line job terminals an advancing target folded.
+    pub(super) consumed: &'a [u32],
+    pub(super) origin: &'a LineOrigin,
+    pub(super) invalid: StoreInvalidReason,
+}
+
+/// Applies `step`. Returns whether the branch became the next head of an
+/// existing line.
+pub(super) fn apply_step(tx: &Transaction<'_>, step: &Step<'_>) -> Result<bool, SessionStoreError> {
+    let Step {
+        target,
+        line,
+        generation,
+        source,
+        consumed,
+        origin,
+        invalid,
+    } = *step;
     match LineStep::of(target.branch_id(), line, generation)
         .ok_or(SessionStoreError::Invalid(invalid))?
     {
@@ -133,22 +147,31 @@ pub(super) fn apply_step(
             Ok(false)
         }
         LineStep::Advance { line, from } => {
-            if let Some((source, _)) = source
-                && branch_line(tx, source)? != Some((line, from))
-            {
+            let Some((source, _)) = source else {
+                return Err(SessionStoreError::Invalid(invalid));
+            };
+            if branch_line(tx, source)? != Some((line, from)) {
                 return Err(SessionStoreError::Invalid(invalid));
             }
             let Some((head, current, _)) = line_row(tx, line)? else {
                 return Err(SessionStoreError::NotLineHead);
             };
-            if current != from || source.is_some_and(|(source, _)| source != head) {
+            if current != from || source != head {
                 return Err(SessionStoreError::NotLineHead);
             }
-            if has_terminals(tx, line)? {
-                // Unconsumed evidence belongs to the current head; its next
-                // commit folds it before the head may move.
-                return Err(SessionStoreError::Conflict);
+            // Pending evidence belongs to the moving head: the target folded
+            // exactly it into the ledger it takes over, so it leaves the
+            // table in this transaction.
+            if pending_jobs(tx, line)? != sorted(consumed) {
+                return Err(SessionStoreError::Invalid(
+                    StoreInvalidReason::LineTerminalsNotFolded,
+                ));
             }
+            tx.execute(
+                "DELETE FROM line_job_terminals WHERE line_id=?1",
+                [id(line)],
+            )
+            .map_err(map_sqlite)?;
             exactly_one(
                 tx.execute(
                     "UPDATE lines SET head_session=?2,head_branch=?3,generation=?4 WHERE line_id=?1",
@@ -166,15 +189,50 @@ pub(super) fn apply_step(
     }
 }
 
-fn has_terminals(c: &Connection, line: LineId) -> Result<bool, SessionStoreError> {
-    c.query_row(
-        "SELECT 1 FROM line_job_terminals WHERE line_id=?1 LIMIT 1",
-        [id(line)],
-        |_| Ok(()),
-    )
-    .optional()
-    .map(|row| row.is_some())
-    .map_err(map_sqlite)
+fn sorted(jobs: &[u32]) -> Vec<u32> {
+    let mut jobs = jobs.to_vec();
+    jobs.sort_unstable();
+    jobs.dedup();
+    jobs
+}
+
+fn pending_jobs(c: &Connection, line: LineId) -> Result<Vec<u32>, SessionStoreError> {
+    let mut statement = c
+        .prepare("SELECT DISTINCT job FROM line_job_terminals WHERE line_id=?1 ORDER BY job")
+        .map_err(map_sqlite)?;
+    let mut rows = statement.query([id(line)]).map_err(map_sqlite)?;
+    let mut jobs = Vec::new();
+    while let Some(row) = rows.next().map_err(map_sqlite)? {
+        let job: i64 = row.get(0).map_err(map_sqlite)?;
+        jobs.push(u32::try_from(job).map_err(|_| SessionStoreError::corrupt())?);
+    }
+    Ok(jobs)
+}
+
+/// Fences the head a line-continuing genesis takes over, exactly as a
+/// rebind fences its source: the presented lease is the head's current one,
+/// the head did not move since the ledger was read, and it is quiescent.
+/// Returns the head's branch and checkpoint for the line step.
+pub(super) fn require_carry_source(
+    tx: &Transaction<'_>,
+    continuation: &LineContinuation,
+    now: LeaseInstant,
+) -> Result<(SessionRef, CheckpointId), SessionStoreError> {
+    let source = continuation.source();
+    live_session(tx, source.session().session_id())?;
+    let row = branch_row(tx, source.session())?.ok_or(SessionStoreError::NotFound)?;
+    require_lease(&row, continuation.lease(), now)?;
+    if row.head != source {
+        return Err(SessionStoreError::Conflict);
+    }
+    let checkpoint = source.checkpoint().checkpoint_id();
+    let head = checkpoint_row(tx, checkpoint)?.ok_or_else(SessionStoreError::corrupt)?;
+    if head.kind != RuntimeCheckpointKind::Quiescent {
+        return Err(SessionStoreError::Invalid(
+            StoreInvalidReason::CarrySourceNotQuiescent,
+        ));
+    }
+    Ok((source.session(), checkpoint))
 }
 
 pub(in super::super) fn load_line(
@@ -301,6 +359,10 @@ pub(in super::super) fn record_line_job_terminals(
             &facts,
         )?)
     };
+    #[cfg(test)]
+    test_crash_cut("record-terminals-before-commit");
     tx.commit().map_err(map_sqlite)?;
+    #[cfg(test)]
+    test_crash_cut("record-terminals-after-commit");
     Ok(LineTerminalsReceipt::from_store(recorded, feed_seq))
 }

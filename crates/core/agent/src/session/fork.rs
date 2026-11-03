@@ -34,6 +34,7 @@ pub struct ForkBranch {
     target: CheckpointObjectBundle,
     admission: StoreAdmission,
     feed_facts: Vec<FeedFact>,
+    consumed_line_terminals: Vec<u32>,
 }
 
 impl ForkBranch {
@@ -67,6 +68,7 @@ impl ForkBranch {
             target,
             admission: StoreAdmission::Ordinary,
             feed_facts: Vec::new(),
+            consumed_line_terminals: Vec::new(),
         }
     }
 
@@ -88,6 +90,21 @@ impl ForkBranch {
     #[must_use]
     pub fn feed_facts(&self) -> &[FeedFact] {
         &self.feed_facts
+    }
+
+    /// Names the pending line job terminals a head-advancing target folded
+    /// into its handed-off ledger. The store refuses the advance unless they
+    /// are exactly the line's pending terminals, and removes them with it.
+    #[must_use]
+    pub fn with_consumed_line_terminals(mut self, jobs: Vec<u32>) -> Self {
+        self.consumed_line_terminals = jobs;
+        self
+    }
+
+    /// Returns the line job terminals the target folded.
+    #[must_use]
+    pub fn consumed_line_terminals(&self) -> &[u32] {
+        &self.consumed_line_terminals
     }
 
     /// Returns the retention admission class.

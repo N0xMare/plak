@@ -1088,7 +1088,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 34.
+like every canonical block. This is runtime checkpoint format epoch 35.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -1178,13 +1178,27 @@ closes and nothing else commits; `AgentError::is_not_line_head` names it. This
 covers turn commits, passive checkpoints, notice-only job consumption, the
 exit-path terminal publication and automatic pruning. A head move whose
 acknowledgement is lost is settled by the same check: whichever branch the
-store names as head after recovery is the only one that commits. A head advance
-is refused with `NotLineHead` when its source is no longer the line's head at
-the expected generation, and with `Conflict` while the line has unconsumed job
-terminals (below). Opening a branch for work (`AgentSessions::open`,
-`verify_open`) refuses a non-head branch as `AgentSessionsErrorKind::
-NotLineHead`. Deleting the session that holds a line's head deletes the line
-and its job terminals; predecessor branches in other sessions stay read-only.
+store names as head after recovery is the only one that commits.
+
+Both head moves, the head-advancing rebind (§5.7) and the same-store carry
+(§5.10), are fenced alike, inside the transaction that publishes the target:
+the request presents the source head's current lease (so no other owner,
+including a lease-only holder, holds it), names the exact source `BranchHead`
+whose job ledger the target took over (so a commit since refuses the move as
+`Conflict`), the source head checkpoint must be Quiescent (a carry of a head
+with an unfinished turn or workflow is refused,
+`StoreInvalidReason::CarrySourceNotQuiescent`), and the source must still be
+the line's head at the expected generation (`NotLineHead` otherwise). A carry
+names its source through `CreateSession::continuing_line(LineContinuation)`;
+a genesis whose topology continues a line is refused without one, and a new
+line with one. Pending line job terminals (below) never block a move: the
+target folds exactly them into the ledger it takes over, names them
+(`ForkBranch::with_consumed_line_terminals`, `LineContinuation`), and the
+transaction deletes them and records `LineJobTerminalsConsumed` on the target's
+publication. Any other set is refused as
+`StoreInvalidReason::LineTerminalsNotFolded`, never as an ownership failure.
+Opening a branch for work (`AgentSessions::open`, `verify_open`) refuses a
+non-head branch as `AgentSessionsErrorKind::NotLineHead`.
 
 **Lease-only open.** `AgentSessions::open_lease_only(operation, line)` takes
 the lease and a fresh fence of the line's head without building a driver: no
@@ -1200,7 +1214,7 @@ its job ledger and deletes them in the same commit (`LineJobTerminalsConsumed`);
 an open of a Quiescent head publishes that fold at once. Until then the
 recorded terminals answer polls in place of `outcome_unknown`. A crash between
 recording and folding leaves them recorded; the fold is exactly once because it
-is one commit. `AgentSessions::line_head(line)` reads a line's head without a
+is one commit, the head's or the head move's. `AgentSessions::line_head(line)` reads a line's head without a
 lease and `OpenedSession::line` names an attached session's line.
 
 `SessionBackend::memory()` is fallible: it returns a structured session-storage
@@ -2136,7 +2150,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 34 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 35 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -2431,20 +2445,34 @@ A rebind names its line transition. Two exist:
   process service to the target when it attaches (§8.5). The source becomes
   read-only history: it can be viewed, exported and forked, and every commit on
   it is refused `NotLineHead`. A source that is not its line's head cannot be
-  rebound this way. An attached source with running jobs in a private process
-  service (no `JobHost` on the target binding) is refused before anything is
-  written with `RebindSessionOutcome::Refused` and
-  `RebindRefused::RunningJobsWithoutJobHost`: that service dies with the
-  source's driver, so nothing could carry the jobs. The facade's in-memory
-  `LocalJobHost` gives an embedder that continuity: with a `JobHost` on both
-  bindings the source is released for transfer
-  (`OpenedSession::release_for_transfer`), the rebind takes its lease and
-  publishes, and the target's open takes the line's service with its running
-  jobs.
+  rebound this way. The move is fenced as §5.1 describes, and the line's
+  pending job terminals are folded into the handed-off ledger by the
+  publication itself.
 - **New-line rebind** (`RebindSessionRequest::starting_line`): a fork onto a
-  new binding. The target starts a new line exactly as an ordinary fork does
-  (origin, `next_id`, no rows), and the source keeps its line, stays writable
-  and keeps its processes.
+  new binding. The target starts a new line exactly as an ordinary fork does:
+  it records its origin, continues the job numbers, and keeps the rows of jobs
+  that already have terminal evidence, under its own owner, so the notices a
+  source still owed reach the target too; running rows stay with the source's
+  line. The source keeps its line, stays writable and keeps its processes.
+
+**Running jobs need a `JobHost` to move.** A head advance hands running rows to
+the target, and only a host-owned `JobHost` can hand the process service with
+them (§8.5); a driver's private service dies with it. The rule is decided on
+durable state: a head-advancing rebind whose source head checkpoint has job
+rows without terminal evidence is refused before any lease is taken, with
+`RebindSessionOutcome::Refused` and `RebindRefused::RunningJobsWithoutJobHost`,
+unless the target binding installs a `JobHost`; a carry is refused the same way
+as `AgentSessionsErrorKind::UnsettledProcesses`. The source side holds by
+construction: `OpenedSession::release_for_transfer` without a `JobHost` has no
+service to leave behind, so it is a terminal release that stops the jobs and
+records their terminals before the lease ends. A released source's running
+rows therefore always live in a `JobHost`, or died with a crashed process, in
+which case the target's open settles them as lost. An attached source cannot
+be moved at all: the move takes its lease. The facade's in-memory
+`LocalJobHost` gives an embedder this continuity: with a `JobHost` on both
+bindings the source is released for transfer, the rebind or carry takes its
+lease and publishes, and the target's open takes the line's service with its
+running jobs.
 
 A rebind names its tool transition. An exact rebind
 (`RebindSessionRequest::new`) keeps the source's tool presentation, execution
@@ -2489,9 +2517,17 @@ Pruning superseded history (§4, §5.1) is the in-place reclaim: it keeps the
 session whole and needs no archive. It runs only on a line's head: a
 predecessor branch of a live line is kept whole as read-only history
 (`AgentSessions::prune_history` answers `PruneHistoryOutcome::Superseded`) and
-is reclaimed only by deleting its session, or the line's head session, which
-ends the line. A fork's source checkpoint is never pruned, so a fork from a
-predecessor pins the history it was forked from.
+is reclaimed only by deleting its session. A fork's source checkpoint is never
+pruned, so a fork from a predecessor pins the history it was forked from.
+
+**Deleting a line's head ends the line.** Deleting the session that holds a
+line's head deletes the line and its job terminals in the same transaction. Its
+predecessor branches in other sessions stay read-only history, exactly as
+before: nothing is promoted to head, and they are still reclaimed only by
+deleting their sessions. Opening one for work, or verifying that open, is
+refused as `AgentSessionsErrorKind::LineEnded` (not `NotFound`: the branch is
+still there); `prune_history` answers `PruneHistoryOutcome::LineEnded`; a fork
+of one starts a new line. A carry from one starts a new line too (§5.10).
 
 ### 5.10 Portable history and seeded sessions
 
@@ -2548,12 +2584,21 @@ to nonempty root genesis checkpoints, never fork/rebind/clear successors.
 
 A new session starts a new agent line. `CreateSessionRequest::continuing_line(
 source)` instead makes it the next head of the line `source`'s branch heads (a
-same-store carry): the genesis names that line at the next generation, takes
-the source head's job ledger with every row handed to the new head, and the
-create moves the line's head across sessions in its own transaction, so the
-source branch becomes read-only. A source that is already superseded has no
-line to continue: the new session starts a new line whose provenance names the
-branch it was carried from. `CreateSessionRequest::with_line_provenance(text)`
+same-store carry): the create takes the source head's lease, reads its job
+ledger under it and folds the line's pending job terminals, and the genesis
+names that line at the next generation with every row handed to the new head.
+The create transaction moves the line's head across sessions only if that
+lease is still current and that exact head is still the line's head and
+Quiescent (§5.1), so the source branch becomes read-only with every row and
+notice handed over exactly once; the source lease ends once the create
+settles. The create is refused as `Ownership` while another owner, including a
+lease-only holder, holds the head, as `NotQuiescent` while the head has an
+unfinished turn or workflow, and as `UnsettledProcesses` when the head has
+running jobs and the new binding installs no `JobHost` (§5.7). An exact retry
+of a published carry's operation rebuilds the same genesis from the published
+one. A source that is already superseded, or whose line ended, has no line to
+continue: the new session starts a new line whose provenance names the branch
+it was carried from. `CreateSessionRequest::with_line_provenance(text)`
 records 1 to 256 bytes of single-line provenance on the new line an import from
 another store starts; it names nothing this store resolves.
 
@@ -2661,7 +2706,7 @@ consumer table:
 | `OperationAdvanced` | operation id, owning turn id, operation kind (provider attempt; effect with call id, exposed tool name, caller lineage and the bounded, redacted presentation subject; process session with its job number; Code Cell with its outer call id, exposed name and subject; compaction with its derived workflow identity), and the state it reached (`Dispatched`, `Completed`, `OutcomeUnknown`, `ProvenNotDispatched`, `Finalized`) |
 | `TurnTerminal` | turn id, root command id, outcome summary (`Completed` with its finish, `Refused`, `Failed` with its error kind, including context capacity and whether the command was withheld before dispatch, `Cancelled` with its cause and, for an abandonment, its claim, cause and whether a model round and a tool round completed before the owner was lost, `RecoveryRequired`), whether the terminal committed a closed exchange, whether queued steering was settled unapplied (its steer operations carry not-applied evidence in this commit), and the turn's exact usage when reported |
 | `LineJobTerminalRecorded` | line, head generation, job number: one per newly recorded job of a `LineJobTerminals` record |
-| `LineJobTerminalsConsumed` | line, generation, job numbers: the commit that folded recorded line terminals into its job ledger and removed them |
+| `LineJobTerminalsConsumed` | line, generation, job numbers: the commit, or the head move's `Branched` or `Created` record, that folded recorded line terminals into its job ledger and removed them |
 | `WorkflowAdmitted` | derived workflow identity, the request's session operation id (absent only for a turn's own fold, which has no host request), and kind (`Compact` with its reason, `Fork`, `Rebind`); the reason is what the checkpoint records: `Endpoint` for a session compaction request, `TurnFence` for a turn's own fold (whether a request was manual or scheduled is the host's) |
 | `WorkflowSettled` | derived workflow identity, operation id as above, and kind; outcome (`Compacted` with source, target, pass (`Native`, `Summary`, `Placeholders`, `ReplayOmission`), the count of source segments it replaced or rewrote, and the independently measured input tokens before and after; `NoEligibleRange`; `Failed` with whether its summary request may have been sent (false only when ProvenNotDispatched evidence proves it unsent, even past the dispatch fence) and the recorded failure's agent and model error class; `Abandoned` with `summary_unsent`; `Published` with the target locator) |
 
@@ -3316,7 +3361,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 34.
+checkpoint format epoch 35.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
@@ -5125,7 +5170,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 34.
+runtime checkpoint format epoch 35.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -6286,8 +6331,10 @@ shutdown commands and `Drop` select Terminal; process-exit abandonment closes
 admission and starts bounded stops, without a second driver stop pass. Only
 same-branch recovery/authority-refresh callers and live-attempt child
 retirement (interrupted, RecoveryRequired recycle, `recover_agent`) select
-Transfer through `OpenedSession::release_for_transfer`. A new same-branch owner reopens admission
-when it binds the retained service. Admission closure and stop snapshots are
+Transfer through `OpenedSession::release_for_transfer`. A new same-branch owner, or the
+line's next head, reopens admission when it binds the retained service. Transfer
+needs a `JobHost` to retain the service: without one the release is Terminal
+(§5.7). Admission closure and stop snapshots are
 scoped to the exact owning agent, so late cleanup from a released owner cannot
 close or stop its replacement's jobs.
 
@@ -6815,7 +6862,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 34.
+runtime checkpoint format epoch 35.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -7299,7 +7346,7 @@ from the host; it does not generate an independent catalog.
 Every cell descriptor uses `sha256(ToolDefinition, 3, [profile, revisions...,
 execute text, wait text, grammar, limits JSON, presentation semantics JSON,
 outer projection digest, nested projection digest, host API JSON])`.
-Runtime epoch 34 separates these identities from the former presentation-local
+The runtime format separates these identities from presentation-local
 recipes. Model-visible text and projection digests are unchanged. The v3
 descriptor replaces Python's separate profile, presentation, result, catalog
 and limits component identities.
@@ -9610,9 +9657,10 @@ implementations, `TokioRuntime` and the feature-gated
 `AgentSessions::open_lease_only` and `LeaseOnlyHead`, `OpenedSession::line`,
 `CreateSessionRequest::continuing_line` and `with_line_provenance`,
 `RebindSessionRequest::starting_line`, `RebindSessionOutcome::Refused` with
-`RebindRefused`, `PruneHistoryOutcome::Superseded`,
-`AgentSessionsErrorKind::NotLineHead`, `AgentError::is_not_line_head` and
-`plakous::tools::LocalJobHost`. They break earlier embedders in these ways:
+`RebindRefused`, `PruneHistoryOutcome::Superseded` and `LineEnded`,
+`AgentSessionsErrorKind::NotLineHead`, `LineEnded` and `NotQuiescent`,
+`AgentError::is_not_line_head` and `plakous::tools::LocalJobHost`. They break
+earlier embedders in these ways:
 
 1. A head-advancing rebind's source becomes read-only (a non-head branch):
    opening it for work, committing on it, rebinding or pruning it are refused
@@ -9624,11 +9672,25 @@ implementations, `TokioRuntime` and the feature-gated
    only to an owner that `JobOwner::succeeds` its holder.
 3. The per-construction `AgentId` is renamed `DriverInstanceId` across the
    facade; it still scopes late cleanup.
-4. A head-advancing rebind of an attached source with running jobs and no
-   `JobHost` is refused `RebindRefused::RunningJobsWithoutJobHost`.
-5. History pruning keeps a live line's predecessor branches whole
-   (`PruneHistoryOutcome::Superseded`); deleting the session is the reclaim. A
-   fork no longer copies job rows.
+4. A head-advancing rebind or carry whose source head has running job rows is
+   refused (`RebindRefused::RunningJobsWithoutJobHost`, or `UnsettledProcesses`
+   for a carry) unless the target binding installs a `JobHost`, and
+   `OpenedSession::release_for_transfer` without a `JobHost` is now a terminal
+   release: it stops the jobs and records their terminals.
+5. A same-store carry (`CreateSessionRequest::continuing_line`) takes the
+   source head's lease: it is refused as `Ownership` while the source is
+   attached or held lease-only, and as `NotQuiescent` while its head has an
+   unfinished turn.
+6. History pruning keeps a line's predecessor branches whole
+   (`PruneHistoryOutcome::Superseded`, or `LineEnded` once the session holding
+   the head was deleted); deleting the session is the reclaim. Opening a
+   predecessor of an ended line is `LineEnded`.
+7. A fork or new-line rebind copies no running job rows: it keeps the job
+   numbers and the rows of jobs with terminal evidence, under its own owner.
+8. `JobView::owner` names the owning agent line (`LineId`) for a view read from
+   a durable job row, and the owning driver instance (`DriverInstanceId`) for a
+   live process snapshot; it was the per-construction agent id for both. It is
+   display attribution, never authority.
 
 `plakous::sessions::feed` is the change feed's public surface (§5.11):
 `FeedSeq`, `FeedCursor`, `FeedRecord`, `FeedChange`, `FeedFact` and its typed
@@ -9813,9 +9875,9 @@ or a moved head is the usual lookup or stale-locator refusal.
 
 `AgentBuilder::job_host` optionally accepts a `JobHost` registry, keyed by
 agent line (§8.5). Without one, the agent privately owns its process service
-and jobs stop when it drops; a head-advancing rebind of an attached source with
-running jobs is then refused (§5.7). `plakous::tools::LocalJobHost` is the
-shipped in-memory registry.
+and jobs stop when it drops: its transfer release is terminal, and a head
+advance with running rows onto a binding without one is refused (§5.7).
+`plakous::tools::LocalJobHost` is the shipped in-memory registry.
 A registry holds, returns and transfers each line's service as a
 `JoinedSessionsPort`, never as the concrete service, so a service that lives
 with a remote runner can stand behind the same handle. A port is attached for

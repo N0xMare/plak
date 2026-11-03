@@ -163,13 +163,14 @@ impl AgentBuilder {
         self.initial_named_state = state;
         self
     }
-    pub(crate) fn continue_line(
-        mut self,
-        line: plakous_model::LineId,
-        generation: u64,
-        jobs: crate::manifest::JobLedger,
-    ) -> Self {
-        self.line_continuation = Some((line, generation, jobs));
+    /// Makes the durable genesis take over a carry source's line head.
+    pub(crate) fn carry_head(mut self, head: Box<super::DurableCarryHead>) -> Self {
+        self.line_carry = Some(super::durable::carry::LineCarry::Head(head));
+        self
+    }
+    /// Rebuilds an already published carry's genesis exactly.
+    pub(crate) fn replay_carry(mut self, replay: super::DurableCarryReplay) -> Self {
+        self.line_carry = Some(super::durable::carry::LineCarry::Replay(replay));
         self
     }
     pub(crate) fn with_line_origin(mut self, origin: crate::session::LineOrigin) -> Self {
@@ -253,7 +254,7 @@ impl AgentBuilder {
         let initial_model_authority = configured_model.initial_authority().clone();
         Self {
             initial_named_state: crate::manifest::NamedState::default(),
-            line_continuation: None,
+            line_carry: None,
             line_origin: crate::session::LineOrigin::Created,
             model,
             provider_configuration,

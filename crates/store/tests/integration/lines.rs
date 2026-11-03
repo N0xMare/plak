@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use plakous_agent::internal::{
-    ArchiveSession, BranchLease, BranchTransitionMode, CheckpointObjectBundle, CommitCheckpoint,
-    CreateSession, DeleteSession, FeedChange, FeedFact, FeedPage, FeedSeq, ForkBranch, ForkLineage,
-    JobTerminalStatus, LeaseClock, LineId, LineJobTerminal, LineOrigin, PruneBranch,
-    RecordLineJobTerminals, RuntimeCheckpoint, RuntimeDurability, RuntimeTopology, SessionRef,
-    SessionStore, SessionStoreError,
+    AcquireBranch, ArchiveSession, BranchLease, BranchTransitionMode, CheckpointObjectBundle,
+    CommitCheckpoint, CreateSession, DeleteSession, FeedChange, FeedPage, FeedSeq, ForkBranch,
+    ForkLineage, JobTerminalStatus, LeaseClock, LineContinuation, LineId, LineJobTerminal,
+    LineOrigin, PruneBranch, RecordLineJobTerminals, RuntimeCheckpoint, RuntimeDurability,
+    RuntimeTopology, SessionRef, SessionStore, SessionStoreError, StoreInvalidReason,
 };
 use plakous_agent::{JobStatus, JobStopReason, JobView};
 use plakous_model::{BranchId, CheckpointId, RunId, SessionId, Timestamp};
@@ -59,6 +59,8 @@ struct Step {
     workflow: u8,
     line: LineId,
     generation: u64,
+    /// Pending line terminals the advancing target folded.
+    consumed: Vec<u32>,
 }
 
 /// One rebind of `source` onto `step`'s branch: the next head of its line.
@@ -74,6 +76,7 @@ async fn rebind(
         workflow: workflow_byte,
         line,
         generation,
+        consumed,
     } = step;
     let source_topology = source.checkpoint.manifest().topology();
     let lineage = ForkLineage {
@@ -138,7 +141,8 @@ async fn rebind(
         NonZeroU64::new(10).ok_or("lease")?,
         bundle(&target, Some(&source.bundle))?,
     )
-    .with_transition(mode);
+    .with_transition(mode)
+    .with_consumed_line_terminals(consumed);
     Ok(match store.fork(request).await {
         Ok(receipt) => Ok(Head {
             lease: receipt.lease().clone(),
@@ -269,6 +273,7 @@ async fn a_rebind_moves_the_head(
             workflow: 71,
             line,
             generation: 2,
+            consumed: Vec::new(),
         },
         durability,
     )
@@ -319,7 +324,8 @@ async fn the_source_is_read_only(
                 checkpoint: id(70_014)?,
                 workflow: 72,
                 line,
-                generation: 2
+                generation: 2,
+                consumed: Vec::new(),
             },
             durability
         )
@@ -412,8 +418,8 @@ async fn only_the_head_records_terminals(
 ) -> TestResult<Head> {
     let session_id = id::<SessionId>(70_001)?;
     let line = LineId::started_by(id::<BranchId>(70_002)?);
-    // Only the head records line job terminals, and only its next commit
-    // consumes them; the head cannot advance while they wait.
+    // Only the head records line job terminals, under its current head
+    // checkpoint; its next commit consumes them.
     assert_eq!(
         store
             .record_line_job_terminals(RecordLineJobTerminals::new(
@@ -426,6 +432,19 @@ async fn only_the_head_records_terminals(
             .await
             .err(),
         Some(SessionStoreError::NotLineHead)
+    );
+    assert_eq!(
+        store
+            .record_line_job_terminals(RecordLineJobTerminals::new(
+                target.lease.clone(),
+                line,
+                2,
+                source.branch.checkpoint().checkpoint_id(),
+                vec![terminal(4)?],
+            ))
+            .await
+            .err(),
+        Some(SessionStoreError::Conflict)
     );
     let recorded = store
         .record_line_job_terminals(RecordLineJobTerminals::new(
@@ -453,24 +472,6 @@ async fn only_the_head_records_terminals(
         store.line_job_terminals(line).await?,
         vec![terminal(4)?, terminal(6)?]
     );
-    let third = id::<BranchId>(70_006)?;
-    assert_eq!(
-        rebind(
-            store,
-            &target,
-            Step {
-                branch: third,
-                checkpoint: id(70_016)?,
-                workflow: 74,
-                line,
-                generation: 3
-            },
-            durability
-        )
-        .await?
-        .err(),
-        Some(SessionStoreError::Conflict)
-    );
     let target = commit(store, &target, id(70_017)?, vec![4, 6]).await??;
     assert_eq!(store.line_job_terminals(line).await?.len(), 0);
     assert!(
@@ -479,21 +480,89 @@ async fn only_the_head_records_terminals(
             .iter()
             .any(|change| matches!(change, FeedChange::LineJobTerminals { .. }))
     );
-    let third_head = rebind(
-        store,
-        &target,
-        Step {
+
+    a_head_move_folds_pending_terminals(store, &target, durability).await
+}
+
+async fn a_head_move_folds_pending_terminals(
+    store: &dyn SessionStore,
+    target: &Head,
+    durability: RuntimeDurability,
+) -> TestResult<Head> {
+    let line = LineId::started_by(id::<BranchId>(70_002)?);
+    // Pending terminals never block a head move: the advancing target folds
+    // exactly them, and the publication removes them. Any other set is
+    // refused, typed, without moving the head.
+    store
+        .record_line_job_terminals(RecordLineJobTerminals::new(
+            target.lease.clone(),
+            line,
+            2,
+            target.branch.checkpoint().checkpoint_id(),
+            vec![terminal(7)?],
+        ))
+        .await?;
+    let third = id::<BranchId>(70_006)?;
+    let third_step = |consumed: Vec<u32>| -> TestResult<Step> {
+        Ok(Step {
             branch: third,
             checkpoint: id(70_016)?,
             workflow: 74,
             line,
             generation: 3,
-        },
-        durability,
-    )
-    .await??;
+            consumed,
+        })
+    };
+    for consumed in [Vec::new(), vec![4], vec![7, 8]] {
+        assert_eq!(
+            rebind(store, target, third_step(consumed)?, durability)
+                .await?
+                .err(),
+            Some(SessionStoreError::Invalid(
+                StoreInvalidReason::LineTerminalsNotFolded
+            ))
+        );
+    }
+    assert_eq!(store.load_line(line).await?.generation(), 2);
+    let third_head = rebind(store, target, third_step(vec![7])?, durability).await??;
+    assert_eq!(store.load_line(line).await?.generation(), 3);
+    assert_eq!(store.line_job_terminals(line).await?.len(), 0);
 
     Ok(third_head)
+}
+
+/// A carry's genesis on `line` at `generation`, in its own session.
+fn carried_genesis(
+    session: SessionId,
+    branch: BranchId,
+    checkpoint_id: CheckpointId,
+    line: LineId,
+    generation: u64,
+    durability: RuntimeDurability,
+) -> TestResult<CheckpointObjectBundle> {
+    let genesis = checkpoint(
+        on_line(
+            topology(session, branch, checkpoint_id, None, 0, None, 1)?,
+            line,
+            generation,
+        ),
+        1,
+        durability,
+    )?;
+    bundle(&genesis, None)
+}
+
+fn carry_request(
+    session: SessionRef,
+    genesis: &CheckpointObjectBundle,
+) -> TestResult<CreateSession> {
+    Ok(CreateSession::new(
+        session,
+        Timestamp::new(60, 0)?,
+        id(70_120)?,
+        NonZeroU64::new(10).ok_or("lease")?,
+        genesis.clone(),
+    ))
 }
 
 async fn a_carry_continues_and_deletion_ends_the_line(
@@ -503,59 +572,133 @@ async fn a_carry_continues_and_deletion_ends_the_line(
     durability: RuntimeDurability,
 ) -> TestResult {
     let line = LineId::started_by(id::<BranchId>(70_002)?);
-    // A same-store carry continues the line across sessions.
     let carried_session = id::<SessionId>(70_101)?;
     let carried_branch = id::<BranchId>(70_102)?;
-    let carried_genesis = checkpoint(
-        on_line(
-            topology(
-                carried_session,
-                carried_branch,
-                id(70_110)?,
-                None,
-                0,
-                None,
-                1,
-            )?,
-            line,
-            4,
-        ),
-        1,
+    let carried = SessionRef::new(carried_session, carried_branch);
+    let genesis = carried_genesis(
+        carried_session,
+        carried_branch,
+        id(70_110)?,
+        line,
+        4,
         durability,
     )?;
-    let carried = store
-        .create(CreateSession::new(
-            SessionRef::new(carried_session, carried_branch),
-            Timestamp::new(60, 0)?,
-            id(70_120)?,
+    // A carry moves the head only by taking over the current head.
+    assert_eq!(
+        store.create(carry_request(carried, &genesis)?).await.err(),
+        Some(SessionStoreError::Invalid(
+            StoreInvalidReason::GenesisCheckpointTopology
+        ))
+    );
+    // It names the exact head it read the ledger from: a commit between the
+    // read and the create refuses it, with nothing moved.
+    let read_head = third_head.branch;
+    let third_head = commit(store, third_head, id(70_018)?, Vec::new()).await??;
+    let stale = LineContinuation::new(third_head.lease.clone(), read_head, Vec::new());
+    assert_eq!(
+        store
+            .create(carry_request(carried, &genesis)?.continuing_line(stale))
+            .await
+            .err(),
+        Some(SessionStoreError::Conflict)
+    );
+    // It holds the head's current lease: a lease-only holder that took the
+    // head since refuses it.
+    store.release(third_head.lease.clone()).await?;
+    let holder = store
+        .acquire(AcquireBranch::new(
+            third_head.branch.session(),
+            id(70_130)?,
             NonZeroU64::new(10).ok_or("lease")?,
-            bundle(&carried_genesis, None)?,
         ))
         .await?;
-    let record = store.load_line(line).await?;
+    store
+        .record_line_job_terminals(RecordLineJobTerminals::new(
+            holder.clone(),
+            line,
+            3,
+            third_head.branch.checkpoint().checkpoint_id(),
+            vec![terminal(9)?],
+        ))
+        .await?;
+    let superseded = LineContinuation::new(third_head.lease.clone(), third_head.branch, vec![9]);
+    assert!(matches!(
+        store
+            .create(carry_request(carried, &genesis)?.continuing_line(superseded))
+            .await
+            .err(),
+        Some(SessionStoreError::FenceSuperseded | SessionStoreError::LeaseExpired)
+    ));
+    let held = Head {
+        lease: holder,
+        branch: third_head.branch,
+        checkpoint: third_head.checkpoint.clone(),
+        bundle: third_head.bundle.clone(),
+    };
+    let created = a_held_carry_folds_the_holders_terminals(store, &held, &genesis).await?;
+    // The predecessor is read-only even under the lease it still holds.
     assert_eq!(
-        record.head(),
-        SessionRef::new(carried_session, carried_branch)
+        commit(store, &held, id(70_019)?, Vec::new()).await?.err(),
+        Some(SessionStoreError::NotLineHead)
     );
+    deletion_ends_the_line(store, held, created, fork_line).await
+}
+
+/// Under the holder's lease the carry continues, folding the terminal the
+/// holder recorded; an exact replay answers from its receipt.
+async fn a_held_carry_folds_the_holders_terminals(
+    store: &dyn SessionStore,
+    held: &Head,
+    genesis: &CheckpointObjectBundle,
+) -> TestResult<plakous_agent::internal::CreateReceipt> {
+    let line = LineId::started_by(id::<BranchId>(70_002)?);
+    let carried_session = id::<SessionId>(70_101)?;
+    let carried = SessionRef::new(carried_session, id::<BranchId>(70_102)?);
+    let unfolded = LineContinuation::new(held.lease.clone(), held.branch, Vec::new());
+    assert_eq!(
+        store
+            .create(carry_request(carried, genesis)?.continuing_line(unfolded))
+            .await
+            .err(),
+        Some(SessionStoreError::Invalid(
+            StoreInvalidReason::LineTerminalsNotFolded
+        ))
+    );
+    assert_eq!(store.load_line(line).await?.generation(), 3);
+    let continuation = LineContinuation::new(held.lease.clone(), held.branch, vec![9]);
+    let created = store
+        .create(carry_request(carried, genesis)?.continuing_line(continuation))
+        .await?;
+    let record = store.load_line(line).await?;
+    assert_eq!(record.head(), carried);
     assert_eq!(record.generation(), 4);
+    assert_eq!(store.line_job_terminals(line).await?.len(), 0);
     assert!(matches!(
         feed_changes(store, carried_session).await?.first(),
         Some(FeedChange::Created { generation: 4, .. })
     ));
     assert_eq!(
-        commit(store, third_head, id(70_018)?, Vec::new())
-            .await?
-            .err(),
-        Some(SessionStoreError::NotLineHead)
+        store.create(carry_request(carried, genesis)?).await?,
+        created
     );
+    Ok(created)
+}
 
+async fn deletion_ends_the_line(
+    store: &dyn SessionStore,
+    held: Head,
+    created: plakous_agent::internal::CreateReceipt,
+    fork_line: LineId,
+) -> TestResult {
+    let line = LineId::started_by(id::<BranchId>(70_002)?);
+    let carried_session = id::<SessionId>(70_101)?;
     // Deleting the head's session ends the line; the predecessors' session
     // stays, and its branches stay read-only.
-    store.release(carried.lease().clone()).await?;
+    store.release(created.lease().clone()).await?;
     let archived = store
         .archive(ArchiveSession::new(
             carried_session,
-            carried.session().revision(),
+            created.session().revision(),
         ))
         .await?;
     store
@@ -569,17 +712,11 @@ async fn a_carry_continues_and_deletion_ends_the_line(
         Some(SessionStoreError::NotFound)
     );
     assert_eq!(
-        commit(store, third_head, id(70_019)?, Vec::new())
-            .await?
-            .err(),
+        commit(store, &held, id(70_020)?, Vec::new()).await?.err(),
         Some(SessionStoreError::NotLineHead)
     );
+    store.release(held.lease).await?;
     assert!(store.load_line(fork_line).await.is_ok());
-    let _ = FeedFact::LineJobTerminalRecorded {
-        line,
-        generation: 2,
-        job: 4,
-    };
     Ok(())
 }
 

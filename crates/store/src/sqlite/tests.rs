@@ -1235,6 +1235,65 @@ fn line_advance(
 }
 
 #[cfg(unix)]
+const LINE_CRASH_MODE_ENV: &str = "PLAKOUS_SQLITE_TEST_LINE_CRASH_MODE";
+
+/// The session a cut carry would create as the line's next head.
+#[cfg(unix)]
+fn carried_head() -> TestResult<SessionRef> {
+    Ok(SessionRef::new(
+        fixture::id::<SessionId>(70_601)?,
+        fixture::id::<BranchId>(70_602)?,
+    ))
+}
+
+/// A same-store carry of `seed`'s head under its create lease.
+#[cfg(unix)]
+fn line_carry(seed: &CrashSeed, created: &CreateReceipt) -> TestResult<CreateSession> {
+    let target = carried_head()?;
+    let mut topology = fixture::topology(
+        target.session_id(),
+        target.branch_id(),
+        fixture::id::<CheckpointId>(70_603)?,
+        None,
+        0,
+        None,
+        1,
+    )?;
+    topology.line = seed.checkpoint.manifest().topology().line;
+    topology.line_generation = 2;
+    let genesis = fixture::checkpoint(topology, 1, RuntimeDurability::Required)?;
+    Ok(CreateSession::new(
+        target,
+        Timestamp::new(60, 0)?,
+        fixture::id::<RunId>(70_604)?,
+        NonZeroU64::new(3_600).ok_or("nonzero lease")?,
+        fixture::bundle(&genesis, None)?,
+    )
+    .continuing_line(plakous_agent::internal::LineContinuation::new(
+        created.lease().clone(),
+        created.branch(),
+        Vec::new(),
+    )))
+}
+
+/// One stopped job's terminal evidence for the line's head.
+#[cfg(unix)]
+fn line_terminal() -> TestResult<plakous_agent::internal::LineJobTerminal> {
+    plakous_agent::internal::LineJobTerminal::from_view(&plakous_agent::JobView {
+        number: 4,
+        command: "sleep 60".to_owned(),
+        started_at: Timestamp::new(10, 0)?,
+        owner: "driver".to_owned(),
+        elapsed: Duration::from_secs(3),
+        status: plakous_agent::JobStatus::Stopped(plakous_agent::JobStopReason::User),
+        output: String::new(),
+        session_id: [7; 16],
+        owner_generation: 1,
+    })?
+    .ok_or_else(|| "a stopped job carries terminal evidence".into())
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn sqlite_line_advance_crash_cut_child() {
     let Some(path) = std::env::var_os(LINE_CRASH_DB_ENV).map(PathBuf::from) else {
@@ -1243,20 +1302,48 @@ async fn sqlite_line_advance_crash_cut_child() {
     let store = SqliteSessionStore::open(path).expect("open child store");
     let seed = crash_seed(70_000).expect("seed");
     let created = store.create(seed.request.clone()).await.expect("create");
-    let fork = line_advance(&seed, &created).expect("fork request");
-    let result = store.fork(fork).await;
+    let mode = std::env::var(LINE_CRASH_MODE_ENV).unwrap_or_default();
+    let result = match mode.as_str() {
+        "carry" => store
+            .create(line_carry(&seed, &created).expect("carry request"))
+            .await
+            .map(|_| ()),
+        "record" => store
+            .record_line_job_terminals(plakous_agent::internal::RecordLineJobTerminals::new(
+                created.lease().clone(),
+                seed.checkpoint.manifest().topology().line,
+                1,
+                seed.checkpoint_id,
+                vec![line_terminal().expect("terminal")],
+            ))
+            .await
+            .map(|_| ()),
+        _ => store
+            .fork(line_advance(&seed, &created).expect("fork request"))
+            .await
+            .map(|_| ()),
+    };
     panic!("configured crash cut did not stop the child: {result:?}");
 }
 
-/// A head advance killed inside or just after its transaction reopens,
-/// fully verified, with exactly one head: the source at generation 1 and
-/// no target, or the target at generation 2 with the source fenced.
+/// A head move (a rebind's fork or a carry's create) killed inside or just
+/// after its transaction reopens, fully verified, with exactly one head: the
+/// source at generation 1 and no target, or the target at generation 2 with
+/// the source fenced. A line terminal recording killed the same way is
+/// recorded wholly or not at all.
 #[cfg(unix)]
 #[tokio::test]
 async fn sigkill_line_advance_cuts_reopen_with_exactly_one_head() -> TestResult {
     use std::os::unix::process::ExitStatusExt as _;
 
-    for (stage, committed) in [("fork-before-commit", false), ("fork-after-commit", true)] {
+    for (mode, stage, committed) in [
+        ("fork", "fork-before-commit", false),
+        ("fork", "fork-after-commit", true),
+        ("carry", "carry-before-commit", false),
+        ("carry", "carry-after-commit", true),
+        ("record", "record-terminals-before-commit", false),
+        ("record", "record-terminals-after-commit", true),
+    ] {
         let database = CrashDatabase::new()?;
         let marker = database.directory.join(format!("{stage}.reached"));
         let child = Command::new(std::env::current_exe()?)
@@ -1264,6 +1351,7 @@ async fn sigkill_line_advance_cuts_reopen_with_exactly_one_head() -> TestResult 
             .arg(LINE_CRASH_CHILD_TEST)
             .arg("--nocapture")
             .env(LINE_CRASH_DB_ENV, &database.path)
+            .env(LINE_CRASH_MODE_ENV, mode)
             .env(CRASH_CUT_STAGE_ENV, stage)
             .env(CRASH_CUT_MARKER_ENV, &marker)
             .env("RUST_TEST_THREADS", "1")
@@ -1278,59 +1366,89 @@ async fn sigkill_line_advance_cuts_reopen_with_exactly_one_head() -> TestResult 
 
         drop(SqliteSessionStore::open_verified(&database.path)?);
         let reopened = SqliteSessionStore::open(&database.path)?;
-        let seed = crash_seed(70_000)?;
-        let line = seed.checkpoint.manifest().topology().line;
-        let record = reopened.load_line(line).await?;
-        let target = SessionRef::new(seed.selector.session_id(), fixture::id(70_501)?);
-        let lease = reopened
-            .acquire(AcquireBranch::new(
-                seed.selector,
-                fixture::id(70_504)?,
-                NonZeroU64::new(30).ok_or("lease")?,
-            ))
-            .await?;
-        let next = fixture::checkpoint(
-            fixture::topology(
-                seed.selector.session_id(),
-                seed.selector.branch_id(),
-                fixture::id(70_505)?,
-                Some(seed.checkpoint_id),
-                1,
-                None,
-                lease.fence().get(),
-            )?,
-            2,
-            RuntimeDurability::Required,
-        )?;
-        let source_commit = reopened
-            .commit(CommitCheckpoint::new(
-                lease.clone(),
-                reopened.load_branch(seed.selector).await?.head(),
-                fixture::bundle(&next, Some(&seed.bundle))?,
-            ))
-            .await
-            .map(|_| ());
-        if committed {
-            assert_eq!((record.head(), record.generation()), (target, 2), "{stage}");
-            assert_eq!(
-                source_commit,
-                Err(SessionStoreError::NotLineHead),
-                "{stage}"
-            );
-        } else {
-            assert_eq!(
-                (record.head(), record.generation()),
-                (seed.selector, 1),
-                "{stage}"
-            );
-            assert_eq!(
-                reopened.load_branch(target).await.map(|_| ()),
-                Err(SessionStoreError::NotFound),
-                "{stage}"
-            );
-            assert_eq!(source_commit, Ok(()), "{stage}");
-        }
+        assert_one_line_head(&reopened, mode, stage, committed).await?;
         reopened.shutdown().await?;
+    }
+    Ok(())
+}
+
+/// The reopened store after a cut `stage` of `mode`: exactly one head, or a
+/// terminal recording wholly there or absent.
+#[cfg(unix)]
+async fn assert_one_line_head(
+    reopened: &SqliteSessionStore,
+    mode: &str,
+    stage: &str,
+    committed: bool,
+) -> TestResult {
+    let seed = crash_seed(70_000)?;
+    let line = seed.checkpoint.manifest().topology().line;
+    let record = reopened.load_line(line).await?;
+    if mode == "record" {
+        assert_eq!((record.head(), record.generation()), (seed.selector, 1));
+        assert_eq!(
+            reopened.line_job_terminals(line).await?,
+            if committed {
+                vec![line_terminal()?]
+            } else {
+                Vec::new()
+            },
+            "{stage}"
+        );
+        return Ok(());
+    }
+    let target = if mode == "carry" {
+        carried_head()?
+    } else {
+        SessionRef::new(seed.selector.session_id(), fixture::id(70_501)?)
+    };
+    let lease = reopened
+        .acquire(AcquireBranch::new(
+            seed.selector,
+            fixture::id(70_504)?,
+            NonZeroU64::new(30).ok_or("lease")?,
+        ))
+        .await?;
+    let next = fixture::checkpoint(
+        fixture::topology(
+            seed.selector.session_id(),
+            seed.selector.branch_id(),
+            fixture::id(70_505)?,
+            Some(seed.checkpoint_id),
+            1,
+            None,
+            lease.fence().get(),
+        )?,
+        2,
+        RuntimeDurability::Required,
+    )?;
+    let source_commit = reopened
+        .commit(CommitCheckpoint::new(
+            lease.clone(),
+            reopened.load_branch(seed.selector).await?.head(),
+            fixture::bundle(&next, Some(&seed.bundle))?,
+        ))
+        .await
+        .map(|_| ());
+    if committed {
+        assert_eq!((record.head(), record.generation()), (target, 2), "{stage}");
+        assert_eq!(
+            source_commit,
+            Err(SessionStoreError::NotLineHead),
+            "{stage}"
+        );
+    } else {
+        assert_eq!(
+            (record.head(), record.generation()),
+            (seed.selector, 1),
+            "{stage}"
+        );
+        assert_eq!(
+            reopened.load_branch(target).await.map(|_| ()),
+            Err(SessionStoreError::NotFound),
+            "{stage}"
+        );
+        assert_eq!(source_commit, Ok(()), "{stage}");
     }
     Ok(())
 }

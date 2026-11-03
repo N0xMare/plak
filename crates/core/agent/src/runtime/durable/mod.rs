@@ -25,8 +25,10 @@ pub(in crate::runtime) mod compaction_fallback;
 mod compaction_inspection;
 pub(in crate::runtime) mod compaction_recovery;
 pub(in crate::runtime) use compaction_inspection::checkpoint_can_abandon_compaction;
+pub(in crate::runtime) mod carry;
 pub(in crate::runtime) mod composition_recovery;
 pub(in crate::runtime) mod effect_recovery;
+pub use carry::{DurableCarryHead, DurableCarryReplay, DurableCarrySource};
 mod line_head;
 pub use line_head::DurableLineHead;
 mod recovery_publication;
@@ -307,6 +309,13 @@ pub enum DurableRuntimeBranchOutcome {
     RecoveryRequired {
         /// Exact unchanged recovery-only source.
         address: DurableSessionAddress,
+    },
+    /// A head-advancing rebind was refused before it took a lease: the
+    /// source's ledger has job rows without terminal evidence and the target
+    /// builder installs no `JobHost` to take the processes over.
+    RunningJobsWithoutJobHost {
+        /// Source job rows without terminal evidence.
+        running: usize,
     },
 }
 

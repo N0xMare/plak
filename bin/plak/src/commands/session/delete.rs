@@ -659,9 +659,13 @@ fn prune_session_history(
         Ok(PruneHistoryOutcome::RecoveryRequired) => {
             "its turn is unfinished; run `plak session recover` first".to_owned()
         }
-        // A predecessor of a live line stays whole until it is deleted.
+        // A predecessor of a line stays whole until it is deleted.
         Ok(PruneHistoryOutcome::Superseded) => {
             "superseded: its agent line continues in a later session; kept as read-only history"
+                .to_owned()
+        }
+        Ok(PruneHistoryOutcome::LineEnded) => {
+            "superseded: its agent line ended when the session holding its head was deleted; kept as read-only history until it is deleted"
                 .to_owned()
         }
         Err(error) if error.kind() == AgentSessionsErrorKind::StaleLocator => {

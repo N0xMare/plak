@@ -57,6 +57,7 @@ fn host_workflow(workflow: ProductWorkflow) -> ActualHostWorkflow {
         ProductWorkflow::Fork => ActualHostWorkflow::Fork,
         ProductWorkflow::Rebind => ActualHostWorkflow::Rebind,
         ProductWorkflow::Compact => ActualHostWorkflow::Compact,
+        ProductWorkflow::Carry => unreachable!("a carry runs only in the product fixture"),
     }
 }
 
@@ -337,8 +338,10 @@ pub(crate) async fn run_actual_host_fixture(
         // The binding changes only through a profile fork, so the matrix
         // seeds rebind rows through the product fixture and reconciles them
         // with the actual host.
-        ProductWorkflow::Rebind => {
-            return Err("actual-host rebind rows are seeded by the product fixture".into());
+        ProductWorkflow::Rebind | ProductWorkflow::Carry => {
+            return Err(
+                "actual-host rebind and carry rows are seeded by the product fixture".into(),
+            );
         }
         ProductWorkflow::Compact => vec![ActualHostAction::Compact],
     };
@@ -527,6 +530,12 @@ pub(crate) async fn run_product_fixture(
             ))
             .await?;
         }
+        ProductWorkflow::Carry => {
+            cuts.reach(ProductCrashBoundary::Prepared).await?;
+            Box::pin(run_carry(&sessions, source, workspace, model, state_path)).await?;
+            cuts.reach(ProductCrashBoundary::RuntimeReturned).await?;
+            cuts.reach(ProductCrashBoundary::ProductCommitted).await?;
+        }
         _ => return Err("root and steer require the actual-host fixture".into()),
     }
     probe_product_fixture(home, state_path)
@@ -675,6 +684,34 @@ async fn run_rebind(
     cuts.reach(ProductCrashBoundary::ProductCommitted).await
 }
 
+/// A same-store carry of `source`: the new session becomes the next head of
+/// its line under one exact operation.
+async fn run_carry(
+    sessions: &AgentSessions,
+    source: SessionLocator,
+    workspace: &Path,
+    model: BoundaryController,
+    state_path: &Path,
+) -> ProductResult {
+    const OPERATION: &str = "plak:carry:crash-harness";
+    let created = Box::pin(
+        sessions.create(
+            CreateSessionRequest::new(
+                SessionOperationId::new(OPERATION)?,
+                runtime_binding(workspace, model)?,
+            )
+            .continuing_line(source),
+        ),
+    )
+    .await?;
+    let CreateSessionOutcome::Created { session, .. } = created else {
+        return Err("carry did not create".into());
+    };
+    record_runtime_target(state_path, session.locator())?;
+    session.release().await?;
+    Ok(())
+}
+
 async fn run_compact(
     sessions: &AgentSessions,
     journal: &mut ProductJournal,
@@ -770,6 +807,23 @@ pub(crate) async fn recover_product_fixture(
         }
         ProductWorkflow::Compact => {
             Box::pin(recover_compact(&sessions, &mut journal, home, workspace)).await?;
+        }
+        ProductWorkflow::Carry => {
+            // The relaunch repeats the exact carry: a published one answers
+            // from its receipt, an unpublished one runs now.
+            let source = journal
+                .snapshot()
+                .locator
+                .ok_or("carry source locator missing")?
+                .parse()?;
+            let evidence = BoundaryController::from_evidence_path(
+                CrashBoundary::None,
+                home.join("product-physical.jsonl"),
+            )?;
+            Box::pin(run_carry(
+                &sessions, source, workspace, evidence, state_path,
+            ))
+            .await?;
         }
         _ => return Err("root and steer require actual-host recovery".into()),
     }

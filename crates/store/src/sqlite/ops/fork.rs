@@ -130,15 +130,18 @@ pub(in super::super) fn fork(
     )?;
     let new_head = lines::apply_step(
         &tx,
-        target,
-        t.line,
-        t.line_generation,
-        Some((
-            r.source().session(),
-            r.source().checkpoint().checkpoint_id(),
-        )),
-        &LineOrigin::Created,
-        StoreInvalidReason::ForkCheckpointSemantics,
+        &lines::Step {
+            target,
+            line: t.line,
+            generation: t.line_generation,
+            source: Some((
+                r.source().session(),
+                r.source().checkpoint().checkpoint_id(),
+            )),
+            consumed: r.consumed_line_terminals(),
+            origin: &LineOrigin::Created,
+            invalid: StoreInvalidReason::ForkCheckpointSemantics,
+        },
     )?;
     let feed_seq = feed::append(
         &tx,

@@ -135,6 +135,25 @@ impl DurableSessionRuntime {
             return Ok(DurableRuntimeBranchOutcome::RecoveryRequired { address: source });
         }
         let target = request.publication_target(historical_checkpoint)?;
+        // A head advance hands every job row to the target; a process only
+        // a JobHost holds can follow it. The branch publishes only while
+        // this checkpoint is the source head, so its ledger is the one
+        // handed over.
+        if let DurableBranchRequest::Rebind(rebind) = &request
+            && !rebind.new_line
+            && !rebind.builder.has_job_host()
+        {
+            let running = historical_checkpoint
+                .manifest()
+                .jobs()
+                .rows()
+                .iter()
+                .filter(|row| row.terminal.is_none())
+                .count();
+            if running != 0 {
+                return Ok(DurableRuntimeBranchOutcome::RunningJobsWithoutJobHost { running });
+            }
+        }
 
         let owner = operation_run_id(&self.instance_nonce, operation_id)?;
         let source_lease = capacity_store_call(
@@ -330,6 +349,25 @@ impl DurableSessionRuntime {
             ));
         }
 
+        // The head's pending line terminals move with it: folded into the
+        // handed-off ledger and removed by the publication itself. The held
+        // source lease keeps every recorder off them meanwhile.
+        let source_topology = source_checkpoint.manifest().topology();
+        let pending = if advances_line {
+            store_call(
+                StorePhase::LoadBranch,
+                self.store_timeouts.operation,
+                self.store.line_job_terminals(source_topology.line),
+            )
+            .await
+            .map_err(StoreCallError::into_agent)?
+        } else {
+            Vec::new()
+        };
+        let consumed = pending
+            .iter()
+            .map(|terminal| terminal.number)
+            .collect::<Vec<_>>();
         let material = DurableBranchMaterial::new(operation_id)?;
         let target_checkpoint = prepare_branch_checkpoint(
             source_checkpoint,
@@ -337,8 +375,21 @@ impl DurableSessionRuntime {
             material,
             transition,
             prepared_target,
-            advances_line,
+            advances_line.then_some(pending.as_slice()),
         )?;
+        let mut facts = crate::feed::facts::branch_facts(
+            identity.workflow_id,
+            operation_id,
+            transition,
+            &target_checkpoint,
+        );
+        if !consumed.is_empty() {
+            facts.push(crate::feed::FeedFact::LineJobTerminalsConsumed {
+                line: source_topology.line,
+                generation: source_topology.line_generation,
+                jobs: consumed.clone(),
+            });
+        }
         let target_bundle =
             RuntimeCheckpointCodec::advance(&target_checkpoint, loaded.checkpoint().bundle())
                 .map_err(checkpoint_bundle_error)?;
@@ -354,12 +405,8 @@ impl DurableSessionRuntime {
             target_bundle,
         )
         .with_transition(transition)
-        .with_feed_facts(crate::feed::facts::branch_facts(
-            identity.workflow_id,
-            operation_id,
-            transition,
-            &target_checkpoint,
-        ));
+        .with_feed_facts(facts)
+        .with_consumed_line_terminals(consumed);
         match capacity_store_call(
             StorePhase::Fork,
             self.store_timeouts.operation,
@@ -448,6 +495,10 @@ impl fmt::Debug for DurableRuntimeBranchOutcome {
             Self::RecoveryRequired { address } => formatter
                 .debug_struct("RecoveryRequired")
                 .field("address", address)
+                .finish(),
+            Self::RunningJobsWithoutJobHost { running } => formatter
+                .debug_struct("RunningJobsWithoutJobHost")
+                .field("running", running)
                 .finish(),
         }
     }
@@ -912,19 +963,21 @@ async fn compile_branch_target(
     })
 }
 
+/// `advance` carries the line's pending job terminals when the target
+/// becomes the source line's next head; `None` starts a new line.
 fn prepare_branch_checkpoint(
     source: &RuntimeCheckpoint,
     identity: &DurableBranchRequestIdentity,
     material: DurableBranchMaterial,
     transition: BranchTransitionMode,
     rebind: Option<PreparedRebindTarget>,
-    advances_line: bool,
+    advance: Option<&[crate::manifest::LineJobTerminal]>,
 ) -> Result<RuntimeCheckpoint, AgentError> {
     let source_manifest = source.manifest();
     let source_topology = source_manifest.topology();
     let target_session = source_topology.session_id;
     let (line, line_generation, jobs) =
-        target_line_and_jobs(source_manifest, identity.target_branch, advances_line)?;
+        target_line_and_jobs(source_manifest, identity.target_branch, advance)?;
     let context = match transition {
         BranchTransitionMode::OrdinaryFork => source_manifest.canonical().context().ordinary_fork(
             source_topology.checkpoint_id,
@@ -1010,23 +1063,31 @@ fn prepare_branch_checkpoint(
     RuntimeCheckpoint::new(manifest).map_err(runtime_manifest_error)
 }
 
-/// The target's line membership and job ledger. A rebind's target becomes
-/// the line's next head: every job row, running or awaiting its notice,
-/// continues under it. A fork is a new line: it continues the job numbers,
-/// never the source line's processes or their notices.
+/// The target's line membership and job ledger. A head-advancing target
+/// becomes the line's next head: every job row, running or awaiting its
+/// notice, continues under it, with the pending line terminals folded in. A
+/// new line continues the job numbers and the notices of exited jobs, never
+/// the source line's running processes.
 fn target_line_and_jobs(
     source_manifest: &RuntimeManifest,
     target_branch: BranchId,
-    advances_line: bool,
+    advance: Option<&[crate::manifest::LineJobTerminal]>,
 ) -> Result<(plakous_model::LineId, u64, crate::manifest::JobLedger), AgentError> {
     let source_topology = source_manifest.topology();
-    if !advances_line {
+    let Some(pending) = advance else {
+        let line = plakous_model::LineId::started_by(target_branch);
         return Ok((
-            plakous_model::LineId::started_by(target_branch),
+            line,
             1,
-            source_manifest.jobs().cleared(),
+            source_manifest.jobs().forked(plakous_tools::JobOwner {
+                line,
+                generation: 1,
+                session_id: source_topology.session_id,
+                branch_id: target_branch,
+                fence: 1,
+            }),
         ));
-    }
+    };
     let generation = source_topology
         .line_generation
         .checked_add(1)
@@ -1038,11 +1099,11 @@ fn target_line_and_jobs(
         branch_id: target_branch,
         fence: 1,
     };
-    Ok((
-        source_topology.line,
-        generation,
-        source_manifest.jobs().handed_off(owner),
-    ))
+    let jobs = source_manifest
+        .jobs()
+        .with_line_terminals(pending)
+        .map_err(runtime_manifest_error)?;
+    Ok((source_topology.line, generation, jobs.handed_off(owner)))
 }
 
 pub(in crate::runtime) fn validate_session_operation_id(
@@ -1184,7 +1245,7 @@ mod jobs_carry_tests {
                 DurableBranchMaterial::new(operation)?,
                 transition,
                 target,
-                transition == BranchTransitionMode::Rebind,
+                (transition == BranchTransitionMode::Rebind).then_some(&[][..]),
             )?;
             let topology = seeded.manifest().topology();
             assert_ne!(topology.branch_id, prior.topology().branch_id);
@@ -1210,13 +1271,19 @@ mod jobs_carry_tests {
                     }
                 );
             } else {
-                // A new line named by its own branch, with no process rows.
+                // A new line named by its own branch: it keeps the exited
+                // job's pending notice under its own owner.
                 assert_eq!(
                     topology.line,
                     plakous_model::LineId::started_by(topology.branch_id)
                 );
                 assert_eq!(topology.line_generation, 1);
-                assert_eq!(seeded.manifest().jobs().rows().len(), 0);
+                assert!(prior.jobs().rows()[0].terminal.is_some());
+                assert_eq!(seeded.manifest().jobs().rows().len(), 1);
+                let row = &seeded.manifest().jobs().rows()[0];
+                assert_eq!(row.terminal, prior.jobs().rows()[0].terminal);
+                assert_eq!(row.owner.line, topology.line);
+                assert_eq!(row.owner.branch_id, topology.branch_id);
             }
             assert_eq!(seeded.manifest().named_state(), prior.named_state());
             let bundle = RuntimeCheckpointCodec::bundle(&seeded, None)?;

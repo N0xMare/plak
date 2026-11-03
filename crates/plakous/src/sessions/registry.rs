@@ -2,7 +2,7 @@ use super::{AgentSessionsError, AgentSessionsErrorKind, SessionOperationId};
 use plakous_agent::internal::facade_support::{
     AgentSessionEndpoint, WeakAgentSessionEndpoint, agent_session_endpoint,
 };
-use plakous_agent::{Agent, DriverInstanceId, WeakAgent};
+use plakous_agent::{Agent, DriverInstanceId};
 use plakous_model::{BranchId, SessionId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -33,7 +33,6 @@ impl SessionBranchKey {
 struct ActiveDriver {
     agent_id: DriverInstanceId,
     endpoint: WeakAgentSessionEndpoint,
-    agent: WeakAgent,
 }
 
 pub(super) struct DriverRegistration {
@@ -153,7 +152,6 @@ impl DriverRegistry {
         let active = ActiveDriver {
             agent_id: agent.id(),
             endpoint: agent_session_endpoint(agent).downgrade(),
-            agent: agent.downgrade(),
         };
         state
             .by_operation
@@ -194,18 +192,6 @@ impl DriverRegistry {
             .and_then(|active| active.endpoint.upgrade());
         drop(state);
         endpoint
-    }
-
-    /// The live agent attached to `branch` in this registry, if any.
-    pub(super) fn attached(&self, branch: SessionBranchKey) -> Option<Agent> {
-        let mut state = self.lock();
-        Self::prune(&mut state);
-        let agent = state
-            .by_branch
-            .get(&branch)
-            .and_then(|active| active.agent.upgrade());
-        drop(state);
-        agent
     }
 
     fn lock(&self) -> MutexGuard<'_, DriverRegistryState> {

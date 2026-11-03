@@ -169,15 +169,40 @@ impl AgentSessions {
             .map_err(|error| runtime_error(&error))
     }
 
+    /// Reads a `NotLineHead` refusal of a branch on `line` as
+    /// [`AgentSessionsErrorKind::LineEnded`] when the line has no head any
+    /// more: the session holding it was deleted (spec 01 §5.9).
+    pub(super) async fn line_refusal(
+        &self,
+        line: LineId,
+        error: AgentSessionsError,
+    ) -> AgentSessionsError {
+        if error.kind() != AgentSessionsErrorKind::NotLineHead || !self.line_ended(line).await {
+            return error;
+        }
+        AgentSessionsError::new(
+            AgentSessionsErrorKind::LineEnded,
+            "the branch's agent line ended when the session holding its head was deleted; it is read-only history: view, export or fork it",
+        )
+    }
+
+    /// Whether `line` ended: its head's session was deleted.
+    pub(super) async fn line_ended(&self, line: LineId) -> bool {
+        use plakous_agent::internal::facade_support::{SessionStoreOrigin, agent_store_origin};
+        self.runtime
+            .line(line)
+            .await
+            .is_err_and(|error| agent_store_origin(&error) == Some(SessionStoreOrigin::NotFound))
+    }
+
     /// Applies a create request's line choice to its builder.
     pub(super) async fn line_builder(
         &self,
+        operation_id: &SessionOperationId,
         builder: AgentBuilder,
         line: Option<CreateLine>,
     ) -> Result<AgentBuilder, AgentSessionsError> {
-        use plakous_agent::internal::facade_support::{
-            agent_builder_continuing_line, agent_builder_with_line_origin,
-        };
+        use plakous_agent::internal::facade_support::agent_builder_with_line_origin;
         match line {
             None => Ok(builder),
             Some(CreateLine::Imported(provenance)) => {
@@ -190,45 +215,61 @@ impl AgentSessions {
                 Ok(agent_builder_with_line_origin(builder, origin))
             }
             Some(CreateLine::Continue(source)) => {
-                // Any checkpoint of the source branch names its line: the
-                // membership is fixed for the branch's life.
-                let loaded = self
-                    .store
-                    .load_branch(source.session_ref())
-                    .await
-                    .map_err(|error| super::store_error(error).for_session(source.session_id))?;
-                let topology = loaded.checkpoint().checkpoint().manifest().topology();
-                let head = self.line_head(topology.line).await?;
-                if head.session_id != source.session_id
-                    || head.branch_id != source.branch_id
-                    || head.generation != topology.line_generation
-                {
-                    // A superseded source has no line to continue: its carry
-                    // starts a new line that names where it came from.
-                    let origin = LineOrigin::imported(format!(
-                        "carried from {}:{}",
-                        source.session_id, source.branch_id
-                    ))
-                    .ok_or_else(|| {
-                        AgentSessionsError::new(
-                            AgentSessionsErrorKind::Internal,
-                            "carry provenance is not single-line text",
-                        )
-                    })?;
-                    return Ok(agent_builder_with_line_origin(builder, origin));
+                self.carry_builder(operation_id, builder, source).await
+            }
+        }
+    }
+
+    /// Resolves a same-store carry from `source`: the next head of its line
+    /// under the head's held lease, an exact replay of this operation's
+    /// published carry, or a new line when `source` is read-only history.
+    async fn carry_builder(
+        &self,
+        operation_id: &SessionOperationId,
+        builder: AgentBuilder,
+        source: SessionLocator,
+    ) -> Result<AgentBuilder, AgentSessionsError> {
+        use plakous_agent::internal::DurableCarrySource;
+        use plakous_agent::internal::facade_support::{
+            agent_builder_carrying_head, agent_builder_has_job_host, agent_builder_replaying_carry,
+            agent_builder_with_line_origin,
+        };
+        let carried = Box::pin(
+            self.runtime
+                .carry_source(operation_id.as_str(), source.session_ref()),
+        )
+        .await
+        .map_err(|error| runtime_error(&error).for_session(source.session_id))?;
+        match carried {
+            DurableCarrySource::Head(head) => {
+                // The store refuses a head that is not quiescent, in the
+                // create's own transaction.
+                if head.running_jobs() != 0 && !agent_builder_has_job_host(&builder) {
+                    let _unreleased = head.release().await;
+                    return Err(AgentSessionsError::new(
+                        AgentSessionsErrorKind::UnsettledProcesses,
+                        "the carry source has running jobs and the new binding installs no JobHost to take them over; install one (for example plakous::tools::LocalJobHost) or stop the jobs first",
+                    ));
                 }
-                let generation = topology.line_generation.checked_add(1).ok_or_else(|| {
+                Ok(agent_builder_carrying_head(builder, head))
+            }
+            DurableCarrySource::Published(replay) => {
+                Ok(agent_builder_replaying_carry(builder, replay))
+            }
+            DurableCarrySource::Superseded => {
+                // A superseded source has no line to continue: its carry
+                // starts a new line that names where it came from.
+                let origin = LineOrigin::imported(format!(
+                    "carried from {}:{}",
+                    source.session_id, source.branch_id
+                ))
+                .ok_or_else(|| {
                     AgentSessionsError::new(
-                        AgentSessionsErrorKind::Integrity,
-                        "line generations exhausted",
+                        AgentSessionsErrorKind::Internal,
+                        "carry provenance is not single-line text",
                     )
                 })?;
-                Ok(agent_builder_continuing_line(
-                    builder,
-                    topology.line,
-                    generation,
-                    loaded.checkpoint().checkpoint().manifest().jobs().clone(),
-                ))
+                Ok(agent_builder_with_line_origin(builder, origin))
             }
         }
     }
