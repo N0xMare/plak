@@ -62,14 +62,17 @@ impl From<crate::session_store::RecordStoreError> for DriveTurnError {
 }
 
 impl DriveTurnError {
-    pub(super) fn storage_failure(&self) -> Option<crate::error::CliFailure> {
-        (self.store_refusal == Some(crate::error::StoreRefusal::StorageFull)).then(|| {
-            crate::session_store::RecordStoreError::refused(
-                crate::error::StoreRefusal::StorageFull,
-                self.message.clone(),
+    /// The typed failure a refused write ends the turn with: exhausted
+    /// storage, or another host's custody of the tree.
+    pub(super) fn refused_failure(&self) -> Option<crate::error::CliFailure> {
+        let refusal = self.store_refusal.filter(|refusal| {
+            matches!(
+                refusal,
+                crate::error::StoreRefusal::StorageFull
+                    | crate::error::StoreRefusal::HostedElsewhere
             )
-            .into()
-        })
+        })?;
+        Some(crate::session_store::RecordStoreError::refused(refusal, self.message.clone()).into())
     }
 }
 

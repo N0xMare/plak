@@ -20,7 +20,7 @@ pub(super) async fn settle_waits(
     rows: &dyn TopologyRows,
     session: &SessionRecord,
     opened: &crate::agent::AttachedCodingSession,
-) -> Result<(), String> {
+) -> Result<(), crate::error::ReadFailure> {
     if opened.has_recovered_turn() {
         // A rejoined turn may replay its own waits from their receipts.
         return Ok(());
@@ -62,7 +62,7 @@ pub(super) async fn settle_waits(
         runtime.mutate_then_emit(false, settle).await?;
     } else if let Some(mut tree) = stored {
         settle(&mut tree)?;
-        rows.save_tree(&mut tree).map_err(|error| error.message)?;
+        rows.save_tree(&mut tree)?;
     }
     Ok(())
 }
@@ -110,7 +110,9 @@ pub(super) async fn settle_terminal_waits(
 ) -> Result<(), String> {
     match exchange {
         crate::agent::TerminalExchange::Closed | crate::agent::TerminalExchange::Unclosed => {
-            settle_waits(rows, session, opened).await
+            settle_waits(rows, session, opened)
+                .await
+                .map_err(String::from)
         }
         crate::agent::TerminalExchange::Unresolved => Ok(()),
     }
@@ -200,7 +202,7 @@ impl crate::sessions::projector::ProductTreeJoin for RootBatchJoin<'_> {
             }
             self.rows
                 .save_tree(&mut tree)
-                .map_err(|error| error.message)
+                .map_err(|error| error.message())
         })
     }
 }

@@ -127,7 +127,7 @@ async fn headless_successor_epoch_and_a_live_hub_cannot_overwrite_each_other() {
         .unwrap();
     let refused = crate::store::tree::save_tree(&paths, &mut stale).unwrap_err();
     assert!(
-        refused.message.contains("refusing to overwrite"),
+        refused.message().contains("refusing to overwrite"),
         "{refused:?}"
     );
     assert_ne!(

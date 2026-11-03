@@ -142,7 +142,7 @@ fn changed_spawn_cap_carries_to_fresh_genesis_but_unchanged_settings_do_not()
         "grok-4.20",
         Some("medium".into()),
     ));
-    crate::store::tree::save_tree(&paths, &mut tree).map_err(|error| error.message)?;
+    crate::store::tree::save_tree(&paths, &mut tree).map_err(|error| error.message())?;
     assert!(!orchestration_changed(&paths, &record)?);
     config.max_children = 10;
     config.save(&paths)?;
@@ -166,7 +166,7 @@ fn changed_spawn_cap_carries_to_fresh_genesis_but_unchanged_settings_do_not()
         carried.record.carried_forward_from().map(|(id, _)| id),
         Some(source.as_str())
     );
-    crate::store::tree::save_tree(&paths, &mut next).map_err(|error| error.message)?;
+    crate::store::tree::save_tree(&paths, &mut next).map_err(|error| error.message())?;
     assert!(!orchestration_changed(&paths, &carried.record)?);
     Ok(())
 }

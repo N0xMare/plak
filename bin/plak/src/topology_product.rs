@@ -126,7 +126,7 @@ impl plakous_hosted::runtime::TreeRows for crate::home::paths::PlakPaths {
     fn save_tree(
         &self,
         tree: &mut ProductAgentTree,
-    ) -> Result<(), plakous_recursive_subagents::tree::TopologyError> {
+    ) -> Result<(), plakous_hosted::runtime::TreeWriteError> {
         crate::store::tree::save_tree(self, tree)
     }
 }
@@ -429,7 +429,7 @@ async fn stop_all_now(paths: &crate::home::paths::PlakPaths, tree_id: &str) -> R
         let root = tree.root_agent_id.clone();
         tree.stop_all(&root, Some(&operation_id))
             .map_err(|error| error.message)?;
-        return crate::store::tree::save_tree(paths, &mut tree).map_err(|error| error.message);
+        return crate::store::tree::save_tree(paths, &mut tree).map_err(|error| error.message());
     };
     let closed_ids = runtime
         .mutate_then_emit(false, move |tree| {

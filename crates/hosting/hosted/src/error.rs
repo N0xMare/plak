@@ -71,6 +71,10 @@ pub enum StoreRefusal {
     LowSpace,
     /// An authoritative write refused for exhausted storage, without committing.
     StorageFull,
+    /// Another live host process holds the agent tree's custody
+    /// (`tree_hosted_elsewhere`); nothing was written. The message is the
+    /// refusal itself.
+    HostedElsewhere,
 }
 
 impl StoreRefusal {
@@ -93,6 +97,7 @@ impl StoreRefusal {
             Self::Unavailable => "unavailable",
             Self::LowSpace => "low-space",
             Self::StorageFull => "storage-full",
+            Self::HostedElsewhere => "hosted-elsewhere",
         }
     }
 }
@@ -119,6 +124,16 @@ impl ReadFailure {
 impl std::fmt::Display for ReadFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
+    }
+}
+
+impl ReadFailure {
+    /// A failure that keeps `refusal` as its class.
+    pub(crate) const fn refused(refusal: StoreRefusal, message: String) -> Self {
+        Self {
+            message,
+            refusal: Some(refusal),
+        }
     }
 }
 
@@ -154,6 +169,9 @@ impl From<ReadFailure> for String {
 
 impl From<ReadFailure> for CliFailure {
     fn from(failure: ReadFailure) -> Self {
+        if failure.refusal == Some(StoreRefusal::HostedElsewhere) {
+            return Self::hosted_elsewhere(failure.message);
+        }
         let mut cli = Self::new(failure.message);
         cli.refusal = failure.refusal;
         if failure.refusal == Some(StoreRefusal::LowSpace) {
@@ -166,6 +184,9 @@ impl From<ReadFailure> for CliFailure {
 impl From<crate::session_store::RecordStoreError> for CliFailure {
     fn from(error: crate::session_store::RecordStoreError) -> Self {
         let refusal = error.refusal();
+        if refusal == Some(StoreRefusal::HostedElsewhere) {
+            return Self::hosted_elsewhere(String::from(error));
+        }
         let mut cli = Self::new(String::from(error));
         cli.refusal = refusal;
         if refusal == Some(StoreRefusal::LowSpace) {
@@ -245,6 +266,17 @@ impl From<crate::capabilities::CapabilityUnavailable> for CliFailure {
     }
 }
 
+impl From<crate::runtime::TreeWriteError> for CliFailure {
+    fn from(error: crate::runtime::TreeWriteError) -> Self {
+        match error {
+            crate::runtime::TreeWriteError::HostedElsewhere(refusal) => {
+                Self::hosted_elsewhere(refusal.to_string())
+            }
+            crate::runtime::TreeWriteError::Refused(error) => Self::new(error.message),
+        }
+    }
+}
+
 /// Independent failures retained after every shutdown stage has been attempted.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ShutdownFailures {
@@ -258,8 +290,7 @@ pub(crate) struct ShutdownFailures {
 impl From<crate::agent_tree::TreeRuntimeError> for CliFailure {
     fn from(error: crate::agent_tree::TreeRuntimeError) -> Self {
         if error.hosted_elsewhere_refusal().is_some() {
-            return Self::classified(CliFailureKind::HostedElsewhere, error.message())
-                .with_attach_failure(AttachFailure::TreeHostedElsewhere);
+            return Self::hosted_elsewhere(error.message());
         }
         Self::new(error.message())
     }
@@ -275,6 +306,14 @@ impl CliFailure {
         let mut failure = Self::from(error).with_context(context);
         failure.refusal = refusal;
         failure
+    }
+
+    /// Another live host process holds the agent tree: exit code 7, the
+    /// stable `tree_hosted_elsewhere` code and its attach cause. `message` is
+    /// the refusal itself.
+    pub(crate) fn hosted_elsewhere(message: impl Into<String>) -> Self {
+        Self::classified(CliFailureKind::HostedElsewhere, message)
+            .with_attach_failure(AttachFailure::TreeHostedElsewhere)
     }
 
     /// Internal failure with the default category.
@@ -549,6 +588,7 @@ pub(crate) mod read_faults {
             Some(StoreRefusal::Unavailable) => "storage unavailable",
             Some(StoreRefusal::LowSpace) => "storage low space",
             Some(StoreRefusal::StorageFull) => "storage full",
+            Some(StoreRefusal::HostedElsewhere) => "hosted elsewhere",
             None => "integrity",
         };
         Some(ReadFailure {

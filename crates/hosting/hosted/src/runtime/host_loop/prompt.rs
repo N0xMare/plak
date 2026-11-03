@@ -290,7 +290,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             )),
         )
         .await
-        .map_err(CliFailure::new)?;
+        .map_err(CliFailure::from)?;
         if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
             return Ok(PromptOutcome::Stopped(stopped));
         }
@@ -394,7 +394,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         .await
         {
             if let Some(state) = one_shot.as_deref_mut() {
-                state.result = Some(Err(CliFailure::new(error.clone())));
+                state.result = Some(Err(CliFailure::from(error.clone())));
             }
             let _ = self.events.notice(TranscriptRow::error(
                 NoticeScope::Tree,
@@ -758,7 +758,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             return Ok(HostStep::Quit);
         }
         if let Err(error) = &driven
-            && let Some(failure) = error.storage_failure()
+            && let Some(failure) = error.refused_failure()
         {
             return Err(failure);
         }

@@ -113,7 +113,7 @@ async fn setup(layout: &Layout, path: &str) -> TestResult {
             Some("medium".into()),
         ));
         crate::store::tree::save_tree(&workspace_paths, &mut tree)
-            .map_err(|error| error.message)?;
+            .map_err(|error| error.message())?;
         config.max_children = 10;
         config.save(&workspace_paths)?;
     }

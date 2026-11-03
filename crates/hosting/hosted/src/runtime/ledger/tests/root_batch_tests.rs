@@ -7,8 +7,8 @@ use std::sync::{
 };
 
 use crate::agent_tree::{
-    CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TopologyError,
-    TreeCustody, TreeStore, TreeStoreError,
+    CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TreeCustody,
+    TreeStore, TreeStoreError,
 };
 use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
 use crate::runtime::topology_state::{TopologyRows, TreeRows};
@@ -63,7 +63,7 @@ impl TreeRows for Rows {
     fn tree_exists(&self, id: &str) -> Result<bool, String> {
         self.trees.exists(id).map_err(|error| error.detail)
     }
-    fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), TopologyError> {
+    fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), crate::runtime::TreeWriteError> {
         let revision = self.trees.save_in_custody(tree)?;
         tree.acknowledge_revision(revision);
         Ok(())
@@ -159,7 +159,7 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
         let error = prepare().await.unwrap_err();
         assert_eq!(error.refusal(), Some(StoreRefusal::StorageFull));
         let failure = crate::runtime::DriveTurnError::from(error)
-            .storage_failure()
+            .refused_failure()
             .unwrap();
         assert_eq!(failure.store_refusal(), Some(StoreRefusal::StorageFull));
         assert_eq!(rows.records.load(&session.id).unwrap(), session);
@@ -206,4 +206,105 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
             crate::topology_runtime::force_release(&session.id).await;
         }
     }
+}
+
+/// Another live host's custody of the tree stays typed through the root
+/// batch written ahead of admission and through the projector's tree save:
+/// both end with exit code 7 and the `tree_hosted_elsewhere` JSONL code,
+/// not an internal failure, and nothing is written.
+#[tokio::test]
+async fn another_hosts_custody_stays_typed_through_the_ledger_and_the_projector() {
+    use crate::agent_tree::{CustodyHost, HostInstance};
+    use crate::driver::ledger::CommandKind;
+    use crate::error::{CliFailure, ReadFailure, StoreRefusal};
+    use crate::runtime::result_mail::{prepare_with_command, select};
+    let dir = tempfile::tempdir().unwrap();
+    let rows = Rows::default();
+    let mut session = SessionRecord::new(dir.path().to_owned());
+    let item = QueueItem::new("continue");
+    session.pending_queue.push(item.clone());
+    rows.records.save(&mut session).unwrap();
+    session = rows.records.load(&session.id).unwrap();
+    let mut tree = result_tree(&session);
+    rows.save_tree(&mut tree).unwrap();
+    let ours = rows
+        .trees
+        .custody_port()
+        .custody(&session.id)
+        .unwrap()
+        .unwrap();
+    let other = CustodyHost {
+        host_id: "local".to_owned(),
+        instance: HostInstance::parse("9-0000000000000009").unwrap(),
+        binary: Some("0123456789ab".to_owned()),
+        host_name: "another-machine".to_owned(),
+    };
+    rows.trees
+        .custody_port()
+        .take_custody(
+            &session.id,
+            &other,
+            Some(&ProductAgentTree::holder_gone_for_test(CustodyClaim {
+                tree_id: session.id.clone(),
+                host: ours.holding.host.clone(),
+                fence: ours.fence,
+            })),
+        )
+        .unwrap();
+    let revision = rows.tree(&session.id).unwrap().unwrap().revision;
+    let assert_hosted_elsewhere = |failure: CliFailure| {
+        assert_eq!(failure.exit_code(), 7, "{}", failure.message());
+        assert_eq!(failure.code(), Some("tree_hosted_elsewhere"));
+        assert!(
+            failure
+                .message()
+                .starts_with("tree_hosted_elsewhere (0123456789ab): agent tree"),
+            "{}",
+            failure.message()
+        );
+        let line: serde_json::Value =
+            serde_json::from_str(&plakous_host_protocol::envelope::coded_diagnostic_line(
+                None,
+                failure.code(),
+                failure.message(),
+            ))
+            .unwrap();
+        assert_eq!(line["code"], "tree_hosted_elsewhere");
+    };
+
+    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    assert!(batch.is_some(), "the child's result rides the prompt");
+    let id = format!("plak.queue.{}.{}", item.id, item.revision);
+    let error = prepare_with_command(
+        &rows,
+        &rows.records,
+        &session,
+        &item,
+        &command,
+        batch,
+        &id,
+        CommandKind::RootStart,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.refusal(), Some(StoreRefusal::HostedElsewhere));
+    assert_hosted_elsewhere(
+        crate::runtime::DriveTurnError::from(error)
+            .refused_failure()
+            .unwrap(),
+    );
+
+    let mut tree = rows.tree(&session.id).unwrap().unwrap();
+    let refused = rows.save_tree(&mut tree).unwrap_err();
+    assert_hosted_elsewhere(CliFailure::from(ReadFailure::from(refused)));
+
+    assert_eq!(rows.tree(&session.id).unwrap().unwrap().revision, revision);
+    assert!(
+        rows.tree(&session.id)
+            .unwrap()
+            .unwrap()
+            .command(&id)
+            .is_none()
+    );
+    assert_eq!(rows.records.load(&session.id).unwrap(), session);
 }

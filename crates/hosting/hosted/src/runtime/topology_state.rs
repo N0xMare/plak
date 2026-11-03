@@ -28,11 +28,9 @@ pub trait TreeRows {
     fn tree_exists(&self, tree_id: &str) -> Result<bool, String>;
 
     /// Publish a whole tree through the store's compare-and-swap.
-    /// A capacity refusal retains its typed recovery-storage classification.
-    fn save_tree(
-        &self,
-        tree: &mut ProductAgentTree,
-    ) -> Result<(), crate::agent_tree::TopologyError>;
+    /// A capacity refusal retains its typed recovery-storage classification,
+    /// and another host's custody its typed refusal.
+    fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), TreeWriteError>;
 
     /// Delete one tree's rows, compare-and-swapped on `expected_revision`;
     /// an absent tree is not an error.
@@ -42,6 +40,77 @@ pub trait TreeRows {
     fn delete_tree(&self, tree_id: &str, expected_revision: u64) -> Result<(), String> {
         let _ = (tree_id, expected_revision);
         Err("these tree rows do not delete trees".to_owned())
+    }
+}
+
+/// A refused tree write.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TreeWriteError {
+    /// Another live host process holds the tree's custody; nothing was
+    /// written.
+    HostedElsewhere(Box<crate::agent_tree::TreeHostedElsewhere>),
+    /// Any other refusal, under its topology classification.
+    Refused(crate::agent_tree::TopologyError),
+}
+
+impl TreeWriteError {
+    /// The operator-facing detail.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::HostedElsewhere(refusal) => refusal.to_string(),
+            Self::Refused(error) => error.message.clone(),
+        }
+    }
+}
+
+impl std::fmt::Display for TreeWriteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for TreeWriteError {}
+
+impl From<crate::agent_tree::TreeStoreError> for TreeWriteError {
+    fn from(error: crate::agent_tree::TreeStoreError) -> Self {
+        match error.kind {
+            crate::agent_tree::TreeStoreErrorKind::HostedElsewhere(refusal) => {
+                Self::HostedElsewhere(refusal)
+            }
+            _ => Self::Refused(error.into()),
+        }
+    }
+}
+
+impl From<crate::agent_tree::TopologyError> for TreeWriteError {
+    fn from(error: crate::agent_tree::TopologyError) -> Self {
+        Self::Refused(error)
+    }
+}
+
+/// A topology tool reads the custody refusal as the recovery-required
+/// refusal the store conversion has always given it.
+impl From<TreeWriteError> for crate::agent_tree::TopologyError {
+    fn from(error: TreeWriteError) -> Self {
+        match error {
+            TreeWriteError::HostedElsewhere(refusal) => {
+                crate::agent_tree::TreeStoreError::hosted_elsewhere(*refusal).into()
+            }
+            TreeWriteError::Refused(error) => error,
+        }
+    }
+}
+
+impl From<TreeWriteError> for crate::error::ReadFailure {
+    fn from(error: TreeWriteError) -> Self {
+        match error {
+            TreeWriteError::HostedElsewhere(refusal) => Self::refused(
+                crate::error::StoreRefusal::HostedElsewhere,
+                refusal.to_string(),
+            ),
+            TreeWriteError::Refused(error) => error.message.into(),
+        }
     }
 }
 
@@ -320,7 +389,7 @@ fn install_on_loaded(
     let snapshot = successor(&tree);
     tree.begin_successor_epoch(snapshot)
         .map_err(|error| error.message)?;
-    rows.save_tree(&mut tree).map_err(|error| error.message)?;
+    rows.save_tree(&mut tree).map_err(|error| error.message())?;
     if let (Some(session_id), Some(tree_id_text)) = (
         crate::product_observation::session_id_from_text(tree_id),
         crate::product_observation::BoundedText64::new(tree_id),
@@ -374,19 +443,14 @@ impl TreeRows for HostRows<'_> {
             .map_err(|error| error.detail.clone())
     }
 
-    fn save_tree(
-        &self,
-        tree: &mut ProductAgentTree,
-    ) -> Result<(), crate::agent_tree::TopologyError> {
+    fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), TreeWriteError> {
         let store = self.trees().map_err(|message| {
             crate::agent_tree::TopologyError::new(
                 crate::agent_tree_protocol::TopologyErrorCode::OperationRecoveryRequired,
                 message,
             )
         })?;
-        let acknowledged = store
-            .save_in_custody(tree)
-            .map_err(crate::agent_tree::TopologyError::from)?;
+        let acknowledged = store.save_in_custody(tree)?;
         tree.acknowledge_revision(acknowledged);
         Ok(())
     }

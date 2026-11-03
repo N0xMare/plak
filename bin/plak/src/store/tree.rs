@@ -8,12 +8,11 @@
 
 use std::sync::Arc;
 
-use plakous_recursive_subagents::tree::{
-    ProductAgentTree, TopologyError, TreeStore, TreeStoreError,
-};
+use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore, TreeStoreError};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 
 use crate::home::paths::PlakPaths;
+use plakous_hosted::runtime::TreeWriteError;
 use plakous_hosted::{CliFailure, CliResult};
 
 /// Names this process's custody host before its first take: the local
@@ -68,9 +67,9 @@ pub fn load_tree(paths: &PlakPaths, tree_id: &str) -> Result<Option<ProductAgent
 }
 
 /// A whole-tree publish through the port's compare-and-swap.
-pub fn save_tree(paths: &PlakPaths, tree: &mut ProductAgentTree) -> Result<(), TopologyError> {
+pub fn save_tree(paths: &PlakPaths, tree: &mut ProductAgentTree) -> Result<(), TreeWriteError> {
     let store = open_tree_store(paths).map_err(TreeStoreError::unavailable)?;
-    let acknowledged = store.save_in_custody(tree).map_err(TopologyError::from)?;
+    let acknowledged = store.save_in_custody(tree)?;
     tree.acknowledge_revision(acknowledged);
     Ok(())
 }

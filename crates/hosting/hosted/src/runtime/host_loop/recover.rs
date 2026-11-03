@@ -321,7 +321,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             &self.opened,
         )
         .await
-        .map_err(CliFailure::new)?;
+        .map_err(CliFailure::from)?;
         self.config
             .session
             .bind_plakous_locator(self.opened.locator())

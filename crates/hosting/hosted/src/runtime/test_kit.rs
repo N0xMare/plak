@@ -315,12 +315,9 @@ impl super::TreeRows for MemoryRows {
     fn save_tree(
         &self,
         tree: &mut crate::agent_tree::ProductAgentTree,
-    ) -> Result<(), crate::agent_tree::TopologyError> {
+    ) -> Result<(), super::TreeWriteError> {
         use crate::agent_tree::TreeStore as _;
-        let acknowledged = self
-            .trees
-            .save_in_custody(tree)
-            .map_err(crate::agent_tree::TopologyError::from)?;
+        let acknowledged = self.trees.save_in_custody(tree)?;
         tree.acknowledge_revision(acknowledged);
         Ok(())
     }
@@ -368,7 +365,7 @@ pub fn seed_restored_paused_tree(
     tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .map_err(|error| error.message)?;
     tree.restore_paused();
-    rows.save_tree(&mut tree).map_err(|error| error.message)
+    rows.save_tree(&mut tree).map_err(|error| error.message())
 }
 
 /// A detached shell host over doubles, with the two handles a test asserts on.

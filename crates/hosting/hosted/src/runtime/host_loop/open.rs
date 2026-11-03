@@ -109,7 +109,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
         )
         .await
         {
-            let failure = CliFailure::new(error);
+            let failure = CliFailure::from(error);
             let release = opened.release().await;
             return match release {
                 Ok(_) => Err(failure),

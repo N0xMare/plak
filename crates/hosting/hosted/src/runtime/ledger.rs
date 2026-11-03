@@ -48,7 +48,7 @@ use crate::driver::ledger::{
     BatchRule, CommandIntent, CommandKind, CommandLedger, LedgerError, LedgerFuture, LedgerStep,
     Prepared, Settlement,
 };
-use crate::runtime::TopologyRows;
+use crate::runtime::{TopologyRows, TreeWriteError};
 use crate::session_store::SessionRecordStore;
 use crate::sessions::projector::{Submission, SubmissionKind};
 use crate::sessions::{QueueItem, ResultMailBatch, SessionRecord};
@@ -62,7 +62,7 @@ async fn record_root_batch(
     command_id: &str,
     command: &str,
     batch: &ResultMailBatch,
-) -> Result<(), TopologyError> {
+) -> Result<(), TreeWriteError> {
     let (command_id, command, recipient, message_ids) = (
         command_id.to_owned(),
         command.to_owned(),
@@ -86,7 +86,7 @@ async fn withdraw_root_batch(
     rows: &(dyn TopologyRows + Sync),
     command_id: &str,
     batch: &ResultMailBatch,
-) -> Result<(), TopologyError> {
+) -> Result<(), TreeWriteError> {
     let command_id = command_id.to_owned();
     let withdraw = move |tree: &mut ProductAgentTree| {
         tree.withdraw_command(&command_id);
@@ -99,9 +99,9 @@ async fn mutate_root_batch(
     rows: &(dyn TopologyRows + Sync),
     batch: &ResultMailBatch,
     work: impl FnOnce(&mut ProductAgentTree) -> Result<(), TopologyError> + Send + 'static,
-) -> Result<(), TopologyError> {
+) -> Result<(), TreeWriteError> {
     if let Some(runtime) = crate::topology_runtime::lookup(&batch.tree_id) {
-        return runtime.mutate_then_emit_typed(false, work).await;
+        return Ok(runtime.mutate_then_emit_typed(false, work).await?);
     }
     let mut tree = rows
         .tree(&batch.tree_id)

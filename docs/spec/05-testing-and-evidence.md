@@ -4218,7 +4218,11 @@ or after it exits, until the break-glass
 (`a_removed_liveness_lock_never_proves_a_holder_gone`). A second process's attach
 of a session whose tree a live process holds is refused with exit code 7 and
 the `tree_hosted_elsewhere` JSONL code, bringing no hub up and writing nothing
-(`a_second_process_attach_is_refused_with_exit_7_and_its_jsonl_code`).
+(`a_second_process_attach_is_refused_with_exit_7_and_its_jsonl_code`). The
+refusal stays typed through the tree rows a hub-less session writes: the root
+batch written ahead of admission and the projector's tree save both end with
+exit code 7 and the JSONL code and write nothing
+(`another_hosts_custody_stays_typed_through_the_ledger_and_the_projector`).
 
 History retention evidence (Plakous sections 4 and 5.1) runs one prune
 conformance suite against both backends (`memory_prune_conformance`,

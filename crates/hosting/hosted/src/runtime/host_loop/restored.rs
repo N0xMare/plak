@@ -90,7 +90,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             return Ok(HostStep::Quit);
         }
         if let Err(error) = &driven
-            && let Some(failure) = error.storage_failure()
+            && let Some(failure) = error.refused_failure()
         {
             return Err(failure);
         }

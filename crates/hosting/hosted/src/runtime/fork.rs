@@ -404,8 +404,7 @@ pub(super) async fn seed_fork_tree<P: plakous_host_protocol::ProtocolExtension>(
             "a topology tree already exists for the forked session",
         ));
     }
-    rows.save_tree(&mut tree)
-        .map_err(|error| CliFailure::new(error.message))?;
+    rows.save_tree(&mut tree).map_err(CliFailure::from)?;
     Ok(Some(tree.stored_revision))
 }
 

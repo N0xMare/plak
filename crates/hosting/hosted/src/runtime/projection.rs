@@ -841,7 +841,7 @@ pub(crate) async fn project_tree_as(
     if tree.feed_cursor(&session_key) == before {
         return Ok(TreePassOutcome::Applied);
     }
-    rows.save_tree(&mut tree).map_err(|error| error.message)?;
+    rows.save_tree(&mut tree)?;
     Ok(TreePassOutcome::Applied)
 }
 

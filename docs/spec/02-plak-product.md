@@ -2803,7 +2803,11 @@ holds the session's agent tree (chapter 03 §14) prints the typed
 `tree_hosted_elsewhere (<binary id>)` refusal naming that process's host,
 machine and instance, exits 7, and in `plak agent` emits one JSONL `error`
 with `code: "tree_hosted_elsewhere"` and one terminal `bye`. The TUI shows the
-same refusal as its attach failure and stays detached. Before the host socket
+same refusal as its attach failure and stays detached. A session that runs
+without a hub keeps the refusal typed when a later tree write meets it (the
+root batch written ahead of a prompt, the prompt's tree pass, the wait-receipt
+settlement): the turn ends with the same exit 7 and JSONL `code`, and nothing
+is written. Before the host socket
 this refusal is the only behavior: nothing is routed to the holding process. For a supported recoverable unfinished turn, the session
 recovers automatically the next time it is used: `plak run --session` opens it, which abandons the unfinished
 turn once (Plakous §13.1) and then runs the prompt. `plak session recover

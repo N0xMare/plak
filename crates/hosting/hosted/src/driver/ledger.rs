@@ -73,6 +73,8 @@ pub(crate) enum Settlement {
 pub(crate) enum LedgerError {
     Store(RecordStoreError),
     TreeStorageFull(crate::agent_tree_protocol::TopologyError),
+    /// Another live host process holds the tree; the refusal's text.
+    TreeHostedElsewhere(String),
     Integrity(String),
     Unavailable(String),
 }
@@ -82,7 +84,9 @@ impl std::fmt::Display for LedgerError {
         match self {
             Self::Store(error) => error.fmt(f),
             Self::TreeStorageFull(error) => f.write_str(&error.message),
-            Self::Integrity(message) | Self::Unavailable(message) => f.write_str(message),
+            Self::TreeHostedElsewhere(message)
+            | Self::Integrity(message)
+            | Self::Unavailable(message) => f.write_str(message),
         }
     }
 }
@@ -91,7 +95,10 @@ impl std::error::Error for LedgerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Store(error) => Some(error),
-            Self::TreeStorageFull(_) | Self::Integrity(_) | Self::Unavailable(_) => None,
+            Self::TreeStorageFull(_)
+            | Self::TreeHostedElsewhere(_)
+            | Self::Integrity(_)
+            | Self::Unavailable(_) => None,
         }
     }
 }
@@ -112,12 +119,26 @@ impl From<crate::agent_tree_protocol::TopologyError> for LedgerError {
     }
 }
 
+impl From<crate::runtime::TreeWriteError> for LedgerError {
+    fn from(error: crate::runtime::TreeWriteError) -> Self {
+        match error {
+            crate::runtime::TreeWriteError::HostedElsewhere(refusal) => {
+                Self::TreeHostedElsewhere(refusal.to_string())
+            }
+            crate::runtime::TreeWriteError::Refused(error) => error.into(),
+        }
+    }
+}
+
 impl From<LedgerError> for RecordStoreError {
     fn from(error: LedgerError) -> Self {
         match error {
             LedgerError::Store(error) => error,
             LedgerError::TreeStorageFull(error) => {
                 Self::refused(crate::error::StoreRefusal::StorageFull, error.message)
+            }
+            LedgerError::TreeHostedElsewhere(message) => {
+                Self::refused(crate::error::StoreRefusal::HostedElsewhere, message)
             }
             other => other.to_string().into(),
         }

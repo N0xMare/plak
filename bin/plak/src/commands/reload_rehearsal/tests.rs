@@ -159,7 +159,7 @@ async fn fixture_projects_root_and_children_without_writes_or_content()
         None,
     )
     .map_err(|error| error.message)?;
-    crate::store::tree::save_tree(&paths, &mut tree).map_err(|error| error.message)?;
+    crate::store::tree::save_tree(&paths, &mut tree).map_err(|error| error.message())?;
     let database = rusqlite::Connection::open(paths.subagents_database())?;
     database.execute(
         "UPDATE agent_nodes SET path=?1 WHERE agent_id=?2",

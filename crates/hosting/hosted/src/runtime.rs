@@ -206,7 +206,7 @@ pub use surface::{
     SurfaceMcp, SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
     UsageRead, UsageReads,
 };
-pub use topology_state::{HostRows, TopologyRows, TreeRows};
+pub use topology_state::{HostRows, TopologyRows, TreeRows, TreeWriteError};
 pub use topology_state::{
     durable_tree_id as durable_topology_tree_id, epoch_rebind_refusal, install_successor_epoch,
     requires_explicit_resume, resume_tree,
