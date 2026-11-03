@@ -57,8 +57,8 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 39 packages: five supported, 29 published internal
-(the vendored `plakous-codex-code-mode-protocol` among them), and five
+The workspace contains 39 packages: five supported, 31 published internal
+(the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
 `publish = false` (chapter 06 §1).
@@ -67,12 +67,9 @@ to crates.io as one exact cohort; the repository-only packages set
   `plak`. Each has an exact inventory pinned by a compile fixture or process
   test, not by whatever happens to be `pub`.
 - **Published internal:** the common, engine, protocol, provider, store,
-  harness, host, and vendor crates listed in the crate map below, except the
-  runner crates.
+  harness, host, and vendor crates listed in the crate map below.
 - **Repository-only:** `plakous-test-support`,
-  `plakous-offline-crash-harness`, `plakous-mcp-fake-server`,
-  `plakous-runner-protocol` and `plakous-runner` (the runner protocol and its
-  loopback, unreleased until runners are reachable from the product).
+  `plakous-offline-crash-harness`, `plakous-mcp-fake-server`.
 
 Complete-workflow embedders depend on `plakous` alone. Narrow component
 embedders may use `plakous-agent`, `plakous-model` (Custom model integration),
@@ -109,11 +106,11 @@ classes and directory policy.
 | `plakous-attempt` | `crates/common/attempt` | `common` | Family-agnostic attempt lifecycle: phase transitions, observation ledger, pure acceptance outcomes |
 | `plakous-http` | `crates/common/http` | `common` | Provider-blind bounded HTTP transport and SSE framing. One fresh connection per execute unless the client is explicitly pooled; no redirect, proxy, retry, or auth semantics |
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
-| `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol v1: length-prefixed JSON frames, the hello and bind handshake, request classes, owner transfer and answers; repository-only |
+| `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol v1: length-prefixed JSON frames, the hello and bind handshake, request classes, owner transfer and answers |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |
-| `plakous-runner` | `crates/runtimes/runner` | `engine` | The runner protocol's host end (a runner link) and runner end (owner and op tables over an execution environment), joined in process as a loopback for conformance; repository-only |
+| `plakous-runner` | `crates/runtimes/runner` | `engine` | The runner protocol's host end (a runner link) and runner end (owner and op tables over an execution environment), joined in process as a loopback for conformance; reached through the facade's hidden `plakous::runner` |
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family wire grammar, stream lifecycle, projection and shared dialect hosts |
 | `plakous-messages` | `crates/protocols/messages` | `protocol` | Messages-family kernel: request grammar, block ordering, thinking/signature replay, stream grammar, wire accounting |
 | `plakous-chat-completions` | `crates/protocols/chat-completions` | `protocol` | Chat Completions kernel: message lowering, one-choice streaming lifecycle, indexed function calls, exact usage, SSE `[DONE]` |

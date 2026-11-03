@@ -1,21 +1,25 @@
 [package]
 name = "plakous-runner"
-description = "The loopback runner: the host and runner ends of the runner protocol over a Plakous execution environment"
+description = "The host and runner ends of the Plakous runner protocol over an execution environment, with an in-process loopback"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-readme.workspace = true
-publish = false
+homepage.workspace = true
+documentation = "https://docs.rs/plakous-runner"
+readme = "README.md"
+keywords = ["llm", "agent", "remote"]
+categories = ["development-tools", "network-programming"]
+exclude.workspace = true
 
 [package.metadata.plakous]
 layer = "engine"
-class = "repository-only"
+class = "published-internal"
 
 [dependencies]
 plakous-model.workspace = true
-plakous-runner-protocol = { path = "../../common/runner-protocol" }
+plakous-runner-protocol.workspace = true
 plakous-tools.workspace = true
 serde.workspace = true
 serde_json.workspace = true

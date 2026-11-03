@@ -362,6 +362,14 @@ pub mod prompts {
 /// credential, select a provider default, or fall back across routes.
 pub mod construction;
 
+/// Unsupported runner ends for official hosting (spec 01 §8.4): the runner
+/// service and its daemon, the host's link, and the wire protocol.
+#[doc(hidden)]
+pub mod runner {
+    pub use plakous_runner::*;
+    pub use plakous_runner_protocol as protocol;
+}
+
 /// High-level exact session workflows and opaque backend composition.
 ///
 /// This surface exposes semantic locators and reports only. Store traits,

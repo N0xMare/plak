@@ -80,9 +80,9 @@ provider qualification, recovery certification, or source compatibility.
 | --- | --- |
 | Supported | A documented consumer product with an explicit inventory, a compatibility baseline, a direct external workflow, and a correctness obligation |
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
-| Repository-only | Test, fixture, and crash-harness packages, and the runner packages before their first release, kept outside the production dependency closure entirely and never published |
+| Repository-only | Test, fixture, and crash-harness packages, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 39 packages: five supported, 29 published internal, five
+The workspace holds 39 packages: five supported, 31 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -94,7 +94,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (29)**
+**Published internal (31)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
@@ -103,22 +103,22 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 `plakous-compose`, `plakous-exchange`,
 `plakous-http`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`,
-`plakous-responses`, `plakous-store`,
+`plakous-responses`, `plakous-runner`, `plakous-runner-protocol`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
 `plakous-tool-search`, `plakous-tool-web`, `plakous-xai`.
 
 A retired package stops at its last published version; that version is not yanked.
 
-**Repository-only (5)**
+**Repository-only (3)**
 
 `plakous-test-support`, `plakous-offline-crash-harness`,
-`plakous-mcp-fake-server`, `plakous-runner-protocol`, `plakous-runner`.
+`plakous-mcp-fake-server`.
 
 `plakous-runner-protocol` (layer `common`) is the runner protocol, and
-`plakous-runner` (layer `engine`) its host and runner ends with the in-process
-loopback (chapter 01 §8.4). They stay repository-only until runners are
-reachable from the product; until then nothing published depends on them. The
-`common` and `engine` layers admit the repository-only class for this reason.
+`plakous-runner` (layer `engine`) its host and runner ends, the runner daemon
+and the in-process loopback (chapter 01 §8.4). The facade reaches them only
+through its hidden `plakous::runner` module, which carries no support promise;
+`plak runner` is their product consumer (chapter 02 §1).
 
 Every one of these declares its `layer` and `class` in `[package.metadata.plakous]`,
 and `tools/gate/check_workspace.py` (via `tools/gate/plakous_policy.py`) checks each

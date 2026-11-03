@@ -143,6 +143,8 @@ plakous-prompts = { version = "0.0.3", path = "crates/harness/prompts", default-
 plakous-recursive-subagents = { version = "0.0.3", path = "crates/orchestration/recursive-subagents", default-features = false }
 plakous-recursive-subagents-store = { version = "0.0.3", path = "crates/orchestration/recursive-subagents-store", default-features = false }
 plakous-responses = { version = "0.0.3", path = "crates/protocols/responses", default-features = false }
+plakous-runner = { version = "0.0.3", path = "crates/runtimes/runner", default-features = false }
+plakous-runner-protocol = { version = "0.0.3", path = "crates/common/runner-protocol", default-features = false }
 plakous-store = { version = "0.0.3", path = "crates/store", default-features = false }
 plakous-tool-files = { version = "0.0.3", path = "crates/harness/tool-files", default-features = false }
 plakous-tool-plan = { version = "0.0.3", path = "crates/harness/tool-plan", default-features = false }
@@ -224,8 +226,8 @@ vendor = ["vendor/{short}"]
 
 [workspace.metadata.plakous.classes]
 core = ["supported"]
-common = ["published-internal", "repository-only"]
-engine = ["published-internal", "repository-only"]
+common = ["published-internal"]
+engine = ["published-internal"]
 protocol = ["published-internal"]
 provider = ["published-internal"]
 store = ["published-internal"]

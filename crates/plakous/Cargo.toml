@@ -96,6 +96,8 @@ plakous-tool-web.workspace = true
 plakous-prompts.workspace = true
 plakous-openai = { workspace = true, optional = true }
 plakous-openrouter = { workspace = true, optional = true }
+plakous-runner.workspace = true
+plakous-runner-protocol.workspace = true
 plakous-store.workspace = true
 plakous-http = { workspace = true, optional = true }
 rustix = { workspace = true, features = ["fs", "process"], optional = true }

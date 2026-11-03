@@ -3832,6 +3832,8 @@ dependencies = [
  "plakous-openrouter",
  "plakous-prompts",
  "plakous-responses",
+ "plakous-runner",
+ "plakous-runner-protocol",
  "plakous-store",
  "plakous-test-support",
  "plakous-tool-files",

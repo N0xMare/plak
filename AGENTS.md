@@ -126,7 +126,7 @@ Prompt renders are regenerated locally into the gitignored `target/prompt-render
 and are **never committed**; correctness is pinned by sha256 tables in code.
 
 The workspace has 39 packages in three classes: supported (5),
-published-internal (29), repository-only (5). Publication and nameability
+published-internal (31), repository-only (3). Publication and nameability
 confer accessibility, not support.
 
 Packages declare the dependency features their Rust targets use rather than

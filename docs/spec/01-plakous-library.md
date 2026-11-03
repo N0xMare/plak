@@ -5532,9 +5532,9 @@ enters `plakous-model`.
 **Runner protocol v1.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a
-loopback (both repository-only, chapter 06 §3). Nothing selects a runner for a
-session yet and no product path reaches either crate; the loopback exists for
-conformance.
+loopback (both published internal, chapter 06 §3, and reached from the facade
+only through its hidden `plakous::runner` module). Nothing selects a runner
+for a session yet; the loopback exists for conformance.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
