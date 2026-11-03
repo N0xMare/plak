@@ -109,30 +109,35 @@ impl TrimOutcome {
 }
 
 impl DormancyTicket {
-    pub(crate) fn run(
+    pub(crate) async fn run(
         &mut self,
         vcs: &dyn VcsOps,
         launch: &Path,
     ) -> Result<DormancyAnswer, VcsError> {
         if self.evidence.phase == Phase::Sealing
-            && let Err(error) = vcs.check_reclaimable(&self.workspace.path, None)
+            && let Err(error) = vcs.check_reclaimable(&self.workspace.path, None).await
         {
             if self.trim_target
                 && error.reclamation_refusal
                     == Some(plakous_workspace::occupancy_vcs::ReclamationRefusal::StaticCoverage)
             {
-                self.trim_outcome = Some(match vcs.trim_disposable_target(&self.workspace.path) {
-                    Ok(true) => TrimOutcome::Trimmed,
-                    Ok(false) => TrimOutcome::Retained,
-                    Err(_) => TrimOutcome::Refused,
-                });
+                self.trim_outcome = Some(
+                    match vcs.trim_disposable_target(&self.workspace.path).await {
+                        Ok(true) => TrimOutcome::Trimmed,
+                        Ok(false) => TrimOutcome::Retained,
+                        Err(_) => TrimOutcome::Refused,
+                    },
+                );
             }
             return Err(error);
         }
-        self.run_step(vcs, launch)
+        self.run_step(vcs, launch).await
     }
 
-    fn run_step(&self, vcs: &dyn VcsOps, launch: &Path) -> Result<DormancyAnswer, VcsError> {
+    /// Whether the copy is present is asked of the port: an unanswered
+    /// question fails the step, so a copy that only looks absent is never
+    /// removed unproven or minted over.
+    async fn run_step(&self, vcs: &dyn VcsOps, launch: &Path) -> Result<DormancyAnswer, VcsError> {
         match self.evidence.phase {
             Phase::Sealing => vcs
                 .seal(
@@ -144,16 +149,19 @@ impl DormancyTicket {
                         .as_deref()
                         .ok_or_else(|| VcsError::seal_failed("copy has no recorded base"))?,
                 )
+                .await
                 .map(DormancyAnswer::Sealed),
             Phase::Removing => {
-                if self.workspace.path.exists() {
+                if vcs.path_exists(&self.workspace.path).await? {
                     let snapshot = self
                         .evidence
                         .snapshot()
                         .map_err(|e| VcsError::mint_unavailable(e.message))?;
-                    vcs.check_reclaimable(&self.workspace.path, Some(&snapshot))?;
+                    vcs.check_reclaimable(&self.workspace.path, Some(&snapshot))
+                        .await?;
                 }
-                vcs.unmint(launch, &self.workspace.path, &self.namespace)?;
+                vcs.unmint(launch, &self.workspace.path, &self.namespace)
+                    .await?;
                 Ok(DormancyAnswer::Removed)
             }
             Phase::Restoring => {
@@ -163,24 +171,27 @@ impl DormancyTicket {
                     .map_err(|e| VcsError::mint_unavailable(e.message))?;
                 // A crash after mint but before publication never handed this
                 // copy to a runtime. Reuse it only after exact coverage proof.
-                if self.workspace.path.exists() {
-                    vcs.check_reclaimable(&self.workspace.path, Some(&snapshot))?;
-                    self.restore_base(vcs)?;
+                if vcs.path_exists(&self.workspace.path).await? {
+                    vcs.check_reclaimable(&self.workspace.path, Some(&snapshot))
+                        .await?;
+                    self.restore_base(vcs).await?;
                     return Ok(DormancyAnswer::Restored(MintedCopy {
                         path: self.workspace.path.clone(),
-                        branch: vcs.label(&self.workspace.path),
+                        branch: vcs.label(&self.workspace.path).await,
                         base: snapshot,
                     }));
                 }
-                let minted = vcs.mint_from(&super::MintRequest {
-                    launch,
-                    agent_id: &self.agent_id,
-                    namespace: &self.namespace,
-                    parent_cwd: launch,
-                    mode: self.workspace.mode,
-                    base: Some(&snapshot),
-                })?;
-                self.restore_base(vcs)?;
+                let minted = vcs
+                    .mint_from(&super::MintRequest {
+                        launch,
+                        agent_id: &self.agent_id,
+                        namespace: &self.namespace,
+                        parent_cwd: launch,
+                        mode: self.workspace.mode,
+                        base: Some(&snapshot),
+                    })
+                    .await?;
+                self.restore_base(vcs).await?;
                 Ok(DormancyAnswer::Restored(minted))
             }
             Phase::Reclaimed | Phase::Present => Err(VcsError::mint_unavailable(
@@ -189,7 +200,7 @@ impl DormancyTicket {
         }
     }
 
-    fn restore_base(&self, vcs: &dyn VcsOps) -> Result<(), VcsError> {
+    async fn restore_base(&self, vcs: &dyn VcsOps) -> Result<(), VcsError> {
         vcs.restore_copy_base(
             &self.workspace.path,
             &self.namespace,
@@ -199,6 +210,7 @@ impl DormancyTicket {
                 .as_deref()
                 .ok_or_else(|| VcsError::seal_failed("copy has no recorded logical base"))?,
         )
+        .await
     }
 }
 

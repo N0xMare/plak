@@ -3723,14 +3723,14 @@ async fn api_child_pin_follows_the_api_table_for_its_node_model() {
         tool_sections: std::collections::BTreeMap::new(),
     });
     let tree_id = crate::topology_runtime::test_support::unique_tree_id();
-    let mut tree = ProductAgentTree::bootstrap_root(
+    let mut tree = crate::agent_tree::block_on_for_test(ProductAgentTree::bootstrap_root(
         &tree_id,
         "root",
         "root",
         workspace.path().to_path_buf(),
         "gpt-5.6-sol",
         WriterMode::SingleLease,
-    )
+    ))
     .expect("tree");
     tree.install_snapshot(snapshot);
     let mut children = Vec::new();
@@ -3796,14 +3796,14 @@ async fn a_child_binds_its_own_frozen_card_tools() {
         input.templates.insert(name, card);
     }
     let tree_id = crate::topology_runtime::test_support::unique_tree_id();
-    let mut tree = ProductAgentTree::bootstrap_root(
+    let mut tree = crate::agent_tree::block_on_for_test(ProductAgentTree::bootstrap_root(
         &tree_id,
         "root",
         "root",
         workspace.path().to_path_buf(),
         "gpt-5.6-sol",
         WriterMode::SingleLease,
-    )
+    ))
     .expect("tree");
     tree.install_snapshot(OrchestrationSnapshot::freeze(input));
     let mut children = Vec::new();

@@ -28,6 +28,7 @@ impl ProductAgentTree {
         caller: &str,
         request: &AdoptCandidateRequest,
         requested: &CandidateRecord,
+        facts: &Result<super::candidates::AdoptFacts, super::VcsError>,
     ) -> Result<(), TopologyError> {
         if request.accept_conflicts {
             return Err(refuse(
@@ -35,7 +36,7 @@ impl ProductAgentTree {
             ));
         }
         let target = self.node(caller)?.path.clone();
-        if is_jj_copy_root(&target) || target.join(".jj").exists() {
+        if is_jj_copy_root(&target) || super::candidates::AdoptFacts::target_jj(facts, &target)? {
             return Err(refuse("revert is not yet available for jj"));
         }
         if requested.adopted_by.is_none()

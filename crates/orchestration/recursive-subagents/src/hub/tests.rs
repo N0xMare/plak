@@ -202,8 +202,10 @@ async fn child_resolve_does_not_load_or_pause() {
         || Ok(memory_store()),
         None,
         |_| {
-            loaded.store(true, Ordering::SeqCst);
-            Err(TreeRuntimeError::new("child compile must not load_tree"))
+            std::future::ready({
+                loaded.store(true, Ordering::SeqCst);
+                Err(TreeRuntimeError::new("child compile must not load_tree"))
+            })
         },
     )
     .await
@@ -232,8 +234,10 @@ async fn missing_hub_child_fails_closed_without_bootstrap() {
         || Ok(memory_store()),
         None,
         |_| {
-            loaded.store(true, Ordering::SeqCst);
-            Err(TreeRuntimeError::new("must not bootstrap"))
+            std::future::ready({
+                loaded.store(true, Ordering::SeqCst);
+                Err(TreeRuntimeError::new("must not bootstrap"))
+            })
         },
     )
     .await
@@ -259,8 +263,10 @@ async fn missing_hub_root_lookup_does_not_bootstrap() {
         || Ok(memory_store()),
         None,
         |_| {
-            loaded.store(true, Ordering::SeqCst);
-            Err(TreeRuntimeError::new("must not bootstrap"))
+            std::future::ready({
+                loaded.store(true, Ordering::SeqCst);
+                Err(TreeRuntimeError::new("must not bootstrap"))
+            })
         },
     )
     .await
@@ -291,7 +297,7 @@ async fn missing_hub_child_does_not_clobber_durable_tree() {
         TopologyHubAttach::AttachRoot,
         || Ok(memory_store()),
         None,
-        |_| Ok(bootstrap(&tree_id, root.path().to_path_buf())),
+        |_| std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf()))),
     )
     .await
     .err()
@@ -318,8 +324,10 @@ async fn attach_root_load_runs_once_then_lookup_shares() {
         || Ok(memory_store()),
         None,
         |_| {
-            loads.fetch_add(1, Ordering::SeqCst);
-            Ok(bootstrap(&tree_id, root.path().to_path_buf()))
+            std::future::ready({
+                loads.fetch_add(1, Ordering::SeqCst);
+                Ok(bootstrap(&tree_id, root.path().to_path_buf()))
+            })
         },
     )
     .await
@@ -331,8 +339,10 @@ async fn attach_root_load_runs_once_then_lookup_shares() {
         || Ok(memory_store()),
         None,
         |_| {
-            loads.fetch_add(1, Ordering::SeqCst);
-            Err(TreeRuntimeError::new("second attach must not reload"))
+            std::future::ready({
+                loads.fetch_add(1, Ordering::SeqCst);
+                Err(TreeRuntimeError::new("second attach must not reload"))
+            })
         },
     )
     .await
@@ -355,7 +365,7 @@ async fn attach_root_resolve_acquires_one_lease() {
         TopologyHubAttach::AttachRoot,
         || Ok(memory_store()),
         None,
-        |_| Ok(bootstrap(&tree_id, root.path().to_path_buf())),
+        |_| std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf()))),
     )
     .await
     .unwrap();

@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::hub::ProductTopologyRuntime;
-use plakous_workspace::occupancy_vcs::fake::FakeVcs;
+use plakous_workspace::occupancy_vcs::fake::{FakeOp, FakeVcs};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -218,4 +218,308 @@ async fn a_hub_record_then_apply_aborted_during_its_seal_records_the_candidate()
     abort(caller).await;
     drop(release);
     assert_sealed(runtime.driver(), &child, NodeStatus::Failed).await;
+}
+
+/// From now on the `nth` VCS call (counting from one) reports itself on the
+/// returned receiver and blocks until the returned sender drops; every other
+/// call passes.
+fn gate_vcs_call(vcs: &FakeVcs, nth: usize) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+    let (entering, entered) = mpsc::channel();
+    let (release, released) = mpsc::channel::<()>();
+    let gate = Mutex::new((0_usize, entering, released));
+    vcs.watch_lock(move || {
+        let mut gate = gate.lock().unwrap();
+        gate.0 += 1;
+        if gate.0 == nth {
+            let _ = gate.1.send(());
+            let _ = gate.2.recv();
+        }
+        false
+    });
+    (entered, release)
+}
+
+/// The settle's port calls are awaited one after another: a caller aborted
+/// after the first seal answered, while the second is still running, leaves
+/// the rest of the batch to run and both candidates recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_settle_aborted_between_two_seals_records_both_candidates() {
+    let (_root, vcs, mut tree, first) = fake_child_tree("abort-between-seals");
+    let second = tree
+        .spawn_agent("root", &mint_spawn_request(), None)
+        .unwrap()
+        .agent_id;
+    tree.settle_for_test();
+    let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
+    let saving = driver.clone();
+    let (close_first, close_second) = (close(&first), close(&second));
+    let (closed, effects) = driver
+        .mutate(move |tree| {
+            close_first(tree)
+                .and_then(|()| close_second(tree))
+                .and_then(|()| saving.save(tree))
+        })
+        .await
+        .unwrap();
+    closed.unwrap();
+    assert_eq!(effects.seals.len(), 2);
+    let (entered, release) = gate_vcs_call(&vcs, 2);
+    let settling = driver.clone();
+    let caller = tokio::spawn(async move { settling.settle(effects).await });
+    until_entered(entered).await;
+    // The first seal answered; the second is in flight.
+    assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
+    abort(caller).await;
+    drop(release);
+    assert_sealed(&driver, &first, NodeStatus::Closed).await;
+    assert_sealed(&driver, &second, NodeStatus::Closed).await;
+}
+
+/// A port whose mint yields: it reports its start, then stays `Pending` until
+/// a permit is released, and answers as the [`FakeVcs`] it wraps. Every other
+/// question is the fake's own answer.
+struct YieldVcs {
+    inner: FakeVcs,
+    entered: tokio::sync::Notify,
+    gate: tokio::sync::Semaphore,
+}
+
+impl YieldVcs {
+    fn new() -> Self {
+        Self {
+            inner: FakeVcs::new(),
+            entered: tokio::sync::Notify::new(),
+            gate: tokio::sync::Semaphore::new(0),
+        }
+    }
+}
+
+mod yield_vcs {
+    use super::YieldVcs;
+    use plakous_workspace::occupancy_vcs::{
+        AdoptFailure, AdoptLanding, AdoptRequest, MintRequest, MintedCopy, ParentBehindCache,
+        RefreshApplied, RefreshPlan, RefreshPreparation, RefreshRequest, VcsError, VcsFuture,
+        VcsOps, VcsSnapshot,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::Path;
+
+    impl VcsOps for YieldVcs {
+        fn prepare_refresh<'a>(
+            &'a self,
+            request: &'a RefreshRequest,
+        ) -> VcsFuture<'a, Result<RefreshPreparation, VcsError>> {
+            self.inner.prepare_refresh(request)
+        }
+        fn apply_refresh<'a>(
+            &'a self,
+            plan: &'a RefreshPlan,
+            recover: bool,
+        ) -> VcsFuture<'a, Result<RefreshApplied, VcsError>> {
+            self.inner.apply_refresh(plan, recover)
+        }
+        fn check_reclaimable<'a>(
+            &'a self,
+            path: &'a Path,
+            sealed: Option<&'a VcsSnapshot>,
+        ) -> VcsFuture<'a, Result<(), VcsError>> {
+            self.inner.check_reclaimable(path, sealed)
+        }
+        fn trim_disposable_target<'a>(
+            &'a self,
+            path: &'a Path,
+        ) -> VcsFuture<'a, Result<bool, VcsError>> {
+            self.inner.trim_disposable_target(path)
+        }
+        fn path_exists<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, Result<bool, VcsError>> {
+            self.inner.path_exists(path)
+        }
+        fn jj_copy_dirs<'a>(
+            &'a self,
+            launch: &'a Path,
+        ) -> VcsFuture<'a, Result<BTreeSet<String>, VcsError>> {
+            self.inner.jj_copy_dirs(launch)
+        }
+        fn mint_from<'a>(
+            &'a self,
+            request: &'a MintRequest<'_>,
+        ) -> VcsFuture<'a, Result<MintedCopy, VcsError>> {
+            Box::pin(async move {
+                self.entered.notify_one();
+                let _permit = self.gate.acquire().await;
+                self.inner.mint_from(request).await
+            })
+        }
+        fn history_left_base<'a>(
+            &'a self,
+            path: &'a Path,
+            base: &'a str,
+            sealed: &'a str,
+        ) -> VcsFuture<'a, Result<bool, VcsError>> {
+            self.inner.history_left_base(path, base, sealed)
+        }
+        fn seal<'a>(
+            &'a self,
+            child_path: &'a Path,
+            namespace: &'a str,
+            candidate_id: &'a str,
+            base_commit: &'a str,
+        ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
+            self.inner
+                .seal(child_path, namespace, candidate_id, base_commit)
+        }
+        fn unpin<'a>(
+            &'a self,
+            child_path: &'a Path,
+            namespace: &'a str,
+            candidate_id: &'a str,
+        ) -> VcsFuture<'a, Result<(), VcsError>> {
+            self.inner.unpin(child_path, namespace, candidate_id)
+        }
+        fn restore_copy_base<'a>(
+            &'a self,
+            path: &'a Path,
+            namespace: &'a str,
+            agent: &'a str,
+            base: &'a str,
+        ) -> VcsFuture<'a, Result<(), VcsError>> {
+            self.inner.restore_copy_base(path, namespace, agent, base)
+        }
+        fn adopt<'a>(
+            &'a self,
+            request: &'a AdoptRequest<'_>,
+        ) -> VcsFuture<'a, Result<AdoptLanding, AdoptFailure>> {
+            self.inner.adopt(request)
+        }
+        fn run_mint_hook<'a>(
+            &'a self,
+            cwd: &'a Path,
+            command: &'a str,
+            env: &'a BTreeMap<String, String>,
+        ) -> VcsFuture<'a, Result<(), VcsError>> {
+            self.inner.run_mint_hook(cwd, command, env)
+        }
+        fn unmint<'a>(
+            &'a self,
+            launch: &'a Path,
+            path: &'a Path,
+            namespace: &'a str,
+        ) -> VcsFuture<'a, Result<(), VcsError>> {
+            self.inner.unmint(launch, path, namespace)
+        }
+        fn dirty<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, bool> {
+            self.inner.dirty(path)
+        }
+        fn ahead_behind<'a>(
+            &'a self,
+            child: &'a Path,
+            parent: &'a Path,
+            base: Option<&'a str>,
+        ) -> VcsFuture<'a, Option<(u64, u64)>> {
+            self.inner.ahead_behind(child, parent, base)
+        }
+        fn ahead_behind_cached<'a>(
+            &'a self,
+            child: &'a Path,
+            parent: &'a Path,
+            base: Option<&'a str>,
+            cache: &'a mut ParentBehindCache,
+        ) -> VcsFuture<'a, Option<(u64, u64)>> {
+            self.inner.ahead_behind_cached(child, parent, base, cache)
+        }
+        fn label<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, Option<String>> {
+            self.inner.label(path)
+        }
+        fn diverged_from_base<'a>(
+            &'a self,
+            path: &'a Path,
+            base_change_id: Option<&'a str>,
+            base_commit: &'a str,
+        ) -> VcsFuture<'a, Result<bool, VcsError>> {
+            self.inner
+                .diverged_from_base(path, base_change_id, base_commit)
+        }
+        fn copy_is_over_candidate<'a>(
+            &'a self,
+            launch: &'a Path,
+            copy_id: &'a str,
+            candidate: &'a VcsSnapshot,
+        ) -> VcsFuture<'a, Result<bool, VcsError>> {
+            self.inner
+                .copy_is_over_candidate(launch, copy_id, candidate)
+        }
+    }
+}
+
+/// A spawn whose caller is dropped while its mint is still pending neither
+/// strands its reservation nor loses the copy: the mint and the writer that
+/// commits it run as one release owner, so the child is recorded with its
+/// workspace and its receipt answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_spawn_dropped_mid_mint_still_commits_its_child() {
+    let root = tempfile::tempdir().unwrap();
+    let vcs = Arc::new(YieldVcs::new());
+    let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
+        vcs.clone(),
+        "abort-spawn",
+        "root",
+        "owner",
+        root.path().to_owned(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut binding = RosterBinding::leaf("test-account", "selected-tuple");
+    binding.max_tier = Tier::Mutate;
+    tree.pin_template("implement", binding);
+    let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
+    let spawning = driver.clone();
+    let caller = tokio::spawn(async move {
+        spawn_tool(spawning, None)
+            .spawn_with(
+                "op-abort-spawn".into(),
+                &serde_json::to_value(mint_spawn_request()).unwrap(),
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), vcs.entered.notified())
+        .await
+        .expect("the mint started");
+    abort(caller).await;
+    vcs.gate.add_permits(1);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let (nodes, answered) = driver
+            .read(|tree| {
+                (
+                    tree.nodes().len(),
+                    tree.operations().values().any(|operation| {
+                        operation.tool_name == "spawn_agent"
+                            && operation.terminal_response.is_some()
+                    }),
+                )
+            })
+            .unwrap();
+        if nodes == 2 && answered {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the reservation was stranded: {nodes} nodes, receipt answered {answered}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let child = driver
+        .read(|tree| tree.nodes().keys().find(|id| *id != "root").cloned())
+        .unwrap()
+        .unwrap();
+    assert!(
+        driver
+            .read(|tree| {
+                let workspace = &tree.node(&child).unwrap().workspace_id;
+                tree.workspace(workspace).is_some()
+            })
+            .unwrap(),
+        "the minted copy is the child's workspace"
+    );
 }

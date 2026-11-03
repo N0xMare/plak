@@ -166,6 +166,12 @@ impl TopologyTool {
                 "topology tree lock is poisoned",
             )
         };
+        // What the admission asks the port is answered here, outside the
+        // writer; an unanswered question refuses the adopt where it is needed.
+        let facts = match self.driver.read(|tree| tree.adopt_probe(&caller, &request)) {
+            Ok(probe) => probe.run(self.driver.vcs().as_ref()).await,
+            Err(error) => return Self::topology_failure(&error),
+        };
         let effects = {
             let driver = self.driver.clone();
             let (operation_id, caller, request) =
@@ -196,9 +202,9 @@ impl TopologyTool {
                         Ok(None) => {}
                         Err(error) => return Err(Box::new(Self::topology_failure(&error))),
                     }
-                    if let Err(error) = driver
-                        .fold_and_commit_guarded(tree, |tree| tree.begin_adopt(&caller, &request))
-                    {
+                    if let Err(error) = driver.fold_and_commit_guarded(tree, |tree| {
+                        tree.begin_adopt(&caller, &request, &facts)
+                    }) {
                         // Prepare persisted a non-terminal receipt; close it.
                         if let Err(persist) = tree
                             .remember_failure(
@@ -313,12 +319,24 @@ impl TopologyTool {
         let tool = self.clone();
         let (caller, operation_id, request) =
             (caller.to_owned(), operation_id.to_owned(), request.clone());
+        // The copy root is listed outside the writer; the admission skips an
+        // id a crashed mint left behind, and refuses if the port could not
+        // answer.
+        let launch = self
+            .driver
+            .read(|tree| tree.launch_checkout.clone())
+            .map_err(|error| {
+                ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
+            })?;
+        let jj_copy_dirs = self.driver.vcs().jj_copy_dirs(&launch).await;
         let (phase, effects) = self
             .driver
             .mutate({
                 let (caller, operation_id, request) =
                     (caller.clone(), operation_id.clone(), request.clone());
-                move |tree| tool.spawn_reserve_locked(tree, &caller, &operation_id, &request)
+                move |tree| {
+                    tool.spawn_reserve_locked(tree, &caller, &operation_id, &request, &jj_copy_dirs)
+                }
             })
             .await
             .map_err(|error| {
@@ -331,38 +349,48 @@ impl TopologyTool {
             Ok(SpawnPhase::Minting(reservation, ticket)) => (reservation, ticket),
             Err(error) => return Ok((Err(error), effects)),
         };
-        let port = self.driver.vcs();
-        let minted = tokio::task::spawn_blocking(move || ticket.mint(port.as_ref()))
-            .await
-            .unwrap_or_else(|error| {
-                Err(VcsError::mint_failed(format!("mint task failed: {error}")))
-            });
+        // One release owner runs the mint and the writer that commits or
+        // rolls back its reservation, as settle does: a caller dropped
+        // mid-mint never strands the reservation. The mint itself is a task
+        // of its own inside it, so once started it runs to its end.
         let driver = self.driver.clone();
         let (result, more) = self
             .driver
-            .mutate(move |tree| match minted {
-                Ok(minted) => match tree.spawn_commit(*reservation, Some(minted)) {
-                    Ok(output) => {
-                        driver.save(tree)?;
-                        Ok((output, false))
-                    }
-                    Err(error) => {
-                        tree.remember_failure(
-                            &operation_id,
-                            &caller,
-                            "spawn_agent",
-                            &request,
-                            error.code,
-                        )?;
-                        driver.save(tree)?;
-                        Err(error)
-                    }
-                },
-                Err(error) => {
-                    let error = tree.spawn_abort(*reservation, topology_error_from_vcs(error));
-                    driver.save(tree)?;
-                    Err(error)
-                }
+            .owned(async move {
+                let port = driver.vcs();
+                let minted = tokio::spawn(async move { ticket.mint(port.as_ref()).await })
+                    .await
+                    .unwrap_or_else(|error| {
+                        Err(VcsError::mint_failed(format!("mint task failed: {error}")))
+                    });
+                let writer = driver.clone();
+                driver
+                    .mutate_owed(move |tree| match minted {
+                        Ok(minted) => match tree.spawn_commit(*reservation, Some(minted)) {
+                            Ok(output) => {
+                                writer.save(tree)?;
+                                Ok((output, false))
+                            }
+                            Err(error) => {
+                                tree.remember_failure(
+                                    &operation_id,
+                                    &caller,
+                                    "spawn_agent",
+                                    &request,
+                                    error.code,
+                                )?;
+                                writer.save(tree)?;
+                                Err(error)
+                            }
+                        },
+                        Err(error) => {
+                            let error =
+                                tree.spawn_abort(*reservation, topology_error_from_vcs(error));
+                            writer.save(tree)?;
+                            Err(error)
+                        }
+                    })
+                    .await
             })
             .await
             .map_err(|error| {
@@ -381,6 +409,7 @@ impl TopologyTool {
         caller: &str,
         operation_id: &str,
         request: &SpawnAgentRequest,
+        jj_copy_dirs: &Result<std::collections::BTreeSet<String>, VcsError>,
     ) -> Result<SpawnPhase, TopologyError> {
         if let Some(prior) = tree.prepare_operation(operation_id, caller, "spawn_agent", request)? {
             let output = serde_json::from_str(&prior).map_err(|_| {
@@ -392,7 +421,7 @@ impl TopologyTool {
             return Ok(SpawnPhase::Done(output, true));
         }
         self.driver.save(tree)?;
-        let admitted = tree.spawn_reserve(caller, request, Some(operation_id));
+        let admitted = tree.spawn_reserve(caller, request, Some(operation_id), jj_copy_dirs);
         match admitted {
             Ok(SpawnAdmission::Replayed(output)) => {
                 self.driver.save(tree)?;

@@ -24,6 +24,11 @@ impl ProductAgentTree {
         effects
     }
 
+    /// Whether [`Self::take_attach_effects`] would take anything.
+    pub(crate) fn owes_attach_effects(&self) -> bool {
+        !self.effects.refreshes.is_empty() || !self.effects.base_pins.is_empty()
+    }
+
     pub(crate) fn take_attach_effects(&mut self) -> Effects {
         Effects {
             refreshes: std::mem::take(&mut self.effects.refreshes),
@@ -51,8 +56,11 @@ impl ProductAgentTree {
             hooks,
             unmints,
         } = completed;
+        // An absent copy's base pin was never reconciliation work.
         let recorded_anything = !refreshes.is_empty()
-            || !base_pins.is_empty()
+            || base_pins
+                .iter()
+                .any(|(_, result)| !matches!(result, Ok(false)))
             || !dormancy.is_empty()
             || !seals.is_empty()
             || !adopts.is_empty()
@@ -125,9 +133,9 @@ impl ProductAgentTree {
         settled
     }
 
-    /// Runs the queued effects synchronously through the tree's own port
-    /// and records them: what a test does where the runtime would release
-    /// the mutex in between. Not for production callers.
+    /// Runs the queued effects through the tree's own port, blocking this
+    /// thread on each, and records them: what a test does where the runtime
+    /// would release the mutex in between. Not for production callers.
     #[cfg(any(test, feature = "test-support"))]
     #[allow(
         clippy::expect_used,
@@ -136,7 +144,8 @@ impl ProductAgentTree {
     pub fn settle_for_test(&mut self) -> Settled {
         let attach = self.take_attach_effects();
         if !attach.is_empty() {
-            self.complete(attach.run(self.vcs()));
+            let completed = super::block_on_for_test(attach.run(self.vcs()));
+            self.complete(completed);
         }
         let mut settled = Settled::default();
         loop {
@@ -149,7 +158,8 @@ impl ProductAgentTree {
             if effects.is_empty() {
                 return settled;
             }
-            let more = self.complete(effects.run(self.vcs()));
+            let completed = super::block_on_for_test(effects.run(self.vcs()));
+            let more = self.complete(completed);
             settled.adopts.extend(more.adopts);
             settled.hook_failures.extend(more.hook_failures);
             settled.seal_failures.extend(more.seal_failures);
@@ -166,17 +176,21 @@ impl SealTicket {
     /// pin `seal_candidate` placed is dropped here, in the same unlocked
     /// phase. An unpin refusal is a recoverable seal failure, never an empty
     /// candidate success.
-    pub fn seal(&self, vcs: &dyn VcsOps) -> Result<Option<VcsSnapshot>, VcsError> {
-        let mut sealed = vcs.seal(
-            &self.path,
-            &self.namespace,
-            self.candidate_id.as_str(),
-            &self.base_commit,
-        )?;
-        sealed.history_left_base =
-            vcs.history_left_base(&self.path, &self.base_commit, &sealed.commit)?;
+    pub async fn seal(&self, vcs: &dyn VcsOps) -> Result<Option<VcsSnapshot>, VcsError> {
+        let mut sealed = vcs
+            .seal(
+                &self.path,
+                &self.namespace,
+                self.candidate_id.as_str(),
+                &self.base_commit,
+            )
+            .await?;
+        sealed.history_left_base = vcs
+            .history_left_base(&self.path, &self.base_commit, &sealed.commit)
+            .await?;
         if !diverged_from_base(&sealed, &self.base_content) {
-            vcs.unpin(&self.path, &self.namespace, self.candidate_id.as_str())?;
+            vcs.unpin(&self.path, &self.namespace, self.candidate_id.as_str())
+                .await?;
             return Ok(None);
         }
         Ok(Some(sealed))
@@ -186,7 +200,13 @@ impl SealTicket {
 impl AdoptTicket {
     /// The subprocess half of the adopt. Holds no tree
     /// reference so it can run with the tree mutex released.
-    pub fn land(&self, vcs: &dyn VcsOps) -> Result<AdoptLanding, AdoptFailure> {
+    pub async fn land(&self, vcs: &dyn VcsOps) -> Result<AdoptLanding, AdoptFailure> {
+        let candidate = VcsSnapshot {
+            history_left_base: false,
+            commit: self.candidate.commit.clone(),
+            content: self.candidate.content.clone(),
+            change_id: self.candidate.change_id.clone(),
+        };
         vcs.adopt(&AdoptRequest {
             resolution_refusal: self.resolution_refusal.as_deref(),
             revert: self.revert.as_ref().map(|plan| &plan.range),
@@ -206,12 +226,7 @@ impl AdoptTicket {
             child_path: &self.child_path,
             base_commit: &self.candidate.base_commit,
             base_change_id: self.candidate.base_change_id.as_deref(),
-            candidate: &VcsSnapshot {
-                history_left_base: false,
-                commit: self.candidate.commit.clone(),
-                content: self.candidate.content.clone(),
-                change_id: self.candidate.change_id.clone(),
-            },
+            candidate: &candidate,
             expected_target: self.expected_target.as_deref(),
             namespace: &self.namespace,
             candidate_id: self.candidate.candidate_id.as_str(),
@@ -219,6 +234,7 @@ impl AdoptTicket {
                 .advance_copy_base
                 .then_some(self.candidate.producing_agent_id.as_str()),
         })
+        .await
     }
 }
 
@@ -231,20 +247,25 @@ impl MintTicket {
 
     /// The subprocess half of the mint. Holds no tree reference so it can
     /// run with the tree mutex released.
-    pub fn mint(&self, vcs: &dyn VcsOps) -> Result<MintedCopy, VcsError> {
-        let mut minted = vcs.mint_from(&MintRequest {
-            launch: &self.launch_checkout,
-            agent_id: &self.agent_id,
-            namespace: &self.namespace,
-            parent_cwd: &self.caller_path,
-            mode: self.mode,
-            base: self.input_base.as_ref(),
-        })?;
+    pub async fn mint(&self, vcs: &dyn VcsOps) -> Result<MintedCopy, VcsError> {
+        let mut minted = vcs
+            .mint_from(&MintRequest {
+                launch: &self.launch_checkout,
+                agent_id: &self.agent_id,
+                namespace: &self.namespace,
+                parent_cwd: &self.caller_path,
+                mode: self.mode,
+                base: self.input_base.as_ref(),
+            })
+            .await?;
         if let Some(base) = &self.merge_base {
-            if let Err(error) =
-                vcs.restore_copy_base(&minted.path, &self.namespace, &self.agent_id, &base.commit)
+            if let Err(error) = vcs
+                .restore_copy_base(&minted.path, &self.namespace, &self.agent_id, &base.commit)
+                .await
             {
-                let _ = vcs.unmint(&self.launch_checkout, &minted.path, &self.namespace);
+                let _ = vcs
+                    .unmint(&self.launch_checkout, &minted.path, &self.namespace)
+                    .await;
                 return Err(error);
             }
             minted.base.clone_from(base);
@@ -324,88 +345,63 @@ impl Effects {
         }
     }
 
-    /// Runs every queued effect against `vcs`. Holds no tree reference, so it
-    /// cannot be called with the tree mutex held by construction of its
-    /// arguments; a `FakeVcs` in tests records whether it was anyway.
-    #[must_use]
-    pub fn run(self, vcs: &dyn VcsOps) -> Completed {
-        let base_pins = self
-            .base_pins
-            .into_iter()
-            .map(|ticket| {
-                let result = vcs.restore_copy_base(
-                    &ticket.path,
-                    &ticket.namespace,
-                    &ticket.agent_id,
-                    &ticket.base,
-                );
-                (ticket, result)
-            })
-            .collect();
-        let refreshes = self
-            .refreshes
-            .into_iter()
-            .map(|ticket| {
-                let answer = ticket.run(vcs);
-                (ticket, answer)
-            })
-            .collect();
-        let seals = self
-            .seals
-            .into_iter()
-            .map(|ticket| {
-                let sealed = ticket.seal(vcs);
-                (ticket, sealed)
-            })
-            .collect();
-        let adopts = self
-            .adopts
-            .into_iter()
-            .map(|ticket| {
-                let landed = ticket.land(vcs);
-                (ticket, landed)
-            })
-            .collect();
-        let hooks = self
-            .hooks
-            .into_iter()
-            .map(|hook| {
-                let ran = vcs.run_mint_hook(&hook.cwd, &hook.command, &hook.env);
-                (hook, ran)
-            })
-            .collect();
-        let unmints = self
-            .unmints
-            .into_iter()
-            .map(|ticket| {
-                let removed = vcs.unmint(&self.launch_checkout, &ticket.path, &ticket.namespace);
-                if removed.is_ok() {
-                    for candidate_id in &ticket.candidate_ids {
-                        // A surviving pin keeps explicitly relinquished
-                        // content reachable; the copy is gone.
-                        let _ = vcs.unpin(&self.launch_checkout, &ticket.namespace, candidate_id);
-                    }
-                }
-                (ticket, removed)
-            })
-            .collect();
-        let dormancy = self
-            .dormancy
-            .into_iter()
-            .map(|mut ticket| {
-                let answer = ticket.run(vcs, &self.launch_checkout);
-                (ticket, answer)
-            })
-            .collect();
-        Completed {
+    /// Runs every queued effect against `vcs`, one awaited port call at a
+    /// time and in a fixed order: base pins, refreshes, seals, adopts, hooks,
+    /// unmints, dormancy. Holds no tree reference, so it cannot be called
+    /// with the tree mutex held by construction of its arguments; a `FakeVcs`
+    /// in tests records whether it was anyway.
+    pub async fn run(self, vcs: &dyn VcsOps) -> Completed {
+        let Self {
             refreshes,
             base_pins,
-            dormancy,
             seals,
+            dormancy,
             adopts,
             hooks,
             unmints,
+            launch_checkout,
+        } = self;
+        let mut completed = Completed::default();
+        for ticket in base_pins {
+            let result = ticket.run(vcs).await;
+            completed.base_pins.push((ticket, result));
         }
+        for ticket in refreshes {
+            let answer = ticket.run(vcs).await;
+            completed.refreshes.push((ticket, answer));
+        }
+        for ticket in seals {
+            let sealed = ticket.seal(vcs).await;
+            completed.seals.push((ticket, sealed));
+        }
+        for ticket in adopts {
+            let landed = ticket.land(vcs).await;
+            completed.adopts.push((ticket, landed));
+        }
+        for hook in hooks {
+            let ran = vcs.run_mint_hook(&hook.cwd, &hook.command, &hook.env).await;
+            completed.hooks.push((hook, ran));
+        }
+        for ticket in unmints {
+            let removed = vcs
+                .unmint(&launch_checkout, &ticket.path, &ticket.namespace)
+                .await;
+            if removed.is_ok() {
+                for candidate_id in &ticket.candidate_ids {
+                    // A surviving pin keeps explicitly relinquished
+                    // content reachable; the copy is gone.
+                    let _ = vcs
+                        .unpin(&launch_checkout, &ticket.namespace, candidate_id)
+                        .await;
+                }
+            }
+            completed.unmints.push((ticket, removed));
+        }
+        for mut ticket in dormancy {
+            let answer = ticket.run(vcs, &launch_checkout).await;
+            completed.dormancy.push((ticket, answer));
+        }
+        completed
     }
 }
 

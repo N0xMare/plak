@@ -1169,7 +1169,7 @@ fn seal_runs_outside_the_tree_mutex() {
     let pending = tree.take_effects();
     assert_eq!(pending.seals.len(), 1);
     // The VCS half needs nothing from the tree.
-    let completed = pending.run(&SystemVcs);
+    let completed = block_on_for_test(pending.run(&SystemVcs));
     tree.complete(completed);
     assert_eq!(tree.candidates().len(), 1);
     // The turn ended without a submit, so the status the termination path
@@ -2179,7 +2179,7 @@ fn close_during_seal_then_retirement_fault(seal_fails: bool) {
     if seal_fails {
         vcs.seal_next_with(Err(VcsError::seal_failed("snapshot refused")));
     }
-    tree.complete(dispatched.run(vcs.as_ref()));
+    tree.complete(block_on_for_test(dispatched.run(vcs.as_ref())));
     assert_eq!(tree.node(id).unwrap().status, NodeStatus::RecoveryRequired);
     assert_eq!(tree.attempt(id).unwrap().status, AttemptStatus::Closed);
     assert_eq!(
@@ -2257,7 +2257,7 @@ fn retirement_fault_and_repeated_close_keep_dispatched_seal_and_failure() {
         if seal_fails {
             vcs.seal_next_with(Err(VcsError::seal_failed("snapshot refused")));
         }
-        tree.complete(dispatched.run(vcs.as_ref()));
+        tree.complete(block_on_for_test(dispatched.run(vcs.as_ref())));
         assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
         assert_eq!(tree.candidates().len(), usize::from(!seal_fails));
         assert!(!tree.seal_pending(&child.agent_id));
@@ -2328,7 +2328,7 @@ fn unresolved_terminal_survives_seal_close_adopt_and_bound_replay() {
         if seal_fails {
             vcs.seal_next_with(Err(VcsError::seal_failed("snapshot failed")));
         }
-        tree.complete(outstanding.run(vcs.as_ref()));
+        tree.complete(block_on_for_test(outstanding.run(vcs.as_ref())));
         if !seal_fails {
             let candidate = candidate_of(&tree, &child.agent_id);
             tree.adopt_candidate("root", &adopt_req(&candidate), None)
@@ -2377,7 +2377,7 @@ fn old_seal_completion_cannot_consume_same_attempt_reseal() {
     let child = tree.spawn_agent("root", &mint_req(), None).unwrap();
     assert!(tree.begin_seal(&child.agent_id));
     let old = tree.take_effects().seals.pop().unwrap();
-    let first = old.seal(vcs.as_ref()).unwrap();
+    let first = block_on_for_test(old.seal(vcs.as_ref())).unwrap();
     tree.finish_seal_with(old.clone(), Ok(first.clone()));
     // Force the existing early snapshot to predate the terminal timestamp.
     tree.candidates
@@ -2390,7 +2390,7 @@ fn old_seal_completion_cannot_consume_same_attempt_reseal() {
     assert!(tree.finish_seal_with(old, Ok(first)).is_none());
     assert!(tree.seal_pending(&child.agent_id));
     assert!(!tree.begin_seal(&child.agent_id));
-    let sealed = current.seal(vcs.as_ref());
+    let sealed = block_on_for_test(current.seal(vcs.as_ref()));
     assert!(tree.finish_seal_with(current, sealed).is_some());
     assert!(!tree.seal_pending(&child.agent_id));
     assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 2);
@@ -2536,7 +2536,7 @@ fn close_seal_runs_outside_the_tree_mutex() {
     assert!(tree.candidates().is_empty());
     let pending = tree.take_effects();
     assert_eq!(pending.seals.len(), 1);
-    tree.complete(pending.run(&SystemVcs));
+    tree.complete(block_on_for_test(pending.run(&SystemVcs)));
     assert_eq!(
         tree.node(&child.agent_id).unwrap().status,
         NodeStatus::Closed
@@ -2559,7 +2559,8 @@ fn adopt_lands_outside_the_tree_mutex() {
     tree.record_turn_completed(&child.agent_id).unwrap();
     tree.settle_for_test();
     let candidate_id = candidate_of(&tree, &child.agent_id);
-    tree.begin_adopt("root", &adopt_req(&candidate_id)).unwrap();
+    tree.begin_adopt_for_test("root", &adopt_req(&candidate_id))
+        .unwrap();
     assert_eq!(
         tree.workspace(&child.workspace.id).unwrap().status,
         WorkspaceStatus::Adopting
@@ -2568,7 +2569,7 @@ fn adopt_lands_outside_the_tree_mutex() {
     // The VCS half needs nothing from the tree.
     let pending = tree.take_effects();
     assert_eq!(pending.adopts.len(), 1);
-    let mut settled = tree.complete(pending.run(&SystemVcs));
+    let mut settled = tree.complete(block_on_for_test(pending.run(&SystemVcs)));
     let outcome = settled.adopts.pop().unwrap().unwrap();
     assert_eq!(outcome.files_changed, 1);
     assert_eq!(
@@ -2622,7 +2623,8 @@ fn an_interrupted_grandparent_adopt_faults_the_adopter_not_the_hub() {
     let repo = git_repo();
     let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
     let (hub, _child, workspace, candidate) = hub_with_sealed_grandchild(&mut tree);
-    tree.begin_adopt("root", &adopt_req(&candidate)).unwrap();
+    tree.begin_adopt_for_test("root", &adopt_req(&candidate))
+        .unwrap();
     let row = tree.workspace(&workspace).unwrap();
     assert_eq!(row.status, WorkspaceStatus::Adopting);
     assert_eq!(
@@ -2654,7 +2656,8 @@ fn an_interrupted_adopt_faults_a_non_root_adopter() {
     let repo = git_repo();
     let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
     let (hub, child, workspace, candidate) = hub_with_sealed_grandchild(&mut tree);
-    tree.begin_adopt(&hub, &adopt_req(&candidate)).unwrap();
+    tree.begin_adopt_for_test(&hub, &adopt_req(&candidate))
+        .unwrap();
     assert_eq!(
         tree.workspace(&workspace)
             .unwrap()
@@ -2686,7 +2689,8 @@ fn a_live_child_adopt_survives_a_projector_pass_without_a_vcs_fault() {
     let repo = git_repo();
     let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
     let (hub, child, workspace, candidate) = hub_with_sealed_grandchild(&mut tree);
-    tree.begin_adopt(&hub, &adopt_req(&candidate)).unwrap();
+    tree.begin_adopt_for_test(&hub, &adopt_req(&candidate))
+        .unwrap();
     tree.fold_due(&hub).unwrap();
     tree.fold_due(&child).unwrap();
     assert_ne!(
@@ -2699,7 +2703,7 @@ fn a_live_child_adopt_survives_a_projector_pass_without_a_vcs_fault() {
     );
     let pending = tree.take_effects();
     assert!(
-        tree.complete(pending.run(&SystemVcs))
+        tree.complete(block_on_for_test(pending.run(&SystemVcs)))
             .adopts
             .pop()
             .unwrap()
@@ -2720,9 +2724,10 @@ fn a_finished_landing_clears_the_adopter_record() {
     let repo = git_repo();
     let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
     let (hub, _child, workspace, candidate) = hub_with_sealed_grandchild(&mut tree);
-    tree.begin_adopt(&hub, &adopt_req(&candidate)).unwrap();
+    tree.begin_adopt_for_test(&hub, &adopt_req(&candidate))
+        .unwrap();
     let pending = tree.take_effects();
-    let mut settled = tree.complete(pending.run(&SystemVcs));
+    let mut settled = tree.complete(block_on_for_test(pending.run(&SystemVcs)));
     settled.adopts.pop().unwrap().unwrap();
     let row = tree.workspace(&workspace).unwrap();
     assert_eq!(row.status, WorkspaceStatus::Adopted);
@@ -3169,4 +3174,180 @@ fn require_review_evidence_demands_a_review_that_names_the_candidate() {
         tree.candidates()[&candidate_id].adopted_evidence,
         vec![second.attempt_id.to_string()]
     );
+}
+
+/// What a revert asks the port about the adopter's checkout is answered
+/// outside the lock. An unanswered question refuses the adopt, and an answer
+/// about another checkout is never used.
+#[test]
+fn an_unanswered_or_stale_workspace_answer_refuses_the_revert() {
+    let (_root, vcs, mut tree) = fake_tree();
+    let child = tree
+        .spawn_agent("root", &mint_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.record_turn_completed(&child).unwrap();
+    tree.settle_for_test();
+    let mut request = adopt_req(&candidate_of(&tree, &child));
+    request.revert = true;
+
+    let stale = Ok(AdoptFacts {
+        target: PathBuf::from("/another/checkout"),
+        target_jj: Some(false),
+        ..AdoptFacts::default()
+    });
+    let refused = tree.begin_adopt("root", &request, &stale).unwrap_err();
+    assert_eq!(refused.code, TopologyErrorCode::TargetChanged);
+
+    vcs.refuse_workspace_questions();
+    let refused = tree.begin_adopt_for_test("root", &request).unwrap_err();
+    assert_eq!(refused.code, TopologyErrorCode::MintUnavailable);
+    assert!(
+        refused.message.contains("could not be inspected"),
+        "{refused:?}"
+    );
+    assert_eq!(vcs.calls_of(FakeOp::Exists).len(), 1);
+    assert!(vcs.calls_of(FakeOp::Adopt).is_empty());
+    assert!(tree.take_effects().adopts.is_empty());
+}
+
+/// A sealed candidate and a running sibling whose copy row sits in the JJ
+/// layout. The fake mints under `.plak/fake`, so the row is moved to
+/// `.plak/workspaces/` to reach the JJ adopt questions without a jj binary.
+fn jj_layout_rows() -> (
+    tempfile::TempDir,
+    Arc<FakeVcs>,
+    ProductAgentTree,
+    CandidateId,
+    String,
+) {
+    let (root, vcs, mut tree) = fake_tree();
+    let first = tree.spawn_agent("root", &mint_req(), None).unwrap();
+    tree.record_turn_completed(&first.agent_id).unwrap();
+    tree.settle_for_test();
+    let candidate = candidate_of(&tree, &first.agent_id);
+    let second = tree.spawn_agent("root", &mint_req(), None).unwrap();
+    let workspace = tree.node(&second.agent_id).unwrap().workspace_id.clone();
+    let launch = tree.launch_checkout.clone();
+    let row = tree.workspaces.get_mut(&workspace).unwrap();
+    let copy = row.path.file_name().unwrap().to_str().unwrap().to_owned();
+    row.path = launch.join(".plak").join("workspaces").join(&copy);
+    (root, vcs, tree, candidate, copy)
+}
+
+fn jj_facts(
+    tree: &ProductAgentTree,
+    candidate: &CandidateId,
+    over_candidate: &[(&str, bool)],
+) -> Result<AdoptFacts, VcsError> {
+    Ok(AdoptFacts {
+        target: tree.node("root").unwrap().path.clone(),
+        target_jj: None,
+        candidate: Some(candidate.clone()),
+        over_candidate: over_candidate
+            .iter()
+            .map(|(copy, over)| ((*copy).to_owned(), *over))
+            .collect(),
+    })
+}
+
+/// Whether a running JJ copy was minted over the candidate is the port's
+/// answer for exactly that copy and candidate. An unanswered question, a copy
+/// the probe did not ask about (the tree moved between the probe and the
+/// writer) and an answer for another candidate all refuse the adopt and queue
+/// nothing; only an answer for this copy lets it proceed.
+#[test]
+fn a_jj_adopt_fails_closed_on_every_unproven_over_candidate_answer() {
+    let (_root, _vcs, mut tree, candidate, copy) = jj_layout_rows();
+    let request = adopt_req(&candidate);
+
+    let unanswered: Result<AdoptFacts, VcsError> = Err(VcsError::mint_unavailable(
+        "the port cannot reach the workspace",
+    ));
+    let error = tree.begin_adopt("root", &request, &unanswered).unwrap_err();
+    assert!(
+        error.message.contains("could not be inspected"),
+        "{}",
+        error.message
+    );
+
+    let unlisted = jj_facts(&tree, &candidate, &[]);
+    let error = tree.begin_adopt("root", &request, &unlisted).unwrap_err();
+    assert_eq!(
+        error.code,
+        TopologyErrorCode::TargetChanged,
+        "{}",
+        error.message
+    );
+
+    let other = CandidateId::from_persisted("cand-other".to_owned());
+    let mismatched = jj_facts(&tree, &other, &[(&copy, false)]);
+    let error = tree.begin_adopt("root", &request, &mismatched).unwrap_err();
+    assert_eq!(
+        error.code,
+        TopologyErrorCode::TargetChanged,
+        "{}",
+        error.message
+    );
+
+    let dependent = jj_facts(&tree, &candidate, &[(&copy, true)]);
+    let error = tree.begin_adopt("root", &request, &dependent).unwrap_err();
+    assert_eq!(error.code, TopologyErrorCode::AdoptNotApplicable);
+    assert!(error.message.contains("was minted over this candidate"));
+    assert!(
+        tree.take_effects().adopts.is_empty(),
+        "no refusal queued an adopt"
+    );
+
+    let independent = jj_facts(&tree, &candidate, &[(&copy, false)]);
+    tree.begin_adopt("root", &request, &independent).unwrap();
+    assert_eq!(tree.take_effects().adopts.len(), 1);
+}
+
+/// The probe asks the port about every running JJ copy, and a port that
+/// cannot answer fails the probe rather than reading as "not minted over".
+#[test]
+fn the_adopt_probe_fails_on_an_unanswered_lineage_question() {
+    let (_root, vcs, tree, candidate, copy) = jj_layout_rows();
+    let probe = tree.adopt_probe("root", &adopt_req(&candidate));
+    let facts = block_on_for_test(probe.clone().run(&*vcs)).unwrap();
+    assert_eq!(facts.over_candidate.get(&copy), Some(&false));
+    vcs.refuse_workspace_questions();
+    assert!(block_on_for_test(probe.run(&*vcs)).is_err());
+}
+
+/// A conflict candidate asks whether the adopter's checkout is a JJ checkout:
+/// an unanswered question refuses the adopt instead of reading as git, and a
+/// JJ answer refuses it as not yet available for jj.
+#[test]
+fn a_conflict_adopt_fails_closed_when_the_checkout_cannot_be_inspected() {
+    let (_root, _vcs, mut tree) = fake_tree();
+    let child = tree.spawn_agent("root", &mint_req(), None).unwrap();
+    tree.record_turn_completed(&child.agent_id).unwrap();
+    tree.settle_for_test();
+    let candidate = candidate_of(&tree, &child.agent_id);
+    tree.candidates.get_mut(&candidate).unwrap().kind = CandidateKind::Conflict;
+    let request = adopt_req(&candidate);
+    let target = tree.node("root").unwrap().path.clone();
+
+    let unanswered: Result<AdoptFacts, VcsError> = Err(VcsError::mint_unavailable(
+        "the port cannot reach the workspace",
+    ));
+    let error = tree.begin_adopt("root", &request, &unanswered).unwrap_err();
+    assert!(
+        error.message.contains("could not be inspected"),
+        "{}",
+        error.message
+    );
+
+    let jj = Ok(AdoptFacts {
+        target,
+        target_jj: Some(true),
+        candidate: Some(candidate.clone()),
+        over_candidate: BTreeMap::new(),
+    });
+    let error = tree.begin_adopt("root", &request, &jj).unwrap_err();
+    assert_eq!(error.code, TopologyErrorCode::AdoptNotApplicable);
+    assert!(error.message.contains("not yet available for jj"));
+    assert!(tree.take_effects().adopts.is_empty());
 }

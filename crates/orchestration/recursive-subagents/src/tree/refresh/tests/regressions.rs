@@ -7,7 +7,7 @@ fn applying(f: &mut Fixture) -> RefreshTicket {
     f.tree
         .prepare_followup_refresh("root", &f.request(None), "followup", false)
         .unwrap();
-    let answer = f.tree.take_effects().run(f.tree.vcs());
+    let answer = crate::tree::block_on_for_test(f.tree.take_effects().run(f.tree.vcs()));
     assert_eq!(f.tree.complete(answer).cleanup_failures, Vec::new());
     f.tree.take_effects().refreshes.remove(0)
 }
@@ -133,7 +133,7 @@ fn fresh_refresh_preconditions_are_checked_before_any_copy_write() {
             ],
         );
         let content = std::fs::read(f.path.join("CHILD.txt")).unwrap();
-        let answer = ticket.run(f.tree.vcs());
+        let answer = crate::tree::block_on_for_test(ticket.run(f.tree.vcs()));
         f.tree.complete_refresh(ticket, answer).unwrap();
         assert!(!f.tree.refresh_pending(&f.workspace), "{changed}");
         assert!(!f.path.join("PARENT.txt").exists(), "{changed}");
@@ -253,7 +253,7 @@ fn prepared_refresh_refuses_a_moved_logical_base_before_publication() {
         .prepare_followup_refresh("root", &f.request(None), "followup", false)
         .unwrap();
     let ticket = f.tree.take_effects().refreshes.remove(0);
-    let answer = ticket.run(f.tree.vcs());
+    let answer = crate::tree::block_on_for_test(ticket.run(f.tree.vcs()));
     f.tree.workspaces.get_mut(&f.workspace).unwrap().base_commit = Some("moved-base".into());
     let error = f.tree.complete_refresh(ticket, answer).unwrap_err();
     assert_eq!(error.code, TopologyErrorCode::WorkspaceRecoveryRequired);

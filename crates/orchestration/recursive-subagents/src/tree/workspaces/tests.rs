@@ -866,8 +866,13 @@ fn fake_vcs_mint_hook_failure_unmints_through_the_port() {
         )
         .unwrap();
     vcs.hook_next_with(Err(VcsError::hook_failed("exited 3")));
-    let failed =
-        VcsOps::run_mint_hook(vcs.as_ref(), &hook.cwd, &hook.command, &hook.env).unwrap_err();
+    let failed = block_on_for_test(VcsOps::run_mint_hook(
+        vcs.as_ref(),
+        &hook.cwd,
+        &hook.command,
+        &hook.env,
+    ))
+    .unwrap_err();
     assert_eq!(failed.kind, VcsErrorKind::HookFailed);
     assert_eq!(vcs.calls_of(FakeOp::Hook).len(), 1);
     let error = tree.fail_mint_hook(
@@ -896,12 +901,13 @@ fn mint_hook_keeps_the_planned_parent_path_if_the_caller_row_is_missing() {
     binding.on_mint = Some("true".into());
     tree.pin_template("implement", binding);
     let parent_path = tree.node("root").unwrap().path.clone();
-    let SpawnAdmission::Reserved(reservation, Some(ticket)) =
-        tree.spawn_reserve("root", &mint_req(), None).unwrap()
+    let SpawnAdmission::Reserved(reservation, Some(ticket)) = tree
+        .spawn_reserve("root", &mint_req(), None, &Ok(BTreeSet::new()))
+        .unwrap()
     else {
         panic!("a fork spawn must reserve a mint");
     };
-    let minted = ticket.mint(vcs.as_ref()).unwrap();
+    let minted = block_on_for_test(ticket.mint(vcs.as_ref())).unwrap();
     tree.nodes.remove("root");
     let child = tree.spawn_commit(*reservation, Some(minted)).unwrap();
     let hook = tree

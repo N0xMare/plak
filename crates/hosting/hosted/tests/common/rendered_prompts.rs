@@ -820,14 +820,14 @@ pub(crate) mod suite {
     }
 
     fn bootstrap_golden_tree(workspace: &Path, cards: Vec<RosterBinding>) -> ProductAgentTree {
-        let mut tree = ProductAgentTree::bootstrap_root(
+        let mut tree = crate::agent_tree::block_on_for_test(ProductAgentTree::bootstrap_root(
             "golden-tree",
             "root",
             "root",
             workspace.to_path_buf(),
             "gpt-5.6-sol",
             WriterMode::SingleLease,
-        )
+        ))
         .expect("tree");
         tree.install_snapshot(golden_epoch(cards));
         tree

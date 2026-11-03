@@ -281,7 +281,7 @@ plak = [
     "zeroize",
 ]
 plakous-host-protocol = ["serde", "serde_json", "uuid"]
-plakous-workspace = ["futures", "gix", "jj-lib", "plakous-host-protocol", "pollster", "rustix", "serde", "sha2", "tempfile"]
+plakous-workspace = ["futures", "gix", "jj-lib", "plakous-host-protocol", "pollster", "rustix", "serde", "sha2", "tempfile", "tokio"]
 plakous-recursive-subagents = [
     "futures-util",
     "plakous",

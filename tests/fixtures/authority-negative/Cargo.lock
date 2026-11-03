@@ -1467,6 +1467,7 @@ dependencies = [
  "serde",
  "sha2",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

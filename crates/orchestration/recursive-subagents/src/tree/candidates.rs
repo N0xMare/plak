@@ -1,7 +1,8 @@
 //! The candidate seam: sealing an attempt's copy and adopting it.
 //!
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use plakous_workspace::occupancy_vcs::is_jj_copy_root as jj_layout_copy;
 
@@ -10,13 +11,117 @@ use plakous_workspace::occupancy_vcs::ConflictPath;
 use super::{
     AdoptCandidateRequest, AdoptFailure, AdoptLanding, AdoptOutcome, AdoptTicket, AttemptFailure,
     AttemptId, AttemptStatus, CandidateId, CandidateRecord, NodeStatus, ProductAgentTree,
-    SealTicket, TopologyError, TopologyErrorCode, VcsError, VcsSnapshot, WorkspaceMode,
+    SealTicket, TopologyError, TopologyErrorCode, VcsError, VcsOps, VcsSnapshot, WorkspaceMode,
     WorkspaceStatus, bounded_text, diverged_from_base, now_unix_millis, topology_error_from_vcs,
 };
 
 const SEAL_EFFECT_KIND: &str = "seal_effect";
 
 pub(super) const SEAL_OUTCOME_KIND: &str = "seal_outcome";
+
+/// The questions one adopt asks the VCS port, read from the rows under the
+/// tree mutex and answered with it released: whether the adopter's checkout
+/// is a JJ checkout (asked only for a conflict, resolution or revert), and,
+/// for each running JJ copy that does not record the candidate as its base,
+/// whether it was minted over the candidate.
+#[derive(Clone, Debug, Default)]
+pub struct AdoptProbe {
+    launch: PathBuf,
+    target: PathBuf,
+    ask_target_jj: bool,
+    candidate: Option<(CandidateId, VcsSnapshot)>,
+    copies: Vec<String>,
+}
+
+/// What an [`AdoptProbe`] learned, for [`ProductAgentTree::begin_adopt`].
+#[derive(Clone, Debug, Default)]
+pub struct AdoptFacts {
+    target: PathBuf,
+    target_jj: Option<bool>,
+    candidate: Option<CandidateId>,
+    over_candidate: BTreeMap<String, bool>,
+}
+
+impl AdoptProbe {
+    /// Asks the port, with the tree mutex released. `Err` when the port
+    /// could not answer; the adopt then fails closed where it needs one.
+    pub async fn run(self, vcs: &dyn VcsOps) -> Result<AdoptFacts, VcsError> {
+        let target_jj = if self.ask_target_jj {
+            Some(vcs.path_exists(&self.target.join(".jj")).await?)
+        } else {
+            None
+        };
+        let mut over_candidate = BTreeMap::new();
+        if let Some((_, snapshot)) = &self.candidate {
+            for copy_id in self.copies {
+                let over = vcs
+                    .copy_is_over_candidate(&self.launch, &copy_id, snapshot)
+                    .await?;
+                over_candidate.insert(copy_id, over);
+            }
+        }
+        Ok(AdoptFacts {
+            target: self.target,
+            target_jj,
+            candidate: self.candidate.map(|(id, _)| id),
+            over_candidate,
+        })
+    }
+}
+
+impl AdoptFacts {
+    /// Whether the adopter's checkout `target` is a JJ checkout, as the port
+    /// answered for exactly that path.
+    pub(super) fn target_jj(
+        facts: &Result<Self, VcsError>,
+        target: &Path,
+    ) -> Result<bool, TopologyError> {
+        let facts = Self::answered(facts)?;
+        match facts.target_jj {
+            Some(jj) if facts.target == target => Ok(jj),
+            _ => Err(Self::moved()),
+        }
+    }
+
+    /// Whether the JJ copy `copy_id` was minted over `candidate`.
+    fn over_candidate(
+        facts: &Result<Self, VcsError>,
+        candidate: &CandidateId,
+        copy_id: &str,
+    ) -> Result<bool, TopologyError> {
+        let facts = Self::answered(facts)?;
+        if facts.candidate.as_ref() != Some(candidate) {
+            return Err(Self::moved());
+        }
+        facts
+            .over_candidate
+            .get(copy_id)
+            .copied()
+            .ok_or_else(Self::moved)
+    }
+
+    fn answered(facts: &Result<Self, VcsError>) -> Result<&Self, TopologyError> {
+        facts.as_ref().map_err(|error| {
+            let error = topology_error_from_vcs(error.clone());
+            TopologyError::new(
+                error.code,
+                format!(
+                    "the workspace could not be inspected: {}; nothing was adopted",
+                    error.message
+                ),
+            )
+        })
+    }
+
+    /// The tree changed between the probe and the adopt's admission: a copy
+    /// or a target appeared that the probe did not ask about.
+    fn moved() -> TopologyError {
+        TopologyError::new(
+            TopologyErrorCode::TargetChanged,
+            "the tree changed while the adopt was being prepared; nothing was adopted, retry",
+        )
+    }
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SealEffectRequest {
@@ -510,50 +615,6 @@ impl ProductAgentTree {
         self.seal_effect_pending_now(agent_id) || self.seal_effect_faulted(agent_id)
     }
 
-    /// `adopt_candidate` driven synchronously through the
-    /// tree's own port, for tests: authority checks, the landing, and the
-    /// receipt in one call. Production runs the landing as an effect with
-    /// the mutex released (`begin_adopt` queues the ticket; the runtime
-    /// completes it) and keeps the operation ledger itself.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn adopt_candidate(
-        &mut self,
-        caller_id: &str,
-        request: &AdoptCandidateRequest,
-        operation_id: Option<&str>,
-    ) -> Result<AdoptOutcome, TopologyError> {
-        if let Some(prior) = self.replay_typed(operation_id, "adopt_candidate", request)? {
-            return Ok(prior);
-        }
-        self.begin_adopt(caller_id, request)?;
-        let ticket = self
-            .effects
-            .adopts
-            .pop()
-            .unwrap_or_else(|| unreachable!("begin_adopt queued the ticket"));
-        let landed = ticket.land(self.vcs());
-        let outcome = self.finish_adopt(&ticket, landed);
-        match outcome {
-            Ok(outcome) => {
-                if let Some(id) = operation_id {
-                    self.remember_success(id, caller_id, "adopt_candidate", request, &outcome)?;
-                }
-                Ok(outcome)
-            }
-            Err(error) => {
-                if let Some(id) = operation_id
-                    && matches!(
-                        error.code,
-                        TopologyErrorCode::MergeConflict | TopologyErrorCode::TargetChanged
-                    )
-                {
-                    self.remember_failure(id, caller_id, "adopt_candidate", request, error.code)?;
-                }
-                Err(error)
-            }
-        }
-    }
-
     /// A candidate whose copy was minted on another candidate this caller has
     /// not adopted. Landing it three-ways against that input's base and drops
     /// the input's delta. `None` when there is no such input, or the caller
@@ -645,7 +706,7 @@ impl ProductAgentTree {
         let Some(caller) = self.nodes.get(caller_id) else {
             return false;
         };
-        let seals: std::collections::BTreeMap<_, _> = self
+        let seals: BTreeMap<_, _> = self
             .operations
             .values()
             .filter(|op| op.tool_name == SEAL_OUTCOME_KIND)
@@ -699,9 +760,59 @@ impl ProductAgentTree {
         false
     }
 
+    /// The questions [`Self::begin_adopt`] needs the VCS port to answer for
+    /// this request, to be run with the tree mutex released. A request the
+    /// admission will refuse anyway asks nothing.
+    pub fn adopt_probe(&self, caller_id: &str, request: &AdoptCandidateRequest) -> AdoptProbe {
+        let target = self
+            .nodes
+            .get(caller_id)
+            .map(|node| node.path.clone())
+            .unwrap_or_default();
+        let Some(candidate) = self.candidates.get(&request.candidate_id) else {
+            return AdoptProbe {
+                launch: self.launch_checkout.clone(),
+                target,
+                ..AdoptProbe::default()
+            };
+        };
+        let ask_target_jj = request.revert
+            || candidate.kind == super::CandidateKind::Conflict
+            || candidate.resolves.is_some();
+        let copies = self
+            .nodes
+            .values()
+            .filter(|node| !node.status.is_finished())
+            .filter_map(|node| self.workspaces.get(&node.workspace_id))
+            .filter(|row| {
+                row.mode != WorkspaceMode::Inherit
+                    && jj_layout_copy(&row.path)
+                    && row.base_commit.as_deref() != Some(candidate.commit.as_str())
+            })
+            .filter_map(|row| row.path.file_name()?.to_str().map(str::to_owned))
+            .collect();
+        AdoptProbe {
+            launch: self.launch_checkout.clone(),
+            target,
+            ask_target_jj,
+            candidate: Some((
+                candidate.candidate_id.clone(),
+                VcsSnapshot {
+                    history_left_base: false,
+                    commit: candidate.commit.clone(),
+                    content: candidate.content.clone(),
+                    change_id: candidate.change_id.clone(),
+                },
+            )),
+            copies,
+        }
+    }
+
     /// Authority, sealing, and freshness checks; marks the candidate's
     /// workspace row `Adopting` and queues the ticket the landing runs on.
-    /// The receipt comes back from [`Self::complete`].
+    /// The receipt comes back from [`Self::complete`]. `facts` are the
+    /// answers to this request's [`Self::adopt_probe`]; an answer the
+    /// admission needs and the port could not give refuses the adopt.
     #[allow(
         clippy::too_many_lines,
         reason = "adoption validates lineage, conflict authority, occupancy and provenance before reserving one landing"
@@ -710,6 +821,7 @@ impl ProductAgentTree {
         &mut self,
         caller_id: &str,
         request: &AdoptCandidateRequest,
+        facts: &Result<AdoptFacts, VcsError>,
     ) -> Result<(), TopologyError> {
         self.require_live()?;
         if !self.grant(caller_id)?.may_adopt {
@@ -737,11 +849,11 @@ impl ProductAgentTree {
             ));
         }
         if request.revert {
-            return self.begin_revert(caller_id, request, &candidate);
+            return self.begin_revert(caller_id, request, &candidate, facts);
         }
         let target = &self.node(caller_id)?.path;
         if (candidate.kind == super::CandidateKind::Conflict || candidate.resolves.is_some())
-            && (jj_layout_copy(target) || target.join(".jj").exists())
+            && (jj_layout_copy(target) || AdoptFacts::target_jj(facts, target)?)
         {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
@@ -921,36 +1033,33 @@ impl ProductAgentTree {
         // so whatever the child had written and not committed is gone before
         // any host code runs. Git does not rewrite the child copy, so a
         // worktree under `.plak/worktrees/` is not a dependent.
-        let dependent = self.nodes.values().find(|node| {
+        let mut dependent = None;
+        for node in self.nodes.values() {
             if node.status.is_finished() {
-                return false;
+                continue;
             }
             let Some(row) = self.workspaces.get(&node.workspace_id) else {
-                return false;
+                continue;
             };
             if row.mode == WorkspaceMode::Inherit || !jj_layout_copy(&row.path) {
-                return false;
+                continue;
             }
             // git records the candidate's own commit as the copy's base.
             if row.base_commit.as_deref() == Some(candidate.commit.as_str()) {
-                return true;
+                dependent = Some(node);
+                break;
             }
             // jj records the copy's own working-copy commit instead, so the
-            // dependency is ancestry in the launch repo.
+            // dependency is ancestry in the launch repo, which the probe
+            // asked the port about.
             let Some(copy_id) = row.path.file_name().and_then(|name| name.to_str()) else {
-                return false;
+                continue;
             };
-            self.vcs().copy_is_over_candidate(
-                &self.launch_checkout,
-                copy_id,
-                &VcsSnapshot {
-                    history_left_base: false,
-                    commit: candidate.commit.clone(),
-                    content: candidate.content.clone(),
-                    change_id: candidate.change_id.clone(),
-                },
-            )
-        });
+            if AdoptFacts::over_candidate(facts, &candidate.candidate_id, copy_id)? {
+                dependent = Some(node);
+                break;
+            }
+        }
         if let Some(node) = dependent {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,

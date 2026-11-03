@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use super::{
-    AdoptFailure, AdoptLanding, AdoptRequest, MintRequest, MintedCopy, VcsError, VcsOps,
+    AdoptFailure, AdoptLanding, AdoptRequest, MintRequest, MintedCopy, VcsError, VcsFuture, VcsOps,
     VcsSnapshot,
 };
 use plakous_host_protocol::topology::WorkspaceMode;
@@ -39,6 +39,10 @@ pub enum FakeOp {
     PrepareRefresh,
     /// [`VcsOps::apply_refresh`].
     ApplyRefresh,
+    /// [`VcsOps::path_exists`].
+    Exists,
+    /// [`VcsOps::jj_copy_dirs`].
+    CopyDirs,
 }
 
 impl FakeOp {
@@ -78,6 +82,7 @@ pub struct FakeVcs {
     next_restore_base: Mutex<Option<Result<(), VcsError>>>,
     label: Mutex<Option<String>>,
     scripted_refresh: std::sync::atomic::AtomicBool,
+    unreachable: std::sync::atomic::AtomicBool,
 }
 
 impl FakeVcs {
@@ -86,6 +91,23 @@ impl FakeVcs {
         self.scripted_refresh
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    /// From now on every question about the workspace's files (whether a
+    /// path exists, the JJ copy root, a copy's lineage) answers `Err`, as a
+    /// port that cannot reach the workspace does.
+    pub fn refuse_workspace_questions(&self) {
+        self.unreachable
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn unreachable(&self) -> Result<(), VcsError> {
+        if self.unreachable.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(VcsError::mint_unavailable(
+                "the fake workspace is unreachable",
+            ));
+        }
+        Ok(())
+    }
+
     /// A recorder with no answers pinned and a fixed presentation label.
     #[must_use]
     pub fn new() -> Self {
@@ -198,8 +220,12 @@ impl FakeVcs {
     }
 }
 
-impl VcsOps for FakeVcs {
-    fn prepare_refresh(
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "each answer keeps the shape of the port method it answers"
+)]
+impl FakeVcs {
+    fn answer_prepare_refresh(
         &self,
         request: &super::RefreshRequest,
     ) -> Result<super::RefreshPreparation, VcsError> {
@@ -224,7 +250,7 @@ impl VcsOps for FakeVcs {
         Ok(super::RefreshPreparation::Unchanged)
     }
 
-    fn apply_refresh(
+    fn answer_apply_refresh(
         &self,
         plan: &super::RefreshPlan,
         _recover: bool,
@@ -239,7 +265,7 @@ impl VcsOps for FakeVcs {
             Err(VcsError::mint_unavailable("fake refresh was not scripted"))
         }
     }
-    fn restore_copy_base(
+    fn answer_restore_copy_base(
         &self,
         path: &Path,
         _namespace: &str,
@@ -254,7 +280,7 @@ impl VcsOps for FakeVcs {
             .unwrap_or(Ok(()))
     }
 
-    fn mint_from(&self, request: &MintRequest<'_>) -> Result<MintedCopy, VcsError> {
+    fn answer_mint_from(&self, request: &MintRequest<'_>) -> Result<MintedCopy, VcsError> {
         let MintRequest {
             launch,
             agent_id,
@@ -278,7 +304,7 @@ impl VcsOps for FakeVcs {
         })
     }
 
-    fn seal(
+    fn answer_seal(
         &self,
         child_path: &Path,
         _namespace: &str,
@@ -302,7 +328,7 @@ impl VcsOps for FakeVcs {
         })
     }
 
-    fn unpin(
+    fn answer_unpin(
         &self,
         child_path: &Path,
         _namespace: &str,
@@ -316,7 +342,7 @@ impl VcsOps for FakeVcs {
             .unwrap_or(Ok(()))
     }
 
-    fn adopt(&self, request: &AdoptRequest<'_>) -> Result<AdoptLanding, AdoptFailure> {
+    fn answer_adopt(&self, request: &AdoptRequest<'_>) -> Result<AdoptLanding, AdoptFailure> {
         let AdoptRequest {
             target_path,
             candidate,
@@ -343,7 +369,7 @@ impl VcsOps for FakeVcs {
         })
     }
 
-    fn run_mint_hook(
+    fn answer_run_mint_hook(
         &self,
         cwd: &Path,
         _command: &str,
@@ -357,7 +383,7 @@ impl VcsOps for FakeVcs {
             .unwrap_or(Ok(()))
     }
 
-    fn unmint(&self, _launch: &Path, path: &Path, _namespace: &str) -> Result<(), VcsError> {
+    fn answer_unmint(&self, _launch: &Path, path: &Path, _namespace: &str) -> Result<(), VcsError> {
         self.record(FakeOp::Unmint, path);
         if let Some(answer) = self
             .next_unmint
@@ -383,12 +409,12 @@ impl VcsOps for FakeVcs {
             })
     }
 
-    fn dirty(&self, path: &Path) -> bool {
+    fn answer_dirty(&self, path: &Path) -> bool {
         self.record(FakeOp::Dirty, path);
         false
     }
 
-    fn ahead_behind(
+    fn answer_ahead_behind(
         &self,
         child: &Path,
         _parent: &Path,
@@ -398,7 +424,7 @@ impl VcsOps for FakeVcs {
         None
     }
 
-    fn label(&self, path: &Path) -> Option<String> {
+    fn answer_label(&self, path: &Path) -> Option<String> {
         self.record(FakeOp::Label, path);
         self.label
             .lock()
@@ -406,7 +432,7 @@ impl VcsOps for FakeVcs {
             .clone()
     }
 
-    fn diverged_from_base(
+    fn answer_diverged_from_base(
         &self,
         path: &Path,
         _base_change_id: Option<&str>,
@@ -416,13 +442,156 @@ impl VcsOps for FakeVcs {
         Ok(true)
     }
 
-    fn copy_is_over_candidate(
+    fn answer_copy_is_over_candidate(
         &self,
         launch: &Path,
         _agent_id: &str,
         _candidate: &VcsSnapshot,
-    ) -> bool {
+    ) -> Result<bool, VcsError> {
         self.record(FakeOp::OverCandidate, launch);
-        false
+        self.unreachable()?;
+        Ok(false)
     }
+
+    fn answer_path_exists(&self, path: &Path) -> Result<bool, VcsError> {
+        self.record(FakeOp::Exists, path);
+        self.unreachable()?;
+        Ok(path.exists())
+    }
+
+    fn answer_jj_copy_dirs(&self, launch: &Path) -> Result<BTreeSet<String>, VcsError> {
+        self.record(FakeOp::CopyDirs, launch);
+        self.unreachable()?;
+        super::SystemVcs.jj_copy_dirs(launch)
+    }
+}
+
+/// Each answer is computed when the call is made, so a recorded call's lock
+/// probe sees the caller's lock state at the call.
+impl VcsOps for FakeVcs {
+    fn prepare_refresh<'a>(
+        &'a self,
+        request: &'a super::RefreshRequest,
+    ) -> VcsFuture<'a, Result<super::RefreshPreparation, VcsError>> {
+        ready(self.answer_prepare_refresh(request))
+    }
+
+    fn apply_refresh<'a>(
+        &'a self,
+        plan: &'a super::RefreshPlan,
+        recover: bool,
+    ) -> VcsFuture<'a, Result<super::RefreshApplied, VcsError>> {
+        ready(self.answer_apply_refresh(plan, recover))
+    }
+
+    fn restore_copy_base<'a>(
+        &'a self,
+        path: &'a Path,
+        namespace: &'a str,
+        agent: &'a str,
+        base: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(self.answer_restore_copy_base(path, namespace, agent, base))
+    }
+
+    fn path_exists<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, Result<bool, VcsError>> {
+        ready(self.answer_path_exists(path))
+    }
+
+    fn jj_copy_dirs<'a>(
+        &'a self,
+        launch: &'a Path,
+    ) -> VcsFuture<'a, Result<BTreeSet<String>, VcsError>> {
+        ready(self.answer_jj_copy_dirs(launch))
+    }
+
+    fn mint_from<'a>(
+        &'a self,
+        request: &'a MintRequest<'_>,
+    ) -> VcsFuture<'a, Result<MintedCopy, VcsError>> {
+        ready(self.answer_mint_from(request))
+    }
+
+    fn seal<'a>(
+        &'a self,
+        child_path: &'a Path,
+        namespace: &'a str,
+        candidate_id: &'a str,
+        base_commit: &'a str,
+    ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
+        ready(self.answer_seal(child_path, namespace, candidate_id, base_commit))
+    }
+
+    fn unpin<'a>(
+        &'a self,
+        child_path: &'a Path,
+        namespace: &'a str,
+        candidate_id: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(self.answer_unpin(child_path, namespace, candidate_id))
+    }
+
+    fn adopt<'a>(
+        &'a self,
+        request: &'a AdoptRequest<'_>,
+    ) -> VcsFuture<'a, Result<AdoptLanding, AdoptFailure>> {
+        ready(self.answer_adopt(request))
+    }
+
+    fn run_mint_hook<'a>(
+        &'a self,
+        cwd: &'a Path,
+        command: &'a str,
+        env: &'a BTreeMap<String, String>,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(self.answer_run_mint_hook(cwd, command, env))
+    }
+
+    fn unmint<'a>(
+        &'a self,
+        launch: &'a Path,
+        path: &'a Path,
+        namespace: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(self.answer_unmint(launch, path, namespace))
+    }
+
+    fn dirty<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, bool> {
+        ready(self.answer_dirty(path))
+    }
+
+    fn ahead_behind<'a>(
+        &'a self,
+        child: &'a Path,
+        parent: &'a Path,
+        base: Option<&'a str>,
+    ) -> VcsFuture<'a, Option<(u64, u64)>> {
+        ready(self.answer_ahead_behind(child, parent, base))
+    }
+
+    fn label<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, Option<String>> {
+        ready(self.answer_label(path))
+    }
+
+    fn diverged_from_base<'a>(
+        &'a self,
+        path: &'a Path,
+        base_change_id: Option<&'a str>,
+        base_commit: &'a str,
+    ) -> VcsFuture<'a, Result<bool, VcsError>> {
+        ready(self.answer_diverged_from_base(path, base_change_id, base_commit))
+    }
+
+    fn copy_is_over_candidate<'a>(
+        &'a self,
+        launch: &'a Path,
+        copy_id: &'a str,
+        candidate: &'a VcsSnapshot,
+    ) -> VcsFuture<'a, Result<bool, VcsError>> {
+        ready(self.answer_copy_is_over_candidate(launch, copy_id, candidate))
+    }
+}
+
+fn ready<'a, T: Send + 'a>(value: T) -> VcsFuture<'a, T> {
+    Box::pin(std::future::ready(value))
 }

@@ -1642,9 +1642,12 @@ For a producing copy that is still present, the adoption transaction also
 advances its base pin to the candidate, matching the workspace row's new base.
 Collecting the candidate record therefore cannot orphan an open copy's base.
 Reopen queues copy-base reconciliation for interrupted `adopting` rows once per
-host generation. Copies with absent paths, missing bases or unknown producers
-are skipped. Driver attachment drains and completes this dedicated queue before
-returning; ordinary mutation effects cannot take or discard it. A queued
+host generation. Copies with missing bases or unknown producers are skipped,
+and so is a copy the VCS port answers is absent; a port that cannot answer
+fails that workspace's reconciliation with the `reopen to retry` remedy rather
+than skip it. Attaching the tree to the hub drains and completes this dedicated
+queue before the tree is published there; ordinary mutation effects cannot
+take or discard it. A queued
 reconciliation must complete before that workspace can admit an adoption retry;
 no other settle queues it again. Attachment acknowledges the reopened generation
 before changing refs; a refused publication changes no pin and fails that
@@ -1878,7 +1881,10 @@ checkout paths affect fingerprints.
 
 These owned intents are recorded in `agent_operations`. Reopen resumes their
 seal/remove/restore stages rather than treating them as an uncertain explicit
-discard. Removing an already absent checkout is idempotent. A follow-up first
+discard. Removing an already absent checkout is idempotent. Whether the
+checkout is present is asked of the VCS port; a port that cannot answer fails
+the stage, so a checkout that only looks absent is neither removed without
+its coverage proof nor minted over. A follow-up first
 rechecks admission and rehydrates the exact sealed content at the same
 tree-owned path, without rerunning `on_mint`, then rechecks capacity before
 opening its new attempt. The workspace keeps its adoption base. A restored copy remains reserved from
@@ -4452,6 +4458,27 @@ settling them holds them so that an early return or an abort hands them to a
 release owner; dormant-copy reclamation instead runs its job stop and the
 dispatch it gates as one release owner, since its refused job stop abandons
 the dispatch to recovery.
+The VCS port (`VcsOps`) is async. Every repository operation and every
+question about a copy's or checkout's files is an awaited port call made
+outside the tree mutex and outside every writer. A question an admission needs
+is asked before its writer: a spawn lists the JJ copy root, so the id of a
+copy directory a crashed mint left without a row is skipped; an adopt asks
+whether the adopter's checkout is JJ (for a conflict, resolution or revert)
+and which running JJ copies were minted over the candidate. A question the port
+cannot answer refuses the operation where its answer is needed, and an answer
+about rows the writer no longer finds refuses with `target_changed`; neither is
+read as "absent". A settle runs its admitted batch as a task of its own that
+its release owner awaits: once dispatched, the batch makes its port calls one
+at a time, in a fixed order, to its end even if that owner is aborted. A spawn
+runs its mint the same way, inside one release owner that also runs the writer
+committing or rolling back its reservation, so a spawn whose caller is dropped
+mid-mint still records its child or releases its reservation. A failed-worktree
+rescue seal is likewise a task of its own. These tasks are plain Tokio tasks,
+outside the tree's task sets and the `Runtime` interface: they outlive an
+aborted owner but not the Tokio runtime. When that runtime shuts down, a task
+is dropped between two port calls; a port call already running on a blocking
+worker is not interrupted, but nothing after it is recorded, so the next
+open's recovery settles that batch as it settles a crash.
 A mutation retains the store-acknowledged revision from its explicit publish;
 settling an empty effect batch does not itself publish a mutation. Every queued
 effect is drained after the tree mutex is released, including when the initial

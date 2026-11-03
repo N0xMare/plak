@@ -94,14 +94,14 @@ fn supervisor_at(depth: u8) -> &'static str {
 /// `install_snapshot` is the only public way to move the root grant's bounds,
 /// and it clamps every field to the appendix ceiling on the way in.
 fn recursive_tree(root: &std::path::Path, requested_depth: u8) -> ProductAgentTree {
-    let mut tree = ProductAgentTree::bootstrap_root(
+    let mut tree = plakous_hosted::agent_tree::block_on_for_test(ProductAgentTree::bootstrap_root(
         "tree1",
         "root",
         "owner",
         PathBuf::from(root),
         "selected-tuple",
         WriterMode::SingleLease,
-    )
+    ))
     .expect("bootstrap");
     let mut snapshot = working_set("selected-tuple");
     snapshot.max_depth = requested_depth;
@@ -203,14 +203,14 @@ fn a_tier_above_the_template_ceiling_clips_and_the_receipt_says_so() {
 #[test]
 fn an_epoch_cannot_raise_the_bounds_above_the_appendix_ceilings() {
     let root = tempfile::tempdir().expect("tempdir");
-    let mut tree = ProductAgentTree::bootstrap_root(
+    let mut tree = plakous_hosted::agent_tree::block_on_for_test(ProductAgentTree::bootstrap_root(
         "tree1",
         "root",
         "owner",
         PathBuf::from(root.path()),
         "selected-tuple",
         WriterMode::SingleLease,
-    )
+    ))
     .expect("bootstrap");
 
     // Ask for far more than the appendix permits. `install_snapshot` clamps.

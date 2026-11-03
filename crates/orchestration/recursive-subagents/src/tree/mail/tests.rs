@@ -265,7 +265,7 @@ fn wait_holds_until_the_seal_finishes_and_the_row_names_the_candidate() {
 
     let effects = tree.take_effects();
     assert_eq!(effects.seals.len(), 1);
-    tree.complete(effects.run(&SystemVcs));
+    tree.complete(block_on_for_test(effects.run(&SystemVcs)));
     let settled = tree
         .poll_wait("root", &wait_for(&child.agent_id))
         .unwrap()
@@ -305,7 +305,7 @@ fn failed_fork_list_and_wait_name_the_adoptable_partial_candidate() {
     )
     .unwrap();
     let effects = tree.take_effects();
-    tree.complete(effects.run(&SystemVcs));
+    tree.complete(block_on_for_test(effects.run(&SystemVcs)));
     let settled = tree
         .poll_wait("root", &wait_for(&child.agent_id))
         .unwrap()

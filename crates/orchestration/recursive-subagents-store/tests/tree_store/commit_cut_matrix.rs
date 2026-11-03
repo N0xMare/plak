@@ -281,6 +281,7 @@ async fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
     )
     .unwrap();
     let driver = TreeDriver::new(Arc::new(Mutex::new(tree)), store.clone(), vcs.clone(), None);
+    driver.reconcile_attachment().await.unwrap();
     publish(&driver, |_| ()).await;
     feeds.lock().unwrap()[0].push(0, Vec::new());
     let root_feed = feeds.lock().unwrap()[0].clone();
@@ -1050,6 +1051,7 @@ async fn two_phase_scenario(root: &Path) -> Vec<Frame> {
     )
     .unwrap();
     let driver = TreeDriver::new(Arc::new(Mutex::new(tree)), store.clone(), vcs, None);
+    driver.reconcile_attachment().await.unwrap();
     publish(&driver, |_| ()).await;
     for child in 1..=2 {
         publish(&driver, move |tree| {
@@ -1198,7 +1200,9 @@ async fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
             "cut {ordinal}: duplicate seal ticket"
         );
         reopened.acknowledge_revision(store.save(&reopened).unwrap());
-        let _ = reopened.complete(effects.run(&*vcs));
+        let _ = reopened.complete(plakous_recursive_subagents::tree::block_on_for_test(
+            effects.run(&*vcs),
+        ));
         reopened.acknowledge_revision(store.save(&reopened).unwrap());
         let mut again = ProductAgentTree::reopen(store.load(TREE).unwrap().unwrap());
         for (child, feed) in frame.feeds.iter().enumerate() {
@@ -1284,6 +1288,7 @@ async fn transient_resume_decision_commit_cuts_are_conservative_then_replayable(
     )
     .unwrap();
     let driver = TreeDriver::new(Arc::new(Mutex::new(tree)), store, vcs.clone(), None);
+    driver.reconcile_attachment().await.unwrap();
     let feeds = Mutex::new(vec![Feed::default(); 2]);
     feeds.lock().unwrap()[0].push(0, Vec::new());
     let root_feed = feeds.lock().unwrap()[0].clone();

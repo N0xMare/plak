@@ -29,7 +29,7 @@ fn turn_waiters_are_counted_per_child_without_a_revision() {
 fn a_tool_racing_the_mint_answers_as_for_an_unspawned_id() {
     let (_root, vcs, mut tree) = fake_tree();
     let SpawnAdmission::Reserved(reservation, Some(ticket)) = tree
-        .spawn_reserve("root", &mint_req(), Some("op-mint"))
+        .spawn_reserve("root", &mint_req(), Some("op-mint"), &Ok(BTreeSet::new()))
         .unwrap()
     else {
         unreachable!("a mutate spawn reserves a mint");
@@ -50,7 +50,7 @@ fn a_tool_racing_the_mint_answers_as_for_an_unspawned_id() {
         unknown.code
     );
     let SpawnAdmission::Reserved(second, _) = tree
-        .spawn_reserve("root", &mint_req(), Some("op-mint-2"))
+        .spawn_reserve("root", &mint_req(), Some("op-mint-2"), &Ok(BTreeSet::new()))
         .unwrap()
     else {
         unreachable!("a mutate spawn reserves a mint");
@@ -59,7 +59,7 @@ fn a_tool_racing_the_mint_answers_as_for_an_unspawned_id() {
         second.agent_id, reserved,
         "a reserved id is not offered twice"
     );
-    let minted = ticket.mint(vcs.as_ref()).unwrap();
+    let minted = block_on_for_test(ticket.mint(vcs.as_ref())).unwrap();
     let output = tree.spawn_commit(*reservation, Some(minted)).unwrap();
     assert_eq!(output.agent_id, reserved);
     assert_eq!(
@@ -77,13 +77,13 @@ fn a_wait_after_a_failed_mint_answers_as_for_an_unspawned_id() {
     // No git or jj identity under this launch checkout: the mint refuses.
     let (_tmp, mut tree) = tree();
     let SpawnAdmission::Reserved(reservation, Some(ticket)) = tree
-        .spawn_reserve("root", &mint_req(), Some("op-mint"))
+        .spawn_reserve("root", &mint_req(), Some("op-mint"), &Ok(BTreeSet::new()))
         .unwrap()
     else {
         unreachable!("a mutate spawn reserves a mint");
     };
     let reserved = reservation.agent_id.clone();
-    let refused = ticket.mint(tree.vcs()).unwrap_err();
+    let refused = block_on_for_test(ticket.mint(tree.vcs())).unwrap_err();
     let error = tree.spawn_abort(*reservation, topology_error_from_vcs(refused));
     assert_eq!(error.code, TopologyErrorCode::MintUnavailable);
     assert_eq!(
@@ -1754,4 +1754,27 @@ fn a_cancel_the_host_did_not_ask_for_ends_the_attempt() {
         Some(CANCELLED_KIND)
     );
     assert!(attempt.candidate_id.is_some(), "partial work still seals");
+}
+
+/// The JJ copy root is listed through the port before the lock: an id whose
+/// copy directory a crashed mint left without a row is skipped, and a port
+/// that cannot list it refuses the spawn without holding a reservation.
+#[test]
+fn a_crashed_mint_directory_is_skipped_and_an_unlisted_copy_root_refuses_the_spawn() {
+    let (root, vcs, mut tree) = fake_tree();
+    let crashed = copy_id(&tree.tree_id, "c1");
+    std::fs::create_dir_all(root.path().join(".plak/workspaces").join(&crashed)).unwrap();
+    let spawned = tree.spawn_agent("root", &mint_req(), None).unwrap();
+    assert_eq!(spawned.agent_id, "c2");
+    assert_eq!(vcs.calls_of(FakeOp::CopyDirs).len(), 1);
+
+    vcs.refuse_workspace_questions();
+    let pending = tree.pending_spawns;
+    let error = tree
+        .spawn_agent("root", &mint_req(), Some("op-unlisted"))
+        .unwrap_err();
+    assert_eq!(error.code, TopologyErrorCode::MintUnavailable);
+    assert_eq!(tree.pending_spawns, pending);
+    assert!(tree.minting.is_empty());
+    assert_eq!(vcs.calls_of(FakeOp::Mint).len(), 1);
 }

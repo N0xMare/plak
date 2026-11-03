@@ -628,11 +628,11 @@ impl TopologyHub {
             return Ok(Arc::clone(&entry.runtime));
         }
         let runtime = Arc::new(ProductTopologyRuntime::new(tree, store, vcs, observer));
-        let effects = runtime
-            .driver
-            .fold_startup()
-            .await
-            .map_err(|error| TreeRuntimeError::new(error.message));
+        let effects = match runtime.driver.reconcile_attachment().await {
+            Ok(()) => runtime.driver.fold_startup().await,
+            Err(error) => Err(error),
+        }
+        .map_err(|error| TreeRuntimeError::new(error.message));
         let occupant = {
             let mut entries = self.entries()?;
             if let Some(entry) = entries.get(&tree_id) {
@@ -686,15 +686,19 @@ impl TopologyHub {
     /// Looks the tree up, or load/bootstraps it only for an attaching root.
     /// `store` is asked for only on that bootstrap path: a hub hit opens
     /// nothing.
-    pub async fn resolve(
+    pub async fn resolve<B, F>(
         &self,
         tree_id: &str,
         is_root: bool,
         attach: TopologyHubAttach,
         store: impl FnOnce() -> TreeRuntimeResult<Arc<dyn TreeStore>>,
         observer: Option<Arc<dyn TopologyObserver>>,
-        load_or_bootstrap: impl FnOnce(&dyn TreeStore) -> TreeRuntimeResult<ProductAgentTree>,
-    ) -> TreeRuntimeResult<Arc<ProductTopologyRuntime>> {
+        load_or_bootstrap: B,
+    ) -> TreeRuntimeResult<Arc<ProductTopologyRuntime>>
+    where
+        B: FnOnce(Arc<dyn TreeStore>) -> F,
+        F: Future<Output = TreeRuntimeResult<ProductAgentTree>>,
+    {
         let runtime = if let Some(runtime) = self.lookup(tree_id) {
             runtime
         } else if !is_root {
@@ -707,7 +711,7 @@ impl TopologyHub {
             ));
         } else {
             let store = store()?;
-            let tree = load_or_bootstrap(store.as_ref())?;
+            let tree = load_or_bootstrap(Arc::clone(&store)).await?;
             let vcs = tree.vcs_port();
             self.insert_root(tree_id, tree, store, vcs, observer)
                 .await?
@@ -875,14 +879,18 @@ pub async fn insert_root_with(
 
 /// Looks up the hub, or load/bootstraps it only for an attaching root, over
 /// the store the product hands out for it (asked for on that path alone).
-pub async fn resolve_topology_runtime(
+pub async fn resolve_topology_runtime<B, F>(
     tree_id: &str,
     is_root: bool,
     attach: TopologyHubAttach,
     store: impl FnOnce() -> TreeRuntimeResult<Arc<dyn TreeStore>>,
     observer: Option<Arc<dyn TopologyObserver>>,
-    load_or_bootstrap: impl FnOnce(&dyn TreeStore) -> TreeRuntimeResult<ProductAgentTree>,
-) -> TreeRuntimeResult<Arc<ProductTopologyRuntime>> {
+    load_or_bootstrap: B,
+) -> TreeRuntimeResult<Arc<ProductTopologyRuntime>>
+where
+    B: FnOnce(Arc<dyn TreeStore>) -> F,
+    F: Future<Output = TreeRuntimeResult<ProductAgentTree>>,
+{
     process_hub()
         .resolve(tree_id, is_root, attach, store, observer, load_or_bootstrap)
         .await
@@ -1025,7 +1033,7 @@ pub mod test_support {
                     Err(TreeRuntimeError::new("a hub hit must not open a store"))
                 },
                 None,
-                |_| Err(TreeRuntimeError::new("a hub hit must not load a tree")),
+                |_| async { Err(TreeRuntimeError::new("a hub hit must not load a tree")) },
             )
             .await
             .unwrap();

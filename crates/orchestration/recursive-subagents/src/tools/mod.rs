@@ -601,14 +601,7 @@ impl TopologyTool {
                 .await??
         };
         let vcs = self.driver.vcs();
-        let occupancy = tokio::task::spawn_blocking(move || probe.run(vcs.as_ref()))
-            .await
-            .map_err(|_| {
-                TopologyError::new(
-                    TopologyErrorCode::OperationRecoveryRequired,
-                    "occupancy probe task failed",
-                )
-            })?;
+        let occupancy = probe.run(vcs.as_ref()).await;
         let caller = caller.to_owned();
         self.driver
             .write(move |tree| {

@@ -26,7 +26,7 @@ impl Fixture {
             .unwrap()
             .agent_id;
         let request = adopt_req(&candidate_of(&tree, &child.agent_id));
-        tree.begin_adopt("root", &request).unwrap();
+        tree.begin_adopt_for_test("root", &request).unwrap();
         let _ = tree.take_effects();
         Self {
             _root: root,
@@ -68,13 +68,15 @@ async fn base_pin_attachment_survives_dropped_first_mutation_effects() {
             fixture.vcs.clone(),
             None,
         );
+        assert!(fixture.vcs.calls_of(FakeOp::RestoreBase).is_empty());
+        driver.reconcile_attachment().await.unwrap();
         assert_eq!(fixture.vcs.calls_of(FakeOp::RestoreBase).len(), 1);
         // This also models a mutation whose caller fails before settlement.
         drop(driver.mutate(|_| ()).await.unwrap());
         let (admitted, settled) = driver
             .mutate_and_settle({
                 let request = fixture.request.clone();
-                move |tree| tree.begin_adopt("root", &request)
+                move |tree| tree.begin_adopt_for_test("root", &request)
             })
             .await
             .unwrap();
@@ -94,8 +96,8 @@ async fn base_pin_attachment_survives_dropped_first_mutation_effects() {
     }
 }
 
-#[test]
-fn base_pin_attachment_publication_failure_has_a_remedy_instead_of_pending() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn base_pin_attachment_publication_failure_has_a_remedy_instead_of_pending() {
     let mut fixture = Fixture::interrupted();
     fixture.reopen();
     let store = Arc::new(MemoryTreeStore::new());
@@ -112,6 +114,7 @@ fn base_pin_attachment_publication_failure_has_a_remedy_instead_of_pending() {
         fixture.vcs.clone(),
         None,
     );
+    driver.reconcile_attachment().await.unwrap();
     let error = driver
         .read(|tree| {
             tree.check_base_pin_recovery(&fixture.workspace)
@@ -143,6 +146,7 @@ async fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
         fixture.vcs.clone(),
         None,
     );
+    driver.reconcile_attachment().await.unwrap();
     let settled = driver.settle(Effects::default()).await.unwrap();
     assert_eq!(settled.cleanup_failures, Vec::new());
     let (submitted, _) = driver
@@ -165,7 +169,9 @@ async fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
     driver.settle(Effects::default()).await.unwrap();
     let mut tree = driver.read(Clone::clone).unwrap();
     assert_eq!(
-        tree.begin_adopt("root", &fixture.request).unwrap_err().code,
+        tree.begin_adopt_for_test("root", &fixture.request)
+            .unwrap_err()
+            .code,
         TopologyErrorCode::WorkspaceRecoveryRequired
     );
     assert!(
@@ -225,22 +231,25 @@ fn base_pin_pending_reconciliation_fences_adopt_until_completion_not_merely_vcs_
     assert_eq!(
         fixture
             .tree
-            .begin_adopt("root", &fixture.request)
+            .begin_adopt_for_test("root", &fixture.request)
             .unwrap_err()
             .code,
         TopologyErrorCode::WorkspaceRecoveryRequired
     );
-    let completed = recovery.run(fixture.vcs.as_ref());
+    let completed = block_on_for_test(recovery.run(fixture.vcs.as_ref()));
     assert_eq!(
         fixture
             .tree
-            .begin_adopt("root", &fixture.request)
+            .begin_adopt_for_test("root", &fixture.request)
             .unwrap_err()
             .code,
         TopologyErrorCode::WorkspaceRecoveryRequired
     );
     fixture.tree.complete(completed);
-    fixture.tree.begin_adopt("root", &fixture.request).unwrap();
+    fixture
+        .tree
+        .begin_adopt_for_test("root", &fixture.request)
+        .unwrap();
     fixture.tree.settle_for_test();
     fixture.tree.restore_paused();
     fixture.tree.settle_for_test();
@@ -259,7 +268,10 @@ fn base_pin_interrupted_adopt_retry_unavailable_retains_the_target_recovery_hold
     let mut fixture = Fixture::interrupted();
     fixture.reopen();
     fixture.tree.settle_for_test();
-    fixture.tree.begin_adopt("root", &fixture.request).unwrap();
+    fixture
+        .tree
+        .begin_adopt_for_test("root", &fixture.request)
+        .unwrap();
     let ticket = fixture.tree.take_effects().adopts.remove(0);
     let error = fixture
         .tree
@@ -278,4 +290,23 @@ fn base_pin_interrupted_adopt_retry_unavailable_retains_the_target_recovery_hold
     );
     fixture.tree.restore_paused();
     assert!(fixture.tree.take_effects().is_empty());
+}
+
+/// Whether an interrupted copy is still there is asked of the port during
+/// attachment. A port that cannot answer fails that workspace's
+/// reconciliation with the reopen remedy; it is never skipped as absent.
+#[test]
+fn base_pin_presence_the_port_cannot_answer_fails_reconciliation_closed() {
+    let mut fixture = Fixture::interrupted();
+    fixture.reopen();
+    fixture.vcs.refuse_workspace_questions();
+    assert_eq!(fixture.tree.settle_for_test().cleanup_failures, Vec::new());
+    let error = fixture
+        .tree
+        .begin_adopt_for_test("root", &fixture.request)
+        .unwrap_err();
+    assert_eq!(error.code, TopologyErrorCode::WorkspaceRecoveryRequired);
+    assert!(error.message.contains("reopen to retry"), "{error:?}");
+    assert_eq!(fixture.vcs.calls_of(FakeOp::Exists).len(), 1);
+    assert!(fixture.vcs.calls_of(FakeOp::RestoreBase).is_empty());
 }

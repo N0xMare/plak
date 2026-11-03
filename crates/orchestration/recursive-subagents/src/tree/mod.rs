@@ -69,11 +69,33 @@ pub fn topology_error_from_vcs(error: VcsError) -> TopologyError {
 /// [`MintTicket`]s handed back by [`ProductAgentTree::spawn_reserve`], the
 /// occupancy probes `list_agents` renders are an [`OccupancyProbe`], and
 /// seals, adopts, hooks, and unmints are [`Effects`]. What is left is the
-/// in-process convenience the tree's own tests drive
-/// ([`ProductAgentTree::spawn_agent`], [`ProductAgentTree::list_agents`]),
-/// which runs those tickets inline through this port.
+/// test-only convenience (`spawn_agent`, `list_agents`, `adopt_candidate`,
+/// `settle_for_test`), which blocks on those tickets through this port.
 #[derive(Clone)]
 struct TreeVcs(Arc<dyn VcsOps>);
+
+/// Drives `future` to its end on this thread, for the synchronous test
+/// conveniences over the async VCS port. A port answer that runs on a
+/// blocking worker wakes this thread when it is done.
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub fn block_on_for_test<F: Future>(future: F) -> F::Output {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = Box::pin(future);
+    loop {
+        if let std::task::Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
+        std::thread::park();
+    }
+}
 
 impl std::fmt::Debug for TreeVcs {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -527,7 +549,8 @@ pub struct Completed {
         refresh::RefreshTicket,
         Result<refresh::RefreshAnswer, VcsError>,
     )>,
-    base_pins: Vec<(BasePinTicket, Result<(), VcsError>)>,
+    /// `Ok(false)`: the copy was absent, so it had no pin to restore.
+    base_pins: Vec<(BasePinTicket, Result<bool, VcsError>)>,
     dormancy: Vec<(
         dormancy::DormancyTicket,
         Result<dormancy::DormancyAnswer, VcsError>,
@@ -796,7 +819,7 @@ pub mod view;
 pub use await_output::{
     AwaitAgents, AwaitJobRow, AwaitOmitted, AwaitOutput, AwaitRequest, WAIT_OUTPUT_BUDGET_BYTES,
 };
-pub use candidates::merge_conflict_message;
+pub use candidates::{AdoptFacts, AdoptProbe, merge_conflict_message};
 pub use commands::{AgentCommand, AgentCommandKind, CommandFact, MAX_TREE_COMMANDS};
 pub use feed::TreeFeed;
 pub use observer::{NodeDetach, TopologyObserver};
@@ -1126,19 +1149,17 @@ fn next_child_id(
     nodes: &BTreeMap<String, NodeRecord>,
     workspaces: &BTreeMap<String, WorkspaceRecord>,
     minting: &BTreeSet<String>,
-    launch: &Path,
+    jj_copy_dirs: &BTreeSet<String>,
 ) -> String {
     let mut n = floor.saturating_add(1);
     loop {
         let id = format!("c{n}");
-        let copy_id = copy_id(tree_id, &id);
         // A jj workspace under this tree-scoped id that no row records is a
-        // crashed mint. Skip the id; this probe does not reclaim it.
-        let workspace_dest = launch.join(".plak/workspaces").join(&copy_id);
+        // crashed mint. Skip the id; this listing does not reclaim it.
         if !nodes.contains_key(&id)
             && !workspaces.contains_key(&format!("ws-{id}"))
             && !minting.contains(&id)
-            && !workspace_dest.exists()
+            && !jj_copy_dirs.contains(&copy_id(tree_id, &id))
         {
             return id;
         }

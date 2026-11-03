@@ -9,7 +9,11 @@ use super::{
 
 impl ProductAgentTree {
     /// Bootstraps a root over the system `git`/`jj` port.
-    pub fn bootstrap_root(
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::bootstrap_root_with`].
+    pub async fn bootstrap_root(
         tree_id: impl Into<String>,
         root_agent_id: impl Into<String>,
         root_role: impl Into<String>,
@@ -26,11 +30,16 @@ impl ProductAgentTree {
             selected_tuple,
             writer_mode,
         )
+        .await
     }
 
     /// [`Self::bootstrap_root`] over an explicit VCS port. The root's branch
-    /// label is the first thing the port answers.
-    pub fn bootstrap_root_with(
+    /// label is the first thing the port answers, before the tree exists.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a tree or root id that is not a portable agent id.
+    pub async fn bootstrap_root_with(
         vcs: Arc<dyn VcsOps>,
         tree_id: impl Into<String>,
         root_agent_id: impl Into<String>,
@@ -55,6 +64,7 @@ impl ProductAgentTree {
                 "root workspace id is not portable",
             ));
         }
+        let branch = vcs.label(&launch_checkout).await;
         let root = NodeRecord {
             fold_order: Some(0),
             abandoned_turn: None,
@@ -75,7 +85,7 @@ impl ProductAgentTree {
             attempt_id: None,
             session_locator: None,
             path: launch_checkout.clone(),
-            branch: vcs.label(&launch_checkout),
+            branch,
             active_turn: false,
         };
         let grant = TopologyGrant {
@@ -199,10 +209,6 @@ impl ProductAgentTree {
                 &OrchestrationSnapshot::unpinned(String::new()),
             )),
         }
-    }
-
-    pub(super) fn vcs(&self) -> &dyn VcsOps {
-        self.vcs.0.as_ref()
     }
 
     /// The tree's VCS port, shared: what a runtime runs the tree's effects

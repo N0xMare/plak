@@ -139,11 +139,15 @@ pub(crate) enum RefreshAnswer {
 }
 
 impl RefreshTicket {
-    pub(crate) fn run(&self, vcs: &dyn VcsOps) -> Result<RefreshAnswer, VcsError> {
+    pub(crate) async fn run(&self, vcs: &dyn VcsOps) -> Result<RefreshAnswer, VcsError> {
         match &self.step {
-            Step::Prepare(request) => vcs.prepare_refresh(request).map(RefreshAnswer::Prepared),
+            Step::Prepare(request) => vcs
+                .prepare_refresh(request)
+                .await
+                .map(RefreshAnswer::Prepared),
             Step::Apply(plan) => vcs
                 .apply_refresh(plan, self.recover)
+                .await
                 .map(RefreshAnswer::Applied),
         }
     }

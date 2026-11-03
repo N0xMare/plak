@@ -74,27 +74,27 @@ pub struct OccupancyProbe {
 
 impl OccupancyProbe {
     /// Probes every listed copy with the mutex released.
-    #[must_use]
-    pub fn run(self, vcs: &dyn VcsOps) -> Occupancy {
+    pub async fn run(self, vcs: &dyn VcsOps) -> Occupancy {
         let mut parents = plakous_workspace::occupancy_vcs::ParentBehindCache::new();
-        Occupancy(
-            self.rows
-                .into_iter()
-                .map(|(agent_id, path, parent_path, base)| {
-                    let dirty = vcs.dirty(&path);
-                    let ahead_behind = parent_path.and_then(|parent| {
-                        vcs.ahead_behind_cached(&path, &parent, base.as_deref(), &mut parents)
-                    });
-                    (
-                        agent_id,
-                        NodeOccupancy {
-                            dirty,
-                            ahead_behind,
-                        },
-                    )
-                })
-                .collect(),
-        )
+        let mut occupancy = BTreeMap::new();
+        for (agent_id, path, parent_path, base) in self.rows {
+            let dirty = vcs.dirty(&path).await;
+            let ahead_behind = match parent_path {
+                Some(parent) => {
+                    vcs.ahead_behind_cached(&path, &parent, base.as_deref(), &mut parents)
+                        .await
+                }
+                None => None,
+            };
+            occupancy.insert(
+                agent_id,
+                NodeOccupancy {
+                    dirty,
+                    ahead_behind,
+                },
+            );
+        }
+        Occupancy(occupancy)
     }
 }
 
@@ -117,19 +117,6 @@ impl ProductAgentTree {
         attempt_id: &super::AttemptId,
     ) -> Option<plakous_host_protocol::views::AttemptCompaction> {
         self.compaction_views.get(attempt_id).copied()
-    }
-
-    /// Renders `list_agents` through the tree's own port: the in-process
-    /// convenience for the tree's own tests. Production drives
-    /// [`Self::occupancy_probe`] / [`Self::list_agents_with`] through the
-    /// runtime so the probes run with the tree mutex released.
-    pub fn list_agents(
-        &self,
-        caller_id: &str,
-        request: &ListAgentsRequest,
-    ) -> Result<ListAgentsOutput, TopologyError> {
-        let occupancy = self.occupancy_probe(caller_id, request)?.run(self.vcs());
-        self.list_agents_with(caller_id, request, &occupancy)
     }
 
     /// The paths the render will ask the VCS about, read under the lock.

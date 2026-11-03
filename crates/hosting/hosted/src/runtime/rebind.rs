@@ -465,7 +465,7 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         let inherited = source_skills_on(opened).await?;
         config.state_roots.set_inherited_skills(inherited);
         let (operation, target_product_id, own_tree, topology_tree_id) =
-            stage_profile_fork(config, opened, &account, model, composition, roster)?;
+            stage_profile_fork(config, opened, &account, model, composition, roster).await?;
         let target = resolve_profile_target(
             watch,
             config,
@@ -618,7 +618,7 @@ fn profile_rebind_selection<P: plakous_host_protocol::ProtocolExtension>(
     Ok((target_selection, api_root, effort_label, composition))
 }
 
-fn stage_profile_fork<P: plakous_host_protocol::ProtocolExtension>(
+async fn stage_profile_fork<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     opened: &AttachedCodingSession,
     account: &str,
@@ -643,7 +643,8 @@ fn stage_profile_fork<P: plakous_host_protocol::ProtocolExtension>(
             model,
             account,
             roster.clone(),
-        )?;
+        )
+        .await?;
     }
     let topology_tree_id = if composition == crate::binding::CompositionSelection::PySdk {
         target_product_id.clone()

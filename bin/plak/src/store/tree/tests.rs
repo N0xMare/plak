@@ -79,7 +79,9 @@ fn pending_workspace_discard_survives_sqlite_reopen_without_removal_replay() {
     assert!(reopened.take_effects().is_empty());
     assert!(vcs.calls_of(FakeOp::Unmint).is_empty());
     // Only the original retained ticket can finish the removal.
-    tree.complete(effects.run(vcs.as_ref()));
+    tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+        effects.run(vcs.as_ref()),
+    ));
     tree.acknowledge_revision(store.save(&tree).unwrap());
     let completed = store.load("pending-discard").unwrap().unwrap();
     assert_eq!(
@@ -103,15 +105,16 @@ fn keyed_spawn_identity_survives_sqlite_close_and_reopen() {
     use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, TopologyErrorCode, WriterMode};
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("keyed"));
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "identity-tree",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "identity-tree",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     pin_review(&mut tree, "codex", "selected-tuple", None);
     let mut request = SpawnAgentRequest::test_review();
     request.request_key = Some("durable-key".into());
@@ -148,15 +151,16 @@ fn agent_tree_save_load_round_trips_and_reopens_paused() {
 
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "tree1",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree1",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     pin_review(&mut tree, "codex", "selected-tuple", None);
     let spawn_request = SpawnAgentRequest::test_review();
     let child = tree.spawn_agent("root", &spawn_request, None).unwrap();
@@ -208,15 +212,16 @@ fn a_tree_deletes_under_its_inspected_revision_and_only_once() {
 
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "doomed",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "doomed",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     pin_review(&mut tree, "codex", "selected-tuple", None);
     tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .unwrap();
@@ -485,15 +490,16 @@ fn agent_tree_attempt_and_candidate_rows_round_trip() {
 
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "tree-rows",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree-rows",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     pin_review(&mut tree, "codex", "selected-tuple", None);
     let mut request = SpawnAgentRequest::test_review();
     request.request_key = Some("key-1".into());
@@ -586,15 +592,16 @@ fn orchestration_snapshot_roundtrip_preserves_max_depth_and_digest() {
     assert_eq!(snapshot.max_depth, MAX_TREE_DEPTH);
     assert!(snapshot.digest_matches());
 
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "tree-snap",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "grok-4.6",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree-snap",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "grok-4.6",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     tree.install_snapshot(snapshot);
     save_tree(&paths, &mut tree).unwrap();
 
@@ -639,15 +646,16 @@ fn a_nested_spawn_roster_round_trips_at_tree_schema_9() {
 
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "tree-nested",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "gpt-5.6-luna",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree-nested",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "gpt-5.6-luna",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     tree.install_snapshot(snapshot.clone());
     save_tree(&paths, &mut tree).unwrap();
 
@@ -676,15 +684,16 @@ fn command_intents_and_feed_cursors_round_trip_at_tree_schema_6() {
 
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "tree-commands",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree-commands",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     for (id, kind) in [
         ("plak:wake:1", AgentCommandKind::RootBatch),
         ("user:2", AgentCommandKind::RootBatch),
@@ -722,15 +731,16 @@ fn agent_tree_account_and_effort_round_trip() {
 
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "tree-bind",
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree-bind",
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     tree.pin_bind_hints_for_test(crate::roster_input::product_bind_hints());
     tree.set_node_account_for_test("root", "codex");
     pin_review(&mut tree, "grok", "grok-4", Some("high"));
@@ -755,28 +765,30 @@ fn agent_tree_duplicate_child_ids_across_trees_persist() {
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     let spawn_request = SpawnAgentRequest::test_review();
-    let mut grok_tree = ProductAgentTree::bootstrap_root(
-        "tree-grok",
-        "root-grok",
-        "owner",
-        root.path().join("grok"),
-        "tuple-grok",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut grok_tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree-grok",
+            "root-grok",
+            "owner",
+            root.path().join("grok"),
+            "tuple-grok",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     pin_review(&mut grok_tree, "grok", "tuple-grok", None);
     let grok_child = grok_tree
         .spawn_agent("root-grok", &spawn_request, None)
         .unwrap();
-    let mut claude_tree = ProductAgentTree::bootstrap_root(
-        "tree-claude",
-        "root-claude",
-        "owner",
-        root.path().join("claude"),
-        "tuple-claude",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
+    let mut claude_tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree-claude",
+            "root-claude",
+            "owner",
+            root.path().join("claude"),
+            "tuple-claude",
+            WriterMode::SingleLease,
+        ))
+        .unwrap();
     pin_review(&mut claude_tree, "claude", "tuple-claude", None);
     let claude_child = claude_tree
         .spawn_agent("root-claude", &spawn_request, None)

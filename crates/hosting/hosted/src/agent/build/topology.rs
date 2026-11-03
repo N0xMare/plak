@@ -392,9 +392,9 @@ async fn topology_extensions_from_hub_with_owner(
                 .map_err(|error| crate::agent_tree::TreeRuntimeError::new(error.message()))
         },
         roots.topology_observer(),
-        move |store| {
+        move |store| async move {
             load_or_bootstrap_topology_tree(
-                store,
+                store.as_ref(),
                 &tree_id,
                 &workspace_root,
                 &selected_tuple,
@@ -403,6 +403,7 @@ async fn topology_extensions_from_hub_with_owner(
                 must_exist,
                 roster_source.as_ref(),
             )
+            .await
             .map_err(|error| crate::agent_tree::TreeRuntimeError::new(error.message()))
         },
     )
@@ -444,7 +445,7 @@ pub(in crate::agent) fn spawn_parent_root_effort(parent: &SpawnParent) -> Option
     clippy::too_many_arguments,
     reason = "one genesis binds every root fact the epoch freezes"
 )]
-pub(in crate::agent) fn load_or_bootstrap_topology_tree(
+pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
     store: &dyn crate::agent_tree::TreeStore,
     tree_id: &str,
     workspace_root: &Path,
@@ -490,7 +491,8 @@ pub(in crate::agent) fn load_or_bootstrap_topology_tree(
         selected_tuple,
         root_account,
         roster,
-    )?;
+    )
+    .await?;
     let acknowledged = store
         .save(&tree)
         .map_err(|error| CliFailure::new(error.detail))?;
@@ -498,7 +500,7 @@ pub(in crate::agent) fn load_or_bootstrap_topology_tree(
     Ok(tree)
 }
 
-fn genesis_tree(
+async fn genesis_tree(
     tree_id: &str,
     workspace_root: &Path,
     selected_tuple: &str,
@@ -514,6 +516,7 @@ fn genesis_tree(
         selected_tuple,
         writer_mode,
     )
+    .await
     .map_err(|error| CliFailure::new(error.message))?;
     tree.install_snapshot(crate::orchestration::OrchestrationSnapshot::freeze(roster));
     stamp_root_account(&mut tree, root_account);
@@ -530,7 +533,7 @@ fn genesis_tree(
 /// # Errors
 /// The tree store is unavailable, a tree already exists under `tree_id`, or
 /// the save fails.
-pub(crate) fn seed_genesis_tree(
+pub(crate) async fn seed_genesis_tree(
     roots: &ProductStateRoots,
     tree_id: &str,
     workspace_root: &Path,
@@ -553,7 +556,8 @@ pub(crate) fn seed_genesis_tree(
         selected_tuple,
         root_account,
         roster,
-    )?;
+    )
+    .await?;
     // This handle is dropped; the session's own open reloads the tree.
     let _revision = store
         .save(&tree)

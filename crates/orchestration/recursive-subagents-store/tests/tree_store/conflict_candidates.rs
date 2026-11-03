@@ -478,7 +478,7 @@ fn conflict_candidate_refused_for_another_adopter() {
     other.insert_candidate_for_test(f.tree.candidates()[&f.source].clone());
     other.insert_candidate_for_test(f.tree.candidates()[&conflict].clone());
     let error = other
-        .begin_adopt("other", &request(&conflict, true))
+        .begin_adopt_for_test("other", &request(&conflict, true))
         .unwrap_err();
     assert_eq!(error.code, TopologyErrorCode::AdoptNotApplicable);
     assert!(error.message.contains("belongs to root's checkout"));
@@ -491,11 +491,12 @@ fn retry_overwrites_unrecorded_conflict_pin_and_lineage_reopens() {
     let store = SqliteTreeStore::open(&tmp.path().join("tree.sqlite3")).unwrap();
     f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
     f.tree
-        .begin_adopt("root", &request(&f.source, false))
+        .begin_adopt_for_test("root", &request(&f.source, false))
         .unwrap();
     f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
     let ticket = f.tree.take_effects().adopts.remove(0);
-    let failed = ticket.land(&SystemVcs).unwrap_err();
+    let failed =
+        plakous_recursive_subagents::tree::block_on_for_test(ticket.land(&SystemVcs)).unwrap_err();
     let AdoptFailure::Conflict {
         candidate: Some(candidate),
         ..
@@ -509,15 +510,22 @@ fn retry_overwrites_unrecorded_conflict_pin_and_lineage_reopens() {
     f.tree.resume_tree().unwrap();
     f.tree.settle_for_test();
     f.tree
-        .begin_adopt("root", &request(&f.source, false))
+        .begin_adopt_for_test("root", &request(&f.source, false))
         .unwrap();
     let retry = f.tree.take_effects().adopts.remove(0);
     let error = f
         .tree
-        .begin_adopt("root", &request(&f.source, false))
+        .begin_adopt_for_test("root", &request(&f.source, false))
         .unwrap_err();
     assert_eq!(error.code, TopologyErrorCode::WorkspaceRecoveryRequired);
-    assert!(f.tree.finish_adopt(&retry, retry.land(&SystemVcs)).is_err());
+    assert!(
+        f.tree
+            .finish_adopt(
+                &retry,
+                plakous_recursive_subagents::tree::block_on_for_test(retry.land(&SystemVcs))
+            )
+            .is_err()
+    );
     let conflict = f
         .tree
         .candidates()

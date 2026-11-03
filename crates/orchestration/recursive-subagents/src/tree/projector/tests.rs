@@ -2254,7 +2254,7 @@ fn a_resolved_vcs_obligation_does_not_stick_in_a_host_intent() {
     tree.nodes.get_mut(&child).unwrap().status = NodeStatus::RecoveryRequired;
     tree.clear_feed_views();
     project(&mut tree, &child, &Feed::new(CHILD_SESSION));
-    let _ = tree.complete(effects.run(tree.vcs()));
+    let _ = tree.complete(block_on_for_test(effects.run(tree.vcs())));
     tree.clear_feed_views();
     project(&mut tree, &child, &Feed::new(CHILD_SESSION));
     assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Failed);
@@ -2289,7 +2289,7 @@ fn adoption_preserves_a_reflected_host_recovery_when_intents_rejoin() {
     .unwrap();
     tree.fold_due(child).unwrap();
     let effects = tree.take_effects();
-    let _ = tree.complete(effects.run(&*vcs));
+    let _ = tree.complete(block_on_for_test(effects.run(&*vcs)));
     let candidate = candidate_of(&tree, child);
     tree.adopt_candidate("root", &adopt_req(&candidate), None)
         .unwrap();
@@ -2348,7 +2348,7 @@ fn host_decision_rebuild_keeps_a_superseded_attempt_and_its_followup_separate() 
                 tree.fold_due(&child).unwrap();
                 let effects = tree.take_effects();
                 assert_eq!(effects.seals.len(), usize::from(forked));
-                let _ = tree.complete(effects.run(tree.vcs()));
+                let _ = tree.complete(block_on_for_test(effects.run(tree.vcs())));
                 let expected_first = tree.attempts[&first].clone();
                 let second = tree
                     .open_followup_attempt(&child, "followup", String::new(), String::new())
@@ -2663,7 +2663,7 @@ fn retirement_annotations_rebuild_after_seal_success_or_failure() {
         if seal_fails {
             vcs.seal_next_with(Err(VcsError::seal_failed("snapshot refused")));
         }
-        tree.complete(effects.run(vcs.as_ref()));
+        tree.complete(block_on_for_test(effects.run(vcs.as_ref())));
         let expected = tree.attempt(&child).unwrap().clone();
         let node = tree.node(&child).unwrap().status;
         tree.clear_feed_views();
@@ -3322,7 +3322,7 @@ fn settle_generated_effects(tree: &mut ProductAgentTree) -> usize {
             return seals;
         }
         seals += effects.seals.len();
-        let _ = tree.complete(effects.run(tree.vcs()));
+        let _ = tree.complete(block_on_for_test(effects.run(tree.vcs())));
     }
 }
 
@@ -3527,7 +3527,7 @@ fn assert_generated_host_interleavings(steps: &[HostInterleaving]) -> Result<(),
         if step.adopt
             && let Some(candidate_id) = live.attempt(&child).unwrap().candidate_id.clone()
         {
-            live.begin_adopt(
+            live.begin_adopt_for_test(
                 "root",
                 &AdoptCandidateRequest {
                     revert: false,
@@ -4889,7 +4889,7 @@ fn seal_outcomes_rebuild_at_their_anchor_without_repeating_effects() {
         if failed {
             vcs.seal_next_with(Err(VcsError::seal_failed("snapshot refused")));
         }
-        tree.complete(effects.run(vcs.as_ref()));
+        tree.complete(block_on_for_test(effects.run(vcs.as_ref())));
         let _ = tree.take_effects();
         let outcome = tree
             .operations()
@@ -4970,7 +4970,7 @@ fn child_finalization_fences_seal_effects_across_view_rebuild() {
     );
     // The original ticket still owns the seal after rebuilding.
     tree.set_vcs(vcs);
-    let _ = tree.complete(effects.run(tree.vcs()));
+    let _ = tree.complete(block_on_for_test(effects.run(tree.vcs())));
     tree.settle_for_test();
     assert_eq!(tree.pending_result_mail("root").len(), 1);
     assert_child_rebuild_laws(&tree, &child, &feed).unwrap();
@@ -5018,7 +5018,7 @@ fn host_recovery_fences_a_real_seal_across_view_rebuild() {
     );
     assert_eq!(rows(&tree), expected);
     tree.set_vcs(vcs);
-    let _ = tree.complete(effects.run(tree.vcs()));
+    let _ = tree.complete(block_on_for_test(effects.run(tree.vcs())));
     let sealed = rows(&tree);
     tree.clear_feed_views();
     restore_unallocated_children(&mut tree);
@@ -5090,7 +5090,7 @@ fn host_decisions_fence_real_seals_across_view_rebuild() {
             vcs.seal_next_with(Err(VcsError::seal_failed("snapshot refused")));
         }
         tree.set_vcs(vcs);
-        let _ = tree.complete(effects.run(tree.vcs()));
+        let _ = tree.complete(block_on_for_test(effects.run(tree.vcs())));
         let sealed = rows(&tree);
         tree.clear_feed_views();
         restore_unallocated_children(&mut tree);

@@ -108,15 +108,16 @@ fn snapshot_bytes(snapshot: &TreeView) -> usize {
 
 /// A deep, wide tree grown until every spawn budget refuses.
 fn saturated_tree(root: &std::path::Path) -> ProductAgentTree {
-    let mut tree = ProductAgentTree::bootstrap_root(
-        "tree1",
-        "root",
-        "owner",
-        PathBuf::from(root),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .expect("bootstrap");
+    let mut tree =
+        plakous_recursive_subagents::tree::block_on_for_test(ProductAgentTree::bootstrap_root(
+            "tree1",
+            "root",
+            "owner",
+            PathBuf::from(root),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        ))
+        .expect("bootstrap");
     tree.install_snapshot(recursive_epoch());
 
     let mut caller = "root".to_owned();

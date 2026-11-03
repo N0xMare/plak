@@ -2406,3 +2406,39 @@ fn a_mint_hook_does_not_inherit_the_hosts_environment() {
         "the host env is wider than what the hook saw"
     );
 }
+
+/// The production port never reads an uninspectable path as absent: a path
+/// behind a directory it may not search, and a copy root it may not read, are
+/// errors. Only a copy root that does not exist lists nothing.
+#[test]
+fn system_presence_questions_answer_an_uninspectable_path_with_an_error() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = tempdir().unwrap();
+    let launch = root.path().join("launch");
+    std::fs::create_dir_all(&launch).unwrap();
+    assert!(SystemVcs.jj_copy_dirs(&launch).unwrap().is_empty());
+
+    let copies = launch.join(".plak/workspaces");
+    std::fs::create_dir_all(copies.join("c1")).unwrap();
+    assert_eq!(
+        SystemVcs.jj_copy_dirs(&launch).unwrap(),
+        std::collections::BTreeSet::from(["c1".to_owned()])
+    );
+    assert!(SystemVcs.path_exists(&copies.join("c1")).unwrap());
+    assert!(!SystemVcs.path_exists(&copies.join("c2")).unwrap());
+
+    std::fs::set_permissions(&copies, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let searchable = std::fs::read_dir(&copies).is_ok();
+    let listed = SystemVcs.jj_copy_dirs(&launch);
+    let present = SystemVcs.path_exists(&copies.join("c1"));
+    std::fs::set_permissions(&copies, std::fs::Permissions::from_mode(0o700)).unwrap();
+    if searchable {
+        // A process that ignores permissions cannot observe the refusal.
+        return;
+    }
+    assert!(listed.is_err(), "an unreadable copy root listed {listed:?}");
+    assert!(
+        present.is_err(),
+        "an unsearchable parent answered {present:?}"
+    );
+}

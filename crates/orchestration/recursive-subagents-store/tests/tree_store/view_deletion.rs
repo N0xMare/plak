@@ -439,7 +439,9 @@ fn same_cursor_intents_after_an_intent_reserved_seal_rebuild_exactly() {
                 assert_eq!(law_rows(&rebuilt), expected);
                 assert!(rebuilt.take_effects().is_empty());
             }
-            let _ = live.complete(seals.run(&*vcs));
+            let _ = live.complete(plakous_recursive_subagents::tree::block_on_for_test(
+                seals.run(&*vcs),
+            ));
             let _ = settle_law_effects(&mut live, &vcs);
             assert_exact_single_session_rebuild(&live, child, &feed, &TreeFeedReads::default());
         }
@@ -549,7 +551,9 @@ fn settle_law_effects(tree: &mut ProductAgentTree, vcs: &FakeVcs) -> usize {
             return seals;
         }
         seals += effects.seals.len();
-        let _ = tree.complete(effects.run(vcs));
+        let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+            effects.run(vcs),
+        ));
     }
 }
 
@@ -1022,7 +1026,9 @@ fn assert_candidate_view_rebuild(sql: bool) {
     tree.record_host_cancellation(child).unwrap();
     tree.fold_due(child).unwrap();
     let effects = tree.take_effects();
-    let _ = tree.complete(effects.run(&*vcs));
+    let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+        effects.run(&*vcs),
+    ));
     let expected = tree.attempt(child).unwrap().clone();
     assert!(expected.candidate_id.is_some(), "successful divergent seal");
     let candidate = expected.candidate_id.clone().unwrap();
@@ -1139,6 +1145,7 @@ async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs(
     assert_eq!(rebuilt.attempts()[&spawned.attempt_id], expected_superseded);
     rebuilt.acknowledge_revision(store.save(&rebuilt).unwrap());
     let driver = TreeDriver::new(Arc::new(Mutex::new(rebuilt)), store.clone(), vcs, None);
+    driver.reconcile_attachment().await.unwrap();
     // The fixture has an authoritative empty runtime tail; no Start was sent.
     driver
         .withdraw_unstarted_followup(
@@ -1746,9 +1753,11 @@ fn sqlite_spawn_adopt_and_cleanup_outcomes_survive_view_deletion() {
             tree.record_host_cancellation(child).unwrap();
             tree.fold_due(child).unwrap();
             let effects = tree.take_effects();
-            let _ = tree.complete(effects.run(&*vcs));
+            let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+                effects.run(&*vcs),
+            ));
             let candidate = tree.attempt(child).unwrap().candidate_id.clone().unwrap();
-            tree.begin_adopt(
+            tree.begin_adopt_for_test(
                 "root",
                 &AdoptCandidateRequest {
                     revert: false,
@@ -1768,7 +1777,9 @@ fn sqlite_spawn_adopt_and_cleanup_outcomes_survive_view_deletion() {
             }
         }
         let effects = tree.take_effects();
-        let _ = tree.complete(effects.run(&*vcs));
+        let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+            effects.run(&*vcs),
+        ));
         let expected_attempt = tree.attempt(child).unwrap().clone();
         let expected_node = tree.node(child).unwrap().clone();
         let mut expected_fault = tree.fault_reason(child).map(str::to_owned);
@@ -1842,8 +1853,10 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
         tree.record_host_cancellation(child).unwrap();
         tree.fold_due(child).unwrap();
         let effects = tree.take_effects();
-        let _ = tree.complete(effects.run(&*vcs));
-        tree.begin_adopt(
+        let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+            effects.run(&*vcs),
+        ));
+        tree.begin_adopt_for_test(
             "root",
             &AdoptCandidateRequest {
                 revert: false,
@@ -1859,7 +1872,9 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
         assert_eq!(tree.fault_reason(child), Some("earlier precise diagnostic"));
         if settled {
             let effects = tree.take_effects();
-            let _ = tree.complete(effects.run(&*vcs));
+            let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+                effects.run(&*vcs),
+            ));
         }
         let expected_attempt = tree.attempt(child).unwrap().clone();
         let expected_node = tree.node(child).unwrap().clone();
@@ -2144,7 +2159,9 @@ fn sqlite_view_deletion_reopens_host_intents_without_repeating_effects() {
         if decision == 6 {
             vcs.seal_next_with(Err(VcsError::seal_failed("snapshot refused")));
         }
-        let _ = tree.complete(effects.run(&*vcs));
+        let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+            effects.run(&*vcs),
+        ));
         if decision == 5 {
             assert!(tree.attempt(child).unwrap().candidate_id.is_none());
         }
@@ -2510,7 +2527,9 @@ async fn assert_cold_host_anchor(below_retention: bool) {
             .unwrap();
         let effects = cold.take_effects();
         assert_eq!(effects.seals.len(), 1);
-        let _ = cold.complete(effects.run(&*vcs));
+        let _ = cold.complete(plakous_recursive_subagents::tree::block_on_for_test(
+            effects.run(&*vcs),
+        ));
         // Once the feed becomes readable, both live and rebuilt views see
         // the same retained-head binding evidence.
         retained.apply(&mut cold, child).unwrap();
@@ -2568,7 +2587,9 @@ fn sqlite_below_retention_host_outcomes_equal_live_without_new_seals() {
         tree.fold_due(child).unwrap();
         let effects = tree.take_effects();
         assert_eq!(effects.seals.len(), 1);
-        let _ = tree.complete(effects.run(&*vcs));
+        let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+            effects.run(&*vcs),
+        ));
         tree.seed_head_turn(child, None).unwrap();
         let mut expected = tree.attempt(child).unwrap().clone();
         expected.usage.turns = 0;
@@ -2640,9 +2661,11 @@ fn sqlite_orphaned_vcs_faults_survive_view_deletion_and_a_second_reopen() {
         tree.fold_due(child).unwrap();
         if adopt {
             let effects = tree.take_effects();
-            let _ = tree.complete(effects.run(&*vcs));
+            let _ = tree.complete(plakous_recursive_subagents::tree::block_on_for_test(
+                effects.run(&*vcs),
+            ));
             let candidate = tree.attempt(child).unwrap().candidate_id.clone().unwrap();
-            tree.begin_adopt(
+            tree.begin_adopt_for_test(
                 "root",
                 &AdoptCandidateRequest {
                     revert: false,
@@ -2701,7 +2724,7 @@ fn settle_only_reopen_base_pin(tree: &mut ProductAgentTree, vcs: &Arc<FakeVcs>, 
     assert_eq!(
         calls,
         if expected {
-            vec![FakeOp::RestoreBase]
+            vec![FakeOp::Exists, FakeOp::RestoreBase]
         } else {
             Vec::new()
         },

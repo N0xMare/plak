@@ -3495,13 +3495,15 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
             "binding-b-model",
             Some("low".to_owned()),
         );
-        let mut tree = plakous_hosted::agent_tree::ProductAgentTree::bootstrap_root(
-            &source.id,
-            &source.id,
-            "root",
-            workspace.clone(),
-            "binding-b-model",
-            roster.writer_mode,
+        let mut tree = plakous_recursive_subagents::tree::block_on_for_test(
+            plakous_hosted::agent_tree::ProductAgentTree::bootstrap_root(
+                &source.id,
+                &source.id,
+                "root",
+                workspace.clone(),
+                "binding-b-model",
+                roster.writer_mode,
+            ),
         )
         .map_err(|error| error.message)?;
         tree.install_snapshot(plakous_hosted::orchestration::OrchestrationSnapshot::freeze(roster));

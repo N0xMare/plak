@@ -2478,7 +2478,7 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
         .runtime
         .driver()
         .mutate_borrowed_for_test(|tree| {
-            tree.begin_adopt(
+            tree.begin_adopt_for_test(
                 "root",
                 &AdoptCandidateRequest {
                     revert: false,

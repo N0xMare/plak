@@ -185,7 +185,8 @@ fn removal_refusal_backoff_survives_resealing_and_internal_generation_bumps() {
         for (now, delay) in [(0, 30_000), (30_000, 60_000), (90_000, 120_000)] {
             tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
             let mut seal = tree.take_effects().dormancy.pop().unwrap();
-            let result = seal.run(tree.vcs(), &tree.launch_checkout);
+            let result =
+                crate::tree::block_on_for_test(seal.run(tree.vcs(), &tree.launch_checkout));
             assert!(matches!(result, Ok(DormancyAnswer::Sealed(_))));
             tree.complete_dormancy_at(seal, result, now).unwrap();
             let removal = tree.take_effects().dormancy.pop().unwrap();
@@ -217,15 +218,16 @@ fn target_is_retained_after_post_seal_change_or_operational_seal_failure() {
     let lock = repo.path().join(".git").join(format!("{reference}.lock"));
     std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
     std::fs::write(&lock, "synthetic lock").unwrap();
-    assert!(seal.run(tree.vcs(), &tree.launch_checkout).is_err());
+    assert!(crate::tree::block_on_for_test(seal.run(tree.vcs(), &tree.launch_checkout)).is_err());
     assert!(seal.trim_outcome.is_none());
     assert!(path.join("target/cache").exists());
     std::fs::remove_file(lock).unwrap();
-    let result = seal.run(tree.vcs(), &tree.launch_checkout);
+    let result = crate::tree::block_on_for_test(seal.run(tree.vcs(), &tree.launch_checkout));
     tree.complete_dormancy_at(seal, result, 0).unwrap();
     let mut removal = tree.take_effects().dormancy.pop().unwrap();
     std::fs::write(path.join("WORK.txt"), "concurrent change").unwrap();
-    let error = removal.run(tree.vcs(), &tree.launch_checkout).unwrap_err();
+    let error =
+        crate::tree::block_on_for_test(removal.run(tree.vcs(), &tree.launch_checkout)).unwrap_err();
     assert_eq!(
         error.reclamation_refusal,
         Some(plakous_workspace::occupancy_vcs::ReclamationRefusal::ChangedAfterSeal)
@@ -245,7 +247,7 @@ fn over_budget_retained_copy_trims_target_without_touching_the_refusal() {
     tree.reclaim_dormant(u64::MAX, &BTreeMap::from([(workspace.clone(), u64::MAX)]))
         .unwrap();
     let mut ticket = tree.take_effects().dormancy.pop().unwrap();
-    let answer = ticket.run(tree.vcs(), &tree.launch_checkout);
+    let answer = crate::tree::block_on_for_test(ticket.run(tree.vcs(), &tree.launch_checkout));
     assert!(answer.is_err());
     assert!(path.join(".env").exists());
     assert!(!path.join("target").exists());
@@ -273,13 +275,13 @@ fn dormant_reclaim_crash_cuts_seal_remove_and_rehydrate() {
         std::fs::write(path.join("AFTER.txt"), "late uncommitted\n").unwrap();
         tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
         if cut > 0 {
-            let completed = tree.take_effects().run(tree.vcs());
+            let completed = crate::tree::block_on_for_test(tree.take_effects().run(tree.vcs()));
             if cut > 1 {
                 tree.complete(completed);
             }
         }
         if cut > 2 {
-            let completed = tree.take_effects().run(tree.vcs());
+            let completed = crate::tree::block_on_for_test(tree.take_effects().run(tree.vcs()));
             if cut > 3 {
                 tree.complete(completed);
             }
@@ -308,7 +310,8 @@ fn dormant_reclaim_crash_cuts_seal_remove_and_rehydrate() {
             .rehydrate_followup("root", &request, "followup")
             .unwrap();
         if cut == 5 {
-            let _unpublished = reopened.take_effects().run(reopened.vcs());
+            let _unpublished =
+                crate::tree::block_on_for_test(reopened.take_effects().run(reopened.vcs()));
             reopened = ProductAgentTree::reopen(reopened.to_persisted());
             reopened
                 .reclaim_dormant(u64::MAX, &BTreeMap::new())
@@ -363,7 +366,7 @@ fn dormant_reclaim_retains_unknown_ignored_secret_and_staged_content() {
 fn dormant_reclaim_retains_changes_between_seal_and_delete() {
     let (_repo, mut tree, _child, path) = finished();
     tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
-    let completed = tree.take_effects().run(tree.vcs());
+    let completed = crate::tree::block_on_for_test(tree.take_effects().run(tree.vcs()));
     tree.complete(completed);
     std::fs::write(path.join("AFTER.txt"), "must retain\n").unwrap();
     assert_eq!(tree.settle_for_test().cleanup_failures.len(), 1);
@@ -438,4 +441,70 @@ fn projected_view_names_retired_and_reclaimed_and_revival_clears_reclaimed() {
         .unwrap();
     assert!(!row.dormancy.workspace_reclaimed);
     assert!(path.exists());
+}
+
+/// Whether the copy is still there is asked of the port: a port that cannot
+/// answer fails the removal step closed, so a copy that only looks absent is
+/// neither removed unproven nor minted over.
+#[test]
+fn an_unanswered_presence_question_neither_removes_nor_remints_the_copy() {
+    let (_repo, mut tree, _child, path) = finished();
+    tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+    let mut seal = tree.take_effects().dormancy.pop().unwrap();
+    let result = crate::tree::block_on_for_test(seal.run(tree.vcs(), &tree.launch_checkout));
+    tree.complete_dormancy_at(seal, result, 0).unwrap();
+    let mut removal = tree.take_effects().dormancy.pop().unwrap();
+    let unreachable = FakeVcs::new();
+    unreachable.refuse_workspace_questions();
+    let error = crate::tree::block_on_for_test(removal.run(&unreachable, &tree.launch_checkout))
+        .unwrap_err();
+    assert_eq!(error.kind, super::super::VcsErrorKind::MintUnavailable);
+    assert!(path.exists(), "an unproven copy was removed");
+    assert_eq!(
+        unreachable
+            .calls()
+            .iter()
+            .map(|call| call.op)
+            .collect::<Vec<_>>(),
+        [plakous_workspace::occupancy_vcs::fake::FakeOp::Exists]
+    );
+}
+
+/// A revival asks the port whether the reclaimed copy is still there before
+/// it decides between reusing and re-minting it: a port that cannot answer
+/// fails the restore closed, and nothing is minted over a copy that only
+/// looks absent.
+#[test]
+fn an_unanswered_presence_question_never_remints_a_reviving_copy() {
+    let (_repo, mut tree, child, path) = finished();
+    tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+    assert_eq!(tree.settle_for_test().cleanup_failures, Vec::new());
+    assert!(!path.exists());
+    tree.state = super::super::TreeAdmissionState::Live;
+    let request = SendAgentMessageRequest {
+        refresh: None,
+        agent_id: child.clone(),
+        message: "continue".into(),
+        purpose: Some(super::super::MessagePurpose::Followup),
+        priority: None,
+        in_reply_to: None,
+        output_schema_json: None,
+    };
+    tree.rehydrate_followup("root", &request, "revive").unwrap();
+    let mut restore = tree.take_effects().dormancy.pop().unwrap();
+    let unreachable = FakeVcs::new();
+    unreachable.refuse_workspace_questions();
+    let error = crate::tree::block_on_for_test(restore.run(&unreachable, &tree.launch_checkout))
+        .unwrap_err();
+    assert_eq!(error.kind, super::super::VcsErrorKind::MintUnavailable);
+    assert_eq!(
+        unreachable
+            .calls()
+            .iter()
+            .map(|call| call.op)
+            .collect::<Vec<_>>(),
+        [plakous_workspace::occupancy_vcs::fake::FakeOp::Exists],
+        "nothing was minted after an unanswered presence question"
+    );
+    assert!(!path.exists());
 }

@@ -3,34 +3,11 @@ use super::{
     MAX_PENDING_SPAWNS, MAX_TREE_DEPTH, MAX_TREE_NODES, MintedCopy, NodeRecord, NodeStatus,
     ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest, SpawnIdentity,
     SpawnReservation, SubmitNudgeBudget, TemplateName, TopologyError, TopologyErrorCode,
-    TopologyGrant, UsageRow, WorkspacePlan, WorkspaceReceipt, admit_output_schema, next_child_id,
-    now_unix_millis, topology_error_from_vcs,
+    TopologyGrant, UsageRow, VcsError, WorkspacePlan, WorkspaceReceipt, admit_output_schema,
+    next_child_id, now_unix_millis, topology_error_from_vcs,
 };
 
 impl ProductAgentTree {
-    /// Spawns a child inline: reserve, run the mint the reservation owes
-    /// through the tree's own port, commit. The in-process convenience for
-    /// the tree's own tests and for `inherit` spawns, which mint nothing.
-    ///
-    /// Production drives [`Self::spawn_reserve`] / [`Self::spawn_commit`]
-    /// through the runtime so the mint runs with the tree mutex released.
-    ///
-    pub fn spawn_agent(
-        &mut self,
-        caller_id: &str,
-        request: &SpawnAgentRequest,
-        operation_id: Option<&str>,
-    ) -> Result<SpawnAgentOutput, TopologyError> {
-        match self.spawn_reserve(caller_id, request, operation_id)? {
-            SpawnAdmission::Replayed(output) => Ok(output),
-            SpawnAdmission::Reserved(reservation, None) => self.spawn_commit(*reservation, None),
-            SpawnAdmission::Reserved(reservation, Some(ticket)) => match ticket.mint(self.vcs()) {
-                Ok(minted) => self.spawn_commit(*reservation, Some(minted)),
-                Err(error) => Err(self.spawn_abort(*reservation, topology_error_from_vcs(error))),
-            },
-        }
-    }
-
     /// The admission half of a spawn: every budget,
     /// grant, template, and schema check, the child id, and the workspace
     /// plan — with no subprocess. A copying tier comes back as a
@@ -38,6 +15,11 @@ impl ProductAgentTree {
     /// released; the reserved id is held in the tree's `minting` set until
     /// [`Self::spawn_commit`] or [`Self::spawn_abort`] gives it back, so a
     /// second spawn racing this one cannot mint over the same copy.
+    ///
+    /// `jj_copy_dirs` is the port's listing of the JJ copy root, asked before
+    /// the lock: a child id whose copy directory exists without a row (a
+    /// crashed mint) is skipped. A port that could not list it refuses the
+    /// spawn after the replay checks.
     #[allow(
         clippy::too_many_lines,
         reason = "spawn admission validates grants, roster, schema and capacity before reserving a single workspace identity"
@@ -47,6 +29,7 @@ impl ProductAgentTree {
         caller_id: &str,
         request: &SpawnAgentRequest,
         operation_id: Option<&str>,
+        jj_copy_dirs: &Result<BTreeSet<String>, VcsError>,
     ) -> Result<SpawnAdmission, TopologyError> {
         if let Some(prior) = self.replay_typed(operation_id, "spawn_agent", request)? {
             return Ok(SpawnAdmission::Replayed(prior));
@@ -192,6 +175,9 @@ impl ProductAgentTree {
         // an `inputs` entry names the sealed candidate the child
         // starts from, instead of its parent's live state.
         let input_base = self.resolve_input_base(request.input_ids())?;
+        let jj_copy_dirs = jj_copy_dirs
+            .as_ref()
+            .map_err(|error| topology_error_from_vcs(error.clone()))?;
 
         self.pending_spawns = self.pending_spawns.saturating_add(1);
         let agent_id = next_child_id(
@@ -200,7 +186,7 @@ impl ProductAgentTree {
             &self.nodes,
             &self.workspaces,
             &self.minting,
-            &self.launch_checkout,
+            jj_copy_dirs,
         );
         let plan = match self.plan_workspace(
             caller_id,

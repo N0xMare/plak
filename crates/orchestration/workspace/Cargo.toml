@@ -33,6 +33,7 @@ futures = { workspace = true, optional = true }
 gix = { version = "=0.88.0", default-features = false, optional = true }
 pollster = { version = "=1.0.1", optional = true }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 
 [features]
 default = ["git-cli", "jj-lib"]

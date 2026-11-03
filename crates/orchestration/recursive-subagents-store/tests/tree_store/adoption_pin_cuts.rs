@@ -88,7 +88,7 @@ async fn adoption_cut(jj: bool, cut: Cut) {
         .clone()
         .unwrap();
     tree.acknowledge_revision(store.save(&tree).unwrap());
-    tree.begin_adopt(
+    tree.begin_adopt_for_test(
         "root",
         &AdoptCandidateRequest {
             revert: false,
@@ -105,7 +105,8 @@ async fn adoption_cut(jj: bool, cut: Cut) {
     assert!(effects.is_empty());
     let old_base = row_base(&tree, &child.workspace.id);
     if cut != Cut::BeforeLanding {
-        let landing = ticket.land(&SystemVcs).unwrap();
+        let landing =
+            plakous_recursive_subagents::tree::block_on_for_test(ticket.land(&SystemVcs)).unwrap();
         assert_ne!(read_base(repo.path(), jj, &child.agent_id), old_base);
         if jj {
             assert!(git_redirect_fence::install_for_copy(&path, Some(&old_base)).is_err());
@@ -140,6 +141,7 @@ async fn adoption_cut(jj: bool, cut: Cut) {
         Arc::new(SystemVcs),
         None,
     );
+    driver.reconcile_attachment().await.unwrap();
     assert_eq!(
         read_base(repo.path(), jj, &child.agent_id),
         expected,
@@ -179,7 +181,7 @@ async fn assert_retry_lands(
     let (admitted, landed) = driver
         .mutate_and_settle({
             let request = request.clone();
-            move |tree| tree.begin_adopt("root", &request)
+            move |tree| tree.begin_adopt_for_test("root", &request)
         })
         .await
         .unwrap();

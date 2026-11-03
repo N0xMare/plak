@@ -182,40 +182,16 @@ impl TreeDriver {
 
     /// Binds `tree` to `store` and `vcs`, installing `vcs` as the tree's own
     /// port so the mint inside `spawn_agent` and the effects run here drive
-    /// one implementation. Reopen-owned base-pin reconciliation completes
-    /// before attachment returns, outside the mutex and before any adopt retry.
+    /// one implementation. A reopened tree's base-pin and refresh
+    /// reconciliation waits for [`Self::reconcile_attachment`].
     pub fn new(
         tree: Arc<Mutex<ProductAgentTree>>,
         store: Arc<dyn TreeStore>,
         vcs: Arc<dyn VcsOps>,
         observer: Option<Arc<dyn TopologyObserver>>,
     ) -> Self {
-        let preparation = if let Ok(mut guard) = tree.lock() {
+        if let Ok(mut guard) = tree.lock() {
             guard.set_vcs(Arc::clone(&vcs));
-            let attach = guard.take_attach_effects();
-            if attach.is_empty() {
-                None
-            } else {
-                let published = store.save(&guard).map(|revision| {
-                    guard.acknowledge_revision(revision);
-                });
-                Some((attach, published))
-            }
-        } else {
-            None
-        };
-        if let Some((attach, published)) = preparation {
-            let completed = match published {
-                Ok(()) => attach.run(vcs.as_ref()),
-                Err(error) => attach.refuse_attach(format!(
-                    "attachment publication failed: {error}; no base pin was changed"
-                )),
-            };
-            if let Ok(mut guard) = tree.lock() {
-                // Record local faults now; startup publication (or the first
-                // mutation) saves them with the rest of the reopened generation.
-                guard.complete(completed);
-            }
         }
         let (restored_paused, root_agent_id) = {
             let tree = tree
@@ -250,8 +226,9 @@ impl TreeDriver {
         }
     }
 
-    /// Reclaims only acknowledged, settled dormant copies. Disk probes and
-    /// VCS work run on blocking workers, never under the tree mutex.
+    /// Reclaims only acknowledged, settled dormant copies. Size probes run on
+    /// blocking workers and VCS work through the port, never under the tree
+    /// mutex.
     pub async fn reclaim_dormant_checkouts(&self) -> Result<(), TopologyError> {
         let now = plakous::model::now_unix_millis();
         let delay = self.read(|tree| tree.snapshot.workspace_idle_seconds)?;
@@ -419,14 +396,15 @@ impl TreeDriver {
                     namespace.clone(),
                     ticket.candidates.clone(),
                 );
-                tokio::task::spawn_blocking(move || {
-                    candidates.iter().try_for_each(|candidate| {
-                        vcs.unpin(&launch, &namespace, candidate.as_str())
-                    })
-                })
+                async move {
+                    for candidate in &candidates {
+                        vcs.unpin(&launch, &namespace, candidate.as_str()).await?;
+                    }
+                    Ok::<(), VcsError>(())
+                }
                 .await
             };
-            if !matches!(unpinned, Ok(Ok(()))) {
+            if unpinned.is_err() {
                 return Err(TopologyError::new(
                     TopologyErrorCode::WorkspaceRecoveryRequired,
                     "collected candidate pin cleanup remains pending; intent retained",
@@ -1054,7 +1032,8 @@ impl TreeDriver {
     /// Destructive removal requires an acknowledged preparation; a refused
     /// preparation retains the copy and records recovery without dispatch.
     ///
-    /// The port runs on a blocking worker; each recording is one writer.
+    /// The port's answers are awaited outside every lock; each recording is
+    /// one writer.
     ///
     /// # Errors
     ///
@@ -1098,7 +1077,11 @@ impl TreeDriver {
                 })
                 .await??;
             let vcs = Arc::clone(&self.vcs);
-            let mut completed = tokio::task::spawn_blocking(move || admitted.run(vcs.as_ref()))
+            // The admitted batch is a task of its own, awaited here: once
+            // dispatched it runs every port call to its end even if this
+            // release owner is aborted. It ends with the Tokio runtime
+            // (spec 03 §16), between two port calls.
+            let mut completed = tokio::spawn(async move { admitted.run(vcs.as_ref()).await })
                 .await
                 .map_err(|_| {
                     TopologyError::new(
@@ -1531,6 +1514,7 @@ pub(super) fn driver_for_tree(
     }
 }
 
+mod attach;
 #[cfg(any(test, feature = "test-support"))]
 mod test_support;
 

@@ -123,13 +123,12 @@ fn collection_law(resolve: bool) {
     }
     for cleanup in tree.pending_pin_cleanup().unwrap() {
         for id in &cleanup.candidates {
-            SystemVcs
-                .unpin(
-                    repo.path(),
-                    &super::super::digest_text("tree1"),
-                    id.as_str(),
-                )
-                .unwrap();
+            crate::tree::block_on_for_test(SystemVcs.unpin(
+                repo.path(),
+                &super::super::digest_text("tree1"),
+                id.as_str(),
+            ))
+            .unwrap();
         }
         tree.acknowledge_pin_cleanup(&cleanup).unwrap();
     }

@@ -38,6 +38,23 @@ pub(super) enum BasePinRecovery {
     Complete,
 }
 
+impl super::BasePinTicket {
+    /// Restores a present copy's base pin; `Ok(false)` when the copy is
+    /// absent and has none. A port that cannot say whether the copy exists
+    /// fails the reconciliation rather than skip it.
+    pub(super) async fn run(
+        &self,
+        vcs: &dyn plakous_workspace::occupancy_vcs::VcsOps,
+    ) -> Result<bool, VcsError> {
+        if !vcs.path_exists(&self.path).await? {
+            return Ok(false);
+        }
+        vcs.restore_copy_base(&self.path, &self.namespace, &self.agent_id, &self.base)
+            .await
+            .map(|()| true)
+    }
+}
+
 impl ProductAgentTree {
     fn recovery_base_pins(&self) -> Vec<super::BasePinTicket> {
         self.workspaces
@@ -46,7 +63,6 @@ impl ProductAgentTree {
                 row.status == WorkspaceStatus::Adopting
                     && row.mode != WorkspaceMode::Inherit
                     && !self.reclaimed(&row.workspace_id)
-                    && row.path.exists()
             })
             .filter(|row| {
                 self.operations.values().any(|op| {
@@ -100,7 +116,7 @@ impl ProductAgentTree {
     pub(super) fn finish_base_pin_recovery(
         &mut self,
         ticket: super::BasePinTicket,
-        result: Result<(), VcsError>,
+        result: Result<bool, VcsError>,
     ) {
         if !matches!(self.base_pin_recovery.get(&ticket.workspace_id),
             Some(BasePinRecovery::Pending(owner)) if Arc::ptr_eq(owner, &ticket.ownership))
@@ -108,7 +124,11 @@ impl ProductAgentTree {
             return;
         }
         match result {
-            Ok(()) => {
+            // An absent copy is skipped, as if it had never been queued.
+            Ok(false) => {
+                self.base_pin_recovery.remove(&ticket.workspace_id);
+            }
+            Ok(true) => {
                 self.base_pin_recovery
                     .insert(ticket.workspace_id, BasePinRecovery::Complete);
             }

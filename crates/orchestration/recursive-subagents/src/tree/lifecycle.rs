@@ -14,9 +14,9 @@ use super::{
     NodeStatus, ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest,
     SpawnIdentity, SpawnReservation, SubmitNudgeBudget, SubmitResultOutput, SubmitResultRequest,
     TemplateName, TopologyError, TopologyErrorCode, TopologyGrant, TopologyObserver,
-    TreeAdmissionState, UsageRow, VcsSnapshot, WorkspaceMode, WorkspacePlan, WorkspaceReceipt,
-    WorkspaceStatus, admit_output_schema, next_child_id, now_unix_millis, topology_error_from_vcs,
-    topology_submit_request_invalid_message, validate_output_json,
+    TreeAdmissionState, UsageRow, VcsError, VcsSnapshot, WorkspaceMode, WorkspacePlan,
+    WorkspaceReceipt, WorkspaceStatus, admit_output_schema, next_child_id, now_unix_millis,
+    topology_error_from_vcs, topology_submit_request_invalid_message, validate_output_json,
 };
 
 impl ProductAgentTree {

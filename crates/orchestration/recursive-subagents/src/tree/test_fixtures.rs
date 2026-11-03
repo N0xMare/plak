@@ -1,8 +1,10 @@
 use crate::epoch::BindHints;
 
 use super::{
-    Arc, AttemptRecord, NodeStatus, PathBuf, ProductAgentTree, SubmitNudgeBudget, SystemVcs,
-    TopologyError, TopologyErrorCode, VcsOps, WriterMode,
+    AdoptCandidateRequest, AdoptOutcome, Arc, AttemptRecord, ListAgentsOutput, ListAgentsRequest,
+    NodeStatus, PathBuf, ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest,
+    SubmitNudgeBudget, SystemVcs, TopologyError, TopologyErrorCode, VcsOps, WriterMode,
+    topology_error_from_vcs,
 };
 
 impl ProductAgentTree {
@@ -75,7 +77,7 @@ impl ProductAgentTree {
         writer_mode: WriterMode,
     ) -> Result<Self, TopologyError> {
         let selected_tuple = selected_tuple.into();
-        let mut tree = Self::bootstrap_root_with(
+        let mut tree = super::block_on_for_test(Self::bootstrap_root_with(
             vcs,
             tree_id,
             root_agent_id,
@@ -83,7 +85,7 @@ impl ProductAgentTree {
             launch_checkout,
             selected_tuple.clone(),
             writer_mode,
-        )?;
+        ))?;
         let working_set = crate::epoch::RosterInput::test_working_set(selected_tuple);
         for (name, binding) in working_set.templates {
             tree.pin_template(name.as_str(), binding);
@@ -115,5 +117,109 @@ impl ProductAgentTree {
     pub fn attempt_mut_for_test(&mut self, agent_id: &str) -> &mut AttemptRecord {
         self.current_attempt_mut(agent_id)
             .unwrap_or_else(|| unreachable!("test node {agent_id} has an attempt"))
+    }
+
+    /// The tree's own port, for the conveniences below and the tree's tests.
+    pub(super) fn vcs(&self) -> &dyn VcsOps {
+        self.vcs.0.as_ref()
+    }
+
+    /// Spawns a child inline: list the copy root, reserve, run the mint the
+    /// reservation owes through the tree's own port, commit, blocking on
+    /// each port answer. The convenience for tests.
+    ///
+    /// Production drives [`Self::spawn_reserve`] / [`Self::spawn_commit`]
+    /// through the runtime so the port answers with the tree mutex released.
+    pub fn spawn_agent(
+        &mut self,
+        caller_id: &str,
+        request: &SpawnAgentRequest,
+        operation_id: Option<&str>,
+    ) -> Result<SpawnAgentOutput, TopologyError> {
+        let copies = super::block_on_for_test(self.vcs().jj_copy_dirs(&self.launch_checkout));
+        match self.spawn_reserve(caller_id, request, operation_id, &copies)? {
+            SpawnAdmission::Replayed(output) => Ok(output),
+            SpawnAdmission::Reserved(reservation, None) => self.spawn_commit(*reservation, None),
+            SpawnAdmission::Reserved(reservation, Some(ticket)) => {
+                match super::block_on_for_test(ticket.mint(self.vcs())) {
+                    Ok(minted) => self.spawn_commit(*reservation, Some(minted)),
+                    Err(error) => {
+                        Err(self.spawn_abort(*reservation, topology_error_from_vcs(error)))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Renders `list_agents` through the tree's own port, blocking on each
+    /// probe: the in-process convenience for tests. Production drives
+    /// [`Self::occupancy_probe`] / [`Self::list_agents_with`] through the
+    /// runtime so the probes run with the tree mutex released.
+    pub fn list_agents(
+        &self,
+        caller_id: &str,
+        request: &ListAgentsRequest,
+    ) -> Result<ListAgentsOutput, TopologyError> {
+        let occupancy =
+            super::block_on_for_test(self.occupancy_probe(caller_id, request)?.run(self.vcs()));
+        self.list_agents_with(caller_id, request, &occupancy)
+    }
+
+    /// `adopt_candidate` driven synchronously through the
+    /// tree's own port, for tests: authority checks, the landing, and the
+    /// receipt in one call. Production runs the landing as an effect with
+    /// the mutex released (`begin_adopt` queues the ticket; the runtime
+    /// completes it) and keeps the operation ledger itself.
+    pub fn adopt_candidate(
+        &mut self,
+        caller_id: &str,
+        request: &AdoptCandidateRequest,
+        operation_id: Option<&str>,
+    ) -> Result<AdoptOutcome, TopologyError> {
+        if let Some(prior) = self.replay_typed(operation_id, "adopt_candidate", request)? {
+            return Ok(prior);
+        }
+        self.begin_adopt_for_test(caller_id, request)?;
+        let ticket = self
+            .effects
+            .adopts
+            .pop()
+            .unwrap_or_else(|| unreachable!("begin_adopt queued the ticket"));
+        let landed = super::block_on_for_test(ticket.land(self.vcs()));
+        let outcome = self.finish_adopt(&ticket, landed);
+        match outcome {
+            Ok(outcome) => {
+                if let Some(id) = operation_id {
+                    self.remember_success(id, caller_id, "adopt_candidate", request, &outcome)?;
+                }
+                Ok(outcome)
+            }
+            Err(error) => {
+                if let Some(id) = operation_id
+                    && matches!(
+                        error.code,
+                        TopologyErrorCode::MergeConflict | TopologyErrorCode::TargetChanged
+                    )
+                {
+                    self.remember_failure(id, caller_id, "adopt_candidate", request, error.code)?;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// [`Self::begin_adopt`] with its probe answered through the tree's own
+    /// port, blocking on each answer: the convenience for tests.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::begin_adopt`].
+    pub fn begin_adopt_for_test(
+        &mut self,
+        caller_id: &str,
+        request: &AdoptCandidateRequest,
+    ) -> Result<(), TopologyError> {
+        let facts = super::block_on_for_test(self.adopt_probe(caller_id, request).run(self.vcs()));
+        self.begin_adopt(caller_id, request, &facts)
     }
 }

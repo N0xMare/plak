@@ -12,8 +12,9 @@
 //! here touches `ProductAgentTree`, and nothing here names a topology type:
 //! failures are [`VcsError`], which the tree converts.
 //!
-//! [`VcsOps`] is the port the tree drives; [`SystemVcs`] is the only
-//! production implementation. A test doubles it with `FakeVcs`.
+//! [`VcsOps`] is the async port the tree drives; [`SystemVcs`] is the only
+//! production implementation, running its blocking work on blocking workers.
+//! A test doubles it with `FakeVcs`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -52,7 +53,7 @@ pub use mint::run_mint_hook;
 use mint::run_mint_hook_bounded;
 use mint::{mint_git_worktree, mint_jj_workspace};
 pub use names::{CopyNames, branch_of_copy_dir, copy_names};
-pub use ops::{AdoptRequest, MintRequest, RevertRange, SystemVcs, VcsOps};
+pub use ops::{AdoptRequest, MintRequest, RevertRange, SystemVcs, VcsFuture, VcsOps};
 pub use refresh::{RefreshApplied, RefreshPlan, RefreshPreparation, RefreshRequest};
 
 use plakous_host_protocol::topology::WorkspaceMode;

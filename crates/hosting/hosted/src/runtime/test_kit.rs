@@ -480,10 +480,10 @@ pub fn install_idle_topology_hub(
         || Ok(crate::topology_runtime::test_support::memory_store()),
         None,
         |_| {
-            Ok(crate::topology_runtime::test_support::bootstrap(
+            std::future::ready(Ok(crate::topology_runtime::test_support::bootstrap(
                 tree_id,
                 workspace.to_path_buf(),
-            ))
+            )))
         },
     )
     .block()

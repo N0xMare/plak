@@ -55,7 +55,7 @@ pub(super) async fn snapshot_failure(
     let reference = candidate_ref(&namespace, &id);
     // The seal primitive leaves HEAD, the branch and the real index untouched,
     // and excludes secrets. Its durable rescue owner is not adoptable authority.
-    let result = tokio::task::spawn_blocking(move || vcs.seal(&path, &namespace, &id, &base)).await;
+    let result = tokio::spawn(async move { vcs.seal(&path, &namespace, &id, &base).await }).await;
     Some(match result {
         Ok(Ok(snapshot)) => format!(
             "; failed worktree snapshot: {reference} (commit {})",
