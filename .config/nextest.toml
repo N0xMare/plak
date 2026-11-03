@@ -171,6 +171,7 @@ not (
   | test(sixty_fifth_running_start_is_refused_before_spawn)
   | test(host_capacity_refuses_the_129th_start_across_services_before_spawn)
   | test(resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner)
+  | test(full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape)
   | test(durability::)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
@@ -316,6 +317,7 @@ default-filter = '''
   | test(sixty_fifth_running_start_is_refused_before_spawn)
   | test(host_capacity_refuses_the_129th_start_across_services_before_spawn)
   | test(resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner)
+  | test(full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape)
   | test(durability::)
 '''
 

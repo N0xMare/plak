@@ -1440,6 +1440,7 @@ assertions do not measure elapsed time and need no budget lane.
 | Process capacity probes | `running_children_still_count_against_the_session_limit`, `sixty_fifth_running_start_is_refused_before_spawn`, `host_capacity_refuses_the_129th_start_across_services_before_spawn`, `a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure` |
 | Product CAS startup/reopen | `isolated_jsonl_startups_and_reopens_preserve_product_revision`, `isolated_idle_jsonl_quits_and_reopens_preserve_product_revision` |
 | PTY resize | `resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner` |
+| Crash-sweep view rebuild | `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` — runs every registered sweep shape's lifecycle in sequence in one test (38 to 58 seconds alone); under parallel gate load it outran the parallel lane's 120-second allowance |
 | Auth lock/callback and HTTP closure deadlines | `expired_commit_and_stalled_callback_writer_are_fail_closed_and_bounded`, `busy_execution_lock_fails_without_waiting_or_accepting`, `an_early_response_to_an_unfinished_upload_is_not_kept`, `a_post_acceptance_deadline_is_definite_on_both_wires` |
 | Detached writer cleanup | `host_future_drop_is_bounded_with_a_detached_continuous_writer` |
 | Auth deadlines | `cancelling_claimed_refresh_after_request_observation_restores_ready`, `local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store` |
