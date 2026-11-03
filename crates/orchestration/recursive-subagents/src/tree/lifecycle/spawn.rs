@@ -145,8 +145,11 @@ impl ProductAgentTree {
             .map(TemplateName::as_str);
         // Menu before account and schema checks, so an off-menu card is
         // `template_not_spawnable` even when its account would not bind.
-        // A name the epoch does not carry stays `template_unknown`.
-        if self.snapshot.binding(&request.template).is_none() {
+        // A name the epoch does not carry stays `template_unknown`. Spawn
+        // authority is the caller's epoch.
+        let epoch_no = self.caller_epoch_no(caller_id)?;
+        let epoch = self.caller_epoch(caller_id)?;
+        if epoch.binding(&request.template).is_none() {
             return Err(TopologyError::new(
                 TopologyErrorCode::TemplateUnknown,
                 format!(
@@ -155,10 +158,7 @@ impl ProductAgentTree {
                 ),
             ));
         }
-        if !self
-            .snapshot
-            .menu_contains(caller_template, &request.template)
-        {
+        if !epoch.menu_contains(caller_template, &request.template) {
             return Err(TopologyError::new(
                 TopologyErrorCode::TemplateNotSpawnable,
                 format!(
@@ -169,7 +169,7 @@ impl ProductAgentTree {
             ));
         }
         let (binding, account, tuple_id, effort) =
-            self.resolve_template_binding(&request.template)?;
+            self.resolve_template_binding(caller_id, &request.template)?;
         // above the ceiling lands at the ceiling; not an error.
         let tier = request.tier.clipped_to(binding.max_tier);
         // an `inputs` entry names the sealed candidate the child
@@ -217,11 +217,11 @@ impl ProductAgentTree {
         };
         let mut parent_grant = grant.clone();
         TopologyGrant::apply_spawn(&mut parent_grant, &mut child_grant, caller_id, &agent_id);
-        // Delegation authority is the child template's own menu, bounded by
-        // depth. Adoption presumes a subtree, so it follows the grant's
-        // may_spawn.
+        // Delegation authority is the child template's own menu in the
+        // epoch the child is spawned under, bounded by depth. Adoption
+        // presumes a subtree, so it follows the grant's may_spawn.
         child_grant.may_spawn = self
-            .snapshot
+            .caller_epoch(caller_id)?
             .spawnable_template_names(Some(request.template.as_str()))
             .next()
             .is_some()
@@ -258,6 +258,7 @@ impl ProductAgentTree {
                 output_schema_json,
                 schema_digest,
                 template: request.template.clone(),
+                epoch_no,
                 mode,
                 parent_grant,
                 child_grant,
@@ -294,6 +295,7 @@ impl ProductAgentTree {
             output_schema_json,
             schema_digest,
             template,
+            epoch_no,
             mode,
             parent_grant,
             child_grant,
@@ -348,7 +350,7 @@ impl ProductAgentTree {
             branch: bound.branch,
             active_turn: false,
             line_id: None,
-            epoch_no: self.epochs().current,
+            epoch_no,
             placement: NodePlacement::default(),
             parent_composition: None,
         };

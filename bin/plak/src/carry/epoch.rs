@@ -57,7 +57,7 @@ pub(super) fn orchestration_changed(
     let TreeInspection::Tree(tree) = observed else {
         return Ok(false);
     };
-    let frozen = &tree.rows().snapshot;
+    let frozen = tree.rows().current_epoch();
     // The session's own profile, re-resolved against the template files as
     // they are now: an edit to one of its files applies to this session, a
     // change of the home default never does. A profile that no longer loads

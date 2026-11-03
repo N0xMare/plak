@@ -153,7 +153,7 @@ fn mail_start_batched_command_bytes() {
         WriterMode::SingleLease,
     )
     .unwrap();
-    let mut snapshot = tree.snapshot.clone();
+    let mut snapshot = tree.current_epoch().clone();
     snapshot.max_depth = 2;
     snapshot.digest = snapshot.compute_digest();
     tree.install_snapshot(snapshot);

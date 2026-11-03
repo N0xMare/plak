@@ -2,16 +2,22 @@
 //! tree carries, where a forked tree came from, where a node's tools run, and
 //! which commits each runner already holds (spec 03 §1.2, §14).
 //!
-//! Today's flows write only the defaults (no line, epoch 0, the local runner,
-//! no provenance, no ancestors) and read none of them; the switch, the line
+//! Every snapshot read goes through the epoch accessors here: spawn authority
+//! by the caller's epoch, a node's bind, reopen and lifecycle by its own,
+//! housekeeping and the root's surfaces by the current one. Today's flows
+//! write only the defaults (no line, epoch 0, the local runner, no
+//! provenance, no ancestors) and never append an epoch; the switch, the line
 //! integration and the runner steps fill them in.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::{OrchestrationSnapshot, ProductAgentTree};
+use super::{
+    CellAgentBudget, OrchestrationSnapshot, ProductAgentTree, TopologyError, TopologyErrorCode,
+};
 
 /// The L0 agent-line identity a node maps to for life: the canonical
 /// lowercase hyphenated UUID of the branch that started the line, the same
@@ -160,6 +166,10 @@ pub(super) struct TreeLineage {
     pub(super) runner_ancestors: BTreeMap<String, BTreeSet<String>>,
 }
 
+/// Epochs one tree may reference at once: the current epoch plus every
+/// epoch a non-root node was spawned under. An append past it is refused.
+pub const MAX_REFERENCED_EPOCHS: usize = 8;
+
 impl ProductAgentTree {
     /// The tree's epochs: the current one and the successor rows.
     #[must_use]
@@ -167,6 +177,217 @@ impl ProductAgentTree {
         &self.lineage.epochs
     }
 
+    /// The snapshot of epoch `epoch_no`, when this tree holds it.
+    #[must_use]
+    pub fn epoch_snapshot(&self, epoch_no: u64) -> Option<&OrchestrationSnapshot> {
+        if epoch_no == 0 {
+            return Some(&self.snapshot);
+        }
+        self.lineage.epochs.successors.get(&epoch_no)
+    }
+
+    /// Epoch 0, the snapshot the tree row itself carries. Only a store
+    /// writing that row reads it; every other reader names whose epoch it
+    /// wants.
+    #[must_use]
+    pub fn header_snapshot(&self) -> &OrchestrationSnapshot {
+        &self.snapshot
+    }
+
+    /// The current epoch: what the root spawns from, the root's own
+    /// surfaces, and the policy tree-wide housekeeping applies.
+    #[must_use]
+    pub fn current_epoch(&self) -> &OrchestrationSnapshot {
+        // A load refuses a current epoch the tree does not hold and
+        // `append_epoch` only ever names one it inserted, so the header is
+        // never reached here while the rows are coherent.
+        self.epoch_snapshot(self.lineage.epochs.current)
+            .unwrap_or(&self.snapshot)
+    }
+
+    /// The epoch number `node_id` lives under. The root follows the current
+    /// epoch; every other node keeps the epoch it was spawned under.
+    pub(super) fn epoch_no_of(&self, node_id: &str) -> Option<u64> {
+        if node_id == self.root_agent_id {
+            return Some(self.lineage.epochs.current);
+        }
+        self.nodes.get(node_id).map(|node| node.epoch_no)
+    }
+
+    /// The epoch a node binds and reopens under, and whose per-node policy
+    /// (turn ceiling, mint hook, transient resumes, cell budget) applies to
+    /// it. `None` for an unknown node.
+    #[must_use]
+    pub fn epoch_of(&self, node_id: &str) -> Option<&OrchestrationSnapshot> {
+        self.epoch_snapshot(self.epoch_no_of(node_id)?)
+    }
+
+    /// The epoch whose roster is `caller_id`'s spawn authority: its menu,
+    /// its cards, and the bind a spawn from it freezes.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an unknown caller as `grant_denied`, and a caller whose
+    /// epoch the tree does not hold.
+    pub fn caller_epoch(&self, caller_id: &str) -> Result<&OrchestrationSnapshot, TopologyError> {
+        let epoch_no = self.caller_epoch_no(caller_id)?;
+        self.epoch_snapshot(epoch_no).ok_or_else(epoch_not_held)
+    }
+
+    pub(super) fn caller_epoch_no(&self, caller_id: &str) -> Result<u64, TopologyError> {
+        self.node(caller_id)?;
+        self.epoch_no_of(caller_id).ok_or_else(epoch_not_held)
+    }
+
+    /// Every epoch the tree holds, header first.
+    pub fn retained_epochs(&self) -> impl Iterator<Item = (u64, &OrchestrationSnapshot)> + '_ {
+        std::iter::once((0, &self.snapshot)).chain(
+            self.lineage
+                .epochs
+                .successors
+                .iter()
+                .map(|(number, snapshot)| (*number, snapshot)),
+        )
+    }
+
+    /// Whether every retained epoch's digest still matches its contents:
+    /// the reopen gate, so an edited roster in any epoch is caught.
+    #[must_use]
+    pub fn epoch_digests_match(&self) -> bool {
+        self.retained_epochs()
+            .all(|(_, snapshot)| snapshot.digest_matches())
+    }
+
+    /// The current epoch, for an in-place install on a quiescent tree.
+    pub(super) fn current_epoch_mut(&mut self) -> &mut OrchestrationSnapshot {
+        let current = self.lineage.epochs.current;
+        if current == 0 {
+            return &mut self.snapshot;
+        }
+        match self.lineage.epochs.successors.get_mut(&current) {
+            Some(snapshot) => snapshot,
+            None => &mut self.snapshot,
+        }
+    }
+
+    /// Epochs a non-root node still references.
+    fn node_epochs(&self) -> BTreeSet<u64> {
+        self.nodes
+            .values()
+            .filter(|node| node.agent_id != self.root_agent_id)
+            .map(|node| node.epoch_no)
+            .collect()
+    }
+
+    /// Appends `snapshot` as the tree's next epoch and makes it current.
+    ///
+    /// The root moves to it: its bind, its spawn ceilings and the
+    /// per-prompt attempt bound come from the new epoch, and future root
+    /// spawns bind its roster. Every other node keeps the epoch it was
+    /// spawned under, with its cards, grant ceilings and cell budget, so
+    /// live descendants do not block an append. A spawn mid-reservation
+    /// does, because its node would otherwise bind an epoch chosen before
+    /// the append. The admission state is kept: an append is not a resume
+    /// and does not lift a stop. Successor epochs no node references any
+    /// more are folded away first; epoch 0 is the header and stays.
+    ///
+    /// Returns the new epoch's number.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a snapshot whose digest does not match its contents, a
+    /// pending spawn, and an append that would reference more than
+    /// [`MAX_REFERENCED_EPOCHS`] epochs.
+    pub fn append_epoch(&mut self, snapshot: OrchestrationSnapshot) -> Result<u64, TopologyError> {
+        if !snapshot.digest_matches() {
+            return Err(TopologyError::new(
+                TopologyErrorCode::SchemaMismatch,
+                "a tree epoch's digest does not match its roster",
+            ));
+        }
+        if self.pending_spawns > 0 || !self.minting.is_empty() {
+            return Err(TopologyError::new(
+                TopologyErrorCode::GrantDenied,
+                Self::TREE_EPOCH_REBIND_PENDING_SPAWNS,
+            ));
+        }
+        let next = self
+            .lineage
+            .epochs
+            .current
+            .checked_add(1)
+            .ok_or_else(epoch_not_held)?;
+        let mut referenced = self.node_epochs();
+        referenced.insert(next);
+        if referenced.len() > MAX_REFERENCED_EPOCHS {
+            return Err(TopologyError::new(
+                TopologyErrorCode::BoundExceeded,
+                format!(
+                    "this tree already references {MAX_REFERENCED_EPOCHS} epochs; close agents \
+                     spawned under older profiles before switching again"
+                ),
+            ));
+        }
+        self.lineage
+            .epochs
+            .successors
+            .retain(|number, _| referenced.contains(number));
+        self.cell_budgets
+            .retain(|number, _| *number == 0 || referenced.contains(number));
+        self.cell_budgets
+            .insert(next, Arc::new(CellAgentBudget::for_snapshot(&snapshot)));
+        self.selected_tuple.clone_from(&snapshot.root_tuple);
+        let root_id = self.root_agent_id.clone();
+        if let Some(root) = self.nodes.get_mut(&root_id) {
+            if !snapshot.root_account.is_empty() {
+                root.account.clone_from(&snapshot.root_account);
+            }
+            root.tuple_id.clone_from(&snapshot.root_tuple);
+            root.effort.clone_from(&snapshot.root_effort);
+            root.epoch_no = next;
+        }
+        self.clamp_root_ceilings(&snapshot);
+        self.lineage.epochs.successors.insert(next, snapshot);
+        self.lineage.epochs.current = next;
+        self.bump();
+        Ok(next)
+    }
+
+    /// The per-cell agent budget of `caller_id`'s epoch. Shared by every
+    /// topology tool built for that caller: the extensions are rebuilt per
+    /// caller and per turn, so a counter owned by one set would enforce
+    /// nothing, and a cell keeps the budget its epoch gave it.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an unknown caller and a caller whose epoch the tree does not
+    /// hold.
+    pub fn cell_budget(&self, caller_id: &str) -> Result<Arc<CellAgentBudget>, TopologyError> {
+        let epoch_no = self.caller_epoch_no(caller_id)?;
+        self.cell_budgets
+            .get(&epoch_no)
+            .map(Arc::clone)
+            .ok_or_else(epoch_not_held)
+    }
+
+    /// Gives every held epoch a cell budget, keeping the ones already built.
+    pub(super) fn ensure_cell_budgets(&mut self) {
+        for (number, snapshot) in &self.lineage.epochs.successors {
+            self.cell_budgets
+                .entry(*number)
+                .or_insert_with(|| Arc::new(CellAgentBudget::for_snapshot(snapshot)));
+        }
+    }
+}
+
+fn epoch_not_held() -> TopologyError {
+    TopologyError::new(
+        TopologyErrorCode::OperationRecoveryRequired,
+        "this node's tree epoch is not held",
+    )
+}
+
+impl ProductAgentTree {
     /// Where this tree came from, when it was forked or imported.
     #[must_use]
     pub fn forked_from(&self) -> Option<&ForkedFrom> {

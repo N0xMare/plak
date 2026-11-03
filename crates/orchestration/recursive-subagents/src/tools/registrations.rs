@@ -377,9 +377,16 @@ pub fn topology_tool_registrations_on(
             .tree
             .lock()
             .map_err(|_| TreeRuntimeError::new("topology tree lock is poisoned"))?;
-        let cell_budget = tree.cell_budget();
         let compiled = tree
             .compiled_tool_names(&caller_id)
+            .map_err(|error| TreeRuntimeError::new(error.message))?;
+        // The caller's epoch is its spawn authority: its cards, its menu and
+        // its cells' agent budget.
+        let epoch = tree
+            .caller_epoch(&caller_id)
+            .map_err(|error| TreeRuntimeError::new(error.message))?;
+        let cell_budget = tree
+            .cell_budget(&caller_id)
             .map_err(|error| TreeRuntimeError::new(error.message))?;
         let caller_template = tree
             .node(&caller_id)
@@ -397,13 +404,12 @@ pub fn topology_tool_registrations_on(
             Some(SpawnDescription {
                 nodes: MAX_TREE_NODES.min(usize::from(grant.max_nodes)),
                 children: MAX_DIRECT_CHILDREN.min(usize::from(grant.max_children)),
-                cards: tree.snapshot.template_cards(caller_template.as_deref()),
+                cards: epoch.template_cards(caller_template.as_deref()),
             })
         } else {
             None
         };
-        let spawnable_templates: Vec<String> = tree
-            .snapshot
+        let spawnable_templates: Vec<String> = epoch
             .spawnable_template_names(caller_template.as_deref())
             .map(|name| name.as_str().to_owned())
             .collect();
@@ -476,7 +482,8 @@ pub async fn invoke_granted_topology_tool_on(
         let tree = tree
             .lock()
             .map_err(|_| TreeRuntimeError::new("topology tree lock is poisoned"))?;
-        tree.cell_budget()
+        tree.cell_budget(&caller_id)
+            .map_err(|error| TreeRuntimeError::new(error.message))?
     };
     let tool = TopologyTool {
         driver: driver.for_agent(&caller_id),

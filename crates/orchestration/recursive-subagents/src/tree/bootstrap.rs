@@ -211,9 +211,12 @@ impl ProductAgentTree {
             prompt_attempt_base: 0,
             notify: Arc::new(tokio::sync::Notify::new()),
             vcs: TreeVcs(vcs),
-            cell_budget: Arc::new(CellAgentBudget::for_snapshot(
-                &OrchestrationSnapshot::unpinned(String::new()),
-            )),
+            cell_budgets: BTreeMap::from([(
+                0,
+                Arc::new(CellAgentBudget::for_snapshot(
+                    &OrchestrationSnapshot::unpinned(String::new()),
+                )),
+            )]),
         }
     }
 
@@ -295,7 +298,8 @@ impl ProductAgentTree {
             .iter()
             .map(|(id, row)| (id.clone(), LiveGeneration::new(row.generation)))
             .collect();
-        let cell_budget = Arc::new(CellAgentBudget::for_snapshot(&snapshot));
+        let cell_budgets =
+            BTreeMap::from([(0, Arc::new(CellAgentBudget::for_snapshot(&snapshot)))]);
         Self {
             tree_id,
             root_agent_id,
@@ -354,7 +358,7 @@ impl ProductAgentTree {
             prompt_attempt_base: 0,
             notify: Arc::new(tokio::sync::Notify::new()),
             vcs: TreeVcs(Arc::new(SystemVcs)),
-            cell_budget,
+            cell_budgets,
         }
     }
 }

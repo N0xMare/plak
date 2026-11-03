@@ -140,7 +140,10 @@ fn low_storage_refuses_spawn_before_template_or_store_access() {
         parent: crate::agent::SpawnParent::Api(parent),
     };
     let refusal = binder
-        .admit_spawn(&crate::agent_tree_protocol::SpawnAgentRequest::test_review())
+        .admit_spawn(
+            "root",
+            &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+        )
         .unwrap_err();
     assert_eq!(
         refusal.code,

@@ -137,7 +137,7 @@ fn with_schema_ten_rows(
     node.parent_composition =
         Some(serde_json::from_value(serde_json::json!("native-ptc")).unwrap());
     let mut operations = rows.operations().clone();
-    let mut successor = rows.snapshot.clone();
+    let mut successor = rows.header_snapshot().clone();
     successor.transient_resumes = 2;
     successor.digest = successor.compute_digest();
     for operation in schema_ten_intents(child, &successor) {
@@ -152,7 +152,7 @@ fn with_schema_ten_rows(
         rows.writer_mode,
         rows.selected_tuple.clone(),
         rows.launch_checkout.clone(),
-        rows.snapshot.clone(),
+        rows.header_snapshot().clone(),
         nodes,
         rows.grants().clone(),
         rows.attempts().clone(),
@@ -251,7 +251,7 @@ fn rebuild(
         tree.writer_mode,
         tree.selected_tuple.clone(),
         tree.launch_checkout.clone(),
-        tree.snapshot.clone(),
+        tree.header_snapshot().clone(),
         nodes,
         tree.grants().clone(),
         tree.attempts().clone(),

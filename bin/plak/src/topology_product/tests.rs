@@ -349,7 +349,7 @@ async fn a_terminal_tree_with_an_idle_root_applies_a_successor_epoch_at_once() {
         .tree_handle_for_test()
         .lock()
         .unwrap()
-        .snapshot
+        .current_epoch()
         .clone();
 
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
@@ -364,10 +364,10 @@ async fn a_terminal_tree_with_an_idle_root_applies_a_successor_epoch_at_once() {
             tree.state,
             plakous_hosted::agent_tree::TreeAdmissionState::Live
         );
-        assert_ne!(tree.snapshot.digest, before.digest);
-        assert!(tree.snapshot.digest_matches());
+        assert_ne!(tree.current_epoch().digest, before.digest);
+        assert!(tree.current_epoch().digest_matches());
         let binding = tree
-            .snapshot
+            .current_epoch()
             .binding(&plakous_hosted::agent_tree_protocol::TemplateName::parse("scout").unwrap())
             .unwrap();
         assert_eq!(binding.template, "scout");
@@ -383,7 +383,7 @@ async fn a_failed_write_installs_no_epoch() {
     paths.ensure_layout().unwrap();
     let tree_id = unique_tree_id();
     let mut tree = bootstrap(&tree_id, paths.home().to_path_buf());
-    let before = tree.snapshot.digest.clone();
+    let before = tree.current_epoch().digest.clone();
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     let runtime = insert_root_with(
         tree_id.clone(),
@@ -408,7 +408,7 @@ async fn a_failed_write_installs_no_epoch() {
             .tree_handle_for_test()
             .lock()
             .unwrap()
-            .snapshot
+            .current_epoch()
             .digest,
         before
     );
@@ -449,7 +449,7 @@ async fn stop_all_then_apply_closes_descendants_then_applies_the_same_save() {
         let tree = runtime.tree_handle_for_test().lock().unwrap();
         assert!(tree.node(&child.agent_id).unwrap().status.is_terminal());
         assert_eq!(
-            tree.snapshot
+            tree.current_epoch()
                 .binding(
                     &plakous_hosted::agent_tree_protocol::TemplateName::parse("scout").unwrap()
                 )
@@ -514,7 +514,7 @@ async fn stop_all_then_apply_lifts_a_restored_pause_and_later_saves_still_answer
         );
         assert_eq!(tree.epoch_rebind_refusal_kind(), None);
         assert_eq!(
-            tree.snapshot
+            tree.current_epoch()
                 .binding(
                     &plakous_hosted::agent_tree_protocol::TemplateName::parse("scout").unwrap()
                 )
@@ -536,7 +536,7 @@ async fn stop_all_then_apply_lifts_a_restored_pause_and_later_saves_still_answer
             .tree_handle_for_test()
             .lock()
             .unwrap()
-            .snapshot
+            .current_epoch()
             .binding(&plakous_hosted::agent_tree_protocol::TemplateName::parse("critic").unwrap())
             .unwrap()
             .template,
@@ -701,7 +701,7 @@ fn install_successor_epoch_persists_when_hub_misses() {
         .unwrap()
         .unwrap();
     assert_eq!(loaded.selected_tuple, "grok-4.6");
-    assert_eq!(loaded.snapshot.root_tuple, "grok-4.6");
-    assert_eq!(loaded.snapshot.root_account, "grok");
-    assert!(loaded.snapshot.digest_matches());
+    assert_eq!(loaded.current_epoch().root_tuple, "grok-4.6");
+    assert_eq!(loaded.current_epoch().root_account, "grok");
+    assert!(loaded.current_epoch().digest_matches());
 }

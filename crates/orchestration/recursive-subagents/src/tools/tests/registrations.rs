@@ -185,7 +185,7 @@ fn spawn_template_binding_resolves_account_and_tuple() {
 async fn invoke_granted_template_unknown_is_executor_failure() {
     let root = tempfile::tempdir().unwrap();
     let (store, mut tree) = persist_fixture(&root);
-    tree.snapshot.roster.clear();
+    tree.current_epoch_mut_for_test().roster.clear();
     pin_review(&mut tree, "grok", "grok-4", None);
     let driver = driver_on(tree, Arc::clone(&store));
     let explore = SpawnAgentRequest::test_named("explore", Tier::ReadOnly, "scout", "look");
@@ -207,8 +207,9 @@ async fn invoke_granted_template_unknown_is_executor_failure() {
 async fn invoke_granted_omits_spawn_on_empty_roster() {
     let root = tempfile::tempdir().unwrap();
     let (store, mut tree) = persist_fixture(&root);
-    tree.snapshot.roster.clear();
-    tree.snapshot.digest = tree.snapshot.compute_digest();
+    let epoch = tree.current_epoch_mut_for_test();
+    epoch.roster.clear();
+    epoch.digest = epoch.compute_digest();
     let err = invoke_granted_topology_tool_on(
         driver_on(tree, store),
         "root".into(),

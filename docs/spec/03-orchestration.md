@@ -189,14 +189,42 @@ per-cell agent budget: a ceiling that decides whether a spawn is admitted is
 bind authority like the other four.
 
 A tree holds its genesis snapshot as epoch 0 in its header, successor epochs
-as `agent_tree_epochs` rows numbered from 1, and `current_epoch`, the epoch new
-spawns bind (§14). Each node records the `epoch_no` it was spawned under and
-the spawning parent's composition (`parent_composition`), the one
-profile-dependent spawn-parent input. A store load refuses a current or node
-epoch the tree does not hold and an epoch row whose digest is not its
-snapshot's. Every tree stays on epoch 0 today: a successor epoch that installs
-on a quiescent tree replaces the header snapshot, and no successor rows or
-parent compositions are written. A template card may carry a `runner` name
+as `agent_tree_epochs` rows numbered from 1, and `current_epoch`, the epoch the
+root follows and root spawns bind (§14). Each node records the `epoch_no` it was
+spawned under and the spawning parent's composition (`parent_composition`), the
+one profile-dependent spawn-parent input: everything else a child's bind reads
+from its parent (tree, workspace root, product home, state roots, compaction,
+round bound, topology admission) belongs to the session, not its profile. A
+store load refuses a current or node epoch the tree does not hold and an epoch
+row whose digest is not its snapshot's.
+
+No reader sees "the" snapshot; each names whose epoch it reads:
+
+- **Spawn authority** is the caller's epoch: the menu, the cards, the
+  capability lines, the bind a spawn freezes, review-evidence policy at adopt
+  and the caller's per-cell agent budget. The root's epoch is always the
+  current one; any other node's is its `epoch_no`, and a child is spawned under
+  its caller's epoch.
+- **A node's bind, reopen and lifecycle** use the node's own epoch: its card's
+  tools, tier, composition and frozen tool tables, its turn ceiling, its mint
+  hook and its transient-resume bound.
+- **Housekeeping** uses the current epoch: retention, checkout reclamation and
+  its idle interval. So do the root's own surfaces (the profile, the root
+  template, the settings cards and the carry comparison).
+- **The reopen gate** checks the digest of every retained epoch.
+
+`append_epoch` adds the next epoch and makes it current. The root moves to it
+(its bind, spawn ceilings and per-prompt attempt bound), while every other node
+keeps its epoch, cards, grant ceilings and cell budget, so live descendants do
+not block it. It refuses a pending spawn and a snapshot whose digest does not
+match, keeps the admission state (it is not a resume and does not lift a stop),
+and first folds successor epochs no non-root node references; epoch 0 stays as
+the header. At most eight epochs are referenced at once (the new current one
+and every non-root node's), and an append past that is refused
+`bound_exceeded`. Every tree stays on epoch 0 today: nothing appends an epoch,
+a successor epoch that installs on a quiescent tree replaces the current
+(header) snapshot in place, and no successor rows or parent compositions are
+written. A template card may carry a `runner` name
 that places a child on that runner rather than its parent's. The field is
 frozen on the card inside the snapshot JSON and its digest only when set, so a
 card without one keeps its encoding and digest. No template file sets it yet,
@@ -3180,7 +3208,11 @@ status appears on the other.
 Today's flows write only the schema-10 defaults: `current_epoch` 0, no
 provenance, and for every node no line, epoch 0, the local runner, no
 workspace pair and no parent composition. The epoch, ancestor and custody
-tables stay empty. The state CHECK still admits `restored_paused`.
+tables stay empty. `append_epoch` (§1.2) is the only writer of
+`agent_tree_epochs` rows and of a non-zero `current_epoch` or `epoch_no`; a
+save after it writes the new row, moves `current_epoch` and the root's
+`epoch_no`, and deletes the rows it folded, in the tree's one save
+transaction. The state CHECK still admits `restored_paused`.
 
 **Custody.** `agent_tree_custody` holds one fenced claim per tree, naming one
 host process by its stable `host_id`, its typed process instance, its binary id

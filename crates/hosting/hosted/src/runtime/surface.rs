@@ -203,8 +203,12 @@ pub(super) fn session_facts(
     let roster = rows.and_then(|rows| {
         let tree_id = super::topology_state::durable_tree_id(rows, session);
         match crate::topology_runtime::lookup(&tree_id) {
-            Some(runtime) => runtime.read(|tree| tree.snapshot.clone()).ok(),
-            None => rows.tree(&tree_id).ok().flatten().map(|tree| tree.snapshot),
+            Some(runtime) => runtime.read(|tree| tree.current_epoch().clone()).ok(),
+            None => rows
+                .tree(&tree_id)
+                .ok()
+                .flatten()
+                .map(|tree| tree.current_epoch().clone()),
         }
     });
     SurfaceSession {

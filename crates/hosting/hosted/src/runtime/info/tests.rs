@@ -210,7 +210,7 @@ async fn the_session_root_template_is_a_template_name_never_the_session_title() 
         WriterMode::SingleLease,
     )
     .unwrap();
-    let mut snapshot = tree.snapshot.clone();
+    let mut snapshot = tree.current_epoch().clone();
     snapshot.root_template = Some("frozen-root".to_owned());
     tree.install_snapshot(snapshot);
     crate::topology_runtime::insert_root(tree_id.clone(), tree, None)

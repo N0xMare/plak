@@ -384,10 +384,10 @@ fn profile_cards_active<P: plakous_host_protocol::ProtocolExtension>(
     let tree_id = durable_tree_id(&rows, &config.session);
     let frozen = match crate::topology_runtime::lookup(&tree_id) {
         Some(runtime) => runtime
-            .read(|tree| tree.snapshot.templates_digest.clone())
+            .read(|tree| tree.current_epoch().templates_digest.clone())
             .ok(),
         None => match rows.tree(&tree_id) {
-            Ok(Some(tree)) => Some(tree.snapshot.templates_digest),
+            Ok(Some(tree)) => Some(tree.current_epoch().templates_digest.clone()),
             // A topology-admitted fork must seed its own tree.
             Ok(None) => return Ok(false),
             Err(_) => None,

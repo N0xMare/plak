@@ -38,7 +38,7 @@ fn build_rendering_and_hint_changes_keep_exact_resume_across_two_hops() {
             snapshot.digest,
             OrchestrationSnapshot::freeze(next.clone()).digest
         );
-        assert!(!effective_settings_changed(&current.rows().snapshot, &next).unwrap());
+        assert!(!effective_settings_changed(current.rows().current_epoch(), &next).unwrap());
         assert!(apply_on_reload(&services, &mut record).is_none());
         assert_eq!(record.id, id);
     }

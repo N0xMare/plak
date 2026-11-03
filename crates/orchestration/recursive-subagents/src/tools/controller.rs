@@ -71,14 +71,18 @@ pub trait ChildController: Send + Sync {
     /// controller's lifetime: a tool may consult it more than once per call.
     fn services(&self) -> ChildServices;
 
-    /// Product admission of the spawn request itself, before the tree
-    /// resolves its template. The default admits everything.
+    /// Product admission of `caller_id`'s spawn request itself, before the
+    /// tree resolves its template. The default admits everything.
     ///
     /// # Errors
     ///
     /// Refuses when the product will not admit this spawn.
-    fn admit_spawn(&self, request: &SpawnAgentRequest) -> Result<(), TopologyError> {
-        let _ = request;
+    fn admit_spawn(
+        &self,
+        caller_id: &str,
+        request: &SpawnAgentRequest,
+    ) -> Result<(), TopologyError> {
+        let _ = (caller_id, request);
         Ok(())
     }
 

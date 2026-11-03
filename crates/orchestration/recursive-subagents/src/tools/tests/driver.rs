@@ -50,7 +50,7 @@ fn large_tree_lock_cost() {
         base.writer_mode,
         base.selected_tuple.clone(),
         base.launch_checkout.clone(),
-        base.snapshot.clone(),
+        base.header_snapshot().clone(),
         nodes,
         BTreeMap::new(),
         BTreeMap::new(),

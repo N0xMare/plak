@@ -722,7 +722,7 @@ fn jj_revert_is_not_applicable_before_an_adopting_hold_and_on_retry() {
 fn same_tree_resolver_belongs_to_the_original_adopter() {
     let mut f = Fixture::new(false);
     let conflict = f.conflict();
-    let mut snapshot = f.tree.snapshot.clone();
+    let mut snapshot = f.tree.header_snapshot().clone();
     snapshot.max_depth = 3;
     snapshot
         .roster

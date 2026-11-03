@@ -198,6 +198,7 @@ impl PersistedTree {
             forked_from,
             runner_ancestors,
         };
+        self.0.ensure_cell_budgets();
         self
     }
 
@@ -235,7 +236,7 @@ impl ProductAgentTree {
             self.writer_mode,
             self.selected_tuple.clone(),
             self.launch_checkout.clone(),
-            self.snapshot.clone(),
+            self.header_snapshot().clone(),
             self.nodes.clone(),
             self.grants.clone(),
             self.attempts.clone(),
@@ -247,6 +248,7 @@ impl ProductAgentTree {
         rows.commands.clone_from(&self.commands);
         rows.feed_cursors.clone_from(&self.feed_cursors);
         rows.lineage.clone_from(&self.lineage);
+        rows.ensure_cell_budgets();
         PersistedTree(rows)
     }
 }

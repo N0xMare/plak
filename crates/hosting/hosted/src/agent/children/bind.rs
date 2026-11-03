@@ -21,6 +21,7 @@ pub(in crate::agent) struct ProductChildSessionBinder {
 impl ProductChildSessionBinder {
     pub(in crate::agent) fn admit_spawn(
         &self,
+        caller_id: &str,
         request: &crate::agent_tree_protocol::SpawnAgentRequest,
     ) -> Result<(), crate::agent_tree::TopologyError> {
         if let crate::session_store::StorageAdmission::Refused(_) = self
@@ -39,7 +40,8 @@ impl ProductChildSessionBinder {
             return Ok(());
         };
         runtime.read(|tree| {
-            let Some(binding) = tree.snapshot.binding(&request.template) else {
+            // Spawn authority is the caller's epoch.
+            let Some(binding) = tree.caller_epoch(caller_id)?.binding(&request.template) else {
                 return Err(crate::agent_tree::TopologyError::new(
                     crate::agent_tree_protocol::TopologyErrorCode::TemplateUnknown,
                     "template is not in this tree epoch's roster",
@@ -860,8 +862,8 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
 }
 
 /// A child's optional tools: its own frozen card's list, never its
-/// parent's, with the epoch's frozen tables. A node with no template, or a
-/// card outside this epoch, has none.
+/// parent's, with its own epoch's frozen tables. A node with no template, or
+/// a card outside its epoch, has none.
 pub(in crate::agent) fn frozen_child_tool_selection(
     tree_id: &str,
     agent_id: &str,
@@ -875,15 +877,19 @@ pub(in crate::agent) fn frozen_child_tool_selection(
                 .node(agent_id)
                 .ok()
                 .and_then(|node| node.template.as_ref())
-                .and_then(|template| tree.snapshot.binding(template))
+                .and_then(|template| tree.epoch_of(agent_id)?.binding(template))
             else {
                 return Ok(crate::tool_plan::NodeToolSelection::default());
             };
+            let tool_sections = tree
+                .epoch_of(agent_id)
+                .map(|epoch| epoch.tool_sections.clone())
+                .unwrap_or_default();
             let selection = crate::tool_plan::TemplateToolSelection::parse(&binding.tools)
                 .map_err(|error| format!("child template {} tools: {error}", binding.template))?;
             Ok(crate::tool_plan::NodeToolSelection {
                 selection,
-                tool_sections: tree.snapshot.tool_sections.clone(),
+                tool_sections,
                 mcp_tools: None,
             })
         })
@@ -904,8 +910,8 @@ pub(in crate::agent) fn frozen_openrouter_child_pin(
                 .as_ref()
                 .ok_or_else(|| "OpenRouter child has no template".to_owned())?;
             let binding = tree
-                .snapshot
-                .binding(template)
+                .epoch_of(agent_id)
+                .and_then(|epoch| epoch.binding(template))
                 .ok_or_else(|| "OpenRouter child template is not in this tree epoch".to_owned())?;
             // A direct API child binds the composition its enrolled row admits.
             if let Some(provider) = crate::binding::PlatformProvider::for_account(&binding.account)

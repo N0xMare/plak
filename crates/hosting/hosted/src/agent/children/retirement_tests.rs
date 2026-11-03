@@ -83,7 +83,7 @@ async fn attempt_end_retires_self_and_all_descendants_after_one_retirement_fails
     let (parent, children, identity) = runtime
         .mutate_then_emit(false, {
             move |tree| {
-                let mut snapshot = tree.snapshot.clone();
+                let mut snapshot = tree.current_epoch().clone();
                 snapshot.max_depth = 2;
                 snapshot.digest = snapshot.compute_digest();
                 tree.install_snapshot(snapshot);
@@ -292,7 +292,7 @@ async fn hosted_descendant_close_refusal_and_commit_cut_never_dispatch_unpublish
             let (parent, child, identity) = runtime
                 .mutate_then_emit(false, {
                     move |tree| {
-                        let mut snapshot = tree.snapshot.clone();
+                        let mut snapshot = tree.current_epoch().clone();
                         snapshot.max_depth = 2;
                         snapshot.digest = snapshot.compute_digest();
                         tree.install_snapshot(snapshot);
@@ -1189,7 +1189,7 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
     let runtime = runtime(root.path());
     let parent = runtime
         .mutate_then_emit(false, |tree| {
-            let mut snapshot = tree.snapshot.clone();
+            let mut snapshot = tree.current_epoch().clone();
             snapshot.max_depth = 2;
             snapshot.digest = snapshot.compute_digest();
             tree.install_snapshot(snapshot);
@@ -1493,7 +1493,7 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
     );
     let parent = runtime
         .mutate_then_emit(false, |tree| {
-            let mut snapshot = tree.snapshot.clone();
+            let mut snapshot = tree.current_epoch().clone();
             snapshot.max_depth = 2;
             snapshot.digest = snapshot.compute_digest();
             tree.install_snapshot(snapshot);

@@ -182,7 +182,7 @@ impl Header {
             state: agent_tree_enum_text(tree.state)?,
             writer_mode: agent_tree_enum_text(tree.writer_mode)?,
             launch_checkout: tree.launch_checkout.to_string_lossy().into_owned(),
-            snapshot_json: serde_json::to_string(&tree.snapshot)
+            snapshot_json: serde_json::to_string(tree.header_snapshot())
                 .map_err(|_| "orchestration snapshot is not serializable".to_owned())?,
             current_epoch: to_i64(tree.epochs().current)?,
             forked_from: tree

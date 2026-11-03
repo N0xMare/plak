@@ -333,7 +333,9 @@ async fn transient_failure_continues_same_attempt_after_exact_route_probe() {
         {"fault": {"at": "pre_stream", "kind": "transport", "phase": "Connect", "retryability": "Exhausted", "message": "offline network failure"}, "output": {"text": "unused"}},
         held("continued")
     ]), |tree| {
-        tree.snapshot.transient_resumes = 1;
+        let mut epoch = tree.current_epoch().clone();
+        epoch.transient_resumes = 1;
+        tree.install_snapshot(epoch);
         leaf(tree)
     }, Some(probe)).await;
     entered.notified().await;
@@ -479,7 +481,9 @@ async fn assert_reopened_transient_resume(journaled: bool) {
     let fixture = fixture_with_probe(json!([
         {"fault": {"at": "pre_stream", "kind": "transport", "phase": "Connect", "retryability": "Exhausted", "message": "retained original outage"}, "output": {"text": "unused"}}, held("reopened continuation")
     ]), |tree| {
-        tree.snapshot.transient_resumes = 1;
+        let mut epoch = tree.current_epoch().clone();
+        epoch.transient_resumes = 1;
+        tree.install_snapshot(epoch);
         leaf(tree)
     }, Some(probe)).await;
     entered.notified().await;
@@ -791,7 +795,7 @@ async fn a_live_child_parks_the_hub_its_result_wakes_it_and_an_empty_end_is_nudg
     let fixture = fixture(
         json!([{"output": {"text": "delegated"}}, {"output": {"text": "read it"}}, held("reminded")]),
         |tree| {
-            let mut snapshot = tree.snapshot.clone();
+            let mut snapshot = tree.current_epoch().clone();
             snapshot.max_depth = 2;
             snapshot.digest = snapshot.compute_digest();
             tree.install_snapshot(snapshot);
@@ -998,7 +1002,7 @@ async fn wake_turns_count_toward_max_turns() {
         json!([start_job("read line"), {"output": {"text": "started"}}, {"output": {"text": "noted"}}]),
         |tree| {
             let name = TemplateName::parse("review").unwrap();
-            let mut binding = tree.snapshot.binding(&name).unwrap().clone();
+            let mut binding = tree.current_epoch().binding(&name).unwrap().clone();
             binding.max_turns = Some(2);
             tree.pin_template("review", binding);
             leaf(tree)
@@ -1717,7 +1721,7 @@ async fn a_reopen_with_max_turns_spent_ends_the_attempt_blocked() {
         json!([start_job("read line"), {"output": {"text": "started"}}]),
         |tree| {
             let name = TemplateName::parse("review").unwrap();
-            let mut binding = tree.snapshot.binding(&name).unwrap().clone();
+            let mut binding = tree.current_epoch().binding(&name).unwrap().clone();
             binding.max_turns = Some(2);
             tree.pin_template("review", binding);
             leaf(tree)

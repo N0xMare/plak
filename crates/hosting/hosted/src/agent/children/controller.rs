@@ -23,9 +23,10 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
 
     fn admit_spawn(
         &self,
+        caller_id: &str,
         request: &crate::agent_tree_protocol::SpawnAgentRequest,
     ) -> Result<(), crate::agent_tree::TopologyError> {
-        self.binder.admit_spawn(request)
+        self.binder.admit_spawn(caller_id, request)
     }
 
     fn admit_binding<'a>(

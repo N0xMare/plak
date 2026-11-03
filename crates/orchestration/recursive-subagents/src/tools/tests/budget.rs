@@ -277,8 +277,8 @@ fn one_cell_budget_is_shared_by_every_topology_tool_on_a_tree() {
     // owns it, per epoch.
     let root = tempfile::tempdir().unwrap();
     let tree = bootstrap_tree("tree-w4-shared", root.path());
-    let left = tree.cell_budget();
-    let right = tree.cell_budget();
+    let left = tree.cell_budget("root").unwrap();
+    let right = tree.cell_budget("root").unwrap();
     assert!(Arc::ptr_eq(&left, &right));
     assert!(left.budget() <= CEILING_MAX_AGENTS_PER_CELL);
 }

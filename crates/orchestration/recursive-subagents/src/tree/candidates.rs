@@ -1093,8 +1093,8 @@ impl ProductAgentTree {
         }
         // `require_review_evidence`: off by default; when on, an
         // adopt must cite a subtree attempt whose output references the
-        // candidate, or nothing lands.
-        if self.snapshot.require_review_evidence && !reviewed {
+        // candidate, or nothing lands. The adopter's own epoch decides.
+        if self.caller_epoch(caller_id)?.require_review_evidence && !reviewed {
             return Err(TopologyError::new(
                 TopologyErrorCode::EvidenceMismatch,
                 format!(

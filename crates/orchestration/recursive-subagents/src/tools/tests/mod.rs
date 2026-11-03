@@ -161,14 +161,18 @@ impl ChildController for RelockingBinder {
         ChildServices::BIND
     }
 
-    fn admit_spawn(&self, request: &SpawnAgentRequest) -> Result<(), TopologyError> {
+    fn admit_spawn(
+        &self,
+        caller_id: &str,
+        request: &SpawnAgentRequest,
+    ) -> Result<(), TopologyError> {
         let tree = self.tree.lock().map_err(|_| {
             TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
                 "topology tree lock is poisoned",
             )
         })?;
-        tree.snapshot
+        tree.caller_epoch(caller_id)?
             .binding(&request.template)
             .map(|_| ())
             .ok_or_else(|| {

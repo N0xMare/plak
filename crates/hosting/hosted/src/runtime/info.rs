@@ -483,7 +483,7 @@ pub(super) fn session_root_template(
     if let Some(frozen) = crate::topology_runtime::lookup(&durable_tree_id(rows, session))
         .and_then(|runtime| {
             runtime
-                .read(|tree| tree.snapshot.root_template.clone())
+                .read(|tree| tree.current_epoch().root_template.clone())
                 .ok()
         })
         .flatten()

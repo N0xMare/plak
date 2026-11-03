@@ -557,7 +557,9 @@ impl TopologyTool {
                     .driver
                     .write(move |tree| {
                         let caller_template = tree.node(&caller)?.template.clone();
-                        if tree.snapshot.binding(&request.template).is_none() {
+                        // Spawn authority is the caller's epoch.
+                        let epoch = tree.caller_epoch(&caller)?;
+                        if epoch.binding(&request.template).is_none() {
                             return Err(TopologyError::new(
                                 TopologyErrorCode::TemplateUnknown,
                                 format!(
@@ -566,7 +568,7 @@ impl TopologyTool {
                                 ),
                             ));
                         }
-                        if !tree.snapshot.menu_contains(
+                        if !epoch.menu_contains(
                             caller_template.as_ref().map(TemplateName::as_str),
                             &request.template,
                         ) {
@@ -579,7 +581,7 @@ impl TopologyTool {
                                 ),
                             ));
                         }
-                        Ok(tree.snapshot.binding(&request.template).cloned())
+                        Ok(epoch.binding(&request.template).cloned())
                     })
                     .await
                     .map_err(|_| {
@@ -593,7 +595,7 @@ impl TopologyTool {
                     Err(error) => return Self::topology_failure(&error),
                 }
             };
-            if let Err(error) = binder.admit_spawn(&request) {
+            if let Err(error) = binder.admit_spawn(&caller, &request) {
                 return Self::topology_failure(&error);
             }
             if let Some(binding) = binding

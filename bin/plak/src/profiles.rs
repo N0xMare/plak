@@ -184,7 +184,7 @@ pub(crate) fn session_selection(
     let (_, observed) = crate::topology_product::inspect_session_tree(paths, record).ok()?;
     match observed {
         plakous_recursive_subagents_store::TreeInspection::Tree(tree) => {
-            Some(SessionSelection::from_snapshot(&tree.rows().snapshot))
+            Some(SessionSelection::from_snapshot(tree.rows().current_epoch()))
         }
         _ => None,
     }

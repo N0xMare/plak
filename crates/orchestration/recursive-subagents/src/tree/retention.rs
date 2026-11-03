@@ -326,12 +326,12 @@ impl ProductAgentTree {
         eligible.sort();
         let excess = eligible
             .len()
-            .saturating_sub(usize::from(self.snapshot.child_retention_count));
+            .saturating_sub(usize::from(self.current_epoch().child_retention_count));
         for (index, (ended, agent)) in eligible.into_iter().enumerate() {
             if index >= excess
                 && self.nodes[&agent].status != NodeStatus::Closed
                 && now.saturating_sub(ended)
-                    < u64::from(self.snapshot.child_retention_days) * 86_400_000
+                    < u64::from(self.current_epoch().child_retention_days) * 86_400_000
             {
                 continue;
             }

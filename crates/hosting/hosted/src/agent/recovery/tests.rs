@@ -239,7 +239,7 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
     let (parent, child, sessionless) = fixture
         .runtime
         .mutate_then_emit(false, |tree| {
-            let mut snapshot = tree.snapshot.clone();
+            let mut snapshot = tree.current_epoch().clone();
             snapshot.max_depth = 2;
             snapshot.digest = snapshot.compute_digest();
             tree.install_snapshot(snapshot);

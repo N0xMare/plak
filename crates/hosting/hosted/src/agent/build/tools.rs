@@ -189,7 +189,7 @@ pub(in crate::agent) fn is_codex_code_mode_candidate(
 }
 
 /// Frozen processing tier for this child's template: a child runs on its own
-/// card's tier, never its parent's. A node whose card is not in the current
+/// card's tier, never its parent's. A node whose card is not in its own
 /// epoch is Standard.
 pub(in crate::agent) fn spawn_roster_processing_tier(
     tree_id: &str,
@@ -200,7 +200,12 @@ pub(in crate::agent) fn spawn_roster_processing_tier(
             runtime
                 .read(|tree| {
                     let template = tree.node(agent_id).ok()?.template.clone()?;
-                    Some(tree.snapshot.binding(&template)?.processing_tier.clone())
+                    Some(
+                        tree.epoch_of(agent_id)?
+                            .binding(&template)?
+                            .processing_tier
+                            .clone(),
+                    )
                 })
                 .ok()
                 .flatten()
@@ -221,7 +226,7 @@ pub(in crate::agent) fn spawn_roster_composition(
             .read(|tree| {
                 let node = tree.node(agent_id).ok()?;
                 let template = node.template.clone()?;
-                let binding = tree.snapshot.binding(&template)?;
+                let binding = tree.epoch_of(agent_id)?.binding(&template)?;
                 Some(binding.composition.map_or(
                     CompositionSelection::FollowCatalog,
                     CompositionSelection::from,

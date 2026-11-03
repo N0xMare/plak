@@ -250,7 +250,7 @@ impl Fixture {
                 let mode = mode.to_owned();
                 move |tree| {
                     let name = crate::agent_tree_protocol::TemplateName::parse("review").unwrap();
-                    let mut binding = tree.snapshot.binding(&name).unwrap().clone();
+                    let mut binding = tree.current_epoch().binding(&name).unwrap().clone();
                     binding.max_turns = Some(
                         if matches!(mode.as_str(), "wake" | "idle" | "wake-prepared") {
                             2

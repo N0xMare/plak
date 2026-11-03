@@ -231,7 +231,7 @@ impl TreeDriver {
     /// mutex.
     pub async fn reclaim_dormant_checkouts(&self) -> Result<(), TopologyError> {
         let now = plakous::model::now_unix_millis();
-        let delay = self.read(|tree| tree.snapshot.workspace_idle_seconds)?;
+        let delay = self.read(|tree| tree.current_epoch().workspace_idle_seconds)?;
         {
             let mut next = self
                 .next_reclaim_probe

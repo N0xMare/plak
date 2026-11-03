@@ -237,7 +237,11 @@ impl ChildController for MenuProbeBinder {
         ChildServices::BIND
     }
 
-    fn admit_spawn(&self, _request: &SpawnAgentRequest) -> Result<(), TopologyError> {
+    fn admit_spawn(
+        &self,
+        _caller_id: &str,
+        _request: &SpawnAgentRequest,
+    ) -> Result<(), TopologyError> {
         self.admits.fetch_add(1, Ordering::SeqCst);
         Err(TopologyError::new(
             TopologyErrorCode::SchemaMismatch,
@@ -275,13 +279,10 @@ fn closure_only_nested(tree: &mut ProductAgentTree) {
     let name = |raw: &str| TemplateName::parse(raw).unwrap();
     let mut nested = RosterBinding::leaf(crate::epoch::RosterInput::TEST_ACCOUNT, "selected-tuple");
     nested.template = "nested".into();
-    tree.snapshot.roster.insert(name("nested"), nested);
-    tree.snapshot
-        .roster
-        .get_mut(&name("orchestrate"))
-        .unwrap()
-        .spawns = vec![name("nested")];
-    tree.snapshot.digest = tree.snapshot.compute_digest();
+    let epoch = tree.current_epoch_mut_for_test();
+    epoch.roster.insert(name("nested"), nested);
+    epoch.roster.get_mut(&name("orchestrate")).unwrap().spawns = vec![name("nested")];
+    epoch.digest = epoch.compute_digest();
 }
 
 /// The root naming a closure-only template is `template_not_spawnable`

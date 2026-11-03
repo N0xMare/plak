@@ -119,7 +119,7 @@ pub(super) async fn try_transient_resume(
                 },
                 error.message(),
                 spent,
-                tree.snapshot.transient_resumes,
+                tree.epoch_of(agent_id)?.transient_resumes,
             )
         })
         .ok()

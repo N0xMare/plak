@@ -347,7 +347,7 @@ fn inspected_topology_extensions(
         persisted
     };
     let mut tree = crate::agent_tree::ProductAgentTree::reopen(persisted);
-    if !tree.snapshot.digest_matches() {
+    if !tree.epoch_digests_match() {
         return Err(CliFailure::recovery_required(
             "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
         ));
@@ -467,7 +467,7 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
     })?;
     if let Some(persisted) = persisted {
         let mut tree = crate::agent_tree::ProductAgentTree::reopen(persisted);
-        if !tree.snapshot.digest_matches() {
+        if !tree.epoch_digests_match() {
             return Err(CliFailure::recovery_required(
                 "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
             ));

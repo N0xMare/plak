@@ -600,7 +600,7 @@ impl ProductAgentTree {
         if workspace.mode == WorkspaceMode::Inherit {
             return None;
         }
-        let binding = self.snapshot.binding(node.template.as_ref()?)?;
+        let binding = self.epoch_of(agent_id)?.binding(node.template.as_ref()?)?;
         let command = binding
             .on_mint
             .as_deref()

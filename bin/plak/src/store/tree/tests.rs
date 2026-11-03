@@ -261,7 +261,7 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
             tree.revision,
             tree.host_generation,
             tree.state,
-            tree.snapshot,
+            tree.current_epoch(),
             tree.nodes(),
             tree.grants(),
             tree.attempts(),
@@ -606,8 +606,8 @@ fn orchestration_snapshot_roundtrip_preserves_max_depth_and_digest() {
     save_tree(&paths, &mut tree).unwrap();
 
     let loaded = load_tree(&paths, "tree-snap").unwrap().expect("tree");
-    assert_eq!(loaded.snapshot.max_depth, MAX_TREE_DEPTH);
-    assert!(loaded.snapshot.digest_matches());
+    assert_eq!(loaded.current_epoch().max_depth, MAX_TREE_DEPTH);
+    assert!(loaded.current_epoch().digest_matches());
     assert_eq!(
         loaded.grants().get("root").unwrap().max_depth,
         MAX_TREE_DEPTH
@@ -660,15 +660,19 @@ fn a_nested_spawn_roster_round_trips_at_tree_schema_10() {
     save_tree(&paths, &mut tree).unwrap();
 
     let loaded = load_tree(&paths, "tree-nested").unwrap().expect("tree");
-    assert_eq!(loaded.snapshot, snapshot);
-    assert!(loaded.snapshot.digest_matches());
+    assert_eq!(loaded.current_epoch(), &snapshot);
+    assert!(loaded.current_epoch().digest_matches());
     assert_eq!(
-        loaded.snapshot.binding(&name("lead")).unwrap().spawns,
+        loaded
+            .current_epoch()
+            .binding(&name("lead"))
+            .unwrap()
+            .spawns,
         [name("helper")]
     );
     assert_eq!(
         loaded
-            .snapshot
+            .current_epoch()
             .spawnable_template_names(None)
             .collect::<Vec<_>>(),
         [&name("lead")]

@@ -419,7 +419,7 @@ impl ProductAgentTree {
         sizes: &BTreeMap<String, u64>,
     ) -> Result<Vec<String>, TopologyError> {
         let over_budget = sizes.values().copied().fold(0_u64, u64::saturating_add)
-            > u64::from(self.snapshot.workspace_budget_mib) * 1024 * 1024;
+            > u64::from(self.current_epoch().workspace_budget_mib) * 1024 * 1024;
         let pending: Vec<_> = self
             .workspaces
             .keys()
@@ -482,12 +482,13 @@ impl ProductAgentTree {
             .collect();
         eligible.sort();
         let mut total: u64 = sizes.values().copied().fold(0, u64::saturating_add);
-        let budget = u64::from(self.snapshot.workspace_budget_mib) * 1024 * 1024;
+        let budget = u64::from(self.current_epoch().workspace_budget_mib) * 1024 * 1024;
         for (ended, id) in eligible {
             if now < self.reclamation_retry_at(&id) {
                 continue;
             }
-            if now.saturating_sub(ended) < u64::from(self.snapshot.workspace_idle_seconds) * 1000
+            if now.saturating_sub(ended)
+                < u64::from(self.current_epoch().workspace_idle_seconds) * 1000
                 && total <= budget
             {
                 continue;

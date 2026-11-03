@@ -3355,21 +3355,21 @@ fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
         .ok_or("the profile fork opened no tree of its own")?;
     assert!(
         target_tree
-            .snapshot
+            .current_epoch()
             .roster
             .keys()
             .any(|name| name.as_str() == "pb-worker")
     );
     // The fork's own profile persists with its tree.
     assert_eq!(
-        target_tree.snapshot.root_template.as_deref(),
+        target_tree.current_epoch().root_template.as_deref(),
         Some("pb-root")
     );
     // The source's tree, if it has one, never received the profile's cards.
     if let Some(source_tree) = plakous_hosted::runtime::TreeRows::tree(&paths, &source_id)? {
         assert!(
             !source_tree
-                .snapshot
+                .current_epoch()
                 .roster
                 .keys()
                 .any(|name| name.as_str() == "pb-worker")

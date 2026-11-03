@@ -120,8 +120,9 @@ impl ProductAgentTree {
     /// this runs, so the caller — the product, or a fixture — says which
     /// accounts its epoch admits.
     pub fn pin_bind_hints_for_test(&mut self, hints: BindHints) {
-        self.snapshot.bind_hints = hints;
-        self.snapshot.digest = self.snapshot.compute_digest();
+        let epoch = self.current_epoch_mut();
+        epoch.bind_hints = hints;
+        epoch.digest = epoch.compute_digest();
     }
 
     /// Forces one node's status, so a test can stage a state the tree would

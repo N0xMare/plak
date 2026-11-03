@@ -28,7 +28,7 @@ impl ProductAgentTree {
         // fails closed with template_not_spawnable or template_unknown.
         let caller_template = node.template.as_ref().map(TemplateName::as_str);
         if self
-            .snapshot
+            .caller_epoch(caller_id)?
             .spawnable_template_names(caller_template)
             .next()
             .is_none()
@@ -36,6 +36,14 @@ impl ProductAgentTree {
             names.retain(|name| *name != "spawn_agent");
         }
         Ok(names)
+    }
+
+    /// The current epoch, mutable, so a test can shape a roster the epoch
+    /// would otherwise have frozen. A real roster change is an install or an
+    /// append.
+    #[cfg(test)]
+    pub(crate) fn current_epoch_mut_for_test(&mut self) -> &mut OrchestrationSnapshot {
+        self.current_epoch_mut()
     }
 
     /// Names a node's account when it has none, so a test can stand in for
@@ -65,13 +73,16 @@ impl ProductAgentTree {
         }
     }
 
-    /// The card a spawn binds. A child binds exactly what its card names —
-    /// account, model, effort and tier — and never its caller's.
+    /// The card a spawn binds, from the caller's epoch. A child binds
+    /// exactly what its card names — account, model, effort and tier — and
+    /// never its caller's.
     pub(super) fn resolve_template_binding(
         &self,
+        caller_id: &str,
         template: &TemplateName,
     ) -> Result<(RosterBinding, String, String, Option<String>), TopologyError> {
-        let Some(binding) = self.snapshot.binding(template) else {
+        let epoch = self.caller_epoch(caller_id)?;
+        let Some(binding) = epoch.binding(template) else {
             return Err(TopologyError::new(
                 TopologyErrorCode::TemplateUnknown,
                 format!("template {template} is not in this tree epoch's roster"),
@@ -93,7 +104,7 @@ impl ProductAgentTree {
         // whether this account is in it. Every spawn path — a product binder
         // or the binder-less JSONL `invoke_tool` on the hub — reaches these
         // checks, so the fence is the same on all of them.
-        let hints = &self.snapshot.bind_hints;
+        let hints = &epoch.bind_hints;
         if !hints.admits_account(&binding.account) {
             return Err(TopologyError::new(
                 TopologyErrorCode::SchemaMismatch,
@@ -120,13 +131,31 @@ impl ProductAgentTree {
         ))
     }
 
-    /// Makes `snapshot` this tree's epoch: bounds are re-clamped, the
-    /// per-cell budget is rebuilt, and the working set replaced.
+    /// Makes `snapshot` this tree's current epoch in place: bounds are
+    /// re-clamped, the per-cell budget is rebuilt, and the working set
+    /// replaced. Every tree is on epoch 0 today, so this replaces the
+    /// header snapshot.
     ///
     /// Only ever called on a quiescent tree — genesis, or a successor epoch
     /// past `epoch_allows_rebind` — so no cell is mid-loop when its counter
     /// is replaced.
     pub fn install_snapshot(&mut self, snapshot: OrchestrationSnapshot) {
+        self.clamp_root_ceilings(&snapshot);
+        // the per-cell agent bound is epoch state too. An
+        // install only happens on a quiescent tree (genesis, or a successor
+        // epoch after `epoch_allows_rebind`), so no cell is mid-loop when its
+        // counter is replaced.
+        self.cell_budgets.insert(
+            self.epochs().current,
+            Arc::new(CellAgentBudget::for_snapshot(&snapshot)),
+        );
+        *self.current_epoch_mut() = snapshot;
+        self.bump();
+    }
+
+    /// The root's epoch state from `snapshot`: the writer mode, the root
+    /// grant's spawn ceilings and the per-prompt attempt bound.
+    pub(super) fn clamp_root_ceilings(&mut self, snapshot: &OrchestrationSnapshot) {
         self.writer_mode = snapshot.writer_mode;
         if let Some(root_grant) = self.grants.get_mut(&self.root_agent_id) {
             root_grant.max_depth = snapshot.max_depth.clamp(1, MAX_TREE_DEPTH);
@@ -138,17 +167,13 @@ impl ProductAgentTree {
         // successor epoch can raise it back up to the constant.
         self.max_attempts = MAX_TREE_ATTEMPTS;
         self.lower_max_attempts(usize::from(snapshot.max_attempts));
-        // the per-cell agent bound is epoch state too. An
-        // install only happens on a quiescent tree (genesis, or a successor
-        // epoch after `epoch_allows_rebind`), so no cell is mid-loop when its
-        // counter is replaced.
-        self.cell_budget = Arc::new(CellAgentBudget::for_snapshot(&snapshot));
-        self.snapshot = snapshot;
-        self.bump();
     }
 
-    /// Start a successor epoch after TreeTerminal rebind. Same tree rows stay
-    /// inspectable; bind authority is the new snapshot.
+    /// Replaces the current epoch in place on a quiescent tree (a model
+    /// rebind that stays on the tree, or a roster apply). Same tree rows
+    /// stay inspectable; bind authority is the new snapshot. Unlike
+    /// [`Self::append_epoch`] it numbers no new epoch and lifts the tree to
+    /// live.
     pub fn begin_successor_epoch(
         &mut self,
         snapshot: OrchestrationSnapshot,
@@ -183,9 +208,10 @@ impl ProductAgentTree {
         if binding.template.is_empty() {
             binding.template = name.as_str().to_owned();
         }
-        self.snapshot.working_set.insert(name.clone());
-        self.snapshot.roster.insert(name, binding);
-        self.snapshot.digest = self.snapshot.compute_digest();
+        let epoch = self.current_epoch_mut();
+        epoch.working_set.insert(name.clone());
+        epoch.roster.insert(name, binding);
+        epoch.digest = epoch.compute_digest();
     }
 
     /// Every refusal that a paused tree produces names the state in prose and

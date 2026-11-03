@@ -18,10 +18,11 @@ impl ProductAgentTree {
         self.submit_result_presented(caller_id, request, operation_id, |name| name)
     }
 
-    /// The template's per-attempt turn ceiling (`max_turns`).
+    /// The template's per-attempt turn ceiling (`max_turns`), from the
+    /// node's own epoch.
     pub(in crate::tree) fn attempt_turn_ceiling(&self, agent_id: &str) -> Option<u32> {
         let template = self.nodes.get(agent_id)?.template.as_ref()?;
-        self.snapshot.binding(template)?.max_turns
+        self.epoch_of(agent_id)?.binding(template)?.max_turns
     }
 
     /// Whether the current attempt has spent that ceiling.

@@ -484,6 +484,8 @@ pub struct SpawnReservation {
     output_schema_json: String,
     schema_digest: String,
     template: TemplateName,
+    /// The caller's epoch, which the child is spawned under.
+    epoch_no: u64,
     /// The copy shape the plan chose; `Inherit` when nothing was minted.
     mode: WorkspaceMode,
     parent_grant: TopologyGrant,
@@ -651,9 +653,11 @@ pub struct ProductAgentTree {
     /// The checkout the session was launched in; every copy is minted from it
     /// and every adopt lands back onto it.
     pub launch_checkout: PathBuf,
-    /// This epoch's frozen bind authority: root bind, bounds, working set,
-    /// and the product's account roster. Epoch 0 of [`Self::epochs`].
-    pub snapshot: OrchestrationSnapshot,
+    /// Epoch 0's frozen bind authority: root bind, bounds, working set,
+    /// and the product's account roster. Private: readers name whose epoch
+    /// they need ([`Self::caller_epoch`], [`Self::epoch_of`],
+    /// [`Self::current_epoch`]).
+    snapshot: OrchestrationSnapshot,
     /// The epochs, the fork provenance and the per-runner ancestors.
     lineage: TreeLineage,
     nodes: BTreeMap<String, NodeRecord>,
@@ -765,11 +769,11 @@ pub struct ProductAgentTree {
     notify: Arc<tokio::sync::Notify>,
     /// The VCS port; see [`TreeVcs`].
     vcs: TreeVcs,
-    /// Per-cell agent admissions for this epoch. Built from
-    /// the snapshot's `max_agents_per_cell` at install, so a config change
-    /// mid-tree never moves a running tree's ceiling. Process-local: a cell
-    /// cannot outlive the process.
-    cell_budget: Arc<CellAgentBudget>,
+    /// Per-cell agent admissions, one per held epoch. Built from each
+    /// epoch's `max_agents_per_cell` at install, so a config change mid-tree
+    /// never moves a running tree's ceiling. Process-local: a cell cannot
+    /// outlive the process.
+    cell_budgets: BTreeMap<u64, Arc<CellAgentBudget>>,
 }
 
 #[derive(Clone)]
@@ -836,7 +840,9 @@ pub use intents::{
     TerminalRefusalIntent, VcsExpectedOutcome, VcsStageClass, VcsStageIntent, VcsStageKind,
 };
 use lineage::TreeLineage;
-pub use lineage::{ForkedFrom, NodeLineId, NodePlacement, NodeWorkspace, TreeEpochs};
+pub use lineage::{
+    ForkedFrom, MAX_REFERENCED_EPOCHS, NodeLineId, NodePlacement, NodeWorkspace, TreeEpochs,
+};
 pub use observer::{NodeDetach, TopologyObserver};
 pub use park::WaitingOn;
 /// The recording VCS double, for the topology crates' tests at the cut.
@@ -863,14 +869,6 @@ pub use plakous_workspace::vcs_fixtures;
 mod workspaces;
 
 impl ProductAgentTree {
-    /// This epoch's per-cell agent budget. Shared by every
-    /// topology tool built on the tree: the extensions are rebuilt per caller
-    /// and per turn, so a counter owned by one set would enforce nothing.
-    #[must_use]
-    pub fn cell_budget(&self) -> Arc<CellAgentBudget> {
-        Arc::clone(&self.cell_budget)
-    }
-
     /// One persisted message by id, for a deliverer that holds only the id.
     #[must_use]
     pub fn mail(&self, message_id: &str) -> Option<&MailRecord> {
