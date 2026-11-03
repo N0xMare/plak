@@ -527,7 +527,7 @@ pub(super) async fn production_create_session<P: plakous_host_protocol::Protocol
     .await
 }
 
-fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
 ) -> CliResult<ProductAgentSpec> {
     let resolved = config

@@ -388,6 +388,51 @@ fn epoch_not_held() -> TopologyError {
 }
 
 impl ProductAgentTree {
+    /// The genesis of a fork of `source`'s root: a new tree `tree_id` whose
+    /// root (agent id `tree_id`, as every genesis root) starts from
+    /// `launch_checkout` on the source's VCS port, with the source's current
+    /// epoch snapshot, byte for byte, as its epoch 0, the source root's
+    /// account, and `forked_from` naming the source node, `line` and
+    /// `branch_id`. Nothing else is copied: no nodes, mail, workspaces,
+    /// candidates, operations or successor epochs, so nothing of the
+    /// source's work is adoptable from the fork.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a `tree_id` that is not a portable agent id.
+    pub async fn fork_genesis(
+        source: &Self,
+        tree_id: &str,
+        launch_checkout: PathBuf,
+        line: NodeLineId,
+        branch_id: String,
+    ) -> Result<Self, TopologyError> {
+        let snapshot = source.current_epoch().clone();
+        let mut tree = Self::bootstrap_root_with(
+            source.vcs_port(),
+            tree_id,
+            tree_id,
+            "root",
+            launch_checkout,
+            source.selected_tuple.clone(),
+            snapshot.writer_mode,
+        )
+        .await?;
+        tree.install_snapshot(snapshot);
+        if let Ok(root) = source.node(&source.root_agent_id) {
+            let account = root.account.clone();
+            tree.set_node_account_if_empty(tree_id, account);
+        }
+        tree.lineage.forked_from = Some(ForkedFrom::Node {
+            tree_id: source.tree_id.clone(),
+            agent_id: source.root_agent_id.clone(),
+            line_id: line,
+            branch_id,
+            epoch_no: source.epochs().current,
+        });
+        Ok(tree)
+    }
+
     /// Where this tree came from, when it was forked or imported.
     #[must_use]
     pub fn forked_from(&self) -> Option<&ForkedFrom> {

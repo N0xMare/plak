@@ -44,7 +44,7 @@ pub trait TurnObserver: Send {
 /// # fn create<'a>( &'a self, config: &'a mut HostConfig<plakous_host_protocol::Core>, seed: Option<SeededHistory>, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, CliResult<AttachedCodingSession>> { unreachable!() }
 /// # fn open<'a>( &'a self, config: &'a HostConfig<plakous_host_protocol::Core>, record: &'a SessionRecord, head: SessionLocator, role: RuntimeRole, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> { unreachable!() }
 /// # fn open_rebind_target<'a>( &'a self, config: &'a HostConfig<plakous_host_protocol::Core>, record: &'a SessionRecord, spec: Option<&'a ProductAgentSpec>, locator: SessionLocator, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> { unreachable!() }
-/// # fn fork_runtime<'a>( &'a self, config: &'a HostConfig<plakous_host_protocol::Core>, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> { unreachable!() }
+/// # fn fork_runtime<'a>( &'a self, config: &'a HostConfig<plakous_host_protocol::Core>, tree_id: &'a str, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> { unreachable!() }
 /// # fn rebind_runtime<'a>( &'a self, config: &'a HostConfig<plakous_host_protocol::Core>, spec: Option<&'a ProductAgentSpec>, attach: plakous_hosted::topology_runtime::TopologyHubAttach, native_target: bool, stderr: &'a mut Vec<u8>, ) -> RuntimeFuture<'a, (CliResult<SessionRuntimeBinding>, Option<String>)> { unreachable!() }
 /// # fn input_window(&self, config: &HostConfig<plakous_host_protocol::Core>) -> CliResult<SessionInputWindow> { unreachable!() }
 /// # fn clear<'a>( &'a self, config: &'a mut HostConfig<plakous_host_protocol::Core>, opened: &'a AttachedCodingSession, target_product_session_id: &'a str, create_operation_id: &'a str, stderr_buf: &'a mut Vec<u8>, events: &'a Sender<plakous_host_protocol::Core>, started: std::time::Instant, ) -> RuntimeFuture<'a, CliResult<( AttachedCodingSession, Option<Arc<plakous::subscriptions::ResolvedProvider>>, )>> { unreachable!() }
@@ -96,9 +96,11 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         locator: SessionLocator,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>>;
+    /// The runtime a fork compiles against its own tree `tree_id`.
     fn fork_runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
+        tree_id: &'a str,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>>;
     fn rebind_runtime<'a>(
@@ -277,9 +279,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Producti
     fn fork_runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
+        tree_id: &'a str,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
-        Box::pin(super::fork::production_fork_runtime(config, stderr))
+        Box::pin(super::fork::production_fork_runtime(
+            config, tree_id, stderr,
+        ))
     }
     fn rebind_runtime<'a>(
         &'a self,

@@ -988,6 +988,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     fn fork_runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
+        _: &'a str,
         _: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
         Box::pin(std::future::ready(

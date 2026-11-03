@@ -321,3 +321,68 @@ fn an_append_past_eight_referenced_epochs_is_refused() {
     assert_eq!(tree.epochs().current, 7);
     assert_eq!(tree.retained_epochs().count(), 8);
 }
+
+/// A fork's genesis is a tree of its own: its root is a new node named after
+/// the tree, its epoch 0 is the source's current epoch byte for byte, it
+/// records where it came from, and nothing of the source's work (children,
+/// candidates) comes with it, so a source candidate is not adoptable there.
+#[test]
+fn a_fork_genesis_is_an_independent_tree_seeded_with_the_source_epoch() {
+    use crate::tree::test_support::{adopt_req, candidate_of, fake_tree, mint_req};
+    let (root, _vcs, mut source) = fake_tree();
+    let child = source.spawn_agent("root", &mint_req(), None).unwrap();
+    source.record_turn_completed(&child.agent_id).unwrap();
+    source.settle_for_test();
+    let candidate = candidate_of(&source, &child.agent_id);
+    let line = NodeLineId::parse(LINE).unwrap();
+    let mut fork = crate::tree::block_on_for_test(ProductAgentTree::fork_genesis(
+        &source,
+        "fork1",
+        root.path().to_path_buf(),
+        line.clone(),
+        "0190c3a1-5b7e-7c2d-9f00-00000000b001".to_owned(),
+    ))
+    .unwrap();
+
+    assert_eq!(
+        (fork.tree_id.as_str(), fork.root_agent_id.as_str()),
+        ("fork1", "fork1")
+    );
+    assert_eq!(fork.node("fork1").unwrap().epoch_no, 0);
+    assert!(fork.node(&child.agent_id).is_err());
+    assert_eq!(
+        serde_json::to_string(fork.current_epoch()).unwrap(),
+        serde_json::to_string(source.current_epoch()).unwrap()
+    );
+    assert_eq!(
+        fork.forked_from(),
+        Some(&ForkedFrom::Node {
+            tree_id: "tree1".to_owned(),
+            agent_id: "root".to_owned(),
+            line_id: line,
+            branch_id: "0190c3a1-5b7e-7c2d-9f00-00000000b001".to_owned(),
+            epoch_no: 0,
+        })
+    );
+    assert!(fork.candidates().is_empty());
+    let refused = fork
+        .adopt_candidate("fork1", &adopt_req(&candidate), None)
+        .unwrap_err();
+    assert_ne!(refused.code, TopologyErrorCode::MergeConflict);
+    assert!(source.candidates().contains_key(&candidate));
+
+    // Persisted, both trees reopen independently with their own rows.
+    let store = MemoryTreeStore::new();
+    let _source_revision = store.save(&source).unwrap();
+    let _fork_revision = store.save(&fork).unwrap();
+    let reopened = ProductAgentTree::reopen(store.load("fork1").unwrap().unwrap());
+    assert_eq!(reopened.forked_from(), fork.forked_from());
+    assert_eq!(
+        serde_json::to_string(reopened.current_epoch()).unwrap(),
+        serde_json::to_string(source.current_epoch()).unwrap()
+    );
+    assert_eq!(reopened.nodes().len(), 1);
+    let source_again = ProductAgentTree::reopen(store.load("tree1").unwrap().unwrap());
+    assert!(source_again.forked_from().is_none());
+    assert!(source_again.node(&child.agent_id).is_ok());
+}

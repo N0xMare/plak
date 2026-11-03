@@ -46,12 +46,7 @@ pub trait TopologyRows: TreeRows {
 /// until a hub or stored tree exists, then that genesis id.
 pub fn durable_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> String {
     let mut candidate = session.id.clone();
-    // A carried-forward source lives in another build's store.
-    let mut next_source = session
-        .carried_forward_from()
-        .is_none()
-        .then(|| session.source_product_session_id.clone())
-        .flatten();
+    let mut next_source = inherited_tree_source(session);
     let mut seen = std::collections::BTreeSet::new();
     loop {
         if !seen.insert(candidate.clone()) {
@@ -69,11 +64,24 @@ pub fn durable_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> Stri
         next_source = rows
             .session(&source)
             .ok()
-            .filter(|record| record.carried_forward_from().is_none())
-            .and_then(|record| record.source_product_session_id);
+            .and_then(|record| inherited_tree_source(&record));
         candidate = source;
     }
     session.id.clone()
+}
+
+/// The source whose tree `session` may still be on: none past a carry (its
+/// source lives in another build's store) or a fork (which opens a tree of
+/// its own).
+fn inherited_tree_source(session: &SessionRecord) -> Option<String> {
+    let forked = session
+        .source_workflow_operation_id
+        .as_deref()
+        .is_some_and(|operation| operation.starts_with("plak:fork:"));
+    if forked || session.carried_forward_from().is_some() {
+        return None;
+    }
+    session.source_product_session_id.clone()
 }
 
 /// Whether the tree must be resumed explicitly before it admits work.

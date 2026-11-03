@@ -601,12 +601,7 @@ fn plain_fork_rereads_changed_agents_md_and_names_it() {
             .expect("the executor drives the call")
             .unwrap();
         assert_ne!(config.session.id, source_id);
-        // A plain fork shares its source's tree today, so it stays its node.
-        let source_node = config.store.load(&source_id).unwrap().node;
-        assert_eq!(
-            config.store.load(&config.session.id).unwrap().node,
-            source_node
-        );
+        assert_fork_has_a_tree_of_its_own(config, &source_id);
         notes_rx
             .try_iter()
             .filter_map(|event| match event {
@@ -644,6 +639,52 @@ fn plain_fork_rereads_changed_agents_md_and_names_it() {
         instructions(&opened)
     );
     executor.block_on(opened.release()).unwrap().unwrap();
+}
+
+/// A fork is a new node in a tree of its own: its record names that node,
+/// its tree is keyed by its id, seeded with the source tree's current epoch
+/// bytes and naming its source node, line and branch, and the source's tree
+/// is left as it was (spec 03 §1.2).
+fn assert_fork_has_a_tree_of_its_own(config: &HostConfig<TestExtension>, source_id: &str) {
+    use crate::agent_tree::ForkedFrom;
+    let fork = config.store.load(&config.session.id).unwrap();
+    let source = config.store.load(source_id).unwrap();
+    assert_eq!(fork.node, sessions::SessionNode::genesis(&fork.id));
+    assert_ne!(fork.node, source.node);
+    let rows = config.topology_rows();
+    assert_eq!(durable_tree_id(&rows, &fork), fork.id);
+    let source_tree_id = durable_tree_id(&rows, &source);
+    assert_eq!(source_tree_id, source.node.tree_id);
+    let store = config.state_roots.tree_store().unwrap();
+    let source_tree =
+        crate::agent_tree::ProductAgentTree::reopen(store.load(&source_tree_id).unwrap().unwrap());
+    let fork_tree =
+        crate::agent_tree::ProductAgentTree::reopen(store.load(&fork.id).unwrap().unwrap());
+    assert_eq!(fork_tree.root_agent_id, fork.id);
+    assert_eq!(fork_tree.nodes().len(), 1);
+    assert!(fork_tree.candidates().is_empty());
+    assert_eq!(
+        serde_json::to_string(fork_tree.current_epoch()).unwrap(),
+        serde_json::to_string(source_tree.current_epoch()).unwrap()
+    );
+    let source_locator = source.plakous_locator.unwrap();
+    let Some(ForkedFrom::Node {
+        tree_id,
+        agent_id,
+        line_id,
+        branch_id,
+        epoch_no,
+    }) = fork_tree.forked_from()
+    else {
+        panic!("the fork's tree records no source node");
+    };
+    assert_eq!(
+        (tree_id, agent_id),
+        (&source_tree_id, &source_tree.root_agent_id)
+    );
+    assert_eq!(branch_id, &source_locator.branch_id().to_string());
+    assert_eq!(*epoch_no, source_tree.epochs().current);
+    assert_ne!(line_id.as_str(), "");
 }
 
 /// Skills follow `AGENTS.md`: a fork re-reads them and names the listing, an
@@ -1050,8 +1091,22 @@ fn prepared_fork_across_open(
     )
     .unwrap();
     let published = canonical_published.then(|| {
+        let target_id = request.successor_product_id();
+        executor
+            .block_on(fork::seed_fork_tree(
+                &config,
+                &opened,
+                &target_id,
+                source_locator,
+            ))
+            .expect("the executor drives the call")
+            .unwrap();
         let runtime = executor
-            .block_on(fork::fork_runtime_binding(&config, &mut Vec::new()))
+            .block_on(fork::fork_runtime_binding(
+                &config,
+                &target_id,
+                &mut Vec::new(),
+            ))
             .unwrap()
             .unwrap();
         let outcome = executor
@@ -1181,8 +1236,22 @@ fn a_saved_fork_names_the_agents_md_it_reread() {
     )
     .unwrap();
     let source = executor.block_on(opened.detach()).unwrap().unwrap();
+    let target_id = sessions::projector::WorkflowRequest {
+        operation_id: "plak:fork:saved-note".into(),
+        source_locator: source,
+        kind: sessions::SessionWorkflowKind::Fork,
+    }
+    .successor_product_id();
+    executor
+        .block_on(fork::seed_fork_tree(&config, &opened, &target_id, source))
+        .expect("the executor drives the call")
+        .unwrap();
     let runtime = executor
-        .block_on(fork::fork_runtime_binding(&config, &mut Vec::new()))
+        .block_on(fork::fork_runtime_binding(
+            &config,
+            &target_id,
+            &mut Vec::new(),
+        ))
         .unwrap()
         .unwrap();
     let sessions = config.state_roots.runtime_sessions().unwrap();
@@ -1838,6 +1907,56 @@ fn handle_rebind_fails_closed_when_tree_epoch_has_live_descendants() {
         crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS
     );
     assert!(no_unsettled_rebind_requests(&config));
+}
+
+/// A fork opens a tree of its own, so it refuses while the source's tree has
+/// live descendants, which would stay behind with the source; nothing is
+/// written.
+#[test]
+fn handle_fork_refuses_while_the_source_tree_has_live_descendants() {
+    use crate::runtime::fork::handle_fork;
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    install_live_descendant_on_hub(
+        &durable_tree_id(&config.topology_rows(), &config.session),
+        &config.cwd,
+    );
+    let mut opened = memory_attached_stub();
+    config
+        .session
+        .bind_plakous_locator(opened.locator())
+        .unwrap();
+    let (tx, _rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(tx);
+    let (_actions_tx, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let interrupt_state = RefCell::new(InterruptWatchState::default());
+    let error = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_fork(
+            InterruptWatch::new(&actions_rx, &interrupt_state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .unwrap_err();
+    assert!(
+        error
+            .message()
+            .starts_with("cannot fork while this session's sub-agents run"),
+        "{}",
+        error.message()
+    );
+    assert_eq!(
+        config
+            .store
+            .load_intents(&config.session.id)
+            .unwrap()
+            .workflow_requests,
+        []
+    );
 }
 
 /// A Codex Code Mode (native-ptc) prefix is replayable onto every

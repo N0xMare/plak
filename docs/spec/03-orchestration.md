@@ -187,6 +187,24 @@ source's tree; Fork now is refused while any are live. Fork now changes only the
 session; the home's default profile is written only by its explicit Set as
 default action.
 
+A plain `/fork` (and `/fork-then-compact`) is a new node in a tree of its own
+too, with a new agent line. Before the runtime fork, the host writes the fork's
+genesis tree, keyed by its session id and with its root agent named the same,
+through the tree store: epoch 0 is the source tree's current epoch, byte for
+byte, so the fork is briefed with exactly the roster and cards the source runs
+now, and `forked_from` records the source node (tree and root agent), its
+line, the branch the fork copied and the source epoch number. Nothing else
+travels: no nodes, mail, workspaces, candidates, operations or successor
+epochs, so a source candidate is unknown to the fork and refused there. The
+fork's tools compile over a detached copy of that tree (no lease), and its
+attach owns the tree from then on. The runtime fork copies the job counter
+(`next_id`) and no job rows (chapter 01 §5.6). The source's tree, children and
+cards are untouched; a fork is refused while that tree has a live descendant
+or a spawn mid-mint. A source without a tree seeds nothing, and the fork
+bootstraps its own tree on first attach like any new session. No session
+inherits a tree across a fork: tree resolution stops at a fork as it stops at
+a carry.
+
 All `[orchestration]` bounds are carried in the digest, including the fixed
 per-cell agent budget: a ceiling that decides whether a spawn is admitted is
 bind authority like the other four.
@@ -3754,7 +3772,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Feed cursors (`agent_feed_cursors`), node fold order | view metadata | cursor per runtime session and last applied intent order at the agent cursor; NULL node order restarts the fold |
 | Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn; written today as no line, epoch 0, the local runner and no composition |
 | Successor epochs, current epoch | intent | an epoch append; none today |
-| Tree provenance (`forked_from`) | intent | the fork or import that created the tree; none today |
+| Tree provenance (`forked_from`) | intent | the fork or import that created the tree: a `/fork` genesis writes `node` (source tree, root agent, line, branch, source epoch); none for an import yet |
 | Runner ancestors | external-effect record | completed bundle stages; none today |
 | Custody | ownership record, never tree content | the custody steps above |
 | Interrupt cause | intent | an optional `cause` field (`operator`, `parent`, `cascade`, `owner_lost`, `handoff`, `stopped`) of the anchored `interrupt` intent, omitted when the writer records none, which every interrupt does today; such a row keeps its earlier bytes |

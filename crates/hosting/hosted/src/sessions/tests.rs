@@ -1006,7 +1006,7 @@ fn switch_selection(pending: bool) -> Box<SwitchSelection> {
     })
 }
 
-/// Today a fork shares its source's tree and stays its node; a rebind takes
+/// A fork is a new node in a tree of its own; a rebind takes
 /// the node of the tree it compiles against (its own, or its source's with
 /// sub-agents off); a clear compiles against a tree of its own. A switch, decoded today,
 /// continues the node and records the profile only on a virtual tree.
@@ -1025,7 +1025,7 @@ fn each_successor_records_the_node_of_the_tree_it_compiles_against() {
         SessionWorkflowKind::Fork,
         branch_locator(8, 9),
     );
-    assert_eq!(fork.node, source.node);
+    assert_eq!(fork.node, SessionNode::genesis(&fork.id));
     let rebind = successor_from_fact(
         &source,
         "plak:rebind:node",

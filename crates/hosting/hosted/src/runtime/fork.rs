@@ -8,6 +8,7 @@ use crate::interrupt::{InterruptWatch, watched};
 use crate::sessions::{self};
 use crate::{CliFailure, CliResult};
 
+use super::TreeRows as _;
 use super::admission::emit_queue_snapshot;
 use super::factory::observe_boundary;
 use super::info::{send_binding, send_last_user_prompt_at};
@@ -15,7 +16,7 @@ use super::rebind::{
     durable_tree_id, instruction_sources, interrupted_before_dispatch, note_reread_instructions,
     note_reread_instructions_at, restore_detached_source,
 };
-use super::startup::{api_runtime_for_record, host_runtime_binding, open_session_for_host};
+use super::startup::{api_runtime_for_record, open_session_for_host};
 use super::{HostBoundary, HostWorkflow};
 use super::{HostConfig, RuntimeRole, Sender};
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -33,6 +34,7 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     requested_account: Option<&str>,
 ) -> CliResult<()> {
     super::jobs_transition_guard(config, opened)?;
+    refuse_live_tree(config)?;
     watch.begin();
     if requested_account.is_some_and(|account| config.session.account.as_deref() != Some(account)) {
         return Err(CliFailure::new(
@@ -127,9 +129,15 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         discard_unstarted_fork(watch, config, opened, events, &operation_id).await?;
         return Err(interrupted_before_dispatch("fork"));
     }
+    let target_id = request.successor_product_id();
+    if let Err(error) = seed_fork_tree(config, opened, &target_id, source_locator).await {
+        restore_detached_source(config, opened, source_locator, stderr_buf).await?;
+        discard_unstarted_fork(watch, config, opened, events, &operation_id).await?;
+        return Err(error);
+    }
     stderr_buf.clear();
     config.state_roots.set_inherited_skills(inherited_skills);
-    let built = fork_runtime_binding(config, stderr_buf).await;
+    let built = fork_runtime_binding(config, &target_id, stderr_buf).await;
     config.state_roots.set_inherited_skills(None);
     let runtime = match built {
         Ok(runtime) => runtime,
@@ -203,7 +211,6 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             error.message()
         )));
     }
-    let target_id = request.successor_product_id();
     let target_result = async {
         let projected = watched(
             watch,
@@ -314,23 +321,114 @@ pub(super) fn fork_refusal(kind: AgentSessionsErrorKind, message: &str) -> Optio
     .then_some("cannot fork: this session's tools changed; start a new session")
 }
 
-/// The runtime a fork recompiles from: this session's own binding and tree,
-/// built from the files as they are now. It takes no topology lease.
+/// A fork opens a tree of its own (spec 03 §1.2), so it refuses while the
+/// source's tree has a spawn mid-mint or live descendants: those stay with
+/// the source, whose release would otherwise interrupt them.
+fn refuse_live_tree<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+) -> CliResult<()> {
+    let rows = config.topology_rows();
+    match super::topology_state::epoch_rebind_refusal(
+        &rows,
+        &durable_tree_id(&rows, &config.session),
+    ) {
+        Some(
+            crate::agent_tree::EpochRebindRefusal::LiveDescendants
+            | crate::agent_tree::EpochRebindRefusal::PendingSpawns,
+        ) => Err(CliFailure::new(
+            "cannot fork while this session's sub-agents run: the fork opens a tree of its own and they stay here; wait for them or stop them first",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Seeds the fork's own tree, keyed by its session id, with the source
+/// tree's current epoch bytes and its provenance (source node, line and
+/// branch), through the tree rows' store. A source with no tree (sub-agents
+/// never on, or a py-sdk root) seeds nothing: the fork then bootstraps its
+/// own tree on first attach like any new session.
+pub(super) async fn seed_fork_tree<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    opened: &AttachedCodingSession,
+    target_id: &str,
+    source_locator: plakous::sessions::SessionLocator,
+) -> CliResult<()> {
+    use crate::agent_tree::{NodeLineId, ProductAgentTree, TopologyError};
+    if config.session.composition == crate::binding::CompositionSelection::PySdk {
+        return Ok(());
+    }
+    let rows = config.topology_rows();
+    let source_tree = durable_tree_id(&rows, &config.session);
+    let attached = crate::topology_runtime::lookup(&source_tree);
+    let stored = match &attached {
+        Some(_) => None,
+        None => match rows.tree(&source_tree).map_err(CliFailure::new)? {
+            Some(tree) => Some(tree),
+            None => return Ok(()),
+        },
+    };
+    let line = opened
+        .sessions()
+        .line_head_of(source_locator)
+        .await
+        .map_err(|error| CliFailure::new(format!("fork source line could not be read: {error}")))?
+        .line();
+    let line = NodeLineId::parse(&line.to_string()).map_err(CliFailure::new)?;
+    let branch = source_locator.branch_id().to_string();
+    // The genesis asks the VCS port for its root's branch, so it is built
+    // from a copy of an attached source, outside the tree's lock.
+    let source = match (attached, stored) {
+        (Some(runtime), _) => runtime
+            .read(ProductAgentTree::clone)
+            .map_err(|error| CliFailure::new(error.message))?,
+        (None, Some(source)) => source,
+        (None, None) => return Ok(()),
+    };
+    let mut tree = ProductAgentTree::fork_genesis(
+        &source,
+        target_id,
+        config.session.workspace_root.clone(),
+        line,
+        branch,
+    )
+    .await
+    .map_err(|error: TopologyError| CliFailure::new(error.message))?;
+    if rows.tree_exists(target_id).map_err(CliFailure::new)? {
+        return Err(CliFailure::new(
+            "a topology tree already exists for the forked session",
+        ));
+    }
+    rows.save_tree(&mut tree)
+        .map_err(|error| CliFailure::new(error.message))
+}
+
+/// The runtime a fork recompiles from: this session's own binding, built
+/// from the files as they are now, over the fork's own tree `tree_id`. It
+/// compiles over a detached copy of that tree and takes no topology lease;
+/// the fork's attach owns its tree.
 pub(super) async fn production_fork_runtime<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
+    tree_id: &str,
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
-    if config.session.target_selection.api_target().is_none() {
-        return host_runtime_binding(config, stderr_buf, RuntimeRole::Primary).await;
-    }
-    let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
     let mut attached = None;
+    if config.session.target_selection.api_target().is_none() {
+        let mut spec = super::startup::native_spec(config)?;
+        spec.topology_tree_id = Some(tree_id.to_owned());
+        return crate::agent::coding_session_runtime_binding_with_attach(
+            spec,
+            stderr_buf,
+            crate::topology_runtime::TopologyHubAttach::Inspect,
+            &mut attached,
+        )
+        .await;
+    }
     api_runtime_for_record(
         config,
         &config.session,
         false,
-        crate::topology_runtime::TopologyHubAttach::LookupOnly,
-        Some(&tree_id),
+        crate::topology_runtime::TopologyHubAttach::Inspect,
+        Some(tree_id),
         &mut attached,
     )
     .await
@@ -395,9 +493,13 @@ async fn discard_unstarted_fork<P: plakous_host_protocol::ProtocolExtension>(
 
 pub(super) async fn fork_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
+    tree_id: &str,
     stderr: &mut Vec<u8>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
-    config.runtime_factory.fork_runtime(config, stderr).await
+    config
+        .runtime_factory
+        .fork_runtime(config, tree_id, stderr)
+        .await
 }
 
 #[cfg(test)]

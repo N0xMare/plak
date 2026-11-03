@@ -37,12 +37,13 @@ impl SessionRecord {
         target.queue_projection_debt = false;
         target.queue_drain_state = QueueDrainState::LiveAutoDrain;
         if request.kind == SessionWorkflowKind::Fork {
+            // A fork is a new node in a tree of its own, which starts from
+            // the source's current epoch, so it keeps the source's profile.
+            target.node = crate::sessions::SessionNode::genesis(&target.id);
             target.prompt_history.clear();
         }
-        // Today a fork shares its source's tree, so it stays its node and
-        // profile; a rebind takes the node and profile of the tree it
-        // compiled against; a switch continues the same node with its new
-        // profile.
+        // A rebind takes the node and profile of the tree it compiled
+        // against; a switch continues the same node with its new profile.
         match &request.kind {
             SessionWorkflowKind::Rebind(selection) => {
                 if let Some(profile) = &selection.own_tree {
