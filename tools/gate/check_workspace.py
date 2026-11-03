@@ -1422,8 +1422,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
             "CodexMinimalLocalCodeModeDescriptorV1",
             "preview_redaction",
             # Hidden, unsupported runner seam: the selected runner's probe
-            # and reader (spec 01 §8.5).
-            "runner",
+            # (spec 01 §8.5).
+            "runner::workspace_probe",
         },
     },
     "plakous-workspace": _SHARED_PLAKOUS_SYMBOLS,
@@ -1431,7 +1431,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
         **_SHARED_PLAKOUS_SYMBOLS,
         # Hidden, unsupported runner seam: the selected runner's probe and
         # whether the tree's VCS port refuses (spec 01 §8.5).
-        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"] | {"runner"},
+        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"]
+        | {"runner::process_runner", "runner::workspace_probe"},
     },
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
@@ -1462,14 +1463,14 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "SourceResolution",
         },
         "tools": {
-            "RunnerCall",
-            "RunnerExtension",
-            "RunnerLink",
-            "RunnerVerb",
-            "ServeFailure",
-            "ServeFuture",
-            "call_blocking",
-            "process_runner",
+            "runner::RunnerCall",
+            "runner::RunnerExtension",
+            "runner::RunnerLink",
+            "runner::RunnerVerb",
+            "runner::ServeFailure",
+            "runner::ServeFuture",
+            "runner::call_blocking",
+            "runner::process_runner",
         },
     },
     # The export document names its runner by the library's runner identity.
@@ -2285,7 +2286,11 @@ def _foreign_function_names(tokens: list[RustToken]) -> set[str]:
 def _unapproved_plakous_symbols(
     tokens: list[RustToken], allowed_symbols: dict[str, set[str]]
 ) -> set[str]:
-    """Find facade symbols outside the package's approved `plakous::` surface."""
+    """Find facade symbols outside the package's approved `plakous::` surface.
+
+    An approved `a::b` grants the one item `b` of the facade module's
+    submodule `a`.
+    """
     unapproved: set[str] = set()
     for statement in _use_statements(tokens):
         for names in _use_tree_paths(statement):
@@ -2295,9 +2300,19 @@ def _unapproved_plakous_symbols(
                 unapproved.add("::".join(names[:2]))
                 continue
             module = names[1]
-            unapproved.update(
-                f"{module}::{name}" for name in names[2:] if name not in allowed_symbols[module]
-            )
+            allowed = allowed_symbols[module]
+            index = 2
+            while index < len(names):
+                name = names[index]
+                if index + 1 < len(names) and f"{name}::{names[index + 1]}" in allowed:
+                    index += 2
+                    continue
+                if name not in allowed:
+                    reported = _unapproved_name(module, allowed, names[index : index + 2])
+                    unapproved.add(reported)
+                    index += reported.count("::")
+                    continue
+                index += 1
 
     for index in range(len(tokens) - 2):
         if not (
@@ -2312,14 +2327,41 @@ def _unapproved_plakous_symbols(
         if module not in allowed_symbols:
             unapproved.add(module)
             continue
-        if (
+        if not (
             index + 4 < len(tokens)
             and tokens[index + 3].value == "::"
             and tokens[index + 4].kind == "identifier"
-            and tokens[index + 4].value not in allowed_symbols[module]
         ):
-            unapproved.add(f"{module}::{tokens[index + 4].value}")
+            continue
+        item = tokens[index + 4].value
+        if item in allowed_symbols[module]:
+            continue
+        if (
+            index + 6 < len(tokens)
+            and tokens[index + 5].value == "::"
+            and tokens[index + 6].value == "{"
+        ):
+            # A use tree: the use-statement walk above checks each path.
+            continue
+        path = [item]
+        if (
+            index + 6 < len(tokens)
+            and tokens[index + 5].value == "::"
+            and tokens[index + 6].kind == "identifier"
+        ):
+            path.append(tokens[index + 6].value)
+            if "::".join(path) in allowed_symbols[module]:
+                continue
+        unapproved.add(_unapproved_name(module, allowed_symbols[module], path))
     return unapproved
+
+
+def _unapproved_name(module: str, allowed: set[str], path: list[str]) -> str:
+    """Name an unapproved facade item, down to the item of a submodule whose
+    items are approved one by one."""
+    if len(path) > 1 and any(symbol.startswith(f"{path[0]}::") for symbol in allowed):
+        return "::".join([module, *path[:2]])
+    return f"{module}::{path[0]}"
 
 
 def _environment_calls(tokens: list[RustToken]) -> list[tuple[str, list[RustToken]]]:

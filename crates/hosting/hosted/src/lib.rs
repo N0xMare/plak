@@ -117,6 +117,7 @@ mod call_detail;
 mod frozen_tables;
 pub mod mcp_binding;
 mod process_environment;
+#[doc(hidden)]
 pub mod runner_reader;
 
 // A session release joins one in-flight store call and then commits the shutdown receipt, each

@@ -10365,9 +10365,12 @@ by hosted through the hidden `plakous::tools::preview_redaction` bridge.
 The runner seam is the unsupported `plakous_tools::internal::runner` and
 `plakous_agent::internal::select_runner_backend`, reached by hosted and the
 orchestration tree through the hidden `plakous::tools::runner` and
-`plakous::agent::select_runner_backend` bridges (§8.5). The hidden
-`JoinedSessionsPort::runner` constructor and its restore and adoption
-methods are part of the same seam.
+`plakous::agent::select_runner_backend` bridges (§8.5). Each consumer is
+granted the bridge's items one by one: hosted its `workspace_probe` and, in
+its hidden `runner_reader`, the link and extension items the instruction
+reader uses; the orchestration tree `workspace_probe` and `process_runner`.
+The hidden `JoinedSessionsPort::runner` constructor and its restore and
+adoption methods are part of the same seam.
 It is display minimization, not credential authority (chapter 04 §5).
 
 ### 12.1 Feature closures
