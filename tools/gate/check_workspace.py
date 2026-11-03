@@ -676,6 +676,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/tools/jobs.rs"): {"json"},
     # A claim or effect no owner could release logs only ids and the error code.
     ("plakous-recursive-subagents", "src/tools/driver.rs"): {"error"},
+    # A custody release the store refused when the driver ended logs only the error.
+    ("plakous-recursive-subagents", "src/tools/driver/custody.rs"): {"warn"},
     ("plakous-recursive-subagents", "src/tools/mail.rs"): {"error", "json"},
     ("plakous-recursive-subagents", "src/tools/mod.rs"): {"json"},
     ("plakous-recursive-subagents", "src/tools/registrations.rs"): {"json"},

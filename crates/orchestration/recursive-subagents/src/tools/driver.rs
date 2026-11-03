@@ -63,83 +63,13 @@ pub struct TreeDriver {
 
 type RetirementRecovery = Arc<dyn Fn() + Send + Sync>;
 
-/// A driver's custody of its tree (spec 03 §14), taken when the driver bound
-/// the tree to its store.
-struct DriverCustody {
-    store: Arc<dyn TreeStore>,
-    /// The share this driver holds, or why its take was refused; every save
-    /// is then refused the same way.
-    hold: Result<Mutex<Option<crate::tree::CustodyHold>>, crate::tree::CustodyError>,
-}
-
-impl DriverCustody {
-    fn claim(&self) -> Result<crate::tree::CustodyClaim, crate::tree::TreeStoreError> {
-        match &self.hold {
-            Ok(hold) => hold
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .map(|hold| hold.claim().clone())
-                .ok_or_else(|| {
-                    crate::tree::TreeStoreError::not_in_custody("agent tree custody was released")
-                }),
-            Err(error) => Err(error.clone().into()),
-        }
-    }
-}
-
-impl Drop for DriverCustody {
-    /// The last clone of the driver is gone: no writer of this tree remains,
-    /// so its share is released. A release the store refuses leaves the
-    /// record naming this live process, which its next take joins and which
-    /// ends with it.
-    fn drop(&mut self) {
-        let Ok(hold) = &self.hold else {
-            return;
-        };
-        let Some(hold) = hold
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        else {
-            return;
-        };
-        if let Err(error) = crate::tree::release_custody_hold(self.store.custody_port(), hold) {
-            tracing::warn!(
-                target: "plak.topology",
-                error = %error,
-                "agent tree custody was not released when its driver ended"
-            );
-        }
-    }
-}
+mod custody;
+use custody::DriverCustody;
+mod host_shutdown;
+pub use host_shutdown::HostShutdown;
 
 /// One writer turn's work, with its result already handed off.
 type ErasedWork = Box<dyn FnOnce(&mut storage::TreeMutationGuard<'_>) + Send>;
-
-/// A host's shutdown, latched once signalled: a tree writer waiting on a
-/// storage outage selects on it rather than polling.
-#[derive(Clone, Debug, Default)]
-pub struct HostShutdown(tokio_util::sync::CancellationToken);
-
-impl HostShutdown {
-    /// A signal not yet raised.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Raises the signal; it stays raised.
-    pub fn signal(&self) {
-        self.0.cancel();
-    }
-
-    /// Whether the signal was raised.
-    #[must_use]
-    pub fn is_signalled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-}
 
 /// How a writer waits for its turn.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -249,17 +179,7 @@ impl TreeDriver {
     ) -> Self {
         // Custody precedes the tree's first save here, and every save after:
         // a write without it is refused before it reaches the store.
-        let custody = {
-            let tree_id = tree
-                .lock()
-                .map(|tree| tree.tree_id.clone())
-                .unwrap_or_else(|poisoned| poisoned.into_inner().tree_id.clone());
-            DriverCustody {
-                hold: crate::tree::acquire_custody(store.custody_port(), &tree_id)
-                    .map(|hold| Mutex::new(Some(hold))),
-                store: Arc::clone(&store),
-            }
-        };
+        let custody = DriverCustody::take(&tree, &store);
         if let Ok(mut guard) = tree.lock() {
             guard.set_vcs(Arc::clone(&vcs));
         }
@@ -1357,20 +1277,6 @@ impl TreeDriver {
         Ok(())
     }
 
-    fn save_claimed(
-        &self,
-        tree: &ProductAgentTree,
-    ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
-        let claim = self.custody.claim()?;
-        self.store.save(tree, &claim)
-    }
-
-    /// Why this driver holds no custody of its tree, when it holds none.
-    #[must_use]
-    pub fn custody_refusal(&self) -> Option<crate::tree::TreeStoreError> {
-        self.custody.claim().err()
-    }
-
     /// Process-local publication pause, readable without taking the tree lock.
     #[cfg(test)]
     #[must_use]
@@ -1386,30 +1292,6 @@ impl TreeDriver {
 
     pub(crate) fn shutdown_storage_waits(&self) {
         self.storage_parking.shutdown();
-    }
-
-    /// Binds the shutdown of the host that attached this tree last. Each
-    /// writer takes the binding current when it asks for its turn, and stops
-    /// waiting for a refused publication once that host's signal is latched.
-    pub fn bind_host_shutdown(&self, signal: HostShutdown) {
-        *self
-            .host_shutdown
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(signal);
-    }
-
-    /// Whether the host that attached this tree last is shutting down.
-    pub(crate) fn host_shutdown_latched(&self) -> bool {
-        self.host_shutdown_signal()
-            .is_some_and(|signal| signal.is_cancelled())
-    }
-
-    fn host_shutdown_signal(&self) -> Option<tokio_util::sync::CancellationToken> {
-        self.host_shutdown
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .map(|signal| signal.0.clone())
     }
 
     /// Applies consequences only to an acknowledged tree, and publishes them
