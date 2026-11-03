@@ -362,6 +362,223 @@ pub async fn install_root_bind_epoch(
     install_on_loaded(rows, tree, successor, tree_id, emit)
 }
 
+/// Runs `work` on `tree_id`'s live hub, or on its persisted rows and saves
+/// them when no hub holds it. `None` when the tree has no rows.
+async fn on_tree<R: Send + 'static>(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+    epoch_advanced: bool,
+    work: impl FnOnce(&mut ProductAgentTree) -> Result<R, String> + Send + 'static,
+) -> Result<Option<R>, String> {
+    if let Some(runtime) = lookup(tree_id) {
+        return runtime
+            .mutate_then_emit(epoch_advanced, work)
+            .await
+            .map(Some);
+    }
+    let Some(mut tree) = rows.tree(tree_id)? else {
+        return Ok(None);
+    };
+    let answer = work(&mut tree)?;
+    rows.save_tree(&mut tree).map_err(|error| error.message())?;
+    Ok(Some(answer))
+}
+
+/// Whether `tree_id` has rows: a live hub, or a persisted tree.
+///
+/// # Errors
+/// The rows could not be read.
+pub(crate) fn tree_has_rows(rows: &dyn TreeRows, tree_id: &str) -> Result<bool, String> {
+    if lookup(tree_id).is_some() {
+        return Ok(true);
+    }
+    rows.tree_exists(tree_id)
+}
+
+/// The current epoch of `tree_id`, from its hub or its persisted rows.
+///
+/// # Errors
+/// The rows could not be read.
+pub(crate) fn current_epoch_of(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+) -> Result<Option<OrchestrationSnapshot>, String> {
+    if let Some(runtime) = lookup(tree_id) {
+        return runtime
+            .read(|tree| tree.current_epoch().clone())
+            .map(Some)
+            .map_err(|error| error.message);
+    }
+    Ok(rows.tree(tree_id)?.map(|tree| tree.current_epoch().clone()))
+}
+
+/// Step 2 of a profile switch on a tree with rows: the successor epoch's
+/// exact bytes, recorded before the publication that compiles against them.
+///
+/// # Errors
+/// The tree refuses the epoch (a root spawn mid-reservation, the epoch
+/// bound, another pending switch) or cannot be written.
+pub(crate) async fn record_switch_epoch(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+    workflow_id: &str,
+    snapshot: OrchestrationSnapshot,
+) -> Result<(), String> {
+    let workflow = workflow_id.to_owned();
+    on_tree(rows, tree_id, false, move |tree| {
+        tree.record_epoch_pending(&workflow, &snapshot)
+            .map(|_| ())
+            .map_err(|error| error.message)
+    })
+    .await?
+    .ok_or_else(|| "the switch's tree has no rows".to_owned())
+}
+
+/// Step 5 of a profile switch: appends the epoch `workflow_id` recorded,
+/// once its successor is published. `None` when nothing was pending.
+///
+/// # Errors
+/// The tree refuses the append or cannot be written.
+pub(crate) async fn settle_switch_epoch(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+    workflow_id: &str,
+) -> Result<Option<u64>, String> {
+    let workflow = workflow_id.to_owned();
+    Ok(on_tree(rows, tree_id, true, move |tree| {
+        tree.settle_epoch_pending(&workflow)
+            .map_err(|error| error.message)
+    })
+    .await?
+    .flatten())
+}
+
+/// Withdraws `workflow_id`'s pending epoch, whose publication definitely did
+/// not land.
+///
+/// # Errors
+/// The tree cannot be written.
+pub(crate) async fn withdraw_switch_epoch(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+    workflow_id: &str,
+) -> Result<(), String> {
+    let workflow = workflow_id.to_owned();
+    on_tree(rows, tree_id, false, move |tree| {
+        Ok(tree.withdraw_epoch_pending(&workflow))
+    })
+    .await
+    .map(|_| ())
+}
+
+/// Withdraws every pending epoch left by a switch that did not publish onto
+/// the head now open: the head holds its lease, so no switch from it is in
+/// flight. Returns the withdrawn workflows.
+///
+/// # Errors
+/// The tree cannot be read or written.
+pub async fn withdraw_stale_switch_epochs(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+) -> Result<Vec<String>, String> {
+    let stale = match lookup(tree_id) {
+        Some(runtime) => runtime
+            .read(|tree| tree.epoch_pending().map_err(|error| error.message))
+            .map_err(|error| error.message)??,
+        None => match rows.tree(tree_id)? {
+            Some(tree) => tree.epoch_pending().map_err(|error| error.message)?,
+            None => return Ok(Vec::new()),
+        },
+    };
+    if stale.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(on_tree(rows, tree_id, false, |tree| {
+        tree.withdraw_epoch_pending_except(None)
+            .map_err(|error| error.message)
+    })
+    .await?
+    .unwrap_or_default())
+}
+
+/// Before `session`'s root opens: when it is a switch successor whose tree
+/// still records its epoch as pending (a crash after the publication), the
+/// tree takes that epoch from the recorded bytes, so the successor compiles
+/// against exactly what it was published with. A tree without rows, and a
+/// session no switch published, change nothing.
+///
+/// # Errors
+/// The tree cannot be read, refuses the append, or cannot be written.
+pub async fn settle_switch_epoch_on_open(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+    session: &SessionRecord,
+) -> Result<(), String> {
+    let Some(workflow) = session.source_workflow_operation_id.as_deref() else {
+        return Ok(());
+    };
+    if !tree_has_rows(rows, tree_id)? {
+        return Ok(());
+    }
+    settle_switch_epoch(rows, tree_id, workflow).await?;
+    // A switch that kept the roster moves only the tree's view of the root
+    // binding; a crash before that view moved leaves the predecessor's.
+    let (Some(model), true) = (
+        session.model.as_deref(),
+        workflow.starts_with("plak:switch:"),
+    ) else {
+        return Ok(());
+    };
+    let root_view = |tree: &ProductAgentTree| {
+        tree.node(&tree.root_agent_id).ok().map(|root| {
+            (
+                root.account.clone(),
+                root.tuple_id.clone(),
+                root.effort.clone(),
+            )
+        })
+    };
+    let current = match lookup(tree_id) {
+        Some(runtime) => runtime.read(root_view).map_err(|error| error.message)?,
+        None => rows.tree(tree_id)?.as_ref().and_then(root_view),
+    };
+    let account = session.account.as_deref().unwrap_or_default();
+    let wanted = (account.to_owned(), model.to_owned(), session.effort.clone());
+    if current.is_none_or(|current| {
+        (account.is_empty() || current.0 == wanted.0)
+            && current.1 == wanted.1
+            && current.2 == wanted.2
+    }) {
+        return Ok(());
+    }
+    record_root_bind_view(rows, tree_id, account, model, session.effort.as_deref()).await
+}
+
+/// Moves the tree's view of the root binding to the line head's, with no
+/// epoch: a switch whose roster is unchanged.
+///
+/// # Errors
+/// The tree cannot be written.
+pub(crate) async fn record_root_bind_view(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+    account: &str,
+    tuple_id: &str,
+    effort: Option<&str>,
+) -> Result<(), String> {
+    let (account, tuple_id, effort) = (
+        account.to_owned(),
+        tuple_id.to_owned(),
+        effort.map(str::to_owned),
+    );
+    on_tree(rows, tree_id, false, move |tree| {
+        tree.record_root_bind(&account, &tuple_id, effort.as_deref());
+        Ok(())
+    })
+    .await
+    .map(|_| ())
+}
+
 /// The no-hub half of [`install_successor_epoch`]: a headless `plak config
 /// set` in another process than the TUI. Its save is the store's
 /// compare-and-swap, so when a hub in that other process publishes first this

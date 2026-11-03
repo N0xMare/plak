@@ -180,6 +180,7 @@ fn interrupted_source_projection_is_pre_dispatch_for_fork_and_rebind() {
                     None,
                     None,
                     &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                    None,
                 ))
                 .expect("the executor drives the call")
                 .unwrap_err()

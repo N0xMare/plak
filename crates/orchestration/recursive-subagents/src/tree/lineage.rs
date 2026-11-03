@@ -276,6 +276,12 @@ impl ProductAgentTree {
         }
     }
 
+    /// Whether a non-root node was spawned under the current epoch, so
+    /// replacing it in place would change that node's cards.
+    pub(super) fn current_epoch_referenced(&self) -> bool {
+        self.node_epochs().contains(&self.lineage.epochs.current)
+    }
+
     /// Epochs a non-root node still references.
     fn node_epochs(&self) -> BTreeSet<u64> {
         self.nodes
@@ -285,33 +291,19 @@ impl ProductAgentTree {
             .collect()
     }
 
-    /// Appends `snapshot` as the tree's next epoch and makes it current.
-    ///
-    /// The root moves to it: its bind, its spawn ceilings and the
-    /// per-prompt attempt bound come from the new epoch, and future root
-    /// spawns bind its roster. Every other node keeps the epoch it was
-    /// spawned under, with its cards, grant ceilings and cell budget, so
-    /// live descendants do not block an append. A spawn mid-reservation
-    /// does, because its node would otherwise bind an epoch chosen before
-    /// the append. The admission state is kept: an append is not a resume
-    /// and does not lift a stop. Successor epochs no node references any
-    /// more are folded away first; epoch 0 is the header and stays.
-    ///
-    /// Returns the new epoch's number.
-    ///
-    /// # Errors
-    ///
-    /// Refuses a snapshot whose digest does not match its contents, a
-    /// pending spawn, and an append that would reference more than
-    /// [`MAX_REFERENCED_EPOCHS`] epochs.
-    pub fn append_epoch(&mut self, snapshot: OrchestrationSnapshot) -> Result<u64, TopologyError> {
+    /// The next epoch's number and the epochs an append of `snapshot` would
+    /// keep referenced, or the refusal [`Self::append_epoch`] would give.
+    pub(super) fn check_appendable(
+        &self,
+        snapshot: &OrchestrationSnapshot,
+    ) -> Result<(u64, BTreeSet<u64>), TopologyError> {
         if !snapshot.digest_matches() {
             return Err(TopologyError::new(
                 TopologyErrorCode::SchemaMismatch,
                 "a tree epoch's digest does not match its roster",
             ));
         }
-        if self.pending_spawns > 0 || !self.minting.is_empty() {
+        if self.root_pending_spawns > 0 {
             return Err(TopologyError::new(
                 TopologyErrorCode::GrantDenied,
                 Self::TREE_EPOCH_REBIND_PENDING_SPAWNS,
@@ -335,6 +327,31 @@ impl ProductAgentTree {
                 ),
             ));
         }
+        Ok((next, referenced))
+    }
+
+    /// Appends `snapshot` as the tree's next epoch and makes it current.
+    ///
+    /// The root moves to it: its bind, its spawn ceilings and the
+    /// per-prompt attempt bound come from the new epoch, and future root
+    /// spawns bind its roster. Every other node keeps the epoch it was
+    /// spawned under, with its cards, grant ceilings and cell budget, so
+    /// live descendants do not block an append. A root spawn
+    /// mid-reservation does, because its node would otherwise bind an epoch
+    /// chosen before the append; a child's spawn binds the child's own epoch
+    /// and does not. The admission state is kept: an append is not a resume
+    /// and does not lift a stop. Successor epochs no node references any
+    /// more are folded away first; epoch 0 is the header and stays.
+    ///
+    /// Returns the new epoch's number.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a snapshot whose digest does not match its contents, a
+    /// pending root spawn, and an append that would reference more than
+    /// [`MAX_REFERENCED_EPOCHS`] epochs.
+    pub fn append_epoch(&mut self, snapshot: OrchestrationSnapshot) -> Result<u64, TopologyError> {
+        let (next, referenced) = self.check_appendable(&snapshot)?;
         self.lineage
             .epochs
             .successors

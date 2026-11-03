@@ -154,6 +154,10 @@ pub struct ProductStateRoots {
     /// A rebind or switch successor's skills on/off, inherited from its
     /// source; `None` outside one.
     inherited_skills: Option<bool>,
+    /// The successor epoch a profile switch's builds compile against: the
+    /// root's tools see the tree with this epoch appended, not its current
+    /// one. `None` outside a switch.
+    pending_epoch: Option<Arc<crate::orchestration::OrchestrationSnapshot>>,
     /// Skill notices new constructions raised, drained by the host loop.
     skill_notices: Arc<Mutex<Vec<String>>>,
     exchange_observer: crate::exchange_observation::Observer,
@@ -276,6 +280,7 @@ impl ProductStateRoots {
             skills: crate::skills::SkillsSetting::default(),
             frozen_skills: None,
             inherited_skills: None,
+            pending_epoch: None,
             skill_notices: Arc::default(),
             exchange_observer: None,
             session_records,
@@ -372,6 +377,20 @@ impl ProductStateRoots {
     /// source whose skills are `on` (`None` ends that).
     pub(crate) fn set_inherited_skills(&mut self, on: Option<bool>) {
         self.inherited_skills = on;
+    }
+
+    /// Makes the builds that follow compile a switch successor against
+    /// `epoch` appended to its tree (`None` ends that).
+    pub(crate) fn set_pending_epoch(
+        &mut self,
+        epoch: Option<Arc<crate::orchestration::OrchestrationSnapshot>>,
+    ) {
+        self.pending_epoch = epoch;
+    }
+
+    /// The successor epoch the builds that follow compile against.
+    pub(crate) fn pending_epoch(&self) -> Option<&crate::orchestration::OrchestrationSnapshot> {
+        self.pending_epoch.as_deref()
     }
 
     /// Queues one skills notice a new construction raised.
@@ -564,6 +583,7 @@ impl ProductStateRoots {
         self.created_semantic_evidence = None;
         self.frozen_skills = None;
         self.inherited_skills = None;
+        self.pending_epoch = None;
         self
     }
 
@@ -655,6 +675,7 @@ impl ProductStateRoots {
             skills: crate::skills::SkillsSetting::default(),
             frozen_skills: None,
             inherited_skills: None,
+            pending_epoch: None,
             skill_notices: Arc::default(),
             exchange_observer: None,
             session_records: Arc::new(crate::session_store::MemoryStore::new()),

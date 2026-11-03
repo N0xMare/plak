@@ -377,6 +377,200 @@ fn actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers() -> T
     Ok(())
 }
 
+/// Live succession's crash shapes: a SIGKILL after each step of a profile
+/// switch's write order (the product intent, the tree's `epoch_pending` row,
+/// the runtime publication, the product projection, the tree settlement)
+/// reconciles onto one line head. Before the publication the switch did not
+/// start: the request and the tree row are withdrawn and the source stays the
+/// head on epoch 0. After it the successor is the head on the same node, and
+/// the tree holds the recorded epoch with no row left pending.
+#[test]
+fn switch_cuts_reconcile_onto_one_line_head() -> TestResult {
+    use plakous_hosted::runtime::TreeRows as _;
+    for cut in [
+        ProductCrashBoundary::Prepared,
+        ProductCrashBoundary::TreePrepared,
+        ProductCrashBoundary::RuntimeReturned,
+        ProductCrashBoundary::ProductPublished,
+        ProductCrashBoundary::ProductCommitted,
+    ] {
+        eprintln!("switch crash shape {cut:?}");
+        let fixture = Fixture::new()?;
+        let run = ControlCommand::ProductRun {
+            version: PROTOCOL_VERSION,
+            home: fixture.home.clone(),
+            workspace: fixture.workspace.clone(),
+            state: fixture.state.clone(),
+            workflow: ProductWorkflow::Switch,
+            cut,
+        };
+        kill_at(&run, ProductWorkflow::Switch, cut)?;
+        let recover = ControlCommand::ProductRecover {
+            version: PROTOCOL_VERSION,
+            home: fixture.home.clone(),
+            workspace: fixture.workspace.clone(),
+            state: fixture.state.clone(),
+        };
+        // Recovery is idempotent: a second pass finds nothing to do.
+        let report = request_report(&recover)?;
+        assert_eq!(
+            request_report(&recover)?.target_locator,
+            report.target_locator
+        );
+        let paths = PlakPaths::explicit(fixture.home.clone());
+        let source = crate::product_sessions::load_session(&paths, &report.product_session_id)?;
+        let tree = paths
+            .tree(&source.id)?
+            .ok_or("the switch's tree is missing")?;
+        assert_eq!(
+            tree.epoch_pending().map_err(|error| error.message)?,
+            Vec::new(),
+            "{cut:?}: a row stayed pending"
+        );
+        let intents = crate::store::ProductStore::open(&paths)?.load_intents(&source.id)?;
+        let published = matches!(
+            cut,
+            ProductCrashBoundary::RuntimeReturned
+                | ProductCrashBoundary::ProductPublished
+                | ProductCrashBoundary::ProductCommitted
+        );
+        let sessions = plakous::sessions::AgentSessions::new(
+            plakous::sessions::SessionBackend::sqlite(paths.runtime_database())?,
+        )?;
+        let executor = plakous::application::ApplicationExecutor::new()?;
+        let source_locator = source.plakous_locator.ok_or("source locator missing")?;
+        let head = executor.block_on(sessions.line_head_of(source_locator))??;
+        if published {
+            let successor_id = report
+                .target_product_session_id
+                .clone()
+                .ok_or("successor id missing")?;
+            let successor = crate::product_sessions::load_session(&paths, &successor_id)?;
+            assert_eq!(successor.node, source.node, "{cut:?}: the node continues");
+            let target = successor
+                .plakous_locator
+                .ok_or("successor locator missing")?;
+            assert_eq!(
+                (head.session_id(), head.branch_id()),
+                (target.session_id(), target.branch_id()),
+                "{cut:?}: the successor is the line's head"
+            );
+            assert_eq!(tree.epochs().current, 1, "{cut:?}");
+        } else {
+            assert_eq!(
+                (head.session_id(), head.branch_id()),
+                (source_locator.session_id(), source_locator.branch_id()),
+                "{cut:?}: the source stays the head"
+            );
+            assert_eq!(tree.epochs().current, 0, "{cut:?}");
+            assert_eq!(
+                intents.workflow_requests,
+                [] as [plakous_hosted::sessions::projector::WorkflowRequest; 0]
+            );
+            assert_eq!(
+                intents
+                    .notices
+                    .iter()
+                    .filter(|notice| matches!(
+                        &notice.row,
+                        TranscriptRow::Notice(row)
+                            if row.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ChooseProfile {})
+                    ))
+                    .count(),
+                1,
+                "{cut:?}: one withdrawal notice"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A crash right after a switch's publication leaves the successor as the
+/// line's head and its epoch pending. Opening the source through startup's
+/// resolver follows the switch to the successor, whose open installs the
+/// epoch from the recorded bytes before it compiles: exactly the roster the
+/// switch recorded, and no pending row.
+#[test]
+fn a_switch_cut_after_publication_reopens_onto_the_settled_successor() -> TestResult {
+    use plakous_hosted::runtime::TreeRows as _;
+    use plakous_hosted::sessions::SessionWorkflowKind;
+    let fixture = Fixture::new()?;
+    let cut = ProductCrashBoundary::RuntimeReturned;
+    let run = ControlCommand::ProductRun {
+        version: PROTOCOL_VERSION,
+        home: fixture.home.clone(),
+        workspace: fixture.workspace.clone(),
+        state: fixture.state.clone(),
+        workflow: ProductWorkflow::Switch,
+        cut,
+    };
+    kill_at(&run, ProductWorkflow::Switch, cut)?;
+    let state: serde_json::Value = serde_json::from_slice(&std::fs::read(&fixture.state)?)?;
+    let source_id = state["source_product_session_id"]
+        .as_str()
+        .ok_or("source id missing")?
+        .to_owned();
+    let paths = PlakPaths::explicit(fixture.home.clone());
+    let pending = paths
+        .tree(&source_id)?
+        .ok_or("the switch's tree is missing")?
+        .epoch_pending()
+        .map_err(|error| error.message)?;
+    assert_eq!(pending.len(), 1, "the cut leaves the epoch pending");
+
+    let (opened, note) = super::fixture::open_switch_source_with_actual_host(
+        &fixture.home,
+        &fixture.workspace,
+        &source_id,
+    )
+    .map_err(|error| -> Box<dyn Error> { error.to_string().into() })?;
+    assert_ne!(opened, source_id, "the open follows the switch");
+    let note = note.ok_or("the resolver said nothing")?;
+    assert!(
+        note.contains(&format!(
+            "session {source_id} switched profile and continues as {opened}; resuming it"
+        )),
+        "{note}"
+    );
+    let tree = paths
+        .tree(&source_id)?
+        .ok_or("the switch's tree is missing")?;
+    assert_eq!(tree.epochs().current, 1);
+    assert_eq!(
+        tree.epoch_pending().map_err(|error| error.message)?,
+        Vec::new()
+    );
+    let intents = crate::store::ProductStore::open(&paths)?.load_intents(&source_id)?;
+    let recorded = intents
+        .workflow_requests
+        .iter()
+        .find_map(|request| match &request.kind {
+            SessionWorkflowKind::Switch(selection) => Some(selection.roster_digest.clone()),
+            _ => None,
+        })
+        .ok_or("the switch request is missing")?;
+    assert_eq!(
+        tree.current_epoch().digest,
+        recorded,
+        "the successor compiles against the recorded bytes"
+    );
+    let successor = crate::product_sessions::load_session(&paths, &opened)?;
+    let target = successor
+        .plakous_locator
+        .ok_or("successor locator missing")?;
+    let sessions = plakous::sessions::AgentSessions::new(
+        plakous::sessions::SessionBackend::sqlite(paths.runtime_database())?,
+    )?;
+    let executor = plakous::application::ApplicationExecutor::new()?;
+    let head = executor.block_on(sessions.line_head_of(target))??;
+    assert_eq!(
+        (head.session_id(), head.branch_id()),
+        (target.session_id(), target.branch_id()),
+        "the opened successor is the line's head"
+    );
+    Ok(())
+}
+
 fn reclaimed_delivery_after_another_face_advances(fixture: &Fixture) -> TestResult {
     use plakous::agent::{CommandAckDisposition, CommandId, ControlErrorKind};
     use plakous::sessions::{

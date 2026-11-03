@@ -589,6 +589,7 @@ fn production_api_rebind_projects_complete_staging_lineage() {
             },
             runtime,
             Instant::now(),
+            None,
         ))
         .expect("the executor drives the call")
         .unwrap();
@@ -994,6 +995,7 @@ fn rebind_to(
             Some(ProductComposition::Direct),
             None,
             &crate::orchestration::RosterInput::unpinned(model),
+            None,
         ))
         .expect("the executor drives the call")
 }
@@ -1525,6 +1527,7 @@ fn fork_now_onto_an_api_root_branches_onto_its_own_tree() {
             Some(ProductComposition::Direct),
             None,
             &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
+            None,
         ))
         .expect("the executor drives the call")
         .unwrap();
@@ -1657,6 +1660,7 @@ fn a_rebind_keeps_the_sessions_frozen_mcp_tools_without_listing_again() {
             Some(ProductComposition::Direct),
             None,
             &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
+            None,
         ))
         .expect("the executor drives the call")
         .unwrap();
@@ -1724,6 +1728,7 @@ fn a_rebind_to_a_route_without_a_frozen_tool_refuses_up_front() {
             Some(crate::binding::CompositionSelection::Direct),
             None,
             &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+            None,
         ))
         .expect("the executor drives the call")
         .unwrap_err();
@@ -2069,6 +2074,7 @@ fn handle_rebind_fails_closed_when_tree_epoch_has_live_descendants() {
             None,
             None,
             &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+            None,
         ))
         .expect("the executor drives the call")
         .unwrap_err();
@@ -2167,6 +2173,7 @@ fn a_code_mode_prefix_is_admitted_for_a_direct_target() {
             Some(crate::binding::CompositionSelection::Direct),
             None,
             &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+            None,
         ))
         .expect("the executor drives the call");
     let mut notes = Vec::new();
@@ -2247,6 +2254,7 @@ fn interrupt_refuses_rebind_before_any_branch_is_created() {
             None,
             None,
             &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+            None,
         ))
         .expect("the executor drives the call")
         .expect_err("an interrupted rebind must not create a branch");
@@ -2294,6 +2302,7 @@ fn handle_rebind_fails_closed_when_tree_epoch_blocks_rebind() {
             None,
             None,
             &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+            None,
         ))
         .expect("the executor drives the call")
         .unwrap_err();
@@ -2323,3 +2332,5 @@ fn a_switch_refused_for_changed_tools_says_so() {
         None
     );
 }
+
+mod succession;

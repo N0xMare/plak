@@ -32,6 +32,15 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
         self.binder.admit_spawn(caller_id, request)
     }
 
+    fn spawn_parent_composition(
+        &self,
+        _caller_id: &str,
+    ) -> Option<plakous_host_protocol::CompositionSelection> {
+        // One controller serves one caller's tools, and its parent is that
+        // caller, so the composition it runs is the parent's.
+        Some(self.binder.parent.child_inputs().composition.into())
+    }
+
     fn admit_binding<'a>(
         &'a self,
         template: &'a crate::agent_tree_protocol::TemplateName,

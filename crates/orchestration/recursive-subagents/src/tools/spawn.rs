@@ -329,13 +329,23 @@ impl TopologyTool {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
         let jj_copy_dirs = self.driver.vcs().jj_copy_dirs(&launch).await;
+        let parent_composition = self
+            .binder()
+            .and_then(|binder| binder.spawn_parent_composition(&caller));
         let (phase, effects) = self
             .driver
             .mutate({
                 let (caller, operation_id, request) =
                     (caller.clone(), operation_id.clone(), request.clone());
                 move |tree| {
-                    tool.spawn_reserve_locked(tree, &caller, &operation_id, &request, &jj_copy_dirs)
+                    tool.spawn_reserve_locked(
+                        tree,
+                        &caller,
+                        &operation_id,
+                        &request,
+                        &jj_copy_dirs,
+                        parent_composition,
+                    )
                 }
             })
             .await
@@ -410,6 +420,7 @@ impl TopologyTool {
         operation_id: &str,
         request: &SpawnAgentRequest,
         jj_copy_dirs: &Result<std::collections::BTreeSet<String>, VcsError>,
+        parent_composition: Option<plakous_host_protocol::selection::CompositionSelection>,
     ) -> Result<SpawnPhase, TopologyError> {
         if let Some(prior) = tree.prepare_operation(operation_id, caller, "spawn_agent", request)? {
             let output = serde_json::from_str(&prior).map_err(|_| {
@@ -429,7 +440,8 @@ impl TopologyTool {
             }
             // An `inherit` bind mints nothing, so its rows and its receipt
             // land in this same lock.
-            Ok(SpawnAdmission::Reserved(reservation, None)) => {
+            Ok(SpawnAdmission::Reserved(mut reservation, None)) => {
+                reservation.set_parent_composition(parent_composition);
                 match tree.spawn_commit(*reservation, None) {
                     Ok(output) => {
                         self.driver.save(tree)?;
@@ -448,7 +460,8 @@ impl TopologyTool {
                     }
                 }
             }
-            Ok(SpawnAdmission::Reserved(reservation, Some(ticket))) => {
+            Ok(SpawnAdmission::Reserved(mut reservation, Some(ticket))) => {
+                reservation.set_parent_composition(parent_composition);
                 Ok(SpawnPhase::Minting(reservation, ticket))
             }
             Err(error) => {

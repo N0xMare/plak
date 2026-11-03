@@ -391,17 +391,19 @@ impl AttachedCodingSession {
         source: SessionLocator,
         target: SessionTargetBinding,
         runtime: SessionRuntimeBinding,
+        continue_line: bool,
     ) -> Result<RebindSessionOutcome, AgentSessionsError> {
-        Box::pin(
-            self.sessions
-                // A profile or model change forks onto a new line: the source
-                // stays live with its processes (spec 01 §5.7).
-                .rebind(
-                    RebindSessionRequest::recompiling_target(operation_id, source, target, runtime)
-                        .starting_line(),
-                ),
-        )
-        .await
+        let request =
+            RebindSessionRequest::recompiling_target(operation_id, source, target, runtime);
+        // A profile switch advances the line's head and hands it the running
+        // processes; a profile fork starts a new line, and the source stays
+        // live with its processes (spec 01 §5.7).
+        let request = if continue_line {
+            request
+        } else {
+            request.starting_line()
+        };
+        Box::pin(self.sessions.rebind(request)).await
     }
 
     pub async fn context_status(
@@ -501,6 +503,23 @@ impl AttachedCodingSession {
                     canonical: Some(canonical),
                 }),
             None => Ok(self.locator),
+        }
+    }
+
+    /// Releases this session's agent-tree lease as a hand-off: a tree that is
+    /// not dormant stays in custody with its children, and the host's quit
+    /// drain ends it (spec 03 §14). The session itself stays as it is.
+    ///
+    /// # Errors
+    /// Returns the hub's release failure.
+    pub(crate) async fn hand_off_topology(&mut self) -> Result<(), String> {
+        match self.topology_owner.take() {
+            Some(tree_id) => Box::pin(crate::topology_runtime::release_root_lease_for_handoff(
+                &tree_id,
+            ))
+            .await
+            .map_err(|error| error.to_string()),
+            None => Ok(()),
         }
     }
 

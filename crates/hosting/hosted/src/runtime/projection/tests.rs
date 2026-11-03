@@ -817,6 +817,7 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
                     None,
                     None,
                     &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                    None,
                 ))
                 .expect("the executor drives the call")
                 .unwrap_err()

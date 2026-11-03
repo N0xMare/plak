@@ -86,6 +86,18 @@ pub trait ChildController: Send + Sync {
         Ok(())
     }
 
+    /// The composition the caller of a spawn runs, which the child's node
+    /// freezes as its `parent_composition` (the one spawn-parent input that
+    /// depends on the caller's profile). `None` when the controller does not
+    /// know it; the child then reads its parent's live composition.
+    fn spawn_parent_composition(
+        &self,
+        caller_id: &str,
+    ) -> Option<plakous_host_protocol::selection::CompositionSelection> {
+        let _ = caller_id;
+        None
+    }
+
     /// Product admission of the frozen card a spawn resolved to:
     /// account availability, and nothing about the wire. Called after
     /// [`Self::admit_spawn`], with the tree mutex released and before the

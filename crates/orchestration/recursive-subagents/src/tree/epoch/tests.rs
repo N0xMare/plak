@@ -80,7 +80,10 @@ fn epoch_freeze_blocks_rebind_until_descendants_are_finished() {
     tree.begin_successor_epoch(successor).unwrap();
     assert_eq!(tree.state, TreeAdmissionState::Live);
     assert_eq!(tree.selected_tuple, "grok-4.6");
-    assert_eq!(tree.snapshot.root_tuple, "grok-4.6");
+    // The closed child keeps epoch 0, so the successor was appended.
+    assert_eq!(tree.epochs().current, 1);
+    assert_eq!(tree.current_epoch().root_tuple, "grok-4.6");
+    assert_eq!(tree.snapshot.root_tuple, "selected-tuple");
 }
 
 /// Closing the last child leaves an idle tree, not a stopped one: the

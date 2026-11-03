@@ -8,9 +8,9 @@ pub(crate) use crate::tui_preferences::TuiPreferences;
 mod usage_decoration;
 pub(crate) use crate::surface_protocol::{
     AgentAcknowledgement, HostEvent, HostEventReceiver, McpOverview, McpSessionBinding,
-    ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsTheme,
-    SettingsView, SurfaceIntent, SurfaceObservation, UserAction, UserActionSendError,
-    UserActionSender, WorkspaceChrome,
+    ProfileApply, ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView,
+    SettingsTheme, SettingsView, SurfaceIntent, SurfaceObservation, UserAction,
+    UserActionSendError, UserActionSender, WorkspaceChrome,
 };
 #[cfg(all(test, feature = "tui"))]
 pub(crate) use crate::surface_protocol::{host_event_channel, user_action_channel};

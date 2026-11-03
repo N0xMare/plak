@@ -90,6 +90,7 @@ fn resumed_fork_and_rebind_do_not_present_inherited_terminal_usage() {
                     None,
                     None,
                     &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                    None,
                 ))
                 .expect("the executor drives the call")
                 .unwrap();

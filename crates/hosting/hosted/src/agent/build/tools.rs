@@ -237,6 +237,26 @@ pub(in crate::agent) fn spawn_roster_composition(
     })
 }
 
+/// The composition `agent_id`'s spawning parent ran when it spawned it,
+/// frozen on the node; `None` for a node spawned before it was recorded,
+/// which reads its parent's live composition.
+pub(in crate::agent) fn frozen_parent_composition(
+    tree_id: &str,
+    agent_id: &str,
+) -> Option<CompositionSelection> {
+    crate::topology_runtime::lookup(tree_id).and_then(|runtime| {
+        runtime
+            .read(|tree| {
+                tree.node(agent_id)
+                    .ok()?
+                    .parent_composition
+                    .map(CompositionSelection::from)
+            })
+            .ok()
+            .flatten()
+    })
+}
+
 /// Roster pin is bind authority. A child's composition comes from
 /// its own template or, unpinned, from the hub. Plak js-ptc/py-ptc
 /// is inherited by every unpinned child, Codex included: on a CodeModeOnly row

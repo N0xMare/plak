@@ -878,6 +878,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             fork.composition,
                             fork.protocol,
                             &fork.roster,
+                            fork.switch.as_deref(),
                         ))
                         .await;
                         let _ = self.events.send(ContentEvent::SetBusy(false));
@@ -891,6 +892,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         });
                         (fork.finish)(match result {
                             Ok(Rebound::Switched) => surface::ProfileForkOutcome::Forked,
+                            Ok(Rebound::Succeeded) => surface::ProfileForkOutcome::Switched,
                             Ok(Rebound::Unchanged) => surface::ProfileForkOutcome::AlreadyActive,
                             Err(error) => {
                                 surface::ProfileForkOutcome::Refused(error.host_failure())

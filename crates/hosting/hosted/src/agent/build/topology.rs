@@ -281,6 +281,11 @@ pub(super) async fn topology_extensions_if_enabled_with_owner(
     opening_durable_session: bool,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<ProductToolExtensions> {
+    if let Some(epoch) = parent.state_roots().pending_epoch()
+        && spawn_parent_is_root(parent)
+    {
+        return pending_switch_topology_extensions(parent, epoch);
+    }
     if attach == crate::topology_runtime::TopologyHubAttach::Inspect {
         return inspected_topology_extensions(parent, opening_durable_session);
     }
@@ -408,6 +413,50 @@ fn inspected_topology_extensions(
             "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
         ));
     }
+    stamp_root_account(&mut tree, spawn_parent_root_account(parent));
+    let vcs = tree.vcs_port();
+    let detached = Arc::new(crate::topology_runtime::ProductTopologyRuntime::new(
+        tree,
+        Arc::new(crate::agent_tree::MemoryTreeStore::new()),
+        vcs,
+        None,
+    ));
+    topology_extensions_from_runtime(detached, parent, spawn_parent_caller_id(parent), None)
+}
+
+/// The topology catalog a switch successor compiles before its publication:
+/// over a detached copy of the tree (this process's attached one, or the
+/// persisted rows) with the switch's successor `epoch` appended in memory, so
+/// the root's spawn menu, cards and briefing are the successor epoch's. The
+/// copy is never inserted, leased, folded or saved, exactly as for an
+/// inspected reopen; the published successor later opens against the live
+/// tree once the same bytes are appended there.
+fn pending_switch_topology_extensions(
+    parent: &SpawnParent,
+    epoch: &crate::orchestration::OrchestrationSnapshot,
+) -> CliResult<ProductToolExtensions> {
+    let tree_id = spawn_parent_tree_id(parent);
+    let unopened = |error: &str| {
+        CliFailure::new(format!(
+            "the switch's tree could not be read ({error}); the session is unchanged"
+        ))
+    };
+    let persisted = if let Some(runtime) = crate::topology_runtime::lookup(tree_id) {
+        runtime
+            .read(crate::agent_tree::ProductAgentTree::to_persisted)
+            .map_err(|error| unopened(&error.message))?
+    } else {
+        parent
+            .state_roots()
+            .tree_store()
+            .map_err(|failure| unopened(failure.message()))?
+            .load(tree_id)
+            .map_err(|error| unopened(&error.detail))?
+            .ok_or_else(|| unopened("no tree is persisted"))?
+    };
+    let mut tree = crate::agent_tree::ProductAgentTree::reopen(persisted);
+    tree.append_epoch(epoch.clone())
+        .map_err(|error| unopened(&error.message))?;
     stamp_root_account(&mut tree, spawn_parent_root_account(parent));
     let vcs = tree.vcs_port();
     let detached = Arc::new(crate::topology_runtime::ProductTopologyRuntime::new(

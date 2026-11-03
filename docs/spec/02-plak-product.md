@@ -1310,7 +1310,10 @@ record is written ahead of the runtime create and settled after a crash
 pending notices, of jobs that already exited, so a notice the source still owed
 reaches the successor too; running processes are never carried (a transition
 with running processes is refused before durable work, §5.1), and the source
-keeps its line. Importing the same source session/key into the same
+keeps its line. A profile switch (Switch now, §5.5) is not refused for running
+processes: it advances the source's own line, so its head-advancing rebind
+hands the running processes and every job row to the successor in the
+publishing transaction. Importing the same source session/key into the same
 workspace twice refuses and names its existing successor. `session list`,
 `session show` and the TUI opening note name the link. Opening notes follow the
 same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
@@ -1562,7 +1565,7 @@ view, and nothing is both.
 | Transcript rows | view, intent or live-only, per field | the row provenance table below | each field has exactly one source |
 | Imported transcript | intent | the import's create operation id; anchor 0, lane 1 | written once by import (§2.5.1); a seeded `Created` record derives no rows |
 | Operator notices: product-authored rows no feed fact implies (settings and configuration notes, plan notes, carry replay-stripping notices, unrecorded refusals, withdrawn requests, `queued prompt already ran`, and the retry, milestone and tree rows the provenance table names) | intent | notice id; anchor | written with its anchor (below) |
-| Workflow requests: compact (with reason), fork, rebind (with selection), new (`/new`; recorded as `clear` before product 36), switch (with its selection: the rebind selection, the profile name, its root template and working set, the frozen roster's digest and, for a root whose tree has no rows, the frozen pending snapshot's exact bytes, which must decode as a snapshot under that digest; decoded today, written from live succession) | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (§4.2 step 3) |
+| Workflow requests: compact (with reason), fork, rebind (with selection), new (`/new`; recorded as `clear` before product 36), switch (with its selection: the rebind selection, the profile name, its root template and working set, the frozen roster's digest and, for a root whose tree has no rows, the frozen pending snapshot's exact bytes, which must decode as a snapshot under that digest; written by Switch now, §5.5) | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (§4.2 step 3) |
 | Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for new, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
 | Pause causes | intent-backed view | the facts that pause (a context-capacity or `RecoveryRequired` `TurnTerminal`, a session-wide `CommandRejected`, a `WorkflowSettled` of a scheduled pass that did not compact) and `pause_cause` intents the host writes for causes no fact carries (an unrecorded session-wide refusal, a failed wake preflight); a workflow fact joins its request by the request's operation id, never by the derived workflow identity | the newest applied cause, by anchor, for the restored note; drain itself is process-local and never stored |
 | Counters: root turns, tool calls, compactions | view | root `CommandAccepted`; the distinct call ids of effect `OperationAdvanced` facts and of the tool results `HistoryAppended` commits (so a call rejected before preparation counts once); each `WorkflowSettled { Compacted }` once, whatever its reason (endpoint or turn fence) | monotonic over the applied records; a successor starts from its source's values at the `Branched` record; after a `BehindRetention` rebuild they restart from zero |
@@ -5521,24 +5524,63 @@ that fixes it, and `plak doctor` lists each such role under
 `spawn_templates`.
 
 The dialog is the destructive confirmation pop-up (§5.7), titled `Apply
-profile <name>?`: `[ Cancel ]`, then `[ Fork now ]` (`[ Use now ]` when the
-session has no model yet) when the root is idle with no running child, then
-`[ Set as default ]`. Focus starts on the first action (`[ Fork now ]`, `[ Use
-now ]`, or `[ Set as default ]` when that is the only one). `Enter` applies the
-focused button at once; `←`/`→` and `Tab` move between the buttons; `Esc`
-writes nothing. Without the first action a line says it waits until the root
-is idle and no child is running.
+profile <name>?`: `[ Cancel ]`, then `[ Switch now ]` when the root is idle
+with an empty queue, then `[ Fork now ]` when the root is idle with no running
+child, then `[ Set as default ]`. A session with no model yet offers only
+`[ Use now ]` (when the root is idle) in place of both. Focus starts on the
+first action offered. `Enter` applies the focused button at once; `←`/`→` and
+`Tab` move between the buttons; `Esc` writes nothing. A line names each action
+that is not offered and what it waits for (`Switch now waits until the root is
+idle and nothing is queued.`, `Fork now waits until the root is idle and no
+child is running.`).
 
 Profile choice is per session. A session's profile is the root template and
-working set its tree froze at genesis, and it persists with that tree. Fork now
-changes only that session: it never writes `[root] agent` or `[roster]
+working set its tree's current epoch froze (its record's root profile while
+the tree has no rows), and it persists with that tree. Switch now and Fork now
+change only that session: they never write `[root] agent` or `[roster]
 working_set`. Set as default is the explicit action that writes them (the
 documented config path, chapter 07 §3): it saves the pointers that brand-new
 sessions bind, and never changes an existing session. Use now is offered only
 while a session has no model; it saves its profile as the default only when the
 home has no loadable default root template, so the next `plak` on a fresh home
-is bound and an existing default is never replaced. Fork
-now needs an idle root with no running child; it closes the Agents tab and
+is bound and an existing default is never replaced.
+
+**Switch now** continues this session's root node as the profile, on its own
+agent line (chapter 01 §5.1; chapter 03 §1.2). It needs an idle root, an empty
+queue and no unresolved product work; running children and background
+processes do not block it and keep running. It closes the Agents tab and
+returns to the transcript. The conversation carries as Fork now carries it,
+and the session continues as a successor session that is the line's next head:
+the predecessor becomes a read-only branch of the line, and opening it follows
+to the successor (`session <old> switched profile and continues as <new>;
+resuming it`). The successor keeps the node, the tree, its children, their
+mailboxes and the line's processes; the root's optional tools are unchanged.
+Future root spawns use the profile's roster, and every existing child keeps the
+epoch, cards, bounds and spawn-parent inputs it was spawned under. The write
+order is the product `Switch` intent (§2.6), the tree's `epoch_pending` row
+(when the tree has rows and the roster changes), the runtime's head-advancing
+rebind publication, the product projection of the successor, the tree's epoch
+append from the recorded bytes, then the host's hand-off release of the
+predecessor (no process stops, the tree stays in custody), the activation of
+the successor it attached and one notice `switched to profile <name>; N agents
+and M processes kept running`. A tree with no rows (a virtual tree of one)
+writes no tree rows: the profile's frozen snapshot travels in the `Switch`
+intent and the successor's record keeps the profile. A profile whose roster
+equals the tree's current epoch apart from the root's account, model and
+effort writes no tree intent at all: only the tree's view of the root binding
+moves. A crash before the publication withdraws the request with `profile
+switch did not start; choose it again`, and the tree's pending row with it; a
+crash after it opens the successor, which first installs its epoch from the
+recorded bytes so it reopens exactly, and moves the tree's view of the root
+binding to its own when a switch that kept the roster stopped before that
+view moved. A successor that cannot be projected or attached after the
+publication is tried once more in process; if it fails again, the host hands
+the tree to custody as a completed switch does (its children keep running and
+the host's quit ends it) and says to open the session again, which follows to
+the successor. A switch past the tree's epoch bound (chapter 03 §1.2) is
+refused before it publishes.
+
+Fork now needs an idle root with no running child; it closes the Agents tab and
 returns to the transcript:
 
 - On an attached session it branches onto the profile's root. The new session
@@ -5581,7 +5623,7 @@ returns to the transcript:
   crash completes it onto the target's own tree.
 
 What landed comes back as a typed `ProfileApplied` (saved as the default,
-forked, bound, or already active) or `ProfileRefused` with its reason; the
+switched, forked, bound, or already active) or `ProfileRefused` with its reason; the
 transcript line and the `default` mark follow that answer, never the key press.
 Saved reads `profile <name> is the default for new sessions; existing sessions
 keep their own`.

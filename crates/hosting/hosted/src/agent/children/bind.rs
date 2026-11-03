@@ -6,9 +6,9 @@ use super::{
     CompositionSelection, CreateSessionOutcome, CreateSessionRequest, Duration, Future,
     LiveRelease, ModelId, NativeSubscriptionError, OutputBoundDisposition, Path, PathBuf, Pin,
     ProductAgentSpec, SessionOperationId, SessionRuntimeBinding, SessionToolFence, SpawnBindError,
-    SpawnParent, coding_session_runtime_binding_for, occupancy_session_fence,
-    product_subscription_request_limits, prompt_agent_tier, prompt_composition, release_startup,
-    require_reconstructed_coding_projection,
+    SpawnParent, coding_session_runtime_binding_for, frozen_parent_composition,
+    occupancy_session_fence, product_subscription_request_limits, prompt_agent_tier,
+    prompt_composition, release_startup, require_reconstructed_coding_projection,
     selected_coding_provider_configuration_with_processing_tier, spawn_child_composition,
     spawn_parent_tree_id, spawn_roster_composition, spawn_roster_processing_tier,
     start_child_turn_owned,
@@ -622,7 +622,8 @@ pub fn spawn_child_start_composition(
         return frozen_openrouter_child_pin(&tree_id, agent_id)
             .map(|(composition, _protocol)| composition);
     }
-    let parent_composition = parent.child_inputs().composition;
+    let parent_composition =
+        frozen_parent_composition(&tree_id, agent_id).unwrap_or(parent.child_inputs().composition);
     let roster_composition = spawn_roster_composition(&tree_id, agent_id);
     let target_account = account
         .map(str::to_owned)
@@ -946,7 +947,8 @@ pub async fn spawned_child_spec(
     let inputs = parent.child_inputs();
     let tree_id = inputs.tree_id.to_owned();
     let state_roots = inputs.state_roots.clone();
-    let parent_composition = inputs.composition;
+    let parent_composition =
+        frozen_parent_composition(&tree_id, agent_id).unwrap_or(inputs.composition);
     let child_path = PathBuf::from(path);
     let workspace_root = child_session_workspace_root(inputs.workspace_root, &child_path)?;
     let account = account.filter(|value| !value.is_empty());

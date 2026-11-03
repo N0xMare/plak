@@ -388,7 +388,7 @@ fn tab_and_shift_tab_move_the_profile_pop_up() {
     assert!(matches!(
         app.handle_key(key(KeyCode::Enter)),
         Some(UserAction::Extension(SurfaceIntent::ApplyProfile {
-            fork_now: false,
+            apply: crate::tui::ProfileApply::Fork,
             ..
         }))
     ));
@@ -399,7 +399,7 @@ fn tab_and_shift_tab_move_the_profile_pop_up() {
     assert!(matches!(
         app.handle_key(key(KeyCode::Enter)),
         Some(UserAction::Extension(SurfaceIntent::ApplyProfile {
-            fork_now: true,
+            apply: crate::tui::ProfileApply::Switch,
             ..
         }))
     ));
@@ -410,7 +410,7 @@ fn tab_and_shift_tab_move_the_profile_pop_up() {
     assert!(matches!(
         app.handle_key(key(KeyCode::Enter)),
         Some(UserAction::Extension(SurfaceIntent::ApplyProfile {
-            fork_now: true,
+            apply: crate::tui::ProfileApply::Switch,
             ..
         }))
     ));

@@ -90,7 +90,7 @@ use waiter::{finalize_child_turn, register_admitted_turn};
 
 use super::{
     ApiTopologyParent, AttachedCodingSession, ProductAgentSpec, SessionToolFence, SpawnParent,
-    coding_session_runtime_binding_for, occupancy_session_fence,
+    coding_session_runtime_binding_for, frozen_parent_composition, occupancy_session_fence,
     product_subscription_request_limits, require_reconstructed_coding_projection,
     selected_coding_provider_configuration_with_processing_tier, spawn_child_composition,
     spawn_parent_tree_id, spawn_roster_composition, spawn_roster_processing_tier,

@@ -35,8 +35,10 @@ use super::{
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 mod complete;
+mod succession;
 
 pub(super) use complete::complete_rebind;
+pub(super) use succession::{Succession, settle_before_open, withdraw_after_open};
 
 async fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
     opened: &AttachedCodingSession,
@@ -362,11 +364,27 @@ pub(super) async fn abandon_prepared_rebind<P: plakous_host_protocol::ProtocolEx
         .map_err(CliFailure::new)
 }
 
+/// Abandons a prepared rebind whose publication definitely did not land,
+/// and a switch's pending tree epoch with it.
+pub(super) async fn abandon_switch<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+    operation: &str,
+    succession: Option<&Succession>,
+) -> CliResult<()> {
+    let abandoned = abandon_prepared_rebind(config, operation).await;
+    if let Some(succession) = succession {
+        succession.withdraw(config, operation).await?;
+    }
+    abandoned
+}
+
 /// How a rebind that did not fail ended.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Rebound {
     /// The attached session moved to a new branch or a resumed ancestor.
     Switched,
+    /// The root node continued on its own line as the profile (Switch now).
+    Succeeded,
     /// The requested binding was already active; nothing changed.
     Unchanged,
 }
@@ -421,12 +439,17 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     composition: Option<crate::binding::CompositionSelection>,
     protocol: Option<crate::binding::ProtocolSelection>,
     roster: &crate::orchestration::RosterInput,
+    switch: Option<&str>,
 ) -> CliResult<Rebound> {
     let rebound: CliResult<Rebound> = Box::pin(async {
-        super::jobs_transition_guard(config, opened)?;
+        // A switch hands running processes to the successor on the same
+        // line; a fork leaves them with the source.
+        if switch.is_none() {
+            super::jobs_transition_guard(config, opened)?;
+        }
         watch.begin();
         let started = Instant::now();
-        refuse_unready_rebind(config)?;
+        refuse_unready_rebind(config, switch.is_some())?;
         let account = account.to_owned();
         // A Code Mode (native-ptc) prefix is replayable onto every presentation:
         // each kernel re-projects `exec`/`wait` cells truthfully at dispatch
@@ -464,8 +487,8 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         // moves to, and never takes the live setting (spec 02 §6.1.1).
         let inherited = source_skills_on(opened).await?;
         config.state_roots.set_inherited_skills(inherited);
-        let (operation, target_product_id, own_tree, topology_tree_id) =
-            stage_profile_fork(config, opened, &account, model, composition, roster).await?;
+        let (operation, target_product_id, own_tree, topology_tree_id, succession) =
+            stage_rebind(config, opened, switch, &account, model, composition, roster).await?;
         let target = resolve_profile_target(
             watch,
             config,
@@ -509,19 +532,21 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 composition,
                 target_selection,
                 operation: &operation,
+                succession: succession.as_ref(),
             },
         )
         .await;
         if let Some(tree_id) = attached_tree {
             release_profile_build_lease(events, &tree_id).await?;
         }
-        if matches!(branched, Ok(Rebound::Switched)) {
+        if matches!(branched, Ok(Rebound::Switched | Rebound::Succeeded)) {
             note_reread_instructions(events, instructions_before, opened);
         }
         branched
     })
     .await;
     config.state_roots.set_inherited_skills(None);
+    config.state_roots.set_pending_epoch(None);
     rebound
 }
 
@@ -564,12 +589,19 @@ struct ProfileBranchInput<'a> {
     composition: crate::binding::CompositionSelection,
     target_selection: TargetSelection,
     operation: &'a str,
+    succession: Option<&'a Succession>,
 }
 
+/// Refuses a rebind the session cannot take now. A switch continues the
+/// root node, so its running children and processes do not block it; a
+/// fork needs a quiescent tree.
 fn refuse_unready_rebind<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
+    switch: bool,
 ) -> CliResult<()> {
-    if let Some(reason) = tree_epoch_rebind_refusal(&config.topology_rows(), &config.session) {
+    if let Some(reason) = tree_epoch_rebind_refusal(&config.topology_rows(), &config.session)
+        && !switch
+    {
         return Err(CliFailure::new(reason.message()).with_optional_remedy(
             (reason == crate::agent_tree::EpochRebindRefusal::RestoredPaused)
                 .then_some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {})
@@ -618,6 +650,47 @@ fn profile_rebind_selection<P: plakous_host_protocol::ProtocolExtension>(
         )
     };
     Ok((target_selection, api_root, effort_label, composition))
+}
+
+/// The operation, successor id, tree decision and, for a switch, its tree
+/// half. A switch's successor root compiles against the epoch it is
+/// published with, which the tree takes only after the publication.
+async fn stage_rebind<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+    opened: &AttachedCodingSession,
+    switch: Option<&str>,
+    account: &str,
+    model: &str,
+    composition: crate::binding::CompositionSelection,
+    roster: &crate::orchestration::RosterInput,
+) -> CliResult<(String, String, bool, String, Option<Succession>)> {
+    let Some(profile) = switch else {
+        let (operation, target, own_tree, tree_id) =
+            stage_profile_fork(config, opened, account, model, composition, roster).await?;
+        return Ok((operation, target, own_tree, tree_id, None));
+    };
+    let (operation, target, own_tree, tree_id) = stage_switch(config, opened);
+    let succession = Succession::plan(config, profile, roster)?;
+    config
+        .state_roots
+        .set_pending_epoch(succession.pending_epoch());
+    Ok((operation, target, own_tree, tree_id, Some(succession)))
+}
+
+/// A switch's operation and successor: the root node stays on its tree.
+fn stage_switch<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    opened: &AttachedCodingSession,
+) -> (String, String, bool, String) {
+    let operation = format!("plak:switch:{}", uuid::Uuid::new_v4());
+    let target_product_id = sessions::projector::WorkflowRequest {
+        operation_id: operation.clone(),
+        source_locator: opened.locator(),
+        kind: sessions::SessionWorkflowKind::Fork,
+    }
+    .successor_product_id();
+    let topology_tree_id = durable_tree_id(&config.topology_rows(), &config.session);
+    (operation, target_product_id, false, topology_tree_id)
 }
 
 async fn stage_profile_fork<P: plakous_host_protocol::ProtocolExtension>(
@@ -726,6 +799,7 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         composition,
         target_selection,
         operation,
+        succession,
     } = input;
     let (runtime, target) = prepare_profile_runtime(
         watch,
@@ -753,17 +827,19 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
     }
     // The tree the branch compiles against: a profile fork's seeded tree, or
     // a py-sdk root's own id with none, frozen on the profile's roster;
-    // otherwise the source's tree.
-    let workflow_kind = rebind_workflow_kind(
+    // otherwise, and always for a switch, the source's tree.
+    let own_tree = (own_tree || composition == crate::binding::CompositionSelection::PySdk)
+        && succession.is_none();
+    let selection = rebind_selection(
         &target,
-        (own_tree || composition == crate::binding::CompositionSelection::PySdk)
-            .then(|| profile.clone()),
+        own_tree.then(|| profile.clone()),
         account,
         model,
         effort_label.as_deref(),
         composition,
         target_selection,
     )?;
+    let workflow_kind = profile_workflow_kind(selection, succession)?;
     let attached_locator = publish_rebind_intent(
         watch,
         config,
@@ -776,6 +852,12 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         },
     )
     .await?;
+    if let Some(succession) = succession
+        && let Err(error) = succession.record(config, operation).await
+    {
+        abandon_prepared_rebind(config, operation).await?;
+        return Err(error);
+    }
     let source_locator = detach_prepared_rebind(
         watch,
         config,
@@ -783,6 +865,7 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         stderr_buf,
         operation,
         attached_locator,
+        succession,
     )
     .await?;
     Box::pin(complete_rebind(
@@ -796,9 +879,16 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         target,
         runtime,
         started,
+        succession,
     ))
     .await
-    .map(|()| Rebound::Switched)
+    .map(|()| {
+        if succession.is_some() {
+            Rebound::Succeeded
+        } else {
+            Rebound::Switched
+        }
+    })
 }
 
 async fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
@@ -983,7 +1073,18 @@ async fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
     Ok((runtime, target))
 }
 
-fn rebind_workflow_kind(
+/// A profile fork's `Rebind` workflow, or a switch's `Switch` one.
+fn profile_workflow_kind(
+    selection: sessions::RebindSelection,
+    succession: Option<&Succession>,
+) -> CliResult<sessions::SessionWorkflowKind> {
+    match succession {
+        Some(succession) => succession.workflow_kind(selection),
+        None => Ok(sessions::SessionWorkflowKind::Rebind(Box::new(selection))),
+    }
+}
+
+fn rebind_selection(
     target: &ResolvedRebindTarget,
     own_tree: Option<sessions::RootProfile>,
     account: &str,
@@ -991,35 +1092,33 @@ fn rebind_workflow_kind(
     effort_label: Option<&str>,
     composition: crate::binding::CompositionSelection,
     target_selection: TargetSelection,
-) -> CliResult<sessions::SessionWorkflowKind> {
+) -> CliResult<sessions::RebindSelection> {
     let provider = match &target.route {
         RebindRoute::Native { provider, .. } => format!("{provider:?}").to_ascii_lowercase(),
         RebindRoute::Api(_) => account.to_owned(),
     };
-    let workflow_kind =
-        sessions::SessionWorkflowKind::Rebind(Box::new(sessions::RebindSelection {
-            provider,
-            account: account.to_owned(),
-            model: model.to_owned(),
-            effort: effort_label.map(str::to_owned),
-            composition,
-            target_selection,
-            protocol: target.binding.protocol().as_str().to_owned(),
-            route: target.binding.route().as_str().to_owned(),
-            requested_model: target.binding.model().as_str().to_owned(),
-            selected_configuration: serde_json::to_string(
-                &target.binding.selected_provider_configuration(),
-            )
-            .map_err(|_| CliFailure::new("selected configuration could not be persisted"))?,
-            effective_configuration: serde_json::to_string(
-                &target.binding.effective_provider_configuration(),
-            )
-            .map_err(|_| CliFailure::new("effective configuration could not be persisted"))?,
-            account_binding: serde_json::to_string(&target.binding.account_binding())
-                .map_err(|_| CliFailure::new("account binding could not be persisted"))?,
-            own_tree,
-        }));
-    Ok(workflow_kind)
+    Ok(sessions::RebindSelection {
+        provider,
+        account: account.to_owned(),
+        model: model.to_owned(),
+        effort: effort_label.map(str::to_owned),
+        composition,
+        target_selection,
+        protocol: target.binding.protocol().as_str().to_owned(),
+        route: target.binding.route().as_str().to_owned(),
+        requested_model: target.binding.model().as_str().to_owned(),
+        selected_configuration: serde_json::to_string(
+            &target.binding.selected_provider_configuration(),
+        )
+        .map_err(|_| CliFailure::new("selected configuration could not be persisted"))?,
+        effective_configuration: serde_json::to_string(
+            &target.binding.effective_provider_configuration(),
+        )
+        .map_err(|_| CliFailure::new("effective configuration could not be persisted"))?,
+        account_binding: serde_json::to_string(&target.binding.account_binding())
+            .map_err(|_| CliFailure::new("account binding could not be persisted"))?,
+        own_tree,
+    })
 }
 
 struct RebindIntent<'a> {
@@ -1123,11 +1222,19 @@ async fn detach_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
     stderr_buf: &mut Vec<u8>,
     operation: &str,
     attached_locator: plakous::sessions::SessionLocator,
+    succession: Option<&Succession>,
 ) -> CliResult<plakous::sessions::SessionLocator> {
-    let source_locator = match watched(watch, opened.detach()).await {
+    // A switch releases the source for transfer, so its running processes
+    // stay with the line for the successor to take.
+    let released = if succession.is_some() {
+        watched(watch, opened.detach_for_transfer()).await
+    } else {
+        watched(watch, opened.detach()).await
+    };
+    let source_locator = match released {
         Ok(locator) => locator,
         Err(error) => {
-            abandon_prepared_rebind(config, operation).await?;
+            abandon_switch(config, operation, succession).await?;
             return Err(CliFailure::new(format!(
                 "rebind source release failed after durable preparation ({:?}): {error}",
                 error.kind()
@@ -1136,7 +1243,7 @@ async fn detach_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
     };
     if source_locator != attached_locator {
         restore_detached_source(config, opened, source_locator, stderr_buf).await?;
-        abandon_prepared_rebind(config, operation).await?;
+        abandon_switch(config, operation, succession).await?;
         return Err(CliFailure::new(
             "rebind source advanced after durable preparation; exact reconciliation is required",
         ));

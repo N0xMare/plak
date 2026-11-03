@@ -183,6 +183,7 @@ impl ProductAgentTree {
             parked: BTreeMap::new(),
             operations: BTreeMap::new(),
             pending_spawns: 0,
+            root_pending_spawns: 0,
             minting: BTreeSet::new(),
             live_generations: BTreeMap::from([(workspace_id.clone(), LiveGeneration::new(0))]),
             effects: Effects::default(),
@@ -287,13 +288,7 @@ impl ProductAgentTree {
                 .or_default()
                 .push(mail.message_id.clone());
         }
-        let pending_spawns = u32::try_from(
-            nodes
-                .values()
-                .filter(|node| node.status == NodeStatus::Pending)
-                .count(),
-        )
-        .unwrap_or(u32::MAX);
+        let (pending_spawns, root_pending_spawns) = pending_spawn_counts(&nodes, &root_agent_id);
         let live_generations = workspaces
             .iter()
             .map(|(id, row)| (id.clone(), LiveGeneration::new(row.generation)))
@@ -330,6 +325,7 @@ impl ProductAgentTree {
             parked: BTreeMap::new(),
             operations,
             pending_spawns,
+            root_pending_spawns,
             minting: BTreeSet::new(),
             live_generations,
             effects: Effects::default(),
@@ -361,4 +357,23 @@ impl ProductAgentTree {
             cell_budgets,
         }
     }
+}
+
+/// The pending spawns persisted rows hold, all and the root's own: a node
+/// still `pending` is a spawn that has not settled.
+fn pending_spawn_counts(nodes: &BTreeMap<String, NodeRecord>, root_agent_id: &str) -> (u32, u32) {
+    let pending = || {
+        nodes
+            .values()
+            .filter(|node| node.status == NodeStatus::Pending)
+    };
+    let count = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
+    (
+        count(pending().count()),
+        count(
+            pending()
+                .filter(|node| node.parent_agent_id.as_deref() == Some(root_agent_id))
+                .count(),
+        ),
+    )
 }

@@ -14,9 +14,9 @@ use std::path::PathBuf;
 // re-exported so the module reads them as `crate::tui::*`.
 pub(crate) use crate::config::{
     AgentAcknowledgement, HostEvent, HostEventReceiver, McpOverview, McpSessionBinding,
-    ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsTheme,
-    SettingsView, SurfaceIntent, SurfaceObservation, UserAction, UserActionSendError,
-    UserActionSender, WorkspaceChrome,
+    ProfileApply, ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView,
+    SettingsTheme, SettingsView, SurfaceIntent, SurfaceObservation, UserAction,
+    UserActionSendError, UserActionSender, WorkspaceChrome,
 };
 #[cfg(test)]
 pub(crate) use crate::config::{host_event_channel, user_action_channel};

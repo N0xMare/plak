@@ -299,7 +299,7 @@ fn commit_profile(
     let saves = match outcome {
         ProfileOutcome::Saved => true,
         ProfileOutcome::Bound => !home_has_default,
-        ProfileOutcome::Forked | ProfileOutcome::AlreadyActive => false,
+        ProfileOutcome::Forked | ProfileOutcome::Switched | ProfileOutcome::AlreadyActive => false,
     };
     if saves
         && let Err(error) = config.save_scoped(paths, crate::product_config::ConfigWriteScope::User)
@@ -326,7 +326,7 @@ fn commit_profile(
 fn apply_profile(
     paths: &PlakPaths,
     name: &str,
-    fork_now: bool,
+    apply: crate::surface_protocol::ProfileApply,
     facts: SurfaceFacts<'_>,
     events: &Sender<PlakExtension>,
 ) -> Option<SurfaceProfileFork> {
@@ -370,7 +370,7 @@ fn apply_profile(
         );
         return None;
     }
-    if !fork_now {
+    if apply == crate::surface_protocol::ProfileApply::Default {
         commit_profile(
             paths,
             prepared.id,
@@ -381,12 +381,9 @@ fn apply_profile(
         );
         return None;
     }
-    if facts.phase == SurfacePhase::Busy {
-        refuse_profile(
-            &prepared.id,
-            "a turn is running; fork onto a profile when the root is idle".to_owned(),
-            events,
-        );
+    let switch = apply == crate::surface_protocol::ProfileApply::Switch;
+    if let Some(reason) = now_refusal(switch, &facts) {
+        refuse_profile(&prepared.id, reason, events);
         return None;
     }
     let roster = crate::roster_input::roster_input_from_config(
@@ -405,12 +402,14 @@ fn apply_profile(
         }),
         protocol: root.protocol,
         roster,
+        switch: switch.then(|| prepared.id.clone()),
         finish: Box::new({
             let paths = paths.clone();
             let events = events.clone();
             move |outcome| {
                 let outcome = match outcome {
                     ProfileForkOutcome::Forked => ProfileOutcome::Forked,
+                    ProfileForkOutcome::Switched => ProfileOutcome::Switched,
                     ProfileForkOutcome::Bound => ProfileOutcome::Bound,
                     ProfileForkOutcome::AlreadyActive => ProfileOutcome::AlreadyActive,
                     ProfileForkOutcome::Refused(reason) => {
@@ -430,6 +429,20 @@ fn apply_profile(
         }),
     };
     Some(fork)
+}
+
+/// Why the profile cannot apply in this session now: a running turn, or for
+/// Switch now, queued prompts (the switch continues this root, so nothing
+/// may wait on the predecessor).
+fn now_refusal(switch: bool, facts: &SurfaceFacts<'_>) -> Option<String> {
+    if facts.phase == SurfacePhase::Busy {
+        let verb = if switch { "switch to" } else { "fork onto" };
+        return Some(format!(
+            "a turn is running; {verb} a profile when the root is idle"
+        ));
+    }
+    (switch && facts.queue_len != 0)
+        .then(|| "prompts are queued; switch profile once the queue is empty".to_owned())
 }
 
 fn refuse_profile_failure(
@@ -1222,9 +1235,9 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             SurfaceIntent::ListAgentAcknowledgements { tree_id } => {
                 send_agent_acknowledgements(&self.paths, &tree_id, events);
             }
-            SurfaceIntent::ApplyProfile { name, fork_now } => {
+            SurfaceIntent::ApplyProfile { name, apply } => {
                 return SurfaceEffect {
-                    profile_fork: apply_profile(&self.paths, &name, fork_now, facts, events),
+                    profile_fork: apply_profile(&self.paths, &name, apply, facts, events),
                     ..SurfaceEffect::default()
                 };
             }

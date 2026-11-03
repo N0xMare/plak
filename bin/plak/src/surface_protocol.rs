@@ -175,11 +175,27 @@ pub struct ProfilesView {
     pub diagnostics: Vec<String>,
 }
 
+/// Where an applied profile takes effect.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileApply {
+    /// Saved as the default profile brand-new sessions bind.
+    Default,
+    /// This session's root continues as the profile on its own line; its
+    /// children and processes keep running (Switch now).
+    Switch,
+    /// This session branches onto the profile, or an unattached, empty one
+    /// binds it (Fork now, Use now).
+    Fork,
+}
+
 /// How an applied profile landed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProfileOutcome {
     /// Saved as the default profile brand-new sessions bind.
     Saved,
+    /// This session's root continued as the profile; its children and
+    /// processes kept running. The home default is unchanged.
+    Switched,
     /// This session branched onto it; the home default is unchanged.
     Forked,
     /// An unattached, empty session took its root; a home without a default
@@ -246,14 +262,14 @@ pub enum SurfaceIntent {
     ShowMcp,
     /// Select a named agent profile (built-in or `~/.plak/profiles`).
     ///
-    /// `fork_now` branches the attached session onto that profile (or binds
-    /// an unattached, empty one); it changes only that session. Otherwise the
-    /// pointers are saved as the default profile for brand-new sessions.
+    /// `apply` says where: as the default for brand-new sessions, or in
+    /// this session now (switching its root node, or forking it). Only the
+    /// default writes the home's pointers.
     ApplyProfile {
         /// Profile id or alias.
         name: String,
-        /// Use it in this session now.
-        fork_now: bool,
+        /// Where the profile applies.
+        apply: ProfileApply,
     },
     /// Record the operator's acknowledgement of one attention occurrence;
     /// answered by [`SurfaceObservation::AgentAcknowledgements`].

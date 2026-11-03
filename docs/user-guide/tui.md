@@ -400,7 +400,7 @@ Notes worth knowing:
 - Skills and workflows are not implemented.
 - There is no `/model`, `/account` or `/effort`. The session's account, model,
   effort, Fast mode, composition and protocol change only through profiles:
-  the Agents tab's **Fork now**, **Use now** on a fresh session with no
+  the Agents tab's **Switch now** or **Fork now**, **Use now** on a fresh session with no
   conversation, or **Set as default** for new sessions. On a fresh home, pick a profile and
   **Use now**; the agent attaches in the same session. Both accept a profile
   whose root is an OpenRouter or direct API account (`openai`, `anthropic`,
@@ -644,9 +644,19 @@ transcript keep a scrollbar. Usage rows wrap complete words, including reset tim
 ### Agent profiles
 
 `Enter` (or a double-click) on a profile asks how to use it, in the
-confirmation pop-up: focus starts on Fork now, so `Enter` forks at once and
-`→` then `Enter` chooses the other action, or click it:
+confirmation pop-up: focus starts on the first action offered (Switch now,
+when it is), so `Enter` applies it at once and `→` then `Enter` chooses the
+next one, or click it:
 
+- **Switch now** continues this session as the profile. It needs an idle root
+  and nothing queued; running sub-agents and background processes keep
+  running. Future root spawns use the profile's cards, and every sub-agent
+  already running keeps the cards it was spawned with. The conversation
+  continues in a successor session; opening the old one resumes the successor.
+  The transcript ends with `switched to profile <name>; N agents and M
+  processes kept running`. After a crash, a switch that had not started says
+  `profile switch did not start; choose it again`; one that had continues on
+  the new profile.
 - **Fork now** branches this session onto the profile. The new session starts
   from this conversation with the profile's root and its sub-agent cards; this
   session stays as it was and can be resumed later with its own cards. It needs
@@ -668,7 +678,7 @@ confirmation pop-up: focus starts on Fork now, so `Enter` forks at once and
   (`[root] agent` and `[roster] working_set` in `config.toml`); existing
   sessions keep their own.
 
-A profile is per session: Fork now changes only that session and never the
+A profile is per session: Switch now and Fork now change only that session and never the
 default (Use now also makes its profile the default when the home has none).
 The session keeps its profile through `/reload`, resume, a carry and
 `/rebind`; if you edit one of its template files, its next `/reload` applies

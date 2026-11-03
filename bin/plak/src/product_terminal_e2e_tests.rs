@@ -1869,7 +1869,7 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
         crate::surface_protocol::UserAction::Extension(
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: name.to_owned(),
-                fork_now: true,
+                apply: crate::surface_protocol::ProfileApply::Fork,
             },
         )
     };
@@ -2054,7 +2054,7 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
         crate::surface_protocol::UserAction::Extension(
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: name.to_owned(),
-                fork_now: true,
+                apply: crate::surface_protocol::ProfileApply::Fork,
             },
         )
     };
@@ -2189,7 +2189,7 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
         crate::surface_protocol::UserAction::Extension(
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
-                fork_now: true,
+                apply: crate::surface_protocol::ProfileApply::Fork,
             },
         ),
     )?;
@@ -3165,7 +3165,8 @@ fn real_tui_profile_fork_now_accepts_first_prompt_and_reopens_target() -> Result
     child.wait_screen("loopback turn committed")?;
     child.send(b"/agents claude-test\r")?;
     child.wait_screen("Fork now")?;
-    // Focus starts on Fork now, so Enter forks.
+    // Focus starts on Switch now; one step right is Fork now.
+    child.send(b"\x1b[C")?;
     child.send(b"\r")?;
     child.wait_screen("forked this session onto profile claude-test")?;
     child.wait_screen("claude-test")?;
@@ -3301,7 +3302,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
         crate::surface_protocol::UserAction::Extension(
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
-                fork_now: true,
+                apply: crate::surface_protocol::ProfileApply::Fork,
             },
         ),
     )?;
@@ -3430,7 +3431,7 @@ fn a_refused_profile_fork_saves_nothing() -> Result<(), Box<dyn Error + Send + S
         crate::surface_protocol::UserAction::Extension(
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
-                fork_now: true,
+                apply: crate::surface_protocol::ProfileApply::Fork,
             },
         ),
     )?;
@@ -3532,7 +3533,7 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
         crate::surface_protocol::UserAction::Extension(
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
-                fork_now: true,
+                apply: crate::surface_protocol::ProfileApply::Fork,
             },
         ),
     )?;

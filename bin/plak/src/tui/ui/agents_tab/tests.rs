@@ -1,7 +1,7 @@
 use super::super::test_support::{confirm_action, key, launch_basic};
 use super::super::{App, ControlTab};
 use crate::tui::{
-    HostEvent, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SurfaceIntent,
+    HostEvent, ProfileApply, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SurfaceIntent,
     SurfaceObservation, UserAction,
 };
 use crossterm::event::KeyCode;
@@ -50,17 +50,17 @@ fn agents_app() -> App {
     app
 }
 
-fn apply(action: Option<UserAction>) -> Option<(String, bool)> {
+fn apply(action: Option<UserAction>) -> Option<(String, ProfileApply)> {
     match action {
-        Some(UserAction::Extension(SurfaceIntent::ApplyProfile { name, fork_now })) => {
-            Some((name, fork_now))
+        Some(UserAction::Extension(SurfaceIntent::ApplyProfile { name, apply })) => {
+            Some((name, apply))
         }
         _ => None,
     }
 }
 
-/// The profile the open pop-up applies, and whether it offers Fork now.
-fn asking(app: &App) -> Option<(String, bool)> {
+/// The profile the open pop-up applies, and how its primary action applies it.
+fn asking(app: &App) -> Option<(String, ProfileApply)> {
     let confirm = app.destructive_confirm.as_ref()?;
     assert_eq!(confirm.kind(), "profile");
     apply(confirm.first_action().cloned())
@@ -82,15 +82,18 @@ fn the_list_opens_on_the_current_profile_and_enter_asks_before_applying() {
         Some("grok-default")
     );
     assert!(app.handle_key(key(KeyCode::Enter)).is_none());
-    assert_eq!(asking(&app), Some(("grok-default".to_owned(), true)));
-    // Esc cancels; Enter on the primary action (Fork now) applies at once.
+    assert_eq!(
+        asking(&app),
+        Some(("grok-default".to_owned(), ProfileApply::Switch))
+    );
+    // Esc cancels; Enter on the primary action (Switch now) applies at once.
     assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
     assert!(app.destructive_confirm.is_none());
     assert_eq!(app.control_tab, Some(ControlTab::Models));
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(
         apply(confirm_action(&mut app)),
-        Some(("grok-default".to_owned(), true))
+        Some(("grok-default".to_owned(), ProfileApply::Switch))
     );
     assert!(app.control_tab.is_none());
     assert!(app.destructive_confirm.is_none());
@@ -118,8 +121,8 @@ fn next_session_keeps_the_agents_tab_open() {
     let mut app = agents_app();
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(
-        apply(press_button(&mut app, 1)),
-        Some(("grok-default".to_owned(), false))
+        apply(press_button(&mut app, 2)),
+        Some(("grok-default".to_owned(), ProfileApply::Default))
     );
     assert_eq!(app.control_tab, Some(ControlTab::Models));
 }
@@ -195,11 +198,17 @@ fn agents_name_resolves_like_the_list() {
         Some(UserAction::Extension(SurfaceIntent::ListProfiles))
     ));
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::Profiles(view())));
-    assert_eq!(asking(&app), Some(("codex".to_owned(), true)));
+    assert_eq!(
+        asking(&app),
+        Some(("codex".to_owned(), ProfileApply::Switch))
+    );
     app.destructive_confirm = None;
     app.open_profile_confirm("claude");
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::Profiles(view())));
-    assert_eq!(asking(&app), Some(("claude-default".to_owned(), true)));
+    assert_eq!(
+        asking(&app),
+        Some(("claude-default".to_owned(), ProfileApply::Switch))
+    );
     app.destructive_confirm = None;
     app.open_profile_confirm("nope");
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::Profiles(view())));
@@ -212,8 +221,8 @@ fn the_default_mark_follows_only_the_products_default_outcome() {
     app.handle_key(key(KeyCode::Up));
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(
-        apply(press_button(&mut app, 1)),
-        Some(("claude-default".to_owned(), false))
+        apply(press_button(&mut app, 2)),
+        Some(("claude-default".to_owned(), ProfileApply::Default))
     );
     // Sent, not yet answered: the mark has not moved.
     assert_eq!(
@@ -271,6 +280,34 @@ fn an_unbound_session_offers_use_now() {
     assert!(frame.contains("[ Use now ]"), "{frame}");
     assert_eq!(
         apply(confirm_action(&mut app)),
-        Some(("grok-default".to_owned(), true))
+        Some(("grok-default".to_owned(), ProfileApply::Fork))
+    );
+    assert!(!frame.contains("Switch now"), "{frame}");
+}
+
+/// Switch now continues the root node, so running children do not hold it
+/// back and queued prompts do; Fork now needs no running child.
+#[test]
+fn switch_now_needs_an_empty_queue_and_fork_now_no_running_child() {
+    let mut app = agents_app();
+    app.tree_live_descendants = 1;
+    app.handle_key(key(KeyCode::Enter));
+    let frame = super::super::test_support::render_to_string(&mut app, 120, 30);
+    assert!(frame.contains("[ Switch now ]"), "{frame}");
+    assert!(!frame.contains("[ Fork now ]"), "{frame}");
+    assert_eq!(
+        asking(&app),
+        Some(("grok-default".to_owned(), ProfileApply::Switch))
+    );
+    app.destructive_confirm = None;
+    app.tree_live_descendants = 0;
+    app.queue_len = 1;
+    app.handle_key(key(KeyCode::Enter));
+    let frame = super::super::test_support::render_to_string(&mut app, 120, 30);
+    assert!(!frame.contains("[ Switch now ]"), "{frame}");
+    assert!(frame.contains("[ Fork now ]"), "{frame}");
+    assert_eq!(
+        asking(&app),
+        Some(("grok-default".to_owned(), ProfileApply::Fork))
     );
 }

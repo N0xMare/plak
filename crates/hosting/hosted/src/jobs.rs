@@ -708,6 +708,21 @@ impl JobRegistry {
         }
         Ok(())
     }
+    /// The service of the line whose head is `(session, branch)`.
+    #[cfg(test)]
+    pub(crate) fn service_of_head(
+        &self,
+        session: plakous::model::SessionId,
+        branch: plakous::model::BranchId,
+    ) -> Option<JoinedSessionsPort> {
+        self.services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .find(|entry| entry.key() == (session, branch))
+            .map(|entry| entry.service.clone())
+    }
+
     pub(crate) fn transition_refusal(
         &self,
         session: plakous::model::SessionId,

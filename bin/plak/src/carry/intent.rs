@@ -137,18 +137,26 @@ pub(crate) fn resolve_open(
             break;
         }
         let store = services.session_records()?;
-        let Some(next) = super::already_carried(
+        if let Some(next) = super::already_carried(
             store.as_ref(),
             &record.workspace_root,
             &record.id,
             &crate::home::state::state_key(),
         )
         .map_err(CliFailure::new)?
-        else {
+        {
+            notes.push(format!(
+                "session {} was carried forward as {}; resuming it",
+                record.id, next.id
+            ));
+            record = next;
+            continue;
+        }
+        let Some(next) = switch_successor(services, &record)? else {
             break;
         };
         notes.push(format!(
-            "session {} was carried forward as {}; resuming it",
+            "session {} switched profile and continues as {}; resuming it",
             record.id, next.id
         ));
         record = next;
@@ -477,6 +485,48 @@ fn is_head(
 }
 
 /// Whether the line of `locator`'s branch moved to another branch.
+/// The session a profile switch of `record` published as its line's next
+/// head, once the source's projection has created it.
+fn switch_successor(
+    services: &crate::shell::services::Services,
+    record: &SessionRecord,
+) -> CliResult<Option<SessionRecord>> {
+    use plakous_hosted::sessions::SessionWorkflowKind;
+    use plakous_hosted::sessions::projector::WorkflowSettlement;
+    let store = services.session_records()?;
+    let sessions = services.state_roots()?.runtime_sessions()?;
+    let executor = plakous::application::ApplicationExecutor::new()
+        .map_err(|_| CliFailure::new("application executor failed"))?;
+    executor
+        .block_on(plakous_hosted::runtime::project_session(
+            &sessions, &store, record,
+        ))
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map_err(CliFailure::new)?;
+    let intents = store.load_intents(&record.id).map_err(CliFailure::new)?;
+    let Some(views) = store.load_views(&record.id).map_err(CliFailure::new)? else {
+        return Ok(None);
+    };
+    let published = intents.workflow_requests.iter().rev().find(|request| {
+        matches!(request.kind, SessionWorkflowKind::Switch(_))
+            && views
+                .state
+                .workflows
+                .get(&request.operation_id)
+                .is_some_and(|workflow| {
+                    matches!(workflow.settled, Some(WorkflowSettlement::Published { .. }))
+                })
+    });
+    let Some(request) = published else {
+        return Ok(None);
+    };
+    match store.load(&request.successor_product_id()) {
+        Ok(next) => Ok(Some(next)),
+        Err(error) if error == "session not found" => Ok(None),
+        Err(error) => Err(CliFailure::new(error)),
+    }
+}
+
 fn superseded(
     services: &crate::shell::services::Services,
     locator: SessionLocator,

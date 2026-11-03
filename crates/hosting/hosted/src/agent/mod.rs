@@ -109,9 +109,9 @@ pub use build::{
     build_or_open_bound_session, injected_root_tool_registrations, verify_bound_session,
 };
 use build::{
-    coding_session_runtime_binding_for, require_reconstructed_coding_projection,
-    spawn_child_composition, spawn_parent_tree_id, spawn_roster_composition,
-    spawn_roster_processing_tier,
+    coding_session_runtime_binding_for, frozen_parent_composition,
+    require_reconstructed_coding_projection, spawn_child_composition, spawn_parent_tree_id,
+    spawn_roster_composition, spawn_roster_processing_tier,
 };
 #[cfg(test)]
 pub(crate) use build::{

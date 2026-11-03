@@ -235,6 +235,9 @@ pub enum ProfileForkOutcome {
     /// The attached session branched onto the profile. The previous
     /// session stays resumable on its own tree and cards.
     Forked,
+    /// The root node continued on its own line as the profile: its
+    /// children and processes kept running (Switch now).
+    Switched,
     /// A detached session with no conversation took the profile's root.
     Bound,
     /// This session already runs that root with those cards.
@@ -266,6 +269,9 @@ pub struct SurfaceProfileFork {
     pub protocol: Option<crate::binding::ProtocolSelection>,
     /// The profile's working set, frozen as the new session's tree epoch.
     pub roster: crate::orchestration::RosterInput,
+    /// `Some(profile name)` continues the root node on its own line as that
+    /// profile (Switch now) instead of forking a new session.
+    pub switch: Option<String>,
     /// Receives the outcome.
     pub finish: Box<dyn FnOnce(ProfileForkOutcome) + Send>,
 }

@@ -338,6 +338,7 @@ may-use = [
     "crate::config::HostEventReceiver",
     "crate::config::McpOverview",
     "crate::config::McpSessionBinding",
+    "crate::config::ProfileApply",
     "crate::config::ProfileDifference",
     "crate::config::ProfileOutcome",
     "crate::config::ProfileRole",

@@ -8,7 +8,9 @@
 
 use super::super::text_input::is_accepted_single_line_char;
 use super::{App, KeyCode, KeyEvent, KeyModifiers, Rect, ScrollBlock, UserAction};
-use crate::tui::{ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SurfaceIntent};
+use crate::tui::{
+    ProfileApply, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SurfaceIntent,
+};
 use ratatui::Frame;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -120,6 +122,8 @@ impl App {
                     "forked this session onto profile {name}; the previous session stays resumable"
                 )
             }
+            // The host's own notice names what kept running.
+            ProfileOutcome::Switched => format!("this session continues as profile {name}"),
             ProfileOutcome::Bound => format!("profile {name} is this session's root"),
             ProfileOutcome::AlreadyActive => {
                 format!("this session already runs profile {name}'s root and cards")
@@ -140,42 +144,57 @@ impl App {
     }
 
     /// Asks how to apply the highlighted profile, in the destructive
-    /// confirmation pop-up (spec 02 §5.5): Cancel, then Fork now (Use
-    /// now on a session with no model) when the root is idle with no running
-    /// child, then Set as default.
+    /// confirmation pop-up (spec 02 §5.5): Cancel, then Switch now when the
+    /// root is idle with an empty queue, then Fork now when the root is idle
+    /// with no running child, then Set as default. A session with no model
+    /// offers Use now in place of both.
     pub(super) fn arm_profile_confirm(&mut self) {
         let Some(row) = self.profiles.selected() else {
             return;
         };
         let id = row.id.clone();
-        let fork_available = !self.busy && self.tree_live_descendants == 0;
-        let (now_label, now_button) = if self.model.is_none() {
-            ("Use now", "[ Use now ]")
-        } else {
-            ("Fork now", "[ Fork now ]")
-        };
-        let apply = |fork_now| {
+        let apply = |apply| {
             UserAction::Extension(SurfaceIntent::ApplyProfile {
                 name: id.clone(),
-                fork_now,
+                apply,
             })
         };
-        let mut lines = vec![if !fork_available {
-            format!("{now_label} waits until the root is idle and no child is running.")
-        } else if self.model.is_none() {
-            "Use now makes it this session's root.".to_owned()
+        let mut lines = Vec::new();
+        let mut actions = Vec::new();
+        if self.model.is_none() {
+            if self.busy {
+                lines.push("Use now waits until the root is idle.".to_owned());
+            } else {
+                lines.push("Use now makes it this session's root.".to_owned());
+                actions.push(("[ Use now ]", apply(ProfileApply::Fork)));
+            }
         } else {
-            "Fork now branches this session onto it; this one stays resumable.".to_owned()
-        }];
+            if self.busy || self.queue_len != 0 {
+                lines.push(
+                    "Switch now waits until the root is idle and nothing is queued.".to_owned(),
+                );
+            } else {
+                lines.push(
+                    "Switch now continues this session as the profile; its agents and processes keep running.".to_owned(),
+                );
+                actions.push(("[ Switch now ]", apply(ProfileApply::Switch)));
+            }
+            if self.busy || self.tree_live_descendants != 0 {
+                lines.push(
+                    "Fork now waits until the root is idle and no child is running.".to_owned(),
+                );
+            } else {
+                lines.push(
+                    "Fork now branches this session onto it; this one stays resumable.".to_owned(),
+                );
+                actions.push(("[ Fork now ]", apply(ProfileApply::Fork)));
+            }
+        }
         lines.push(
             "Set as default makes it the profile new sessions start with; existing sessions keep their own."
                 .to_owned(),
         );
-        let mut actions = Vec::new();
-        if fork_available {
-            actions.push((now_button, apply(true)));
-        }
-        actions.push(("[ Set as default ]", apply(false)));
+        actions.push(("[ Set as default ]", apply(ProfileApply::Default)));
         self.open_confirm(format!("Apply profile {id}?"), lines, actions);
     }
 

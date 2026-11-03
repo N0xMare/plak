@@ -179,7 +179,7 @@ impl ProductAgentTree {
             .as_ref()
             .map_err(|error| topology_error_from_vcs(error.clone()))?;
 
-        self.pending_spawns = self.pending_spawns.saturating_add(1);
+        self.take_spawn_slot(caller_id);
         let agent_id = next_child_id(
             self.collected_child_floor(),
             &self.tree_id,
@@ -198,7 +198,7 @@ impl ProductAgentTree {
         ) {
             Ok(plan) => plan,
             Err(error) => {
-                self.pending_spawns = self.pending_spawns.saturating_sub(1);
+                self.release_spawn_slot(caller_id);
                 if let Some(id) = operation_id
                     && error.code == TopologyErrorCode::MintUnavailable
                 {
@@ -263,6 +263,7 @@ impl ProductAgentTree {
                 parent_grant,
                 child_grant,
                 bound,
+                parent_composition: None,
             }),
             ticket,
         ))
@@ -300,6 +301,7 @@ impl ProductAgentTree {
             parent_grant,
             child_grant,
             bound,
+            parent_composition,
         } = reservation;
         self.minting.remove(&agent_id);
         let bound = match (bound, minted) {
@@ -316,7 +318,7 @@ impl ProductAgentTree {
                     .map(CandidateId::from_persisted),
             ),
             (None, None) => {
-                self.pending_spawns = self.pending_spawns.saturating_sub(1);
+                self.release_spawn_slot(&caller_id);
                 return Err(TopologyError::new(
                     TopologyErrorCode::OperationRecoveryRequired,
                     "spawn reservation was committed without the copy its mint owed",
@@ -352,7 +354,7 @@ impl ProductAgentTree {
             line_id: None,
             epoch_no,
             placement: NodePlacement::default(),
-            parent_composition: None,
+            parent_composition,
         };
         self.nodes.insert(agent_id.clone(), child);
         self.grants.insert(caller_id.clone(), parent_grant);
@@ -399,7 +401,7 @@ impl ProductAgentTree {
         } else {
             Ok(())
         };
-        self.pending_spawns = self.pending_spawns.saturating_sub(1);
+        self.release_spawn_slot(&caller_id);
         remembered?;
         // the template's `on_mint` runs once in the fresh copy,
         // with the mutex released, before any session binds to it.
@@ -426,7 +428,7 @@ impl ProductAgentTree {
         error: TopologyError,
     ) -> TopologyError {
         self.minting.remove(&reservation.agent_id);
-        self.pending_spawns = self.pending_spawns.saturating_sub(1);
+        self.release_spawn_slot(&reservation.caller_id);
         if let Some(id) = &reservation.operation_id
             && let Err(failed) = self.remember_failure(
                 id,
@@ -523,5 +525,21 @@ impl ProductAgentTree {
             ));
         }
         self.spawn_receipt(&agent_id).map(Some)
+    }
+
+    /// Counts a reservation `caller_id` takes until its commit or abort.
+    pub(in crate::tree) fn take_spawn_slot(&mut self, caller_id: &str) {
+        self.pending_spawns = self.pending_spawns.saturating_add(1);
+        if caller_id == self.root_agent_id {
+            self.root_pending_spawns = self.root_pending_spawns.saturating_add(1);
+        }
+    }
+
+    /// Gives back the slot [`Self::take_spawn_slot`] counted.
+    pub(in crate::tree) fn release_spawn_slot(&mut self, caller_id: &str) {
+        self.pending_spawns = self.pending_spawns.saturating_sub(1);
+        if caller_id == self.root_agent_id {
+            self.root_pending_spawns = self.root_pending_spawns.saturating_sub(1);
+        }
     }
 }

@@ -333,6 +333,32 @@ fn an_append_past_eight_referenced_epochs_is_refused() {
     assert_eq!(tree.retained_epochs().count(), 8);
 }
 
+/// A switch's pending epoch is refused when its append would be: with eight
+/// epochs referenced, recording a ninth writes no row.
+#[test]
+fn a_pending_epoch_past_the_bound_is_not_recorded() {
+    let (_root, mut tree) = tree();
+    for epoch in 0..super::MAX_REFERENCED_EPOCHS as u64 {
+        let child = tree
+            .spawn_agent("root", &spawn_req(), None)
+            .unwrap()
+            .agent_id;
+        tree.close_agent("root", &close_req(&child), None).unwrap();
+        tree.settle_for_test();
+        if epoch + 1 < super::MAX_REFERENCED_EPOCHS as u64 {
+            let successor = successor_of(&tree, |snapshot| {
+                snapshot.root_tuple = format!("tuple-{epoch}");
+            });
+            tree.append_epoch(successor).unwrap();
+        }
+    }
+    let ninth = successor_of(&tree, |snapshot| snapshot.root_tuple = "ninth".into());
+    let refused = tree.record_epoch_pending("switch-9", &ninth).unwrap_err();
+    assert_eq!(refused.code, TopologyErrorCode::BoundExceeded);
+    assert_eq!(tree.epoch_pending().unwrap(), Vec::new());
+    assert_eq!(tree.epochs().current, 7);
+}
+
 /// A fork's genesis is a tree of its own: its root is a new node named after
 /// the tree, its epoch 0 is the source's current epoch byte for byte, it
 /// records where it came from, and nothing of the source's work (children,
@@ -550,4 +576,182 @@ fn an_adopter_on_a_successor_epoch_keeps_its_review_evidence_rule() {
         .adopt_candidate(&lead, &adopt_req(&candidate), None)
         .unwrap_err();
     assert_eq!(refused.code, TopologyErrorCode::EvidenceMismatch);
+}
+
+/// A roster apply on a quiescent tree whose finished child was spawned under
+/// the current epoch appends: the child keeps the card it was spawned with.
+/// With nothing but the root on the current epoch it replaces it in place.
+#[test]
+fn a_roster_apply_appends_while_a_finished_agent_keeps_the_current_epoch() {
+    let (_root, mut tree) = tree();
+    let in_place = successor_of(&tree, |epoch| epoch.transient_resumes = 2);
+    tree.begin_successor_epoch(in_place.clone()).unwrap();
+    assert_eq!(tree.epochs().current, 0, "only the root referenced epoch 0");
+    assert_eq!(tree.current_epoch(), &in_place);
+
+    let child = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.close_agent("root", &close_req(&child), None).unwrap();
+    tree.settle_for_test();
+    let card = tree.epoch_of(&child).unwrap().clone();
+    let applied = successor_of(&tree, |epoch| {
+        epoch.roster.clear();
+        epoch.working_set.clear();
+    });
+    tree.begin_successor_epoch(applied.clone()).unwrap();
+    assert_eq!(tree.epochs().current, 1);
+    assert_eq!(tree.current_epoch(), &applied);
+    assert_eq!(tree.node(&child).unwrap().epoch_no, 0);
+    assert_eq!(
+        tree.epoch_of(&child),
+        Some(&card),
+        "the closed child keeps its card"
+    );
+}
+
+/// The per-prompt attempt bound is the root's epoch state: a reopen derives
+/// it from the current epoch instead of resetting it to the host constant.
+#[test]
+fn a_reopen_rederives_the_attempt_bound_from_the_current_epoch() {
+    let (_root, mut tree) = tree();
+    let lowered = successor_of(&tree, |epoch| epoch.max_attempts = 3);
+    assert_eq!(tree.append_epoch(lowered).unwrap(), 1);
+    assert_eq!(tree.max_attempts(), 3);
+    let store = MemoryTreeStore::new();
+    let _ = store.save_in_custody(&tree).unwrap();
+    let reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
+    assert_eq!(reopened.max_attempts(), 3);
+}
+
+/// A child's spawn mid-reservation binds the child's own epoch, so it does
+/// not hold an append back; only a root spawn does.
+#[test]
+fn only_a_root_spawn_mid_reservation_blocks_an_append() {
+    let (_root, mut tree) = tree();
+    let child = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    let successor = successor_of(&tree, |epoch| epoch.transient_resumes = 2);
+    tree.take_spawn_slot(&child);
+    assert_eq!(tree.append_epoch(successor.clone()).unwrap(), 1);
+    tree.release_spawn_slot(&child);
+    tree.take_spawn_slot("root");
+    let next = successor_of(&tree, |epoch| epoch.transient_resumes = 0);
+    assert_eq!(
+        tree.append_epoch(next).unwrap_err().message,
+        ProductAgentTree::TREE_EPOCH_REBIND_PENDING_SPAWNS
+    );
+}
+
+/// The `epoch_pending` publish-or-validate pair: the bytes are recorded
+/// before the publication, settle appends exactly them and removes the row,
+/// a repeat is idempotent, and a switch that did not land is withdrawn.
+#[test]
+fn a_pending_epoch_settles_from_its_bytes_or_is_withdrawn() {
+    let (_root, mut tree) = tree();
+    let live = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    let successor = successor_of(&tree, |epoch| epoch.transient_resumes = 2);
+    let recorded = tree.record_epoch_pending("switch-1", &successor).unwrap();
+    assert_eq!(recorded.epoch_no, 1);
+    assert_eq!(
+        tree.record_epoch_pending("switch-1", &successor).unwrap(),
+        recorded,
+        "recording the same bytes again validates them"
+    );
+    let other = successor_of(&tree, |epoch| epoch.transient_resumes = 0);
+    assert_eq!(
+        tree.record_epoch_pending("switch-2", &other)
+            .unwrap_err()
+            .code,
+        TopologyErrorCode::GrantDenied
+    );
+    assert_eq!(
+        tree.record_epoch_pending("switch-1", &other)
+            .unwrap_err()
+            .code,
+        TopologyErrorCode::OperationRecoveryRequired
+    );
+
+    // The row survives a store round trip, and the live child does not
+    // block the settle.
+    let store = MemoryTreeStore::new();
+    let _ = store.save_in_custody(&tree).unwrap();
+    let mut reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
+    assert_eq!(reopened.epoch_pending().unwrap(), vec![recorded]);
+    assert!(!reopened.node(&live).unwrap().status.is_finished());
+    assert_eq!(reopened.settle_epoch_pending("switch-1").unwrap(), Some(1));
+    assert_eq!(reopened.current_epoch(), &successor);
+    assert_eq!(reopened.node(&live).unwrap().epoch_no, 0);
+    assert_eq!(reopened.epoch_pending().unwrap(), Vec::new());
+    assert_eq!(reopened.settle_epoch_pending("switch-1").unwrap(), None);
+
+    let third = successor_of(&reopened, |epoch| epoch.transient_resumes = 1);
+    reopened.record_epoch_pending("switch-3", &third).unwrap();
+    assert_eq!(
+        reopened
+            .withdraw_epoch_pending_except(Some("switch-4"))
+            .unwrap(),
+        ["switch-3"]
+    );
+    assert_eq!(reopened.epoch_pending().unwrap(), Vec::new());
+    assert_eq!(reopened.epochs().current, 1);
+    assert!(!reopened.withdraw_epoch_pending("switch-3"));
+}
+
+/// A pending epoch installs only as the tree's next epoch: once another
+/// append took that number, its settle refuses and leaves the tree and the
+/// row as they were.
+#[test]
+fn a_pending_epoch_numbered_for_another_epoch_does_not_settle() {
+    let (_root, mut tree) = tree();
+    let pending = successor_of(&tree, |epoch| epoch.transient_resumes = 2);
+    assert_eq!(
+        tree.record_epoch_pending("switch-1", &pending)
+            .unwrap()
+            .epoch_no,
+        1
+    );
+    let other = successor_of(&tree, |epoch| epoch.transient_resumes = 0);
+    assert_eq!(tree.append_epoch(other.clone()).unwrap(), 1);
+    assert_eq!(
+        tree.settle_epoch_pending("switch-1").unwrap_err().code,
+        TopologyErrorCode::OperationRecoveryRequired
+    );
+    assert_eq!(tree.epochs().current, 1);
+    assert_eq!(tree.current_epoch(), &other);
+    assert_eq!(tree.epoch_pending().unwrap().len(), 1);
+}
+
+/// A rebind that keeps the roster moves only the tree's view of the root
+/// binding: no epoch, no quiescence, the admission state kept.
+#[test]
+fn a_root_bind_view_moves_with_live_descendants_and_no_epoch() {
+    let (_root, mut tree) = tree();
+    let child = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    let epoch = tree.current_epoch().clone();
+    let state = tree.state;
+    tree.record_root_bind("claude", "claude-next", Some("high"));
+    let root = tree.node("root").unwrap();
+    assert_eq!(
+        (
+            root.account.as_str(),
+            root.tuple_id.as_str(),
+            root.effort.as_deref()
+        ),
+        ("claude", "claude-next", Some("high"))
+    );
+    assert_eq!(tree.selected_tuple, "claude-next");
+    assert_eq!(tree.current_epoch(), &epoch);
+    assert_eq!(tree.epochs(), &TreeEpochs::default());
+    assert_eq!(tree.state, state);
+    assert!(!tree.node(&child).unwrap().status.is_finished());
 }

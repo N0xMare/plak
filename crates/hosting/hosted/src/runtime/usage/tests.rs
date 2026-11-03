@@ -1596,9 +1596,11 @@ impl SurfaceHandler<TestExtension> for Arc<IdleToolFork> {
                 composition: None,
                 protocol: None,
                 roster: crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                switch: None,
                 finish: Box::new(move |result| {
                     let label = match result {
                         ProfileForkOutcome::Forked => "forked".to_owned(),
+                        ProfileForkOutcome::Switched => "switched".to_owned(),
                         ProfileForkOutcome::Bound => "bound".to_owned(),
                         ProfileForkOutcome::AlreadyActive => "unchanged".to_owned(),
                         ProfileForkOutcome::Refused(failure) => {

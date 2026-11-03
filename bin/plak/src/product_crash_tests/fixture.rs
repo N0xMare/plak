@@ -55,14 +55,16 @@ fn host_workflow(workflow: ProductWorkflow) -> ActualHostWorkflow {
         ProductWorkflow::RootDelivery => ActualHostWorkflow::RootDelivery,
         ProductWorkflow::SendNow => ActualHostWorkflow::SendNow,
         ProductWorkflow::Fork => ActualHostWorkflow::Fork,
-        ProductWorkflow::Rebind => ActualHostWorkflow::Rebind,
+        ProductWorkflow::Rebind | ProductWorkflow::Switch => ActualHostWorkflow::Rebind,
         ProductWorkflow::Compact => ActualHostWorkflow::Compact,
     }
 }
 
 fn host_boundary(boundary: ProductCrashBoundary) -> ActualHostBoundary {
     match boundary {
-        ProductCrashBoundary::Prepared => ActualHostBoundary::Prepared,
+        ProductCrashBoundary::Prepared | ProductCrashBoundary::TreePrepared => {
+            ActualHostBoundary::Prepared
+        }
         ProductCrashBoundary::RuntimeReturned => ActualHostBoundary::RuntimeReturned,
         ProductCrashBoundary::ProductPublished => ActualHostBoundary::ProductPublished,
         ProductCrashBoundary::ProductCommitted => ActualHostBoundary::ProductCommitted,
@@ -337,7 +339,7 @@ pub(crate) async fn run_actual_host_fixture(
         // The binding changes only through a profile fork, so the matrix
         // seeds rebind rows through the product fixture and reconciles them
         // with the actual host.
-        ProductWorkflow::Rebind => {
+        ProductWorkflow::Rebind | ProductWorkflow::Switch => {
             return Err("actual-host rebind rows are seeded by the product fixture".into());
         }
         ProductWorkflow::Compact => vec![ActualHostAction::Compact],
@@ -370,6 +372,51 @@ pub(crate) async fn run_actual_host_fixture(
         .join()
         .map_err(|_| "actual host thread panicked")??;
     probe_product_fixture(home, state_path)
+}
+
+/// A relaunch after a switch's cut, as startup runs it: the startup resolver
+/// follows the source to the switch's successor, then the actual host opens
+/// that successor and quits. Returns the opened session and the resolver's
+/// note.
+pub(crate) fn open_switch_source_with_actual_host(
+    home: &Path,
+    workspace: &Path,
+    source_id: &str,
+) -> ProductResult<(String, Option<String>)> {
+    let paths = PlakPaths::explicit(home.to_path_buf());
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    let source = crate::product_sessions::load_session(&paths, source_id)?;
+    let (resolved, note) = crate::carry::intent::resolve_open(&services, source)
+        .map_err(|error| error.message().to_owned())?;
+    let controller = BoundaryController::from_evidence_path(
+        CrashBoundary::None,
+        home.join("product-physical.jsonl"),
+    )?;
+    let switched =
+        runtime_binding_for_account(workspace, controller.clone(), b"offline-loopback-switch")?;
+    let target = switched.target_binding();
+    let runtime_workspace = workspace.to_path_buf();
+    let runtime = Arc::new(move |_role: InjectedRuntimeRole| {
+        runtime_binding_for_account(
+            &runtime_workspace,
+            controller.clone(),
+            b"offline-loopback-switch",
+        )
+        .map_err(|error| error.to_string())
+    });
+    let injection = ActualHostInjection::new(
+        runtime,
+        target,
+        Arc::new(|_: ActualHostWorkflow, _: ActualHostBoundary| {}),
+    );
+    let host_home = home.to_path_buf();
+    let opened = resolved.id.clone();
+    std::thread::spawn(move || {
+        run_actual_host(host_home, &opened, injection, vec![ActualHostAction::Quit])
+    })
+    .join()
+    .map_err(|_| "actual host open thread panicked")??;
+    Ok((resolved.id, note))
 }
 
 pub(crate) fn recover_actual_host_fixture(
@@ -510,6 +557,21 @@ pub(crate) async fn run_product_fixture(
                 home,
                 workspace,
                 model,
+                state_path,
+                &cuts,
+            ))
+            .await?;
+        }
+        ProductWorkflow::Switch => {
+            seed_switch_tree(home, workspace, journal.product_session_id())?;
+            let runtime =
+                runtime_binding_for_account(workspace, model, b"offline-loopback-switch")?;
+            Box::pin(run_switch(
+                &sessions,
+                &mut journal,
+                source,
+                home,
+                runtime,
                 state_path,
                 &cuts,
             ))
@@ -676,6 +738,122 @@ async fn run_rebind(
     cuts.reach(ProductCrashBoundary::ProductCommitted).await
 }
 
+/// Live succession's write order with a cut after each step: the product
+/// `Switch` intent (1), the tree's `epoch_pending` row (2), the head-advancing
+/// runtime publication (3), the product projection (4) and the tree
+/// settlement (5). The source has tree rows, so the switch appends an epoch.
+async fn run_switch(
+    sessions: &AgentSessions,
+    journal: &mut ProductJournal,
+    source: SessionLocator,
+    home: &Path,
+    runtime: plakous::sessions::SessionRuntimeBinding,
+    state_path: &Path,
+    cuts: &ProductBoundaryController,
+) -> ProductResult {
+    use plakous_hosted::runtime::TreeRows as _;
+    const OPERATION: &str = "plak:switch:crash-harness";
+    let paths = PlakPaths::explicit(home.to_path_buf());
+    let tree_id = journal.product_session_id().to_owned();
+    let tree = paths.tree(&tree_id)?.ok_or("switch tree missing")?;
+    let mut successor = tree.current_epoch().clone();
+    successor.transient_resumes = successor.transient_resumes.wrapping_add(1);
+    successor.digest = successor.compute_digest();
+    let binding = runtime.target_binding();
+    submit_branch_request(
+        home,
+        journal,
+        state_path,
+        &WorkflowRequest {
+            operation_id: OPERATION.into(),
+            source_locator: source,
+            kind: SessionWorkflowKind::Switch(Box::new(
+                plakous_hosted::sessions::SwitchSelection {
+                    rebind: crate::product_sessions::RebindSelection {
+                        provider: "codex".into(),
+                        account: "offline-switch".into(),
+                        model: "offline-loopback-v1".into(),
+                        effort: Some("medium".into()),
+                        composition:
+                            crate::product_config::ProductCompositionSelection::FollowCatalog,
+                        target_selection: crate::product_config::ProductTargetSelection::Native,
+                        protocol: binding.protocol().as_str().into(),
+                        route: binding.route().as_str().into(),
+                        requested_model: binding.model().as_str().into(),
+                        selected_configuration: serde_json::to_string(
+                            &binding.selected_provider_configuration(),
+                        )?,
+                        effective_configuration: serde_json::to_string(
+                            &binding.effective_provider_configuration(),
+                        )?,
+                        account_binding: serde_json::to_string(&binding.account_binding())?,
+                        own_tree: None,
+                    },
+                    profile: "crash-switch".into(),
+                    root: plakous_hosted::sessions::RootProfile::default(),
+                    roster_digest: successor.digest.clone(),
+                    pending_snapshot: None,
+                },
+            )),
+        },
+    )?;
+    cuts.reach(ProductCrashBoundary::Prepared).await?;
+    let mut tree = paths.tree(&tree_id)?.ok_or("switch tree missing")?;
+    tree.record_epoch_pending(OPERATION, &successor)
+        .map_err(|error| error.message)?;
+    paths
+        .save_tree(&mut tree)
+        .map_err(|error| error.message())?;
+    cuts.reach(ProductCrashBoundary::TreePrepared).await?;
+    // A switch advances the line's head: no new line.
+    let outcome = sessions
+        .rebind(RebindSessionRequest::recompiling_target(
+            SessionOperationId::new(OPERATION)?,
+            source,
+            binding,
+            runtime,
+        ))
+        .await?;
+    let RebindSessionOutcome::Rebound { target, .. } = outcome else {
+        return Err(format!("switch did not publish: {outcome:?}").into());
+    };
+    record_runtime_target(state_path, target)?;
+    cuts.reach(ProductCrashBoundary::RuntimeReturned).await?;
+    project_branch_request(sessions, home, journal.product_session_id()).await?;
+    cuts.reach(ProductCrashBoundary::ProductPublished).await?;
+    let state: ProductState =
+        serde_json::from_reader(BufReader::new(std::fs::File::open(state_path)?))?;
+    recover_switch_tree(home, journal.product_session_id(), &state).await?;
+    cuts.reach(ProductCrashBoundary::ProductCommitted).await
+}
+
+/// The source's tree rows, so the switch has an epoch to append to.
+fn seed_switch_tree(home: &Path, workspace: &Path, tree_id: &str) -> ProductResult {
+    use plakous_hosted::runtime::TreeRows as _;
+    let mut tree =
+        plakous_hosted::topology_runtime::test_support::bootstrap(tree_id, workspace.to_path_buf());
+    PlakPaths::explicit(home.to_path_buf())
+        .save_tree(&mut tree)
+        .map_err(|error| error.message())?;
+    Ok(())
+}
+
+/// What the host's open does to the tree of a switch, exactly as the root's
+/// open runs it: a published successor takes its pending epoch from the
+/// recorded bytes before it opens, and the line head then withdraws any
+/// epoch a switch that never published left pending.
+async fn recover_switch_tree(home: &Path, source_id: &str, state: &ProductState) -> ProductResult {
+    let paths = PlakPaths::explicit(home.to_path_buf());
+    let store = crate::store::session_records::SqliteSessionStore::new(paths.clone());
+    if let Some(target) = state.target_product_session_id.as_deref()
+        && let Ok(successor) = store.load(target)
+    {
+        plakous_hosted::runtime::settle_switch_epoch_on_open(&paths, source_id, &successor).await?;
+    }
+    plakous_hosted::runtime::withdraw_stale_switch_epochs(&paths, source_id).await?;
+    Ok(())
+}
+
 async fn run_compact(
     sessions: &AgentSessions,
     journal: &mut ProductJournal,
@@ -768,6 +946,10 @@ pub(crate) async fn recover_product_fixture(
         }
         ProductWorkflow::Rebind => {
             project_branch_request(&sessions, home, journal.product_session_id()).await?;
+        }
+        ProductWorkflow::Switch => {
+            project_branch_request(&sessions, home, journal.product_session_id()).await?;
+            recover_switch_tree(home, journal.product_session_id(), &state).await?;
         }
         ProductWorkflow::Compact => {
             Box::pin(recover_compact(&sessions, &mut journal, home, workspace)).await?;

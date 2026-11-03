@@ -250,7 +250,8 @@ No reader sees "the" snapshot; each names whose epoch it reads:
 `append_epoch` adds the next epoch and makes it current. The root moves to it
 (its bind, spawn ceilings and per-prompt attempt bound), while every other node
 keeps its epoch, cards, grant ceilings and cell budget, so live descendants do
-not block it. It refuses a pending spawn and a snapshot whose digest does not
+not block it. It refuses a root spawn mid-reservation (a child's spawn binds the
+child's own epoch and does not block it) and a snapshot whose digest does not
 match, keeps the admission state (it is not a resume and does not lift a stop),
 and first folds successor epochs no non-root node references; epoch 0 stays as
 the header. At most eight epochs are referenced at once (the new current one
@@ -259,10 +260,24 @@ and every non-root node's), and an append past that is refused
 was spawned under for as long as its row exists, because a followup can revive
 it on that epoch's card, so its epoch is released only when retention removes
 the row (§6.7). The refusal says so and points at a new session; it never asks
-the operator to close agents. Every tree stays on epoch 0 today: nothing
-appends an epoch, a successor epoch that installs on a quiescent tree replaces
-the current (header) snapshot in place, and no successor rows or parent
-compositions are written. A template card may carry a `runner` name
+the operator to close agents. A profile's **Switch now** (chapter 02 §5.5)
+appends the profile's epoch to the session's own tree, with live descendants:
+before the runtime publication of the switch's successor the tree records the
+epoch's exact bytes as an `epoch_pending` row, the successor's root compiles
+its spawn menu, cards and briefing against those bytes appended to a detached
+copy of the tree, and once the successor is published the live tree appends
+exactly those bytes and removes the row (§14.3). A switch whose profile differs
+from the current epoch only in the root's account, model and effort appends
+nothing: the tree's root binding (the root node's account, tuple and effort)
+is a view of the line head and moves alone, also with live descendants. A
+roster apply on a quiescent tree appends when a non-root node still references
+the current epoch, so a finished child keeps its card, and replaces the current
+epoch in place only when nothing but the root references it. The root's
+per-prompt attempt bound is epoch state: an install, an append and every reopen
+derive it from the current epoch. Each spawn records its caller's composition
+as the child's `parent_composition`, and a child's bind and reopen read that
+frozen value rather than the composition its parent runs now, so a switch of
+the parent never changes it. A template card may carry a `runner` name
 that places a child on that runner rather than its parent's. The field is
 frozen on the card inside the snapshot JSON and its digest only when set, so a
 card without one keeps its encoding and digest. No template file sets it yet,
@@ -3245,10 +3260,11 @@ operator must not repair it by guessing a new tree locator.
 One in-flight status per row: a node seals, a workspace adopts, and neither
 status appears on the other.
 
-Today's flows write only the schema-10 defaults: `current_epoch` 0, no
-provenance, and for every node no line, epoch 0, the local runner, no
-workspace pair and no parent composition. The epoch, ancestor and custody
-tables stay empty. `append_epoch` (§1.2) is the only writer of
+Today's flows write the schema-10 defaults except where §1.2 says otherwise:
+no provenance outside a fork, and for every node no line, the local runner and
+no workspace pair. A spawn writes its caller's epoch and composition; a
+profile switch or a roster apply writes successor epochs. The ancestor table
+stays empty. `append_epoch` (§1.2) is the only writer of
 `agent_tree_epochs` rows and of a non-zero `current_epoch` or `epoch_no`; a
 save after it writes the new row, moves `current_epoch` and the root's
 `epoch_no`, and deletes the rows it folded, in the tree's one save
@@ -3349,7 +3365,9 @@ node is resident or has work in flight: a root session is attached, a root
 runtime built against the hub without an attachment (a rebind's successor
 before it is opened) lives, or a child turn is live, starting or retiring.
 Root dormancy alone never ends it. Only a rebind's hand-off to its successor
-detaches the last root attachment: from a tree that is not dormant the hub
+detaches the last root attachment (a profile switch whose published successor
+did not project or attach on its one in-process retry hands its tree off the
+same way, chapter 02 §5.5): from a tree that is not dormant the hub
 then keeps the tree and its children running and ends it once the whole tree
 goes dormant, woken whenever a child leaves the live table or a resident root
 goes. Every other release of a session is its host's shutdown of that session
@@ -3886,8 +3904,8 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Orphaned VCS operation and its settlement | intent, joined into views | anchored `agent_operations` of kinds `vcs_fault` and `vcs_fault_settled`, per affected agent and attempt; reopen records seal, adopt and removal ambiguity, and acknowledged workspace completion records settlement |
 | Spawn refusal, adoption acceptance and failed workspace removal | intent, joined into views | anchored `agent_operations` of kinds `spawn_refused`, `attempt_adopted` for the producer's attempt, and `workspace_cleanup` per occupant; captured failure, diagnostic and spawn end stamp derive agent-local consequences |
 | Feed cursors (`agent_feed_cursors`), node fold order | view metadata | cursor per runtime session and last applied intent order at the agent cursor; NULL node order restarts the fold |
-| Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn; written today as no line, epoch 0, the local runner and no composition |
-| Successor epochs, current epoch | intent | an epoch append; none today |
+| Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn: the caller's epoch and composition; written today as no line and the local runner |
+| Successor epochs, current epoch | intent | an epoch append: a profile switch's settlement of its pending epoch, or a roster apply (§1.2) |
 | Tree provenance (`forked_from`) | intent | the fork or import that created the tree: a `/fork` genesis writes `node` (source tree, root agent, line, branch, source epoch); none for an import yet |
 | Runner ancestors | external-effect record | completed bundle stages; none today |
 | Custody | ownership record, never tree content | the custody steps above |
@@ -3895,7 +3913,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Root and child continuation decisions | intent | `agent_operations` of kind `continuation`, keyed `plak:continuation:<agent>:<attempt or root>:<cause>:<host generation>:<round>:<turn or command>:<anchor id>`, so root decisions in different turns and decisions after another host loss never collide; with cause `transient`, `owner_lost` or `handoff`, a one-based 32-bit round, the anchoring stopped turn or unfacted command, the decision stamp, and a decision: `new_turn` (its command id and the unfacted commands it replaces), `resubmit` (the one unfacted command) or `withdrawn` (at least one command); none today, where child transient decisions remain `child_finalization` `Resume` intents and root decisions are process-local |
 | Terminal recovery refusals | intent | kind `terminal_refusal`, keyed `plak:terminal_refusal:<agent>:<attempt>`, with the refusal and its observation stamp; none today, where they remain process-local |
 | VCS stages | external-effect record | kind `vcs_stage`, written before the stage runs: the stage (`mint`, `seal`, `adopt`, `unmint`, `refresh`, `base_snapshot`, `bundle_create`, `relay`, `bundle_apply`), its class (`reproducible`, `verifiable`, `ambiguous`), the node it serves, and exactly the inputs its kind takes (below), plus for exactly the verifiable class the expected `refs/` reference and commit; none today |
-| Pending epoch | intent | kind `epoch_pending`, with the epoch number it installs as (from 1), the workflow whose published settlement validates it, and the successor snapshot's exact JSON bytes and digest; the bytes must decode to a snapshot whose digest matches; none today |
+| Pending epoch | intent | kind `epoch_pending`, with the epoch number it installs as (from 1), the workflow whose published settlement validates it, and the successor snapshot's exact JSON bytes and digest; the bytes must decode to a snapshot whose digest matches. Keyed `plak:epoch_pending:<workflow>`, at most one per tree, written by a profile switch after its product `Switch` intent and before its runtime publication (chapter 02 §5.5). Publish or validate: once the publication lands, the append from these bytes and the row's removal are one tree revision, taken in process right after the product projection and, after a crash, by the successor's open before its tools compile; a request withdrawn without its fact withdraws the row, and the line head's open withdraws any row left pending by a switch that never published onto it |
 
 Each of the last five payloads is decoded only through its own codec, which
 also requires the row's request digest to match its canonical request and a

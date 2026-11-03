@@ -493,6 +493,20 @@ pub struct SpawnReservation {
     /// The bind for an `inherit` spawn; `None` when a [`MintTicket`] owes the
     /// row its path, branch, and base.
     bound: Option<BoundWorkspace>,
+    /// The spawning parent's composition, frozen on the child's node.
+    parent_composition: Option<plakous_host_protocol::selection::CompositionSelection>,
+}
+
+impl SpawnReservation {
+    /// Freezes the spawning parent's composition on the child this
+    /// reservation commits: the one spawn-parent input a profile switch of
+    /// the parent would otherwise change under the child.
+    pub fn set_parent_composition(
+        &mut self,
+        composition: Option<plakous_host_protocol::selection::CompositionSelection>,
+    ) {
+        self.parent_composition = composition;
+    }
 }
 
 /// What [`ProductAgentTree::spawn_reserve`] admitted: a receipt the operation
@@ -696,6 +710,10 @@ pub struct ProductAgentTree {
     /// Projector observations awaiting this handle's next save; never persisted.
     pub(crate) pending_turn_usages: BTreeMap<plakous::model::TurnId, ProjectedChildTurnUsage>,
     pending_spawns: u32,
+    /// The part of `pending_spawns` the root reserved: a spawn that binds the
+    /// current epoch, so an epoch append must wait for it. A child's spawn
+    /// binds its own epoch and never blocks an append.
+    root_pending_spawns: u32,
     /// Child ids reserved by a `spawn_reserve` whose mint has not answered
     /// — the tree's `Minting` state. Process-local and
     /// never persisted: a reservation cannot outlive the process that took
@@ -818,6 +836,7 @@ mod recovery;
 mod refresh;
 mod retention;
 mod revert;
+mod succession;
 pub use refresh::{RefreshReport, RefreshStatus};
 mod runtime_error;
 pub mod text;

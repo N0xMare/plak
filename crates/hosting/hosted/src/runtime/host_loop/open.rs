@@ -76,6 +76,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
         // Creation freezes the root's tools; a wildcard MCP tool left out then
         // is a pending notice the operator must see (spec 07 §3.5).
         let freezing_tools = config.session.frozen_tools.is_none();
+        // A switch successor published before a crash takes its epoch from
+        // the recorded bytes before its tools compile.
+        super::super::rebind::settle_before_open(&config).await?;
         let mut opened = build_session_from_config(&mut config, &mut stderr_buf).await?;
         // Observe owner faults before attachment hooks can retire children;
         // the face's first snapshot may be much later.
@@ -232,6 +235,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
                 for row in withdrawn {
                     let _ = events.send(ContentEvent::Row(row));
                 }
+                // This head holds its lease, so an epoch still pending is a
+                // switch from it that never published.
+                super::super::rebind::withdraw_after_open(&config).await?;
                 let rows = config.topology_rows();
                 for target in &withdrawn_forks {
                     super::super::fork::discard_withdrawn_fork_tree(&rows, &*config.store, target);

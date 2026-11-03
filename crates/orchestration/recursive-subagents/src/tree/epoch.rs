@@ -169,11 +169,12 @@ impl ProductAgentTree {
         self.lower_max_attempts(usize::from(snapshot.max_attempts));
     }
 
-    /// Replaces the current epoch in place on a quiescent tree (a model
-    /// rebind that stays on the tree, or a roster apply). Same tree rows
-    /// stay inspectable; bind authority is the new snapshot. Unlike
-    /// [`Self::append_epoch`] it numbers no new epoch and lifts the tree to
-    /// live.
+    /// Makes `snapshot` the root's epoch on a quiescent tree (a roster
+    /// apply) and lifts the tree to live. A finished agent spawned under the
+    /// current epoch keeps it, because a followup can revive it on that
+    /// epoch's card, so then the snapshot is appended as the next epoch;
+    /// otherwise nothing references the current epoch but the root and it is
+    /// replaced in place.
     pub fn begin_successor_epoch(
         &mut self,
         snapshot: OrchestrationSnapshot,
@@ -183,6 +184,11 @@ impl ProductAgentTree {
                 TopologyErrorCode::GrantDenied,
                 "successor epoch requires a quiescent tree",
             ));
+        }
+        if self.current_epoch_referenced() {
+            self.append_epoch(snapshot)?;
+            self.state = TreeAdmissionState::Live;
+            return Ok(());
         }
         self.selected_tuple = snapshot.root_tuple.clone();
         let root_id = self.root_agent_id.clone();
@@ -368,6 +374,7 @@ impl ProductAgentTree {
     #[cfg(any(test, feature = "test-support"))]
     pub fn set_pending_spawns_for_test(&mut self, pending: u32) {
         self.pending_spawns = pending;
+        self.root_pending_spawns = pending;
     }
 }
 

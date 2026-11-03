@@ -4,11 +4,11 @@ use super::{
     AgentSessionsErrorKind, AttachedCodingSession, CliFailure, CliResult, HostBoundary, HostConfig,
     HostLifecyclePhase, HostTargetAuthority, HostWorkflow, Instant, InterruptWatch, NoticeScope,
     RebindBefore, RebindRoute, RebindSessionOutcome, ResolvedRebindTarget, Sender,
-    SessionOperationId, SessionRecord, SessionRuntimeBinding, SourceRelease, TranscriptRow,
-    abandon_prepared_rebind, durable_tree_id, emit_queue_snapshot, interrupted_before_dispatch,
-    observe_boundary, observe_phase, rebind_note, release_source_attachment, report_rebind_context,
-    restore_detached_source, send_binding, send_last_user_prompt_at, sessions, topology_state,
-    watched,
+    SessionOperationId, SessionRecord, SessionRuntimeBinding, SourceRelease, Succession,
+    TranscriptRow, abandon_switch, durable_tree_id, emit_queue_snapshot,
+    interrupted_before_dispatch, observe_boundary, observe_phase, rebind_note,
+    release_source_attachment, report_rebind_context, restore_detached_source, send_binding,
+    send_last_user_prompt_at, sessions, topology_state, watched,
 };
 
 use crate::binding::TargetSelection;
@@ -28,8 +28,11 @@ pub(in crate::runtime) async fn complete_rebind<P: plakous_host_protocol::Protoc
     target: ResolvedRebindTarget,
     runtime: SessionRuntimeBinding,
     started: Instant,
+    succession: Option<&Succession>,
 ) -> CliResult<()> {
-    crate::runtime::jobs_transition_guard(config, opened)?;
+    if succession.is_none() {
+        crate::runtime::jobs_transition_guard(config, opened)?;
+    }
     let source_was_detached = opened.agent().is_none();
     // Captured before the target overwrites them, so an effort-only fork is
     // not reported as a model switch.
@@ -45,16 +48,30 @@ pub(in crate::runtime) async fn complete_rebind<P: plakous_host_protocol::Protoc
         operation,
         source_locator,
         started,
+        succession,
     };
+    let mut target = target;
     let target_locator = transition
         .dispatch(source_was_detached, &target, runtime)
         .await?;
     let target_record = transition.project_target(target_locator).await?;
+    if let Some(succession) = succession {
+        transition
+            .settle_succession(succession, &target_record, &mut target)
+            .await?;
+    }
     let (target_record, replacement, target_model) =
         transition.open_target(target_record, &target).await?;
     transition
         .activate_target(target_record, replacement, target_model, target)
         .await?;
+    if let Some(succession) = succession {
+        let _ = events.notice(TranscriptRow::info(
+            NoticeScope::Settings,
+            switched_note(opened, succession),
+        ));
+        return Ok(());
+    }
     // A profile fork onto the same root changes only the cards; the product
     // reports that itself, and "effort changed" would be false.
     let same_root = previous_account == config.session.account
@@ -89,6 +106,7 @@ struct RebindTransition<'a, 'interrupt, P: plakous_host_protocol::ProtocolExtens
     operation: &'a str,
     source_locator: plakous::sessions::SessionLocator,
     started: Instant,
+    succession: Option<&'a Succession>,
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
@@ -117,7 +135,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             }
             return Err(CliFailure::new("rebind operation identity is invalid"));
         };
-        let released_source = opened.detach().await.map_err(|error| {
+        let succession = self.succession;
+        let released = if succession.is_some() {
+            opened.detach_for_transfer().await
+        } else {
+            opened.detach().await
+        };
+        let released_source = released.map_err(|error| {
             CliFailure::new(format!(
                 "rebind source release failed ({:?}): {error}",
                 error.kind()
@@ -133,7 +157,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         // the prepared workflow back and reattaches the exact source. No branch is
         // created and no receipt is claimed.
         if watch.observe_now() {
-            let abandoned = abandon_prepared_rebind(config, operation).await;
+            let abandoned = abandon_switch(config, operation, succession).await;
             restore_detached_source(config, opened, source_locator, stderr_buf).await?;
             abandoned?;
             return Err(interrupted_before_dispatch("rebind"));
@@ -145,6 +169,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 source_locator,
                 target.binding.clone(),
                 runtime,
+                succession.is_some(),
             )),
         )
         .await
@@ -158,7 +183,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                         | AgentSessionsErrorKind::Revalidation
                 ) =>
             {
-                let workflow_finish = abandon_prepared_rebind(config, operation).await;
+                let workflow_finish = abandon_switch(config, operation, succession).await;
                 restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 workflow_finish?;
                 if let Some(refusal) = rebind_refusal(error.kind(), &error.to_string()) {
@@ -208,7 +233,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             RebindSessionOutcome::RecoveryRequired { recovery, .. }
                 if recovery.locator() == source_locator =>
             {
-                let recovery_save = abandon_prepared_rebind(config, operation).await;
+                let recovery_save = abandon_switch(config, operation, succession).await;
                 restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 recovery_save?;
                 return Err(CliFailure::new(
@@ -223,18 +248,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         Ok(target_locator)
     }
 
-    async fn project_target(
+    /// The successor's product record, projected to the published branch.
+    async fn project_successor(
         &mut self,
         target_locator: plakous::sessions::SessionLocator,
     ) -> CliResult<SessionRecord> {
         let watch = self.watch;
-        let config = &mut *self.config;
-        let opened = &mut *self.opened;
-        let stderr_buf = &mut *self.stderr_buf;
+        let config = &*self.config;
+        let opened = &*self.opened;
         let operation = self.operation;
         let source_locator = self.source_locator;
-
-        let target_record_result: CliResult<SessionRecord> = async {
+        async {
             // Publish the successor and settle the canonical receipt before an
             // interrupt can stop catch-up on the saved, resumable target.
             watched(
@@ -279,10 +303,38 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             }
             Ok(record)
         }
-        .await;
+        .await
+    }
+
+    async fn project_target(
+        &mut self,
+        target_locator: plakous::sessions::SessionLocator,
+    ) -> CliResult<SessionRecord> {
+        let mut target_record_result = self.project_successor(target_locator).await;
+        // A switch cannot restore its source after the publication, so a
+        // failed projection is tried once more in process (D-S8).
+        if target_record_result.is_err() && self.succession.is_some() && !self.watch.interrupted() {
+            target_record_result = self.project_successor(target_locator).await;
+        }
+        let watch = self.watch;
+        let operation = self.operation;
+        let source_locator = self.source_locator;
         let target_record = match target_record_result {
             Ok(record) => record,
+            Err(error) if self.succession.is_some() => {
+                // The successor is the line's head now: the source cannot
+                // be restored, and the successor's next open finishes it.
+                return Err(self
+                    .hand_off_tree(format!(
+                        "the profile switch was published but its session could not be projected ({}); open this session again to continue on the new profile",
+                        error.message()
+                    ))
+                    .await);
+            }
             Err(error) => {
+                let config = &mut *self.config;
+                let opened = &mut *self.opened;
+                let stderr_buf = &mut *self.stderr_buf;
                 restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 let target_id = config
                     .store
@@ -306,11 +358,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             }
         };
         observe_boundary(
-            config.runtime_factory.as_ref(),
+            self.config.runtime_factory.as_ref(),
             HostWorkflow::Rebind,
             HostBoundary::ProductPublished,
         );
         Ok(target_record)
+    }
+
+    /// A published switch whose successor could not be projected or attached
+    /// hands its tree to custody, as a completed switch does, so its live
+    /// children keep running and the host's quit drain ends the tree; the
+    /// successor's next open takes it back. Returns `message` with any
+    /// hand-off failure.
+    async fn hand_off_tree(&mut self, message: String) -> CliFailure {
+        match self.opened.hand_off_topology().await {
+            Ok(()) => CliFailure::new(message),
+            Err(error) => CliFailure::new(message)
+                .with_cleanup_failure(format!("the agent tree could not be handed off: {error}")),
+        }
     }
 
     async fn open_target(
@@ -345,7 +410,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             RebindRoute::Native { spec, .. } => spec.as_deref(),
             RebindRoute::Api(_) => None,
         };
-        let replacement_result = match config
+        let mut replacement_result = match config
             .runtime_factory
             .open_rebind_target(config, &target_record, spec, resume_locator, stderr_buf)
             .await
@@ -353,8 +418,28 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             Ok(replacement) => Ok(replacement),
             Err(error) => Err(*error.failure),
         };
+        // A switch cannot restore its source after the publication, so a
+        // failed attach is tried once more in process (D-S8).
+        if replacement_result.is_err() && self.succession.is_some() {
+            stderr_buf.clear();
+            replacement_result = config
+                .runtime_factory
+                .open_rebind_target(config, &target_record, spec, resume_locator, stderr_buf)
+                .await
+                .map_err(|error| *error.failure);
+        }
         let replacement = match replacement_result {
             Ok(replacement) => replacement,
+            Err(error) if self.succession.is_some() => {
+                // The successor is the line's head: the source cannot be
+                // restored. Its next open retries the attach.
+                return Err(self
+                    .hand_off_tree(format!(
+                        "the profile switch was published but its session could not attach ({}); open this session again to continue on the new profile",
+                        error.message()
+                    ))
+                    .await);
+            }
             Err(error) => {
                 restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 return Err(error);
@@ -460,9 +545,85 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         ));
         send_last_user_prompt_at(events, config, opened);
         report_rebind_context(opened, events, config).await;
-        install_rebind_epoch(config).await?;
+        // A switch's tree took its epoch before the successor opened.
+        if self.succession.is_none() {
+            install_rebind_epoch(config).await?;
+        }
         Ok(())
     }
+
+    /// Step 5 of a switch, after the successor is published and projected:
+    /// the tree takes the successor's epoch (or root-binding view) before
+    /// the successor opens against it. A failure here leaves the successor
+    /// published as the line's head; its next open installs the epoch.
+    async fn settle_succession(
+        &mut self,
+        succession: &Succession,
+        target_record: &SessionRecord,
+        target: &mut ResolvedRebindTarget,
+    ) -> CliResult<()> {
+        let config = &mut *self.config;
+        config.state_roots.set_pending_epoch(None);
+        if let RebindRoute::Native {
+            spec: Some(spec), ..
+        } = &mut target.route
+        {
+            spec.state_roots.set_pending_epoch(None);
+        }
+        let settled = succession
+            .settle(
+                config,
+                self.operation,
+                target_record.account.as_deref().unwrap_or_default(),
+                target_record.model.as_deref().unwrap_or_default(),
+                target_record.effort.as_deref(),
+            )
+            .await;
+        match settled {
+            Ok(()) => Ok(()),
+            Err(error) => Err(self
+                .hand_off_tree(format!(
+                    "the profile switch published session {} but its agent tree could not take the profile ({}); open it to finish",
+                    target_record.id,
+                    error.message()
+                ))
+                .await),
+        }
+    }
+}
+
+/// The notice a completed switch prints: what kept running across it.
+fn switched_note(opened: &AttachedCodingSession, succession: &Succession) -> String {
+    let agents = crate::topology_runtime::lookup(&succession.tree_id)
+        .and_then(|runtime| {
+            runtime
+                .read(|tree| {
+                    tree.nodes()
+                        .values()
+                        .filter(|node| {
+                            node.agent_id != tree.root_agent_id && !node.status.is_finished()
+                        })
+                        .count()
+                })
+                .ok()
+        })
+        .unwrap_or(0);
+    let processes = opened.agent().map_or(0, |agent| {
+        agent
+            .jobs()
+            .iter()
+            .filter(|job| job.status == plakous::tools::JobStatus::Running)
+            .count()
+    });
+    let plural = |count: usize, one: &str, many: &str| {
+        format!("{count} {}", if count == 1 { one } else { many })
+    };
+    format!(
+        "switched to profile {}; {} and {} kept running",
+        succession.profile,
+        plural(agents, "agent", "agents"),
+        plural(processes, "process", "processes")
+    )
 }
 
 async fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(

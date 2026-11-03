@@ -4614,6 +4614,68 @@ fn child_spawn_parent_inputs_are_profile_independent_apart_from_composition() {
     assert_eq!(after_composition, CompositionSelection::JsPtc);
 }
 
+/// A child keeps what it was spawned under across its parent's switch: the
+/// composition its parent ran at the spawn stays frozen on its node, and its
+/// card, composition included, stays its own epoch's, while the parent now
+/// runs another composition on a successor epoch that pins another one.
+#[tokio::test]
+async fn a_childs_spawn_composition_survives_its_parents_switch() {
+    use crate::agent_tree_protocol::TemplateName;
+    use plakous_host_protocol::selection::CompositionSelection as Frozen;
+    let review = TemplateName::parse("review").unwrap();
+    let tree_id = crate::topology_runtime::test_support::unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+        &tree_id,
+        "root",
+        "owner",
+        root.path().to_path_buf(),
+        "selected-tuple",
+        crate::agent_tree_protocol::WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut genesis = tree.current_epoch().clone();
+    genesis.roster.get_mut(&review).unwrap().composition = Some(Frozen::JsPtc);
+    genesis.digest = genesis.compute_digest();
+    tree.install_snapshot(genesis);
+    // The spawn as the tool runs it: the caller's composition is frozen on
+    // the reservation before the commit writes the node.
+    let crate::agent_tree::SpawnAdmission::Reserved(mut reservation, None) = tree
+        .spawn_reserve(
+            "root",
+            &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+            None,
+            &Ok(std::collections::BTreeSet::new()),
+        )
+        .unwrap()
+    else {
+        panic!("a read-only spawn mints nothing");
+    };
+    reservation.set_parent_composition(Some(Frozen::Direct));
+    let child = tree.spawn_commit(*reservation, None).unwrap().agent_id;
+    // The parent switches to a profile that runs and pins PY PTC.
+    let mut successor = tree.current_epoch().clone();
+    successor.roster.get_mut(&review).unwrap().composition = Some(Frozen::PyPtc);
+    successor.digest = successor.compute_digest();
+    assert_eq!(tree.append_epoch(successor).unwrap(), 1);
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
+    let mut switched = openrouter_test_parent();
+    switched.topology_tree_id = Some(tree_id.clone());
+    switched.composition = CompositionSelection::PyPtc;
+
+    let frozen = frozen_parent_composition(&tree_id, &child);
+    let card = spawn_roster_composition(&tree_id, &child);
+    let started =
+        children::spawn_child_start_composition(&SpawnParent::Api(switched), &child, Some("codex"));
+    crate::topology_runtime::force_release(&tree_id).await;
+
+    assert_eq!(frozen, Some(CompositionSelection::Direct));
+    assert_eq!(card, Some(CompositionSelection::JsPtc));
+    assert_eq!(started.unwrap(), CompositionSelection::JsPtc);
+}
+
 /// A hub tree whose `orchestrate` child was spawned under epoch 0, then one
 /// append that changes everything that child's own epoch says: `review` and
 /// `orchestrate` are gone from the current epoch, the frozen tool tables and

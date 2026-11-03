@@ -241,6 +241,11 @@ impl ProductAgentTree {
     pub fn reopen(persisted: PersistedTree) -> Self {
         let mut tree = persisted.0;
         tree.host_generation = tree.host_generation.saturating_add(1);
+        // The per-prompt attempt bound is the root's epoch state, not a row:
+        // re-derive it from the current epoch, as an install does.
+        tree.max_attempts = super::MAX_TREE_ATTEMPTS;
+        let bound = usize::from(tree.current_epoch().max_attempts);
+        tree.lower_max_attempts(bound);
         tree.restore_paused();
         tree
     }

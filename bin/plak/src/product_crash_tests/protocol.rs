@@ -15,6 +15,9 @@ pub(super) enum ProductWorkflow {
     SendNow,
     Fork,
     Rebind,
+    /// A profile switch: the root node continues on its own line (spec 02
+    /// §5.5), with the tree's `epoch_pending` publish-or-validate pair.
+    Switch,
     Compact,
 }
 
@@ -22,6 +25,8 @@ pub(super) enum ProductWorkflow {
 #[serde(rename_all = "snake_case")]
 pub(super) enum ProductCrashBoundary {
     Prepared,
+    /// A switch's `epoch_pending` row is durable; its publication is not.
+    TreePrepared,
     RuntimeReturned,
     ProductPublished,
     ProductCommitted,

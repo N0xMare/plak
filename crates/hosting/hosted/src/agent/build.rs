@@ -78,7 +78,9 @@ pub(super) use tools::{
 pub use tools::{direct_composition_capable, spawn_child_composition};
 #[cfg(test)]
 pub(crate) use tools::{direct_extension_tool, projection_target};
-pub(super) use tools::{spawn_roster_composition, spawn_roster_processing_tier};
+pub(super) use tools::{
+    frozen_parent_composition, spawn_roster_composition, spawn_roster_processing_tier,
+};
 #[cfg(test)]
 pub(super) use topology::SpawnParentInputs;
 #[cfg(test)]

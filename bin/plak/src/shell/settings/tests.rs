@@ -1064,22 +1064,32 @@ fn profile_paths(dir: &std::path::Path) -> PlakPaths {
 fn apply(
     paths: &PlakPaths,
     name: &str,
-    fork_now: bool,
+    how: crate::surface_protocol::ProfileApply,
     phase: SurfacePhase,
+) -> (SurfaceEffect, Vec<HostEvent>) {
+    apply_with_queue(paths, name, how, phase, 0)
+}
+
+fn apply_with_queue(
+    paths: &PlakPaths,
+    name: &str,
+    how: crate::surface_protocol::ProfileApply,
+    phase: SurfacePhase,
+    queue_len: usize,
 ) -> (SurfaceEffect, Vec<HostEvent>) {
     let (events, rx) = host_event_sink();
     let catalog = codex_catalog();
     let effect = ProductSurface::new(paths.clone()).dispatch(
         SurfaceIntent::ApplyProfile {
             name: name.to_owned(),
-            fork_now,
+            apply: how,
         },
         SurfaceFacts {
             session: None,
             phase,
             attached_one_shot: false,
             catalog: &catalog,
-            queue_len: 0,
+            queue_len,
             usage_reads: UsageReads::default(),
         },
         &events,
@@ -1092,7 +1102,12 @@ fn apply(
 fn next_session_saves_the_profile_and_reports_it() {
     let dir = tempfile::tempdir().unwrap();
     let paths = profile_paths(dir.path());
-    let (effect, observed) = apply(&paths, "mine", false, SurfacePhase::Idle);
+    let (effect, observed) = apply(
+        &paths,
+        "mine",
+        crate::surface_protocol::ProfileApply::Default,
+        SurfacePhase::Idle,
+    );
     assert!(effect.profile_fork.is_none());
     assert!(observed.iter().any(|event| matches!(
         event,
@@ -1135,7 +1150,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
     let effect = ProductSurface::new(paths.clone()).dispatch(
         SurfaceIntent::ApplyProfile {
             name: "claude-default".into(),
-            fork_now: true,
+            apply: crate::surface_protocol::ProfileApply::Fork,
         },
         SurfaceFacts {
             session: None,
@@ -1171,7 +1186,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
     let effect = ProductSurface::new(paths.clone()).dispatch(
         SurfaceIntent::ApplyProfile {
             name: "claude-default".into(),
-            fork_now: false,
+            apply: crate::surface_protocol::ProfileApply::Default,
         },
         SurfaceFacts {
             session: None,
@@ -1199,7 +1214,12 @@ fn fork_now_changes_only_its_session_and_never_the_home_default() {
     let paths = profile_paths(dir.path());
     let before = std::fs::read(paths.config_file()).ok();
 
-    let (effect, observed) = apply(&paths, "mine", true, SurfacePhase::Idle);
+    let (effect, observed) = apply(
+        &paths,
+        "mine",
+        crate::surface_protocol::ProfileApply::Fork,
+        SurfacePhase::Idle,
+    );
     assert!(
         observed.is_empty(),
         "nothing is reported before the host answers"
@@ -1227,7 +1247,12 @@ fn fork_now_changes_only_its_session_and_never_the_home_default() {
         "a refusal saves nothing"
     );
 
-    let (effect, _) = apply(&paths, "mine", true, SurfacePhase::Idle);
+    let (effect, _) = apply(
+        &paths,
+        "mine",
+        crate::surface_protocol::ProfileApply::Fork,
+        SurfacePhase::Idle,
+    );
     let fork = effect.profile_fork.expect("a fork request");
     (fork.finish)(ProfileForkOutcome::Forked);
     assert_eq!(
@@ -1241,11 +1266,48 @@ fn fork_now_changes_only_its_session_and_never_the_home_default() {
 fn fork_now_during_a_turn_is_refused_before_the_host_sees_it() {
     let dir = tempfile::tempdir().unwrap();
     let paths = profile_paths(dir.path());
-    let (effect, observed) = apply(&paths, "mine", true, SurfacePhase::Busy);
+    let (effect, observed) = apply(
+        &paths,
+        "mine",
+        crate::surface_protocol::ProfileApply::Fork,
+        SurfacePhase::Busy,
+    );
     assert!(effect.profile_fork.is_none());
     assert!(observed.iter().any(|event| matches!(
         event,
         HostEvent::Extension(SurfaceObservation::ProfileRefused { reason, .. }) if reason.contains("turn is running")
+    )));
+}
+
+/// Switch now asks the host to continue this session's root as the profile,
+/// saves nothing before it lands, and is refused while prompts are queued.
+#[test]
+fn switch_now_names_the_profile_and_waits_for_an_empty_queue() {
+    use crate::surface_protocol::ProfileApply;
+    let dir = tempfile::tempdir().unwrap();
+    let paths = profile_paths(dir.path());
+    let before = std::fs::read(paths.config_file()).ok();
+    let (effect, observed) = apply(&paths, "mine", ProfileApply::Switch, SurfacePhase::Idle);
+    assert!(
+        observed.is_empty(),
+        "nothing is reported before the host answers"
+    );
+    let switch = effect.profile_fork.expect("a switch request");
+    assert_eq!(switch.switch.as_deref(), Some("mine"));
+    (switch.finish)(ProfileForkOutcome::Switched);
+    assert_eq!(
+        std::fs::read(paths.config_file()).ok(),
+        before,
+        "a switch changes only its session"
+    );
+    let (effect, _) = apply(&paths, "mine", ProfileApply::Fork, SurfacePhase::Idle);
+    assert_eq!(effect.profile_fork.expect("a fork request").switch, None);
+    let (effect, observed) =
+        apply_with_queue(&paths, "mine", ProfileApply::Switch, SurfacePhase::Idle, 1);
+    assert!(effect.profile_fork.is_none());
+    assert!(observed.iter().any(|event| matches!(
+        event,
+        HostEvent::Extension(SurfaceObservation::ProfileRefused { reason, .. }) if reason.contains("prompts are queued")
     )));
 }
 
@@ -1276,7 +1338,7 @@ fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
     });
     tx.send(UserAction::Extension(SurfaceIntent::ApplyProfile {
         name: "mine".into(),
-        fork_now: true,
+        apply: crate::surface_protocol::ProfileApply::Fork,
     }))
     .unwrap();
     join.join().unwrap().unwrap();
@@ -1334,7 +1396,7 @@ fn use_now_keeps_a_loadable_home_default() {
     });
     tx.send(UserAction::Extension(SurfaceIntent::ApplyProfile {
         name: "mine".into(),
-        fork_now: true,
+        apply: crate::surface_protocol::ProfileApply::Fork,
     }))
     .unwrap();
     join.join().unwrap().unwrap();
@@ -1445,7 +1507,7 @@ fn use_now_binds_an_openrouter_or_api_root_from_its_template() {
         });
         tx.send(UserAction::Extension(SurfaceIntent::ApplyProfile {
             name: "api".into(),
-            fork_now: true,
+            apply: crate::surface_protocol::ProfileApply::Fork,
         }))
         .unwrap();
         drop(tx);

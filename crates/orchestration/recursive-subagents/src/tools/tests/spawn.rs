@@ -873,3 +873,64 @@ async fn spawn_close_emits_tree_node_spawned_and_detached() {
     assert_eq!(detached[0].1, "c1");
     assert_eq!(detached[0].2, NodeDetach::Closed);
 }
+
+/// A controller whose caller runs the JS PTC composition.
+struct ComposingBinder;
+
+impl ChildController for ComposingBinder {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
+    fn spawn_parent_composition(
+        &self,
+        _caller_id: &str,
+    ) -> Option<plakous_host_protocol::selection::CompositionSelection> {
+        Some(plakous_host_protocol::selection::CompositionSelection::JsPtc)
+    }
+
+    fn bind(
+        &self,
+        _start: SpawnStart,
+    ) -> Pin<Box<dyn Future<Output = Result<SpawnBound, SpawnBindError>> + Send + '_>> {
+        Box::pin(async {
+            Ok(SpawnBound {
+                durably_registered: false,
+                session_locator: "00000000-0000-4000-8000-0000000000c1/00000000-0000-4000-8000-00000000000b/00000000-0000-4000-8000-000000003001".into(),
+                turn_id: Some("turn-c1".into()),
+            })
+        })
+    }
+}
+
+/// A spawn freezes the composition its caller runs on the child's node, in
+/// memory and in the store, so a later switch of the caller cannot change
+/// what the child binds and reopens with.
+#[tokio::test]
+async fn a_spawn_freezes_its_callers_composition_on_the_child() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, tree) = persist_fixture(&root);
+    let driver = driver_on(tree, Arc::clone(&store));
+    let tree = Arc::clone(&driver.tree);
+    let tool = spawn_tool(
+        driver,
+        Some(Arc::new(ComposingBinder) as Arc<dyn ChildController>),
+    );
+    let arguments = serde_json::to_value(spawn_request()).unwrap();
+    let outcome = tool
+        .spawn_with("op-spawn-composition".into(), &arguments)
+        .await
+        .unwrap();
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    let frozen = |tree: &ProductAgentTree| {
+        tree.nodes()
+            .values()
+            .find(|node| node.agent_id != tree.root_agent_id)
+            .map(|node| node.parent_composition)
+    };
+    let expected = Some(Some(
+        plakous_host_protocol::selection::CompositionSelection::JsPtc,
+    ));
+    assert_eq!(frozen(&tree.lock().unwrap()), expected);
+    assert_eq!(frozen(&reload(&store, "tree1")), expected);
+}

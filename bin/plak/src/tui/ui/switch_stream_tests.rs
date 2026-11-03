@@ -68,7 +68,7 @@ fn switch_action(
             ]);
             Some(UserAction::Extension(SurfaceIntent::ApplyProfile {
                 name: "boundary".into(),
-                fork_now: true,
+                apply: crate::tui::ProfileApply::Fork,
             }))
         }
         _ => unreachable!(),

@@ -660,10 +660,10 @@ impl App {
                 self.begin_quit();
                 Some(action)
             }
-            // Fork now continues in the transcript, where the outcome lands
-            // and the next prompt is typed.
+            // Switch now and Fork now continue in the transcript, where the
+            // outcome lands and the next prompt is typed.
             UserAction::Extension(crate::tui::SurfaceIntent::ApplyProfile {
-                fork_now: true,
+                apply: crate::tui::ProfileApply::Switch | crate::tui::ProfileApply::Fork,
                 ..
             }) => {
                 self.close_control_center();

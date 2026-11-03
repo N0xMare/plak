@@ -510,7 +510,7 @@ fn the_profile_dialog_confirms_on_enter_at_once() {
     assert!(matches!(
         app.handle_key(key(KeyCode::Enter)),
         Some(UserAction::Extension(SurfaceIntent::ApplyProfile {
-            fork_now: true,
+            apply: crate::tui::ProfileApply::Switch,
             ..
         }))
     ));
@@ -521,7 +521,7 @@ fn the_profile_dialog_confirms_on_enter_at_once() {
     assert!(matches!(
         app.handle_key(key(KeyCode::Enter)),
         Some(UserAction::Extension(SurfaceIntent::ApplyProfile {
-            fork_now: false,
+            apply: crate::tui::ProfileApply::Fork,
             ..
         }))
     ));

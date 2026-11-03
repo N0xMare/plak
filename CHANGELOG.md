@@ -121,6 +121,11 @@ an export.
   the route and model named. New sessions record a registry descriptor that
   includes `view_image`; no schema revision or state-key change. Codex native
   Code Mode does not offer `view_image`.
+- The Agents tab's profile dialog offers **Switch now**: this session's root
+  continues as the profile on its own line while its sub-agents and background
+  processes keep running; future root spawns use the profile's cards and every
+  running sub-agent keeps its own. It needs an idle root and an empty queue.
+  **Fork now** is unchanged and now comes second.
 - `/clear` is replaced by `/new`, which starts a new session in the same TUI; the
   previous session is untouched and resumable. With running agents or background
   processes, `/new` asks first and offers to stop that work before switching.
