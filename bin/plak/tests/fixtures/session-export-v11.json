@@ -1,0 +1,263 @@
+{
+  "format": "plak-session-export",
+  "version": 11,
+  "source": {
+    "session_id": "b1c6cbe1-3c06-4c80-bbb3-0b670b2a8fd0",
+    "state_key": "r26.e34.p35.t9",
+    "producer": {
+      "status": "verified",
+      "binary_id": "56474890ba1a"
+    }
+  },
+  "workspace_root": "/workspace/carried-from-0.0.3",
+  "title": "carried",
+  "binding": {
+    "account": "codex",
+    "model": "offline-loopback-v1",
+    "effort": "medium",
+    "composition": "direct",
+    "target_selection": "native"
+  },
+  "named_state": {},
+  "history": {
+    "replay_account": "2ed735113b7a57f0efa434b19d8ffd7f6a296f8cd21ce35d7abb50a92434ab17",
+    "replay_model": "offline-loopback-v1",
+    "groups": [
+      {
+        "kind": "compaction",
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000010",
+            "actor": "assistant",
+            "origin": "model_output",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "compaction",
+                "summary": "Earlier: the parser was split into two modules.",
+                "turns": [
+                  2,
+                  3
+                ],
+                "native": null,
+                "binding": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "conversation",
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000011",
+            "actor": "user",
+            "origin": "user_input",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "text",
+                "text": "Read the diagram and summarize the parser layout.",
+                "phase": null
+              },
+              {
+                "kind": "image",
+                "mime": "image/png",
+                "source": {
+                  "kind": "bytes",
+                  "bytes": "iVBORw=="
+                },
+                "detail": "low"
+              }
+            ]
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000012",
+            "actor": "assistant",
+            "origin": "model_output",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "text",
+                "text": "I will list the source files first.",
+                "phase": "commentary"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "tool_exchange",
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000013",
+            "actor": "assistant",
+            "origin": "model_output",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "reasoning",
+                "visibility": "visible",
+                "text": "The diagram shows a lexer feeding a parser.",
+                "replay": null
+              },
+              {
+                "kind": "call",
+                "id": "00000000-0000-0000-0000-000000000031",
+                "name": "exec",
+                "canonical_name": "exec",
+                "owner": {
+                  "kind": "local"
+                },
+                "state": "completed",
+                "correlation": {
+                  "remote_call": null,
+                  "container": null,
+                  "caller": {
+                    "kind": "direct"
+                  }
+                },
+                "arguments": "{\"code\":\"tools.ls({path:'src'})\"}"
+              },
+              {
+                "kind": "call",
+                "id": "00000000-0000-0000-0000-000000000032",
+                "name": "ls",
+                "canonical_name": "ls",
+                "owner": {
+                  "kind": "local"
+                },
+                "state": "completed",
+                "correlation": {
+                  "remote_call": null,
+                  "container": null,
+                  "caller": {
+                    "kind": "local",
+                    "operation": 7,
+                    "generation": 1,
+                    "cell": "cell-1",
+                    "sequence": 2,
+                    "child": "00000000-0000-0000-0000-000000000031",
+                    "depth": 1
+                  }
+                },
+                "arguments": "{\"path\":\"src\"}"
+              }
+            ]
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000014",
+            "actor": "tool",
+            "origin": "tool_execution",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "result",
+                "id": "00000000-0000-0000-0000-000000000032",
+                "owner": {
+                  "kind": "local"
+                },
+                "outcome": "success",
+                "parts": [
+                  {
+                    "kind": "text",
+                    "text": "lexer.rs\nparser.rs\n",
+                    "phase": null
+                  }
+                ],
+                "correlation": {
+                  "remote_call": null,
+                  "container": null,
+                  "caller": {
+                    "kind": "local",
+                    "operation": 7,
+                    "generation": 1,
+                    "cell": "cell-1",
+                    "sequence": 2,
+                    "child": "00000000-0000-0000-0000-000000000031",
+                    "depth": 1
+                  }
+                }
+              },
+              {
+                "kind": "result",
+                "id": "00000000-0000-0000-0000-000000000031",
+                "owner": {
+                  "kind": "local"
+                },
+                "outcome": "failure",
+                "parts": [
+                  {
+                    "kind": "text",
+                    "text": "cell ended after one call",
+                    "phase": null
+                  }
+                ],
+                "correlation": {
+                  "remote_call": null,
+                  "container": null,
+                  "caller": {
+                    "kind": "direct"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "conversation",
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000015",
+            "actor": "assistant",
+            "origin": "model_output",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "text",
+                "text": "The parser has a lexer and a parser module.",
+                "phase": "final"
+              },
+              {
+                "kind": "citation",
+                "citation": {
+                  "item": "00000000-0000-0000-0000-000000000011",
+                  "block": 0,
+                  "source": "source-1",
+                  "annotation": "annotation-1",
+                  "uri": "https://example.com/parser",
+                  "title": "Parser layout",
+                  "range": {
+                    "start": 0,
+                    "end": 4,
+                    "unit": "unicode_scalar"
+                  }
+                }
+              },
+              {
+                "kind": "refusal",
+                "text": "I will not print credentials."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "pending_work": [],
+  "queue": [
+    "held follow-up"
+  ],
+  "prompt_history": [
+    "first"
+  ],
+  "transcript": [
+    {
+      "kind": "user",
+      "text": "first"
+    }
+  ],
+  "source_subagents": 0,
+  "source_resolved_count": 0
+}

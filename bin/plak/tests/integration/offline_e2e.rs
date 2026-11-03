@@ -4952,7 +4952,7 @@ fn v8_exports_refuse_file_import_without_creating_sessions() {
         assert!(
             result
                 .stderr
-                .contains("version 8 session export; this build imports versions 10 and 11"),
+                .contains("version 8 session export; this build imports versions 11 and 12"),
             "{}",
             result.stderr
         );
@@ -6799,7 +6799,7 @@ fn export_session(fixture: &Fixture, session: &str, name: &str) -> (String, Valu
     let document: Value =
         serde_json::from_slice(&std::fs::read(&path).expect("export document")).expect("json");
     assert_eq!(document["format"], "plak-session-export");
-    assert_eq!(document["version"], 11);
+    assert_eq!(document["version"], 12);
     assert!(document["source_resolved_count"].is_u64());
     assert!(
         document["pending_work"]
@@ -7737,7 +7737,7 @@ fn nested_workspace_import_refuses_broken_trusted_parent_before_successor() {
     let nested = fixture.workspace().join("nested");
     std::fs::create_dir_all(&nested).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v10.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v11.json")).unwrap();
     document["workspace_root"] = json!(nested);
     let path = fixture.root.join("nested-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -7785,7 +7785,7 @@ fn home_workspace_import_does_not_treat_product_home_as_overlay() {
     let home = fixture.root.join(".plak");
     std::fs::rename(fixture.home(), &home).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v10.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v11.json")).unwrap();
     document["workspace_root"] = json!(fixture.root);
     let path = fixture.root.join("home-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -7942,12 +7942,12 @@ fn reload_probe_reports_strict_effective_config_without_creating_sessions() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     let version = run_cli(&fixture, &["version", "--export-version"]);
     assert!(version.status.success(), "{}", version.stderr);
-    assert_eq!(version.stdout.trim(), "11");
+    assert_eq!(version.stdout.trim(), "12");
     let valid = run_cli(&fixture, &["version", "--reload-probe"]);
     assert!(valid.status.success(), "{}", valid.stderr);
     let verdict: Value = serde_json::from_str(&valid.stdout).unwrap();
     assert_eq!(verdict["config_error"], Value::Null);
-    assert_eq!(verdict["export_versions"], json!([10, 11]));
+    assert_eq!(verdict["export_versions"], json!([11, 12]));
 
     let project = fixture.workspace().join(".plak");
     std::fs::create_dir_all(&project).unwrap();
@@ -8003,30 +8003,156 @@ fn doctor_checks_trusted_project_config_and_template_files() {
     assert!(report.stdout.contains("broken.toml"), "{}", report.stdout);
 }
 
+/// A document the 0.0.3 release's writer produced imports onto the local runner under
+/// the home default profile, and re-exports as v12 with the identical
+/// canonical history.
 #[test]
-fn a_v10_session_imports_and_exports_as_v11_with_named_state() {
+fn a_v11_session_imports_and_exports_as_v12_with_an_identical_history() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v10.json"))
+        serde_json::from_str(include_str!("../fixtures/session-export-v11.json"))
             .expect("sanitized previous export");
     document["workspace_root"] = json!(fixture.workspace());
-    let path = fixture.root.join("v10-session.json");
+    document["named_state"] = json!({"fixture_answer":42});
+    let path = fixture.root.join("v11-session.json");
     write_private(&path, &serde_json::to_string(&document).expect("document"));
     let imported = run_cli(
         &fixture,
         &["session", "import", path.to_str().expect("UTF-8")],
     );
     assert!(imported.status.success(), "{}", imported.stderr);
+    assert!(
+        imported
+            .stdout
+            .contains("this session's export records no profile; the home default profile applies"),
+        "{}",
+        imported.stdout
+    );
     let new = imported
         .stdout
         .lines()
         .find_map(|line| line.strip_prefix("resume with: plak --resume "))
         .expect("imported session id");
-    let (_, exported) = export_session(&fixture, new, "v11-session.json");
-    assert_eq!(exported["version"], 11);
+    let (_, exported) = export_session(&fixture, new, "v12-session.json");
+    assert_eq!(exported["version"], 12);
+    assert_eq!(exported["history"], document["history"]);
+    assert_eq!(
+        exported["runner"],
+        json!({"name":"local","runner_id":"local"})
+    );
+    assert_eq!(
+        exported["profile"],
+        json!({"root_template":"lead","working_set":[]}),
+        "the fixture home's default profile"
+    );
+    assert_eq!(exported["queue"], document["queue"]);
     assert_eq!(exported["named_state"], json!({"fixture_answer":42}));
     assert_eq!(exported["binding"]["composition"], "direct");
     assert!(!fixture.home().join("references").exists());
+}
+
+fn write_loopback_template(fixture: &Fixture, name: &str) {
+    write_private(
+        &fixture.home().join("agents").join(format!("{name}.toml")),
+        &format!(
+            "account = \"codex\"\nmodel = \"offline-loopback-v1\"\neffort = \"medium\"\ncomposition = \"direct\"\ndescription = \"offline loopback {name}\"\n"
+        ),
+    );
+}
+
+fn set_home_default(fixture: &Fixture, root: &str) {
+    write_private(
+        &fixture.home().join("config.toml"),
+        &format!(
+            "[root]\nagent = \"{root}\"\n\n[orchestration]\nsubagents = false\n\n[compaction]\nenabled = true\n"
+        ),
+    );
+}
+
+/// A v12 import binds the document's profile and its record keeps it, so a
+/// later change of the home default does not reach the next export.
+#[test]
+fn a_v12_import_keeps_its_profile_after_the_home_default_changes() {
+    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
+    write_loopback_template(&fixture, "carried");
+    write_loopback_template(&fixture, "later");
+    let mut document: Value =
+        serde_json::from_str(include_str!("../fixtures/session-export-v11.json"))
+            .expect("sanitized previous export");
+    document["version"] = json!(12);
+    document["workspace_root"] = json!(fixture.workspace());
+    document["runner"] = json!({"name":"local","runner_id":"local"});
+    document["profile"] = json!({"root_template":"carried","working_set":[]});
+    let path = fixture.root.join("v12-session.json");
+    write_private(&path, &serde_json::to_string(&document).expect("document"));
+    let imported = run_cli(
+        &fixture,
+        &["session", "import", path.to_str().expect("UTF-8")],
+    );
+    assert!(imported.status.success(), "{}", imported.stderr);
+    assert!(
+        !imported.stdout.contains("the home default profile applies"),
+        "{}",
+        imported.stdout
+    );
+    let new = imported
+        .stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+        .expect("imported session id")
+        .to_owned();
+    set_home_default(&fixture, "later");
+    let (_, exported) = export_session(&fixture, &new, "reexported.json");
+    assert_eq!(
+        exported["profile"],
+        json!({"root_template":"carried","working_set":[]})
+    );
+    assert_eq!(exported["history"], document["history"]);
+}
+
+/// A session whose tree has rows exports its tree's current epoch, not the
+/// home default it would get now.
+#[test]
+fn a_spawn_bearing_session_exports_its_tree_epoch_after_the_home_default_changes() {
+    use plakous_hosted::agent_tree::ProductAgentTree;
+    use plakous_hosted::agent_tree_protocol::{NodeStatus, SpawnAgentRequest, WriterMode};
+
+    let fixture = Fixture::new(&json!({
+        "version": 1, "repeat_last_step": true,
+        "steps": [{"output": {"text": "root answer"}}]
+    }));
+    let root = answered_run(&fixture, "root prompt");
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        root.clone(),
+        "root",
+        "owner",
+        fixture.workspace(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .expect("tree");
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .expect("child")
+        .agent_id;
+    tree.set_node_status_for_test(&child, NodeStatus::Completed);
+    let epoch = tree.current_epoch();
+    let expected = json!({
+        "root_template": epoch.root_template,
+        "working_set": epoch
+            .working_set
+            .iter()
+            .map(|name| name.as_str().to_owned())
+            .collect::<Vec<_>>(),
+    });
+    plak::store::tree::save_tree(&paths, &mut tree).expect("saved tree");
+    write_loopback_template(&fixture, "later");
+    set_home_default(&fixture, "later");
+    let (_, exported) = export_session(&fixture, &root, "tree-session.json");
+    assert_eq!(exported["profile"], expected);
+    assert_ne!(exported["profile"]["root_template"], "later");
+    assert_eq!(exported["source_subagents"], 1);
 }
 
 // ---------------------------------------------------------------------------

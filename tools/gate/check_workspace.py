@@ -1434,6 +1434,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "TurnViewState",
         },
     },
+    # The export document names its runner by the library's runner identity.
+    ("plak", "src/carry/document.rs"): {"tools": {"RunnerId"}},
     # Plak owns the export document, not a second runtime. This one codec
     # reconstructs validated public content data, never mutable authority.
     ("plak", "src/carry/history.rs"): {

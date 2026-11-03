@@ -23,6 +23,8 @@ fn settled_export_matches_the_writable_projector_path() {
         history,
         ..
     } = document.into_import().unwrap();
+    // A product create writes the genesis profile; this direct create stands in.
+    record.root_profile = Some(plakous_hosted::sessions::RootProfile::default());
     let sessions =
         AgentSessions::new(SessionBackend::sqlite(paths.runtime_database()).unwrap()).unwrap();
     let binding = text_runtime_binding(

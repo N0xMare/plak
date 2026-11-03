@@ -215,8 +215,8 @@ tiers and optional tool namespaces cannot select it. The library has no tree
 or root/child distinction; an embedder can attach the SDK to any isolated
 single agent with the required fixed catalog and authority. Output over
 16 KiB carries a `Ref` that `ctx.read` can page when available;
-references evict oldest-first. Export v11 carries the committed named values;
-v10 imports retain them and v9 and older are refused. Oversized puts are refused before storing a value
+references evict oldest-first. Export v12 carries the committed named values;
+v11 imports retain them and v10 and older are refused. Oversized puts are refused before storing a value
 that could not be read back within the per-result quota.
 
 ## Construction

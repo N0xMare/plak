@@ -2410,7 +2410,7 @@ fn rebind_and_epoch_reload_preserve_committed_named_state() {
         ] {
             let path = fixture.export(session, name);
             let exported: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-            assert_eq!(exported["version"], 11);
+            assert_eq!(exported["version"], 12);
             assert_eq!(exported["named_state"], named);
         }
     }
@@ -2943,7 +2943,7 @@ fn assert_same_key_reload_starts_installed_build(changed_orchestration: bool) {
 fn install_carry_target(fixture: &Fixture, fake_bin: &Path, admitted: u64) -> (PathBuf, PathBuf) {
     let args = fixture.root.join("reload-args");
     let copy = fixture.root.join("carried.json");
-    let probe = json!({"state_key":"r0.e0.p0.t0","export_versions":[10,11],"config_error":null});
+    let probe = json!({"state_key":"r0.e0.p0.t0","export_versions":[11,12],"config_error":null});
     let capacity = json!({"route":"test.route","total_window":1_000_000,"admitted_input":admitted,"estimated_tokens":100,"messages":3});
     write_script_file(
         &fake_bin.join("plak"),

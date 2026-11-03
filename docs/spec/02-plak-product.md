@@ -1063,25 +1063,48 @@ is a warning, not an export refusal.
 The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
-writes **version 11** and imports **11 and 10**, never older documents. Runtime
-canonical format epochs are not export versions: v11 carries a Plak-owned neutral
+writes **version 12** and imports **12 and 11**, never older documents. Runtime
+canonical format epochs are not export versions: v12 carries a Plak-owned neutral
 conversation encoding, not canonical segment bytes, digests, checkpoints, or
 runtime serde representations.
 
-Version 11 adds the optional semantic `remedy` on notice transcript rows. Its
-closed code and typed targets are part of the document: unknown codes, fields,
-accounts and invalid target UUIDs refuse the document before import. The
-version 10 reader accepts only its original notice fields and installs no
-remedy. Missing remedies retain their text verbatim; importing never infers an
-action from words or command fragments. This is a document bump, not an
-in-place database migration; the product store is schema 36.
+Notice transcript rows carry the optional semantic `remedy`. Its closed code
+and typed targets are part of the document: unknown codes, fields, accounts and
+invalid target UUIDs refuse the document before import. Missing remedies retain
+their text verbatim; importing never infers an action from words or command
+fragments.
+
+Version 12 adds two fields beside `workspace_root`. `runner` is
+`{"name", "runner_id"}`, the runner the session's root ran on, taken from the
+record's runner display copy; every session runs on the host's local runner
+today, so it is `{"name": "local", "runner_id": "local"}`. `profile` is
+`{"root_template", "working_set"}`, the session's profile: its tree's current
+epoch when the tree has rows, otherwise the virtual-tree root profile its
+record keeps. Export never reads the live configuration; a session without tree
+rows whose record names no root profile is refused as an integrity error, since
+this build writes one with every such record. Both fields are required in
+version 12 and absent in version 11. A document with the other version's shape
+refuses before import, naming the field, the version and its JSON path
+(``version 12 requires `runner` at $.runner``), as does a runner name or identity
+that is empty, too long or contains whitespace (`$.runner`), and a profile
+naming an invalid template or listing one twice (`$.profile`). This build runs sessions only on its local
+runner and refuses a document that names another. The embedded history and
+binding encodings are those of version 11: the neutral history carries no
+backend descriptor or job owner, and jobs are never carried. Frozen tool
+selections are not exported (below), so the document carries no MCP placement;
+the successor freezes the destination's tools, and with them MCP placement
+`host`. The version 11 reader imports onto the local runner under the
+destination's home default profile, with the notice `this session's export
+records no profile; the home default profile applies`. This is a document bump,
+not an in-place database migration; the product store is schema 36.
 
 `plak session export <id> [--out <path>]` writes one JSON document with
-`"format": "plak-session-export", "version": 11` and prints its path. The
+`"format": "plak-session-export", "version": 12` and prints its path. The
 exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
 state key and producer build provenance (verified binary id, or explicitly
-unavailable), workspace, title and selected binding accompany the history.
+unavailable), workspace, runner, profile, title and selected binding accompany
+the history.
 When the stored projector cursor already equals the canonical feed tail,
 export inspects that projection and history without opening a writable runtime,
 so even SQLite maintenance cannot change the settled source's store bytes.
@@ -1089,9 +1112,10 @@ Otherwise the common lease-free projector first catches the views up to the
 feed tail; any required writes remain derived product-view writes, not attach.
 The binding carries `py-sdk` like every other explicit selection. `named_state`
 is a key-ordered JSON map of committed session-owned values (01 §9.8); import
-validates it and seeds it atomically with history. The v10 importer uses the
-same history decoder and preserves named state. Version 9 and older are refused
-with `this build imports versions 10 and 11`. 0.0.2 wrote version 8. There is
+validates it and seeds it atomically with history. The v11 importer uses the
+same history decoder and preserves named state. Version 10 and older are refused
+with `this build imports versions 11 and 12`. The 0.0.3 release wrote version
+11 and 0.0.2 wrote version 8. There is
 no version-8 importer, so a 0.0.2 session cannot be carried into 0.0.3 by
 `/reload` or export/import. Finish those sessions on 0.0.2, or start new ones.
 0.0.2 state is left untouched for the 0.0.2 binary.
@@ -1247,8 +1271,10 @@ before it can export; lease release alone is not terminal evidence.
 `plak session import <path>` creates a new id, seeds its new runtime, links it
 to the source id/key and prints the provenance, carry summary and resume line.
 Lineage uses `plak:carry-forward:` and stops tree walks at the boundary. The new
-session starts a new tree. An import starts a new agent line (chapter 01
-§5.1) whose provenance names the source key and id. The same-state carries,
+session starts a new tree: a virtual tree of one with no tree rows until it
+spawns, whose record keeps the profile its genesis froze. An import starts
+a new agent line (chapter 01 §5.1) whose provenance names the source key and
+id. The same-state carries,
 the binding-repair `/rebind` carry and the `/reload` orchestration carry,
 instead continue the source's line: the new runtime session becomes the line's
 next head in its create transaction, takes the source head's process rows and
@@ -1270,7 +1296,7 @@ same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
 on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
 
-Versions 10 and 11 carry full conversation rather than a separate archive;
+Versions 11 and 12 carry full conversation rather than a separate archive;
 neither has a restart checkpoint or archive import arm. There is no
 `session reference` command or search/tail archive reader. Old retained
 reference files are never read or used as import authority;
@@ -1524,7 +1550,7 @@ view, and nothing is both.
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
 | Node: `node_tree_id`, `node_agent_id`, the agent node the session is | intent | `plak:create:<id>` | written once with the record and never rewritten (a save that moved it is refused): a created, new (`/new`) or imported session and a carry's successor are the root of a tree named after their own id, whose root agent id is that id too (the genesis tree's own naming); a rebind successor takes the node of the tree it compiled against, recorded in its request (`own_tree`): the root of the tree named after its id when it has a tree of its own (sub-agents on) or is a py-sdk root, otherwise its source's node; a fork successor is the root of a tree of its own named after its id (chapter 03 §1.2); a switch continues its source's node. Readers keep resolving the tree through the lineage until the node becomes authority |
-| Root profile (`root_profile`: the root template and working set) | intent | `plak:create:<id>` | the profile the record's genesis froze, which is the session's profile while its tree has no rows (a virtual tree of one; a tree with rows records its own epochs, §5.5): what the roster source answers for the root bind, the same answer a tree genesis freezes. Written once, at genesis, and never moved: by the first runtime create of a created, imported or carried session (an import or carry successor takes its source's profile when it still resolves, else the home default it binds), into a `/new` reservation before its runtime create, from a rebind request onto a tree of its own (the profile it was frozen on), copied by a rebind that stays on its source's tree and by a fork, and from a switch request's profile. A record has none only before its first runtime create, or while it has no bound tuple |
+| Root profile (`root_profile`: the root template and working set) | intent | `plak:create:<id>` | the profile the record's genesis froze, which is the session's profile while its tree has no rows (a virtual tree of one; a tree with rows records its own epochs, §5.5): what the roster source answers for the root bind, the same answer a tree genesis freezes. Written once, at genesis, and never moved: by the first runtime create of a created, imported or carried session (an import or carry successor takes its source's profile when it still resolves, else the home default it binds), into a `/new` reservation before its runtime create, from a rebind request onto a tree of its own (the profile it was frozen on), copied by a rebind that stays on its source's tree and by a fork, and from a switch request's profile. A record has none only before its first runtime create, or while it has no bound tuple. Export reads it (§2.5.1) |
 | Runner display copy (`runner_display`: runner name and id, workspace root and working directory on it) | intent | `plak:create:<id>` | a display copy of the runner and workspace the root's binding names, never authority; NULL is the host's own local runner at the record's workspace root, which every session is today; successors copy it; no reader yet |
 | Frozen MCP placement: each frozen MCP tool record's `placement` (`host` or `runner`) | intent | `plak:create:<id>` | frozen with the record's MCP tool records (above); every record freezes `host` today; one server never freezes two placements; no reader yet |
 | Root interrupt cause and continuation decision of a virtual tree's root (`interrupt_cause`: the stopped turn or command and `operator`, `owner_lost`, `handoff` or `stopped`; `continuation_decision`: the anchor, host generation, cause `transient`, `owner_lost` or `handoff`, a round from 1, the decision time and a `new_turn`, `resubmit` or `withdrawn` decision) | intent | kind, anchor and ordinal | defined and decoded with unknown fields refused; no flow writes or reads them until node recovery lands; a tree with rows records the same facts in the tree store (chapter 03 §14) |
@@ -2404,7 +2430,7 @@ marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
 `plak version --carry-probe <file>` is a hidden machine form: it validates a
-v11/v10 export and reports the destination route, optional total/admitted input
+v12/v11 export and reports the destination route, optional total/admitted input
 windows, estimated history tokens and message count. It performs no inference
 or session creation and emits no startup event.
 
@@ -5538,14 +5564,14 @@ that session at its next `/reload`, through the epoch-scoped carry of §5.1 when
 it changes an effective value; a change of the home default never does. Only
 when the source's templates no longer load does the successor fall back to the
 home default, with the notice `this session's profile could not be loaded
-(<reason>); the home default profile applies`. A session without an agent tree
-(sub-agents off, including one Fork now branched while they were off) records
-no profile, since no existing record holds one without a format change; its
-successor binds the home default with the notice `this session has no agent
-tree, so it records no profile of its own; the home default profile applies`.
-A reload handoff passes the profile to the destination in its private sidecar
-(§2.5.1); an import of a same-store source reads the source's tree; any other
-import binds the home default with that same no-profile notice. `/new`, `/fork`,
+(<reason>); the home default profile applies`. A session whose tree has no
+rows keeps on its record the profile its genesis froze (a virtual tree of
+one). A reload handoff passes the profile to the destination in its private
+sidecar (§2.5.1); otherwise an import binds the profile its version 12
+document names, and the successor's record keeps it. A version 11 document
+names none: its successor binds the home default, with the notice `this
+session's export records no profile; the home default profile applies`, and
+its record keeps that default. `/new`, `/fork`,
 and `/fork-then-compact` keep the binding they already have. Applying a
 built-in publishes its templates as `{name}-root`, `{name}-worker`,
 `{name}-reviewer`, and `{name}-researcher` together with the pointers; every

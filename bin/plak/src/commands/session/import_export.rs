@@ -179,6 +179,7 @@ pub(super) fn import_prepared_with_fallback(
         mut record,
         mut history,
         mut note,
+        profile: document_profile,
     } = carried;
     let resumed = carry.as_ref().and_then(|carry| carry.resume.as_ref());
     if let Some(intent) = resumed {
@@ -193,23 +194,10 @@ pub(super) fn import_prepared_with_fallback(
         .carried_forward_from()
         .ok_or_else(|| CliFailure::new("missing carry lineage"))?;
     let (source_id, source_key) = (source_id.to_owned(), source_key.to_owned());
-    if let Some(existing) = crate::carry::already_carried(
-        services.session_records()?.as_ref(),
-        &record.workspace_root,
-        &source_id,
-        &source_key,
-    )
-    .map_err(CliFailure::new)?
-        && resumed.is_none_or(|intent| intent.id != existing.id)
-    {
-        return Err(CliFailure::new(format!(
-            "session {source_id} ({source_key}) was already carried forward as {}; resume it with `plak --resume {}`",
-            existing.id, existing.id
-        )));
-    }
+    refuse_carried_twice(services, &record, &source_id, &source_key, resumed)?;
     record.validate_for_store().map_err(CliFailure::new)?;
-    let profile = profile.or_else(|| same_store_source_profile(services, &source_id, &source_key));
     let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
+    let profile = profile.or(document_profile);
     keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
     config.seed_history = Some(history);
     let line = seed_line(services, carry.is_some(), &source_id, &source_key);
@@ -268,6 +256,32 @@ pub(super) fn import_prepared_with_fallback(
         );
     }
     Ok((record, note))
+}
+
+/// Refuses a second import of a source this workspace already carried
+/// forward, unless it is the interrupted carry being resumed.
+fn refuse_carried_twice(
+    services: &crate::shell::services::Services,
+    record: &product_sessions::SessionRecord,
+    source_id: &str,
+    source_key: &str,
+    resumed: Option<&product_sessions::SessionRecord>,
+) -> CliResult<()> {
+    if let Some(existing) = crate::carry::already_carried(
+        services.session_records()?.as_ref(),
+        &record.workspace_root,
+        source_id,
+        source_key,
+    )
+    .map_err(CliFailure::new)?
+        && resumed.is_none_or(|intent| intent.id != existing.id)
+    {
+        return Err(CliFailure::new(format!(
+            "session {source_id} ({source_key}) was already carried forward as {}; resume it with `plak --resume {}`",
+            existing.id, existing.id
+        )));
+    }
+    Ok(())
 }
 
 /// An interrupted carry finishes under its own identity, so its create
@@ -333,27 +347,11 @@ fn seed_line(
     )
 }
 
-/// A source this store still holds names its own profile in its tree.
-fn same_store_source_profile(
-    services: &crate::shell::services::Services,
-    source_id: &str,
-    source_key: &str,
-) -> Option<crate::profiles::SessionSelection> {
-    if source_key != crate::home::state::state_key() {
-        return None;
-    }
-    let source = services.session_records().ok()?.load(source_id).ok()?;
-    let paths = crate::home::paths::PlakPaths::for_workspace(
-        services.paths().ok()?.home().to_path_buf(),
-        &source.workspace_root,
-    );
-    crate::profiles::session_selection(&paths, &source)
-}
-
 /// The successor's genesis freezes its source's own profile, resolved against
 /// the current template files, and its root tools follow that profile's root
-/// template. A source that records no profile, or whose templates no longer
-/// load, binds the home default with one notice.
+/// template; the genesis records the profile the roster answers. A source that
+/// records no profile, or whose templates no longer load, binds the home
+/// default with one notice.
 fn keep_source_profile(
     paths: &crate::home::paths::PlakPaths,
     config: &mut product_host::HostConfig<crate::surface_protocol::PlakExtension>,
@@ -400,8 +398,7 @@ fn successor_profile<'a>(
 > {
     let Some(profile) = profile else {
         return Err(
-            "this session has no agent tree, so it records no profile of its own; the home default profile applies"
-                .to_owned(),
+            "this session's export records no profile; the home default profile applies".to_owned(),
         );
     };
     product_config::ProductConfig::load(paths)
@@ -474,7 +471,7 @@ mod rebind_tests {
         let none = successor_profile(&paths, None).err().unwrap();
         assert_eq!(
             none,
-            "this session has no agent tree, so it records no profile of its own; the home default profile applies"
+            "this session's export records no profile; the home default profile applies"
         );
         let missing = crate::profiles::SessionSelection {
             root: Some("gone-root".to_owned()),

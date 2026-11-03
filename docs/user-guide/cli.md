@@ -668,10 +668,13 @@ A smaller destination route schedules compaction at the first prompt when
 needed; if its protected history or summary input still cannot fit, it returns
 the normal context-limit refusal rather than silently truncating conversation.
 An unknown destination window is reported but does not block carry.
-This build writes version 11 and imports versions 11 and 10. Both versions preserve
+This build writes version 12 and imports versions 12 and 11. Both versions preserve
 the composition selection, including `py-sdk`, and session-owned named state.
-Version 9 and older are refused with `this build imports versions 10 and 11`.
-0.0.2 wrote version 8, which this build refuses, so a 0.0.2 session cannot be
+Version 12 also names the runner the session ran on and its profile (root
+template and working set); the imported session keeps that profile. A
+version 11 document, which the 0.0.3 release wrote, imports onto the local runner under
+your home default profile and says so in one notice. Version 10 and older are
+refused with `this build imports versions 11 and 12`. 0.0.2 wrote version 8, which this build refuses, so a 0.0.2 session cannot be
 carried into 0.0.3: finish it on 0.0.2, or start a new one. 0.0.2 state is
 left untouched for the 0.0.2 binary.
 New exports have no separate archive.

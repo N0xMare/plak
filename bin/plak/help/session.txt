@@ -20,8 +20,8 @@ USAGE:
   export writes a portable session document (0600; default ~/.plak/carry/)
   that carries the full conversation to another plak build. import creates a
   linked session that continues from it; live tools, processes and sub-agents
-  are not restored, and queued work stays paused. This build writes version 11
-  and imports versions 11 and 10. Both preserve named state. Version 9 and
+  are not restored, and queued work stays paused. This build writes version 12
+  and imports versions 12 and 11. Both preserve named state. Version 10 and
   older are refused.
   Session IDs accept an unambiguous prefix of at least four characters.
   --abandon-children explicitly retires recovery-required children before delete.

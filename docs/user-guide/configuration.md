@@ -242,8 +242,8 @@ For the typed Python SDK, select `py-sdk` in `/settings` or pass
 set `composition = "py-sdk"` in `[root]` beside the root `agent` name.
 The SDK is single-agent and core-tools-only; do not put `py-sdk` in an agent
 template. Cells have fresh globals; save JSON with `state.put` to retain it.
-Session export v11 preserves those named values and the selection. V10 imports
-retain them; v9 and older exports are refused.
+Session export v12 preserves those named values and the selection. V11 imports
+retain them; v10 and older exports are refused.
 
 Changing the root template or applying a profile clears the saved composition
 override; the new template supplies its own composition.

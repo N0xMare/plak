@@ -186,10 +186,10 @@ Monty worker package needs.
 
 The workspace release is **0.0.3**. The current versions below are this
 build's state tuple, not the 0.0.2 tuple (`r25.e29.p33.t8`); older state is
-not opened. This build imports export documents of versions 10 and 11 only
-(§2.5.1 of chapter 02). 0.0.2 wrote version 8, which this build refuses, so
-0.0.2 sessions cannot be carried into 0.0.3: finish them on 0.0.2 or start
-new ones. 0.0.2 state is left untouched for the 0.0.2 binary.
+not opened. This build imports export documents of versions 11 and 12 only
+(§2.5.1 of chapter 02); the 0.0.3 release wrote version 11. 0.0.2 wrote version 8, which
+this build refuses, so 0.0.2 sessions cannot be carried into 0.0.3: finish
+them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 binary.
 
 | Store | Owner | Current version |
 | --- | --- | --- |
@@ -198,7 +198,7 @@ new ones. 0.0.2 state is left untouched for the 0.0.2 binary.
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **36** (adds the write-ahead `carry_intent` of a same-store carry, the session's node, the virtual root profile, the runner display copy, frozen MCP placement, the `switch` workflow kind, the root interrupt cause and continuation decision intents, the clear workflow kind renamed `new` with `plak:new:` operation ids, and no legacy `workflows` table) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **21**, disposable, never recovery authority |
-| Session export document | Plak | version **11**, imports **11** and **10** |
+| Session export document | Plak | version **12** (adds the session's runner and profile), imports **12** and **11** |
 
 Tree schema 10 adds the node's line, epoch and runner placement, successor
 epochs, fork provenance, runner ancestors and the tree custody record (chapter
@@ -212,16 +212,17 @@ ownership evidence in the shared Git directory.
 Submitted intents own exact child outputs; attempt outputs are derived on load
 and submit-result replay receipts keep a digest summary. Provisional wait
 receipts retain the exact views they returned.
-Product schema 36 and export v11 retain closed notice-remedy codes and typed
-targets. Their frontend command spelling is rendered only by Plak; v10 imports
-install no remedy and preserve their original notice text.
+Product schema 36 and exports v11 and v12 retain closed notice-remedy codes
+and typed targets. Their frontend command spelling is rendered only by Plak.
 
 The canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Builds open
-only their current version tuple as state authority. Export v11 carries
-conversation history, CarryBinding (including `py-sdk`) and session-owned
-named state, not tree seal outcomes. Its history preserves exact account/model
-replay scope. The v10 importer preserves named state and unannotated notice text; v9 and older are refused. Export v11 is this build's document.
+only their current version tuple as state authority. Export v12 carries
+conversation history, CarryBinding (including `py-sdk`), session-owned named
+state, the session's runner and its profile, not tree seal outcomes. Its
+history preserves exact account/model replay scope. The v11 importer preserves
+named state and imports onto the local runner under the home default profile;
+v10 and older are refused. Export v12 is this build's document.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the

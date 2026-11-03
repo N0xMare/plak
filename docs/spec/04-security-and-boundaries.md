@@ -1202,7 +1202,7 @@ reconstructs an exact checkpoint; current defaults, rendered transcripts,
 digests alone, and provider wire logs cannot repair missing state.
 
 An explicit cross-build conversation import is construction, not recovery
-repair (chapter 02 §2.5.1). Export v11 carries full canonical content and
+repair (chapter 02 §2.5.1). Export v12 carries full canonical content and
 session-owned named values in a
 Plak-owned neutral encoding, including original message roles; it is sensitive
 conversation data, not a sanitized transcript. Exports are as sensitive as
@@ -1421,10 +1421,10 @@ Composition named state is session data in the runtime store, not a credential
 store. It is unencrypted like canonical history, bounded to 64 canonical JSON
 values (1 MiB each, 4 MiB total), and subject to the same store permissions.
 The next-turn harness note reveals only keys and sizes, never saved values.
-Export v11 includes the values themselves, with the same sensitivity as the
+Export v12 includes the values themselves, with the same sensitivity as the
 store. File import preserves them independently of replay stripping and
 validates the key grammar, 64-key, 1 MiB-per-value and 4 MiB-total bounds before
-creating a session. Version 10 preserves named state; version 9 and older are refused.
+creating a session. Version 11 preserves named state; version 10 and older are refused.
 The driver alone owns publication; evaluator state requests cannot publish
 outside their own successful terminal checkpoint or address another cell.
 

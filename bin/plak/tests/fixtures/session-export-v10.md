@@ -1,5 +1,5 @@
 # Version 10 export fixture
 
-`session-export-v10.json` is synthesized previous-version evidence with neutral
-history, typed transcript rows and committed named state. Version 11 imports
-these rows without inventing notice remedies; version 9 is refused.
+`session-export-v10.json` is synthesized older-version refusal evidence with
+neutral history, typed transcript rows and committed named state. This build
+imports only versions 11 and 12; version 10 is refused before state admission.

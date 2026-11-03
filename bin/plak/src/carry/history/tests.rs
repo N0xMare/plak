@@ -42,7 +42,7 @@ fn v10_native_citations_survive_local_carry_and_file_import_keeps_semantic_text(
     let mut document = crate::carry::document::sample_document();
     document.history = History::export(&source).unwrap();
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("v10.json");
+    let path = root.path().join("export.json");
     crate::carry::document::write_document(&path, &document).unwrap();
     let local = crate::carry::document::read_document(&path)
         .unwrap()

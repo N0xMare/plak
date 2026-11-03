@@ -1,7 +1,8 @@
 //! Export a session into a carry document.
 
 use super::document::{
-    CarryBinding, CarryDocument, CarrySource, FORMAT, PendingWorkEntry, ProducerBuild, VERSION,
+    CarryBinding, CarryDocument, CarryRunner, CarrySource, FORMAT, PendingWorkEntry, ProducerBuild,
+    VERSION,
 };
 use super::history;
 use crate::home::paths::PlakPaths;
@@ -38,6 +39,9 @@ pub(crate) enum ExportRefusal {
     RecordBehindHead,
     /// The runtime store could not be read.
     Runtime(String),
+    /// The record of a session without tree rows names no root profile,
+    /// which this build writes with every such record: an integrity fault.
+    ProfileMissing,
 }
 
 impl fmt::Display for ExportRefusal {
@@ -64,6 +68,9 @@ impl fmt::Display for ExportRefusal {
                 "the runtime advanced past the session record; resume the session once first",
             ),
             Self::Runtime(error) => write!(formatter, "the runtime store could not be read: {error}"),
+            Self::ProfileMissing => formatter.write_str(
+                "integrity error: the session has no agent tree rows and its record names no root profile, which this build writes with every session record",
+            ),
         }
     }
 }
@@ -189,6 +196,16 @@ fn export_projected(
         version: VERSION,
         source,
         workspace_root: record.workspace_root.clone(),
+        runner: Some(
+            record
+                .runner
+                .as_ref()
+                .map_or_else(CarryRunner::local, |runner| CarryRunner {
+                    name: runner.name.clone(),
+                    runner_id: runner.runner_id.clone(),
+                }),
+        ),
+        profile: Some(session_profile(paths, record)?),
         title: record.title.clone(),
         binding: CarryBinding {
             account: record.account.clone(),
@@ -213,6 +230,25 @@ fn export_projected(
         source_subagents,
         source_resolved_count: Some(source_resolved_count),
     })
+}
+
+/// The profile a session runs under: its tree's current epoch when the tree
+/// has rows, else the virtual tree's profile its record keeps. Never the
+/// live configuration.
+fn session_profile(
+    paths: &PlakPaths,
+    record: &SessionRecord,
+) -> Result<plakous_hosted::sessions::RootProfile, ExportRefusal> {
+    if let Some(selection) = crate::profiles::session_selection(paths, record) {
+        return Ok(plakous_hosted::sessions::RootProfile {
+            root_template: selection.root,
+            working_set: selection.working_set,
+        });
+    }
+    record
+        .root_profile
+        .clone()
+        .ok_or(ExportRefusal::ProfileMissing)
 }
 
 /// Captures inert facts needed to find unfinished source work without

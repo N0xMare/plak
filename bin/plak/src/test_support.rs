@@ -245,6 +245,11 @@ impl ProductJournal {
         self.record.account = Some(account.to_owned());
         self.record.model = Some(model.to_owned());
         self.record.effort = Some(effort.to_owned());
+        // A bound record's first runtime create froze its profile; a tree-less
+        // journal stands in the empty one.
+        self.record
+            .root_profile
+            .get_or_insert_with(plakous_hosted::sessions::RootProfile::default);
         self.persist()
     }
 

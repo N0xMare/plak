@@ -22,10 +22,23 @@ impl CarryDocument {
     }
 
     pub(crate) fn into_import_with_replay(
-        self,
+        mut self,
         local_handoff: bool,
     ) -> Result<CarriedImport, ImportError> {
         self.validate()?;
+        if let Some(runner) = self.runner.as_ref().filter(|runner| !runner.is_local()) {
+            return Err(ImportError::Invalid(format!(
+                "the session ran on runner {} ({}); this build runs sessions only on its local runner",
+                runner.name, runner.runner_id
+            )));
+        }
+        let profile = self
+            .profile
+            .take()
+            .map(|profile| crate::profiles::SessionSelection {
+                root: profile.root_template,
+                working_set: profile.working_set,
+            });
         let mut record = SessionRecord::new(self.workspace_root.clone());
         let note = self.import_note(&record.id);
         let history = self
@@ -53,6 +66,7 @@ impl CarryDocument {
             record,
             history,
             note,
+            profile,
         })
     }
 
@@ -113,6 +127,9 @@ pub(crate) struct CarriedImport {
     pub(crate) record: SessionRecord,
     pub(crate) history: PortableSessionHistory,
     pub(crate) note: String,
+    /// The profile the document names; `None` for a version 11 document,
+    /// which imports under the home default.
+    pub(crate) profile: Option<crate::profiles::SessionSelection>,
 }
 
 /// The session in `workspace` already carried forward from `source_id` of

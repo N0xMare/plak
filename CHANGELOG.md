@@ -45,8 +45,13 @@ one cross-build carrier (a build imports its own and the previous version).
   `list_dir` names a missing path.
 - Existing sessions on routes whose tools changed (Grok, Codex, Claude, pi,
   Python cells and the typed SDK) carry on their next reopen.
-- `plak session --help` names the export versions from the build's own
-  constants: it writes 11 and imports 11 and 10.
+- `plak session --help` names the export versions it writes (12) and imports
+  (12 and 11); a test pins that text to the build's export constants.
+- Session export version 12 names the session's runner (today always the local
+  runner) and its profile (root template and working set), and an imported
+  session keeps that profile. Version 11 documents from the 0.0.3 release import onto the
+  local runner under the home default profile with one notice and an identical
+  conversation; version 10 is refused.
 - Text and thinking streamed by a model request that is retried, refused, cut
   by the output limit or folded for context are dimmed or dropped from the live
   transcript back to the start of that request. Earlier requests of the same

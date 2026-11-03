@@ -3,7 +3,9 @@
 use super::history;
 use crate::product_config::{ProductCompositionSelection, ProductTargetSelection};
 use plakous_host_protocol::views::presentation::row_bytes;
-use plakous_hosted::sessions::{MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES, TranscriptRow};
+use plakous_hosted::sessions::{
+    MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES, RootProfile, TranscriptRow,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
@@ -18,8 +20,8 @@ pub(super) const FORMAT: &str = "plak-session-export";
 /// and of the immediately previous one. Any change to the document, including
 /// the embedded canonical-history and binding encodings, bumps this; the
 /// previous version's importer is kept for one bump only.
-pub(crate) const VERSION: u32 = 11;
-const PREVIOUS_VERSION: u32 = 10;
+pub(crate) const VERSION: u32 = 12;
+const PREVIOUS_VERSION: u32 = 11;
 pub(crate) const IMPORTABLE_VERSIONS: [u32; 2] = [PREVIOUS_VERSION, VERSION];
 const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
@@ -33,6 +35,16 @@ pub(crate) struct CarryDocument {
     pub(super) version: u32,
     pub(super) source: CarrySource,
     pub(super) workspace_root: PathBuf,
+    /// The runner the session's tools ran on. Version 12 names it; a version
+    /// 11 document has none and imports onto the local runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) runner: Option<CarryRunner>,
+    /// The session's profile: its tree's when it has rows, otherwise its
+    /// record's, otherwise the home default it ran under. Version 12 names
+    /// it; a version 11 document has none and imports under the
+    /// destination's home default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) profile: Option<RootProfile>,
     pub(super) title: Option<String>,
     pub(super) binding: CarryBinding,
     /// Committed session-owned state, shared by both importable versions.
@@ -45,7 +57,8 @@ pub(crate) struct CarryDocument {
     /// never queued here: export refuses while one is unresolved.
     pub(super) queue: Vec<String>,
     pub(super) prompt_history: Vec<String>,
-    /// Typed product transcript rows, oldest first; v11 adds semantic notice remedies.
+    /// Typed product transcript rows, oldest first, with their semantic
+    /// notice remedies.
     #[serde(deserialize_with = "bounded_transcript")]
     pub(super) transcript: Vec<TranscriptRow>,
     /// Non-live sub-agents the source tree held; their trees are not carried.
@@ -77,6 +90,46 @@ pub(super) struct CarrySource {
 pub(super) enum ProducerBuild {
     Verified { binary_id: String },
     Unavailable,
+}
+
+/// The runner a session's tools ran on, by its configured name and stable
+/// identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CarryRunner {
+    pub(super) name: String,
+    pub(super) runner_id: String,
+}
+
+impl CarryRunner {
+    /// The host's own local runner, which every session runs on today.
+    pub(super) fn local() -> Self {
+        let local = plakous::tools::RunnerId::local();
+        Self {
+            name: local.as_str().to_owned(),
+            runner_id: local.as_str().to_owned(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), ImportError> {
+        let visible = |value: &str| {
+            (1..=64).contains(&value.len())
+                && !value
+                    .chars()
+                    .any(|character| character.is_whitespace() || character.is_control())
+        };
+        if !visible(&self.name) || plakous::tools::RunnerId::new(self.runner_id.clone()).is_err() {
+            return Err(ImportError::Invalid(
+                "$.runner: export runner is not a runner name and identity".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether this is the local runner, the only one this build runs tools on.
+    pub(super) fn is_local(&self) -> bool {
+        plakous::tools::RunnerId::new(self.runner_id.clone()).is_ok_and(|runner| runner.is_local())
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -192,12 +245,31 @@ impl CarryDocument {
                     .into(),
             );
         }
-        match self.version {
-            VERSION | PREVIOUS_VERSION => self.history.validate_size(),
-            _ => Err(ImportError::Invalid(
-                "export payload does not match its version".to_owned(),
-            )),
+        for (field, present) in [
+            ("runner", self.runner.is_some()),
+            ("profile", self.profile.is_some()),
+        ] {
+            let mismatch = match (self.version, present) {
+                (VERSION, true) | (PREVIOUS_VERSION, false) => continue,
+                (VERSION, false) => format!("version {VERSION} requires `{field}` at $.{field}"),
+                (PREVIOUS_VERSION, true) => {
+                    format!("version {PREVIOUS_VERSION} has no `{field}`, but one is at $.{field}")
+                }
+                (version, _) => format!("version {version} is not importable"),
+            };
+            return Err(ImportError::Invalid(format!(
+                "export payload does not match its version: {mismatch}"
+            )));
         }
+        if let Some(runner) = &self.runner {
+            runner.validate()?;
+        }
+        if let Some(profile) = &self.profile {
+            profile
+                .encode()
+                .map_err(|error| ImportError::Invalid(format!("$.profile: {error}")))?;
+        }
+        self.history.validate_size()
     }
 
     /// The session id and state key this document was exported from.
@@ -301,13 +373,6 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
     if let Some(history) = header.raw_history {
         validate_size("history", history.get().len(), 128 * 1024 * 1024)?;
     }
-    if header.version == PREVIOUS_VERSION {
-        validate_v10_transcript(
-            header
-                .raw_transcript
-                .ok_or_else(|| ImportError::from("export transcript is missing".to_owned()))?,
-        )?;
-    }
     let mut document = serde_json::from_slice::<CarryDocument>(&bytes).map_err(invalid)?;
     document
         .transcript
@@ -321,8 +386,6 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
 /// The fields every version keeps, read before the version-specific body.
 #[derive(Deserialize)]
 struct DocumentHeader<'a> {
-    #[serde(borrow, rename = "transcript")]
-    raw_transcript: Option<&'a serde_json::value::RawValue>,
     #[serde(
         borrow,
         default,
@@ -337,61 +400,6 @@ struct DocumentHeader<'a> {
     checkpoint_present: bool,
     #[serde(default, rename = "archive", deserialize_with = "field_present")]
     archive_present: bool,
-}
-
-/// V10 notice rows have no remedy field. Do not silently reinterpret a v11 row
-/// relabelled as v10; the previous encoding remains an independent admission check.
-fn validate_v10_transcript(raw: &serde_json::value::RawValue) -> Result<(), ImportError> {
-    #[derive(Deserialize)]
-    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-    enum V10Notice {
-        Notice {
-            scope: plakous_host_protocol::views::transcript::NoticeScope,
-            tone: plakous_host_protocol::views::transcript::NoticeTone,
-            text: String,
-        },
-    }
-    struct Rows;
-    impl<'de> serde::de::Visitor<'de> for Rows {
-        type Value = ();
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("bounded version 10 transcript rows")
-        }
-
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut rows: A) -> Result<(), A::Error> {
-            use serde::de::Error as _;
-            #[derive(Deserialize)]
-            struct Kind<'a> {
-                #[serde(borrow)]
-                kind: &'a str,
-            }
-            let (mut count, mut bytes) = (0, 0_usize);
-            while let Some(raw) = rows.next_element::<&serde_json::value::RawValue>()? {
-                count += 1;
-                if count > MAX_TRANSCRIPT_LINES {
-                    return Err(A::Error::custom("version 10 transcript has too many rows"));
-                }
-                let kind: Kind<'_> = serde_json::from_str(raw.get()).map_err(A::Error::custom)?;
-                if kind.kind == "notice" {
-                    let V10Notice::Notice { scope, tone, text } =
-                        serde_json::from_str(raw.get()).map_err(A::Error::custom)?;
-                    let _ = (scope, tone, text);
-                }
-                let row: TranscriptRow =
-                    serde_json::from_str(raw.get()).map_err(A::Error::custom)?;
-                bytes = bytes.saturating_add(row_bytes(&row));
-                if bytes > MAX_TRANSCRIPT_BYTES {
-                    return Err(A::Error::custom(
-                        "version 10 transcript exceeds its byte bound",
-                    ));
-                }
-            }
-            Ok(())
-        }
-    }
-    serde::Deserializer::deserialize_seq(&mut serde_json::Deserializer::from_str(raw.get()), Rows)
-        .map_err(|e| ImportError::from(e.to_string()))
 }
 
 fn field_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
@@ -460,6 +468,11 @@ pub(super) fn sample_document() -> CarryDocument {
             },
         },
         workspace_root: PathBuf::from("/tmp/workspace"),
+        runner: Some(CarryRunner::local()),
+        profile: Some(RootProfile {
+            root_template: Some("lead".to_owned()),
+            working_set: vec!["review".to_owned()],
+        }),
         title: Some("carried".to_owned()),
         binding: CarryBinding {
             account: Some("codex".to_owned()),
