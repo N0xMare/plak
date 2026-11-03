@@ -469,23 +469,19 @@ async fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(
 ) -> CliResult<()> {
     let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
     // A profile fork's session froze its roster at its own genesis; only a
-    // branch on the source's tree installs a successor epoch there.
+    // branch on the source's tree installs a successor epoch there, and that
+    // epoch keeps the tree's roster: only the root bind moves.
     if let (Some(account), Some(model)) = (
         config.session.account.as_deref(),
         config.session.model.as_deref(),
     ) && tree_id != config.session.id
     {
-        let snapshot = crate::orchestration::OrchestrationSnapshot::freeze(
-            config.state_roots.roster_source().roster(
-                account,
-                model,
-                config.session.effort.as_deref(),
-            )?,
-        );
-        topology_state::install_successor_epoch(
+        topology_state::install_root_bind_epoch(
             &config.topology_rows(),
-            snapshot,
             &tree_id,
+            account,
+            model,
+            config.session.effort.as_deref(),
             &|observation| config.state_roots.emit_product(observation),
         )
         .await

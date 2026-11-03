@@ -124,6 +124,62 @@ impl SpawnParent {
             Self::Api(parent) => parent.topology_enabled,
         }
     }
+
+    /// Everything a child's bind and reopen read from the parent that
+    /// spawned it. Only `composition` depends on the parent's profile; the
+    /// rest belongs to the session and its tree, so a profile switch keeps
+    /// it, and a node's frozen `parent_composition` is the one input a
+    /// switch has to carry.
+    pub(in crate::agent) fn child_inputs(&self) -> SpawnParentInputs<'_> {
+        let (workspace_root, product_home, state_roots, composition) = match self {
+            Self::Native(spec) => (
+                spec.workspace_root.as_path(),
+                spec.product_home.as_deref(),
+                &spec.state_roots,
+                spec.composition,
+            ),
+            Self::Api(parent) => (
+                parent.workspace_root.as_path(),
+                parent.product_home.as_deref(),
+                &parent.state_roots,
+                parent.composition,
+            ),
+        };
+        let (scheduled_compaction, max_model_rounds) = match self {
+            Self::Native(spec) => (spec.scheduled_compaction, spec.max_model_rounds),
+            Self::Api(parent) => (parent.scheduled_compaction, parent.max_model_rounds),
+        };
+        SpawnParentInputs {
+            tree_id: spawn_parent_tree_id(self),
+            workspace_root,
+            product_home,
+            state_roots,
+            scheduled_compaction,
+            max_model_rounds,
+            topology_enabled: self.topology_enabled(),
+            composition,
+        }
+    }
+}
+
+/// The spawn-parent inputs of [`SpawnParent::child_inputs`].
+pub(in crate::agent) struct SpawnParentInputs<'a> {
+    /// The tree the child belongs to.
+    pub(in crate::agent) tree_id: &'a str,
+    /// The session workspace the child's copy path is resolved under.
+    pub(in crate::agent) workspace_root: &'a Path,
+    /// The product home.
+    pub(in crate::agent) product_home: Option<&'a Path>,
+    /// The process's state roots.
+    pub(in crate::agent) state_roots: &'a ProductStateRoots,
+    /// Whether compaction is scheduled for sessions under this parent.
+    pub(in crate::agent) scheduled_compaction: bool,
+    /// The model-round bound per turn.
+    pub(in crate::agent) max_model_rounds: usize,
+    /// Whether the product admits topology for this parent.
+    pub(in crate::agent) topology_enabled: bool,
+    /// The parent's tool composition: the one profile-dependent input.
+    pub(in crate::agent) composition: CompositionSelection,
 }
 
 pub(in crate::agent) fn topology_tree_id(spec: &ProductAgentSpec) -> &str {

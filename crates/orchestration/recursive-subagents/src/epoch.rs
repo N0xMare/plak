@@ -597,6 +597,25 @@ impl OrchestrationSnapshot {
         sha256_hex(&[&canonical])
     }
 
+    /// This epoch with only the root bind moved to `account`, `tuple_id`
+    /// and `effort`: the working set, every card, the bounds, the tool
+    /// tables, the account roster and the root template all stay frozen.
+    /// What a model rebind that stays on its tree installs.
+    #[must_use]
+    pub fn with_root_bind(
+        &self,
+        account: impl Into<String>,
+        tuple_id: impl Into<String>,
+        effort: Option<String>,
+    ) -> Self {
+        let mut next = self.clone();
+        next.root_account = account.into();
+        next.root_tuple = tuple_id.into();
+        next.root_effort = effort;
+        next.digest = next.compute_digest();
+        next
+    }
+
     /// Whether the stored digest still matches the contents, so a snapshot
     /// edited in the file is detected at reopen rather than trusted.
     #[must_use]

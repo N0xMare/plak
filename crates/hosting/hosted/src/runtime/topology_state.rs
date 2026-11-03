@@ -239,6 +239,44 @@ pub async fn install_successor_epoch(
     install_successor_epoch_headless(rows, snapshot, tree_id, emit)
 }
 
+/// A model rebind that stays on its tree keeps that tree's roster: the
+/// successor epoch is the current one with only the root's account, model
+/// and effort moved. A tree with no rows installs nothing.
+pub async fn install_root_bind_epoch(
+    rows: &dyn TreeRows,
+    tree_id: &str,
+    account: &str,
+    tuple_id: &str,
+    effort: Option<&str>,
+    emit: &dyn Fn(crate::product_observation::ProductObservation),
+) -> Result<(), String> {
+    let (account, tuple_id, effort) = (
+        account.to_owned(),
+        tuple_id.to_owned(),
+        effort.map(str::to_owned),
+    );
+    let successor = move |tree: &ProductAgentTree| {
+        tree.current_epoch()
+            .with_root_bind(account, tuple_id, effort)
+    };
+    if let Some(runtime) = lookup(tree_id) {
+        // The successor is derived inside the writer, from the epoch current
+        // at its turn.
+        runtime
+            .mutate_then_emit(true, move |tree| {
+                let snapshot = successor(tree);
+                tree.begin_successor_epoch(snapshot)
+                    .map_err(|error| error.message)
+            })
+            .await?;
+        return Ok(());
+    }
+    let Some(tree) = rows.tree(tree_id)? else {
+        return Ok(());
+    };
+    install_on_loaded(rows, tree, successor, tree_id, emit)
+}
+
 /// The no-hub half of [`install_successor_epoch`]: a headless `plak config
 /// set` in another process than the TUI. Its save is the store's
 /// compare-and-swap, so when a hub in that other process publishes first this
@@ -250,9 +288,20 @@ pub fn install_successor_epoch_headless(
     tree_id: &str,
     emit: &dyn Fn(crate::product_observation::ProductObservation),
 ) -> Result<(), String> {
-    let Some(mut tree) = rows.tree(tree_id)? else {
+    let Some(tree) = rows.tree(tree_id)? else {
         return Ok(());
     };
+    install_on_loaded(rows, tree, |_| snapshot, tree_id, emit)
+}
+
+fn install_on_loaded(
+    rows: &dyn TreeRows,
+    mut tree: ProductAgentTree,
+    successor: impl FnOnce(&ProductAgentTree) -> OrchestrationSnapshot,
+    tree_id: &str,
+    emit: &dyn Fn(crate::product_observation::ProductObservation),
+) -> Result<(), String> {
+    let snapshot = successor(&tree);
     tree.begin_successor_epoch(snapshot)
         .map_err(|error| error.message)?;
     rows.save_tree(&mut tree).map_err(|error| error.message)?;

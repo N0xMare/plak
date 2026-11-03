@@ -1582,6 +1582,55 @@ fn production_api_detached_source_restoration_retires_previous_root_lease() {
     );
 }
 
+/// The hub defect on the production attach path, reproduced and left
+/// unfixed. A model rebind that stays on its tree builds the successor's
+/// runtime with `LookupOnly` (`prepare_profile_runtime` with no own tree):
+/// it compiles against the attached hub and takes no root lease. Today the
+/// successor's second open (`open_target`) takes one before the predecessor
+/// is released, which is what keeps the hub alive. A hand-off that releases
+/// the predecessor right after the commit and activates the attached
+/// successor without opening it again (live succession step 6) drops the
+/// last lease instead, and the hub shuts down with its children. This
+/// asserts the custody behavior and fails until tree custody lands.
+#[test]
+#[ignore = "documents the hub defect: the LookupOnly successor attach holds no root lease, so \
+            the predecessor's release shuts the hub down; tree custody fixes it"]
+fn a_lookup_only_successor_attach_keeps_the_hub_across_the_predecessors_release() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (config, opened) = actual_api_topology_host(root.path(), &executor);
+    let tree_id = config.session.id.clone();
+    let hub = crate::topology_runtime::lookup(&tree_id).unwrap();
+    let mut target = config.session.clone();
+    target.model = Some("gpt-5.6-sol".into());
+    let mut attached = None;
+    let successor = executor
+        .block_on(api_runtime_for_record(
+            &config,
+            &target,
+            false,
+            crate::topology_runtime::TopologyHubAttach::LookupOnly,
+            Some(&tree_id),
+            &mut attached,
+        ))
+        .unwrap()
+        .unwrap();
+    assert_eq!(attached, None, "the successor's attach took a root lease");
+
+    executor.block_on(opened.release()).unwrap().unwrap();
+
+    let survived = crate::topology_runtime::lookup(&tree_id)
+        .is_some_and(|runtime| Arc::ptr_eq(&runtime, &hub));
+    drop(successor);
+    executor
+        .block_on(crate::topology_runtime::force_release(&tree_id))
+        .unwrap();
+    assert!(
+        survived,
+        "the predecessor's release dropped the last root lease and shut the hub down"
+    );
+}
+
 /// An effort-only change is not a model switch: a profile fork onto the
 /// same account and model must not report a switch between a model and
 /// itself, nor the caveat about the previous model's reasoning.

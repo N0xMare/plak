@@ -80,6 +80,8 @@ pub use tools::{direct_composition_capable, spawn_child_composition};
 pub(crate) use tools::{direct_extension_tool, projection_target};
 pub(super) use tools::{spawn_roster_composition, spawn_roster_processing_tier};
 #[cfg(test)]
+pub(super) use topology::SpawnParentInputs;
+#[cfg(test)]
 pub(crate) use topology::topology_extensions_if_enabled;
 pub use topology::{
     ApiTopologyParent, ProductAgentSpec, RESTORED_PAUSED_REFUSAL, SpawnParent,

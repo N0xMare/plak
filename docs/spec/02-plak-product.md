@@ -5485,6 +5485,11 @@ returns to the transcript:
   prints the same note. `/fork` and `/fork-then-compact` land the same way on
   the current binding (see the `/fork` command). Exact reopen and `/resume` keep the sources a
   session sealed.
+- When the branch opens no tree of its own (sub-agents off, or a `py-sdk`
+  root) it stays on the source's tree, and that tree keeps its profile: a
+  successor epoch installs on the quiescent tree with the same working set,
+  cards, bounds, tool tables and root template, and only the root's account,
+  model and effort move. The home roster is not re-read.
 - When the session already runs that root with those cards, nothing branches
   and the outcome says so. With topology admitted, a session without a tree
   is not already active: Fork now seeds the successor's own tree.

@@ -4558,3 +4558,58 @@ async fn a_selected_tool_the_route_cannot_serve_refuses_api_session_creation()
     }
     Ok(())
 }
+
+/// A child's spawn-parent inputs are frozen to the set below, and a profile
+/// switch of the parent (another account, model, effort, route, tools and
+/// composition on the same session) changes none of them except the
+/// parent's composition, which a node records as `parent_composition`.
+#[test]
+fn child_spawn_parent_inputs_are_profile_independent_apart_from_composition() {
+    let before = SpawnParent::Api(openrouter_test_parent());
+    let after = SpawnParent::Api(ApiTopologyParent {
+        model: "claude-opus-5-5".into(),
+        effort: Some(ReasoningEffort::High),
+        target: crate::binding::ApiTarget::Platform {
+            provider: crate::binding::PlatformProvider::Anthropic,
+        },
+        composition: CompositionSelection::JsPtc,
+        tool_selection: crate::tool_plan::NodeToolSelection {
+            tool_sections: std::collections::BTreeMap::from([(
+                "tools.lint".to_owned(),
+                "command = \"lint\"".to_owned(),
+            )]),
+            ..crate::tool_plan::NodeToolSelection::default()
+        },
+        prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
+        ..openrouter_test_parent()
+    });
+    let frozen = |parent: &SpawnParent| {
+        // Exhaustive: a new spawn-parent input has to be classified here.
+        let build::SpawnParentInputs {
+            tree_id,
+            workspace_root,
+            product_home,
+            state_roots: _,
+            scheduled_compaction,
+            max_model_rounds,
+            topology_enabled,
+            composition,
+        } = parent.child_inputs();
+        (
+            (
+                tree_id.to_owned(),
+                workspace_root.to_path_buf(),
+                product_home.map(Path::to_path_buf),
+                scheduled_compaction,
+                max_model_rounds,
+                topology_enabled,
+            ),
+            composition,
+        )
+    };
+    let (before_inputs, before_composition) = frozen(&before);
+    let (after_inputs, after_composition) = frozen(&after);
+    assert_eq!(before_inputs, after_inputs);
+    assert_ne!(before_composition, after_composition);
+    assert_eq!(after_composition, CompositionSelection::JsPtc);
+}

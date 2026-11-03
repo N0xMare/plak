@@ -2254,3 +2254,86 @@ async fn abandon_live_agents_aborts_an_explicit_child_recover() {
     );
     force_release(&tree_id).await;
 }
+
+/// The hub defect live succession must not inherit, reproduced and left
+/// unfixed. A successor root that reaches the attached tree through
+/// `LookupOnly` (the rebind runtime build of a rebind that stays on its tree)
+/// holds no root lease. When the predecessor's release drops the one lease
+/// it holds, that is the last lease: the hub shuts down and retires the
+/// running child. This asserts the behavior tree custody gives (the hub and
+/// the child outlive a root's release) and fails until custody lands.
+#[tokio::test]
+#[ignore = "documents the hub defect: a LookupOnly successor holds no root lease, so the \
+            predecessor's release shuts the hub down and retires the children; tree custody fixes it"]
+async fn a_lookup_only_successor_keeps_the_hub_and_children_across_the_predecessors_release() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let predecessor = resolve_topology_runtime(
+        &tree_id,
+        true,
+        TopologyHubAttach::AttachRoot,
+        || Ok(memory_store()),
+        None,
+        |_| std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf()))),
+    )
+    .await
+    .unwrap();
+    let child = predecessor
+        .mutate_then_emit(false, |tree| {
+            Ok(tree
+                .spawn_agent(
+                    "root",
+                    &crate::protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id)
+        })
+        .await
+        .unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    assert!(
+        predecessor
+            .try_occupy_live(child.clone(), Box::new(barrier_child(&entered, &finish)))
+            .await
+            .is_ok()
+    );
+    let successor = resolve_topology_runtime(
+        &tree_id,
+        true,
+        TopologyHubAttach::LookupOnly,
+        || unreachable!("a hub hit opens no store"),
+        None,
+        |_| -> std::future::Ready<TreeRuntimeResult<ProductAgentTree>> {
+            unreachable!("a hub hit loads nothing")
+        },
+    )
+    .await
+    .unwrap();
+    assert!(Arc::ptr_eq(&predecessor, &successor));
+
+    let release_id = tree_id.clone();
+    let mut release = tokio::spawn(async move { release_root_lease(&release_id).await });
+    let (child_retired, released) = tokio::select! {
+        () = entered.notified() => (true, false),
+        joined = &mut release => {
+            joined.unwrap().unwrap();
+            (false, true)
+        }
+    };
+    let hub_attached = lookup(&tree_id).is_some();
+    let child_live = successor.live.lock().await.contains_key(&child);
+    finish.notify_one();
+    if !released {
+        let _ = release.await;
+    }
+    force_release(&tree_id).await;
+
+    assert!(
+        !child_retired,
+        "the predecessor's release retired the running child {child}"
+    );
+    assert!(hub_attached, "the predecessor's release shut the hub down");
+    assert!(child_live, "child {child} is no longer live");
+}

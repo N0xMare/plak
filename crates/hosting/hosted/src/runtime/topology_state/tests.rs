@@ -255,3 +255,71 @@ async fn a_root_publication_parks_on_a_full_tree_store_until_released_or_shut_do
     store.full.store(false, Ordering::Release);
     crate::topology_runtime::force_release(&tree_id).await;
 }
+/// A model rebind that stays on its tree keeps that tree's roster: the
+/// working set, every card and the bounds stay frozen, and only the root's
+/// account, model and effort move. Both the hub and the headless path.
+#[tokio::test]
+async fn a_model_rebind_epoch_keeps_the_trees_roster() {
+    use crate::agent_tree::{ProductAgentTree, TreeStore as _};
+    for attached in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let tree_id = uuid::Uuid::new_v4().to_string();
+        let mut tree = ProductAgentTree::bootstrap_root_for_test(
+            tree_id.as_str(),
+            "root",
+            "owner",
+            root.path().to_path_buf(),
+            "gpt-5.6-luna",
+            crate::agent_tree_protocol::WriterMode::SingleLease,
+        )
+        .unwrap();
+        let rows = crate::runtime::test_kit::MemoryRows::new();
+        let before = tree.current_epoch().clone();
+        if attached {
+            crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+                .await
+                .unwrap();
+        } else {
+            let acknowledged = rows.trees().save(&tree).unwrap();
+            tree.acknowledge_revision(acknowledged);
+        }
+
+        super::install_root_bind_epoch(
+            &rows,
+            &tree_id,
+            "claude",
+            "claude-opus-5-5",
+            Some("high"),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+
+        let after = if attached {
+            crate::topology_runtime::lookup(&tree_id)
+                .unwrap()
+                .read(|tree| tree.current_epoch().clone())
+                .unwrap()
+        } else {
+            super::TreeRows::tree(&rows, &tree_id)
+                .unwrap()
+                .unwrap()
+                .current_epoch()
+                .clone()
+        };
+        assert_eq!(after.root_account, "claude", "attached={attached}");
+        assert_eq!(after.root_tuple, "claude-opus-5-5");
+        assert_eq!(after.root_effort.as_deref(), Some("high"));
+        assert!(after.digest_matches());
+        assert_eq!(
+            after,
+            before.with_root_bind("claude", "claude-opus-5-5", Some("high".to_owned()))
+        );
+        assert_eq!(after.working_set, before.working_set);
+        assert_eq!(after.roster, before.roster);
+        assert_eq!(after.templates_digest, before.templates_digest);
+        if attached {
+            crate::topology_runtime::force_release(&tree_id).await;
+        }
+    }
+}

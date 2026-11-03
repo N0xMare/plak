@@ -173,7 +173,10 @@ selects its successor identity with a repair notice; it is not a refusal that
 allows a later reload to carry the source again.
 The source keeps its tree and frozen bounds; no config edit silently changes
 an existing tree. Unchanged settings keep exact reopen. A successor epoch may
-also install on a quiescent tree during a model rebind that stays on it. A
+also install on a quiescent tree during a model rebind that stays on it; that
+epoch keeps the tree's roster (working set, cards, bounds, tool tables,
+account roster and root template) and moves only the root's account, model
+and effort, so it never re-reads the home roster. A
 profile's **Fork now** is different: the new session opens a **tree of its
 own**, keyed by its session id, whose genesis freezes the profile's roster.
 The source keeps its tree, epoch, and cards, so its checkpoint reopens with

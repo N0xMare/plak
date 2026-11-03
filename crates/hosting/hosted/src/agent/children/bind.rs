@@ -356,18 +356,7 @@ pub(in crate::agent) async fn create_spawned_child_session(
 ) -> Result<CreatedChild, SpawnBindError> {
     let attach_started = std::time::Instant::now();
     let spawned = &start.spawned;
-    let tree_id = match parent {
-        SpawnParent::Native(spec) => spec
-            .topology_tree_id
-            .as_deref()
-            .unwrap_or(spec.plan_state_authority.as_str())
-            .to_owned(),
-        SpawnParent::Api(parent) => parent
-            .topology_tree_id
-            .as_deref()
-            .unwrap_or(parent.plan_state_authority.as_str())
-            .to_owned(),
-    };
+    let tree_id = parent.child_inputs().tree_id.to_owned();
     let operation_id = spawn_child_operation_id(&tree_id, &spawned.agent_id)?;
     let fence = occupancy_session_fence(start.tier);
     let account = Some(start.account.as_str()).filter(|account| !account.is_empty());
@@ -633,10 +622,7 @@ pub fn spawn_child_start_composition(
         return frozen_openrouter_child_pin(&tree_id, agent_id)
             .map(|(composition, _protocol)| composition);
     }
-    let parent_composition = match parent {
-        SpawnParent::Native(spec) => spec.composition,
-        SpawnParent::Api(parent) => parent.composition,
-    };
+    let parent_composition = parent.child_inputs().composition;
     let roster_composition = spawn_roster_composition(&tree_id, agent_id);
     let target_account = account
         .map(str::to_owned)
@@ -816,20 +802,15 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
         }
         crate::binding::ApiTarget::Platform { provider }
     };
+    let inputs = parent.child_inputs();
     let child_path = PathBuf::from(path);
-    let workspace_root = child_session_workspace_root(
-        match parent {
-            SpawnParent::Native(spec) => &spec.workspace_root,
-            SpawnParent::Api(parent) => &parent.workspace_root,
-        },
-        &child_path,
-    )?;
+    let workspace_root = child_session_workspace_root(inputs.workspace_root, &child_path)?;
     let selected_effort = crate::runtime::effort_from_record(effort)?;
     let child = ApiTopologyParent {
         created_output_bound,
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
-        product_home: parent.product_home().map(Path::to_path_buf),
+        product_home: inputs.product_home.map(Path::to_path_buf),
         tool_selection: frozen_child_tool_selection(tree_id, agent_id)?,
         workspace_root,
         cwd: child_path,
@@ -837,19 +818,13 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
         composition,
         topology_tree_id: Some(tree_id.to_owned()),
         topology_caller_id: Some(agent_id.to_owned()),
-        state_roots: parent.state_roots().clone(),
+        state_roots: inputs.state_roots.clone(),
         model: model.to_owned(),
         effort: selected_effort,
         target,
-        scheduled_compaction: match parent {
-            SpawnParent::Native(spec) => spec.scheduled_compaction,
-            SpawnParent::Api(parent) => parent.scheduled_compaction,
-        },
-        max_model_rounds: match parent {
-            SpawnParent::Native(spec) => spec.max_model_rounds,
-            SpawnParent::Api(parent) => parent.max_model_rounds,
-        },
-        topology_enabled: parent.topology_enabled(),
+        scheduled_compaction: inputs.scheduled_compaction,
+        max_model_rounds: inputs.max_model_rounds,
+        topology_enabled: inputs.topology_enabled,
     };
     Box::pin(crate::agent::build::api_session_runtime_binding(
         &child,
@@ -968,27 +943,12 @@ pub async fn spawned_child_spec(
     effort: Option<&str>,
     startup_deadline: Option<tokio::time::Instant>,
 ) -> crate::CliResult<ProductAgentSpec> {
-    let (tree_id, workspace_root_base, state_roots, parent_composition) = match parent {
-        SpawnParent::Native(spec) => (
-            spec.topology_tree_id
-                .clone()
-                .unwrap_or_else(|| spec.plan_state_authority.clone()),
-            spec.workspace_root.clone(),
-            spec.state_roots.clone(),
-            spec.composition,
-        ),
-        SpawnParent::Api(parent) => (
-            parent
-                .topology_tree_id
-                .clone()
-                .unwrap_or_else(|| parent.plan_state_authority.clone()),
-            parent.workspace_root.clone(),
-            parent.state_roots.clone(),
-            parent.composition,
-        ),
-    };
+    let inputs = parent.child_inputs();
+    let tree_id = inputs.tree_id.to_owned();
+    let state_roots = inputs.state_roots.clone();
+    let parent_composition = inputs.composition;
     let child_path = PathBuf::from(path);
-    let workspace_root = child_session_workspace_root(&workspace_root_base, &child_path)?;
+    let workspace_root = child_session_workspace_root(inputs.workspace_root, &child_path)?;
     let account = account.filter(|value| !value.is_empty());
     let tuple_id = tuple_id.filter(|value| !value.is_empty());
     let effort = effort.filter(|value| !value.is_empty());
@@ -1082,7 +1042,7 @@ pub async fn spawned_child_spec(
     Ok(ProductAgentSpec {
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
-        product_home: parent.product_home().map(Path::to_path_buf),
+        product_home: inputs.product_home.map(Path::to_path_buf),
         tool_selection: frozen_child_tool_selection(&tree_id, agent_id)?,
         provider: target_provider,
         resolved,
@@ -1095,15 +1055,9 @@ pub async fn spawned_child_spec(
         topology_tree_id: Some(tree_id),
         topology_caller_id: Some(agent_id.to_owned()),
         state_roots,
-        scheduled_compaction: match parent {
-            SpawnParent::Native(spec) => spec.scheduled_compaction,
-            SpawnParent::Api(openrouter) => openrouter.scheduled_compaction,
-        },
-        max_model_rounds: match parent {
-            SpawnParent::Native(spec) => spec.max_model_rounds,
-            SpawnParent::Api(openrouter) => openrouter.max_model_rounds,
-        },
-        topology_enabled: parent.topology_enabled(),
+        scheduled_compaction: inputs.scheduled_compaction,
+        max_model_rounds: inputs.max_model_rounds,
+        topology_enabled: inputs.topology_enabled,
     })
 }
 
