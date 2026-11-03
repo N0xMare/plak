@@ -162,7 +162,7 @@ fn prepare_scripted_tree(
     sessions: Arc<dyn plakous_hosted::session_store::SessionRecordStore>,
     state_roots: product_agent::ProductStateRoots,
     detached: bool,
-) -> Result<PreparedTree, String> {
+) -> Result<PreparedTree, crate::CliFailure> {
     use plakous_hosted::agent_tree::{MemoryTreeStore, ProductAgentTree, TreeStore};
     use plakous_hosted::agent_tree_protocol::WriterMode;
     use plakous_hosted::occupancy_vcs::VcsOps;
@@ -211,9 +211,6 @@ fn prepare_scripted_tree(
         tree = ProductAgentTree::reopen(persisted);
         tree.set_vcs(Arc::clone(&vcs));
     }
-    let attached = (!detached)
-        .then(|| plakous_hosted::topology_runtime::lookup(tree_id))
-        .flatten();
     let runtime = if detached {
         Arc::new(
             plakous_hosted::topology_runtime::ProductTopologyRuntime::new(
@@ -223,29 +220,9 @@ fn prepare_scripted_tree(
                 None,
             ),
         )
-    } else if let Some(runtime) = attached {
-        // An earlier runtime this process built for the session attached the
-        // tree already. Share it: publishing a reloaded copy here would leave
-        // the hub's handle a revision behind the store, and its next save
-        // would be refused as stale.
-        runtime
     } else {
-        let revision = store.save_in_custody(&tree).map_err(|error| {
-            format!("offline scripted tree could not be saved: {}", error.detail)
-        })?;
-        tree.acknowledge_revision(revision);
         drop(vcs);
-        // Attach rather than construct: `insert_root_with` puts the tree in the
-        // process hub *and* hands back the runtime that owns it, so the navigator
-        // and the tools are looking at one tree rather than two copies of one.
-        // Building a `TreeDriver` directly would leave the hub empty.
-        run_to_end(plakous_hosted::topology_runtime::insert_root_with(
-            tree_id,
-            tree,
-            Arc::clone(&store),
-            None,
-        ))?
-        .map_err(|error| format!("offline scripted tree could not attach: {error}"))?
+        attach_scripted_tree(tree_id, tree, store)?
     };
     let driver = runtime.driver().clone();
     let binder = Arc::new(ScriptedChildBinder {
@@ -266,6 +243,40 @@ fn prepare_scripted_tree(
         state_roots,
     });
     Ok(PreparedTree { driver, binder })
+}
+
+/// Attaches a scripted tree as a production root attach does, through the
+/// process hub: the hub holds the tree, the session takes one root
+/// attachment, and its release gives that back, so the last one ends the tree
+/// and its custody. The tree is published under the attach's custody claim
+/// when the hub does not hold it yet; an earlier runtime this process built
+/// for the session shares the attached tree instead, since publishing a
+/// reloaded copy would leave the hub's handle a revision behind the store.
+/// Another host's custody stays the typed refusal (exit 7).
+fn attach_scripted_tree(
+    tree_id: &str,
+    mut tree: plakous_hosted::agent_tree::ProductAgentTree,
+    store: Arc<dyn plakous_hosted::agent_tree::TreeStore>,
+) -> Result<Arc<plakous_hosted::topology_runtime::ProductTopologyRuntime>, crate::CliFailure> {
+    run_to_end(plakous_hosted::topology_runtime::resolve_topology_runtime(
+        tree_id,
+        true,
+        plakous_hosted::topology_runtime::TopologyHubAttach::AttachRoot,
+        || Ok(store),
+        None,
+        |store| async move {
+            let revision = store.save_in_custody(&tree)?;
+            tree.acknowledge_revision(revision);
+            Ok(tree)
+        },
+    ))?
+    .map_err(|error| {
+        if error.hosted_elsewhere_refusal().is_some() {
+            crate::CliFailure::from(error)
+        } else {
+            crate::CliFailure::new(format!("offline scripted tree could not attach: {error}"))
+        }
+    })
 }
 
 /// Runs `future` to its end on its own runtime and thread: the fixture's
@@ -1064,7 +1075,8 @@ impl OfflineSelection {
         cwd: &Path,
         ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
         resume_publication: Option<Arc<AtomicBool>>,
-    ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, String> {
+    ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure>
+    {
         let controller = if let Some(release) = std::env::var_os("PLAK_TEST_PROVIDER_RELEASE") {
             BoundaryController::quiet_gated_from_evidence_path(
                 CrashBoundary::ProviderDispatchOne,

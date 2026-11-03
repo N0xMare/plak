@@ -342,19 +342,17 @@ pub fn build_host_config(
     // falling through to one.
     #[cfg(feature = "test-hooks")]
     if let Some(selection) = crate::test_hooks::selected() {
-        return selection?
-            .host_config(
-                crate::test_hooks::OfflineFace::Attached,
-                paths,
-                state_roots,
-                session,
-                effort,
-                effort_explicit,
-                cwd,
-                ready_catalog,
-                resume_publication,
-            )
-            .map_err(crate::CliFailure::new);
+        return selection?.host_config(
+            crate::test_hooks::OfflineFace::Attached,
+            paths,
+            state_roots,
+            session,
+            effort,
+            effort_explicit,
+            cwd,
+            ready_catalog,
+            resume_publication,
+        );
     }
     let account = account
         .filter(|s| !s.trim().is_empty())

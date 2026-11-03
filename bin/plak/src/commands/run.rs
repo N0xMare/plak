@@ -538,21 +538,19 @@ impl PlakousApplication {
         if let Some(selection) = crate::test_hooks::selected() {
             let cwd = env::current_dir()
                 .map_err(|_| CliFailure::new("working directory is unavailable"))?;
-            let config = selection
-                .and_then(|selection| {
-                    selection.host_config(
-                        crate::test_hooks::OfflineFace::OneShot,
-                        paths,
-                        &roots,
-                        session,
-                        effort,
-                        explicit,
-                        &cwd,
-                        &plakous_host_protocol::views::ReadyCatalog::default(),
-                        None,
-                    )
-                })
-                .map_err(CliFailure::new)?;
+            let config = selection.map_err(CliFailure::new).and_then(|selection| {
+                selection.host_config(
+                    crate::test_hooks::OfflineFace::OneShot,
+                    paths,
+                    &roots,
+                    session,
+                    effort,
+                    explicit,
+                    &cwd,
+                    &plakous_host_protocol::views::ReadyCatalog::default(),
+                    None,
+                )
+            })?;
             return run_config(
                 &self.executor,
                 config,

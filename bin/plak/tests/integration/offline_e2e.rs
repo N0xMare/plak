@@ -9373,6 +9373,8 @@ mod durability {
 mod carried_sessions;
 #[path = "offline_e2e/cell_startup.rs"]
 mod cell_startup;
+#[path = "offline_e2e/custody_release.rs"]
+mod custody_release;
 #[path = "offline_e2e/running_root_waits.rs"]
 mod running_root_waits;
 #[path = "offline_e2e/telemetry_measurement.rs"]

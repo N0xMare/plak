@@ -148,6 +148,7 @@ fn build_attached_host_config(
         let state_roots = services.state_roots()?;
         let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
         return selection
+            .map_err(CliFailure::new)
             .and_then(|selection| {
                 selection.host_config(
                     if purpose == AttachedPurpose::Verify {
@@ -165,7 +166,7 @@ fn build_attached_host_config(
                     None,
                 )
             })
-            .map_err(|error| AttachedConfigError::Other(CliFailure::new(error)));
+            .map_err(AttachedConfigError::Other);
     }
     // After the offline model's early return: the probe never renews a login.
     if purpose == AttachedPurpose::Verify
