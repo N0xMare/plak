@@ -41,10 +41,12 @@ impl App {
 
     /// How long a parked loop may sleep before a deadline this state armed
     /// falls due: a wheel gesture settling, a call-detail ask, an Agents row
-    /// ageing, and the installed-build check. The build check re-arms every
-    /// [`BUILD_CHECK_INTERVAL`], so a parked shell wakes that often; nothing
-    /// else here repeats. `None` parks until input, a host observation or a
-    /// signal wakes the loop.
+    /// ageing, a confirmed `/new` waiting for its processes, and the
+    /// installed-build check. The build check re-arms every
+    /// [`BUILD_CHECK_INTERVAL`], so a parked shell wakes that often, and an
+    /// armed `/new` polls until its deadline; nothing else here repeats.
+    /// `None` parks until input, a host observation or a signal wakes the
+    /// loop.
     pub(super) fn next_deadline(&self, now: Instant) -> Option<Duration> {
         let wheel_settles = self
             .last_wheel_at
@@ -65,6 +67,7 @@ impl App {
             wheel_settles,
             self.call_details.next_ask(now),
             ages,
+            self.new_after_stop_wake(now),
         ]
         .into_iter()
         .flatten()
@@ -112,7 +115,7 @@ impl App {
     /// Structural change after the block vector was rewritten wholesale.
     ///
     /// Re-sums retained bytes, which is O(blocks). Only snapshot replacement
-    /// and `/clear` may call it: the per-event paths keep `transcript_bytes`
+    /// and `/new` may call it: the per-event paths keep `transcript_bytes`
     /// incrementally so no O(blocks) sum runs on the hot path.
     pub(super) fn mark_transcript_replaced(&mut self) {
         self.pane.transcript_bytes = self

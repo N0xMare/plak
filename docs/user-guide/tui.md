@@ -326,7 +326,7 @@ Type `/` to open the palette; it fuzzy-matches as you type. `Tab` completes
 and `Enter` runs the highlighted command only when what you typed is the start
 of its name (`/he` runs `/help`); otherwise `Tab` does nothing and `Enter`
 submits the line as typed, so `/tmp` never runs `/fork-then-compact`. The
-commands that act for good, `/clear`, `/compact`, `/fork-then-compact`,
+commands that act for good, `/new`, `/compact`, `/fork-then-compact`,
 `/fork`, `/drop` and `/recover`, run from `Enter` only when you typed the
 full name: `Enter` on a shorter word (`/co`) completes it, as `Tab` does, and
 runs nothing, and an `Enter` within about 600 ms of that completion runs
@@ -346,7 +346,7 @@ nothing either; look, then press `Enter` again. There are 25 commands:
 | `/attach` | Reconnect the agent |
 | `/rebind` | Carry this conversation under the current configuration and login |
 | `/recover` | Recover an interrupted turn |
-| `/clear` | Start a new conversation |
+| `/new` | Start a new session |
 | `/compact` | Compact this conversation |
 | `/config` | Open `config.toml` in your editor |
 | `/resume` | Resume a previous session · `<id>` |
@@ -360,8 +360,19 @@ nothing either; look, then press `Enter` again. There are 25 commands:
 | `/reload` | Restart on the installed Plak and resume this session |
 | `/quit` | Exit Plak |
 
-After a restart, a `/clear` request that never started leaves one notice:
-`clear did not start; run /clear again`. It is not automatically retried.
+`/new` starts a new session in the same window: empty history, the same model,
+account and tools. The session you leave is not changed; `/resume` returns to
+it. If it still has running agents or background processes, `/new` asks
+first: the pop-up names them, and `[ Stop work + new ]` stops its background
+processes, waits for them to exit, and then starts the new session. Running
+agents are interrupted and resume when you resume that session. `Esc` keeps
+everything as it is. If a process is still running after 10 seconds, nothing
+switches and Plak says so; sending a prompt in the meantime also cancels the
+switch. `/clear` is not a command.
+
+After a restart, a `/new` request that never started leaves one notice:
+`new session did not start; request a new session again explicitly`. It is
+not automatically retried.
 
 Notes worth knowing:
 
@@ -415,7 +426,7 @@ Notes worth knowing:
 - Only the slash spelling quits. Typing `quit`, `exit` or `:q` sends it as a
   prompt.
 - A command that takes no arguments refuses extra text instead of ignoring
-  it: `/compact now` or `/clear all` prints
+  it: `/compact now` or `/new all` prints
   `usage: /compact  —  takes no arguments` and does nothing.
 - Closing the terminal window (`SIGHUP`) or stopping `plak` with `SIGTERM`
   quits like `Ctrl+Q`: the terminal is restored, the resume hint is printed,
@@ -884,7 +895,7 @@ keeps its own result status. The Activity title, the Agents and Processes tabs a
 Typing does nothing here (see above); your root draft waits for you. If the root needs
 you (an approval, a context decision), the footer starts with a red `root
 needs approval · Esc`. Everything the root
-does meanwhile is waiting there too. `/clear`, `/resume` or a fork closes the
+does meanwhile is waiting there too. `/new`, `/resume` or a fork closes the
 agent view. See
 [agents and orchestration](agents-and-orchestration.md) for what those nodes
 are.
@@ -927,7 +938,7 @@ Details:
   resend. Sub-agent results that do not fit with it stay unread for a later
   prompt; a wake that does not fit pauses auto-continue until your next prompt.
   Follow the recovery panel: shorten an oversized prompt, compact, or choose a
-  larger model, fork or `/clear`. The failed turn is not replayed.
+  larger model, fork or `/new`. The failed turn is not replayed.
 - After a compaction the model gets its latest task list back as a short
   harness note, so it continues the plan.
 

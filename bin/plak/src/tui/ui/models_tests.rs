@@ -226,19 +226,19 @@ fn failed_clear_keeps_source_view_and_binding() {
     app.apply_host_event(HostEvent::Row(
         plakous_host_protocol::views::transcript::TranscriptRow::info(
             plakous_host_protocol::views::transcript::NoticeScope::Host,
-            "clear session failed; previous session remains active",
+            "new session not started; this session remains active",
         ),
     ));
     app.apply_host_event(HostEvent::Status {
         phase: HostPhase::Idle,
         queue_len: 0,
         detail: Some(HostStatusDetail::PlanDiagnostic {
-            diagnostic: DiagnosticText::new("clear refused · source remains active"),
+            diagnostic: DiagnosticText::new("new session refused · source remains active"),
         }),
     });
 
     assert!(blocks_contain(&app, "source transcript"));
-    assert!(blocks_contain(&app, "previous session remains active"));
+    assert!(blocks_contain(&app, "this session remains active"));
     assert_eq!(app.session_id.as_deref(), Some("source-session"));
     assert!(!app.clear_pending);
 }

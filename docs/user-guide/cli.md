@@ -425,6 +425,7 @@ printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account g
 Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume_tree`, `tree`,
 `interrupt_node`, `close_node`, `stop_all`, `clear`,
 `invoke_tool`, `fork`, `recover`, `background`, `resolve_approval`, `quit`.
+`clear` starts a new session, as `/new` does in the TUI.
 A `prompt` may carry `"images": ["shot.png", "~/..."]`: paths to png, jpeg,
 gif or webp files (relative ones resolve against the agent's working
 directory; `~` is not expanded), read with the same limits as `plak run
@@ -693,13 +694,13 @@ it runs when the session is idle; outcome: <path>`. See
 plus all of its retained history, together with the
 history of its finished sub-agents and its agent tree, and prints
 `deleted session <id>`. It is how you free space when the session store is
-full; `/clear`, compaction and `/recover` do not. It asks first unless `--yes`
+full; `/new`, compaction and `/recover` do not. It asks first unless `--yes`
 is given, and refuses while the session is open in a running plak (or its
 process died less than half a minute ago), while its agent tree has a
 sub-agent that is still running or resumable, or one that needs recovery
 (resolve it with `recover_agent` first, or explicitly abandon that obligation
 with `--abandon-children`), or while other sessions continue from
-it or share its history (forks, rebinds, `/clear` targets); the
+it or share its history (forks, rebinds, `/new` targets); the
 refusal names them. These checks run before the question and again after it,
 and nothing is removed until the session itself has been closed for deletion.
 `--abandon-children` exempts only recovery-required children in this session's

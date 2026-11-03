@@ -212,9 +212,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             }) {
                 let _ = events.notice(TranscriptRow::error(
                     NoticeScope::Session,
-                    format!(
-                        "clear session was not saved; previous session remains active: {error}"
-                    ),
+                    format!("new session was not saved; this session remains active: {error}"),
                 ));
                 return ShellStep::Continue;
             }

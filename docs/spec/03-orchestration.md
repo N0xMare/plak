@@ -481,7 +481,7 @@ and rebind successors inherit it and bind the same selection, sections and MCP
 records whatever tuple they move to, so canonical tool authority never changes
 across a rebind (chapter 01 durable rebind). A rebind whose target route
 cannot serve one of the frozen tools refuses before any durable work with one
-line naming the tool and the remedy (`/clear`, or a new session on that
+line naming the tool and the remedy (`/new`, or a new session on that
 model). Editing the template or a table changes new sessions only. A wildcard
 `mcp:<id>` tool omitted at creation leaves one Settings notice in the
 transcript.
@@ -4407,7 +4407,7 @@ and open nothing. Every scoped snapshot or patch is checked, under one lock,
 against the face's view generation it
 was started under; close, replace, a new turn and a session switch bump that
 generation under the same lock, so nothing of an earlier serve arrives after
-them. `/clear`, `/resume`, fork and a profile rebind close the view before the
+them. `/new`, `/resume`, fork and a profile rebind close the view before the
 switch emits its `ClearView` or new session snapshot. This view does not count
 against the eight progress observers. A history row reads both names from the
 committed tool call (chapter 01 §8.2): it is labelled by the exposed name the

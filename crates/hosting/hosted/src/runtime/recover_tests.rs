@@ -244,7 +244,7 @@ fn turn_failed(event: &HostEvent) -> bool {
 
 /// The next prompt after a fence recovers the session and then runs: one
 /// `Recovered` observation with the model-request claim, the operator line
-/// once, and no dead end that asks for `/clear`.
+/// once, and no dead end that asks for `/new`.
 #[test]
 fn the_next_prompt_after_a_fence_recovers_in_place_and_runs() {
     let root = tempfile::tempdir().unwrap();
@@ -284,8 +284,8 @@ fn the_next_prompt_after_a_fence_recovers_in_place_and_runs() {
     assert_eq!(lines, 1, "the operator line is printed once");
     assert!(
         !seen.iter().any(|event| matches!(event,
-            HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text, .. })) if text.contains("/clear"))),
-        "nothing sends the operator to /clear: {seen:#?}"
+            HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text, .. })) if text.contains("/new"))),
+        "nothing sends the operator to /new: {seen:#?}"
     );
     assert_eq!(
         seen.iter().filter(|event| recovery_required(event)).count(),

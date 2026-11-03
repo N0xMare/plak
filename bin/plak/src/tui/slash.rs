@@ -20,7 +20,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "Carry this conversation under the current configuration and login",
     ),
     ("recover", "Recover an interrupted turn"),
-    ("clear", "Start a new conversation"),
+    ("new", "Start a new session"),
     ("compact", "Compact this conversation"),
     ("config", "Open config.toml in your editor"),
     ("resume", "Resume a previous session · <id>"),
@@ -191,7 +191,7 @@ fn fuzzy_score(name: &str, query: &str) -> Option<usize> {
 /// Commands that act for good: the palette's `Enter` runs them only from
 /// their full name (spec 02 §5.1).
 const IRREVERSIBLE: &[&str] = &[
-    "clear",
+    "new",
     "compact",
     "fork-then-compact",
     "fork",
@@ -208,7 +208,7 @@ pub fn is_irreversible(name: &str) -> bool {
 
 /// Commands whose grammar is the bare word. Trailing text is refused rather
 /// than ignored: `/compact now` must not start a paid compaction, and
-/// `/clear all` must not clear on the strength of a word it never read.
+/// `/new all` must not start a session on the strength of a word it never read.
 const TAKES_NO_ARGUMENTS: &[&str] = &[
     "ps",
     "help",
@@ -221,7 +221,7 @@ const TAKES_NO_ARGUMENTS: &[&str] = &[
     "context",
     "attach",
     "recover",
-    "clear",
+    "new",
     "compact",
     "config",
     "stop-all",
@@ -249,7 +249,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         // 2.1: `/status` opens the Session tab, never an unscrollable
         // floating text overlay.
         "status" => SlashEffect::OpenSession,
-        "clear" => SlashEffect::Action(UserAction::ClearSession),
+        "new" => SlashEffect::Action(UserAction::ClearSession),
         "compact" => SlashEffect::Action(UserAction::Compact),
         "config" => SlashEffect::Action(UserAction::Extension(SurfaceIntent::OpenConfigFile)),
         "settings" => SlashEffect::OpenSettings,

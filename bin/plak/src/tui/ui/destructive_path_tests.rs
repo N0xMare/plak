@@ -447,7 +447,7 @@ fn s_then_arrows_then_enter_stops_all() {
 #[test]
 fn two_letters_and_enter_in_the_palette_run_a_destructive_command() {
     let mut hits = Vec::new();
-    for draft in ["/co", "/d", "/f", "/cl", "/c", "/re"] {
+    for draft in ["/co", "/d", "/f", "/ne", "/n", "/c", "/re"] {
         let mut app = busy_with_queue(QueueDrainState::LiveAutoDrain);
         app.apply_host_event(HostEvent::SetBusy(false));
         let mut steps = typed_at(draft, 90);
@@ -770,7 +770,7 @@ fn irreversible_palette_commands_run_only_from_their_full_name() {
     );
     let mut app = App::new(launch_basic(), true);
     pass_time(&mut app, 0);
-    let mut steps = typed_at("/clear", 90);
+    let mut steps = typed_at("/new", 90);
     steps.push((90, KeyCode::Enter));
     assert_eq!(run(&mut app, &steps), vec![UserAction::ClearSession]);
     let mut app = App::new(launch_basic(), true);

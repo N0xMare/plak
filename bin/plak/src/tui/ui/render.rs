@@ -358,7 +358,7 @@ impl App {
                 "[ compact this checkpoint ]",
             ),
             crate::tui::ContextCapacityRecovery::Protected => (
-                "Protected context cannot be compacted; choose a larger model, fork, or /clear.",
+                "Protected context cannot be compacted; choose a larger model, fork, or /new.",
                 "",
             ),
         };

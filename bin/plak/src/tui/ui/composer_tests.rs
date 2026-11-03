@@ -484,7 +484,7 @@ fn slash_palette_scrolls_selection_and_mouse_maps_through_viewport() {
 #[test]
 fn slash_palette_does_not_block_composer_mouse_interaction() {
     let mut app = App::new(launch_basic(), true);
-    app.set_input("/clear trailing".into());
+    app.set_input("/new trailing".into());
     app.sync_slash_open();
     let backend = TestBackend::new(80, 30);
     let mut terminal = Terminal::new(backend).unwrap();

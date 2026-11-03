@@ -314,7 +314,7 @@ impl App {
     /// `SetBusy(false)` without an `ApprovalResolved` means the turn ended
     /// under a lagged channel, an unsettled cancel or a dropped host. The row
     /// must not stay `◆ Waiting…` at idle: it would hold the redraw loop at
-    /// the busy cadence for ever and keep `a`/`d` hijacked until `/clear`.
+    /// the busy cadence for ever and keep `a`/`d` hijacked until `/new`.
     pub(super) fn retire_unresolved_approval(&mut self) {
         let Some(approval_id) = self.open_approval.take() else {
             return;

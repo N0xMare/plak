@@ -93,7 +93,7 @@ pub(crate) fn status_detail(
         D::ConfigurationPath { path } => format!("config: {path}"),
         D::ChooseProfile => "choose a profile with /agents".into(),
         D::CreatingFreshConversation => {
-            "creating a fresh conversation on the current exact binding".into()
+            "starting a new session on the current exact binding".into()
         }
         D::ForkingSession => "forking session".into(),
         D::InterruptRequested => "interrupt requested".into(),
@@ -116,7 +116,7 @@ pub(crate) fn status_detail(
         D::ReleasingPreviousAttachment => "releasing the previous session attachment".into(),
         D::TurnComplete => "turn complete".into(),
         D::Ready { model_id, pause } => with_pause(format!("ready · {model_id}"), *pause),
-        D::ClearRefused { model_id } => format!("clear refused · {model_id} remains active"),
+        D::ClearRefused { model_id } => format!("new session refused · {model_id} remains active"),
         D::ForkingProfileRoot { model } => format!("forking onto profile root `{model}`"),
         D::RestoringAdmittedTurn { pause } => {
             with_pause("restoring the original admitted turn".into(), *pause)

@@ -1076,7 +1076,7 @@ async fn a_childs_abandoned_turn_reaches_the_callers_face_once() {
     crate::topology_runtime::force_release(&tree_id).await;
 }
 
-/// `/clear`, `/resume`, fork and rebind all replace `config.session`
+/// `/new`, `/resume`, fork and rebind all replace `config.session`
 /// inside one attach. The push cache is keyed on the session it resolved
 /// for, so the successor session re-resolves and §5.10 live updates keep
 /// arriving instead of dying silently for the rest of the attach.
@@ -1118,7 +1118,7 @@ async fn a_session_switch_re_resolves_the_tree_and_pushes_keep_arriving() {
         [HostEvent::TopologyNavigatorSnapshot(_)]
     ));
 
-    // The operator runs `/clear`: a new session, a new tree, same attach.
+    // The operator runs `/new`: a new session, a new tree, same attach.
     let mut second = SessionRecord::new(root.path().to_path_buf());
     let second_tree = durable_tree_id(&paths, &second);
     assert_ne!(first_tree, second_tree);

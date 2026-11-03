@@ -38,7 +38,7 @@ impl App {
         self.composer_wheel_scroll = None;
     }
 
-    /// Clear the draft and drop the undo history (submit, `/clear`, resume).
+    /// Clear the draft and drop the undo history (submit, `/new`, resume).
     pub(super) fn clear_input(&mut self) {
         self.clear_input_text();
         self.composer_undo.reset();
@@ -293,6 +293,20 @@ impl App {
         }
     }
 
+    /// `/new`: this host serves one session at a time, so a session with
+    /// running agents or background processes is not left behind silently.
+    /// The confirmation names that work and offers to stop it first. A busy
+    /// root goes to the host, which answers that `/new` waits for idle.
+    fn request_new_session(&mut self) -> Option<UserAction> {
+        if self.busy || (self.tree_live_descendants == 0 && self.background_processes == 0) {
+            return Some(UserAction::ClearSession);
+        }
+        self.slash_open = false;
+        self.clear_input();
+        self.open_new_session_confirm();
+        None
+    }
+
     pub(super) fn apply_slash_effect(&mut self, effect: SlashEffect) -> Option<UserAction> {
         match effect {
             SlashEffect::Quit => self.request_quit(),
@@ -347,7 +361,7 @@ impl App {
                 }
                 None
             }
-            SlashEffect::Action(UserAction::ClearSession) => Some(UserAction::ClearSession),
+            SlashEffect::Action(UserAction::ClearSession) => self.request_new_session(),
             SlashEffect::Action(UserAction::DropQueued) => self.queue_drop_last(),
             SlashEffect::Action(UserAction::OpenTopologyNavigator) => {
                 self.activity_tab = Some(super::processes::ActivityTab::Agents);

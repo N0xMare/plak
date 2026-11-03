@@ -138,7 +138,7 @@ impl WorkflowRequest {
             SessionWorkflowKind::Fork => "fork did not start; request a fork again explicitly",
             SessionWorkflowKind::Rebind(_) => "model change did not start; choose the model again",
             SessionWorkflowKind::Clear => {
-                "clear did not start; request a fresh conversation again explicitly"
+                "new session did not start; request a new session again explicitly"
             }
         }
     }

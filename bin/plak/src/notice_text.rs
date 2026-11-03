@@ -145,7 +145,7 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
             Jsonl => format!("reopen `plak agent --session {session}`; there is no JSONL attach command"),
         },
         R::ResumeQueueOrStartFresh {} => match face {
-            Tui => "review the preceding compaction result and correct its cause; Tab then r resumes the queue; /compact is a new paid operation; /clear starts fresh".into(),
+            Tui => "review the preceding compaction result and correct its cause; Tab then r resumes the queue; /compact is a new paid operation; /new starts a new session".into(),
             Run => format!("inspect the prior result, {open_tui} to resume the queue or retry /compact as a new paid operation, or start a fresh run"),
             Jsonl => "review the preceding compaction outcome, correct its cause, then send resume_queue; compact is a new paid operation and clear starts fresh".into(),
         },
@@ -170,7 +170,7 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
             Jsonl => format!("send resume_tree, or relaunch `plak agent --session {session} --resume-tree`"),
         },
         R::StartFresh {} => match face {
-            Tui => "use /clear, or start a new session on the chosen model".into(),
+            Tui => "use /new, or start a new session on the chosen model".into(),
             Run => "start a new `plak run` without --session".into(),
             Jsonl => "send clear, or launch a fresh plak agent without --session".into(),
         },
@@ -282,13 +282,13 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
             Jsonl => "send compact for this exact checkpoint; no fit is guaranteed".into(),
         },
         R::CompactSegmentHistory {} => match face {
-            Tui => "/compact reduces this session; /fork-then-compact reduces a fork and leaves this session unchanged; /clear starts a new conversation".into(),
-            Run => format!("{open_tui} for /compact, /fork-then-compact or /clear, with their distinct effects, or start a fresh run"),
+            Tui => "/compact reduces this session; /fork-then-compact reduces a fork and leaves this session unchanged; /new starts a new session".into(),
+            Run => format!("{open_tui} for /compact, /fork-then-compact or /new, with their distinct effects, or start a fresh run"),
             Jsonl => "compact reduces this session; fork with compact: true reduces a fork; clear starts fresh".into(),
         },
         R::LargerModelOrStartFresh {} => match face {
             Tui => "\
-                choose a larger model, fork, or /clear; the failed turn is not automatically \
+                choose a larger model, fork, or /new; the failed turn is not automatically \
                 replayed"
                 .into(),
             Run => format!(
@@ -314,7 +314,7 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
             "run `plak session gc --all`, then `plak session delete <id>` on unneeded sessions; \
              {} do not reclaim retained history",
             match face {
-                Tui => "/clear, compaction and /recover",
+                Tui => "/new, compaction and /recover",
                 _ => "clear, compact and recover",
             }
         ),

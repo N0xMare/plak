@@ -253,7 +253,7 @@ pub(crate) fn restore_former_attachment(
 
 /// Adopt the host-authoritative attached session before re-entering the loop.
 ///
-/// The launcher's `record` is the session the process started on. `/clear`,
+/// The launcher's `record` is the session the process started on. `/new`,
 /// an in-host `/resume`, and a rebind branch all replace the attached session
 /// *inside* the host, and nothing else tells the launcher: the editor return
 /// path and the retry-attach path would both re-open the stale record and

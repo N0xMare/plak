@@ -1,4 +1,4 @@
-//! `/clear` rebuild, publication, and resume session switching.
+//! `/new` rebuild, publication, and resume session switching.
 
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};

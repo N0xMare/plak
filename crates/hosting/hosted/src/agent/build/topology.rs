@@ -298,7 +298,7 @@ pub(super) async fn topology_extensions_if_enabled_with_owner(
     // The gate is read live, from the file, at the moment a fresh root would
     // open a tree — not from the attach-time snapshot on the spec. A
     // `plak config set orchestration.subagents …` from another shell is in force for
-    // the next `/clear`, rebind or plan recompile, and an unreadable roster
+    // the next `/new`, rebind or plan recompile, and an unreadable roster
     // refuses creation.
     if opening_durable_session || !parent.state_roots().roster_source().topology_admitted()? {
         return Ok(ProductToolExtensions::empty());

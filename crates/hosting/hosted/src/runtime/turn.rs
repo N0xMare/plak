@@ -337,7 +337,7 @@ fn operator_facing_render(
         Some(ModelErrorKind::ReauthenticationRequired) => {
             "the selected subscription requires interactive reauthentication".to_owned()
         }
-        Some(ModelErrorKind::ProtectedHistory) => "protected history cannot be replayed under the selected binding; clear context or fork from a checkpoint without incompatible native history, or switch back to the model and account that produced it".to_owned(),
+        Some(ModelErrorKind::ProtectedHistory) => "protected history cannot be replayed under the selected binding; start a new session or fork from a checkpoint without incompatible native history, or switch back to the model and account that produced it".to_owned(),
         Some(ModelErrorKind::ContextLimit) => {
             "the request exceeded the model or route context limit".to_owned()
         }

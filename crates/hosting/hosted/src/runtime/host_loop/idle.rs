@@ -491,7 +491,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 TranscriptRow::info(
                                     NoticeScope::Session,
                                     format!(
-                                        "clear session failed; previous session remains active: {}",
+                                        "new session not started; this session remains active: {}",
                                         err.message()
                                     ),
                                 )

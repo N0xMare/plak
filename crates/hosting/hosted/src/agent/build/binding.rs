@@ -474,7 +474,7 @@ pub async fn coding_session_runtime_binding(
     .await
 }
 
-/// Fresh conversation create (`/clear`) must attach a new root tree, not look
+/// Fresh conversation create (`/new`) must attach a new root tree, not look
 /// up the previous hub lease.
 pub async fn coding_session_runtime_binding_attaching_root(
     spec: ProductAgentSpec,

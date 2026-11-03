@@ -617,13 +617,13 @@ fn injected_event_loop_control_plane_sequence() {
 }
 
 #[test]
-fn clear_slash_produces_clear_session_action() {
+fn new_slash_produces_clear_session_action() {
     let mut app = App::new(launch_basic(), true);
     app.pane
         .blocks
         .push(ScrollBlock::user("preserve me".into()));
     app.session_id = Some("source-session".into());
-    app.input = "/clear".into();
+    app.input = "/new".into();
     let action = app.handle_key(key(KeyCode::Enter));
     assert_eq!(action, Some(UserAction::ClearSession));
     assert!(!blocks_contain(&app, "session cleared"));
@@ -646,11 +646,11 @@ fn clear_slash_produces_clear_session_action() {
 #[test]
 fn slash_tab_completes_without_submitting() {
     let mut app = App::new(launch_basic(), true);
-    app.input = "/cle".into();
+    app.input = "/ne".into();
     app.slash_open = true;
     app.slash_selected = 0;
     assert!(app.handle_key(key(KeyCode::Tab)).is_none());
-    assert_eq!(app.input, "/clear");
+    assert_eq!(app.input, "/new");
     assert_eq!(
         app.handle_key(key(KeyCode::Enter)),
         Some(UserAction::ClearSession)

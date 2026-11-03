@@ -589,7 +589,7 @@ pub fn inspect_runtime_store(path: &Path) -> RuntimeStoreStatus {
     }
 }
 
-const RUNTIME_STORE_REMEDY: &str = "reclaim superseded history with `plak session gc --all`, then free sessions with `plak session delete <id>`; /clear and compaction do not reclaim it";
+const RUNTIME_STORE_REMEDY: &str = "reclaim superseded history with `plak session gc --all`, then free sessions with `plak session delete <id>`; /new and compaction do not reclaim it";
 
 fn runtime_store_check(
     status: RuntimeStoreStatus,

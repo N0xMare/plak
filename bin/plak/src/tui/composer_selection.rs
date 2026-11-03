@@ -365,7 +365,7 @@ fn replace_char_range(text: &mut String, range: Range<usize>, replacement: &str)
 /// Steps are whole-draft snapshots: the drafts this bounds are already capped
 /// at `MAX_COMPOSER_BYTES`, so a delta encoding would buy nothing but bugs.
 /// The ring is capped by both step count and retained bytes and is not durable
-/// product data — `/clear` and exact resume drop it.
+/// product data — `/new` and exact resume drop it.
 pub(crate) const UNDO_MAX_STEPS: usize = 128;
 
 /// Retained-byte cap across the whole ring (past plus future).
@@ -441,7 +441,7 @@ impl ComposerUndo {
         Some(next)
     }
 
-    /// Drop the whole history (`/clear`, exact resume, submit).
+    /// Drop the whole history (`/new`, exact resume, submit).
     pub(crate) fn reset(&mut self) {
         self.past.clear();
         self.future.clear();

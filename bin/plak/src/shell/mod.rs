@@ -14,7 +14,7 @@ pub(crate) mod workspace;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
-    //! The product half of the detached shell host's `/clear`.
+    //! The product half of the detached shell host's `/new`.
     //!
     //! The hosted crate owns `commit_detached_clear` and its refusal path; what
     //! is product — and so what is pinned here — is that the shell host running

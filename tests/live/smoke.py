@@ -94,7 +94,7 @@ def require_completed(
 
 
 def continues(agent: live.Agent) -> None:
-    """The session answers a fresh prompt: no dead end that needs /clear."""
+    """The session answers a fresh prompt: no dead end that needs /new."""
     require_completed(agent.prompt(CONTINUE, timeout=180), "follow-up after the fault")
 
 

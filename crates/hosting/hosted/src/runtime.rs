@@ -839,7 +839,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostConfig<P> {
     /// `[roster] subagents` as the product states it *now*.
     ///
     /// [`Self::topology_enabled`] is the answer this attach started with. A
-    /// recompile that builds a fresh spec — `/clear`, rebind, plan — asks
+    /// recompile that builds a fresh spec — `/new`, rebind, plan — asks
     /// again, so a `plak config set orchestration.subagents …` from another
     /// shell is in force for the next one, and a product that cannot answer
     /// refuses the recompile. The re-ask is [`HostConfig::topology_admission`], supplied
@@ -1240,7 +1240,7 @@ struct RebindBefore<'a> {
 /// whose tree is not in the hub, avoiding unnecessary session loads.
 ///
 /// The cache is keyed on the session the id was resolved for, so it invalidates
-/// itself at every `config.session` replacement — `/clear`, `/resume`, fork,
+/// itself at every `config.session` replacement — `/new`, `/resume`, fork,
 /// rebind, a successor epoch — without any replacement site having to remember
 /// to reset it. A cache that outlived its session pinned the *previous*
 /// session's tree id, and once that tree left the hub every §5.10 live push

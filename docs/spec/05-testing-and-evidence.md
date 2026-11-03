@@ -333,7 +333,7 @@ scripted turn whose stream reports an unobservable outcome after two deltas and
 require: one `recovery_required` terminal per turn, one `recovered` record with
 the `model_request` claim and `interrupted` cause (from JSONL `recover`, from the
 next prompt, from `plak run --session`, and from `plak session recover`), exactly
-one harness note, no second provider dispatch, and no text naming `/clear`.
+one harness note, no second provider dispatch, and no text naming `/new`.
 Unit tests pin the abandonment fold per obligation shape, the claim precedence
 and each claim × cause note, the process-session and Code Cell abandonments at
 reopen, Esc inside a paid fold ending `Cancelled` with the fold finalized, a
@@ -3141,7 +3141,7 @@ is still active when start returns.
 
 An actual interactive host test injects failed completion publication and paused-state
 writes, restores storage, and proves both a manual prompt and queue drain remain
-refused while settings, explicit clear into a fresh conversation, and quit work.
+refused while settings, an explicit new session, and quit work.
 The busy-follow-up ENOSPC regression additionally fails the root definitively,
 retains the exact previously committed queue identity, rejects only the unwritten
 draft, delivers a new prompt separately, and explicitly resumes the old item.

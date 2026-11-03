@@ -39,7 +39,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     ///
     /// On failure the old attachment stays released and `recovery_blocked`
     /// stays set, so the next action tries again; nothing is lost and nothing
-    /// ends in `/clear`.
+    /// ends in `/new`.
     #[allow(
         clippy::too_many_lines,
         reason = "Recovery distinguishes retained approvals, abandoned turns, pending projection debt, and the exact source binding before reopening."

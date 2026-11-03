@@ -84,7 +84,7 @@ fn tool_op(call_id: &str, state: &str) -> TranscriptRow {
 /// The host re-sends a same-session `PresentationSnapshot` after a root
 /// refusal (publication.rs, turn.rs) and after observation-queue saturation
 /// (`resnapshot_transcript_if_required`). Neither is a session switch; spec
-/// 02 §6.3 closes the view only on `/clear`, open, resume or fork.
+/// 02 §6.3 closes the view only on `/new`, open, resume or fork.
 #[test]
 fn a_same_session_resnapshot_keeps_the_agent_view() {
     let mut app = root_app();

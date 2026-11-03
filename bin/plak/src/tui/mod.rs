@@ -401,7 +401,7 @@ pub enum TuiOutcome {
     /// Operator quit; do not re-open for attach.
     Exited {
         /// The last host-published binding, so the exit line names the session
-        /// the operator was actually in after an in-host `/resume` or `/clear`.
+        /// the operator was actually in after an in-host `/resume` or `/new`.
         attached_session: Option<String>,
     },
     /// Auth/binding changed — app should re-resolve credentials and re-open the TUI.
@@ -423,7 +423,7 @@ pub enum TuiOutcome {
         /// Host-authoritative attached product session when the presentation
         /// released the terminal.
         ///
-        /// `/clear`, an in-host `/resume`, and a rebind branch all replace the
+        /// `/new`, an in-host `/resume`, and a rebind branch all replace the
         /// attached session inside the host, so the launcher's own record can
         /// name a session the operator left long ago. Every re-entry must come
         /// back on the session that was on screen, so the identity travels with

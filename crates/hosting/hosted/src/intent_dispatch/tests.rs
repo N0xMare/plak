@@ -13,7 +13,9 @@ fn expected_class(action: &UserAction) -> IntentClass {
     match action {
         UserAction::Interrupt => IntentClass::Urgent,
         UserAction::Quit => IntentClass::Quit,
-        UserAction::ClearSession => IntentClass::IdleOnly { noun: "clear" },
+        UserAction::ClearSession => IntentClass::IdleOnly {
+            noun: "new session",
+        },
         UserAction::Compact => IntentClass::IdleOnly { noun: "compact" },
         UserAction::ResumeSession { .. } | UserAction::ResumeSessionHandoff { .. } => {
             IntentClass::IdleOnly { noun: "resume" }

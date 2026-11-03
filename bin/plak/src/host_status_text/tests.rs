@@ -107,7 +107,7 @@ fn every_unit_status_detail_keeps_its_jsonl_spelling() {
         ),
         (
             HostStatusDetail::CreatingFreshConversation,
-            "creating a fresh conversation on the current exact binding",
+            "starting a new session on the current exact binding",
         ),
         (HostStatusDetail::ForkingSession, "forking session"),
         (HostStatusDetail::InterruptRequested, "interrupt requested"),

@@ -719,6 +719,9 @@ pub(super) fn run_app(
             request_terminal_handoff(&mut app, actions, TuiHandoff::Rebind { cause });
         }
         app.service_reload_request();
+        if let Some(action) = app.new_session_after_stop(Instant::now()) {
+            dispatch_action(&mut app, &action, actions);
+        }
         if std::mem::take(&mut app.pending_reload) {
             // Asked while the session is still attached: once the handoff
             // starts there is nothing left to show a slow answer on.
@@ -857,6 +860,7 @@ pub(super) fn dispatch_action(
     action: &UserAction,
     actions: Option<&crate::tui::UserActionSender>,
 ) {
+    app.drop_new_after_stop_for(action);
     match action {
         UserAction::Quit => {
             // Restoration comes first: the UI only ends itself here. The
@@ -946,7 +950,8 @@ pub(super) fn commit_sent_action(app: &mut App, action: &UserAction) {
     if action == &UserAction::ClearSession {
         app.clear_pending = true;
         app.phase = HostPhase::Clear;
-        app.status_detail = Some("clear pending authoritative host acknowledgement".to_owned());
+        app.status_detail =
+            Some("new session pending authoritative host acknowledgement".to_owned());
         return;
     }
     if !matches!(

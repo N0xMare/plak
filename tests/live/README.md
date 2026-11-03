@@ -325,7 +325,7 @@ the shared home and the scenario private home.
 A growth turn that finishes without that compaction is `harness` only when `model.operation_usage` shows prepared input at the lower of the compaction trigger and the catalog window minus one read page, and `model` otherwise. The trigger is spec 01 §10.3: 80% for `grok-4.6`, otherwise the window minus a tenth (about 90%) when that exceeds the semantic-summary headroom. A peak between that trigger and the window minus one page is harness, not a model miss. The same split applies to an overflow turn that completes without a remedy, so sequential reads that never reach the bar are not a harness failure. It does not apply to `child_compaction`: the child history projection has no `model.operation_usage` row, and a history without the compaction segment is `model`. A `ContextLimit` stop without a committed recovery is `harness`. Provider refusal is classified the same way as smoke.
 
 After every fault the session must answer a plain follow-up: a failure that
-leaves it needing `/clear` is a dead end, and a harness failure.
+leaves it needing `/new` is a dead end, and a harness failure.
 
 **Soak** (`soak.py`) is headless: it keeps one session working through a cycle of tasks on
 more-itertools pinned at v10.5.0: explore, fix a planted bug, add a function with

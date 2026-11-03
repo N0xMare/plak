@@ -75,7 +75,7 @@ impl TreeFacts {
 
 /// The indicator state of one bound session.
 ///
-/// Keyed by session id, so an in-place switch (`/clear`, `/resume`) starts
+/// Keyed by session id, so an in-place switch (`/new`, `/resume`) starts
 /// the switched-to session from its own baseline instead of this one's.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct PendingTrack {

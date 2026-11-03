@@ -136,7 +136,7 @@ pub fn spawn_shell_host(
     spawn_shell_host_with_clear_publication(config, None)
 }
 
-/// The same, with the `/clear` publication cell the TUI reads back.
+/// The same, with the `/new` publication cell the TUI reads back.
 #[must_use]
 pub fn spawn_shell_host_with_clear_publication(
     config: ShellHostConfig<PlakExtension>,

@@ -495,9 +495,12 @@ pub(crate) struct App {
     pub(crate) phase: HostPhase,
     pub(crate) queue_len: usize,
     pub(crate) status_detail: Option<String>,
-    /// A clear request crossed the UI mailbox but has not reached the host's
+    /// A new-session request crossed the UI mailbox but has not reached the host's
     /// authoritative [`HostEvent::ClearView`] publication boundary.
     clear_pending: bool,
+    /// A confirmed `/new` waiting, until this deadline, for the processes it
+    /// stopped to exit.
+    new_after_stop: Option<Instant>,
     /// Last complete queue snapshot supplied by the authoritative host.
     pub(crate) local_queue: Vec<QueueItem>,
     /// Queue delivery authority supplied alongside the snapshot.
@@ -896,6 +899,7 @@ impl App {
             queue_len: 0,
             status_detail: None,
             clear_pending: false,
+            new_after_stop: None,
             local_queue: Vec::new(),
             queue_drain: QueueDrainState::LiveAutoDrain,
             queue_focused: false,
@@ -1179,6 +1183,13 @@ mod launch;
 )]
 mod launch_intro_tests;
 mod mouse;
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "unit tests may assert with unwrap/expect"
+)]
+mod new_session_tests;
 mod opening_note;
 mod pane;
 #[cfg(any(test, feature = "test-hooks"))]

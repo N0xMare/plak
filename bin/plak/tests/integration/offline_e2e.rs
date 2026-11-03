@@ -1993,7 +1993,7 @@ fn assert_one_terminal_per_turn(outcome: &AgentOutcome) {
 
 /// JSONL `recover` reopens a session a live turn fenced, emits one
 /// must-not-drop `recovered` record naming the claim and the cause, and the
-/// next prompt answers. Nothing is replayed and nothing asks for `/clear`.
+/// next prompt answers. Nothing is replayed and nothing asks for `/new`.
 #[test]
 fn a_jsonl_recover_command_recovers_a_fenced_session_in_place() {
     let fixture = Fixture::new(&fenced_then_answering());
@@ -2029,8 +2029,8 @@ fn a_jsonl_recover_command_recovers_a_fenced_session_in_place() {
         1
     );
     assert!(
-        !outcome.lines.iter().any(|line| line.contains("/clear")),
-        "nothing sends the operator to /clear:\n{}",
+        !outcome.lines.iter().any(|line| line.contains("/new")),
+        "nothing sends the operator to /new:\n{}",
         outcome.lines.join("\n")
     );
     assert_eq!(
@@ -2109,7 +2109,7 @@ fn a_fenced_cli_run_recovers_on_the_next_run_and_session_recover_is_idempotent()
         fenced.stderr
     );
     assert!(
-        !fenced.stderr.contains("/clear"),
+        !fenced.stderr.contains("/new"),
         "stderr:\n{}",
         fenced.stderr
     );

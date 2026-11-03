@@ -536,7 +536,7 @@ fn failed_interactive_publication_recovers_in_place_on_the_next_prompt() {
     }
     // Storage recovers. The next prompt reopens the session in place and then
     // runs: the canonical conversation kept the lost turn, so nothing is
-    // replayed, and nothing sends the operator to /clear. The retained queue
+    // replayed, and nothing sends the operator to /new. The retained queue
     // stays paused until it is resumed explicitly.
     rusqlite::Connection::open(&database)
         .unwrap()
@@ -557,8 +557,8 @@ fn failed_interactive_publication_recovers_in_place_on_the_next_prompt() {
             ))
             | HostEvent::Row(TranscriptRow::Notice(
                 plakous_host_protocol::views::transcript::NoticeRow { text: note, .. },
-            )) if note.contains("/clear") => {
-                panic!("no dead end sends the operator to /clear: {note}")
+            )) if note.contains("/new") => {
+                panic!("no dead end sends the operator to /new: {note}")
             }
             HostEvent::AssistantDone => break,
             _ => {}

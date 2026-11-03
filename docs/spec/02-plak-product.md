@@ -1334,7 +1334,7 @@ snapshot exists, a paid compaction fallback is not offered.
 `plak session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
 runtime history. It is a remedy when logical retention bounds are full; physical
 disk exhaustion may first require freeing disk space: Plakous never
-refuses archive or delete for capacity (Plakous section 5.2), while `/clear`,
+refuses archive or delete for capacity (Plakous section 5.2), while `/new`,
 compaction and recovery do not reclaim retained state. It resolves the id like
 every session command (full id or unambiguous prefix in this workspace) and
 refuses with one typed reason. The tree and dependency refusals are checked
@@ -2751,7 +2751,7 @@ old attachment (§2.6). It performs no source-finalization reconciliation.
    in one durable, revision-CAS'd transaction. Admitted requests remain for the
    runtime to settle; an unsuccessful projector pass never authorizes
    withdrawal. The notice is `compaction did not start; run /compact again`,
-   `fork did not start; run /fork again`, `clear did not start; run /clear
+   `fork did not start; run /fork again`, `new session did not start; run /new
    again`, or `model change did not start; choose the model again`.
 
 A turn restored at a pending decision is driven only after surface attachment,
@@ -2936,7 +2936,7 @@ resubmitted command carries its stored bytes, never a reselected batch.
 
 When scheduled compaction ends without a compacted checkpoint, its prompt
 remains queued and automatic drain pauses. The diagnostic names the terminal
-outcome and the explicit retry control or `/clear`. A pass that found nothing to
+outcome and the explicit retry control or `/new`. A pass that found nothing to
 compact (`NoEligibleRange`) paid nothing and changed nothing and never follows
 on; the session log records it as `compact.finished` outcome `no_eligible_range`. A
 prompt that fits is sent as is, with one note that nothing could be compacted.
@@ -2987,7 +2987,7 @@ capacity-recovery compact: that action is a new operation. `Compacted` and
 Scheduled and CapacityRecovery requests, the queue-drain remeasurement through
 the same projection path live and on reopen.
 
-**No fenced session ends in `/clear`.** When a turn ends recovery-required, the
+**No fenced session ends in `/new`.** When a turn ends recovery-required, the
 host marks the session as needing recovery and says that the next prompt (or
 `/recover`) records the uncertainty and continues. Projection debt alone is not
 a fence: the next action applies it first. The next action that needs the session — a prompt,
@@ -3500,8 +3500,9 @@ are published to the TUI; `/attach` retries attachment against that catalog.
 Changing branches or sessions while the source has running promoted processes
 is refused before durable product work: `N background processes are running;
 stop them first (/ps)`. This applies to profile rebinds, ordinary
-forks and fork-then-compact, clear, resume/session switch, and their workflow
-requests. Pending terminal notices alone do not refuse a transition.
+forks and fork-then-compact, a new session (`/new`), resume/session switch,
+and their workflow requests. Pending terminal notices alone do not refuse a
+transition.
 Same-branch recovery and authority refresh transfer the process service instead;
 compaction preserves that branch's jobs.
 
@@ -3509,7 +3510,7 @@ The catalog is **closed**. Twenty-five commands ship, and a command that does
 nothing but announce a deferred capability is not one of them:
 
 `/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`, `/mcp`,
-`/usage`, `/context`, `/attach`, `/recover`, `/clear`, `/compact`,
+`/usage`, `/context`, `/attach`, `/recover`, `/new`, `/compact`,
 `/config`, `/resume`, `/tree`, `/ps`, `/stop-all`, `/fork`, `/fork-then-compact`,
 `/drop`, `/image`, `/reload`, `/rebind`, `/quit`. Two spellings are accepted aliases rather than extra rows:
 `/stop_all` for `/stop-all` and `/exit` for `/quit`.
@@ -3517,9 +3518,28 @@ nothing but announce a deferred capability is not one of them:
 A command whose grammar is the bare word — every row except `/agents`,
 `/resume`, `/tree` and `/image` — refuses trailing
 text with a one-line system note, `usage: /<name>  —  takes no arguments`, and
-does nothing else. `/compact now` starts no paid compaction and `/clear all`
-clears nothing. `/fork` and `/fork-then-compact` refuse with their own usage
-line. The argument-taking commands keep their grammar below.
+does nothing else. `/compact now` starts no paid compaction and `/new all`
+starts no session. `/clear` is not a command and answers the unknown-command
+note. `/fork` and `/fork-then-compact` refuse with their own usage line. The
+argument-taking commands keep their grammar below.
+
+`/new` starts a new session in the same TUI: a new runtime session and agent
+tree with empty history, on the current binding, composition and frozen root
+tools. It runs the session workflow §2.6 records as `clear`; that persisted
+kind, the JSONL `clear` command and the `clear` host phase keep the name. The
+previous session is not changed and stays resumable with `/resume`. One TUI
+hosts one session, so `/new` while this session has running agents or
+background processes does not switch. A confirmation names that work (`N
+running agents: interrupted, resumable.`, `N background processes: stopped;
+work in flight is lost.`) and offers `[ Stop work + new ]`. That button stops
+every background process, as the Processes tab's stop-all does, and starts the
+new session once none runs; the switch's release of the previous session
+interrupts its running agents, which resume with it. A process still running
+10 seconds later drops the switch with `new session not started: N background
+processes are still running; stop them in /ps, then run /new`; a prompt or
+another session command sent meanwhile drops it too. While the root turn runs,
+`/new` answers `new session: available when idle (finish or interrupt the
+turn)`.
 
 `/mcp` opens a read-only panel: every configured MCP server with its
 transport, scope, the templates that enable it and any secret it names that is
@@ -3729,7 +3749,7 @@ only when the typed command word begins its name, and otherwise does nothing.
 its name, and otherwise submits the line as typed: a fuzzy match is never run
 by `Enter` or written into the draft by `Tab`, so `/tmp` reaches the
 unknown-command note, not `/fork-then-compact`. The irreversible commands,
-`/clear`, `/compact`, `/fork-then-compact`, `/fork`, `/drop` and `/recover`,
+`/new`, `/compact`, `/fork-then-compact`, `/fork`, `/drop` and `/recover`,
 run from `Enter` only when the typed word is the full name: `Enter` on a
 shorter word completes it exactly as `Tab` does and runs nothing, and an
 `Enter` within 600 ms of that completion, the draft unchanged, runs nothing
@@ -4342,7 +4362,7 @@ product formats them. Usage projections retain credential state and inference
 key source, and child activity retains the waiting account. A restored open
 warning carries typed tree/queue pause facts; it remains live-only and does not
 write a second stored pause notice. Log-only retained compaction overflow is a
-typed presentation fact whose Plak log adapter preserves the `/clear` hint.
+typed presentation fact whose Plak log adapter preserves the `/new` hint.
 Preventive low-storage refusal carries a typed live-only admission warning and
 `CheckStorage` refusal advice. Every existing frontend retains `plak doctor`;
 the warning never enters transcript/export history and adds no stored remedy code.
@@ -4392,7 +4412,7 @@ has exactly one writer, named by the provenance table of §2.6:
 - A notice that restates state every attach, open or in-place switch
   re-announces is live only: the restored-paused queue note (and on a JSONL
   face the paused tree it folds in), an unreadable context report (at open,
-  recover, `/clear` and `/resume`) and the automatic child-recovery pass's
+  recover, `/new` and `/resume`) and the automatic child-recovery pass's
   report (an explicit `/recover` answer is a notice intent). It is never
   stored, so a session's transcript does not grow per open; the state itself
   persists and the next attach announces it again. An event that happened once
@@ -4409,7 +4429,7 @@ thread so the target is active at once, and the host keeps each one it started.
 The release is bounded by the host's 25-second release deadline. A release
 that fails in owned children but still releases the parent lands like a clean
 one and then reports the child failure, as the host's own release does. A
-switch back onto that source (`/resume`, including after `/clear`, a fork or a
+switch back onto that source (`/resume`, including after `/new`, a fork or a
 rebind) waits for that pass before reading the source's views: it shows
 `finishing the previous session…` and waits at most 5 seconds, then refuses
 with `session <id> is still finishing its previous switch; try again` and
@@ -5086,7 +5106,7 @@ retrieval of the withheld prompt from history. Restoration never submits a promp
 Recovery consumes Plakous's `context_overflow_remedy`: `ResendShorter` asks
 the operator to shorten and explicitly resend the restored draft, `Compact`
 offers compaction without replaying the failed turn, and `ClearOrFork` asks
-for a larger model, a fork, or `/clear`. An unverified source presents
+for a larger model, a fork, or `/new`. An unverified source presents
 protected recovery without a compact action.
 With auto compaction on, a `Compact` terminal on the exact attached head
 compacts once (a CapacityRecovery pass) unless the session's newest finalized
@@ -5101,7 +5121,7 @@ attached head holds at least the refusal limit's 4,032 segments, read from the
 attached checkpoint in memory and never persisted, the guidance names the
 segment limit instead of token or tool growth, on native routes too: `/compact`
 compacts this session's earlier history, `/fork-then-compact` compacts a fork
-and leaves this session unchanged, and `/clear` starts a new conversation.
+and leaves this session unchanged, and `/new` starts a new session.
 These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu
@@ -5376,7 +5396,7 @@ successor binds the home default with the notice `this session has no agent
 tree, so it records no profile of its own; the home default profile applies`.
 A reload handoff passes the profile to the destination in its private sidecar
 (§2.5.1); an import of a same-store source reads the source's tree; any other
-import binds the home default with that same no-profile notice. `/clear`, `/fork`,
+import binds the home default with that same no-profile notice. `/new`, `/fork`,
 and `/fork-then-compact` keep the binding they already have. Applying a
 built-in publishes its templates as `{name}-root`, `{name}-worker`,
 `{name}-reviewer`, and `{name}-researcher` together with the pointers; every
@@ -5552,7 +5572,7 @@ Plakous context projection:
 - Explicit `/compact` on a protected-only overflow is **dispatched**, not refused at the
   key. That compaction's protected-capacity notice appears when the ladder is exhausted —
   every body replaced and the projection still over capacity — and it still
-  says to choose a larger model or `/clear`.
+  says to choose a larger model or `/new`.
   Terminal overflow recovery follows the canonical remedy rather than
   reclassifying the capacity tuple; a withheld oversized prompt instead asks
   for shortening and resending, without automatic compaction or replay.
@@ -5659,26 +5679,27 @@ prompt is dropped. A paste never reaches a draft under the pop-up or a dialog.
 **The destructive confirmation pop-up.** Stopping the root turn or a
 fork/rebind operation (busy `Esc`, §5.3), interrupting or closing an agent,
 stopping every agent, resuming a restored-paused tree, stopping one or all
-background processes, and quitting over running processes are sent only from
-one pop-up, shared by the root view (busy `Esc` and the busy `Ctrl+C`),
-Activity > Agents (`i`, `c`, `s`, `r`), the agent view (`i`, `c`),
-`/stop-all`, the Processes tab (`s`, `S`), `Ctrl+Q`, the confirmed `Ctrl+C`
-and `/quit` (§5.3), `Alt+A`/`Alt+D` on an open effect decision (§5.2), the
-Menu's profile dialog (§5.5), and Settings `d` (`Reset <label>?`, `[ Reset ]`,
-binding that row's key and writing the live draft at confirm). Interrupt and
-close never target the root row. It is centred over a scrim and says what will
-happen: its title names the target (`Stop this turn?`, `Stop this operation?`,
-`Interrupt #c3?`, `Close #c3?`, `Stop all agents?`, `Resume all agents?`,
-`Stop this process?`, `Stop all processes?`, `Quit plak?`, `Allow <tool>?`,
-`Deny <tool>?`, `Reset <label>?`), its lines the agent id or the count of open
+background processes, quitting over running processes, and `/new` over running
+agents or processes (§5.1) are sent only from one pop-up, shared by the root
+view (busy `Esc` and the busy `Ctrl+C`), Activity > Agents (`i`, `c`, `s`,
+`r`), the agent view (`i`, `c`), `/stop-all`, `/new`, the Processes tab (`s`,
+`S`), `Ctrl+Q`, the confirmed `Ctrl+C` and `/quit` (§5.3), `Alt+A`/`Alt+D` on
+an open effect decision (§5.2), the Menu's profile dialog (§5.5), and Settings
+`d` (`Reset <label>?`, `[ Reset ]`, binding that row's key and writing the live
+draft at confirm). Interrupt and close never target the root row. It is centred
+over a scrim and says what will happen: its title names the target (`Stop this
+turn?`, `Stop this operation?`, `Interrupt #c3?`, `Close #c3?`, `Stop all
+agents?`, `Resume all agents?`, `Stop this process?`, `Stop all processes?`,
+`Quit plak?`, `Start a new session?`, `Allow <tool>?`, `Deny <tool>?`, `Reset
+<label>?`), its lines the agent id or the count of open
 agents (or processes, or the process's owner and command), that running turns
 are cancelled and work in flight is lost, and for stop-all that no new agents
 start until the next prompt. Lines wrap at narrow widths rather than clip, and
 buttons that do not fit one row stack right-aligned. `[ Cancel ]` comes first,
 then the action (`[ Stop turn ]` and `[ Stop turn + processes ]`,
 `[ Stop operation ]`, `[ Interrupt ]`, `[ Close ]`, `[ Stop all ]`,
-`[ Resume all ]`, `[ Stop ]`, `[ Quit ]`, `[ Allow ]`, `[ Deny ]`,
-`[ Reset ]`, `[ Recover ]`); focus starts on the primary action, and a dim
+`[ Resume all ]`, `[ Stop ]`, `[ Quit ]`, `[ Stop work + new ]`, `[ Allow ]`,
+`[ Deny ]`, `[ Reset ]`, `[ Recover ]`); focus starts on the primary action, and a dim
 `Enter confirms · Esc cancels` under the lines says how to confirm. Focus is
 absolute and moves the moment a key arrives: `←` and `→` move it one button
 without wrapping, and `Tab` moves right while `Shift+Tab` moves left.
@@ -5899,7 +5920,7 @@ close it in the destructive confirmation pop-up, `x` acknowledges its current
 attention occurrence, and `y` copies its id. Recovery stays the root agent's (`recover_agent`), as in the
 list. Its identity is the agent id: tree snapshot revisions
 never reset, re-emit or close it. Opening another agent replaces it, and a
-session switch (`/clear`, open, resume, fork: `ClearView`, `SessionOpening` or
+session switch (`/new`, open, resume, fork: `ClearView`, `SessionOpening` or
 a binding naming another session) closes it; a same-session presentation
 snapshot does not. Leaving and re-entering an agent, or switching away and
 back, fetches its rows again, and a turn-end re-send keeps open items, their
@@ -6255,7 +6276,7 @@ nothing else is persisted). While they are on, every family's node registers
 that omits it leaves the canonical executor bindings unchanged (chapter 01
 §3), so tool authority never moves with the vocabulary. The live
 `skills.enabled` decides it only for a new session, a child spawn and
-`/clear`. Every other construction follows the session:
+`/new`. Every other construction follows the session:
 
 - an exact reopen, `/resume`, `/reload` and a compaction carry exactly the
   sealed `Skill` and listing, and give the read tool the user root only when

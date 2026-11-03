@@ -184,7 +184,7 @@ fn send_attached_action(actions: &surface_protocol::UserActionSender, action: Us
         .expect("the attached host accepts an action");
 }
 
-/// `/clear`, rebind and plan build a fresh spec, so the topology
+/// `/new`, rebind and plan build a fresh spec, so the topology
 /// gate is the file's answer *now* — not the one this attach started
 /// with. `plak config set orchestration.subagents …` from another shell
 /// is in force for the next recompile, and an unreadable roster refuses

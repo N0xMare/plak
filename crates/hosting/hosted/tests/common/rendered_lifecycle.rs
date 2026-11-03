@@ -1815,10 +1815,10 @@ mod suite {
         md.push_str("# Lifecycle: mid-session changes\n\n");
         md.push_str("## Header\n\n");
         md.push_str("| Field | Value |\n| --- | --- |\n");
-        md.push_str("| what | What changes in the next model request when a session is bound to another effort or another model of the same provider (a profile Fork now or a new session from another template), after `/clear`, and on reopen/fork under a different model |\n");
+        md.push_str("| what | What changes in the next model request when a session is bound to another effort or another model of the same provider (a profile Fork now or a new session from another template), after `/new`, and on reopen/fork under a different model |\n");
         md.push_str("| why | Identity and effort are request-prefix, not first-turn-only |\n");
         md.push_str("| production fns | `selected_harness_profile`, `product_target_identity_profile`, and identity templates in `prompts/identity.rs` |\n");
-        md.push_str("| faithful vs synthetic | Identity/effort text is faithful (synthetic workspace `/work/repo`, OS `macos`). History emptiness after `/clear` is described from production behaviour (new session), not a live store. |\n\n");
+        md.push_str("| faithful vs synthetic | Identity/effort text is faithful (synthetic workspace `/work/repo`, OS `macos`). History emptiness after `/new` is described from production behaviour (new session), not a live store. |\n\n");
 
         let medium = selected_harness_profile(
             NativeProvider::Codex,
@@ -1894,16 +1894,16 @@ mod suite {
             &identity_tail(&next_model),
         ));
 
-        md.push_str("## `/clear`\n\n");
-        md.push_str("Production `/clear` starts a new session: empty canonical history and empty working projection. The harness profile / identity tail is the same construction as a new session (still includes the model-history sentence). Tools and composition are unchanged.\n\n");
+        md.push_str("## `/new`\n\n");
+        md.push_str("Production `/new` starts a new session: empty canonical history and empty working projection. The harness profile / identity tail is the same construction as a new session (still includes the model-history sentence). Tools and composition are unchanged.\n\n");
         md.push_str(&surface(
-            "Next request history after `/clear`",
+            "Next request history after `/new`",
             "Synthetic description of the production empty projection.",
             "text",
             "history: (empty)\nworking: (empty)\n",
         ));
         md.push_str(&surface(
-            "Identity tail after `/clear` (new session)",
+            "Identity tail after `/new` (new session)",
             "Faithful; same as genesis.",
             "text",
             &identity_tail(&medium),
@@ -1951,7 +1951,7 @@ mod suite {
         ),
         (
             "mid-session",
-            "232b5342ae0e5b3bff5be05c29d1f5f8f7893a64719fc0ae7346e6719908d944",
+            "875340714e2e0f57bd8c4ddf41e9004494c6f5ab5a5d17faef87191bf9fd5167",
         ),
     ];
 

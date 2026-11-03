@@ -4,7 +4,7 @@
 //!
 //! Whether a session's skills are on is frozen in its registry: it holds the
 //! `Skill` registration exactly while they are on. A new session, a spawn or
-//! `/clear` follows the live setting; a fork, rebind or switch successor
+//! `/new` follows the live setting; a fork, rebind or switch successor
 //! inherits its source's value; an exact reopen and a compaction follow what
 //! the session froze, its listing included.
 
@@ -92,7 +92,7 @@ pub(crate) async fn frozen_skills(
 /// Which skills authority one node build follows.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum SkillsMode<'a> {
-    /// A new session, spawn or `/clear`: the live setting.
+    /// A new session, spawn or `/new`: the live setting.
     New,
     /// A fork, rebind or switch successor: the source session's frozen on/off,
     /// with its skills discovered again.

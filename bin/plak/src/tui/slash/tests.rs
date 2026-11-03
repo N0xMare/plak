@@ -26,7 +26,7 @@ fn parse_table() {
     );
 
     assert!(parse_slash("hello").is_none());
-    assert_eq!(parse_slash("/CLEAR").unwrap().name, "clear");
+    assert_eq!(parse_slash("/NEW").unwrap().name, "new");
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn resolve_core_actions() {
         ..SlashContext::default()
     };
     assert_eq!(
-        resolve(&parse_slash("/clear").unwrap(), &ctx),
+        resolve(&parse_slash("/new").unwrap(), &ctx),
         SlashEffect::Action(UserAction::ClearSession)
     );
     assert_eq!(
@@ -132,7 +132,7 @@ fn a_command_without_arguments_refuses_trailing_text() {
     let ctx = SlashContext::default();
     for (line, name) in [
         ("/compact now", "compact"),
-        ("/clear all", "clear"),
+        ("/new all", "new"),
         ("/reload please", "reload"),
         ("/rebind now", "rebind"),
         ("/quit later", "quit"),
@@ -192,7 +192,8 @@ fn resolve_local_notes() {
     match resolve(&parse_slash("/help").unwrap(), &ctx) {
         SlashEffect::OpenInfoOverlay { title, body } => {
             assert_eq!(title, "help");
-            assert!(body.contains("/clear"));
+            assert!(body.contains("/new"));
+            assert!(!body.contains("/clear"));
         }
         other => panic!("expected help overlay, got {other:?}"),
     }
@@ -218,6 +219,7 @@ fn the_catalog_is_closed_and_carries_no_deferred_capability_rows() {
     // command, and neither may a removed surface. Login, logout
     // and API keys are CLI-only; the roster is config-only.
     for dead in [
+        "clear",
         "skills",
         "sandbox",
         "workflows",
@@ -315,7 +317,7 @@ fn fuzzy_list_filters() {
     assert_eq!(all.len(), COMMANDS.len());
     let help = fuzzy_list("he");
     assert!(help.iter().any(|(n, _)| *n == "help"));
-    let clr = fuzzy_list("clr"); // subsequence c-l-r in clear
-    assert!(clr.iter().any(|(n, _)| *n == "clear"));
+    let rcv = fuzzy_list("rcv"); // subsequence r-c-v in recover
+    assert!(rcv.iter().any(|(n, _)| *n == "recover"));
     assert_eq!(fuzzy_list("zzznotfound"), [] as [(&str, &str); 0]);
 }

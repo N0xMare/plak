@@ -752,7 +752,7 @@ fn protected_capacity_recovery_refuses_compaction() {
 
     let rendered = serialize_frame(terminal.backend().buffer());
     assert!(rendered.contains("Protected·context·cannot·be·compacted"));
-    assert!(rendered.contains("larger·model,·fork,·or·/clear"));
+    assert!(rendered.contains("larger·model,·fork,·or·/new"));
     assert!(app.capacity_recovery_action.is_none());
 }
 

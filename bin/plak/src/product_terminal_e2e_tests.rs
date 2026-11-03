@@ -870,7 +870,7 @@ fn injected_real_pty_model_response_and_slash_clear() -> Result<(), Box<dyn Erro
     child.send(format!("{prompt}\r").as_bytes())?;
     child.wait_screen("loopback turn committed")?;
     let clear = Instant::now();
-    child.send(b"/clear\r")?;
+    child.send(b"/new\r")?;
     let cleared = child.wait_stable_where("cleared shell without the prior turn", |screen| {
         screen.contains("%/")
             && screen.contains("/ commands")
@@ -1103,7 +1103,7 @@ fn injected_real_pty_long_work_transitions_remain_ordered_and_reopen_quiescent()
     }
 
     let clear = Instant::now();
-    child.send(b"/clear\r")?;
+    child.send(b"/new\r")?;
     let clear_sent = clear.elapsed();
     let clear_first_visible = std::cell::Cell::new(None);
     child.wait_stable_where("fresh shell after clear", |screen| {

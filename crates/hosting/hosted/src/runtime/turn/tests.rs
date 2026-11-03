@@ -670,7 +670,7 @@ fn protected_history_render_offers_clear_or_fork_without_text_classification() {
         None,
     );
     assert!(rendered.contains("protected history"));
-    assert!(rendered.contains("clear context or fork"));
+    assert!(rendered.contains("start a new session or fork"));
     assert!(rendered.contains("switch back to the model and account that produced it"));
     assert!(rendered.ends_with(&raw));
     assert_eq!(

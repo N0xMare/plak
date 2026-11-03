@@ -133,8 +133,8 @@ fn fresh_tui_launch_remains_unpublished_until_user_intent() {
 }
 
 /// "Edit raw config" returned from `$EDITOR`
-/// bound to an earlier session, discarding a rebind, a `/clear`, and every
-/// turn after it. `/clear` replaces the attached session inside the host;
+/// bound to an earlier session, discarding a rebind, a `/new`, and every
+/// turn after it. `/new` replaces the attached session inside the host;
 /// the launcher's own record still names the session the process started
 /// on, so every terminal re-entry adopts the host-authoritative identity
 /// the presentation carried out with it.
@@ -148,7 +148,7 @@ fn a_terminal_handoff_reenters_on_the_host_authoritative_session() {
 
     let mut launched = product_sessions::SessionRecord::new(cwd.clone());
     product_sessions::save_session(&paths, &mut launched).unwrap();
-    // What `/clear` produced inside the host while the TUI was attached.
+    // What `/new` produced inside the host while the TUI was attached.
     let mut cleared = product_sessions::SessionRecord::new(cwd.clone());
     product_sessions::save_session(&paths, &mut cleared).unwrap();
     assert_ne!(launched.id, cleared.id);
@@ -170,7 +170,7 @@ fn a_terminal_handoff_reenters_on_the_host_authoritative_session() {
 
     assert_eq!(
         record.id, cleared.id,
-        "the editor must return to /clear's session"
+        "the editor must return to /new's session"
     );
     assert!(
         !resume,

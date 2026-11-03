@@ -392,11 +392,11 @@ the last one ends. Its tool list is frozen when the session is created; a
 server that later changes a tool answers that tool with an error telling you to
 start a new session. The root's tools are frozen the same way: editing the
 `[root] agent` template's `tools`, a `[tools.*]` table or an `[mcp_servers.*]`
-table changes new sessions only, never one you resume, clear or switch models
-in. A session keeps its tools when you switch models: a session started on the
+table changes new sessions only, never one you resume, replace with `/new` or
+switch models in. A session keeps its tools when you switch models: a session started on the
 `[root] agent` template's account and model has the template's tools for its
 whole life, one started on any other model has none, and a switch to a model
-whose route cannot run one of the session's tools is refused (use `/clear` or
+whose route cannot run one of the session's tools is refused (use `/new` or
 start a new session on that model). A tool listed through `mcp:<id>` whose input schema Plak cannot represent
 is left out with a notice in the transcript, on `plak run` stderr and as a
 `tool.omitted` record in the session log; naming it as `mcp:<id>/<tool>`

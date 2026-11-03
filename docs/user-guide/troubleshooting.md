@@ -276,10 +276,10 @@ plak session delete SESSION_ID
 `gc` and deleting are never refused for lack of space. Deleting is refused while the session is
 open in a running plak, while its agent tree has a child that is still running
 or resumable or needs recovery (resolve it with `recover_agent`), and while other sessions continue from it or share its history
-(forks, rebinds, `/clear` targets); the refusal names what
+(forks, rebinds, `/new` targets); the refusal names what
 blocks it. A finished child's history and the agent tree are deleted with the
 session. A delete that failed part way finishes when run again (or with
-`plak session gc --all`). `/clear`, compaction, a fresh session, and `/recover`
+`plak session gc --all`). `/new`, compaction, a fresh session, and `/recover`
 do not reclaim retained state. The database file shrinks as `gc` and deletion
 return free pages; `plak doctor` shows the file size and its free bytes.
 Opening a session and recovering an interrupted turn keep
@@ -303,7 +303,7 @@ answer.
 A turn whose outcome Plak could not observe ends *recovery required*: a stream
 that broke where a provider-hosted action was possible, a process it could not
 prove had stopped, a checkpoint it could not confirm, a lease it lost. The
-session is not lost and you do not need `/clear`. The next thing you do that
+session is not lost and you do not need `/new`. The next thing you do that
 needs the session — a prompt, `/compact`, a model change — first reopens it in
 place and then runs. `/recover` in the TUI, `{"v":1,"kind":"recover","id":"r1"}`
 in `plak agent`, or `plak session recover SESSION_ID` does the same on its own.
@@ -477,8 +477,8 @@ see the [security specification](../spec/04-security-and-boundaries.md).
 The selected model or account cannot replay native or opaque history, or its
 exact replay artifact is no longer available. The request was refused before
 dispatch; this is not a context-capacity error. Switch back to the model and
-account that produced the history, clear context with `/clear`, or fork from a
-checkpoint before the incompatible history. Returning to the producing binding
+account that produced the history, start a new session with `/new`, or fork
+from a checkpoint before the incompatible history. Returning to the producing binding
 cannot restore an expired or missing replay artifact. `/recover` and `/compact`
 do not authorize replay on another binding.
 
@@ -887,8 +887,8 @@ resume the prompt queue.
 
 If scheduled compaction leaves a prompt queued, read the preceding compaction
 result and correct its cause before resuming. Retrying compaction is a new
-paid operation. Use `clear` in JSONL or `/clear` in the TUI to start a fresh
-conversation when retaining the old context is unnecessary. A compaction whose
+paid operation. Use `clear` in JSONL or `/new` in the TUI to start a new
+session when retaining the old context is unnecessary. A compaction whose
 outcome was never observed is closed without being sent again when the session
 is next used; queue resumption does not send it again either.
 If Plak stopped during compaction after publishing your answer, reopening keeps

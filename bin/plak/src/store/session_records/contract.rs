@@ -668,7 +668,7 @@ fn workflow_withdrawal_is_atomic_once_and_preserves_admitted_requests() {
                 .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryFork {}),
                 TranscriptRow::info(
                     NoticeScope::Recovery,
-                    "clear did not start; request a fresh conversation again explicitly"
+                    "new session did not start; request a new session again explicitly"
                 )
                 .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::StartFresh {}),
             ]

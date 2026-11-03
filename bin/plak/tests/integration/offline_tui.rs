@@ -1171,7 +1171,7 @@ fn a_terminal_killed_mid_turn_relaunches_with_one_recovery_note_and_answers() {
 }
 
 /// A turn a live process fenced shows the pending-recovery pill, never a
-/// `/clear` dead end; `/recover` reopens the session in place with one
+/// `/new` dead end; `/recover` reopens the session in place with one
 /// operator line, and the next prompt answers.
 #[test]
 fn a_fenced_turn_shows_the_recovery_pill_and_slash_recover_continues() {
@@ -1189,7 +1189,7 @@ fn a_fenced_turn_shows_the_recovery_pill_and_slash_recover_continues() {
         fenced.contains("next prompt recovers"),
         "the pill says how to continue:\n{fenced}"
     );
-    assert!(!fenced.contains("/clear"), "no /clear dead end:\n{fenced}");
+    assert!(!fenced.contains("/new"), "no /new dead end:\n{fenced}");
     terminal.send(b"/recover\r");
     let recovered = terminal.wait_screen("recovered an interrupted turn");
     assert_eq!(

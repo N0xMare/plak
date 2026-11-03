@@ -1,11 +1,11 @@
 //! The one confirmation pop-up for destructive operator actions (spec 02
 //! §5.7): stopping the root turn, interrupting, closing, stopping or resuming
-//! agents, stopping background processes, and quitting over them. It opens
-//! instantly: focus starts on the primary action; `Enter` presses the focused
-//! button; `Esc` cancels; `←`/`→` and `Tab` move between buttons at once; a
-//! click presses the button it lands on. Over the composer a printable key or
-//! `Backspace` closes the pop-up and is typed into the draft. In a full-page
-//! view those keys do nothing.
+//! agents, stopping background processes, and quitting or starting a new
+//! session over them. It opens instantly: focus starts on the primary action;
+//! `Enter` presses the focused button; `Esc` cancels; `←`/`→` and `Tab` move
+//! between buttons at once; a click presses the button it lands on. Over the
+//! composer a printable key or `Backspace` closes the pop-up and is typed into
+//! the draft. In a full-page view those keys do nothing.
 
 use super::{
     App, Block, BorderType, Borders, Clear, Frame, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
@@ -17,6 +17,7 @@ use crate::tui::tree_navigator::short_id;
 use crate::tui::{ApprovalChoice, agent_list};
 use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::views::ProcessStatus;
+use std::time::{Duration, Instant};
 
 const CANCEL: &str = "[ Cancel ]";
 /// How to confirm, under the consequence. Focus already sits on the action.
@@ -24,6 +25,10 @@ const HINT: &str = "Enter confirms · Esc cancels";
 const BUTTON_GAP: u16 = 2;
 /// A long process command wraps rather than widening the pop-up past this.
 const MAX_TEXT_WIDTH: usize = 72;
+/// How long a confirmed `/new` waits for its stopped processes to exit. The
+/// stop's grace is 2 s; past this the switch is dropped, not left armed.
+const NEW_AFTER_STOP_DEADLINE: Duration = Duration::from_secs(10);
+const NEW_AFTER_STOP_POLL: Duration = Duration::from_millis(100);
 
 /// What a confirmation button does. A settings reset names the row and reads
 /// the live draft when it is pressed, so a snapshot that arrives while the
@@ -33,6 +38,10 @@ enum ConfirmButton {
     Send(UserAction),
     ResetSetting(&'static str),
     Reload(crate::carry::ReloadTarget),
+    /// `/new` over live work: stop this session's background processes, then
+    /// start the new session once none runs. The switch's release interrupts
+    /// running agents, resumable with the session.
+    NewSession,
 }
 
 /// An open confirmation: what it says, the exact intents its buttons send,
@@ -60,6 +69,7 @@ impl DestructiveConfirm {
         match self.actions.first().map(|(_, button)| button) {
             Some(ConfirmButton::ResetSetting(_)) => "settings-reset",
             Some(ConfirmButton::Reload(_)) => "reload-carry",
+            Some(ConfirmButton::NewSession) => "new-session",
             Some(ConfirmButton::Send(UserAction::Interrupt)) => "turn-stop",
             Some(ConfirmButton::Send(UserAction::InterruptTopologyNode { .. })) => "interrupt",
             Some(ConfirmButton::Send(UserAction::CloseTopologyNode { .. })) => "close",
@@ -422,6 +432,38 @@ impl App {
         );
     }
 
+    /// `/new` while agents or background processes are live: name them and
+    /// offer to stop them first.
+    pub(super) fn open_new_session_confirm(&mut self) {
+        let mut lines = vec!["This session still has live work:".to_owned()];
+        if self.tree_live_descendants > 0 {
+            lines.push(format!(
+                "{}: interrupted, resumable.",
+                plural(
+                    self.tree_live_descendants,
+                    "running agent",
+                    "running agents"
+                )
+            ));
+        }
+        if self.background_processes > 0 {
+            lines.push(format!(
+                "{}: stopped; work in flight is lost.",
+                plural(
+                    self.background_processes,
+                    "background process",
+                    "background processes"
+                )
+            ));
+        }
+        lines.push("This session stays resumable with /resume.".to_owned());
+        self.show_confirm(
+            "Start a new session?".to_owned(),
+            lines,
+            vec![("[ Stop work + new ]", ConfirmButton::NewSession)],
+        );
+    }
+
     pub(super) fn open_reload_confirm(
         &mut self,
         target: crate::carry::ReloadTarget,
@@ -553,7 +595,7 @@ impl App {
             .actions
             .iter()
             .map(|(_, button)| match button {
-                ConfirmButton::ResetSetting(_) => true,
+                ConfirmButton::ResetSetting(_) | ConfirmButton::NewSession => true,
                 ConfirmButton::Reload(_) => {
                     self.reload_refusal().is_none() && !self.reload_source_changed()
                 }
@@ -603,6 +645,7 @@ impl App {
                 return None;
             }
             ConfirmButton::ResetSetting(key) => return self.commit_settings_reset(key),
+            ConfirmButton::NewSession => return Some(self.stop_work_then_new_session()),
             ConfirmButton::Send(action) => action,
         };
         match action {
@@ -628,6 +671,75 @@ impl App {
             }
             action => Some(action),
         }
+    }
+
+    /// `[ Stop work + new ]`: with no process running the switch starts now;
+    /// otherwise stop every process and start it once none runs.
+    fn stop_work_then_new_session(&mut self) -> UserAction {
+        if self.background_processes == 0 {
+            return UserAction::ClearSession;
+        }
+        self.new_after_stop = Some(Instant::now() + NEW_AFTER_STOP_DEADLINE);
+        UserAction::StopProcesses {
+            id: None,
+            interrupt: false,
+        }
+    }
+
+    /// The armed `/new`, once its stopped processes are gone and the root is
+    /// idle; at its deadline it is dropped with a note instead.
+    pub(super) fn new_session_after_stop(&mut self, now: Instant) -> Option<UserAction> {
+        let deadline = self.new_after_stop?;
+        if self.background_processes == 0 && !self.busy {
+            self.new_after_stop = None;
+            return Some(UserAction::ClearSession);
+        }
+        if now < deadline {
+            return None;
+        }
+        self.new_after_stop = None;
+        let note = match self.background_processes {
+            0 => "new session not started: a root turn started; run /new when it ends".to_owned(),
+            1 => "new session not started: 1 background process is still running; stop it in /ps, then run /new".to_owned(),
+            count => format!(
+                "new session not started: {count} background processes are still running; stop them in /ps, then run /new"
+            ),
+        };
+        self.push_block(ScrollBlock::System(note));
+        None
+    }
+
+    /// When the loop must look again for the armed `/new`: the process count
+    /// is published without a wake, so it is polled until the deadline.
+    pub(super) fn new_after_stop_wake(&self, now: Instant) -> Option<Instant> {
+        self.new_after_stop
+            .map(|deadline| deadline.min(now + NEW_AFTER_STOP_POLL))
+    }
+
+    /// A command that starts work or changes the session drops an armed
+    /// `/new`, so it never switches away from what the operator did next.
+    pub(super) fn drop_new_after_stop_for(&mut self, action: &UserAction) {
+        if self.new_after_stop.is_none()
+            || !matches!(
+                action,
+                UserAction::Prompt(_)
+                    | UserAction::FollowUp(_)
+                    | UserAction::Steer(_)
+                    | UserAction::ClearSession
+                    | UserAction::Compact
+                    | UserAction::ResumeSession { .. }
+                    | UserAction::ResumeSessionHandoff { .. }
+                    | UserAction::ForkSession { .. }
+                    | UserAction::RetryAttach
+                    | UserAction::Recover
+            )
+        {
+            return;
+        }
+        self.new_after_stop = None;
+        self.push_block(ScrollBlock::System(
+            "the confirmed /new was dropped: another command came first".to_owned(),
+        ));
     }
 
     /// Restores one settings key on the draft as it is now. A snapshot that
