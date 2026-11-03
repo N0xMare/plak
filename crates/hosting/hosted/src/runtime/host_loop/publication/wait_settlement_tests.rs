@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 use crate::runtime::test_kit::BlockOn as _;
 
-use super::{NodeActor, TerminalErrorPresentation, TurnHostOutcome};
+use super::{RootActor, TerminalErrorPresentation, TurnHostOutcome};
 use crate::agent::TerminalExchange;
 use crate::agent_tree::{MailDurableState, ProductAgentTree};
 use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
@@ -16,7 +16,7 @@ use std::time::Instant;
 
 /// One host over a tree whose root holds one unread Result envelope.
 pub(super) fn with_unread_result(
-    test: impl FnOnce(&mut NodeActor<'_, TestExtension>, &Arc<ProductTopologyRuntime>),
+    test: impl FnOnce(&mut RootActor<'_, TestExtension>, &Arc<ProductTopologyRuntime>),
 ) {
     let dir = tempfile::tempdir().unwrap();
     let (config, _) = fresh_injected_attached_host(dir.path());
@@ -48,7 +48,7 @@ pub(super) fn with_unread_result(
         .unwrap();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -62,11 +62,12 @@ pub(super) fn with_unread_result(
 /// A bare wait under a fresh call id, which canonical history never
 /// holds: it acknowledges the unread envelope and keeps one receipt.
 pub(super) fn wait_outside_history(
-    host: &NodeActor<'_, TestExtension>,
+    host: &RootActor<'_, TestExtension>,
     runtime: &Arc<ProductTopologyRuntime>,
 ) {
     let tree_id = runtime.read(|tree| tree.tree_id.clone()).unwrap();
     let receipt = host
+        .role
         .executor
         .block_on(crate::agent::invoke_topology_tool_on_hub(
             &tree_id,
@@ -132,10 +133,15 @@ fn a_failure_without_a_committed_exchange_returns_wait_mail_to_unread() {
         let message_id = runtime
             .read(|tree| tree.messages().keys().next().cloned().unwrap())
             .unwrap();
-        let item = crate::sessions::queue::enqueue(&mut host.config.session.pending_queue, "next")
+        let item =
+            crate::sessions::queue::enqueue(&mut host.role.config.session.pending_queue, "next")
+                .unwrap();
+        host.role.config.session.record_prompt(item.text.clone());
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
             .unwrap();
-        host.config.session.record_prompt(item.text.clone());
-        host.config.store.save(&mut host.config.session).unwrap();
         host.block(async |host| {
             host.run_prompt(item.text.clone(), Some(item), false, None)
                 .await
@@ -143,9 +149,10 @@ fn a_failure_without_a_committed_exchange_returns_wait_mail_to_unread() {
         .unwrap();
         assert_eq!(receipts_and_unread(runtime).0, 0);
         assert!(
-            host.config
+            host.role
+                .config
                 .store
-                .load_intents(&host.config.session.id)
+                .load_intents(&host.role.config.session.id)
                 .unwrap()
                 .submissions
                 .iter()
@@ -204,18 +211,20 @@ let seq = tree.feed_cursor(&session.to_string()) + 1;
             .await
         });
         assert_eq!(receipts_and_unread(runtime), (0, 0));
-        host.executor
+        host.role
+            .executor
             .block_on(host.opened.detach())
             .unwrap()
             .unwrap();
-        let root = host.config.product_home.parent().unwrap();
+        let root = host.role.config.product_home.parent().unwrap();
         let (mut config, _) = fresh_injected_attached_host(root);
-        config.state_roots = host.config.state_roots.clone();
-        config.store = host.config.store.clone();
-        config.session = config.store.load(&host.config.session.id).unwrap();
-        config.runtime_factory = host.config.runtime_factory.clone();
+        config.state_roots = host.role.config.state_roots.clone();
+        config.store = host.role.config.store.clone();
+        config.session = config.store.load(&host.role.config.session.id).unwrap();
+        config.runtime_factory = host.role.config.runtime_factory.clone();
         let mut reopened =
-            NodeActor::open_blocking(config, host.actions, host.events.clone(), None).unwrap();
+            RootActor::open_blocking(config, host.role.actions, host.role.events.clone(), None)
+                .unwrap();
         assert_eq!(receipts_and_unread(runtime), (0, 0));
         assert!(
             runtime
@@ -226,11 +235,12 @@ let seq = tree.feed_cursor(&session.to_string()) + 1;
                 .unwrap()
         );
         reopened
+            .role
             .executor
             .block_on(reopened.opened.detach())
             .unwrap()
             .unwrap();
         host.opened = reopened.opened;
-        host.config.session = reopened.config.session;
+        host.role.config.session = reopened.role.config.session;
     });
 }

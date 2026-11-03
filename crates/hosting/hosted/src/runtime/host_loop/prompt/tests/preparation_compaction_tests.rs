@@ -69,16 +69,21 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     seed_compactable_history(&host);
     let source = host.opened.locator();
     let item = host
+        .role
         .config
         .session
         .enqueue_live("p".repeat(50_000))
         .unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
     events.try_iter().for_each(drop);
     let path = evidence.clone();
     let control = std::thread::spawn(move || {
@@ -121,9 +126,9 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
         3,
         "two seeded turns, exactly one fold, no new root or follow-on"
     );
-    assert_eq!(host.config.session.pending_queue, [item]);
+    assert_eq!(host.role.config.session.pending_queue, [item]);
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
     let observed: Vec<_> = events.try_iter().collect();
@@ -144,9 +149,10 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
     host.block(async |host| host.release().await).unwrap();
 }
 
-fn seed_compactable_history(host: &NodeActor<'_, TestExtension>) {
+fn seed_compactable_history(host: &RootActor<'_, TestExtension>) {
     for text in ["older intent", "latest intent"] {
-        host.executor
+        host.role
+            .executor
             .block_on(async {
                 host.opened
                     .agent()
@@ -169,18 +175,23 @@ fn context_stop_skips_a_due_paid_compaction_and_preserves_the_locator() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     seed_compactable_history(&host);
     let source = host.opened.locator();
     let item = host
+        .role
         .config
         .session
         .enqueue_live("p".repeat(50_000))
         .unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
-    host.prep_hooks.called.clear();
-    host.prep_hooks.hook = Some((
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    host.role.prep_hooks.called.clear();
+    host.role.prep_hooks.hook = Some((
         preparation::Stage::Context,
         Box::pin(async move {
             actions.send(UserAction::Interrupt).unwrap();
@@ -192,7 +203,7 @@ fn context_stop_skips_a_due_paid_compaction_and_preserves_the_locator() {
     })
     .unwrap();
     {
-        let calls = &host.prep_hooks.called;
+        let calls = &host.role.prep_hooks.called;
         assert!(calls.contains(&preparation::Stage::Context));
         assert!(
             !calls.contains(&preparation::Stage::Compact),
@@ -240,15 +251,20 @@ fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
     });
     let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     seed_compactable_history(&host);
     let item = host
+        .role
         .config
         .session
         .enqueue_live("p".repeat(50_000))
         .unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
     let mut invocation = crate::runtime::oneshot::OneShotState {
         attempted: true,
         resume_tree: false,
@@ -266,9 +282,10 @@ fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
         .expect_err("compaction error is not an interrupted one-shot");
     assert!(error.message().contains("injected compaction failure"));
     let intents = host
+        .role
         .config
         .store
-        .load_intents(&host.config.session.id)
+        .load_intents(&host.role.config.session.id)
         .unwrap();
     assert!(matches!(&intents.pause_causes.last().unwrap().value,
         sessions::projector::HostPauseCause::UnrecordedRefusal {reason} if reason.contains("injected compaction failure")));

@@ -2,7 +2,7 @@
 use super::RootRecovery;
 
 use super::{
-    ExceptionalTerminalProjection, Instant, InterruptWatch, NodeActor, SessionEvent,
+    ExceptionalTerminalProjection, Instant, InterruptWatch, RootActor, SessionEvent,
     SessionQueueDrainState, TurnHostOutcome, commit_definite_failure_projection,
     commit_exceptional_terminal_projection, commit_session_update,
     context_capacity_recovery_guidance, elapsed_ms_since, emit_unavailable_context, handle_compact,
@@ -19,7 +19,7 @@ pub(super) enum TerminalErrorPresentation {
     Return,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Terminal publication joins cached outcome, durable feed catch-up, pending notices, and compaction under one publication fence."
@@ -54,9 +54,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             }) => {
                 let transcript_line = super::super::turn::completed_turn_row(&assistant);
                 match commit_session_update(
-                    &*self.config.store,
-                    &self.config.home,
-                    &mut self.config.session,
+                    &*self.role.config.store,
+                    &self.role.config.home,
+                    &mut self.role.config.session,
                     |candidate| {
                         candidate.append_transcript(transcript_line);
                         if finish_reason == plakous::model::FinishReason::Refusal {
@@ -68,66 +68,70 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     Ok(true) => {
                         {
                             observe_boundary(
-                                self.config.runtime_factory.as_ref(),
+                                self.role.config.runtime_factory.as_ref(),
                                 HostWorkflow::SendNow,
                                 HostBoundary::ProductCommitted,
                             );
                         }
                         if finish_reason == plakous::model::FinishReason::Length {
-                            let _ = self.events.send(ContentEvent::Row(TranscriptRow::warning(
-                                NoticeScope::Turn,
-                                super::super::turn::truncation_note(wire_output_limit),
-                            )));
+                            let _ =
+                                self.role
+                                    .events
+                                    .send(ContentEvent::Row(TranscriptRow::warning(
+                                        NoticeScope::Turn,
+                                        super::super::turn::truncation_note(wire_output_limit),
+                                    )));
                         }
                         if assistant.is_empty()
                             && finish_reason != plakous::model::FinishReason::Refusal
                         {
-                            let _ = self.events.notice(TranscriptRow::warning(NoticeScope::Turn,
+                            let _ = self.role.events.notice(TranscriptRow::warning(NoticeScope::Turn,
                                 "turn finished with no visible text (empty stream); try again or choose another profile",
                             ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryOrChooseProfile {}));
                         }
                         if assistant.is_empty() {
                             log_ev(
-                                self.log.as_ref(),
-                                &self.config,
+                                self.role.log.as_ref(),
+                                &self.role.config,
                                 SessionEvent::new("turn.assistant_empty").u64("chars", 0),
                             );
                         } else {
                             log_ev(
-                                self.log.as_ref(),
-                                &self.config,
+                                self.role.log.as_ref(),
+                                &self.role.config,
                                 SessionEvent::new("turn.assistant")
                                     .str("text", &assistant)
                                     .u64("chars", assistant.len() as u64),
                             );
-                            let _ = self.events.send(ContentEvent::AssistantDone);
+                            let _ = self.role.events.send(ContentEvent::AssistantDone);
                         }
                         if finish_reason == plakous::model::FinishReason::Refusal {
-                            let _ = self.events.send(ContentEvent::ModelRefusal {
+                            let _ = self.role.events.send(ContentEvent::ModelRefusal {
                                 detail: finish_detail,
                             });
                         }
-                        self.events.resync_transcript_gaps();
+                        self.role.events.resync_transcript_gaps();
                         log_ev(
-                            self.log.as_ref(),
-                            &self.config,
+                            self.role.log.as_ref(),
+                            &self.role.config,
                             SessionEvent::new("turn.completed")
                                 .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                         );
                         if let Err(error) = report_context(
                             &self.opened,
-                            &self.events,
+                            &self.role.events,
                             "after turn publication",
-                            self.config
+                            self.role
+                                .config
                                 .target
                                 .native_provider()
                                 .is_some_and(native_compact_facet),
-                            self.config.session.context_counters(),
+                            self.role.config.session.context_counters(),
                         )
                         .await
                         {
-                            emit_unavailable_context(&self.events);
-                            let _ = self.events.notice(
+                            emit_unavailable_context(&self.role.events);
+                            let _ = self.role.events.notice(
                                 TranscriptRow::error(NoticeScope::Turn, error.message().to_owned())
                                     .with_optional_remedy(error.remedy()),
                             );
@@ -136,18 +140,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     Ok(false) => unreachable!("completion update always changes the candidate"),
                     Err(_) => {
                         completed = false;
-                        self.recovery = RootRecovery::Due;
+                        self.role.recovery = RootRecovery::Due;
                         let _ = commit_session_update(
-                            &*self.config.store,
-                            &self.config.home,
-                            &mut self.config.session,
+                            &*self.role.config.store,
+                            &self.role.config.home,
+                            &mut self.role.config.session,
                             |candidate| {
                                 candidate.queue_drain_state =
                                     SessionQueueDrainState::RestoredPaused;
                                 true
                             },
                         );
-                        let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
+                        let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Host,
                             "turn completed but its product transcript could not be committed; the session reopens in place and continues"
                                 ,
                         ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
@@ -161,7 +165,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             }) => {
                 let exact_source = self.opened.locator().checkpoint_id() == source_checkpoint;
                 if !exact_source {
-                    let _ = self.events.notice(TranscriptRow::error(NoticeScope::Compaction,
+                    let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Compaction,
                         "context-capacity result did not match the exact attached checkpoint; compact recovery was refused"
                             ,
                     ));
@@ -172,6 +176,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     plakous_host_protocol::ContextCapacityRecovery::Protected
                 };
                 let native = self
+                    .role
                     .config
                     .target
                     .native_provider()
@@ -184,12 +189,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     recovery,
                     plakous_host_protocol::ContextCapacityRecovery::Compactable
                 ) && exact_source
-                    && self.config.compaction_enabled
+                    && self.role.config.compaction_enabled
                     && !self.opened.paid_fold_failed_since_last_round();
                 let saved = commit_session_update(
-                    &*self.config.store,
-                    &self.config.home,
-                    &mut self.config.session,
+                    &*self.role.config.store,
+                    &self.role.config.home,
+                    &mut self.role.config.session,
                     |candidate| {
                         candidate.queue_drain_state = SessionQueueDrainState::RestoredPaused;
                         candidate.append_transcript(TranscriptRow::error(
@@ -200,25 +205,26 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     },
                 );
                 if saved.is_err() {
-                    self.recovery = RootRecovery::Due;
-                    self.config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-                    let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
+                    self.role.recovery = RootRecovery::Due;
+                    self.role.config.session.queue_drain_state =
+                        SessionQueueDrainState::RestoredPaused;
+                    let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Host,
                         "context-capacity stop could not be committed; queue drain remains fail-closed",
                     ));
                     return false;
                 }
                 if auto_compact {
-                    let _ = self.events.notice(TranscriptRow::warning(NoticeScope::Turn,
+                    let _ = self.role.events.notice(TranscriptRow::warning(NoticeScope::Turn,
                         "this turn stopped at the context limit; compacting once for subsequent prompts. The failed turn will not be retried automatically",
                     ));
-                    self.idle_entry_pass_due = true;
+                    self.role.idle_entry_pass_due = true;
                     match handle_compact(
-                        InterruptWatch::new(self.actions, &self.interrupt_state),
-                        &mut self.config,
+                        InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
+                        &mut self.role.config,
                         &self.opened,
-                        &mut self.stderr_buf,
-                        &self.events,
-                        self.log.as_ref(),
+                        &mut self.role.stderr_buf,
+                        &self.role.events,
+                        self.role.log.as_ref(),
                         sessions::ProductCompactReason::CapacityRecovery,
                         None,
                     )
@@ -228,15 +234,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             completed = true;
                             if let Err(error) = report_context(
                                 &self.opened,
-                                &self.events,
+                                &self.role.events,
                                 "after compaction",
                                 native,
-                                self.config.session.context_counters(),
+                                self.role.config.session.context_counters(),
                             )
                             .await
                             {
-                                emit_unavailable_context(&self.events);
-                                let _ = self.events.notice(
+                                emit_unavailable_context(&self.role.events);
+                                let _ = self.role.events.notice(
                                     TranscriptRow::error(
                                         NoticeScope::Turn,
                                         error.message().to_owned(),
@@ -253,19 +259,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                 segment_limit,
                             );
                             if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                                let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
-                                    NoticeScope::Turn,
-                                    error,
-                                )));
+                                let _ =
+                                    self.role
+                                        .events
+                                        .send(ContentEvent::Row(TranscriptRow::error(
+                                            NoticeScope::Turn,
+                                            error,
+                                        )));
                             }
-                            let _ = self.events.notice(
+                            let _ = self.role.events.notice(
                                 TranscriptRow::error(
                                     NoticeScope::Compaction,
                                     format!("compact: {}", compact_error.message()),
                                 )
                                 .with_optional_remedy(compact_error.remedy()),
                             );
-                            let _ = self.events.notice(
+                            let _ = self.role.events.notice(
                                 TranscriptRow::info(NoticeScope::Turn, guidance)
                                     .with_optional_remedy(
                                         super::super::compact::context_capacity_recovery_remedy(
@@ -278,6 +287,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                     ),
                             );
                             let _ = self
+                                .role
                                 .events
                                 .send(ContentEvent::ContextCapacityRecovery(Some(recovery)));
                         }
@@ -290,12 +300,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         segment_limit,
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
-                            NoticeScope::Turn,
-                            error,
-                        )));
+                        let _ = self
+                            .role
+                            .events
+                            .send(ContentEvent::Row(TranscriptRow::error(
+                                NoticeScope::Turn,
+                                error,
+                            )));
                     }
-                    let _ = self.events.notice(
+                    let _ = self.role.events.notice(
                         TranscriptRow::info(NoticeScope::Turn, guidance).with_optional_remedy(
                             super::super::compact::context_capacity_recovery_remedy(
                                 recovery,
@@ -307,13 +320,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         ),
                     );
                     let _ = self
+                        .role
                         .events
                         .send(ContentEvent::ContextCapacityRecovery(Some(recovery)));
                 }
             }
             Ok(TurnHostOutcome::AdmissionRejected { error, remedy, .. }) => {
                 if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                    let _ = self.events.notice(
+                    let _ = self.role.events.notice(
                         TranscriptRow::error(NoticeScope::Turn, error)
                             .with_optional_remedy(remedy.as_ref()),
                     );
@@ -326,21 +340,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 ..
             }) => {
                 if let Ok(()) = commit_definite_failure_projection(
-                    &mut self.config.session,
+                    &mut self.role.config.session,
                     &error,
-                    |candidate| self.config.store.save(candidate),
+                    |candidate| self.role.config.store.save(candidate),
                     remedy.as_ref(),
                 ) {
                     log_ev(
-                        self.log.as_ref(),
-                        &self.config,
+                        self.role.log.as_ref(),
+                        &self.role.config,
                         SessionEvent::new("turn.failed")
                             .str("disposition", "definite")
                             .str("msg", &error)
                             .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(ContentEvent::Row(
+                        let _ = self.role.events.send(ContentEvent::Row(
                             TranscriptRow::error(NoticeScope::Turn, error.clone())
                                 .with_optional_remedy(remedy.as_ref()),
                         ));
@@ -348,49 +362,49 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     if !transient
                         .is_some_and(|failure| self.schedule_transient_resume(failure, &error))
                     {
-                        let _ = self.events.notice(TranscriptRow::info(NoticeScope::Turn,
+                        let _ = self.role.events.notice(TranscriptRow::info(NoticeScope::Turn,
                             "turn failed definitively; the durable session remains available for a new prompt",
                         ));
                     }
                 } else {
-                    self.recovery = RootRecovery::Due;
-                    let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
+                    self.role.recovery = RootRecovery::Due;
+                    let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Host,
                         "definite turn failure could not be saved; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
             Ok(TurnHostOutcome::RecoveryRequired { error, remedy }) => {
-                self.recovery = RootRecovery::Due;
+                self.role.recovery = RootRecovery::Due;
                 let saved = commit_exceptional_terminal_projection(
-                    &mut self.config.session,
+                    &mut self.role.config.session,
                     ExceptionalTerminalProjection::RecoveryRequired(&error),
-                    |candidate| self.config.store.save(candidate),
+                    |candidate| self.role.config.store.save(candidate),
                     remedy.as_ref(),
                 );
                 if saved.is_ok() {
                     log_ev(
-                        self.log.as_ref(),
-                        &self.config,
+                        self.role.log.as_ref(),
+                        &self.role.config,
                         SessionEvent::new("turn.recovery_required")
                             .str("disposition", "recovery_required")
                             .str("msg", &error)
                             .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(ContentEvent::Row(
+                        let _ = self.role.events.send(ContentEvent::Row(
                             TranscriptRow::error(NoticeScope::Turn, error)
                                 .with_optional_remedy(remedy.as_ref()),
                         ));
                     }
-                    let _ = self.events.notice(
+                    let _ = self.role.events.notice(
                         TranscriptRow::info(NoticeScope::Recovery, RECOVERY_PENDING_NOTE)
                             .with_remedy(
                             plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {},
                         ),
                     );
                 } else {
-                    let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
+                    let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Host,
                         "recovery-required terminal projection could not be committed; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
@@ -398,59 +412,63 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             }
             Ok(TurnHostOutcome::Interrupted { assistant, .. }) => {
                 let saved = commit_exceptional_terminal_projection(
-                    &mut self.config.session,
+                    &mut self.role.config.session,
                     ExceptionalTerminalProjection::Interrupted(&assistant),
-                    |candidate| self.config.store.save(candidate),
+                    |candidate| self.role.config.store.save(candidate),
                     None,
                 );
                 if saved.is_ok() {
                     log_ev(
-                        self.log.as_ref(),
-                        &self.config,
+                        self.role.log.as_ref(),
+                        &self.role.config,
                         SessionEvent::new("control.interrupt"),
                     );
                     let _ = self
+                        .role
                         .events
                         .send(ContentEvent::Row(TranscriptRow::Interrupted));
                 } else {
-                    self.recovery = RootRecovery::Due;
-                    let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
+                    self.role.recovery = RootRecovery::Due;
+                    let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Host,
                         "interrupted terminal projection could not be committed; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
             Err(msg) => {
-                self.recovery = RootRecovery::Due;
+                self.role.recovery = RootRecovery::Due;
                 let saved = commit_exceptional_terminal_projection(
-                    &mut self.config.session,
+                    &mut self.role.config.session,
                     ExceptionalTerminalProjection::UnresolvedError(&msg),
-                    |candidate| self.config.store.save(candidate),
+                    |candidate| self.role.config.store.save(candidate),
                     None,
                 );
                 if saved.is_ok() {
                     // drive_one_turn already applies operator_facing_agent_error.
                     log_ev(
-                        self.log.as_ref(),
-                        &self.config,
+                        self.role.log.as_ref(),
+                        &self.role.config,
                         SessionEvent::new("error")
                             .str("code", "agent")
                             .str("msg", &msg),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
-                            NoticeScope::Turn,
-                            msg,
-                        )));
+                        let _ = self
+                            .role
+                            .events
+                            .send(ContentEvent::Row(TranscriptRow::error(
+                                NoticeScope::Turn,
+                                msg,
+                            )));
                     }
-                    let _ = self.events.notice(
+                    let _ = self.role.events.notice(
                         TranscriptRow::info(NoticeScope::Recovery, RECOVERY_PENDING_NOTE)
                             .with_remedy(
                             plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {},
                         ),
                     );
                 } else {
-                    let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
+                    let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Host,
                         "failed terminal projection could not be committed; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
@@ -466,14 +484,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// leaves them for the settlement at the next admission or open.
     async fn settle_terminal_waits(&self, exchange: crate::agent::TerminalExchange) {
         let settled = super::super::result_mail::settle_terminal_waits(
-            &self.config.topology_rows(),
-            &self.config.session,
+            &self.role.config.topology_rows(),
+            &self.role.config.session,
             &self.opened,
             exchange,
         )
         .await;
         if let Err(error) = settled {
-            let _ = self.events.notice(TranscriptRow::error(
+            let _ = self.role.events.notice(TranscriptRow::error(
                 NoticeScope::Tree,
                 format!("wait receipt settlement failed: {error}"),
             ));

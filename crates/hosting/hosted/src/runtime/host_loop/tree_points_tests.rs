@@ -117,16 +117,23 @@ fn a_refused_idle_entry_pass_is_retried_by_the_next_tick() {
     let _runtime = insert_tree(&config);
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = super::NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
+    let mut host = super::RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
     let opened = root_tree_passes_of(&id).len();
 
     refuse_root_tree_passes(&id, 1);
-    host.idle_entry_pass_due = true;
+    host.role.idle_entry_pass_due = true;
     host.block(async |host| host.project().await);
-    assert!(host.idle_entry_pass_due, "the refused pass is due again");
+    assert!(
+        host.role.idle_entry_pass_due,
+        "the refused pass is due again"
+    );
     host.block(async |host| host.project().await);
-    assert!(!host.idle_entry_pass_due, "the retried pass succeeded");
+    assert!(!host.role.idle_entry_pass_due, "the retried pass succeeded");
     host.block(async |host| host.project().await);
 
     assert_eq!(

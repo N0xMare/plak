@@ -2,7 +2,7 @@
 
 use super::{
     CliFailure, CliResult, ContextDisposition, ContextQuery, Duration, HeldUsage, HostConfig,
-    Instant, InterruptWatchState, NodeActor, Ordering, RefCell, Sender, SessionEvent,
+    Instant, InterruptWatchState, Ordering, RefCell, RootActor, Sender, SessionEvent,
     SessionLedger, SessionLog, SessionQueueDrainState, SessionQueueItem, SubscriptionUsageRefresh,
     TreeSnapshotPush, build_session_from_config, elapsed_ms_since, emit_agent_plan_notes,
     emit_prompt_history, emit_queue_snapshot, emit_restored_paused_note, emit_unavailable_context,
@@ -14,7 +14,7 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
-impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
+impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Host open reconstructs projection, workflow settlements, queued submissions, and live attachments before exposing a ready session."
@@ -510,45 +510,47 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
             )
         });
         let mut host = Self {
-            role: super::RolePolicy::ROOT,
-            _storage_notices: storage_notices,
-            config,
-            actions,
-            events,
+            policy: super::RolePolicy::ROOT,
             opened,
             quit_started_at: None,
             quit_abandoned_turn: false,
             quit_job_stops: None,
-            executor,
-            log,
-            stderr_buf,
-            interrupt_state,
-            pending_start,
-            pending_resume: None,
-            transient_resumes_used: 0,
-            pending_storage_admission: None,
-            last_tree_revision,
-            job_events: super::super::job_events::JobEvents::default(),
-            last_tree_observed_at,
-            child_wake: super::wake::RootWake::default(),
-            storage_interrupted: false,
-            pending_track: super::pending::PendingTrack::default(),
-            recovery: if recovery_required {
-                super::RootRecovery::Due
-            } else {
-                super::RootRecovery::Clear
+            role: super::RootRole {
+                _storage_notices: storage_notices,
+                config,
+                actions,
+                events,
+                executor,
+                log,
+                stderr_buf,
+                interrupt_state,
+                pending_start,
+                pending_resume: None,
+                transient_resumes_used: 0,
+                pending_storage_admission: None,
+                last_tree_revision,
+                job_events: super::super::job_events::JobEvents::default(),
+                last_tree_observed_at,
+                child_wake: super::wake::RootWake::default(),
+                storage_interrupted: false,
+                pending_track: super::pending::PendingTrack::default(),
+                recovery: if recovery_required {
+                    super::RootRecovery::Due
+                } else {
+                    super::RootRecovery::Clear
+                },
+                recovered_at_open: abandoned_turn.is_some(),
+                held_usage,
+                session_ledger,
+                pending_usage,
+                subscription_usage_refresh,
+                readiness: super::super::shell::ReadinessRefresh::new(),
+                live: None,
+                projection_finished: false,
+                shown_skill_notices: crate::skills::ShownSkillNotices::default(),
+                prep_hooks: super::prompt::preparation::Hooks::new(),
+                idle_entry_pass_due: false,
             },
-            recovered_at_open: abandoned_turn.is_some(),
-            held_usage,
-            session_ledger,
-            pending_usage,
-            subscription_usage_refresh,
-            readiness: super::super::shell::ReadinessRefresh::new(),
-            live: None,
-            projection_finished: false,
-            shown_skill_notices: crate::skills::ShownSkillNotices::default(),
-            prep_hooks: super::prompt::preparation::Hooks::new(),
-            idle_entry_pass_due: false,
         };
         host.publish_pending_continuation();
         host.publish_projected_usage();

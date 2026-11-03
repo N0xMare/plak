@@ -93,7 +93,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
         });
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sender, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(sender),
@@ -115,7 +115,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
         "outage spans terminal publication"
     );
     assert!(
-        host.recovery.blocked(),
+        host.role.recovery.blocked(),
         "the refused projection fences admission"
     );
     assert!(refused.load(Ordering::SeqCst) > 0);
@@ -142,7 +142,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
         .block(async |host| host.next_prompt(None).await)
         .unwrap();
     assert!(
-        !host.recovery.blocked(),
+        !host.role.recovery.blocked(),
         "the new prompt recovered in place"
     );
     run_prompt_step(&mut host, step);
@@ -152,7 +152,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
             .any(|event| matches!(event, HostEvent::Recovered { .. }))
     );
     assert_retained_queue(&durable.load(&id).unwrap(), &seen, &queued);
-    assert_retained_queue(&host.config.session, &seen, &queued);
+    assert_retained_queue(&host.role.config.session, &seen, &queued);
     actions.send(UserAction::ResumeQueueDrain).unwrap();
     let step = host
         .block(async |host| host.next_prompt(None).await)
@@ -167,7 +167,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
     host.block(async |host| host.release().await).unwrap();
 }
 
-fn run_prompt_step(host: &mut NodeActor<'_, TestExtension>, step: HostStep) {
+fn run_prompt_step(host: &mut RootActor<'_, TestExtension>, step: HostStep) {
     let HostStep::Prompt {
         text,
         queued_delivery,

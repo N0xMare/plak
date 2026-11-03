@@ -37,8 +37,9 @@ fn retained_approval_after_owner_loss(switch: bool) {
     let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut emitter = super::super::Sender::over(sent);
     emitter.recorded = Some(recorded.clone());
-    let mut host = NodeActor::open_blocking(config, &actions, emitter.clone(), None).unwrap();
+    let mut host = RootActor::open_blocking(config, &actions, emitter.clone(), None).unwrap();
     let turn_id = host
+        .role
         .executor
         .block_on(async {
             let mut turn = host
@@ -71,13 +72,17 @@ fn retained_approval_after_owner_loss(switch: bool) {
             id
         })
         .unwrap();
-    let target = host.config.session.id.clone();
+    let target = host.role.config.session.id.clone();
     if switch {
-        host.config.store.save(&mut host.config.session).unwrap();
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
+            .unwrap();
         let (mut source, _) = scripted_host_with(root.path(), script);
-        source.store = host.config.store.clone();
-        source.runtime_factory = host.config.runtime_factory.clone();
-        host = NodeActor::open_blocking(source, &actions, emitter, None).unwrap();
+        source.store = host.role.config.store.clone();
+        source.runtime_factory = host.role.config.runtime_factory.clone();
+        host = RootActor::open_blocking(source, &actions, emitter, None).unwrap();
     }
     observed.try_iter().for_each(drop);
     recorded.lock().unwrap().clear();
@@ -104,14 +109,15 @@ fn retained_approval_after_owner_loss(switch: bool) {
         }
         (offered, observed, before_offer)
     });
-    host.recovery = RootRecovery::Due;
+    host.role.recovery = RootRecovery::Due;
     let outcome = if switch {
-        host.executor
+        host.role
+            .executor
             .block_on(crate::runtime::clear::resume_session_switch(
-                &mut host.config,
+                &mut host.role.config,
                 &mut host.opened,
-                &mut host.stderr_buf,
-                &host.events,
+                &mut host.role.stderr_buf,
+                &host.role.events,
                 &target,
             ))
             .expect("the executor drives the call")
@@ -121,6 +127,7 @@ fn retained_approval_after_owner_loss(switch: bool) {
     };
     let pending = host.opened.has_recovered_turn();
     let feed = host
+        .role
         .executor
         .block_on(crate::agent::read_tree_feed(
             host.opened.sessions(),
@@ -217,10 +224,10 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host =
-            NodeActor::open_blocking(config, &rx, super::super::Sender::over(tx), None).unwrap();
+            RootActor::open_blocking(config, &rx, super::super::Sender::over(tx), None).unwrap();
         if with_submission {
             let item = sessions::QueueItem::new("interrupted prompt");
-            host.config.session.pending_queue.push(item.clone());
+            host.role.config.session.pending_queue.push(item.clone());
             let submission = sessions::projector::Submission {
                 command_id: "recover-root".into(),
                 kind: sessions::projector::SubmissionKind::RootStart,
@@ -230,12 +237,14 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
                 canonical_command: item.text.clone(),
                 submitted_at_ms: item.submitted_at_ms,
             };
-            host.config
+            host.role
+                .config
                 .store
-                .save_submission(&mut host.config.session, &submission)
+                .save_submission(&mut host.role.config.session, &submission)
                 .unwrap();
         }
         let result = host
+            .role
             .executor
             .block_on(async {
                 host.opened
@@ -273,7 +282,12 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
                 .count(),
             1
         );
-        let saved = host.config.store.load(&host.config.session.id).unwrap();
+        let saved = host
+            .role
+            .config
+            .store
+            .load(&host.role.config.session.id)
+            .unwrap();
         assert_eq!(
             saved
                 .transcript
@@ -329,14 +343,18 @@ fn a_failed_eager_reopen_is_retried_by_the_next_action() {
     let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
-    let durable = std::sync::Arc::clone(&host.config.store);
-    host.config.store = std::sync::Arc::new(crate::runtime::fault_store::FaultStore::new(
+        RootActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    let durable = std::sync::Arc::clone(&host.role.config.store);
+    host.role.config.store = std::sync::Arc::new(crate::runtime::fault_store::FaultStore::new(
         std::sync::Arc::clone(&durable),
         RefuseViews,
     ));
-    host.recovery = RootRecovery::Due;
+    host.role.recovery = RootRecovery::Due;
     observed.try_iter().for_each(drop);
 
     assert!(matches!(
@@ -344,7 +362,7 @@ fn a_failed_eager_reopen_is_retried_by_the_next_action() {
             .unwrap(),
         HostStep::Continue
     ));
-    assert_eq!(host.recovery, RootRecovery::Retrying);
+    assert_eq!(host.role.recovery, RootRecovery::Retrying);
     let failed = observed.try_iter().collect::<Vec<_>>();
     assert!(
         failed.iter().any(|event| matches!(event,
@@ -358,7 +376,7 @@ fn a_failed_eager_reopen_is_retried_by_the_next_action() {
             .any(|event| matches!(event, HostEvent::Recovered { .. }))
     );
 
-    host.config.store = durable;
+    host.role.config.store = durable;
     controls
         .send(crate::surface_protocol::UserAction::Prompt(
             "after the retry".into(),
@@ -371,7 +389,7 @@ fn a_failed_eager_reopen_is_retried_by_the_next_action() {
         matches!(step, HostStep::Prompt { .. }),
         "the prompt still runs"
     );
-    assert_eq!(host.recovery, RootRecovery::Clear);
+    assert_eq!(host.role.recovery, RootRecovery::Clear);
     assert!(
         observed
             .try_iter()
@@ -391,15 +409,19 @@ fn a_deferred_quit_skips_the_eager_reopen() {
     let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
-    host.recovery = RootRecovery::Due;
+        RootActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    host.role.recovery = RootRecovery::Due;
     // The fenced turn's own watch drained the quit.
     controls
         .send(crate::surface_protocol::UserAction::Quit)
         .unwrap();
-    crate::interrupt::InterruptWatch::new(&actions, &host.interrupt_state).poll();
-    assert!(host.interrupt_state.borrow().has_deferred_quit());
+    crate::interrupt::InterruptWatch::new(&actions, &host.role.interrupt_state).poll();
+    assert!(host.role.interrupt_state.borrow().has_deferred_quit());
     observed.try_iter().for_each(drop);
 
     let step = host
@@ -407,7 +429,7 @@ fn a_deferred_quit_skips_the_eager_reopen() {
         .unwrap();
 
     assert!(matches!(step, HostStep::Quit));
-    assert_eq!(host.recovery, RootRecovery::Due, "no eager reopen ran");
+    assert_eq!(host.role.recovery, RootRecovery::Due, "no eager reopen ran");
     assert!(
         !observed
             .try_iter()
@@ -453,21 +475,25 @@ fn an_interrupt_and_quit_sent_during_the_eager_reopen_are_answered_after_it() {
     let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
-    let durable = std::sync::Arc::clone(&host.config.store);
-    host.config.store = std::sync::Arc::new(crate::runtime::fault_store::FaultStore::new(
+        RootActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    let durable = std::sync::Arc::clone(&host.role.config.store);
+    host.role.config.store = std::sync::Arc::new(crate::runtime::fault_store::FaultStore::new(
         std::sync::Arc::clone(&durable),
         SendDuringReopen(std::sync::Mutex::new(Some(controls))),
     ));
-    host.recovery = RootRecovery::Due;
+    host.role.recovery = RootRecovery::Due;
     observed.try_iter().for_each(drop);
 
     let step = host
         .block(async |host| host.next_prompt(None).await)
         .unwrap();
 
-    assert_eq!(host.recovery, RootRecovery::Clear, "the reopen ran");
+    assert_eq!(host.role.recovery, RootRecovery::Clear, "the reopen ran");
     assert!(
         observed
             .try_iter()
@@ -475,11 +501,11 @@ fn an_interrupt_and_quit_sent_during_the_eager_reopen_are_answered_after_it() {
     );
     // The interrupt was answered at idle; the quit waits, drained, behind it.
     assert!(matches!(step, HostStep::Continue));
-    assert!(host.interrupt_state.borrow().has_deferred_quit());
+    assert!(host.role.interrupt_state.borrow().has_deferred_quit());
     let step = host
         .block(async |host| host.next_prompt(None).await)
         .unwrap();
     assert!(matches!(step, HostStep::Quit));
-    host.config.store = durable;
+    host.role.config.store = durable;
     host.block(async |host| host.release().await).unwrap();
 }

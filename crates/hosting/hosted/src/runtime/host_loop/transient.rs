@@ -1,6 +1,6 @@
 //! Root transient continuation owns no turn while waiting.
 
-use super::{CliFailure, CliResult, HostStep, InterruptWatch, NodeActor};
+use super::{CliFailure, CliResult, HostStep, InterruptWatch, RootActor};
 use crate::driver::transient::{self, ResumeGate, ResumeOwner, ResumePlan};
 use crate::runtime::TransientFailure;
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -57,32 +57,38 @@ impl Drop for PendingResume {
     }
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) fn schedule_transient_resume(
         &mut self,
         failure: TransientFailure,
         error: &str,
     ) -> bool {
-        let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
+        let watch = InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.defer_input();
-        if self.recovery.blocked()
+        if self.role.recovery.blocked()
             || self.quit_started_at.is_some()
             || watch.interrupted()
-            || self.interrupt_state.borrow().has_deferred()
-            || self.pending_start.is_some()
-            || !self.config.session.pending_queue.is_empty()
-            || self.config.session.queue_commands.has_pending()
+            || self.role.interrupt_state.borrow().has_deferred()
+            || self.role.pending_start.is_some()
+            || !self.role.config.session.pending_queue.is_empty()
+            || self.role.config.session.queue_commands.has_pending()
         {
             return false;
         }
         let budget = self
+            .role
             .config
             .state_roots
             .roster_source()
             .roster(
-                self.config.session.account.as_deref().unwrap_or_default(),
-                &self.config.model_id,
-                self.config.session.effort.as_deref(),
+                self.role
+                    .config
+                    .session
+                    .account
+                    .as_deref()
+                    .unwrap_or_default(),
+                &self.role.config.model_id,
+                self.role.config.session.effort.as_deref(),
             )
             .map_or(0, |roster| roster.transient_resumes.min(2));
         let Some(plan) = transient::plan(
@@ -91,7 +97,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 failed_turn: failure.failed_turn,
             },
             error,
-            self.transient_resumes_used,
+            self.role.transient_resumes_used,
             budget,
         ) else {
             return false;
@@ -102,24 +108,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             ResumeGate::Network => "when the network returns".to_owned(),
             ResumeGate::Delay(delay) => format!("after {}s", delay.as_secs()),
         };
-        let session_id = self.config.session.id.clone();
+        let session_id = self.role.config.session.id.clone();
         let probe = self.opened.reachability_probe();
-        let pending = PendingResume::spawn(self.executor.tasks(), session_id, plan, probe);
-        self.pending_resume = Some(pending);
-        self.transient_resumes_used = round;
-        let _ = self.events.notice(TranscriptRow::info(
+        let pending = PendingResume::spawn(self.role.executor.tasks(), session_id, plan, probe);
+        self.role.pending_resume = Some(pending);
+        self.role.transient_resumes_used = round;
+        let _ = self.role.events.notice(TranscriptRow::info(
             NoticeScope::Turn,
             format!(
                 "{human}; will continue automatically {wait} ({}/{budget}); continuation may be cancelled",
-                self.transient_resumes_used,
+                self.role.transient_resumes_used,
             ),
         ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::CancelContinuation {}));
         true
     }
 
     pub(super) fn cancel_transient_resume(&mut self) {
-        if self.pending_resume.take().is_some() {
-            let _ = self.events.notice(TranscriptRow::info(
+        if self.role.pending_resume.take().is_some() {
+            let _ = self.role.events.notice(TranscriptRow::info(
                 NoticeScope::Turn,
                 "automatic continuation cancelled",
             ));
@@ -127,20 +133,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     }
 
     pub(super) async fn transient_resume_prompt(&mut self) -> CliResult<HostStep> {
-        let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
+        let watch = InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.defer_input();
-        if watch.interrupted() || self.interrupt_state.borrow().has_deferred() {
+        if watch.interrupted() || self.role.interrupt_state.borrow().has_deferred() {
             self.cancel_transient_resume();
             return Ok(HostStep::Continue);
         }
-        let Some(pending) = self.pending_resume.as_ref() else {
+        let Some(pending) = self.role.pending_resume.as_ref() else {
             return Ok(HostStep::Continue);
         };
-        if pending.session_id != self.config.session.id
-            || self.recovery.blocked()
-            || self.pending_start.is_some()
-            || !self.config.session.pending_queue.is_empty()
-            || self.config.session.queue_commands.has_pending()
+        if pending.session_id != self.role.config.session.id
+            || self.role.recovery.blocked()
+            || self.role.pending_start.is_some()
+            || !self.role.config.session.pending_queue.is_empty()
+            || self.role.config.session.queue_commands.has_pending()
         {
             self.cancel_transient_resume();
             return Ok(HostStep::Continue);
@@ -150,13 +156,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         }
         let command = pending.plan.command_id.clone();
         let text = pending.plan.text.clone();
-        let mut candidate = self.config.session.clone();
+        let mut candidate = self.role.config.session.clone();
         let item = candidate
             .enqueue_live(text.clone())
             .map_err(|_| CliFailure::new("transient continuation queue admission was refused"))?;
-        self.config.session = super::super::result_mail::prepare_with_command(
-            &self.config.topology_rows(),
-            self.config.store.as_ref(),
+        self.role.config.session = super::super::result_mail::prepare_with_command(
+            &self.role.config.topology_rows(),
+            self.role.config.store.as_ref(),
             &candidate,
             &item,
             &text,
@@ -171,7 +177,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 self.cancel_transient_resume();
             }
         })?;
-        self.pending_resume = None;
+        self.role.pending_resume = None;
         Ok(HostStep::Prompt {
             text,
             queued_delivery: Some(item),

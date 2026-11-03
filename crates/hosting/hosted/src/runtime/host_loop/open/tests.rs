@@ -91,12 +91,12 @@ fn unpublished_control_fixture(
     let gate = root.join("control-release");
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
-    let store = host.config.store.clone();
-    let id = host.config.session.id.clone();
-    let item =
-        sessions::queue::enqueue(&mut host.config.session.pending_queue, "unpublished").unwrap();
-    store.save(&mut host.config.session).unwrap();
+    let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    let store = host.role.config.store.clone();
+    let id = host.role.config.session.id.clone();
+    let item = sessions::queue::enqueue(&mut host.role.config.session.pending_queue, "unpublished")
+        .unwrap();
+    store.save(&mut host.role.config.session).unwrap();
     let command = format!("plak.queue.{}.{}", item.id, item.revision);
     let intent = sessions::projector::Submission {
         command_id: command.clone(),
@@ -108,9 +108,10 @@ fn unpublished_control_fixture(
         submitted_at_ms: item.submitted_at_ms,
     };
     store
-        .save_submission(&mut host.config.session, &intent)
+        .save_submission(&mut host.role.config.session, &intent)
         .unwrap();
     let submission = host
+        .role
         .executor
         .block_on(
             host.opened
@@ -122,7 +123,8 @@ fn unpublished_control_fixture(
         .unwrap();
     let handle = submission.into_turn().unwrap();
     if let Some(cut) = cut {
-        host.executor
+        host.role
+            .executor
             .block_on(async {
                 use plakous_offline_crash_harness::protocol::CrashBoundary;
                 let approval = matches!(
@@ -213,8 +215,13 @@ fn unpublished_control_fixture(
             })
             .unwrap();
     }
-    host.executor.block_on(handle.result()).unwrap().unwrap();
+    host.role
+        .executor
+        .block_on(handle.result())
+        .unwrap()
+        .unwrap();
     let head = host
+        .role
         .executor
         .block_on(host.opened.release())
         .unwrap()
@@ -257,7 +264,7 @@ fn control_cut_publication(cut: RootControlCut) {
     config.session = store.load(&id).unwrap();
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut reopened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    let mut reopened = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     let published = store.load(&id).unwrap();
     assert_eq!(published.plakous_locator, Some(head));
     assert_eq!(
@@ -272,7 +279,7 @@ fn control_cut_publication(cut: RootControlCut) {
     config.store = store.clone();
     config.session = store.load(&id).unwrap();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut reopened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    let mut reopened = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     assert_eq!(
         store.load(&id).unwrap().transcript.len(),
         rows,
@@ -306,12 +313,12 @@ fn terminal_projection_survives_attachment_save_failure_and_repeated_open() {
         config.store = fail.clone();
         fail.faults.fail.store(failing, Ordering::SeqCst);
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let opened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None);
+        let opened = RootActor::open_blocking(config, &rx, Sender::over(tx), None);
         if failing {
             assert!(opened.is_err());
         } else {
             let mut opened = opened.unwrap();
-            assert_eq!(opened.config.session.plakous_locator, Some(head));
+            assert_eq!(opened.role.config.session.plakous_locator, Some(head));
             opened.block(async |opened| opened.release().await).unwrap();
         }
         let projected = store.load(&id).unwrap();
@@ -346,11 +353,11 @@ fn unrecorded_wake_submission_reopens_without_a_legacy_delivery_receipt() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
-    let store = host.config.store.clone();
-    let id = host.config.session.id.clone();
+    let mut host = RootActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+    let store = host.role.config.store.clone();
+    let id = host.role.config.session.id.clone();
     let item = sessions::queue::enqueue(
-        &mut host.config.session.pending_queue,
+        &mut host.role.config.session.pending_queue,
         super::super::wake::WAKE_PROMPT,
     )
     .unwrap();
@@ -364,11 +371,11 @@ fn unrecorded_wake_submission_reopens_without_a_legacy_delivery_receipt() {
         submitted_at_ms: item.submitted_at_ms,
     };
     store
-        .save_submission(&mut host.config.session, &submission)
+        .save_submission(&mut host.role.config.session, &submission)
         .unwrap();
     assert_eq!(
         store
-            .load_intents(&host.config.session.id)
+            .load_intents(&host.role.config.session.id)
             .unwrap()
             .submissions,
         vec![submission.clone()]
@@ -379,16 +386,16 @@ fn unrecorded_wake_submission_reopens_without_a_legacy_delivery_receipt() {
     config.session = store.load(&id).unwrap();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut reopened =
-        NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+        RootActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
     assert_eq!(
-        reopened.config.session.pending_queue,
+        reopened.role.config.session.pending_queue,
         [] as [sessions::queue::QueueItem; 0]
     );
     assert_eq!(
         store.load_intents(&id).unwrap().submissions,
         [] as [sessions::projector::Submission; 0]
     );
-    assert_eq!(reopened.config.session.root_turn_count, 0);
+    assert_eq!(reopened.role.config.session.root_turn_count, 0);
     reopened
         .block(async |reopened| reopened.release().await)
         .unwrap();
@@ -405,10 +412,11 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host =
-            NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
-        let store = host.config.store.clone();
-        let id = host.config.session.id.clone();
+            RootActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
+        let store = host.role.config.store.clone();
+        let id = host.role.config.session.id.clone();
         let target = host
+            .role
             .executor
             .block_on(async {
                 let turn = host
@@ -424,7 +432,7 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
             })
             .unwrap();
         let item =
-            sessions::queue::enqueue(&mut host.config.session.pending_queue, "operator text")
+            sessions::queue::enqueue(&mut host.role.config.session.pending_queue, "operator text")
                 .unwrap();
         let intent = Submission {
             command_id: "custom-stored-command".into(),
@@ -440,7 +448,7 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
             submitted_at_ms: item.submitted_at_ms,
         };
         store
-            .save_submission(&mut host.config.session, &intent)
+            .save_submission(&mut host.role.config.session, &intent)
             .unwrap();
         host.block(async |host| host.release().await).unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
@@ -448,19 +456,29 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
         config.session = store.load(&id).unwrap();
         let (event_tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut reopened =
-            NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
-        assert_eq!(reopened.config.session.pending_queue, vec![item.clone()]);
+            RootActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
         assert_eq!(
-            reopened.config.session.queue_drain_state,
+            reopened.role.config.session.pending_queue,
+            vec![item.clone()]
+        );
+        assert_eq!(
+            reopened.role.config.session.queue_drain_state,
             SessionQueueDrainState::RestoredPaused
         );
-        assert!(reopened.config.session.queue_commands.is_locked(&item.id));
-        assert!(reopened.pending_start.is_none());
+        assert!(
+            reopened
+                .role
+                .config
+                .session
+                .queue_commands
+                .is_locked(&item.id)
+        );
+        assert!(reopened.role.pending_start.is_none());
         assert_eq!(
             store.load_intents(&id).unwrap().submissions,
             vec![intent.clone()]
         );
-        let count = reopened.config.session.root_turn_count;
+        let count = reopened.role.config.session.root_turn_count;
         actions
             .send(crate::surface_protocol::UserAction::SendQueuedNow {
                 id: item.id.clone(),
@@ -490,18 +508,19 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
                 views.state.deliveries.get(&intent.command_id),
                 Some(Delivery::Rejected { .. })
             ));
-            assert_eq!(reopened.config.session.root_turn_count, count);
-            assert_eq!(reopened.config.session.pending_queue, vec![item]);
+            assert_eq!(reopened.role.config.session.root_turn_count, count);
+            assert_eq!(reopened.role.config.session.pending_queue, vec![item]);
         } else {
             assert_eq!(
                 views.state.deliveries.get(&intent.command_id),
                 Some(&Delivery::Accepted)
             );
             assert_eq!(
-                reopened.config.session.pending_queue,
+                reopened.role.config.session.pending_queue,
                 [] as [sessions::queue::QueueItem; 0]
             );
             let duplicate = reopened
+                .role
                 .executor
                 .block_on(reopened.opened.agent().unwrap().command(
                     plakous::agent::TurnCommand::Start {
@@ -519,7 +538,7 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
                 duplicate.acknowledgement().is_accepted(),
                 "the runtime accepted the exact stored bytes, not the editable queue text"
             );
-            assert_eq!(reopened.config.session.root_turn_count, count + 1);
+            assert_eq!(reopened.role.config.session.root_turn_count, count + 1);
         }
         assert_eq!(store.load_intents(&id).unwrap().submissions, vec![intent]);
         reopened
@@ -537,11 +556,11 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
-    let store = host.config.store.clone();
-    let id = host.config.session.id.clone();
-    let item =
-        sessions::queue::enqueue(&mut host.config.session.pending_queue, "already ran").unwrap();
+        RootActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
+    let store = host.role.config.store.clone();
+    let id = host.role.config.session.id.clone();
+    let item = sessions::queue::enqueue(&mut host.role.config.session.pending_queue, "already ran")
+        .unwrap();
     let intent = sessions::projector::Submission {
         command_id: "below-retention-root".into(),
         kind: SubmissionKind::RootStart,
@@ -552,10 +571,11 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
         submitted_at_ms: item.submitted_at_ms,
     };
     store
-        .save_submission(&mut host.config.session, &intent)
+        .save_submission(&mut host.role.config.session, &intent)
         .unwrap();
-    drop(host.live.take());
-    host.executor
+    drop(host.role.live.take());
+    host.role
+        .executor
         .block_on(async {
             host.opened
                 .agent()
@@ -575,7 +595,8 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
         })
         .unwrap();
     // Release only the runtime lease: simulates losing the host before its projector pass.
-    host.executor
+    host.role
+        .executor
         .block_on(host.opened.release_opened())
         .unwrap()
         .unwrap();
@@ -586,8 +607,8 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
     config.session = store.load(&id).unwrap();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut reopened =
-        NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
-    assert_eq!(reopened.config.session.root_turn_count, 0);
+        RootActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
+    assert_eq!(reopened.role.config.session.root_turn_count, 0);
     actions
         .send(crate::surface_protocol::UserAction::ResumeQueueDrain)
         .unwrap();
@@ -597,9 +618,9 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
             .unwrap(),
         super::super::HostStep::Continue
     ));
-    assert_eq!(reopened.config.session.root_turn_count, 0);
+    assert_eq!(reopened.role.config.session.root_turn_count, 0);
     assert_eq!(
-        reopened.config.session.pending_queue,
+        reopened.role.config.session.pending_queue,
         [] as [sessions::queue::QueueItem; 0]
     );
     let intents = store.load_intents(&id).unwrap();

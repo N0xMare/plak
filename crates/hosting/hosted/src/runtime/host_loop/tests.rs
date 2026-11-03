@@ -47,7 +47,7 @@ fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
         .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sender, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &receiver, Sender::over(sender), None).unwrap();
+    let mut host = RootActor::open_blocking(config, &receiver, Sender::over(sender), None).unwrap();
     send_attached_action(
         &actions,
         UserAction::Prompt("one shot with a busy tree".into()),
@@ -73,8 +73,8 @@ fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
         ready.recv_timeout(Duration::from_secs(30)).unwrap();
         // The first storage probe in drive's loop follows its one-shot
         // admission check. Release there, before later tree projections.
-        host.config.store = Arc::new(FaultStore::new(
-            host.config.store.clone(),
+        host.role.config.store = Arc::new(FaultStore::new(
+            host.role.config.store.clone(),
             ReleaseAfterGate(Mutex::new(Some(release))),
         ));
         host.block(async |host| host.drive(Some(&mut state)).await)

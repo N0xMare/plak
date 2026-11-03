@@ -22,16 +22,25 @@ fn stopped_preparation_publishes_stop_status_even_when_the_pause_write_fails() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
-    let item = host.config.session.enqueue_live("keep queued").unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
-    host.config.store = Arc::new(FaultStore::new(
-        host.config.store.clone(),
+    let item = host
+        .role
+        .config
+        .session
+        .enqueue_live("keep queued")
+        .unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    host.role.config.store = Arc::new(FaultStore::new(
+        host.role.config.store.clone(),
         PauseWriteFailure,
     ));
     events.try_iter().for_each(drop);
-    host.prep_hooks.hook = Some((
+    host.role.prep_hooks.hook = Some((
         preparation::Stage::Settle,
         Box::pin(async move {
             actions.send(UserAction::Interrupt).unwrap();

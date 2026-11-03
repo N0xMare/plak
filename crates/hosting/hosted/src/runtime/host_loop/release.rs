@@ -1,13 +1,13 @@
 //! Release canonical ownership; the feed projector owns the head view.
 
-use super::{CliFailure, CliResult, NodeActor, delete_unpublished_runtime};
+use super::{CliFailure, CliResult, RootActor, delete_unpublished_runtime};
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// Releases the attachment, then ends every task the session started:
     /// no session task outlives release.
     pub(super) async fn release(&mut self) -> CliResult<()> {
         let released = self.release_attachment().await;
-        self.executor.end_tasks().await;
+        self.role.executor.end_tasks().await;
         released
     }
 
@@ -16,19 +16,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         reason = "Host release drains terminal publication and pending cancellations before dropping runtime and topology ownership."
     )]
     async fn release_attachment(&mut self) -> CliResult<()> {
-        self.pending_resume = None;
+        self.role.pending_resume = None;
         self.quit_abandoned_turn =
-            self.events.quit_receipt.outcome() == super::super::HostQuitOutcome::Escalated;
+            self.role.events.quit_receipt.outcome() == super::super::HostQuitOutcome::Escalated;
         let abandon = self.quit_abandoned_turn;
         self.opened.close_admission();
-        let published = self.config.session.store_revision != 0;
-        if !self.projection_finished {
+        let published = self.role.config.session.store_revision != 0;
+        if !self.role.projection_finished {
             self.finish_projection(false).await?;
         }
         if abandon && let Some(agent) = self.opened.agent() {
             agent.begin_abandon();
         }
-        let registry = self.config.state_roots.job_registry().clone();
+        let registry = self.role.config.state_roots.job_registry().clone();
         let deadline = self.quit_started_at.unwrap_or_else(super::Instant::now)
             + std::time::Duration::from_secs(1);
         let job_budget = || {
@@ -39,8 +39,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         };
         let stop_failure = if abandon {
             let pending = self.quit_job_stops.take();
-            let tree_id =
-                super::durable_tree_id(&self.config.topology_rows(), &self.config.session);
+            let tree_id = super::durable_tree_id(
+                &self.role.config.topology_rows(),
+                &self.role.config.session,
+            );
             let root = self.opened.agent().cloned();
             async {
                 let mut agents = crate::topology_runtime::abandon_live_agents(&tree_id).await;
@@ -105,7 +107,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             // The attachments the host's switches left behind are released
             // first, so a tree a hand-off among them kept attached is
             // unattached now. Their join blocks, so it runs off the actor.
-            let left_behind = std::mem::take(&mut self.config.source_releases);
+            let left_behind = std::mem::take(&mut self.role.config.source_releases);
             let joined = tokio::task::spawn_blocking(move || drop(left_behind)).await;
             let ended = end_handed_off_trees().await;
             match (joined, ended) {
@@ -140,11 +142,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 .map(|started| started + std::time::Duration::from_secs(1))
                 .unwrap_or_else(|| super::Instant::now() + super::FINAL_PROJECTION_BOUND);
             let projected = async {
-                let sessions = self.config.state_roots.runtime_sessions()?;
+                let sessions = self.role.config.state_roots.runtime_sessions()?;
                 let pass = super::super::projection::project_to_tail(
                     &sessions,
-                    &self.config.store,
-                    &self.config.session.id,
+                    &self.role.config.store,
+                    &self.role.config.session.id,
                     locator,
                 );
                 #[cfg(test)]
@@ -163,8 +165,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     projected.map(|_| ()).map_err(CliFailure::from)
                 } else {
                     super::log_ev(
-                        self.log.as_ref(),
-                        &self.config,
+                        self.role.log.as_ref(),
+                        &self.role.config,
                         super::SessionEvent::new("projector.deferred").str(
                             "error",
                             "the post-release projector pass exceeded its bound",
@@ -182,8 +184,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             == Some(crate::error::StoreRefusal::StorageFull) =>
                 {
                     super::log_ev(
-                        self.log.as_ref(),
-                        &self.config,
+                        self.role.log.as_ref(),
+                        &self.role.config,
                         super::SessionEvent::new("projector.deferred")
                             .str("error", error.message()),
                     );
@@ -192,16 +194,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 Err(error) => Some(error),
             }
         } else {
-            delete_unpublished_runtime(&self.config.state_roots, locator)
+            delete_unpublished_runtime(&self.role.config.state_roots, locator)
                 .await
                 .err()
         };
-        for terminal in super::take_pending_usage(&self.pending_usage, runtime_session) {
+        for terminal in super::take_pending_usage(&self.role.pending_usage, runtime_session) {
             super::super::usage::log_projected_turn_usage(
-                &self.config.session.id,
+                &self.role.config.session.id,
                 terminal.turn_id,
                 terminal.usage,
-                self.log.as_ref(),
+                self.role.log.as_ref(),
             );
         }
         CliFailure::shutdown(release_failure, cleanup_failure)

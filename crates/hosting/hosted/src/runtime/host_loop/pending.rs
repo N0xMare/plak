@@ -12,7 +12,7 @@
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::PendingContinuation;
 
-use super::{Instant, NodeActor, TREE_OBSERVE_INTERVAL, commit_session_update};
+use super::{Instant, RootActor, TREE_OBSERVE_INTERVAL, commit_session_update};
 use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -96,15 +96,15 @@ pub(super) struct PendingTrack {
     baseline: bool,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) fn has_automatic_continue_work(&mut self) -> bool {
-        if !self.config.prompt_host_facts().host_wakes {
+        if !self.role.config.prompt_host_facts().host_wakes {
             return false;
         }
         self.bind_pending_track();
         self.read_tree_facts()
             .map(|(tree, _)| tree)
-            .or(self.pending_track.tree)
+            .or(self.role.pending_track.tree)
             .is_none_or(|tree| tree.descendants)
             || self
                 .opened
@@ -117,7 +117,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let Some((tree, source)) = self.read_tree_facts() else {
             return;
         };
-        self.pending_track.tree = Some(tree);
+        self.role.pending_track.tree = Some(tree);
         let jobs = self
             .opened
             .agent()
@@ -127,18 +127,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             .iter()
             .filter(|job| job.status != plakous::tools::JobStatus::Running)
             .count();
-        let suppressed = self.config.session.child_wake_suppressed;
+        let suppressed = self.role.config.session.child_wake_suppressed;
         let next = PendingContinuation {
             results: tree.results,
             questions: tree.questions,
             process_exits: u32::try_from(process_exits).unwrap_or(u32::MAX),
             auto_continue_paused: suppressed
-                && self.config.prompt_host_facts().host_wakes
+                && self.role.config.prompt_host_facts().host_wakes
                 && (tree.descendants || !jobs.is_empty()),
             tree_paused: tree.paused,
         };
-        if self.pending_track.last != Some(next) {
-            let sent = self.events.send(ContentEvent::PendingContinuation {
+        if self.role.pending_track.last != Some(next) {
+            let sent = self.role.events.send(ContentEvent::PendingContinuation {
                 results: next.results,
                 questions: next.questions,
                 process_exits: next.process_exits,
@@ -148,25 +148,26 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             tracing::debug!(target: "plak.pending", source, results = next.results,
                 questions = next.questions, sent);
             if sent {
-                self.pending_track.last = Some(next);
+                self.role.pending_track.last = Some(next);
             }
         }
         self.note_auto_continue_pause(suppressed, next.auto_continue_paused);
         self.note_tree_pause(next.tree_paused);
-        self.pending_track.baseline = false;
+        self.role.pending_track.baseline = false;
     }
 
     /// The wake path just paused auto-continue and said so in its own row;
     /// this episode needs no second line.
     pub(super) fn auto_continue_pause_reported(&mut self) {
         self.bind_pending_track();
-        self.pending_track.auto_continue_noted = Some(self.config.session.root_turn_count);
+        self.role.pending_track.auto_continue_noted =
+            Some(self.role.config.session.root_turn_count);
     }
 
     fn bind_pending_track(&mut self) {
-        let id = &self.config.session.id;
-        if self.pending_track.session_id.as_ref() != Some(id) {
-            self.pending_track = PendingTrack {
+        let id = &self.role.config.session.id;
+        if self.role.pending_track.session_id.as_ref() != Some(id) {
+            self.role.pending_track = PendingTrack {
                 session_id: Some(id.clone()),
                 baseline: true,
                 ..PendingTrack::default()
@@ -176,86 +177,92 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
 
     /// A failed or not-yet-due observation is not evidence of a change.
     fn read_tree_facts(&mut self) -> Option<(TreeFacts, &'static str)> {
-        let rows = self.config.topology_rows();
-        let (source, observed) =
-            if let Some(runtime) = self.last_tree_revision.runtime(&rows, &self.config.session) {
-                ("hub", runtime.read(TreeFacts::of).map_err(|_| ()))
-            } else {
-                let now = Instant::now();
-                if self
-                    .pending_track
-                    .store_observed_at
-                    .is_some_and(|last| now.duration_since(last) < TREE_OBSERVE_INTERVAL)
-                {
-                    return None;
-                }
-                self.pending_track.store_observed_at = Some(now);
-                let observed = self
-                    .last_tree_revision
-                    .tree_id()
-                    .ok_or(())
-                    .and_then(|tree_id| rows.tree(tree_id).map_err(|_| ()))
-                    .map(|tree| tree.as_ref().map(TreeFacts::of).unwrap_or_default());
-                ("store", observed)
-            };
-        let Ok(tree) = observed else {
-            if !self.pending_track.read_skipped {
-                tracing::debug!(target: "plak.pending", source = "skipped",
-                    results = ?self.pending_track.last.map(|last| last.results),
-                    questions = ?self.pending_track.last.map(|last| last.questions), sent = false);
+        let rows = self.role.config.topology_rows();
+        let (source, observed) = if let Some(runtime) = self
+            .role
+            .last_tree_revision
+            .runtime(&rows, &self.role.config.session)
+        {
+            ("hub", runtime.read(TreeFacts::of).map_err(|_| ()))
+        } else {
+            let now = Instant::now();
+            if self
+                .role
+                .pending_track
+                .store_observed_at
+                .is_some_and(|last| now.duration_since(last) < TREE_OBSERVE_INTERVAL)
+            {
+                return None;
             }
-            self.pending_track.read_skipped = true;
+            self.role.pending_track.store_observed_at = Some(now);
+            let observed = self
+                .role
+                .last_tree_revision
+                .tree_id()
+                .ok_or(())
+                .and_then(|tree_id| rows.tree(tree_id).map_err(|_| ()))
+                .map(|tree| tree.as_ref().map(TreeFacts::of).unwrap_or_default());
+            ("store", observed)
+        };
+        let Ok(tree) = observed else {
+            if !self.role.pending_track.read_skipped {
+                tracing::debug!(target: "plak.pending", source = "skipped",
+                    results = ?self.role.pending_track.last.map(|last| last.results),
+                    questions = ?self.role.pending_track.last.map(|last| last.questions), sent = false);
+            }
+            self.role.pending_track.read_skipped = true;
             return None;
         };
-        self.pending_track.read_skipped = false;
+        self.role.pending_track.read_skipped = false;
         Some((tree, source))
     }
 
     fn note_auto_continue_pause(&mut self, suppressed: bool, paused: bool) {
         if !suppressed {
-            self.pending_track.auto_continue_noted = None;
+            self.role.pending_track.auto_continue_noted = None;
             return;
         }
-        let turn = self.config.session.root_turn_count;
-        if !paused || self.pending_track.auto_continue_noted == Some(turn) {
+        let turn = self.role.config.session.root_turn_count;
+        if !paused || self.role.pending_track.auto_continue_noted == Some(turn) {
             return;
         }
-        self.pending_track.auto_continue_noted = Some(turn);
+        self.role.pending_track.auto_continue_noted = Some(turn);
         self.record_pause(PauseKind::AutoContinue);
     }
 
     fn note_tree_pause(&mut self, paused: bool) {
         if !paused {
-            self.pending_track.tree_noted = false;
+            self.role.pending_track.tree_noted = false;
             return;
         }
-        if !self.pending_track.tree_noted {
-            self.pending_track.tree_noted = true;
+        if !self.role.pending_track.tree_noted {
+            self.role.pending_track.tree_noted = true;
             self.record_pause(PauseKind::Tree);
         }
     }
 
     fn record_pause(&mut self, kind: PauseKind) {
-        if self.storage_interrupted && self.config.store.storage_unavailable() {
+        if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
             return;
         }
         let row = kind.row();
-        if !self.config.interactive
-            || (self.pending_track.baseline && pause_already_recorded(&self.config.session, &row))
+        if !self.role.config.interactive
+            || (self.role.pending_track.baseline
+                && pause_already_recorded(&self.role.config.session, &row))
         {
             return;
         }
         let stored = row.clone();
         let _ = commit_session_update(
-            &*self.config.store,
-            &self.config.home,
-            &mut self.config.session,
+            &*self.role.config.store,
+            &self.role.config.home,
+            &mut self.role.config.session,
             |session| {
                 session.record_notice(stored);
                 true
             },
         );
-        let _ = self.events.send(ContentEvent::Row(row));
+        let _ = self.role.events.send(ContentEvent::Row(row));
     }
 }
 

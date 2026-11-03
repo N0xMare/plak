@@ -2,7 +2,7 @@ use super::*;
 use crate::surface_protocol::UserAction;
 use plakous_host_protocol::status::HostPhase;
 
-fn next_non_idle_step(host: &mut NodeActor<'_, TestExtension>) -> HostStep {
+fn next_non_idle_step(host: &mut RootActor<'_, TestExtension>) -> HostStep {
     loop {
         let step = host
             .block(async |host| host.next_prompt(None).await)
@@ -44,7 +44,7 @@ pub(super) fn stopped_preparation(
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     actions
         .send(UserAction::Prompt("keep exact input".into()))
@@ -59,7 +59,7 @@ pub(super) fn stopped_preparation(
     else {
         panic!("prompt");
     };
-    let before = host.config.session.pending_queue.clone();
+    let before = host.role.config.session.pending_queue.clone();
     drop(events.try_iter().collect::<Vec<_>>());
     let locator = host.opened.locator();
     let started = Arc::new(tokio::sync::Notify::new());
@@ -81,7 +81,7 @@ pub(super) fn stopped_preparation(
     // The hook drops its sender when the step returns. Disconnected is quit,
     // so another sender has to outlive the retry or quit branch.
     let actions_held = actions.clone();
-    host.prep_hooks.hook = Some((
+    host.role.prep_hooks.hook = Some((
         stage,
         Box::pin(async move {
             actions.send(stop).unwrap();
@@ -115,7 +115,7 @@ pub(super) fn stopped_preparation(
         result: None,
         run: None,
     };
-    host.prep_hooks.called.clear();
+    host.role.prep_hooks.called.clear();
     host.block(async |host| {
         host.run_prompt(
             text.clone(),
@@ -134,12 +134,12 @@ pub(super) fn stopped_preparation(
         _ => None,
     };
     assert!(
-        host.prep_hooks.called.contains(&stage),
+        host.role.prep_hooks.called.contains(&stage),
         "preparation entered the stopped stage {stage:?}"
     );
     if let Some(skipped) = skipped {
         {
-            let calls = &host.prep_hooks.called;
+            let calls = &host.role.prep_hooks.called;
             assert!(
                 !calls.contains(&skipped),
                 "stop at {stage:?} must skip {skipped:?}"
@@ -150,24 +150,25 @@ pub(super) fn stopped_preparation(
             );
         }
     }
-    assert_eq!(host.config.session.pending_queue, before);
+    assert_eq!(host.role.config.session.pending_queue, before);
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
     assert_eq!(
-        host.config
+        host.role
+            .config
             .store
-            .load(&host.config.session.id)
+            .load(&host.role.config.session.id)
             .unwrap()
             .pending_queue,
         before
     );
-    assert!(!host.config.session.queue_commands.has_pending());
-    assert_eq!(host.config.session.root_turn_count, 0);
+    assert!(!host.role.config.session.queue_commands.has_pending());
+    assert_eq!(host.role.config.session.root_turn_count, 0);
     assert_eq!(host.opened.locator(), locator);
     assert!(host.opened.agent().is_some());
-    assert!(!host.recovery.blocked() && !host.quit_abandoned_turn);
+    assert!(!host.role.recovery.blocked() && !host.quit_abandoned_turn);
     let observed: Vec<_> = events.try_iter().collect();
     assert!(!observed.iter().any(|event| matches!(
         event,
@@ -207,12 +208,12 @@ pub(super) fn stopped_preparation(
         // The next explicit retry uses the same delivery and a clean watch.
         host.block(async |host| host.run_prompt(text, queued_delivery, true, None).await)
             .unwrap();
-        assert_eq!(host.config.session.root_turn_count, 1);
+        assert_eq!(host.role.config.session.root_turn_count, 1);
         assert_eq!(
-            host.config.session.pending_queue,
+            host.role.config.session.pending_queue,
             [] as [SessionQueueItem; 0]
         );
-        assert!(!host.recovery.blocked());
+        assert!(!host.role.recovery.blocked());
     }
     drop(actions_held);
     host.block(async |host| host.release().await).unwrap();
@@ -226,7 +227,7 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     actions
         .send(UserAction::Prompt("source input".into()))
@@ -247,7 +248,7 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
     })
     .unwrap();
     assert!(host.opened.last_operator_input_unix_ms().is_some());
-    let source = host.config.session.id.clone();
+    let source = host.role.config.session.id.clone();
     drop(events.try_iter().collect::<Vec<_>>());
     actions
         .send(UserAction::ForkSession {
@@ -257,8 +258,8 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
         .unwrap();
     actions.send(UserAction::Quit).unwrap();
     assert!(matches!(next_non_idle_step(&mut host), HostStep::Quit));
-    assert_ne!(host.config.session.id, source);
-    assert_eq!(host.config.session.prompt_history, [] as [String; 0]);
+    assert_ne!(host.role.config.session.id, source);
+    assert_eq!(host.role.config.session.prompt_history, [] as [String; 0]);
     assert!(
         events
             .try_iter()
@@ -266,15 +267,15 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
     );
     // A fork still carries the source's canonical input; the clock must not.
     assert!(host.opened.last_operator_input_unix_ms().is_some());
-    let fork = host.config.session.id.clone();
-    let store = host.config.store.clone();
+    let fork = host.role.config.session.id.clone();
+    let store = host.role.config.store.clone();
     host.block(async |host| host.release().await).unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session = store.load(&fork).unwrap();
     config.store = store.clone();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     assert!(
         events
@@ -301,13 +302,22 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
     .unwrap();
     let committed_at = host.opened.last_operator_input_unix_ms().unwrap();
     drop(events.try_iter().collect::<Vec<_>>());
-    crate::runtime::info::send_last_user_prompt_at(&host.events, &host.config, &host.opened);
+    crate::runtime::info::send_last_user_prompt_at(
+        &host.role.events,
+        &host.role.config,
+        &host.opened,
+    );
     assert!(
         events.try_iter().any(
             |event| matches!(event, HostEvent::LastUserPromptAt(Some(at)) if at == committed_at)
         )
     );
-    let stored = host.config.store.load(&host.config.session.id).unwrap();
+    let stored = host
+        .role
+        .config
+        .store
+        .load(&host.role.config.session.id)
+        .unwrap();
     assert_eq!(stored.prompt_history, ["fork input"]);
     host.block(async |host| host.release().await).unwrap();
 }
@@ -323,7 +333,7 @@ fn an_idle_queue_edit_has_exactly_one_receipt() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     actions
         .send(UserAction::EditQueued {

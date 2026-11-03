@@ -88,7 +88,7 @@ pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(
     );
     let (result, actor) = executor
         .block_on(async {
-            match NodeActor::open(
+            match RootActor::open(
                 config,
                 actions,
                 events,
@@ -154,18 +154,29 @@ impl RolePolicy {
     };
 }
 
-/// The root node's actor: sole owner of the attachment, durable session
-/// record, queue, interrupt and deferred state, and publication.
-struct NodeActor<'a, P: plakous_host_protocol::ProtocolExtension> {
-    role: RolePolicy,
-    _storage_notices: Option<super::storage::StorageNotices>,
-    config: HostConfig<P>,
-    actions: &'a crate::surface_protocol::UserActionReceiver<P>,
-    events: Sender<P>,
+/// One node's actor (design §3.1): the single driver of a resident node,
+/// whichever its role. What only one role has lives behind the role port `R`
+/// (§3.2); the actor consults its policy value rather than running a second
+/// driver.
+struct NodeActor<R> {
+    policy: RolePolicy,
     opened: crate::agent::AttachedCodingSession,
     quit_started_at: Option<Instant>,
     quit_abandoned_turn: bool,
     quit_job_stops: Option<crate::TaskHandle<Result<(), String>>>,
+    role: R,
+}
+
+/// The attached root's actor.
+type RootActor<'a, P> = NodeActor<RootRole<'a, P>>;
+
+/// The root's port: the attachment's surface, its durable session record,
+/// queue, interrupt and deferred state, and publication.
+struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
+    _storage_notices: Option<super::storage::StorageNotices>,
+    config: HostConfig<P>,
+    actions: &'a crate::surface_protocol::UserActionReceiver<P>,
+    events: Sender<P>,
     /// The attachment's executor, shared with the thread that drives the
     /// actor; the actor spawns only onto its task set.
     executor: std::rc::Rc<session_executor::SessionExecutor>,
@@ -227,22 +238,23 @@ mod session_executor;
 pub(in crate::runtime) mod transient;
 pub(in crate::runtime) mod wake;
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// What the live projector follows now: the attached session's feed.
     fn live_target(&self) -> super::projection::live::LiveTarget {
-        let rows = self.config.topology_rows();
-        let events = self.events.clone();
-        self.pending_usage
+        let rows = self.role.config.topology_rows();
+        let events = self.role.events.clone();
+        self.role
+            .pending_usage
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .target = Some(self.opened.locator().session_id());
         super::projection::live::LiveTarget {
             sessions: self.opened.shared_sessions(),
-            store: self.config.store.clone(),
-            roots: self.config.state_roots.clone(),
-            product_id: self.config.session.id.clone(),
+            store: self.role.config.store.clone(),
+            roots: self.role.config.state_roots.clone(),
+            product_id: self.role.config.session.id.clone(),
             followed: self.opened.locator(),
-            tree_id: durable_tree_id(&rows, &self.config.session),
+            tree_id: durable_tree_id(&rows, &self.role.config.session),
             emit_settled: std::sync::Arc::new(move |row| {
                 let _ = events.send(ContentEvent::Row(row));
             }),
@@ -258,9 +270,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// first prompt stores it mid-turn. No pass is requested before that:
     /// an unstored view read cannot warm the attachment's persistent cache.
     async fn project(&mut self) {
-        if self.config.store.storage_unavailable() {
-            self.storage_interrupted |= self.config.store.storage_wait_cancelled();
-            if self.storage_interrupted {
+        if self.role.config.store.storage_unavailable() {
+            self.role.storage_interrupted |= self.role.config.store.storage_wait_cancelled();
+            if self.role.storage_interrupted {
                 return;
             }
         }
@@ -268,19 +280,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         // A stopped task (it panicked or was aborted) is replaced: the new
         // one loads the views again and reconciles the settled rows once.
         if self
+            .role
             .live
             .as_ref()
             .is_some_and(super::projection::live::LiveProjector::stopped)
         {
-            self.live = None;
+            self.role.live = None;
         }
-        if self.live.is_none() {
-            self.live = Some(super::projection::live::LiveProjector::spawn(
-                self.executor.tasks(),
+        if self.role.live.is_none() {
+            self.role.live = Some(super::projection::live::LiveProjector::spawn(
+                self.role.executor.tasks(),
             ));
         }
-        if self.config.session.store_revision != 0
-            && let Some(live) = self.live.as_mut()
+        if self.role.config.session.store_revision != 0
+            && let Some(live) = self.role.live.as_mut()
         {
             live.tick(target.clone());
             if let Some(error) = live.take_refusal() {
@@ -291,8 +304,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         // after open, a recovery or a workflow, never on a tick or an intent
         // alone. A turn settles its own pass. The tick keeps the tree's
         // housekeeping.
-        if self.role.tree_passes && self.config.session.store_revision != 0 {
-            let due = std::mem::take(&mut self.idle_entry_pass_due);
+        if self.policy.tree_passes && self.role.config.session.store_revision != 0 {
+            let due = std::mem::take(&mut self.role.idle_entry_pass_due);
             let passed = if due {
                 target.tree_pass().await
             } else {
@@ -300,36 +313,38 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             };
             if let Err(error) = passed {
                 // A refused idle-entry pass stays due: the next tick retries it.
-                self.idle_entry_pass_due = due;
+                self.role.idle_entry_pass_due = due;
                 self.log_projector_debt(&error);
             }
         }
-        if self.config.session.queue_commands.has_pending()
-            || self.config.session.queue_projection_debt
+        if self.role.config.session.queue_commands.has_pending()
+            || self.role.config.session.queue_projection_debt
         {
             let joined = self
+                .role
                 .config
                 .store
-                .load_queue_commands(&self.config.session.id);
+                .load_queue_commands(&self.role.config.session.id);
             if let Ok(commands) = joined {
-                let changed = self.config.session.queue_commands != commands;
-                self.config.session.queue_commands = commands;
-                self.config.session.queue_projection_debt =
-                    self.config.session.queue_projection_debt
-                        && self.config.session.queue_commands.has_pending();
-                self.config
+                let changed = self.role.config.session.queue_commands != commands;
+                self.role.config.session.queue_commands = commands;
+                self.role.config.session.queue_projection_debt =
+                    self.role.config.session.queue_projection_debt
+                        && self.role.config.session.queue_commands.has_pending();
+                self.role
+                    .config
                     .session
                     .pending_queue
-                    .retain(|item| !self.config.session.queue_commands.is_consumed(item));
+                    .retain(|item| !self.role.config.session.queue_commands.is_consumed(item));
                 if changed {
-                    emit_queue_snapshot(&self.events, &self.config.session);
+                    emit_queue_snapshot(&self.role.events, &self.role.config.session);
                 }
-                if self.pending_start.is_none()
-                    && !self.recovery.blocked()
-                    && self.config.session.queue_drain_state
+                if self.role.pending_start.is_none()
+                    && !self.role.recovery.blocked()
+                    && self.role.config.session.queue_drain_state
                         == SessionQueueDrainState::LiveAutoDrain
                 {
-                    self.pending_start = queue::next_drainable(&self.config.session);
+                    self.role.pending_start = queue::next_drainable(&self.role.config.session);
                 }
             }
         }
@@ -339,7 +354,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// A projector pass to the tail that the caller waits for: a reopen's
     /// step 2, whose rows the next step reads.
     async fn project_now(&mut self) {
-        if self.config.session.store_revision == 0 {
+        if self.role.config.session.store_revision == 0 {
             return;
         }
         let target = self.live_target();
@@ -349,7 +364,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         }
         .await;
         if passed.is_ok() {
-            self.config.session.queue_projection_debt = false;
+            self.role.config.session.queue_projection_debt = false;
         }
         if let Err(error) = passed {
             self.log_projector_debt(&error);
@@ -366,7 +381,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let deadline = self.projection_deadline(one_shot);
         // The task keeps its views and the rows it has shown for the next
         // turn: no cold reload and no re-emission of settled rows.
-        let live = self.live.as_mut();
+        let live = self.role.live.as_mut();
         let pass = async {
             match live {
                 Some(live) => live.settle(target.clone()).await,
@@ -390,48 +405,62 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             }
         };
         self.publish_projected_usage();
-        let Ok(intents) = self.config.store.load_intents(&self.config.session.id) else {
+        let Ok(intents) = self
+            .role
+            .config
+            .store
+            .load_intents(&self.role.config.session.id)
+        else {
             return;
         };
-        let Ok(stored) = self.config.store.load_queue_head(&self.config.session.id) else {
+        let Ok(stored) = self
+            .role
+            .config
+            .store
+            .load_queue_head(&self.role.config.session.id)
+        else {
             return;
         };
-        let unsaved = self.config.session.transcript.pending_notice_items();
-        self.config.session.transcript =
+        let unsaved = self.role.config.session.transcript.pending_notice_items();
+        self.role.config.session.transcript =
             sessions::ProductTranscript::stored(views.transcript(&intents));
         for (notice, id) in unsaved {
-            self.config
+            self.role
+                .config
                 .session
                 .transcript
                 .record_notice_item(notice, id);
         }
-        self.config.session.root_turn_count = views.state.counters.root_turns;
-        self.config.session.tool_call_count = views.state.counters.tool_calls;
-        self.config.session.compaction_count = views.state.counters.compactions;
-        self.config.session.plakous_locator = views.projected_locator(stored.recorded_locator);
-        self.config.session.queue_commands =
+        self.role.config.session.root_turn_count = views.state.counters.root_turns;
+        self.role.config.session.tool_call_count = views.state.counters.tool_calls;
+        self.role.config.session.compaction_count = views.state.counters.compactions;
+        self.role.config.session.plakous_locator = views.projected_locator(stored.recorded_locator);
+        self.role.config.session.queue_commands =
             sessions::QueueCommands::from_join(&intents, Some(&views));
-        self.config.session.pending_queue = stored.pending_queue;
-        self.config
+        self.role.config.session.pending_queue = stored.pending_queue;
+        self.role
+            .config
             .session
             .pending_queue
-            .retain(|item| !self.config.session.queue_commands.is_consumed(item));
-        self.config.session.queue_projection_debt = self.config.session.queue_projection_debt
-            && self.config.session.queue_commands.has_pending();
-        let snapshot = super::logging::project_session_snapshot(&self.config.session);
-        let _ = self.events.publish_transcript(snapshot);
+            .retain(|item| !self.role.config.session.queue_commands.is_consumed(item));
+        self.role.config.session.queue_projection_debt =
+            self.role.config.session.queue_projection_debt
+                && self.role.config.session.queue_commands.has_pending();
+        let snapshot = super::logging::project_session_snapshot(&self.role.config.session);
+        let _ = self.role.events.publish_transcript(snapshot);
     }
 
     fn publish_projected_usage(&self) {
-        for terminal in take_pending_usage(&self.pending_usage, self.opened.locator().session_id())
+        for terminal in
+            take_pending_usage(&self.role.pending_usage, self.opened.locator().session_id())
         {
             super::usage::emit_projected_turn_usage(
-                &self.events,
-                &self.config.session.id,
+                &self.role.events,
+                &self.role.config.session.id,
                 terminal.turn_id,
                 terminal.usage,
-                self.log.as_ref(),
-                &self.session_ledger,
+                self.role.log.as_ref(),
+                &self.role.session_ledger,
             );
         }
     }
@@ -448,13 +477,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// projector applied its turn's terminal, so it waits for the pass to
     /// complete and a refused pass fails the command.
     async fn finish_projection(&mut self, one_shot: bool) -> CliResult<()> {
-        self.projection_finished = true;
-        if self.config.session.store_revision == 0 {
+        self.role.projection_finished = true;
+        if self.role.config.session.store_revision == 0 {
             return Ok(());
         }
         let target = self.live_target();
         let deadline = self.projection_deadline(one_shot);
-        let live = self.live.take();
+        let live = self.role.live.take();
         let pass = async {
             let refused = match live {
                 Some(live) => live.finish(target.clone(), None).await.err(),
@@ -493,8 +522,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
 
     fn log_projector_debt(&self, error: &str) {
         log_ev(
-            self.log.as_ref(),
-            &self.config,
+            self.role.log.as_ref(),
+            &self.role.config,
             SessionEvent::new("projector.deferred").str("error", error),
         );
     }
@@ -503,52 +532,56 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         // A new construction (this session, a fork, a spawn) queued what its
         // skills discovery left out; each distinct notice is shown once per
         // root session.
-        let notices = self.config.state_roots.take_skill_notices();
+        let notices = self.role.config.state_roots.take_skill_notices();
         for notice in self
+            .role
             .shown_skill_notices
-            .fresh(&self.config.session.id, notices)
+            .fresh(&self.role.config.session.id, notices)
         {
-            let _ = self.events.notice(sessions::TranscriptRow::info(
+            let _ = self.role.events.notice(sessions::TranscriptRow::info(
                 sessions::NoticeScope::Session,
                 notice,
             ));
         }
-        if self.storage_interrupted && self.config.store.storage_unavailable() {
+        if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
             return;
         }
         super::events::commit_notice_intents(
-            &self.events,
-            &*self.config.store,
-            &self.config.home,
-            self.log.as_ref(),
-            &mut self.config.session,
+            &self.role.events,
+            &*self.role.config.store,
+            &self.role.config.home,
+            self.role.log.as_ref(),
+            &mut self.role.config.session,
         );
     }
 
     fn update_background_process_count(&mut self) {
         for failure in self
+            .role
             .config
             .state_roots
             .job_registry()
             .take_user_stop_failures()
         {
-            let _ = self.events.notice(sessions::TranscriptRow::error(
+            let _ = self.role.events.notice(sessions::TranscriptRow::error(
                 sessions::NoticeScope::Session,
                 failure,
             ));
         }
-        self.actions
-            .set_background_processes(self.config.state_roots.job_registry().running_count());
-        for row in self
-            .job_events
-            .emit(self.config.state_roots.job_registry(), &self.events)
-        {
+        self.role
+            .actions
+            .set_background_processes(self.role.config.state_roots.job_registry().running_count());
+        for row in self.role.job_events.emit(
+            self.role.config.state_roots.job_registry(),
+            &self.role.events,
+        ) {
             // Live only: the projector derives the stored process row.
-            self.config.session.append_transcript(row.clone());
-            let _ = self.events.send(ContentEvent::Row(row));
+            self.role.config.session.append_transcript(row.clone());
+            let _ = self.role.events.send(ContentEvent::Row(row));
         }
-        self.actions
-            .set_processes(self.config.state_roots.job_registry().snapshot());
+        self.role
+            .actions
+            .set_processes(self.role.config.state_roots.job_registry().snapshot());
     }
 
     async fn run(
@@ -561,7 +594,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             .and_then(|state| state.run.as_ref())
             .is_some_and(|run| run.bounds.leave_jobs_running)
         {
-            self.config
+            self.role
+                .config
                 .state_roots
                 .job_registry()
                 .disown_leftovers()
@@ -584,8 +618,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         // A one-shot's initial prompt belongs after the recovered turn, not
         // in its busy follow-up queue. Keep its delivery/provenance intact.
         let initial_prompt = if one_shot.is_some() && self.opened.has_recovered_turn() {
-            crate::intent_dispatch::take_next(&self.interrupt_state, || self.actions.try_recv())
-                .ok()
+            crate::intent_dispatch::take_next(&self.role.interrupt_state, || {
+                self.role.actions.try_recv()
+            })
+            .ok()
         } else {
             None
         };
@@ -593,7 +629,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             return self.finish_projection(one_shot.is_some()).await;
         }
         if let Some(delivery) = initial_prompt {
-            self.interrupt_state.borrow_mut().restore_front(delivery);
+            self.role
+                .interrupt_state
+                .borrow_mut()
+                .restore_front(delivery);
         }
         let mut passive_checkpoint_scheduled = false;
         if let Some(state) = one_shot.as_deref_mut()
@@ -604,16 +643,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         }
 
         loop {
-            if self.config.store.storage_unavailable() {
-                self.storage_interrupted |= self.config.store.storage_wait_cancelled();
+            if self.role.config.store.storage_unavailable() {
+                self.role.storage_interrupted |= self.role.config.store.storage_wait_cancelled();
             } else {
-                self.storage_interrupted = false;
+                self.role.storage_interrupted = false;
             }
             self.commit_notice_intents();
             self.project().await;
-            if !passive_checkpoint_scheduled && self.actions.is_promptable() {
+            if !passive_checkpoint_scheduled && self.role.actions.is_promptable() {
                 self.opened
-                    .schedule_passive_checkpoint(self.executor.tasks());
+                    .schedule_passive_checkpoint(self.role.executor.tasks());
                 passive_checkpoint_scheduled = true;
             }
             if let Some(state) = one_shot.as_deref_mut() {
@@ -642,7 +681,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     user_echoed,
                 } => (text, queued_delivery, user_echoed),
             };
-            let before = self.config.session.root_turn_count;
+            let before = self.role.config.session.root_turn_count;
             let step = match self
                 .run_prompt(
                     raw_text,
@@ -659,7 +698,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             if let Some(run) = one_shot.as_deref_mut().and_then(|state| state.run.as_mut()) {
                 run.turns = run
                     .turns
-                    .saturating_add(u8::from(self.config.session.root_turn_count > before));
+                    .saturating_add(u8::from(self.role.config.session.root_turn_count > before));
             }
             if matches!(step, HostStep::Quit) {
                 break;
@@ -673,7 +712,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// A one-shot resumes a paused tree only when asked (`--resume-tree`);
     /// otherwise a paused tree refuses the run.
     async fn resume_one_shot_tree(&self, resume_tree: bool) -> CliResult<()> {
-        let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
+        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
         if resume_tree {
             topology_state::resume_tree(&tree_id)
                 .await
@@ -693,10 +732,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         if error.store_refusal() != Some(crate::error::StoreRefusal::StorageFull) {
             return false;
         }
-        self.storage_interrupted = true;
-        self.config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-        self.pending_start = None;
-        let _ = self.events.notice(sessions::TranscriptRow::info(
+        self.role.storage_interrupted = true;
+        self.role.config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
+        self.role.pending_start = None;
+        let _ = self.role.events.notice(sessions::TranscriptRow::info(
             sessions::NoticeScope::Settings,
             "storage write unavailable; retained work and queued inputs remain available",
         ));
@@ -705,7 +744,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
 }
 
 #[cfg(test)]
-impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
+impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
     /// Opens the actor on an executor of its own, for synchronous tests.
     fn open_blocking(
         config: HostConfig<P>,
@@ -729,7 +768,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
     }
 
     fn test_executor(&self) -> std::rc::Rc<session_executor::SessionExecutor> {
-        std::rc::Rc::clone(&self.executor)
+        std::rc::Rc::clone(&self.role.executor)
     }
 
     /// Drives one of the actor's async steps to its end from a synchronous

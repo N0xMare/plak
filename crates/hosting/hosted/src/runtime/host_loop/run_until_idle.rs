@@ -1,12 +1,12 @@
 //! Non-interactive waiting owns no turn; continuations use ordinary admission.
 
-use super::{CliFailure, CliResult, HostStep, InterruptWatch, NodeActor};
+use super::{CliFailure, CliResult, HostStep, InterruptWatch, RootActor};
 use crate::runtime::oneshot::{OneShotOutcome, OneShotState};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Run-until-idle selection preserves queue priority, child wake readiness, turn bounds, and terminal shutdown conditions."
@@ -18,7 +18,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let mut waiting_noted = false;
         loop {
             let storage_unavailable =
-                self.storage_interrupted && self.config.store.storage_unavailable();
+                self.role.storage_interrupted && self.role.config.store.storage_unavailable();
             let Some(run) = state.run.as_ref() else {
                 return Ok(HostStep::Quit);
             };
@@ -27,11 +27,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     Instant::now() >= deadline
                         || super::super::oneshot::injected_run_deadline_elapsed()
                 });
-            let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
+            let watch = InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
             watch.poll();
             let interrupted = watch.interrupted();
-            let tree_id =
-                super::durable_tree_id(&self.config.topology_rows(), &self.config.session);
+            let tree_id = super::durable_tree_id(
+                &self.role.config.topology_rows(),
+                &self.role.config.session,
+            );
             let runtime = crate::topology_runtime::lookup(&tree_id);
             let (waiting_rows, mail) = if let Some(runtime) = runtime {
                 runtime
@@ -76,7 +78,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 .iter()
                 .filter(|job| {
                     job.status == plakous::tools::JobStatus::Running
-                        && !self.config.state_roots.job_registry().is_leftover(job)
+                        && !self.role.config.state_roots.job_registry().is_leftover(job)
                 })
                 .collect::<Vec<_>>();
             let notices = jobs
@@ -91,7 +93,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     OneShotOutcome::Completed { .. } | OneShotOutcome::Truncated { .. }
                 ))
             );
-            let resuming = self.pending_resume.is_some();
+            let resuming = self.role.pending_resume.is_some();
             // A deadline interrupt can race an already complete final turn.
             let interrupted = interrupted && (!timeout || !completed || pending || live);
             let bound = if timeout && (pending || live || !completed) {
@@ -112,7 +114,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         format!(
                             "{} p{}",
                             if run.bounds.leave_jobs_running
-                                && self.config.state_roots.job_registry().is_leftover(job)
+                                && self.role.config.state_roots.job_registry().is_leftover(job)
                             {
                                 "released"
                             } else {
@@ -125,6 +127,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 let mut failures = Vec::new();
                 if run.bounds.leave_jobs_running {
                     if let Err(error) = self
+                        .role
                         .config
                         .state_roots
                         .job_registry()
@@ -135,6 +138,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     }
                 }
                 if let Err(error) = self
+                    .role
                     .config
                     .state_roots
                     .job_registry()
@@ -176,16 +180,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     failures.push(error);
                 }
                 if storage_unavailable {
-                    let _ = self.events.notice(TranscriptRow::info(
+                    let _ = self.role.events.notice(TranscriptRow::info(
                         NoticeScope::Tree,
                         "plak: run stopped at storage unavailable",
                     ));
                 }
                 if let Some(bound) = bound.filter(|_| !storage_unavailable) {
-                    if let Some(session_id) =
-                        crate::product_observation::session_id_from_text(&self.config.session.id)
-                    {
-                        self.config.state_roots.emit_product(
+                    if let Some(session_id) = crate::product_observation::session_id_from_text(
+                        &self.role.config.session.id,
+                    ) {
+                        self.role.config.state_roots.emit_product(
                             crate::product_observation::ProductObservation::RunBoundExit {
                                 at: crate::product_observation::wall_timestamp(),
                                 session_id,
@@ -217,7 +221,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     } else {
                         format!("; {}", details.join("; "))
                     };
-                    let _ = self.events.notice(TranscriptRow::info(
+                    let _ = self.role.events.notice(TranscriptRow::info(
                         NoticeScope::Tree,
                         format!("plak: run stopped at {bound}{suffix}"),
                     ));
@@ -251,8 +255,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             }
             if pending {
                 let (command, batch) = super::super::result_mail::select(
-                    &self.config.topology_rows(),
-                    &self.config.session,
+                    &self.role.config.topology_rows(),
+                    &self.role.config.session,
                     super::wake::WAKE_PROMPT,
                 )
                 .map_err(CliFailure::new)?;
@@ -274,13 +278,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     .map(|job| format!("p{}", job.number))
                     .chain(mail.iter().map(|(id, _)| id.clone()))
                     .collect::<Vec<_>>();
-                let mut candidate = self.config.session.clone();
+                let mut candidate = self.role.config.session.clone();
                 let item = candidate
                     .enqueue_live(super::wake::WAKE_PROMPT)
                     .map_err(|_| CliFailure::new("run continuation queue admission was refused"))?;
-                self.config.session = super::super::result_mail::prepare_instruction(
-                    &self.config.topology_rows(),
-                    self.config.store.as_ref(),
+                self.role.config.session = super::super::result_mail::prepare_instruction(
+                    &self.role.config.topology_rows(),
+                    self.role.config.store.as_ref(),
                     &candidate,
                     &item,
                     &command,
@@ -294,7 +298,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     .map(|job| format!("p{} {}", job.number, job_status(job.status)))
                     .chain(mail.iter().map(|(_, label)| label.clone()))
                     .collect::<Vec<_>>();
-                let _ = self.events.notice(TranscriptRow::info(
+                let _ = self.role.events.notice(TranscriptRow::info(
                     NoticeScope::Tree,
                     format!(
                         "plak: continuing (turn {}: {})",
@@ -318,7 +322,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     .map(|job| format!("p{} ({})", job.number, job.command))
                     .chain(waiting_rows.iter().map(|(_, label)| label.clone()))
                     .collect::<Vec<_>>();
-                let _ = self.events.notice(
+                let _ = self.role.events.notice(
                     TranscriptRow::info(
                         NoticeScope::Tree,
                         format!("waiting for {}", waiting.join(", ")),
@@ -334,17 +338,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     }
 
     fn pause_run_queue(&mut self) -> CliResult<()> {
-        self.config.session.queue_drain_state = crate::sessions::QueueDrainState::RestoredPaused;
-        if self.storage_interrupted && self.config.store.storage_unavailable() {
+        self.role.config.session.queue_drain_state =
+            crate::sessions::QueueDrainState::RestoredPaused;
+        if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
             return Ok(());
         }
-        self.config
+        self.role
+            .config
             .store
-            .save(&mut self.config.session)
+            .save(&mut self.role.config.session)
             .map_err(|error| {
                 super::super::admission::log_queue_persist_failed(
-                    &self.config.home,
-                    &self.config.session,
+                    &self.role.config.home,
+                    &self.role.config.session,
                     super::super::admission::QueuePersistAction::PauseDrain,
                     &error,
                 );

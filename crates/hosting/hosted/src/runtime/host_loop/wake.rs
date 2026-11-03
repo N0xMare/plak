@@ -1,6 +1,6 @@
 //! Idle interactive continuation uses ordinary root admission and its journal.
 
-use super::{CliFailure, CliResult, HostStep, Instant, NodeActor, SessionQueueItem};
+use super::{CliFailure, CliResult, HostStep, Instant, RootActor, SessionQueueItem};
 use crate::driver::wake::{WakeCoalescer, WakeDecision, WakeSources};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
@@ -103,32 +103,35 @@ pub(in crate::runtime) fn is_wake_delivery(
         })
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) fn suppress_child_wake(&mut self, reason: Option<String>) -> CliResult<()> {
-        self.config.session.child_wake_suppressed = true;
-        self.child_wake.suppression_pending = true;
-        self.child_wake.pause_pending = reason.clone();
-        if self.storage_interrupted && self.config.store.storage_unavailable() {
+        self.role.config.session.child_wake_suppressed = true;
+        self.role.child_wake.suppression_pending = true;
+        self.role.child_wake.pause_pending = reason.clone();
+        if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
             return Ok(());
         }
-        if self.config.session.store_revision == 0 {
-            self.config
+        if self.role.config.session.store_revision == 0 {
+            self.role
+                .config
                 .store
-                .save(&mut self.config.session)
+                .save(&mut self.role.config.session)
                 .map_err(CliFailure::from)?;
         }
         let pause =
             reason.map(
                 |reason| crate::sessions::projector::HostPauseCause::WakePreflightFailed { reason },
             );
-        self.config
+        self.role
+            .config
             .store
-            .write_host_controls(&self.config.session.id, true, pause.clone())
+            .write_host_controls(&self.role.config.session.id, true, pause.clone())
             .map_err(CliFailure::from)?;
-        self.child_wake.suppression_pending = false;
-        self.child_wake.pause_pending = None;
+        self.role.child_wake.suppression_pending = false;
+        self.role.child_wake.pause_pending = None;
         if pause.is_some() {
-            self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
+            self.role.config.session.queue_drain_state =
+                super::SessionQueueDrainState::RestoredPaused;
         }
         Ok(())
     }
@@ -136,10 +139,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     pub(super) fn pause_unrecorded(&mut self, reason: String) -> CliResult<()> {
         self.pause_queue(reason, false)?;
         let _ = self
+            .role
             .events
             .send(crate::surface_protocol::ContentEvent::Status {
                 phase: HostPhase::Idle,
-                queue_len: self.config.session.pending_queue.len(),
+                queue_len: self.role.config.session.pending_queue.len(),
                 detail: Some(HostStatusDetail::PromptNotAdmittedQueuePaused),
             });
         Ok(())
@@ -147,53 +151,60 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
 
     pub(super) fn pause_queue(&mut self, reason: String, suppress_wakes: bool) -> CliResult<()> {
         if suppress_wakes {
-            self.config.session.child_wake_suppressed = true;
-            self.child_wake.park();
+            self.role.config.session.child_wake_suppressed = true;
+            self.role.child_wake.park();
         }
-        self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
-        if self.storage_interrupted && self.config.store.storage_unavailable() {
-            self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
+        self.role.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
+        if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
+            self.role.config.session.queue_drain_state =
+                super::SessionQueueDrainState::RestoredPaused;
             return Ok(());
         }
-        if self.config.session.store_revision == 0 {
-            self.config
+        if self.role.config.session.store_revision == 0 {
+            self.role
+                .config
                 .store
-                .save(&mut self.config.session)
+                .save(&mut self.role.config.session)
                 .map_err(CliFailure::from)?;
         }
-        self.config
+        self.role
+            .config
             .store
             .write_host_controls(
-                &self.config.session.id,
+                &self.role.config.session.id,
                 suppress_wakes,
                 Some(crate::sessions::projector::HostPauseCause::UnrecordedRefusal { reason }),
             )
             .map_err(CliFailure::from)?;
-        self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
+        self.role.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
         Ok(())
     }
 
     pub(super) async fn child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
-        if self.config.interactive
-            && let Some(surface) = self.config.surface.as_deref()
+        if self.role.config.interactive
+            && let Some(surface) = self.role.config.surface.as_deref()
             && let Some(enabled) = surface.child_wake_enabled()
         {
-            self.config.auto_continue = enabled;
+            self.role.config.auto_continue = enabled;
         }
-        if self.child_wake.suppression_pending
+        if self.role.child_wake.suppression_pending
             && self
-                .suppress_child_wake(self.child_wake.pause_pending.clone())
+                .suppress_child_wake(self.role.child_wake.pause_pending.clone())
                 .is_err()
         {
             return Ok(HostStep::Continue);
         }
-        if self.child_wake.retry_waiting(&self.config.session.id, now) {
+        if self
+            .role
+            .child_wake
+            .retry_waiting(&self.role.config.session.id, now)
+        {
             return self.wake_deferred();
         }
-        let suppressed = self.config.session.child_wake_suppressed;
+        let suppressed = self.role.config.session.child_wake_suppressed;
         let step = match self.try_child_wake_prompt(now).await {
             Ok(step) => {
-                self.child_wake.retry = None;
+                self.role.child_wake.retry = None;
                 Ok(step)
             }
             Err(error) => {
@@ -206,8 +217,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     cause = "refused",
                     "sub-agent auto-continue paused until the next prompt"
                 );
-                self.child_wake.retry = None;
-                let _ = self.events.notice(
+                self.role.child_wake.retry = None;
+                let _ = self.role.events.notice(
                     TranscriptRow::error(
                         NoticeScope::Tree,
                         format!(
@@ -218,11 +229,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     .with_optional_remedy(error.remedy()),
                 );
                 let _ = self.suppress_child_wake(Some(error.message().to_owned()));
-                self.child_wake.park();
+                self.role.child_wake.park();
                 Ok(HostStep::Continue)
             }
         };
-        if !suppressed && self.config.session.child_wake_suppressed {
+        if !suppressed && self.role.config.session.child_wake_suppressed {
             self.auto_continue_pause_reported();
         }
         self.publish_pending_continuation();
@@ -233,13 +244,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// root host wake: the same journaled submission, crash and reopen rules
     /// as an idle wake. It waits while another submission is unresolved.
     pub(super) async fn continuation_prompt(&mut self) -> CliResult<HostStep> {
-        if self.recovery.blocked()
-            || self.pending_start.is_some()
-            || self.config.session.queue_commands.has_pending()
+        if self.role.recovery.blocked()
+            || self.role.pending_start.is_some()
+            || self.role.config.session.queue_commands.has_pending()
         {
             return Ok(HostStep::Continue);
         }
-        let Some(text) = self.config.continuation.take() else {
+        let Some(text) = self.role.config.continuation.take() else {
             return Ok(HostStep::Continue);
         };
         // The same context preflight a wake runs, which a host-authored
@@ -247,25 +258,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         match self.fit_child_wake(&text).await {
             Ok(WakeFit::Fits) => {}
             Ok(WakeFit::Stopped(_)) => {
-                self.config.continuation = Some(text);
+                self.role.config.continuation = Some(text);
                 return Ok(HostStep::Continue);
             }
             Ok(WakeFit::DoesNotFit) | Err(_) => {
-                self.child_wake.prepared_context = None;
-                let _ = self.events.notice(TranscriptRow::warning(
+                self.role.child_wake.prepared_context = None;
+                let _ = self.role.events.notice(TranscriptRow::warning(
                     NoticeScope::Session,
                     "the reload continuation could not be prepared; send a prompt to continue",
                 ));
                 return Ok(HostStep::Continue);
             }
         }
-        let mut candidate = self.config.session.clone();
+        let mut candidate = self.role.config.session.clone();
         let item = candidate
             .enqueue_live(text.as_str())
             .map_err(|_| CliFailure::new("the continuation was refused by the queue"))?;
-        self.config.session = super::super::result_mail::prepare_instruction(
-            &self.config.topology_rows(),
-            self.config.store.as_ref(),
+        self.role.config.session = super::super::result_mail::prepare_instruction(
+            &self.role.config.topology_rows(),
+            self.role.config.store.as_ref(),
             &candidate,
             &item,
             &text,
@@ -290,7 +301,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// retried on a doubling delay, then every [`TRANSIENT_REARM`] once the
     /// retries are spent, which is when the pause is reported.
     fn defer_child_wake(&mut self, refusal: crate::error::StoreRefusal, now: Instant) {
-        let (failures, delay) = self.child_wake.defer(&self.config.session.id, now);
+        let (failures, delay) = self
+            .role
+            .child_wake
+            .defer(&self.role.config.session.id, now);
         let storage_low = refusal == crate::error::StoreRefusal::LowSpace;
         let message = if storage_low {
             "sub-agent auto-continue waiting: product storage is below the admission floor"
@@ -305,7 +319,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             "{message}"
         );
         if failures == TRANSIENT_RETRIES + 1 {
-            let _ = self.events.notice(TranscriptRow::warning(
+            let _ = self.role.events.notice(TranscriptRow::warning(
                 NoticeScope::Tree,
                 if storage_low {
                     format!("Sub-agent auto-continue waiting: product storage is below the admission floor; rechecks every {} s", TRANSIENT_REARM.as_secs())
@@ -336,44 +350,47 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         jobs: Vec<plakous::tools::JobView>,
     ) -> CliResult<HostStep> {
         let views = self
+            .role
             .config
             .store
-            .load_views(&self.config.session.id)
+            .load_views(&self.role.config.session.id)
             .map_err(CliFailure::new)?
             .unwrap_or_else(crate::sessions::projector::SessionViews::empty);
         let intents = self
+            .role
             .config
             .store
-            .load_intents(&self.config.session.id)
+            .load_intents(&self.role.config.session.id)
             .map_err(CliFailure::new)?;
-        self.config.session.child_wake_suppressed = views.wake_suppressed(&intents);
+        self.role.config.session.child_wake_suppressed = views.wake_suppressed(&intents);
         if views.pause_cause(&intents).is_some() {
-            self.child_wake.park();
+            self.role.child_wake.park();
             return Ok(HostStep::Continue);
         }
-        self.config
+        self.role
+            .config
             .session
             .pending_queue
-            .retain(|item| !self.config.session.queue_commands.is_consumed(item));
-        let session = &self.config.session;
-        if !self.config.prompt_host_facts().host_wakes
-            || self.recovery.blocked()
+            .retain(|item| !self.role.config.session.queue_commands.is_consumed(item));
+        let session = &self.role.config.session;
+        if !self.role.config.prompt_host_facts().host_wakes
+            || self.role.recovery.blocked()
             || session.child_wake_suppressed
-            || self.pending_start.is_some()
+            || self.role.pending_start.is_some()
             || !session.pending_queue.is_empty()
             || session.queue_commands.has_pending()
         {
-            self.child_wake.park();
+            self.role.child_wake.park();
             return Ok(HostStep::Continue);
         }
-        let rows = self.config.topology_rows();
-        let runtime = self.last_tree_revision.runtime(&rows, session);
+        let rows = self.role.config.topology_rows();
+        let runtime = self.role.last_tree_revision.runtime(&rows, session);
         let notices: Vec<_> = jobs
             .into_iter()
             .filter(|job| job.status != plakous::tools::JobStatus::Running)
             .collect();
         let ids = wake_ids(runtime.as_deref(), &notices)?;
-        if !self.child_wake.observe(&session.id, ids, now) {
+        if !self.role.child_wake.observe(&session.id, ids, now) {
             return Ok(HostStep::Continue);
         }
         // A wake is to be admitted: this is its admission pass to the tail,
@@ -388,17 +405,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         .await?;
         let ids = wake_ids(runtime.as_deref(), &notices)?;
         if ids.is_empty() {
-            self.child_wake.park();
+            self.role.child_wake.park();
             return Ok(HostStep::Continue);
         }
         // Recheck ingress after observing mail: user input and shutdown outrank a wake.
-        let watch = super::InterruptWatch::new(self.actions, &self.interrupt_state);
+        let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.poll();
-        if self.interrupt_state.borrow().has_deferred() || watch.interrupted() {
+        if self.role.interrupt_state.borrow().has_deferred() || watch.interrupted() {
             return Ok(HostStep::Continue);
         }
-        let admission = self.config.store.storage_admission();
-        super::super::info::send_session_info_with_storage(&self.events, &self.config, &admission);
+        let admission = self.role.config.store.storage_admission();
+        super::super::info::send_session_info_with_storage(
+            &self.role.events,
+            &self.role.config,
+            &admission,
+        );
         if matches!(
             admission,
             crate::session_store::StorageAdmission::Refused(_)
@@ -413,7 +434,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let (command, batch) = super::super::result_mail::select(&rows, session, WAKE_PROMPT)
             .map_err(CliFailure::new)?;
         if batch.is_none() && notices.is_empty() {
-            self.child_wake.park();
+            self.role.child_wake.park();
             return Ok(HostStep::Continue);
         }
         // Compaction requires an idle journal; budget the complete mail batch
@@ -421,20 +442,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         if !self.preflight_child_wake(&command).await? {
             return Ok(HostStep::Continue);
         }
-        let watch = super::InterruptWatch::new(self.actions, &self.interrupt_state);
+        let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.poll();
-        if self.interrupt_state.borrow().has_deferred() || watch.interrupted() {
+        if self.role.interrupt_state.borrow().has_deferred() || watch.interrupted() {
             return Ok(HostStep::Continue);
         }
-        let mut candidate = self.config.session.clone();
+        let mut candidate = self.role.config.session.clone();
         let item = candidate
             .enqueue_live(WAKE_PROMPT)
             .map_err(|_| CliFailure::new("child wake queue admission was refused"))?;
         // Queue identity and the exact instruction batch publish atomically;
         // an unresolved wake cannot be edited or exported as a user prompt.
-        self.config.session = super::super::result_mail::prepare_instruction(
-            &self.config.topology_rows(),
-            self.config.store.as_ref(),
+        self.role.config.session = super::super::result_mail::prepare_instruction(
+            &self.role.config.topology_rows(),
+            self.role.config.store.as_ref(),
             &candidate,
             &item,
             &command,
@@ -443,7 +464,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         )
         .await
         .map_err(CliFailure::from)?;
-        self.child_wake.park();
+        self.role.child_wake.park();
         Ok(HostStep::Prompt {
             text: item.text.clone(),
             queued_delivery: Some(item),
@@ -456,7 +477,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             WakeFit::Fits => return Ok(true),
             WakeFit::Stopped(stopped) => {
                 let _ = stopped;
-                self.child_wake.park();
+                self.role.child_wake.park();
                 return Ok(false);
             }
             WakeFit::DoesNotFit => {}
@@ -465,16 +486,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             "Sub-agent auto-continue preflight did not fit".to_owned(),
         ))?;
 
-        let _ = self.events.notice(TranscriptRow::warning(
+        let _ = self.role.events.notice(TranscriptRow::warning(
             NoticeScope::Tree,
             "Sub-agent auto-continue preflight paused until the next prompt",
         ));
-        self.child_wake.park();
+        self.role.child_wake.park();
         Ok(false)
     }
 
     pub(super) async fn fit_child_wake(&mut self, command: &str) -> CliResult<WakeFit> {
-        let watch = super::InterruptWatch::new(self.actions, &self.interrupt_state);
+        let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.begin();
         self.refresh_native_authority_before_prompt().await?;
         if let Some(stopped) = self.stop_preparation(&mut None)? {
@@ -490,32 +511,32 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             return Ok(WakeFit::Stopped(stopped));
         }
         if !context.compaction_verdict().is_due() {
-            self.child_wake.prepared_context = Some(context);
+            self.role.child_wake.prepared_context = Some(context);
             return Ok(WakeFit::Fits);
         }
-        if !self.config.compaction_enabled {
+        if !self.role.config.compaction_enabled {
             if context.compaction_verdict().overflow() {
                 return Err(CliFailure::new(super::scheduled_compaction_disabled_note(
                     context.disposition(),
                 )));
             }
-            self.child_wake.prepared_context = Some(context);
+            self.role.child_wake.prepared_context = Some(context);
             return Ok(WakeFit::Fits);
         }
-        self.config.session.queue_drain_state = super::SessionQueueDrainState::LiveAutoDrain;
-        super::observe_compact(&self.events, 0, true);
+        self.role.config.session.queue_drain_state = super::SessionQueueDrainState::LiveAutoDrain;
+        super::observe_compact(&self.role.events, 0, true);
         let outcome = super::run_scheduled_compaction_until_fits(
-            super::InterruptWatch::new(self.actions, &self.interrupt_state),
-            &mut self.config,
+            super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
+            &mut self.role.config,
             &self.opened,
-            &mut self.stderr_buf,
-            &self.events,
-            self.log.as_ref(),
+            &mut self.role.stderr_buf,
+            &self.role.events,
+            self.role.log.as_ref(),
             &command,
             None,
         )
         .await;
-        super::observe_compact(&self.events, 0, false);
+        super::observe_compact(&self.role.events, 0, false);
         if let Some(stopped) = self.stop_preparation(&mut None)? {
             return Ok(WakeFit::Stopped(stopped));
         }
@@ -530,7 +551,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             }
         );
         if sends {
-            self.child_wake.prepared_context = Some(
+            self.role.child_wake.prepared_context = Some(
                 super::query_context(
                     &self.opened,
                     super::ContextQuery::WithPendingUserInput(command),

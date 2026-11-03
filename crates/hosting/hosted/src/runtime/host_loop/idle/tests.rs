@@ -19,14 +19,14 @@ fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
     let durable_store = Arc::clone(&config.store);
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
         None,
     )
     .unwrap();
-    let before = host.config.session.clone();
+    let before = host.role.config.session.clone();
     let stored_before = durable_store.load(&before.id).unwrap();
     let _ = event_rx.try_iter().collect::<Vec<_>>();
 
@@ -37,7 +37,8 @@ fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
             "store_failure",
         ),
     ] {
-        host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::refusing(reason));
+        host.role.config.store =
+            Arc::new(crate::runtime::fault_store::FaultStore::refusing(reason));
         let draft = "private unsaved draft";
         actions.send(UserAction::Prompt(draft.into())).unwrap();
         assert!(matches!(
@@ -45,7 +46,7 @@ fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
                 .unwrap(),
             HostStep::Continue
         ));
-        assert_eq!(host.config.session, before);
+        assert_eq!(host.role.config.session, before);
         assert_eq!(durable_store.load(&before.id).unwrap(), stored_before);
         let observed = event_rx.try_iter().collect::<Vec<_>>();
         assert!(observed.iter().any(|event| matches!(
@@ -63,7 +64,7 @@ fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
         )));
 
         let records = session_log::read_tail_for_kind(
-            &host.config.home,
+            &host.role.config.home,
             &before.id,
             10,
             Some("queue.persist_failed"),
@@ -93,14 +94,14 @@ fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
         HostStep::Continue
     ));
     let failures = session_log::read_tail_for_kind(
-        &host.config.home,
+        &host.role.config.home,
         &before.id,
         10,
         Some("queue.persist_failed"),
     )
     .unwrap();
     assert_eq!(failures.len(), 2, "one diagnostic per failed action");
-    host.config.store = durable_store;
+    host.role.config.store = durable_store;
     actions.send(UserAction::DropQueued).unwrap();
     assert!(matches!(
         host.block(async |host| host.next_prompt(None).await)
@@ -108,11 +109,11 @@ fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
         HostStep::Continue
     ));
     assert_eq!(
-        host.config.session.pending_queue,
+        host.role.config.session.pending_queue,
         [] as [queue::QueueItem; 0]
     );
     let after_success = session_log::read_tail_for_kind(
-        &host.config.home,
+        &host.role.config.home,
         &before.id,
         10,
         Some("queue.persist_failed"),
@@ -130,7 +131,7 @@ fn the_idle_wait_wakes_on_an_intent_and_not_before() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, _event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -173,6 +174,6 @@ fn the_idle_wait_wakes_on_an_intent_and_not_before() {
     block_release(&mut host);
 }
 
-fn block_release(host: &mut NodeActor<'_, TestExtension>) {
+fn block_release(host: &mut RootActor<'_, TestExtension>) {
     host.block(async |host| host.release().await).unwrap();
 }

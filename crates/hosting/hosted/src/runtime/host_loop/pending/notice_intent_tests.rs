@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::tests::{pause_rows, pause_tree, reopen, snapshots, spawn_child, with_configured_tree};
 use super::{AUTO_CONTINUE_PAUSE_TEXT, TREE_PAUSE_TEXT};
-use crate::runtime::host_loop::NodeActor;
+use crate::runtime::host_loop::RootActor;
 use crate::runtime::test_kit::TestExtension;
 use crate::session_store::{MemoryStore, SessionRecordStore as _};
 use crate::sessions::TranscriptRow;
@@ -48,18 +48,18 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
         0,
         move |config| config.store = memory,
         |host, runtime, actions, observed| {
-            let id = host.config.session.id.clone();
-            let observe_tree = |host: &mut NodeActor<'_, TestExtension>| {
+            let id = host.role.config.session.id.clone();
+            let observe_tree = |host: &mut RootActor<'_, TestExtension>| {
                 crate::runtime::tree::emit_tree_snapshot_if_revision_advanced(
                     &crate::runtime::HostRows::new(
-                        &host.config.state_roots,
-                        host.config.store.as_ref(),
+                        &host.role.config.state_roots,
+                        host.role.config.store.as_ref(),
                     ),
-                    &*host.config.store,
-                    &host.config.home,
-                    &mut host.config.session,
-                    &mut host.last_tree_revision,
-                    &host.events,
+                    &*host.role.config.store,
+                    &host.role.config.home,
+                    &mut host.role.config.session,
+                    &mut host.role.last_tree_revision,
+                    &host.role.events,
                     false,
                 );
             };
@@ -85,6 +85,7 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
                 );
             }
             let notices: Vec<TranscriptRow> = host
+                .role
                 .config
                 .session
                 .transcript
@@ -109,13 +110,15 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
                 "every live milestone is one notice intent: {intents:?}"
             );
 
-            host.config.store.save(&mut host.config.session).unwrap();
+            let config = &mut host.role.config;
+            config.store.save(&mut config.session).unwrap();
             store.delete_views(&id);
             reopen(host, |restored| {
-                let sessions = restored.config.state_roots.runtime_sessions().unwrap();
+                let sessions = restored.role.config.state_roots.runtime_sessions().unwrap();
                 let records: Arc<dyn crate::session_store::SessionRecordStore> = store.clone();
-                let locator = restored.config.session.plakous_locator.unwrap();
+                let locator = restored.role.config.session.plakous_locator.unwrap();
                 restored
+                    .role
                     .executor
                     .block_on(crate::runtime::projection::project_to_tail(
                         &sessions, &records, &id, locator,
@@ -130,11 +133,9 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
                         "the rebuild keeps {row:?} once: {rebuilt:#?}"
                     );
                 }
-                assert_eq!(
-                    pause_rows(&restored.config.session, AUTO_CONTINUE_PAUSE_TEXT),
-                    1
-                );
-                assert_eq!(pause_rows(&restored.config.session, TREE_PAUSE_TEXT), 1);
+                let session = &restored.role.config.session;
+                assert_eq!(pause_rows(session, AUTO_CONTINUE_PAUSE_TEXT), 1);
+                assert_eq!(pause_rows(session, TREE_PAUSE_TEXT), 1);
             });
         },
     );

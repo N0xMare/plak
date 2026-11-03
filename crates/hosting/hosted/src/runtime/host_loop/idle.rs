@@ -4,7 +4,7 @@ use super::RootRecovery;
 use super::recover::RecoveryTrigger;
 use super::{
     APPROVAL_REFUSED_NOTE, CliFailure, CliResult, ContextQuery, HostStep,
-    IDLE_OBSERVE_POLL_INTERVAL, Instant, InterruptWatch, NodeActor, Rebound, RecvTimeoutError,
+    IDLE_OBSERVE_POLL_INTERVAL, Instant, InterruptWatch, Rebound, RecvTimeoutError, RootActor,
     SessionQueueDrainState, TREE_OBSERVE_INTERVAL, UserAction, admit_idle_immediate_prompt,
     clear_session_rebuild, commit_session_update, compact_may_resume_queue,
     compact_reason_for_disposition, dispatch_invoke_tool, dispatch_topology_navigator,
@@ -22,15 +22,15 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// Reopens a fenced session in place as soon as the actor is idle, with
     /// no action needed. A failed reopen is reported and left to the next
     /// action that needs the session, or to an explicit recovery. The reopen
     /// is watched: what the operator sends meanwhile, an interrupt or a quit
     /// included, is left for the idle dispatcher to answer after it.
     async fn recover_eagerly(&mut self) -> Result<HostStep, ()> {
-        let state = std::rc::Rc::clone(&self.interrupt_state);
-        let watch = InterruptWatch::deferring(self.actions, &state);
+        let state = std::rc::Rc::clone(&self.role.interrupt_state);
+        let watch = InterruptWatch::deferring(self.role.actions, &state);
         let recovered = crate::interrupt::watched(
             watch,
             Box::pin(self.recover_session(RecoveryTrigger::Eager)),
@@ -44,8 +44,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 Ok(step)
             }
             Err(failure) => {
-                self.recovery = RootRecovery::Retrying;
-                let _ = self.events.notice(
+                self.role.recovery = RootRecovery::Retrying;
+                let _ = self.role.events.notice(
                     TranscriptRow::error(NoticeScope::Session, failure.message().to_owned())
                         .with_optional_remedy(failure.remedy()),
                 );
@@ -64,7 +64,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     ) -> Result<crate::surface_protocol::UserActionDelivery<P>, RecvTimeoutError> {
         let deadline = tokio::time::Instant::now() + window;
         loop {
-            match self.actions.try_recv() {
+            match self.role.actions.try_recv() {
                 Ok(delivery) => return Ok(delivery),
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     return Err(RecvTimeoutError::Disconnected);
@@ -73,7 +73,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             }
             tokio::select! {
                 biased;
-                () = self.actions.ready() => {}
+                () = self.role.actions.ready() => {}
                 () = tokio::time::sleep_until(deadline) => return Err(RecvTimeoutError::Timeout),
             }
         }
@@ -89,38 +89,41 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     ) -> CliResult<HostStep> {
         // A quit the operator already sent is answered first; the next open
         // recovers the fenced turn.
-        if self.role.recovery == super::RecoveryPolicy::EagerInPlace
-            && self.recovery == RootRecovery::Due
-            && !self.interrupt_state.borrow().has_deferred_quit()
-            && !self.actions.abandon_and_release_requested()
+        if self.policy.recovery == super::RecoveryPolicy::EagerInPlace
+            && self.role.recovery == RootRecovery::Due
+            && !self.role.interrupt_state.borrow().has_deferred_quit()
+            && !self.role.actions.abandon_and_release_requested()
         {
             match self.recover_eagerly().await {
                 Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                 Ok(_) | Err(()) => {}
             }
         }
-        crate::call_detail::note_attached(&self.config.session.id);
-        self.last_tree_revision
+        crate::call_detail::note_attached(&self.role.config.session.id);
+        self.role
+            .last_tree_revision
             .child_live
-            .retain_session(&self.config.session.id);
+            .retain_session(&self.role.config.session.id);
         self.update_background_process_count();
         self.publish_pending_continuation();
-        self.readiness.apply_settled(&mut self.config, &self.events);
+        self.role
+            .readiness
+            .apply_settled(&mut self.role.config, &self.role.events);
         // An action the operator already sent outranks the queue. Starting
         // a queued turn first would open a turn the very next iteration has to
         // cancel, so a deferred delivery is drained before `pending_start`.
-        let deferred_first = self.interrupt_state.borrow().has_deferred();
+        let deferred_first = self.role.interrupt_state.borrow().has_deferred();
         let next_prompt = if let Some(item) = (!deferred_first)
-            .then(|| self.pending_start.take())
+            .then(|| self.role.pending_start.take())
             .flatten()
         {
             Some((item.text.clone(), Some(item), false))
         } else {
-            if !self.config.attached_one_shot {
-                self.subscription_usage_refresh.poll_idle(
-                    &self.held_usage,
-                    &self.session_ledger,
-                    self.config.target.native_subscriptions().cloned(),
+            if !self.role.config.attached_one_shot {
+                self.role.subscription_usage_refresh.poll_idle(
+                    &self.role.held_usage,
+                    &self.role.session_ledger,
+                    self.role.config.target.native_subscriptions().cloned(),
                 );
             }
             // Child status transitions, grandchild spawns, and mail changes have
@@ -134,33 +137,33 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             // clears the recorded revision along with the tree id. The emitter
             // drops every non-advancing revision, so at most one push per
             // revision leaves.
-            let observed_tree = self.last_tree_observed_at.elapsed() >= TREE_OBSERVE_INTERVAL;
+            let observed_tree = self.role.last_tree_observed_at.elapsed() >= TREE_OBSERVE_INTERVAL;
             if observed_tree
-                && !(self.storage_interrupted && self.config.store.storage_unavailable())
+                && !(self.role.storage_interrupted && self.role.config.store.storage_unavailable())
             {
-                self.last_tree_observed_at = Instant::now();
+                self.role.last_tree_observed_at = Instant::now();
                 emit_tree_snapshot_if_revision_advanced(
                     &crate::runtime::HostRows::new(
-                        &self.config.state_roots,
-                        self.config.store.as_ref(),
+                        &self.role.config.state_roots,
+                        self.role.config.store.as_ref(),
                     ),
-                    &*self.config.store,
-                    &self.config.home,
-                    &mut self.config.session,
-                    &mut self.last_tree_revision,
-                    &self.events,
+                    &*self.role.config.store,
+                    &self.role.config.home,
+                    &mut self.role.config.session,
+                    &mut self.role.last_tree_revision,
+                    &self.role.events,
                     false,
                 );
             }
             let mut acknowledgement = None;
-            let deferred = self.interrupt_state.borrow_mut().take_deferred();
+            let deferred = self.role.interrupt_state.borrow_mut().take_deferred();
             let received = match deferred {
                 Some(delivery) => Ok(delivery),
                 None => self.receive(IDLE_OBSERVE_POLL_INTERVAL).await,
             }
             .map(|delivery| {
                 if let Some(started) = delivery.started() {
-                    let _ = self.events.send(started);
+                    let _ = self.role.events.send(started);
                 }
                 let (action, guard) = delivery.into_parts();
                 acknowledgement = Some(guard);
@@ -168,14 +171,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             });
             let cancels_resume =
                 received.is_ok() && !matches!(&received, Ok(UserAction::ResyncTranscript { .. }));
-            let cancelled_resume = cancels_resume && self.pending_resume.is_some();
+            let cancelled_resume = cancels_resume && self.role.pending_resume.is_some();
             if cancels_resume {
                 self.cancel_transient_resume();
             }
             // A session whose eager reopen failed recovers on the next action
             // that needs it, which then proceeds as though nothing had happened.
             let received = match received {
-                Ok(action) if self.recovery.blocked() && recovery_blocked_action(&action) => {
+                Ok(action) if self.role.recovery.blocked() && recovery_blocked_action(&action) => {
                     match self.recover_session(RecoveryTrigger::Action).await {
                         Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                         Ok(_) => {
@@ -191,7 +194,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                     failure.message().to_owned(),
                                 )));
                             }
-                            refuse_recovery_blocked_action(&self.events, &action, &failure);
+                            refuse_recovery_blocked_action(&self.role.events, &action, &failure);
                             return Ok(HostStep::Continue);
                         }
                     }
@@ -201,12 +204,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             match received {
                 Ok(UserAction::StopProcesses { id, interrupt: _ }) => {
                     if let Err(error) = self
+                        .role
                         .config
                         .state_roots
                         .job_registry()
                         .stop_user(id.as_deref())
                     {
                         let _ = self
+                            .role
                             .events
                             .notice(TranscriptRow::error(NoticeScope::Session, error));
                     }
@@ -214,12 +219,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::Recover) => {
-                    if self.recovery.blocked() {
+                    if self.role.recovery.blocked() {
                         match self.recover_session(RecoveryTrigger::Explicit).await {
                             Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                             Ok(_) => {}
                             Err(failure) => {
-                                let _ = self.events.notice(
+                                let _ = self.role.events.notice(
                                     TranscriptRow::error(
                                         NoticeScope::Session,
                                         failure.message().to_owned(),
@@ -229,7 +234,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             }
                         }
                     } else {
-                        let nothing = (!self.recovered_at_open).then(|| {
+                        let nothing = (!self.role.recovered_at_open).then(|| {
                             "nothing to recover: no turn in this session was interrupted".to_owned()
                         });
                         self.recover_tree_children(nothing);
@@ -244,11 +249,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                 assistant: String::new(),
                             }));
                     }
-                    if self.config.session.store_revision != 0 {
+                    if self.role.config.session.store_revision != 0 {
                         let _ = commit_session_update(
-                            &*self.config.store,
-                            &self.config.home,
-                            &mut self.config.session,
+                            &*self.role.config.store,
+                            &self.role.config.home,
+                            &mut self.role.config.session,
                             |candidate| {
                                 candidate.queue_drain_state =
                                     SessionQueueDrainState::RestoredPaused;
@@ -257,8 +262,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         );
                     }
                     super::log_ev(
-                        self.log.as_ref(),
-                        &self.config,
+                        self.role.log.as_ref(),
+                        &self.role.config,
                         super::SessionEvent::new("session.quit"),
                     );
                     return Ok(HostStep::Quit);
@@ -271,15 +276,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         unreachable!()
                     };
                     if draft.text.trim().is_empty() && draft.images.is_empty() {
-                        reject_draft(&self.events, action);
+                        reject_draft(&self.role.events, action);
                         None
                     } else {
                         let mut queued = None;
                         let mut refusal = None;
                         match commit_session_update(
-                            &*self.config.store,
-                            &self.config.home,
-                            &mut self.config.session,
+                            &*self.role.config.store,
+                            &self.role.config.home,
+                            &mut self.role.config.session,
                             |candidate| match candidate.enqueue_live(draft.clone()) {
                                 Ok(item) => {
                                     candidate.record_prompt(item.text.clone());
@@ -293,15 +298,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             },
                         ) {
                             Ok(true) => queued.map(|item| {
-                                let capacity = self.config.store.storage_admission();
+                                let capacity = self.role.config.store.storage_admission();
                                 let echo = !matches!(
                                     capacity,
                                     crate::session_store::StorageAdmission::Refused(_)
                                 );
-                                self.pending_storage_admission = Some(capacity);
+                                self.role.pending_storage_admission = Some(capacity);
                                 admit_idle_immediate_prompt(
-                                    &self.events,
-                                    &self.config.session,
+                                    &self.role.events,
+                                    &self.role.config.session,
                                     action,
                                     item,
                                     echo,
@@ -315,45 +320,45 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                     )));
                                 }
                                 queue_refusal(
-                                    &self.events,
+                                    &self.role.events,
                                     "queue admission",
                                     refusal.unwrap_or(queue::Refusal::Stale),
                                 );
-                                reject_draft(&self.events, action);
+                                reject_draft(&self.role.events, action);
                                 None
                             }
                             Err(error) => {
                                 queue_persist_failed(
-                                    &self.events,
-                                    &self.config.home,
-                                    &self.config.session,
+                                    &self.role.events,
+                                    &self.role.config.home,
+                                    &self.role.config.session,
                                     QueuePersistAction::Admission,
                                     &error,
                                 );
                                 if let Some(state) = one_shot.as_deref_mut() {
                                     state.result = Some(Err(CliFailure::new(error)));
                                 }
-                                reject_draft(&self.events, action);
+                                reject_draft(&self.role.events, action);
                                 None
                             }
                         }
                     }
                 }
                 Ok(action @ UserAction::Steer(_)) => {
-                    let _ = self.events.send(ContentEvent::Status {
+                    let _ = self.role.events.send(ContentEvent::Status {
                         phase: HostPhase::Idle,
-                        queue_len: self.config.session.pending_queue.len(),
+                        queue_len: self.role.config.session.pending_queue.len(),
                         detail: Some(HostStatusDetail::NoActiveTurn),
                     });
-                    reject_draft(&self.events, action);
+                    reject_draft(&self.role.events, action);
                     None
                 }
                 Ok(UserAction::Interrupt) => {
-                    if self.config.store.storage_unavailable() {
-                        self.storage_interrupted = true;
-                        self.config.session.queue_drain_state =
+                    if self.role.config.store.storage_unavailable() {
+                        self.role.storage_interrupted = true;
+                        self.role.config.session.queue_drain_state =
                             SessionQueueDrainState::RestoredPaused;
-                        self.pending_start = None;
+                        self.role.pending_start = None;
                         return Ok(HostStep::Continue);
                     }
                     if !cancelled_resume
@@ -381,17 +386,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 Ok(UserAction::Background) => None,
                 Ok(UserAction::DropQueued) => {
                     match commit_session_update(
-                        &*self.config.store,
-                        &self.config.home,
-                        &mut self.config.session,
+                        &*self.role.config.store,
+                        &self.role.config.home,
+                        &mut self.role.config.session,
                         drop_last_mutable,
                     ) {
-                        Ok(true) => emit_queue_snapshot(&self.events, &self.config.session),
+                        Ok(true) => {
+                            emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                        }
                         Ok(false) => {}
                         Err(error) => queue_persist_failed(
-                            &self.events,
-                            &self.config.home,
-                            &self.config.session,
+                            &self.role.events,
+                            &self.role.config.home,
+                            &self.role.config.session,
                             QueuePersistAction::Drop,
                             &error,
                         ),
@@ -400,17 +407,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 }
                 Ok(UserAction::DeleteQueued { id, revision }) => {
                     match commit_session_update(
-                        &*self.config.store,
-                        &self.config.home,
-                        &mut self.config.session,
+                        &*self.role.config.store,
+                        &self.role.config.home,
+                        &mut self.role.config.session,
                         |candidate| remove_mutable(candidate, &id, revision),
                     ) {
-                        Ok(true) => emit_queue_snapshot(&self.events, &self.config.session),
-                        Ok(false) => reject_stale_queue_action(&self.events, &self.config.session),
+                        Ok(true) => {
+                            emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                        }
+                        Ok(false) => {
+                            reject_stale_queue_action(&self.role.events, &self.role.config.session);
+                        }
                         Err(error) => queue_persist_failed(
-                            &self.events,
-                            &self.config.home,
-                            &self.config.session,
+                            &self.role.events,
+                            &self.role.config.home,
+                            &self.role.config.session,
                             QueuePersistAction::Delete,
                             &error,
                         ),
@@ -420,9 +431,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 Ok(UserAction::EditQueued { id, revision, text }) => {
                     let mut refusal = None;
                     match commit_session_update(
-                        &*self.config.store,
-                        &self.config.home,
-                        &mut self.config.session,
+                        &*self.role.config.store,
+                        &self.role.config.home,
+                        &mut self.role.config.session,
                         |candidate| match edit_mutable(candidate, &id, revision, &text) {
                             Ok(()) => true,
                             Err(error) => {
@@ -432,27 +443,27 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         },
                     ) {
                         Ok(true) => {
-                            emit_queue_snapshot(&self.events, &self.config.session);
-                            queue_edit_applied(&self.events, id);
+                            emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                            queue_edit_applied(&self.role.events, id);
                         }
                         Ok(false) => {
-                            emit_queue_snapshot(&self.events, &self.config.session);
-                            queue_edit_refused(&self.events, id);
+                            emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                            queue_edit_refused(&self.role.events, id);
                             queue_refusal(
-                                &self.events,
+                                &self.role.events,
                                 "queue edit",
                                 refusal.unwrap_or(queue::Refusal::Stale),
                             );
                         }
                         Err(error) => {
                             queue_persist_failed(
-                                &self.events,
-                                &self.config.home,
-                                &self.config.session,
+                                &self.role.events,
+                                &self.role.config.home,
+                                &self.role.config.session,
                                 QueuePersistAction::Edit,
                                 &error,
                             );
-                            queue_edit_refused(&self.events, id);
+                            queue_edit_refused(&self.role.events, id);
                         }
                     }
                     None
@@ -463,17 +474,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     new_index,
                 }) => {
                     match commit_session_update(
-                        &*self.config.store,
-                        &self.config.home,
-                        &mut self.config.session,
+                        &*self.role.config.store,
+                        &self.role.config.home,
+                        &mut self.role.config.session,
                         |candidate| move_mutable(candidate, &id, revision, new_index),
                     ) {
-                        Ok(true) => emit_queue_snapshot(&self.events, &self.config.session),
-                        Ok(false) => reject_stale_queue_action(&self.events, &self.config.session),
+                        Ok(true) => {
+                            emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                        }
+                        Ok(false) => {
+                            reject_stale_queue_action(&self.role.events, &self.role.config.session);
+                        }
                         Err(error) => queue_persist_failed(
-                            &self.events,
-                            &self.config.home,
-                            &self.config.session,
+                            &self.role.events,
+                            &self.role.config.home,
+                            &self.role.config.session,
                             QueuePersistAction::Move,
                             &error,
                         ),
@@ -481,27 +496,27 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::SendQueuedNow { id, revision }) => {
-                    if self.config.session.queue_projection_debt {
-                        emit_queue_snapshot(&self.events, &self.config.session);
-                        let _ = self.events.send(ContentEvent::Status {
+                    if self.role.config.session.queue_projection_debt {
+                        emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                        let _ = self.role.events.send(ContentEvent::Status {
                             phase: HostPhase::Idle,
-                            queue_len: self.config.session.pending_queue.len(),
+                            queue_len: self.role.config.session.pending_queue.len(),
                             detail: Some(HostStatusDetail::QueueProjectionCatchingUp),
                         });
                         return Ok(HostStep::Continue);
                     }
-                    let item = queue::get(&self.config.session.pending_queue, &id, revision);
+                    let item = queue::get(&self.role.config.session.pending_queue, &id, revision);
                     if let Some(item) = item {
                         Some((item.text.clone(), Some(item), false))
                     } else {
-                        reject_stale_queue_action(&self.events, &self.config.session);
+                        reject_stale_queue_action(&self.role.events, &self.role.config.session);
                         None
                     }
                 }
                 Ok(UserAction::ResolveApproval { .. }) => {
                     // Decisions exist only inside an admitted turn; idle, there
                     // is nothing to resolve and the runtime is not contacted.
-                    let _ = self.events.notice(TranscriptRow::error(
+                    let _ = self.role.events.notice(TranscriptRow::error(
                         NoticeScope::Approval,
                         APPROVAL_REFUSED_NOTE,
                     ));
@@ -509,25 +524,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 }
                 Ok(UserAction::ResumeQueueDrain) => {
                     match commit_session_update(
-                        &*self.config.store,
-                        &self.config.home,
-                        &mut self.config.session,
+                        &*self.role.config.store,
+                        &self.role.config.home,
+                        &mut self.role.config.session,
                         |candidate| {
                             candidate.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
                             true
                         },
                     ) {
                         Ok(true) => {
-                            emit_queue_snapshot(&self.events, &self.config.session);
-                            queue::next_drainable(&self.config.session)
+                            emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                            queue::next_drainable(&self.role.config.session)
                                 .map(|item| (item.text.clone(), Some(item), false))
                         }
                         Ok(false) => None,
                         Err(error) => {
                             queue_persist_failed(
-                                &self.events,
-                                &self.config.home,
-                                &self.config.session,
+                                &self.role.events,
+                                &self.role.config.home,
+                                &self.role.config.session,
                                 QueuePersistAction::ResumeDrain,
                                 &error,
                             );
@@ -536,29 +551,29 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     }
                 }
                 Ok(UserAction::NewSession) => {
-                    self.idle_entry_pass_due = true;
+                    self.role.idle_entry_pass_due = true;
                     // A switch closes the agent view before its ClearView.
-                    self.last_tree_revision.child_live.close_agent_view();
-                    let _ = self.events.send(ContentEvent::SetBusy(true));
-                    let _ = self.events.send(ContentEvent::Status {
+                    self.role.last_tree_revision.child_live.close_agent_view();
+                    let _ = self.role.events.send(ContentEvent::SetBusy(true));
+                    let _ = self.role.events.send(ContentEvent::Status {
                         phase: HostPhase::Clear,
-                        queue_len: self.config.session.pending_queue.len(),
+                        queue_len: self.role.config.session.pending_queue.len(),
                         detail: Some(HostStatusDetail::CreatingFreshConversation),
                     });
                     match clear_session_rebuild(
-                        &mut self.config,
+                        &mut self.role.config,
                         &mut self.opened,
-                        &mut self.stderr_buf,
-                        &self.events,
-                        self.log.as_ref(),
+                        &mut self.role.stderr_buf,
+                        &self.role.events,
+                        self.role.log.as_ref(),
                     )
                     .await
                     {
                         Ok(()) => {
-                            self.recovery = RootRecovery::Clear;
+                            self.role.recovery = RootRecovery::Clear;
                         }
                         Err(err) => {
-                            let _ = self.events.notice(
+                            let _ = self.role.events.notice(
                                 TranscriptRow::info(
                                     NoticeScope::Session,
                                     format!(
@@ -568,12 +583,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                 )
                                 .with_optional_remedy(err.remedy()),
                             );
-                            let _ = self.events.send(ContentEvent::SetBusy(false));
-                            let _ = self.events.send(ContentEvent::Status {
+                            let _ = self.role.events.send(ContentEvent::SetBusy(false));
+                            let _ = self.role.events.send(ContentEvent::Status {
                                 phase: HostPhase::Idle,
-                                queue_len: self.config.session.pending_queue.len(),
+                                queue_len: self.role.config.session.pending_queue.len(),
                                 detail: Some(HostStatusDetail::ClearRefused {
-                                    model_id: self.config.model_id.clone(),
+                                    model_id: self.role.config.model_id.clone(),
                                 }),
                             });
                         }
@@ -581,7 +596,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::Compact) => {
-                    self.idle_entry_pass_due = true;
+                    self.role.idle_entry_pass_due = true;
                     let current = query_context(&self.opened, ContextQuery::Current).await;
                     // Every typed disposition asks for a compact now, so there
                     // is no disposition left to refuse up front. A
@@ -591,7 +606,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     let reason = match current.as_ref().map(|projection| projection.disposition()) {
                         Ok(disposition) => compact_reason_for_disposition(disposition),
                         Err(error) => {
-                            let _ = self.events.notice(TranscriptRow::error(
+                            let _ = self.role.events.notice(TranscriptRow::error(
                                 NoticeScope::Compaction,
                                 format!(
                                     "compact refused: current context authority is unavailable: {}",
@@ -603,21 +618,29 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     };
                     let capacity_recovery =
                         reason == sessions::ProductCompactReason::CapacityRecovery;
-                    observe_compact(&self.events, self.config.session.pending_queue.len(), true);
+                    observe_compact(
+                        &self.role.events,
+                        self.role.config.session.pending_queue.len(),
+                        true,
+                    );
                     let compacted = handle_compact(
-                        InterruptWatch::new(self.actions, &self.interrupt_state),
-                        &mut self.config,
+                        InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
+                        &mut self.role.config,
                         &self.opened,
-                        &mut self.stderr_buf,
-                        &self.events,
-                        self.log.as_ref(),
+                        &mut self.role.stderr_buf,
+                        &self.role.events,
+                        self.role.log.as_ref(),
                         reason,
                         None,
                     )
                     .await;
-                    observe_compact(&self.events, self.config.session.pending_queue.len(), false);
+                    observe_compact(
+                        &self.role.events,
+                        self.role.config.session.pending_queue.len(),
+                        false,
+                    );
                     if let Err(error) = compacted {
-                        let _ = self.events.notice(
+                        let _ = self.role.events.notice(
                             TranscriptRow::error(
                                 NoticeScope::Compaction,
                                 format!("compact: {}", error.message()),
@@ -627,10 +650,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         None
                     } else if compact_may_resume_queue(
                         capacity_recovery,
-                        self.config.attached_one_shot,
-                        self.config.session.queue_drain_state,
+                        self.role.config.attached_one_shot,
+                        self.role.config.session.queue_drain_state,
                     ) {
-                        queue::next_drainable(&self.config.session)
+                        queue::next_drainable(&self.role.config.session)
                             .map(|item| (item.text.clone(), Some(item), false))
                     } else {
                         None
@@ -641,41 +664,41 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     agent_id,
                     session_id,
                 }) => {
-                    let sessions = self.config.state_roots.runtime_sessions().ok();
-                    let events = self.events.clone();
+                    let sessions = self.role.config.state_roots.runtime_sessions().ok();
+                    let events = self.role.events.clone();
                     if let Some(request) = crate::call_detail::prepare(
-                        &self.config.topology_rows(),
-                        &self.config.session,
+                        &self.role.config.topology_rows(),
+                        &self.role.config.session,
                         call_id.clone(),
                         agent_id.clone(),
                         &session_id,
                     ) {
                         // Only enters the runtime to spawn the read; the answer
                         // arrives as its own observation.
-                        request.spawn(self.executor.tasks(), sessions, events);
+                        request.spawn(self.role.executor.tasks(), sessions, events);
                     }
                     None
                 }
                 Ok(UserAction::RefreshTemplates) => {
                     surface::publish_template_readiness(
-                        self.config.surface.as_deref(),
-                        &self.config.ready_catalog.accounts,
-                        &self.events,
+                        self.role.config.surface.as_deref(),
+                        &self.role.config.ready_catalog.accounts,
+                        &self.role.events,
                     );
                     None
                 }
                 Ok(UserAction::ResumeSession { id: None }) => {
-                    handle_resume_picker(&self.config, &self.events);
+                    handle_resume_picker(&self.role.config, &self.role.events);
                     None
                 }
                 Ok(UserAction::ResumeSession { id: Some(id) }) => {
-                    self.idle_entry_pass_due = true;
-                    self.last_tree_revision.child_live.close_agent_view();
+                    self.role.idle_entry_pass_due = true;
+                    self.role.last_tree_revision.child_live.close_agent_view();
                     match resume_session_switch(
-                        &mut self.config,
+                        &mut self.role.config,
                         &mut self.opened,
-                        &mut self.stderr_buf,
-                        &self.events,
+                        &mut self.role.stderr_buf,
+                        &self.role.events,
                         &id,
                     )
                     .await
@@ -687,7 +710,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             None
                         }
                         Err(err) => {
-                            let _ = self.events.notice(
+                            let _ = self.role.events.notice(
                                 TranscriptRow::error(
                                     NoticeScope::Session,
                                     format!("resume: {}", err.message()),
@@ -699,34 +722,34 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     }
                 }
                 Ok(UserAction::ResumeSessionHandoff { .. }) => {
-                    let _ = self.events.notice(TranscriptRow::error(
+                    let _ = self.role.events.notice(TranscriptRow::error(
                         NoticeScope::Session,
                         "resume relaunch must be handled by the terminal owner",
                     ));
                     None
                 }
                 Ok(UserAction::ForkSession { account, compact }) => {
-                    self.idle_entry_pass_due = true;
-                    self.last_tree_revision.child_live.close_agent_view();
-                    let _ = self.events.send(ContentEvent::SetBusy(true));
-                    let _ = self.events.send(ContentEvent::Status {
+                    self.role.idle_entry_pass_due = true;
+                    self.role.last_tree_revision.child_live.close_agent_view();
+                    let _ = self.role.events.send(ContentEvent::SetBusy(true));
+                    let _ = self.role.events.send(ContentEvent::Status {
                         phase: HostPhase::Fork,
-                        queue_len: self.config.session.pending_queue.len(),
+                        queue_len: self.role.config.session.pending_queue.len(),
                         detail: Some(HostStatusDetail::ForkingSession),
                     });
                     let forked = Box::pin(handle_fork(
-                        InterruptWatch::new(self.actions, &self.interrupt_state),
-                        &mut self.config,
+                        InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
+                        &mut self.role.config,
                         &mut self.opened,
-                        &mut self.stderr_buf,
-                        &self.events,
+                        &mut self.role.stderr_buf,
+                        &self.role.events,
                         account.as_deref(),
                     ))
                     .await;
-                    let _ = self.events.send(ContentEvent::SetBusy(false));
-                    let _ = self.events.send(ContentEvent::Status {
+                    let _ = self.role.events.send(ContentEvent::SetBusy(false));
+                    let _ = self.role.events.send(ContentEvent::Status {
                         phase: HostPhase::Idle,
-                        queue_len: self.config.session.pending_queue.len(),
+                        queue_len: self.role.config.session.pending_queue.len(),
                         detail: None,
                     });
                     match forked {
@@ -738,11 +761,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             {
                                 Ok(disposition) => compact_reason_for_disposition(disposition),
                                 Err(error) => {
-                                    let _ = self.events.notice(TranscriptRow::error(NoticeScope::Compaction, format!(
+                                    let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Compaction, format!(
                                         "compact refused: current context authority is unavailable: {}",
                                         error.message()
                                     )).with_optional_remedy(error.remedy()));
-                                    let _ = self.events.notice(TranscriptRow::info(NoticeScope::Compaction,
+                                    let _ = self.role.events.notice(TranscriptRow::info(NoticeScope::Compaction,
                                         "the forked session is active; another explicit compaction retries the reduction"
                                             ,
                                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryCompaction {}));
@@ -750,35 +773,35 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                 }
                             };
                             observe_compact(
-                                &self.events,
-                                self.config.session.pending_queue.len(),
+                                &self.role.events,
+                                self.role.config.session.pending_queue.len(),
                                 true,
                             );
                             let compacted = handle_compact(
-                                InterruptWatch::new(self.actions, &self.interrupt_state),
-                                &mut self.config,
+                                InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
+                                &mut self.role.config,
                                 &self.opened,
-                                &mut self.stderr_buf,
-                                &self.events,
-                                self.log.as_ref(),
+                                &mut self.role.stderr_buf,
+                                &self.role.events,
+                                self.role.log.as_ref(),
                                 reason,
                                 None,
                             )
                             .await;
                             observe_compact(
-                                &self.events,
-                                self.config.session.pending_queue.len(),
+                                &self.role.events,
+                                self.role.config.session.pending_queue.len(),
                                 false,
                             );
                             if let Err(error) = compacted {
-                                let _ = self.events.notice(
+                                let _ = self.role.events.notice(
                                     TranscriptRow::error(
                                         NoticeScope::Compaction,
                                         format!("compact: {}", error.message()),
                                     )
                                     .with_optional_remedy(error.remedy()),
                                 );
-                                let _ = self.events.notice(TranscriptRow::info(
+                                let _ = self.role.events.notice(TranscriptRow::info(
                                     NoticeScope::Compaction,
                                     "the forked session is active; another explicit compaction retries the reduction",
                                 ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RetryCompaction {}));
@@ -786,7 +809,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         }
                         Ok(()) => {}
                         Err(err) => {
-                            let _ = self.events.notice(
+                            let _ = self.role.events.notice(
                                 TranscriptRow::error(
                                     NoticeScope::Session,
                                     format!("fork: {}", err.message()),
@@ -799,21 +822,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 }
                 // Publish host-owned meters before invoking a driver that requests them.
                 Ok(UserAction::Extension(intent)) => {
-                    if surface::needs_usage(self.config.surface.as_deref(), &intent) {
+                    if surface::needs_usage(self.role.config.surface.as_deref(), &intent) {
                         if let Err(error) = report_context(
                             &self.opened,
-                            &self.events,
+                            &self.role.events,
                             "on idle refresh",
-                            self.config
+                            self.role
+                                .config
                                 .target
                                 .native_provider()
                                 .is_some_and(native_compact_facet),
-                            self.config.session.context_counters(),
+                            self.role.config.session.context_counters(),
                         )
                         .await
                         {
-                            emit_unavailable_context(&self.events);
-                            let _ = self.events.notice(
+                            emit_unavailable_context(&self.role.events);
+                            let _ = self.role.events.notice(
                                 TranscriptRow::error(
                                     NoticeScope::Session,
                                     error.message().to_owned(),
@@ -821,56 +845,57 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                                 .with_optional_remedy(error.remedy()),
                             );
                         }
-                        if !self.config.attached_one_shot {
-                            if surface::fresh_usage(self.config.surface.as_deref(), &intent) {
-                                self.subscription_usage_refresh.request_fresh(
-                                    self.config.target.native_subscriptions().cloned(),
+                        if !self.role.config.attached_one_shot {
+                            if surface::fresh_usage(self.role.config.surface.as_deref(), &intent) {
+                                self.role.subscription_usage_refresh.request_fresh(
+                                    self.role.config.target.native_subscriptions().cloned(),
                                 );
                             } else {
-                                self.subscription_usage_refresh
-                                    .request(self.config.target.native_subscriptions().cloned());
+                                self.role.subscription_usage_refresh.request(
+                                    self.role.config.target.native_subscriptions().cloned(),
+                                );
                             }
                         }
                     }
                     let with_tools =
-                        surface::needs_session_tools(self.config.surface.as_deref(), &intent);
+                        surface::needs_session_tools(self.role.config.surface.as_deref(), &intent);
                     let effect = surface::dispatch(
-                        self.config.surface.as_deref(),
+                        self.role.config.surface.as_deref(),
                         intent,
                         surface::SurfaceFacts {
                             session: Some(surface::session_facts(
-                                &self.config.session,
-                                Some(&self.config.topology_rows()),
+                                &self.role.config.session,
+                                Some(&self.role.config.topology_rows()),
                                 with_tools,
                             )),
                             phase: surface::SurfacePhase::Idle,
-                            attached_one_shot: self.config.attached_one_shot,
-                            catalog: &self.config.ready_catalog.accounts,
-                            queue_len: self.config.session.pending_queue.len(),
-                            usage_reads: self.subscription_usage_refresh.reads(),
+                            attached_one_shot: self.role.config.attached_one_shot,
+                            catalog: &self.role.config.ready_catalog.accounts,
+                            queue_len: self.role.config.session.pending_queue.len(),
+                            usage_reads: self.role.subscription_usage_refresh.reads(),
                         },
-                        &self.events,
+                        &self.role.events,
                     );
                     if let Some(saved) = effect.saved {
-                        self.config.root_template = saved.root_template;
+                        self.role.config.root_template = saved.root_template;
                     }
                     if let Some(fork) = effect.profile_fork {
-                        self.idle_entry_pass_due = true;
-                        self.last_tree_revision.child_live.close_agent_view();
-                        let _ = self.events.send(ContentEvent::SetBusy(true));
-                        let _ = self.events.send(ContentEvent::Status {
+                        self.role.idle_entry_pass_due = true;
+                        self.role.last_tree_revision.child_live.close_agent_view();
+                        let _ = self.role.events.send(ContentEvent::SetBusy(true));
+                        let _ = self.role.events.send(ContentEvent::Status {
                             phase: HostPhase::Rebind,
-                            queue_len: self.config.session.pending_queue.len(),
+                            queue_len: self.role.config.session.pending_queue.len(),
                             detail: Some(HostStatusDetail::ForkingProfileRoot {
                                 model: fork.model.clone(),
                             }),
                         });
                         let result = Box::pin(handle_rebind(
-                            InterruptWatch::new(self.actions, &self.interrupt_state),
-                            &mut self.config,
+                            InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
+                            &mut self.role.config,
                             &mut self.opened,
-                            &mut self.stderr_buf,
-                            &self.events,
+                            &mut self.role.stderr_buf,
+                            &self.role.events,
                             &fork.account,
                             &fork.model,
                             fork.effort.as_deref(),
@@ -881,12 +906,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             fork.switch.as_deref(),
                         ))
                         .await;
-                        let _ = self.events.send(ContentEvent::SetBusy(false));
-                        let _ = self.events.send(ContentEvent::Status {
+                        let _ = self.role.events.send(ContentEvent::SetBusy(false));
+                        let _ = self.role.events.send(ContentEvent::Status {
                             phase: HostPhase::Idle,
-                            queue_len: self.config.session.pending_queue.len(),
+                            queue_len: self.role.config.session.pending_queue.len(),
                             detail: Some(HostStatusDetail::Ready {
-                                model_id: self.config.model_id.clone(),
+                                model_id: self.role.config.model_id.clone(),
                                 pause: plakous_host_protocol::status::HostPause::default(),
                             }),
                         });
@@ -902,15 +927,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::RefreshReadiness) => {
-                    self.readiness.start(&self.config);
+                    self.role.readiness.start(&self.role.config);
                     None
                 }
                 Ok(UserAction::ResyncTranscript { scope }) => {
-                    self.events.resync_transcript(&scope);
+                    self.role.events.resync_transcript(&scope);
                     None
                 }
                 Ok(UserAction::RetryAttach) => {
-                    let _ = self.events.notice(TranscriptRow::info(
+                    let _ = self.role.events.notice(TranscriptRow::info(
                         NoticeScope::Session,
                         "already attached; attachment retry applies only to a detached session",
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::AttachOnlyWhenDetached {}));
@@ -928,18 +953,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     | UserAction::RecoverTopologyNode { .. }),
                 ) => {
                     dispatch_topology_navigator(
-                        &self.config.topology_rows(),
-                        &self.config.state_roots,
-                        &self.config.session,
-                        &self.events,
+                        &self.role.config.topology_rows(),
+                        &self.role.config.state_roots,
+                        &self.role.config.session,
+                        &self.role.events,
                         &action,
-                        &mut self.last_tree_revision,
+                        &mut self.role.last_tree_revision,
                     )
                     .await;
                     record_emitted_tree_revision(
-                        &self.config.topology_rows(),
-                        &self.config.session,
-                        &mut self.last_tree_revision,
+                        &self.role.config.topology_rows(),
+                        &self.role.config.session,
+                        &mut self.role.last_tree_revision,
                     );
                     None
                 }
@@ -951,27 +976,27 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 }) => {
                     dispatch_invoke_tool(
                         &crate::runtime::HostRows::new(
-                            &self.config.state_roots,
-                            self.config.store.as_ref(),
+                            &self.role.config.state_roots,
+                            self.role.config.store.as_ref(),
                         ),
-                        &*self.config.store,
-                        &self.config.home,
-                        &mut self.config.session,
-                        &self.events,
+                        &*self.role.config.store,
+                        &self.role.config.home,
+                        &mut self.role.config.session,
+                        &self.role.events,
                         &name,
                         &arguments,
                         agent_id.as_deref(),
                         correlation_id.as_deref(),
-                        &mut self.last_tree_revision,
+                        &mut self.role.last_tree_revision,
                     )
                     .await;
                     None
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    if self.pending_resume.is_some() {
+                    if self.role.pending_resume.is_some() {
                         return self.transient_resume_prompt().await;
                     }
-                    if one_shot.is_none() && self.config.continuation.is_some() {
+                    if one_shot.is_none() && self.role.config.continuation.is_some() {
                         return self.continuation_prompt().await;
                     }
                     if one_shot.is_none() && observed_tree {

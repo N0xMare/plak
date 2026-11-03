@@ -38,8 +38,8 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
     let store = config.store.clone();
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
-    let id = host.config.session.id.clone();
+    let mut host = RootActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
+    let id = host.role.config.session.id.clone();
     let mut folded = TranscriptState::default();
     for event in events.try_iter() {
         if let HostEvent::PresentationSnapshot(snapshot) = event {
@@ -80,7 +80,8 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
         }
     }
     assert!(patches > 0);
-    let expected = super::super::super::logging::project_session_snapshot(&host.config.session);
+    let expected =
+        super::super::super::logging::project_session_snapshot(&host.role.config.session);
     assert_eq!(
         folded.items(),
         &expected
@@ -108,7 +109,7 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
     config.store = store;
     let (wire, restored) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut reopened =
-        NodeActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
+        RootActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
     let snapshot = restored
         .try_iter()
         .find_map(|event| match event {
@@ -145,11 +146,11 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &actions, crate::runtime::Sender::over(tx), None).unwrap();
-    let store = host.config.store.clone();
+        RootActor::open_blocking(config, &actions, crate::runtime::Sender::over(tx), None).unwrap();
+    let store = host.role.config.store.clone();
     if defer_projection {
-        host.live.take();
-        host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+        host.role.live.take();
+        host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
             store.clone(),
             crate::runtime::test_support::SlowProjection {
                 delay: std::time::Duration::ZERO,
@@ -176,15 +177,23 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
     })
     .unwrap();
     if defer_projection {
-        assert_eq!(host.config.session.tool_call_count, 0);
+        assert_eq!(host.role.config.session.tool_call_count, 0);
     }
-    host.config.store = store;
+    host.role.config.store = store;
     // Interactive publication can leave projection debt at its bounded
     // pass; this fixture asserts the settled view, not that wall clock.
     host.block(async |host| host.publish_projected_transcript(true).await);
-    assert_eq!(host.config.session.tool_call_count, 1);
-    let stored = host.config.store.load(&host.config.session.id).unwrap();
-    assert_eq!(host.config.session.tool_call_count, stored.tool_call_count);
+    assert_eq!(host.role.config.session.tool_call_count, 1);
+    let stored = host
+        .role
+        .config
+        .store
+        .load(&host.role.config.session.id)
+        .unwrap();
+    assert_eq!(
+        host.role.config.session.tool_call_count,
+        stored.tool_call_count
+    );
     assert!(events.try_iter().any(|event| match event {
         HostEvent::PresentationSnapshot(snapshot) =>
             snapshot.items.iter().map(|item| &item.row).any(
@@ -212,12 +221,13 @@ fn awaiting_native_same_account_login_reopens_in_place_before_the_next_prompt() 
     let (config, _) = fresh_injected_attached_host(root.path());
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
-    let session = host.config.session.id.clone();
-    let locator = host.config.session.plakous_locator.unwrap();
+    let mut host = RootActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
+    let session = host.role.config.session.id.clone();
+    let locator = host.role.config.session.plakous_locator.unwrap();
     let old = native_refresh_tests::binding(1);
     let fresh = native_refresh_tests::binding(2);
     let changed = host
+        .role
         .executor
         .block_on(refresh_native_authority(
             Arc::new(native_refresh_tests::AwaitingNativeModel),
@@ -234,12 +244,17 @@ fn awaiting_native_same_account_login_reopens_in_place_before_the_next_prompt() 
     assert!(changed);
     host.block(async |host| host.reopen_after_native_authority_refresh(changed).await)
         .unwrap();
-    assert_eq!(host.config.session.id, session);
+    assert_eq!(host.role.config.session.id, session);
     assert_eq!(
-        host.config.session.plakous_locator.unwrap().branch_id(),
+        host.role
+            .config
+            .session
+            .plakous_locator
+            .unwrap()
+            .branch_id(),
         locator.branch_id()
     );
-    assert!(!host.recovery.blocked());
+    assert!(!host.role.recovery.blocked());
     action_tx
         .send(UserAction::Prompt("continue after renewing login".into()))
         .unwrap();
@@ -293,7 +308,7 @@ fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry()
     let (config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -303,8 +318,8 @@ fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry()
     let capacity = Arc::new(Mutex::new(StorageAdmission::Refused(
         "test volume: 0 MiB free".into(),
     )));
-    host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
-        host.config.store.clone(),
+    host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+        host.role.config.store.clone(),
         CapacityProbe(capacity.clone()),
     ));
     actions
@@ -323,19 +338,19 @@ fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry()
         panic!("prompt");
     };
     let _ = events.try_iter().collect::<Vec<_>>();
-    host.transient_resumes_used = 2;
+    host.role.transient_resumes_used = 2;
     host.block(async |host| {
         host.run_prompt(text.clone(), queued_delivery.clone(), false, None)
             .await
     })
     .unwrap();
-    assert_eq!(host.config.session.pending_queue.len(), 1);
+    assert_eq!(host.role.config.session.pending_queue.len(), 1);
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
-    assert!(!host.config.session.queue_commands.has_pending());
-    assert_eq!(host.transient_resumes_used, 2);
+    assert!(!host.role.config.session.queue_commands.has_pending());
+    assert_eq!(host.role.transient_resumes_used, 2);
     let refused = events.try_iter().collect::<Vec<_>>();
     assert!(
         refused
@@ -402,13 +417,14 @@ fn an_unstored_attachment_never_reads_views_before_its_first_prompt() {
     config.store = store.clone();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sender, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &receiver, Sender::over(sender), None).unwrap();
-    assert_eq!(host.config.session.store_revision, 0);
+    let mut host = RootActor::open_blocking(config, &receiver, Sender::over(sender), None).unwrap();
+    assert_eq!(host.role.config.session.store_revision, 0);
     assert_eq!(store.view_read_count(), 0);
     for _ in 0..3 {
         host.block(async |host| host.project().await);
-        host.executor
-            .block_on(host.live.as_mut().unwrap().drain_ticks())
+        host.role
+            .executor
+            .block_on(host.role.live.as_mut().unwrap().drain_ticks())
             .unwrap();
         assert_eq!(
             store.view_read_count(),
@@ -435,7 +451,7 @@ fn an_unstored_attachment_never_reads_views_before_its_first_prompt() {
             .await
     })
     .unwrap();
-    assert!(host.config.session.store_revision > 0);
+    assert!(host.role.config.session.store_revision > 0);
     assert_eq!(store.view_read_count(), 1);
     host.block(async |host| host.release().await).unwrap();
 }
@@ -959,7 +975,7 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = NodeActor::open_blocking(
+        let mut host = RootActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -993,20 +1009,23 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
             canonical_command: text.clone(),
             submitted_at_ms: item.submitted_at_ms,
         };
-        host.config
+        host.role
+            .config
             .store
-            .save_submission(&mut host.config.session, &submission)
+            .save_submission(&mut host.role.config.session, &submission)
             .unwrap();
         if retry {
-            host.config
+            host.role
+                .config
                 .store
-                .save_submission(&mut host.config.session, &submission)
+                .save_submission(&mut host.role.config.session, &submission)
                 .unwrap();
         }
         let intents = host
+            .role
             .config
             .store
-            .load_intents(&host.config.session.id)
+            .load_intents(&host.role.config.session.id)
             .unwrap()
             .submissions;
         crate::runtime::turn_drive::stub_ingress_backpressure(
@@ -1019,29 +1038,36 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
         })
         .unwrap();
         assert_eq!(
-            host.config
+            host.role
+                .config
                 .store
-                .load_intents(&host.config.session.id)
+                .load_intents(&host.role.config.session.id)
                 .unwrap()
                 .submissions,
             intents
         );
-        assert!(host.pending_start.is_none());
-        assert!(!host.recovery.blocked());
+        assert!(host.role.pending_start.is_none());
+        assert!(!host.role.recovery.blocked());
         assert!(queue::queue_item_is_delivery_locked(
-            &host.config.session,
+            &host.role.config.session,
             &item.id
         ));
-        let loaded = host.config.store.load(&host.config.session.id).unwrap();
+        let loaded = host
+            .role
+            .config
+            .store
+            .load(&host.role.config.session.id)
+            .unwrap();
         assert!(loaded.queue_commands.is_locked(&item.id));
         let conflicting = sessions::projector::Submission {
             canonical_command: "changed command".into(),
             ..submission
         };
         assert!(
-            host.config
+            host.role
+                .config
                 .store
-                .save_submission(&mut host.config.session, &conflicting)
+                .save_submission(&mut host.role.config.session, &conflicting)
                 .is_err()
         );
         assert!(
@@ -1063,7 +1089,7 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = NodeActor::open_blocking(
+        let mut host = RootActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -1103,8 +1129,8 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery.blocked());
-        assert!(!host.config.session.queue_commands.has_pending());
+        assert!(!host.role.recovery.blocked());
+        assert!(!host.role.config.session.queue_commands.has_pending());
         // Withdrawal releases the pending row, not its permanent content binding.
         let command = format!("plak.queue.{}.{}", first_item.id, first_item.revision);
         let conflicting = sessions::projector::Submission {
@@ -1117,14 +1143,15 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
             submitted_at_ms: first_item.submitted_at_ms,
         };
         assert!(
-            host.config
+            host.role
+                .config
                 .store
-                .save_submission(&mut host.config.session, &conflicting)
+                .save_submission(&mut host.role.config.session, &conflicting)
                 .is_err()
         );
-        assert!(host.pending_start.is_none());
+        assert!(host.role.pending_start.is_none());
         assert_eq!(
-            host.config.session.queue_drain_state,
+            host.role.config.session.queue_drain_state,
             SessionQueueDrainState::LiveAutoDrain
         );
         assert!(
@@ -1151,17 +1178,17 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery.blocked());
-        assert_eq!(host.config.session.root_turn_count, 1);
-        assert!(!host.config.session.queue_commands.has_pending());
+        assert!(!host.role.recovery.blocked());
+        assert_eq!(host.role.config.session.root_turn_count, 1);
+        assert!(!host.role.config.session.queue_commands.has_pending());
         // The remaining first prompt may now drain, but was never copied to a draft.
-        let first = host.pending_start.take().unwrap();
+        let first = host.role.pending_start.take().unwrap();
         host.block(async |host| {
             host.run_prompt(first.text.clone(), Some(first), false, None)
                 .await
         })
         .unwrap();
-        assert_eq!(host.config.session.root_turn_count, 2);
+        assert_eq!(host.role.config.session.root_turn_count, 2);
         host.block(async |host| host.release().await).unwrap();
     }
 }
@@ -1177,7 +1204,7 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = NodeActor::open_blocking(
+        let mut host = RootActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -1207,7 +1234,8 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
                 kind,
             );
         } else {
-            host.executor
+            host.role
+                .executor
                 .block_on(host.opened.agent().unwrap().shutdown())
                 .unwrap()
                 .unwrap();
@@ -1217,9 +1245,9 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
                 .await
         })
         .unwrap();
-        assert!(host.recovery.blocked());
-        assert!(host.config.session.queue_commands.has_pending());
-        assert_eq!(host.config.session.root_turn_count, 0);
+        assert!(host.role.recovery.blocked());
+        assert!(host.role.config.session.queue_commands.has_pending());
+        assert_eq!(host.role.config.session.root_turn_count, 0);
         assert!(
             !event_rx
                 .try_iter()
@@ -1237,15 +1265,15 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = NodeActor::open_blocking(
+        let mut host = RootActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
             None,
         )
         .unwrap();
-        let durable_store = host.config.store.clone();
-        host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+        let durable_store = host.role.config.store.clone();
+        host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
             durable_store.clone(),
             SubmissionFailure {
                 fail_prepare: false,
@@ -1284,9 +1312,9 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
                 .await
         })
         .unwrap();
-        assert!(host.recovery.blocked());
-        assert!(host.config.session.queue_commands.has_pending());
-        host.config.store = durable_store;
+        assert!(host.role.recovery.blocked());
+        assert!(host.role.config.session.queue_commands.has_pending());
+        host.role.config.store = durable_store;
         host.block(async |host| {
             host.recover_session(super::super::recover::RecoveryTrigger::Explicit)
                 .await
@@ -1302,14 +1330,14 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery.blocked());
-        assert_eq!(host.config.session.pending_queue.len(), 1);
-        assert_eq!(host.config.session.root_turn_count, 0);
+        assert!(!host.role.recovery.blocked());
+        assert_eq!(host.role.config.session.pending_queue.len(), 1);
+        assert_eq!(host.role.config.session.root_turn_count, 0);
         assert_eq!(
-            host.config.session.queue_drain_state,
+            host.role.config.session.queue_drain_state,
             SessionQueueDrainState::RestoredPaused
         );
-        assert!(!host.config.session.transcript.iter().any(
+        assert!(!host.role.config.session.transcript.iter().any(
             |line| matches!(line, TranscriptRow::User { text, .. } if text == "never drop me")
         ));
         assert_eq!(
@@ -1319,8 +1347,8 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
                 .count(),
             0
         );
-        assert!(!host.config.session.queue_commands.has_pending());
-        assert!(!host.config.session.queue_commands.has_pending());
+        assert!(!host.role.config.session.queue_commands.has_pending());
+        assert!(!host.role.config.session.queue_commands.has_pending());
         host.block(async |host| host.release().await).unwrap();
     }
 }
@@ -1336,7 +1364,7 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = NodeActor::open_blocking(
+        let mut host = RootActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -1359,8 +1387,12 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
             panic!("prompt");
         };
         let item = queued_delivery.as_ref().unwrap();
-        queue::enqueue(&mut host.config.session.pending_queue, "next item").unwrap();
-        host.config.store.save(&mut host.config.session).unwrap();
+        queue::enqueue(&mut host.role.config.session.pending_queue, "next item").unwrap();
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
+            .unwrap();
         crate::runtime::turn_drive::stub_start_refusal(
             format!("plak:deliver:{}:{}", item.id, item.revision),
             disposition,
@@ -1371,23 +1403,23 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery.blocked());
-        assert_eq!(host.config.session.root_turn_count, 0);
-        assert_eq!(host.config.session.pending_queue.len(), 1);
-        assert_eq!(host.pending_start.as_ref().unwrap().text, "next item");
+        assert!(!host.role.recovery.blocked());
+        assert_eq!(host.role.config.session.root_turn_count, 0);
+        assert_eq!(host.role.config.session.pending_queue.len(), 1);
+        assert_eq!(host.role.pending_start.as_ref().unwrap().text, "next item");
         assert_eq!(event_rx.try_iter().filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "queued prompt already ran; its result is no longer kept")).count(), 1);
-        let next = host.pending_start.take().unwrap();
+        let next = host.role.pending_start.take().unwrap();
         host.block(async |host| {
             host.run_prompt(next.text.clone(), Some(next), false, None)
                 .await
         })
         .unwrap();
         assert_eq!(
-            host.config.session.pending_queue,
+            host.role.config.session.pending_queue,
             [] as [queue::QueueItem; 0]
         );
-        assert_eq!(host.config.session.root_turn_count, 1);
-        assert!(!host.recovery.blocked());
+        assert_eq!(host.role.config.session.root_turn_count, 1);
+        assert!(!host.role.recovery.blocked());
         host.block(async |host| host.release().await).unwrap();
     }
 }
@@ -1398,15 +1430,15 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
         None,
     )
     .unwrap();
-    let durable_store = host.config.store.clone();
-    host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+    let durable_store = host.role.config.store.clone();
+    host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
         durable_store.clone(),
         SubmissionFailure {
             fail_prepare: false,
@@ -1440,12 +1472,12 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
             .await
     })
     .unwrap();
-    assert!(host.recovery.blocked());
-    assert_eq!(host.config.session.pending_queue.len(), 1);
-    assert!(host.config.session.queue_commands.has_pending());
-    assert_eq!(host.config.session.root_turn_count, 0);
+    assert!(host.role.recovery.blocked());
+    assert_eq!(host.role.config.session.pending_queue.len(), 1);
+    assert!(host.role.config.session.queue_commands.has_pending());
+    assert_eq!(host.role.config.session.root_turn_count, 0);
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
     assert_eq!(
@@ -1458,7 +1490,7 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
     injector
         .execute_batch("DROP TRIGGER reject_admission;")
         .unwrap();
-    host.config.store = durable_store;
+    host.role.config.store = durable_store;
     host.block(async |host| {
         host.recover_session(super::super::recover::RecoveryTrigger::Explicit)
             .await
@@ -1467,15 +1499,16 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
     let submitted_at_ms = queued_delivery.as_ref().unwrap().submitted_at_ms;
     host.block(async |host| host.run_prompt(text, queued_delivery, true, None).await)
         .unwrap();
-    assert!(!host.recovery.blocked());
+    assert!(!host.role.recovery.blocked());
     assert_eq!(
-        host.config.session.pending_queue,
+        host.role.config.session.pending_queue,
         [] as [queue::QueueItem; 0]
     );
-    assert_eq!(host.config.session.root_turn_count, 1);
+    assert_eq!(host.role.config.session.root_turn_count, 1);
     // The admitted row shows the operator's submit time, not the retry's.
     assert_eq!(
-        host.config
+        host.role
+            .config
             .session
             .transcript
             .iter()
@@ -1496,7 +1529,7 @@ fn lost_acknowledgement_keeps_fenced_recovery_and_never_restores_as_a_refusal() 
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1529,12 +1562,12 @@ fn lost_acknowledgement_keeps_fenced_recovery_and_never_restores_as_a_refusal() 
             .await
     })
     .unwrap();
-    assert!(host.recovery.blocked());
-    assert_eq!(host.config.session.pending_queue.len(), 1);
-    assert_eq!(host.config.session.root_turn_count, 0);
-    assert!(host.config.session.queue_commands.has_pending());
+    assert!(host.role.recovery.blocked());
+    assert_eq!(host.role.config.session.pending_queue.len(), 1);
+    assert_eq!(host.role.config.session.root_turn_count, 0);
+    assert!(host.role.config.session.queue_commands.has_pending());
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
     let events = event_rx.try_iter().collect::<Vec<_>>();
@@ -1582,7 +1615,7 @@ fn unverified_context_capacity_source_publishes_protected_recovery_without_compa
     let (config, _) = fresh_injected_attached_host(root.path());
     let (_, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1651,7 +1684,7 @@ fn context_capacity_restores_the_admitted_draft_without_a_rejection_receipt() {
     });
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1693,7 +1726,7 @@ fn context_capacity_restores_the_admitted_draft_without_a_rejection_receipt() {
             .iter()
             .any(|event| matches!(event, HostEvent::DraftRejected(_)))
     );
-    assert!(!host.recovery.blocked());
+    assert!(!host.role.recovery.blocked());
     host.block(async |host| host.release().await).unwrap();
 }
 
@@ -1703,7 +1736,7 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1738,32 +1771,37 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
         panic!("prompt");
     };
     queue::enqueue(
-        &mut host.config.session.pending_queue,
+        &mut host.role.config.session.pending_queue,
         "second under pressure",
     )
     .unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
     host.block(async |host| {
         host.run_prompt(text, queued_delivery, user_echoed, None)
             .await
     })
     .unwrap();
-    assert!(!host.recovery.blocked());
-    assert!(host.pending_start.is_none());
-    assert_eq!(host.config.session.pending_queue.len(), 2);
-    assert!(!host.config.session.queue_commands.has_pending());
+    assert!(!host.role.recovery.blocked());
+    assert!(host.role.pending_start.is_none());
+    assert_eq!(host.role.config.session.pending_queue.len(), 2);
+    assert!(!host.role.config.session.queue_commands.has_pending());
     assert_eq!(
-        host.config
+        host.role
+            .config
             .store
-            .load_intents(&host.config.session.id)
+            .load_intents(&host.role.config.session.id)
             .unwrap()
             .pause_causes
             .len(),
         1
     );
-    assert_eq!(host.config.session.root_turn_count, 0);
+    assert_eq!(host.role.config.session.root_turn_count, 0);
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
     let events = event_rx.try_iter().collect::<Vec<_>>();
@@ -1792,18 +1830,20 @@ fn rejected_root_fact_binds_only_with_its_projector_page() {
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host =
-            NodeActor::open_blocking(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
-        let store = host.config.store.clone();
-        let id = host.config.session.id.clone();
-        let item = queue::enqueue(&mut host.config.session.pending_queue, "queued item").unwrap();
-        store.save(&mut host.config.session).unwrap();
+            RootActor::open_blocking(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
+        let store = host.role.config.store.clone();
+        let id = host.role.config.session.id.clone();
+        let item =
+            queue::enqueue(&mut host.role.config.session.pending_queue, "queued item").unwrap();
+        store.save(&mut host.role.config.session).unwrap();
         let source = host.opened.locator();
         host.opened.close_admission();
         let command_id =
             plakous::agent::CommandId::new(format!("plak.queue.{}.{}", item.id, item.revision))
                 .unwrap();
         let receipt =
-            host.executor
+            host.role
+                .executor
                 .block_on(host.opened.agent().unwrap().command(
                     plakous::agent::TurnCommand::Start {
                         command_id,
@@ -1825,7 +1865,7 @@ fn rejected_root_fact_binds_only_with_its_projector_page() {
             );
         }
         if fail_projection {
-            host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+            host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
                 store.clone(),
                 SubmissionFailure {
                     fail_prepare: false,
@@ -1846,31 +1886,33 @@ fn rejected_root_fact_binds_only_with_its_projector_page() {
         let head = host.opened.locator();
         assert_ne!(source, head, "rejection receipt must have committed");
         assert!(
-            host.config
+            host.role
+                .config
                 .session
                 .queue_commands
-                .is_rejected(&host.config.session.pending_queue[0])
+                .is_rejected(&host.role.config.session.pending_queue[0])
         );
         let projected = store.load_views(&id).unwrap().unwrap();
         assert!(projected.state.deliveries.contains_key(&format!(
             "plak.queue.{}.{}",
-            host.config.session.pending_queue[0].id, host.config.session.pending_queue[0].revision
+            host.role.config.session.pending_queue[0].id,
+            host.role.config.session.pending_queue[0].revision
         )));
         let notices = events
             .try_iter()
             .filter(|event| matches!(event, HostEvent::Row(_)))
             .count();
         assert!(notices > 0);
-        host.config.store = store.clone();
+        host.role.config.store = store.clone();
         host.block(async |host| host.release().await).unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
         config.store = store.clone();
         config.session = store.load(&id).unwrap();
         let (tx, reopened_events) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut reopened =
-            NodeActor::open_blocking(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
+            RootActor::open_blocking(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
         assert_eq!(
-            reopened.config.session.plakous_locator,
+            reopened.role.config.session.plakous_locator,
             Some(reopened.opened.locator())
         );
         assert!(!reopened_events.try_iter().any(|event| matches!(event, HostEvent::Row(row) if row.text().is_some_and(|text| text.contains("prompt text must") || text.contains("agent is shutting down")))));
@@ -1887,7 +1929,7 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
     let database = root.path().join("home/runtime.sqlite3");
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1923,25 +1965,34 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
             .await
     })
     .unwrap();
-    assert!(!host.recovery.blocked());
+    assert!(!host.role.recovery.blocked());
     assert_eq!(host.opened.locator(), head);
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
-    assert_eq!(host.config.session.pending_queue.len(), 1);
-    assert_eq!(host.config.session.pending_queue[0].text, "keep my text");
-    assert!(!host.config.session.queue_commands.has_pending());
+    assert_eq!(host.role.config.session.pending_queue.len(), 1);
     assert_eq!(
-        host.config
+        host.role.config.session.pending_queue[0].text,
+        "keep my text"
+    );
+    assert!(!host.role.config.session.queue_commands.has_pending());
+    assert_eq!(
+        host.role
+            .config
             .store
-            .load_intents(&host.config.session.id)
+            .load_intents(&host.role.config.session.id)
             .unwrap()
             .submissions,
         [] as [sessions::projector::Submission; 0]
     );
-    let saved = host.config.store.load(&host.config.session.id).unwrap();
-    assert_eq!(saved.pending_queue, host.config.session.pending_queue);
+    let saved = host
+        .role
+        .config
+        .store
+        .load(&host.role.config.session.id)
+        .unwrap();
+    assert_eq!(saved.pending_queue, host.role.config.session.pending_queue);
     assert!(
         !saved
             .transcript
@@ -1970,7 +2021,8 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
         panic!("host must accept a new prompt after definite rejection");
     };
     assert!(
-        host.config
+        host.role
+            .config
             .session
             .pending_queue
             .iter()
@@ -1986,13 +2038,16 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
             .await
     })
     .unwrap();
-    assert!(!host.recovery.blocked());
+    assert!(!host.role.recovery.blocked());
     assert!(
-        host.pending_start.is_none(),
+        host.role.pending_start.is_none(),
         "a rejected delivery is not automatically retried"
     );
-    assert_eq!(host.config.session.pending_queue.len(), 1);
-    assert_eq!(host.config.session.pending_queue[0].text, "keep my text");
+    assert_eq!(host.role.config.session.pending_queue.len(), 1);
+    assert_eq!(
+        host.role.config.session.pending_queue[0].text,
+        "keep my text"
+    );
     host.block(async |host| host.release().await).unwrap();
 }
 
@@ -2011,7 +2066,7 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
                 crate::surface_protocol::user_action_channel::<TestExtension>();
             let (event_tx, event_rx) =
                 crate::surface_protocol::host_event_channel::<TestExtension>();
-            let mut host = NodeActor::open_blocking(
+            let mut host = RootActor::open_blocking(
                 config,
                 &action_rx,
                 crate::runtime::Sender::over(event_tx),
@@ -2030,7 +2085,7 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
                     attempted_revision: Mutex::new(None),
                 },
             ));
-            host.config.store = failing_store.clone();
+            host.role.config.store = failing_store.clone();
             let _ = event_rx.try_iter().collect::<Vec<_>>();
             actions
                 .send(crate::surface_protocol::UserAction::Prompt(
@@ -2047,7 +2102,7 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
             else {
                 panic!("queue admission must succeed before the injected delivery failure");
             };
-            let admitted = durable_store.load(&host.config.session.id).unwrap();
+            let admitted = durable_store.load(&host.role.config.session.id).unwrap();
             assert_eq!(admitted.pending_queue.len(), 1);
             assert!(!admitted.queue_commands.has_pending());
             assert!(
@@ -2073,7 +2128,7 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
                 admitted.store_revision + u64::from(!fail_prepare)
             );
             let records = crate::session_log::read_tail_for_kind(
-                &host.config.home,
+                &host.role.config.home,
                 &admitted.id,
                 10,
                 Some("queue.persist_failed"),

@@ -3,13 +3,13 @@ use super::RootRecovery;
 
 use super::super::usage::last_enrolled_source_bytes;
 use super::{
-    CliFailure, CliResult, ContextQuery, HostStep, Instant, NodeActor, TerminalPhase,
+    CliFailure, CliResult, ContextQuery, HostStep, Instant, RootActor, TerminalPhase,
     emit_terminal_status, host_outcome_blocks_continuation, query_context,
 };
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "A restored turn retains its original admission and terminal fence while reconnecting host events and pending cancel settlement."
@@ -18,17 +18,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let Some(recovered) = self.opened.take_recovered_turn() else {
             return Ok(HostStep::Continue);
         };
-        let _ = self.events.send(ContentEvent::SetBusy(true));
+        let _ = self.role.events.send(ContentEvent::SetBusy(true));
         let pause = super::restored_paused_status_suffix(
-            &self.config.topology_rows(),
-            &self.config.session,
+            &self.role.config.topology_rows(),
+            &self.role.config.session,
         );
-        let _ = self.events.send(ContentEvent::Status {
+        let _ = self.role.events.send(ContentEvent::Status {
             phase: HostPhase::Running,
-            queue_len: self.config.session.pending_queue.len(),
+            queue_len: self.role.config.session.pending_queue.len(),
             detail: Some(HostStatusDetail::RestoringAdmittedTurn { pause }),
         });
-        let _ = self.events.send(ContentEvent::Activity {
+        let _ = self.role.events.send(ContentEvent::Activity {
             label: "agent restoring".into(),
             active: false,
         });
@@ -51,42 +51,42 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             self.opened.sessions(),
             super::super::TurnHost {
                 job_agent: agent,
-                host_wakes: self.config.prompt_host_facts().host_wakes
-                    && !self.config.session.child_wake_suppressed,
+                host_wakes: self.role.config.prompt_host_facts().host_wakes
+                    && !self.role.config.session.child_wake_suppressed,
                 quit_started_at: &mut self.quit_started_at,
                 quit_job_stops: &mut self.quit_job_stops,
-                actions: self.actions,
-                deferred: &self.interrupt_state,
-                events: &self.events,
+                actions: self.role.actions,
+                deferred: &self.role.interrupt_state,
+                events: &self.role.events,
                 rows: &super::super::HostRows::new(
-                    &self.config.state_roots,
-                    self.config.store.as_ref(),
+                    &self.role.config.state_roots,
+                    self.role.config.store.as_ref(),
                 ),
-                roots: &self.config.state_roots,
-                store: self.config.store.as_ref(),
-                projection_store: &self.config.store,
-                live_projector: self.live.as_mut(),
+                roots: &self.role.config.state_roots,
+                store: self.role.config.store.as_ref(),
+                projection_store: &self.role.config.store,
+                live_projector: self.role.live.as_mut(),
                 live_target,
-                home: &self.config.home,
-                session: &mut self.config.session,
+                home: &self.role.config.home,
+                session: &mut self.role.config.session,
                 context_projection,
                 enrolled_source_bytes,
-                root_template: &mut self.config.root_template,
-                attached_one_shot: self.config.attached_one_shot,
-                ready_catalog: &self.config.ready_catalog.accounts,
-                surface: &self.config.surface,
-                log: self.log.as_ref(),
-                subscription_service: self.config.target.native_subscriptions().cloned(),
-                subscription_usage_refresh: &self.subscription_usage_refresh,
-                held_usage: &self.held_usage,
-                ledger: &self.session_ledger,
-                last_tree_revision: &mut self.last_tree_revision,
-                job_events: &mut self.job_events,
-                runtime_factory: self.config.runtime_factory.as_ref(),
+                root_template: &mut self.role.config.root_template,
+                attached_one_shot: self.role.config.attached_one_shot,
+                ready_catalog: &self.role.config.ready_catalog.accounts,
+                surface: &self.role.config.surface,
+                log: self.role.log.as_ref(),
+                subscription_service: self.role.config.target.native_subscriptions().cloned(),
+                subscription_usage_refresh: &self.role.subscription_usage_refresh,
+                held_usage: &self.role.held_usage,
+                ledger: &self.role.session_ledger,
+                last_tree_revision: &mut self.role.last_tree_revision,
+                job_events: &mut self.role.job_events,
+                runtime_factory: self.role.config.runtime_factory.as_ref(),
             },
         ))
         .await;
-        if self.actions.abandon_and_release_requested() && driven.is_err() {
+        if self.role.actions.abandon_and_release_requested() && driven.is_err() {
             return Ok(HostStep::Quit);
         }
         if let Err(error) = &driven
@@ -106,7 +106,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             self.suppress_child_wake(None)?;
         }
         if host_outcome_blocks_continuation(&outcome) {
-            self.recovery = RootRecovery::Due;
+            self.role.recovery = RootRecovery::Due;
         }
         self.publish_terminal(
             outcome,
@@ -114,21 +114,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             super::publication::TerminalErrorPresentation::Events,
         )
         .await;
-        self.publish_projected_transcript(self.config.attached_one_shot)
+        self.publish_projected_transcript(self.role.config.attached_one_shot)
             .await;
         self.update_background_process_count();
         self.publish_pending_continuation();
-        let _ = self.events.send(ContentEvent::SetBusy(false));
+        let _ = self.role.events.send(ContentEvent::SetBusy(false));
         emit_terminal_status(
-            &self.events,
-            if self.recovery.blocked() {
+            &self.role.events,
+            if self.role.recovery.blocked() {
                 TerminalPhase::RecoveryPending
             } else if interrupted {
                 TerminalPhase::Interrupted
             } else {
                 TerminalPhase::Idle
             },
-            self.config.session.pending_queue.len(),
+            self.role.config.session.pending_queue.len(),
         );
         Ok(if quit {
             HostStep::Quit

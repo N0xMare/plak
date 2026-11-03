@@ -1,7 +1,7 @@
 //! Pre-dispatch checkpoints: finish the current receipt, never start a turn after stop.
 //! The checkpoint is the fence; watching only drains the mailbox for latency.
 
-use super::{CliResult, ContentEvent, InterruptWatch, NodeActor};
+use super::{CliResult, ContentEvent, InterruptWatch, RootActor};
 use crate::interrupt::watched;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::future::Future;
@@ -63,12 +63,12 @@ impl Hooks {
     }
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(in crate::runtime::host_loop) fn stop_preparation(
         &mut self,
         one_shot: &mut Option<&mut crate::runtime::oneshot::OneShotState>,
     ) -> CliResult<Option<Stopped>> {
-        let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
+        let watch = InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         if !watch.preparation_stopped() {
             return Ok(None);
         }
@@ -78,9 +78,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 assistant: String::new(),
             }));
         }
-        let _ = self.events.send(ContentEvent::Status {
+        let _ = self.role.events.send(ContentEvent::Status {
             phase: HostPhase::Idle,
-            queue_len: self.config.session.pending_queue.len(),
+            queue_len: self.role.config.session.pending_queue.len(),
             detail: Some(HostStatusDetail::PromptPreparationStopped),
         });
         paused?;

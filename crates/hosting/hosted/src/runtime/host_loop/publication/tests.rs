@@ -9,7 +9,7 @@ use plakous::model::FinishReason;
 #[test]
 fn capacity_commit_failure_requires_recovery_and_pauses_live_drain() {
     use super::SessionQueueDrainState;
-    use crate::runtime::host_loop::NodeActor;
+    use crate::runtime::host_loop::RootActor;
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::test_support::{SaveFailure, fresh_injected_attached_host};
     use crate::runtime::{Sender, TurnHostOutcome};
@@ -27,31 +27,40 @@ fn capacity_commit_failure_requires_recovery_and_pauses_live_drain() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
-        host.config.compaction_enabled = true;
-        host.config.session.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
-        crate::sessions::queue::enqueue(&mut host.config.session.pending_queue, "queued follow-up")
+        let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+        host.role.config.compaction_enabled = true;
+        host.role.config.session.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
+        crate::sessions::queue::enqueue(
+            &mut host.role.config.session.pending_queue,
+            "queued follow-up",
+        )
+        .unwrap();
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
             .unwrap();
-        host.config.store.save(&mut host.config.session).unwrap();
-        let source = host.config.session.plakous_locator;
+        let source = host.role.config.session.plakous_locator;
         let submission = host
+            .role
             .executor
             .block_on(host.opened.agent().unwrap().prompt("synthetic terminal"))
             .unwrap()
             .unwrap();
-        host.executor
+        host.role
+            .executor
             .block_on(submission.result())
             .unwrap()
             .unwrap();
         let head = host.opened.locator();
         assert_ne!(source, Some(head));
         let store = Arc::new(crate::runtime::fault_store::FaultStore::new(
-            host.config.store.clone(),
+            host.role.config.store.clone(),
             SaveFailure {
                 fail: AtomicBool::new(true),
             },
         ));
-        host.config.store = store.clone();
+        host.role.config.store = store.clone();
         assert!(!host.block(async |host| {
             host.publish_terminal(
                 Ok(TurnHostOutcome::ContextCapacity {
@@ -66,18 +75,18 @@ fn capacity_commit_failure_requires_recovery_and_pauses_live_drain() {
         }));
         // Storage returning must not rearm the drain before result replay.
         store.faults.fail.store(false, Ordering::SeqCst);
-        assert!(host.recovery.blocked());
+        assert!(host.role.recovery.blocked());
         assert_eq!(
-            host.config.session.queue_drain_state,
+            host.role.config.session.queue_drain_state,
             SessionQueueDrainState::RestoredPaused
         );
-        assert_eq!(host.config.session.pending_queue.len(), 1);
+        assert_eq!(host.role.config.session.pending_queue.len(), 1);
 
-        assert_eq!(host.config.session.plakous_locator, source);
+        assert_eq!(host.role.config.session.plakous_locator, source);
         assert_eq!(
             store
                 .inner
-                .load(&host.config.session.id)
+                .load(&host.role.config.session.id)
                 .unwrap()
                 .plakous_locator,
             source
@@ -93,7 +102,7 @@ fn capacity_commit_failure_requires_recovery_and_pauses_live_drain() {
 
 #[test]
 fn capacity_auto_compact_sees_the_terminal_head_binding() {
-    use crate::runtime::host_loop::NodeActor;
+    use crate::runtime::host_loop::RootActor;
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::test_support::fresh_injected_attached_host;
     use crate::runtime::{Sender, TurnHostOutcome};
@@ -113,16 +122,22 @@ fn capacity_auto_compact_sees_the_terminal_head_binding() {
         });
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
-    host.config.compaction_enabled = true;
-    host.config.store.save(&mut host.config.session).unwrap();
-    let source = host.config.session.plakous_locator;
+    let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    host.role.config.compaction_enabled = true;
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    let source = host.role.config.session.plakous_locator;
     let submission = host
+        .role
         .executor
         .block_on(host.opened.agent().unwrap().prompt("synthetic terminal"))
         .unwrap()
         .unwrap();
-    host.executor
+    host.role
+        .executor
         .block_on(submission.result())
         .unwrap()
         .unwrap();
@@ -168,9 +183,10 @@ fn capacity_auto_compact_sees_the_terminal_head_binding() {
     assert_eq!(requests[0].source_locator, head);
 
     let views = host
+        .role
         .config
         .store
-        .load_views(&host.config.session.id)
+        .load_views(&host.role.config.session.id)
         .unwrap()
         .unwrap();
     assert_eq!(
@@ -186,7 +202,7 @@ fn capacity_auto_compact_sees_the_terminal_head_binding() {
 /// operator gets the guidance instead of "compacting once".
 #[test]
 fn capacity_auto_compact_waits_after_a_failed_paid_fold() {
-    use crate::runtime::host_loop::NodeActor;
+    use crate::runtime::host_loop::RootActor;
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::test_support::fresh_injected_attached_host;
     use crate::runtime::{Sender, TurnHostOutcome};
@@ -271,11 +287,16 @@ fn capacity_auto_compact_waits_after_a_failed_paid_fold() {
     ));
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
-    host.config.compaction_enabled = true;
-    host.config.store.save(&mut host.config.session).unwrap();
+    let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    host.role.config.compaction_enabled = true;
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
     for attempt in 0..2 {
         let submission = host
+            .role
             .executor
             .block_on(
                 host.opened
@@ -286,6 +307,7 @@ fn capacity_auto_compact_waits_after_a_failed_paid_fold() {
             .unwrap()
             .unwrap();
         let result = host
+            .role
             .executor
             .block_on(submission.result())
             .unwrap()
@@ -352,7 +374,7 @@ fn capacity_auto_compact_waits_after_a_failed_paid_fold() {
 
 #[test]
 fn completed_terminal_projector_publishes_once_and_tracks_head() {
-    use crate::runtime::host_loop::NodeActor;
+    use crate::runtime::host_loop::RootActor;
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::test_support::fresh_injected_attached_host;
     use crate::runtime::{Sender, TurnHostOutcome};
@@ -364,16 +386,16 @@ fn completed_terminal_projector_publishes_once_and_tracks_head() {
     config.store = records.clone();
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
-    let store = host.config.store.clone();
-    let id = host.config.session.id.clone();
-    let item =
-        crate::sessions::queue::enqueue(&mut host.config.session.pending_queue, "root").unwrap();
-    store.save(&mut host.config.session).unwrap();
+    let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    let store = host.role.config.store.clone();
+    let id = host.role.config.session.id.clone();
+    let item = crate::sessions::queue::enqueue(&mut host.role.config.session.pending_queue, "root")
+        .unwrap();
+    store.save(&mut host.role.config.session).unwrap();
     let command = format!("plak.queue.{}.{}", item.id, item.revision);
     store
         .save_submission(
-            &mut host.config.session,
+            &mut host.role.config.session,
             &Submission {
                 command_id: command.clone(),
                 kind: SubmissionKind::RootStart,
@@ -386,6 +408,7 @@ fn completed_terminal_projector_publishes_once_and_tracks_head() {
         )
         .unwrap();
     let submission = host
+        .role
         .executor
         .block_on(
             host.opened
@@ -396,12 +419,17 @@ fn completed_terminal_projector_publishes_once_and_tracks_head() {
         .unwrap()
         .unwrap();
     let handle = submission.into_result().unwrap();
-    let result = host.executor.block_on(handle.result()).unwrap().unwrap();
+    let result = host
+        .role
+        .executor
+        .block_on(handle.result())
+        .unwrap()
+        .unwrap();
     let TurnResultOutcome::Completed(response) = result.outcome() else {
         panic!("completed turn required")
     };
     let assistant = response.output_text();
-    let source = host.config.session.plakous_locator;
+    let source = host.role.config.session.plakous_locator;
     let head = host.opened.locator();
     host.block(async |host| {
         host.publish_terminal(
@@ -424,10 +452,13 @@ fn completed_terminal_projector_publishes_once_and_tracks_head() {
         "terminal publication must not hydrate a full session record"
     );
     let stored = store.load(&id).unwrap();
-    assert_eq!(host.config.session.pending_queue, stored.pending_queue);
-    assert_eq!(host.config.session.queue_commands, stored.queue_commands);
+    assert_eq!(host.role.config.session.pending_queue, stored.pending_queue);
+    assert_eq!(
+        host.role.config.session.queue_commands,
+        stored.queue_commands
+    );
     assert!(
-        host.config.session.pending_queue.is_empty(),
+        host.role.config.session.pending_queue.is_empty(),
         "consumed queue item survived publication"
     );
     assert_ne!(source, Some(head));
@@ -438,7 +469,7 @@ fn completed_terminal_projector_publishes_once_and_tracks_head() {
     config.session = store.load(&id).unwrap();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     {
-        let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+        let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
         host.block(async |host| host.release().await).unwrap();
     }
     let count = store
@@ -455,7 +486,7 @@ fn completed_terminal_projector_publishes_once_and_tracks_head() {
 fn cached_terminal_publication_matches_the_stored_projection_and_preserves_pending_notices() {
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::test_support::fresh_injected_attached_host;
-    use crate::runtime::{Sender, host_loop::NodeActor};
+    use crate::runtime::{Sender, host_loop::RootActor};
     use crate::session_store::SessionRecordStore;
     use crate::sessions::projector::{Lane, RowKey, ViewWrites};
     use crate::sessions::{MAX_TRANSCRIPT_LINES, NoticeScope, TranscriptRow};
@@ -467,17 +498,18 @@ fn cached_terminal_publication_matches_the_stored_projection_and_preserves_pendi
         let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host =
-            NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
-        records.save(&mut host.config.session).unwrap();
-        if let Some(live) = host.live.take() {
+            RootActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+        records.save(&mut host.role.config.session).unwrap();
+        if let Some(live) = host.role.live.take() {
             let target = host.live_target();
-            host.executor
+            host.role
+                .executor
                 .block_on(live.finish(target, None))
                 .unwrap()
                 .unwrap();
         }
         host.block(async |host| host.project_now().await);
-        let id = host.config.session.id.clone();
+        let id = host.role.config.session.id.clone();
         let before = records.load_views(&id).unwrap().unwrap();
         let mut views = before.clone();
         views.rows.clear();
@@ -517,51 +549,58 @@ fn cached_terminal_publication_matches_the_stored_projection_and_preserves_pendi
                 .anchor,
             views.cursor.get()
         );
-        host.config.session = records.load(&id).unwrap();
+        host.role.config.session = records.load(&id).unwrap();
         host.block(async |host| host.project().await);
         host.commit_notice_intents();
-        host.config
+        host.role
+            .config
             .session
             .pending_queue
             .iter_mut()
             .find(|item| item.id == kept.id)
             .unwrap()
             .text = "unsaved queue edit".into();
-        host.config.session.plakous_locator = None;
-        host.config.session.root_turn_count = 0;
-        host.config.session.tool_call_count = 0;
-        host.config.session.compaction_count = 0;
+        host.role.config.session.plakous_locator = None;
+        host.role.config.session.root_turn_count = 0;
+        host.role.config.session.tool_call_count = 0;
+        host.role.config.session.compaction_count = 0;
         let pending = TranscriptRow::info(NoticeScope::Session, "pending unsaved notice");
         if pending_notice {
-            host.config.session.record_notice(pending.clone());
+            host.role.config.session.record_notice(pending.clone());
         }
         host.block(async |host| host.publish_projected_transcript(true).await);
         let mut expected = records.load(&id).unwrap();
         if pending_notice {
             expected.record_notice(pending);
         }
-        assert_eq!(host.config.session.transcript, expected.transcript);
+        assert_eq!(host.role.config.session.transcript, expected.transcript);
         assert_eq!(
-            host.config.session.root_turn_count,
+            host.role.config.session.root_turn_count,
             expected.root_turn_count
         );
         assert_eq!(
-            host.config.session.tool_call_count,
+            host.role.config.session.tool_call_count,
             expected.tool_call_count
         );
         assert_eq!(
-            host.config.session.compaction_count,
+            host.role.config.session.compaction_count,
             expected.compaction_count
         );
         assert_eq!(
-            host.config.session.plakous_locator,
+            host.role.config.session.plakous_locator,
             expected.plakous_locator
         );
-        assert_eq!(host.config.session.queue_commands, expected.queue_commands);
-        assert_eq!(host.config.session.pending_queue, expected.pending_queue);
-        assert!(host.config.session.transcript.len() <= MAX_TRANSCRIPT_LINES);
         assert_eq!(
-            host.config.session.transcript.first(),
+            host.role.config.session.queue_commands,
+            expected.queue_commands
+        );
+        assert_eq!(
+            host.role.config.session.pending_queue,
+            expected.pending_queue
+        );
+        assert!(host.role.config.session.transcript.len() <= MAX_TRANSCRIPT_LINES);
+        assert_eq!(
+            host.role.config.session.transcript.first(),
             Some(&TranscriptRow::Truncated)
         );
         host.block(async |host| host.release().await).unwrap();
@@ -571,7 +610,7 @@ fn cached_terminal_publication_matches_the_stored_projection_and_preserves_pendi
 #[test]
 fn terminal_head_changes_only_after_the_projector_pass() {
     use crate::agent::TerminalExchange;
-    use crate::runtime::host_loop::NodeActor;
+    use crate::runtime::host_loop::RootActor;
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::test_support::{SaveFailure, fresh_injected_attached_host};
     use crate::runtime::{Sender, TurnHostOutcome};
@@ -584,27 +623,33 @@ fn terminal_head_changes_only_after_the_projector_pass() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
-        host.config.store.save(&mut host.config.session).unwrap();
-        let source = host.config.session.plakous_locator;
+        let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
+            .unwrap();
+        let source = host.role.config.session.plakous_locator;
         let submission = host
+            .role
             .executor
             .block_on(host.opened.agent().unwrap().prompt("synthetic terminal"))
             .unwrap()
             .unwrap();
-        host.executor
+        host.role
+            .executor
             .block_on(submission.result())
             .unwrap()
             .unwrap();
         let head = host.opened.locator();
         assert_ne!(source, Some(head));
         let store = Arc::new(crate::runtime::fault_store::FaultStore::new(
-            host.config.store.clone(),
+            host.role.config.store.clone(),
             SaveFailure {
                 fail: AtomicBool::new(true),
             },
         ));
-        host.config.store = store.clone();
+        host.role.config.store = store.clone();
         let drive = || {
             Ok(match outcome {
                 0 => TurnHostOutcome::Failed {
@@ -631,11 +676,11 @@ fn terminal_head_changes_only_after_the_projector_pass() {
             )
             .await
         });
-        assert_eq!(host.config.session.plakous_locator, source);
+        assert_eq!(host.role.config.session.plakous_locator, source);
         assert_eq!(
             store
                 .inner
-                .load(&host.config.session.id)
+                .load(&host.role.config.session.id)
                 .unwrap()
                 .plakous_locator,
             source
@@ -649,9 +694,9 @@ fn terminal_head_changes_only_after_the_projector_pass() {
             )
             .await
         });
-        assert_eq!(host.config.session.plakous_locator, source);
+        assert_eq!(host.role.config.session.plakous_locator, source);
         host.block(async |host| host.publish_projected_transcript(true).await);
-        assert_eq!(host.config.session.plakous_locator, Some(head));
+        assert_eq!(host.role.config.session.plakous_locator, Some(head));
         host.block(async |host| host.release().await).unwrap();
     }
 }

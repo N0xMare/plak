@@ -13,7 +13,7 @@ use plakous::sessions::feed::FeedSeq;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 use super::{
-    CliFailure, CliResult, ContextQuery, HostStep, NodeActor, SessionEvent,
+    CliFailure, CliResult, ContextQuery, HostStep, RootActor, SessionEvent,
     build_session_from_config, durable_tree_id, emit_queue_snapshot, emit_restored_paused_note,
     emit_unavailable_context, log_ev, native_compact_facet, query_context, report_context,
     restored_paused_status_suffix,
@@ -37,7 +37,7 @@ pub(super) struct ReopenedTurn {
     terminal_published: bool,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// Reopens this session in place and publishes what the reopen closed.
     ///
     /// On failure the old attachment stays released and the recovery overlay
@@ -51,16 +51,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         &mut self,
         trigger: RecoveryTrigger,
     ) -> CliResult<HostStep> {
-        let _ = self.events.send(ContentEvent::SetBusy(true));
-        let _ = self.events.send(ContentEvent::Status {
+        let _ = self.role.events.send(ContentEvent::SetBusy(true));
+        let _ = self.role.events.send(ContentEvent::Status {
             phase: HostPhase::Running,
-            queue_len: self.config.session.pending_queue.len(),
+            queue_len: self.role.config.session.pending_queue.len(),
             detail: Some(HostStatusDetail::RecoveringInterruptedTurn),
         });
         let recovered = self.reopen_in_place().await;
         let restored_working = recovered.is_ok() && self.opened.has_recovered_turn();
         if !restored_working {
-            let _ = self.events.send(ContentEvent::SetBusy(false));
+            let _ = self.role.events.send(ContentEvent::SetBusy(false));
         }
         let ReopenedTurn {
             abandoned: report,
@@ -69,13 +69,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             Ok(report) => report,
             Err(failure) => {
                 log_ev(
-                    self.log.as_ref(),
-                    &self.config,
+                    self.role.log.as_ref(),
+                    &self.role.config,
                     SessionEvent::new("session.recover_failed").str("msg", failure.message()),
                 );
-                let _ = self.events.send(ContentEvent::Status {
+                let _ = self.role.events.send(ContentEvent::Status {
                     phase: HostPhase::Error,
-                    queue_len: self.config.session.pending_queue.len(),
+                    queue_len: self.role.config.session.pending_queue.len(),
                     detail: Some(HostStatusDetail::RecoveryIncomplete),
                 });
                 return Err(CliFailure::new(format!(
@@ -84,7 +84,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
             }
         };
-        self.recovery = RootRecovery::Clear;
+        self.role.recovery = RootRecovery::Clear;
         let (claim, cause, operations) =
             report.as_ref().map_or((None, None, Vec::new()), |report| {
                 (
@@ -106,17 +106,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 .str("claim", report.claim().as_str())
                 .str("cause", report.cause().as_str());
         }
-        log_ev(self.log.as_ref(), &self.config, record);
+        log_ev(self.role.log.as_ref(), &self.role.config, record);
         if let Some(report) = &report {
             if !terminal_published {
-                let _ = self.events.send(ContentEvent::Row(TranscriptRow::info(
+                let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(
                     NoticeScope::Recovery,
                     super::super::events::abandoned_turn_operator_line(report),
                 )));
             }
         }
         if report.is_none() && !restored_working {
-            let _ = self.events.send(ContentEvent::Row(TranscriptRow::info(NoticeScope::Recovery,
+            let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(NoticeScope::Recovery,
                 if terminal_published {
                     "plak: reopened the session and published the saved turn's result; the conversation continues from its saved state".to_owned()
                 } else {
@@ -124,51 +124,52 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 },
             )));
         }
-        let _ = self.events.send(ContentEvent::Recovered {
+        let _ = self.role.events.send(ContentEvent::Recovered {
             claim,
             cause,
             operations,
         });
         if let Err(error) = report_context(
             &self.opened,
-            &self.events,
+            &self.role.events,
             "after recovery",
-            self.config
+            self.role
+                .config
                 .target
                 .native_provider()
                 .is_some_and(native_compact_facet),
-            self.config.session.context_counters(),
+            self.role.config.session.context_counters(),
         )
         .await
         {
-            emit_unavailable_context(&self.events);
-            let _ = self.events.send(ContentEvent::Row(
+            emit_unavailable_context(&self.role.events);
+            let _ = self.role.events.send(ContentEvent::Row(
                 TranscriptRow::error(NoticeScope::Recovery, error.message().to_owned())
                     .with_optional_remedy(error.remedy()),
             ));
         }
-        let _ = self.events.send(ContentEvent::AgentAttached(true));
+        let _ = self.role.events.send(ContentEvent::AgentAttached(true));
         self.spawn_tree_recovery();
         // What was queued behind the fenced turn was written for a turn whose
         // outcome nobody saw, so it stays paused (spec 02 §4.2); the note says
         // exactly how to resume it, and a prompt typed now still runs at once.
-        let rows = self.config.topology_rows();
-        emit_queue_snapshot(&self.events, &self.config.session);
+        let rows = self.role.config.topology_rows();
+        emit_queue_snapshot(&self.role.events, &self.role.config.session);
         emit_restored_paused_note(
-            &self.events,
+            &self.role.events,
             &rows,
-            &self.config.session,
-            self.config.interactive,
+            &self.role.config.session,
+            self.role.config.interactive,
         );
         if restored_working {
             return self.drive_restored_turn().await;
         }
-        let _ = self.events.send(ContentEvent::Status {
+        let _ = self.role.events.send(ContentEvent::Status {
             phase: HostPhase::Idle,
-            queue_len: self.config.session.pending_queue.len(),
+            queue_len: self.role.config.session.pending_queue.len(),
             detail: Some(HostStatusDetail::Ready {
-                model_id: self.config.model_id.clone(),
-                pause: restored_paused_status_suffix(&rows, &self.config.session),
+                model_id: self.role.config.model_id.clone(),
+                pause: restored_paused_status_suffix(&rows, &self.role.config.session),
             }),
         });
         Ok(HostStep::Continue)
@@ -178,9 +179,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// waits on a lease, and what it settled or refused reaches the user as
     /// one system note when it finishes.
     pub(super) fn spawn_tree_recovery(&self) {
-        let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
-        let events = self.events.clone();
-        let session_id = self.config.session.id.clone();
+        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
+        let events = self.role.events.clone();
+        let session_id = self.role.config.session.id.clone();
         super::super::tree::start_child_recovery(&events, &session_id, tree_id, false, None);
     }
 
@@ -189,15 +190,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// `nothing` when it had nothing to do, follows as a note. Never waits on
     /// the pass.
     pub(super) fn recover_tree_children(&mut self, nothing: Option<String>) {
-        let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
-        let events = self.events.clone();
-        let session_id = self.config.session.id.clone();
+        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
+        let events = self.role.events.clone();
+        let session_id = self.role.config.session.id.clone();
         let for_pass = nothing.clone();
         let started =
             super::super::tree::start_child_recovery(&events, &session_id, tree_id, true, for_pass);
         log_ev(
-            self.log.as_ref(),
-            &self.config,
+            self.role.log.as_ref(),
+            &self.role.config,
             SessionEvent::new("topology.children_recovery_requested")
                 .str("start", format!("{started:?}")),
         );
@@ -205,6 +206,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             && let Some(nothing) = nothing
         {
             let _ = self
+                .role
                 .events
                 .notice(TranscriptRow::info(NoticeScope::Recovery, nothing));
         }
@@ -219,9 +221,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     )]
     pub(super) async fn reopen_in_place(&mut self) -> CliResult<ReopenedTurn> {
         let previous_cursor = self
+            .role
             .config
             .store
-            .load_views(&self.config.session.id)
+            .load_views(&self.role.config.session.id)
             .map_err(CliFailure::new)?
             .map_or(FeedSeq::ZERO, |views| views.cursor);
         match self.opened.detach_for_transfer().await {
@@ -232,8 +235,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             // the session.
             Err(error) if error.kind() == plakous::sessions::AgentSessionsErrorKind::Ownership => {
                 log_ev(
-                    self.log.as_ref(),
-                    &self.config,
+                    self.role.log.as_ref(),
+                    &self.role.config,
                     SessionEvent::new("session.lease_taken_over"),
                 );
             }
@@ -244,24 +247,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 )));
             }
         }
-        if self.config.session.store_revision == 0 {
-            self.config
+        if self.role.config.session.store_revision == 0 {
+            self.role
+                .config
                 .store
-                .save(&mut self.config.session)
+                .save(&mut self.role.config.session)
                 .map_err(CliFailure::new)?;
         }
         // Transfer reopens the projected head, just like a fresh attachment.
         let views = super::super::projection::project_to_tail(
             self.opened.sessions(),
-            &self.config.store,
-            &self.config.session.id,
+            &self.role.config.store,
+            &self.role.config.session.id,
             self.opened.locator(),
         )
         .await
         .map_err(CliFailure::new)?;
-        self.config.session.plakous_locator = super::super::projection::head_locator(&views);
+        self.role.config.session.plakous_locator = super::super::projection::head_locator(&views);
         let mut replacement =
-            build_session_from_config(&mut self.config, &mut self.stderr_buf).await?;
+            build_session_from_config(&mut self.role.config, &mut self.role.stderr_buf).await?;
         replacement.inherit_topology_owner(&mut self.opened);
         let mut report = replacement
             .agent()
@@ -271,7 +275,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         // closure, so no crash between them loses it; the next open then
         // derives the notice and may log it a second time.
         if let Some(report) = &report {
-            log_abandoned_report(self.log.as_ref(), &self.config, report);
+            log_abandoned_report(self.role.log.as_ref(), &self.role.config, report);
         }
         let previous = std::mem::replace(&mut self.opened, replacement);
         // Spec 02 §4.2 step 2: apply what the reopen committed.
@@ -279,19 +283,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         // A closure an earlier, failed reopen committed is applied here and
         // reported now; one this reopen committed was reported above.
         let projected = super::take_projected_abandonments(
-            &self.pending_usage,
+            &self.role.pending_usage,
             self.opened.locator().session_id(),
         );
         if report.is_none()
             && let Some(abandonment) = projected.into_iter().next()
         {
-            log_abandoned_report(self.log.as_ref(), &self.config, &abandonment.report);
+            log_abandoned_report(
+                self.role.log.as_ref(),
+                &self.role.config,
+                &abandonment.report,
+            );
             report = Some(abandonment.report);
         }
         let applied_cursor = self
+            .role
             .config
             .store
-            .load_views(&self.config.session.id)
+            .load_views(&self.role.config.session.id)
             .map_err(CliFailure::new)?
             .map_or(previous_cursor, |views| views.cursor);
         let locator = self.opened.locator();
@@ -310,26 +319,28 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             .err()
             .map(|error| error.to_string());
         if let Some(error) = released {
-            let _ = self.events.notice(TranscriptRow::error(
+            let _ = self.role.events.notice(TranscriptRow::error(
                 NoticeScope::Recovery,
                 format!("the stopped session's attachment did not release cleanly: {error}"),
             ));
         }
         super::super::result_mail::settle_waits(
-            &self.config.topology_rows(),
-            &self.config.session,
+            &self.role.config.topology_rows(),
+            &self.role.config.session,
             &self.opened,
         )
         .await
         .map_err(CliFailure::from)?;
-        self.config
+        self.role
+            .config
             .session
             .bind_plakous_locator(self.opened.locator())
             .map_err(CliFailure::new)?;
-        self.config.session.touch();
-        self.config
+        self.role.config.session.touch();
+        self.role
+            .config
             .store
-            .save(&mut self.config.session)
+            .save(&mut self.role.config.session)
             .map_err(CliFailure::new)?;
         if query_context(&self.opened, ContextQuery::Current)
             .await

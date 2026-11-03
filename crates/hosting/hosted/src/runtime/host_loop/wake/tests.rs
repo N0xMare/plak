@@ -18,21 +18,22 @@ use crate::surface_protocol::{HostEventReceiver, UserAction, UserActionSender};
 use std::sync::Arc;
 
 fn submissions<P: plakous_host_protocol::ProtocolExtension>(
-    host: &NodeActor<'_, P>,
+    host: &RootActor<'_, P>,
 ) -> Vec<crate::sessions::projector::Submission> {
-    host.config
+    host.role
+        .config
         .store
-        .load_intents(&host.config.session.id)
+        .load_intents(&host.role.config.session.id)
         .unwrap()
         .submissions
 }
 
 fn root_batch<P: plakous_host_protocol::ProtocolExtension>(
-    host: &NodeActor<'_, P>,
+    host: &RootActor<'_, P>,
     submission: &crate::sessions::projector::Submission,
 ) -> Option<crate::agent_tree::AgentCommand> {
-    let rows = host.config.topology_rows();
-    let id = super::super::durable_tree_id(&rows, &host.config.session);
+    let rows = host.role.config.topology_rows();
+    let id = super::super::durable_tree_id(&rows, &host.role.config.session);
     crate::topology_runtime::lookup(&id).and_then(|runtime| {
         runtime
             .read(|tree| tree.command(&submission.command_id).cloned())
@@ -41,12 +42,13 @@ fn root_batch<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 fn accepted<P: plakous_host_protocol::ProtocolExtension>(
-    host: &NodeActor<'_, P>,
+    host: &RootActor<'_, P>,
     submission: &crate::sessions::projector::Submission,
 ) -> bool {
-    host.config
+    host.role
+        .config
         .store
-        .load_views(&host.config.session.id)
+        .load_views(&host.role.config.session.id)
         .unwrap()
         .unwrap()
         .state
@@ -62,7 +64,7 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &actions, crate::runtime::Sender::over(events), None)
+        RootActor::open_blocking(config, &actions, crate::runtime::Sender::over(events), None)
             .unwrap();
     let job = plakous::tools::JobView {
         number: 3,
@@ -76,7 +78,7 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
         owner_generation: 1,
     };
     let now = Instant::now();
-    host.config.auto_continue = false;
+    host.role.config.auto_continue = false;
     assert!(matches!(
         host.block(async |host| host.try_child_wake_with_jobs(now, vec![job.clone()]).await)
             .unwrap(),
@@ -86,8 +88,8 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
         submissions(&host),
         [] as [crate::sessions::projector::Submission; 0]
     );
-    host.config.auto_continue = true;
-    host.config.session.child_wake_suppressed = true;
+    host.role.config.auto_continue = true;
+    host.role.config.session.child_wake_suppressed = true;
     assert!(matches!(
         host.block(async |host| host.try_child_wake_with_jobs(now, vec![job.clone()]).await)
             .unwrap(),
@@ -97,7 +99,7 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
         submissions(&host),
         [] as [crate::sessions::projector::Submission; 0]
     );
-    host.config.session.child_wake_suppressed = false;
+    host.role.config.session.child_wake_suppressed = false;
     let mut second = job.clone();
     second.number = 4;
     assert!(matches!(
@@ -119,9 +121,10 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
         "Background processes finished or sub-agent results arrived while you were idle; continue the current task, or reply briefly if nothing remains."
     );
     let intents = host
+        .role
         .config
         .store
-        .load_intents(&host.config.session.id)
+        .load_intents(&host.role.config.session.id)
         .unwrap();
     let intent = intents.submissions.last().unwrap();
     assert!(intent.command_id.contains("p3"));
@@ -139,7 +142,7 @@ fn idle_escape_suppresses_wake_until_user_prompt() {
                 .unwrap(),
             HostStep::Continue
         ));
-        assert!(host.config.session.child_wake_suppressed);
+        assert!(host.role.config.session.child_wake_suppressed);
         let now = Instant::now();
         for at in [now, now + QUIET_WINDOW] {
             assert!(matches!(
@@ -157,7 +160,7 @@ fn idle_escape_suppresses_wake_until_user_prompt() {
         );
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
             .unwrap();
-        assert!(!host.config.session.child_wake_suppressed);
+        assert!(!host.role.config.session.child_wake_suppressed);
     });
 }
 
@@ -166,7 +169,7 @@ fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
     with_host(0, |host, _, actions, events| {
         use super::super::prompt::preparation::Stage;
         let controls = actions.clone();
-        host.prep_hooks.hook = Some((
+        host.role.prep_hooks.hook = Some((
             Stage::Refresh,
             Box::pin(async move {
                 controls.send(UserAction::Interrupt).unwrap();
@@ -178,9 +181,10 @@ fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
                 .unwrap()
         );
         let intents = host
+            .role
             .config
             .store
-            .load_intents(&host.config.session.id)
+            .load_intents(&host.role.config.session.id)
             .unwrap();
         assert!(matches!(&intents.pause_causes.last().unwrap().value,
             crate::sessions::projector::HostPauseCause::UnrecordedRefusal {reason} if reason == "preparation stopped; queue paused"));
@@ -189,7 +193,7 @@ fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
             crate::sessions::projector::HostPauseCause::WakePreflightFailed { .. }
         )));
         assert_eq!(
-            host.config.session.queue_drain_state,
+            host.role.config.session.queue_drain_state,
             QueueDrainState::RestoredPaused
         );
         let observed: Vec<_> = events.try_iter().collect();
@@ -224,7 +228,7 @@ fn completed_run(max_turns: u8) -> super::super::super::oneshot::OneShotState {
 #[test]
 fn completed_final_run_is_not_bounded_and_drain_is_process_local() {
     with_host(0, |host, _, controls, _| {
-        host.config.session.queue_drain_state = QueueDrainState::LiveAutoDrain;
+        host.role.config.session.queue_drain_state = QueueDrainState::LiveAutoDrain;
         let mut state = completed_run(25);
         state
             .run
@@ -243,10 +247,15 @@ fn completed_final_run_is_not_bounded_and_drain_is_process_local() {
             Some(Ok(crate::runtime::OneShotOutcome::Completed { .. }))
         ));
         assert_eq!(
-            host.config.session.queue_drain_state,
+            host.role.config.session.queue_drain_state,
             QueueDrainState::RestoredPaused
         );
-        let stored = host.config.store.load(&host.config.session.id).unwrap();
+        let stored = host
+            .role
+            .config
+            .store
+            .load(&host.role.config.session.id)
+            .unwrap();
         assert_eq!(stored.queue_drain_state, QueueDrainState::LiveAutoDrain);
     });
 }
@@ -254,8 +263,8 @@ fn completed_final_run_is_not_bounded_and_drain_is_process_local() {
 #[test]
 fn run_continuation_ignores_auto_continue_and_admits_its_own_terminal() {
     with_host(1, |host, _, _, observed| {
-        host.config.auto_continue = false;
-        host.config.interactive = false;
+        host.role.config.auto_continue = false;
+        host.role.config.interactive = false;
         let mut state = completed_run(100);
         let (text, delivery, echoed) = take_prompt(
             host.block(async |host| host.next_run_prompt(&mut state).await)
@@ -273,7 +282,7 @@ fn run_continuation_ignores_auto_continue_and_admits_its_own_terminal() {
             state.result,
             Some(Ok(crate::runtime::OneShotOutcome::Completed { .. }))
         ));
-        assert_eq!(host.config.session.root_turn_count, 1);
+        assert_eq!(host.role.config.session.root_turn_count, 1);
         assert!(matches!(
             host.block(async |host| host.next_run_prompt(&mut state).await)
                 .unwrap(),
@@ -339,10 +348,10 @@ fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
                 .block()
                 .unwrap();
             let _ = observed.try_iter().count();
-            let records = host.config.store.clone();
+            let records = host.role.config.store.clone();
             let store = Arc::new(FaultStore::new(records.clone(), FullSubmission::default()));
-            host.config.store = store.clone();
-            let queue = host.config.session.pending_queue.clone();
+            host.role.config.store = store.clone();
+            let queue = host.role.config.session.pending_queue.clone();
             let before = submissions(host);
             let mut state = completed_run(100);
             state.run.as_mut().unwrap().deadline = Some(Instant::now() + Duration::from_secs(5));
@@ -365,14 +374,17 @@ fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
                 runtime.read(|tree| tree.nodes()["c1"].status).unwrap(),
                 crate::agent_tree_protocol::NodeStatus::Interrupted
             );
-            assert_eq!(host.config.session.pending_queue, queue);
+            assert_eq!(host.role.config.session.pending_queue, queue);
             assert_eq!(
-                host.config.session.queue_drain_state,
+                host.role.config.session.queue_drain_state,
                 QueueDrainState::RestoredPaused
             );
             assert_eq!(submissions(host), before);
             assert_eq!(
-                records.load(&host.config.session.id).unwrap().pending_queue,
+                records
+                    .load(&host.role.config.session.id)
+                    .unwrap()
+                    .pending_queue,
                 queue
             );
             let notices: Vec<_> = observed
@@ -397,9 +409,16 @@ fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
                 1
             );
             store.faults.unavailable.store(false, Ordering::Release);
-            host.config.store.save(&mut host.config.session).unwrap();
+            host.role
+                .config
+                .store
+                .save(&mut host.role.config.session)
+                .unwrap();
             assert_eq!(
-                records.load(&host.config.session.id).unwrap().pending_queue,
+                records
+                    .load(&host.role.config.session.id)
+                    .unwrap()
+                    .pending_queue,
                 queue
             );
         },
@@ -419,7 +438,7 @@ fn run_max_turns_stops_before_admitting_a_continuation() {
             state.result,
             Some(Ok(crate::runtime::OneShotOutcome::Bounded { .. }))
         ));
-        assert_eq!(host.config.session.root_turn_count, 0);
+        assert_eq!(host.role.config.session.root_turn_count, 0);
         assert!(observed.try_iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "plak: run stopped at max-turns 1")));
     });
 }
@@ -470,7 +489,7 @@ fn run_waits_without_a_turn_and_timeout_interrupts_resumable_children() {
                 .iter()
                 .any(|note| note == "plak: run stopped at timeout; interrupted c1")
         );
-        assert_eq!(host.config.session.root_turn_count, 0);
+        assert_eq!(host.role.config.session.root_turn_count, 0);
         assert!(
             runtime
                 .read(|tree| tree.nodes()["c1"].status
@@ -544,7 +563,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                 let path = runtime
                     .read(|tree| tree.node(&child).unwrap().path.clone())
                     .unwrap();
-                let factory = crate::runtime::test_kit::scripted(&host.config)
+                let factory = crate::runtime::test_kit::scripted(&host.role.config)
                     .child_runtime
                     .as_ref()
                     .unwrap();
@@ -564,6 +583,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                 )
                 .unwrap();
                 let CreateSessionOutcome::Created { session, .. } = host
+                    .role
                     .executor
                     .block_on(sessions.create(CreateSessionRequest::new(
                         SessionOperationId::new("run-child:create").unwrap(),
@@ -576,6 +596,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                 };
                 let agent = session.agent().clone();
                 let submission = host
+                    .role
                     .executor
                     .block_on(agent.start_instruction(
                         plakous::agent::CommandId::new("run-child:start").unwrap(),
@@ -604,7 +625,8 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                     session,
                 );
                 assert!(
-                    host.executor
+                    host.role
+                        .executor
                         .block_on(async {
                             runtime
                                 .try_occupy_live(
@@ -639,12 +661,18 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                     HostStep::Quit
                 ));
                 assert!(
-                    host.executor
+                    host.role
+                        .executor
                         .block_on(async { runtime.live.lock().await.is_empty() })
                         .unwrap(),
                     "{stop} left a live child owner"
                 );
-                let terminal = host.executor.block_on(result.result()).unwrap().unwrap();
+                let terminal = host
+                    .role
+                    .executor
+                    .block_on(result.result())
+                    .unwrap()
+                    .unwrap();
                 assert!(matches!(
                     terminal.outcome(),
                     plakous::agent::TurnResultOutcome::Cancelled(_)
@@ -663,6 +691,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                 let workspace = path.clone();
                 let resumed_binding = scripted_runtime_binding(&workspace, BoundaryController::quiet_from_evidence_path(CrashBoundary::None, workspace.join("resume-evidence.jsonl")).unwrap(), Arc::new(serde_json::from_value(serde_json::json!({"version": 1, "steps": [{"output": {"text": "resumed child"}}]})).unwrap())).unwrap();
                 let OpenSessionOutcome::Opened { session, .. } = host
+                    .role
                     .executor
                     .block_on(sessions.open(OpenSessionRequest::new(
                         SessionOperationId::new("run-child:resume").unwrap(),
@@ -675,6 +704,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                     panic!("resumable child required")
                 };
                 let resumed = host
+                    .role
                     .executor
                     .block_on(async {
                         session
@@ -691,7 +721,11 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                     resumed.outcome(),
                     plakous::agent::TurnResultOutcome::Completed(_)
                 ));
-                host.executor.block_on(session.release()).unwrap().unwrap();
+                host.role
+                    .executor
+                    .block_on(session.release())
+                    .unwrap()
+                    .unwrap();
             },
         );
     }
@@ -700,7 +734,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
 fn with_host(
     results: usize,
     test: impl FnOnce(
-        &mut NodeActor<'_, TestExtension>,
+        &mut RootActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -713,7 +747,7 @@ fn with_fixture(
     results: usize,
     overflow: bool,
     test: impl FnOnce(
-        &mut NodeActor<'_, TestExtension>,
+        &mut RootActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -730,7 +764,7 @@ fn with_configured_fixture(
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
     ),
     test: impl FnOnce(
-        &mut NodeActor<'_, TestExtension>,
+        &mut RootActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -776,7 +810,7 @@ fn with_configured_fixture(
     configure(&mut config, &runtime);
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -1005,7 +1039,12 @@ fn a_fanout_wait_keeps_its_wait_facts_live_and_restored() {
             assert!(live.settled_agent.is_some(), "{live:?}");
             assert!(live.timeout_ms.is_some(), "{live:?}");
             host.block(async |host| host.project_now().await);
-            let restored = host.config.store.load(&host.config.session.id).unwrap();
+            let restored = host
+                .role
+                .config
+                .store
+                .load(&host.role.config.session.id)
+                .unwrap();
             let persisted = restored
                 .transcript
                 .iter()
@@ -1054,7 +1093,7 @@ fn a_fanout_wait_keeps_its_wait_facts_live_and_restored() {
 }
 
 fn assert_wait_is_unread(
-    host: &NodeActor<'_, TestExtension>,
+    host: &RootActor<'_, TestExtension>,
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
 ) {
     let report = host.opened.agent().unwrap().abandoned_turn().unwrap();
@@ -1108,10 +1147,11 @@ fn assert_wait_is_unread(
             .unwrap()
     );
     // Repeating settlement is harmless and does not consume the mail.
-    host.executor
+    host.role
+        .executor
         .block_on(super::super::super::result_mail::settle_waits(
-            &host.config.topology_rows(),
-            &host.config.session,
+            &host.role.config.topology_rows(),
+            &host.role.config.session,
             &host.opened,
         ))
         .unwrap()
@@ -1132,7 +1172,8 @@ fn abandoned_uncommitted_wait_returns_its_acknowledged_mail_to_unread() {
             false,
             configure_uncommitted_wait,
             |host, runtime, _, _| {
-                host.executor
+                host.role
+                    .executor
                     .block_on(async {
                         let turn = host
                             .opened
@@ -1164,7 +1205,7 @@ fn abandoned_uncommitted_wait_returns_its_acknowledged_mail_to_unread() {
                     "wait operations: {:?}",
                     runtime.read(|tree| tree.operations().clone()).unwrap()
                 );
-                rusqlite::Connection::open(host.config.product_home.join("runtime.sqlite3"))
+                rusqlite::Connection::open(host.role.config.product_home.join("runtime.sqlite3"))
                     .unwrap()
                     .execute_batch("DROP TRIGGER cut_wait_publication")
                     .unwrap();
@@ -1175,11 +1216,16 @@ fn abandoned_uncommitted_wait_returns_its_acknowledged_mail_to_unread() {
                         .unwrap();
                     assert_wait_is_unread(host, runtime);
                 } else {
-                    host.config
+                    host.role
+                        .config
                         .session
                         .bind_plakous_locator(host.opened.locator())
                         .unwrap();
-                    host.config.store.save(&mut host.config.session).unwrap();
+                    host.role
+                        .config
+                        .store
+                        .save(&mut host.role.config.session)
+                        .unwrap();
                     reopen_at_cut(host, |reopened| assert_wait_is_unread(reopened, runtime));
                 }
             },
@@ -1198,7 +1244,8 @@ fn a_loss_between_canonical_abandonment_and_tree_settlement_still_restores_mail(
         false,
         configure_uncommitted_wait,
         |host, runtime, _, _| {
-            host.executor
+            host.role
+                .executor
                 .block_on(async {
                     let turn = host
                         .opened
@@ -1215,7 +1262,7 @@ fn a_loss_between_canonical_abandonment_and_tree_settlement_still_restores_mail(
                     turn.result().await.unwrap();
                 })
                 .unwrap();
-            rusqlite::Connection::open(host.config.product_home.join("runtime.sqlite3"))
+            rusqlite::Connection::open(host.role.config.product_home.join("runtime.sqlite3"))
                 .unwrap()
                 .execute_batch("DROP TRIGGER cut_wait_publication")
                 .unwrap();
@@ -1225,11 +1272,16 @@ fn a_loss_between_canonical_abandonment_and_tree_settlement_still_restores_mail(
                 [] as [plakous_recursive_subagents::tree::MailRecord; 0]
             );
             assert_eq!(before.retained_wait_receipts("root").len(), 1);
-            host.config
+            host.role
+                .config
                 .session
                 .bind_plakous_locator(host.opened.locator())
                 .unwrap();
-            host.config.store.save(&mut host.config.session).unwrap();
+            host.role
+                .config
+                .store
+                .save(&mut host.role.config.session)
+                .unwrap();
             reopen_at_cut(host, |reopened| assert_wait_is_unread(reopened, runtime));
             // The settled tree save is lost: the store goes back to the
             // tree as it was before that open, over its current revision.
@@ -1294,9 +1346,13 @@ fn a_withheld_over_window_prompt_leaves_child_mail_unread() {
 
             // Prompts reach a turn through the queue, which is what a
             // scheduled pass measures.
-            let send = |host: &mut NodeActor<'_, TestExtension>, text: String| {
-                let item = host.config.session.enqueue_live(text.clone()).unwrap();
-                host.config.store.save(&mut host.config.session).unwrap();
+            let send = |host: &mut RootActor<'_, TestExtension>, text: String| {
+                let item = host.role.config.session.enqueue_live(text.clone()).unwrap();
+                host.role
+                    .config
+                    .store
+                    .save(&mut host.role.config.session)
+                    .unwrap();
                 host.block(async |host| host.run_prompt(text, Some(item), false, None).await)
                     .unwrap();
             };
@@ -1334,7 +1390,7 @@ fn with_scripted_mail_fixture(
     results: usize,
     script: serde_json::Value,
     test: impl FnOnce(
-        &mut NodeActor<'_, TestExtension>,
+        &mut RootActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -1392,9 +1448,13 @@ fn with_scripted_mail_fixture(
 }
 
 /// Queues a user prompt and runs it, as the drain does.
-fn send_queued(host: &mut NodeActor<'_, TestExtension>, text: String) {
-    let item = host.config.session.enqueue_live(text.clone()).unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
+fn send_queued(host: &mut RootActor<'_, TestExtension>, text: String) {
+    let item = host.role.config.session.enqueue_live(text.clone()).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
     host.block(async |host| host.run_prompt(text, Some(item), false, None).await)
         .unwrap();
 }
@@ -1414,7 +1474,7 @@ fn notice_texts(observed: &HostEventReceiver<TestExtension>) -> Vec<String> {
 /// A user prompt that fits, with five child findings that only together
 /// with it overflow the window, and the bare prompt's text.
 fn prompt_whose_mail_alone_overflows(
-    host: &NodeActor<'_, TestExtension>,
+    host: &RootActor<'_, TestExtension>,
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
 ) -> String {
     let child = runtime
@@ -1449,7 +1509,8 @@ fn prompt_whose_mail_alone_overflows(
             .unwrap();
     }
     let project = |text: &str| {
-        host.executor
+        host.role
+            .executor
             .block_on(super::super::query_context(
                 &host.opened,
                 super::super::ContextQuery::WithPendingUserInput(text.to_owned().into()),
@@ -1477,8 +1538,8 @@ fn prompt_whose_mail_alone_overflows(
         "precondition: the bare prompt needs no compaction"
     );
     let (with_mail, batch) = super::super::super::result_mail::select(
-        &host.config.topology_rows(),
-        &host.config.session,
+        &host.role.config.topology_rows(),
+        &host.role.config.session,
         &text,
     )
     .unwrap();
@@ -1522,10 +1583,10 @@ fn a_fitting_prompt_is_sent_without_mail_that_alone_overflows() {
                 "a fitting prompt parked behind its own mail: {notes:?}"
             );
             assert_eq!(
-                host.config.session.queue_drain_state,
+                host.role.config.session.queue_drain_state,
                 QueueDrainState::LiveAutoDrain
             );
-            assert!(host.config.session.pending_queue.is_empty(), "it ran");
+            assert!(host.role.config.session.pending_queue.is_empty(), "it ran");
             assert!(
                 submissions(host)
                     .iter()
@@ -1550,7 +1611,7 @@ fn a_fitting_prompt_is_sent_without_overflowing_mail_when_compaction_is_disabled
             "steps": [{"output": {"text": "answered"}}]
         }),
         |host, runtime, _, observed| {
-            host.config.compaction_enabled = false;
+            host.role.config.compaction_enabled = false;
             let text = prompt_whose_mail_alone_overflows(host, runtime);
             observed.try_iter().for_each(drop);
             send_queued(host, text);
@@ -1560,10 +1621,10 @@ fn a_fitting_prompt_is_sent_without_overflowing_mail_when_compaction_is_disabled
                 "{notes:?}"
             );
             assert_eq!(
-                host.config.session.queue_drain_state,
+                host.role.config.session.queue_drain_state,
                 QueueDrainState::LiveAutoDrain
             );
-            assert!(host.config.session.pending_queue.is_empty(), "it ran");
+            assert!(host.role.config.session.pending_queue.is_empty(), "it ran");
             assert_eq!(
                 runtime
                     .read(|tree| tree.pending_mail("root").len())
@@ -1752,9 +1813,15 @@ fn a_withheld_wake_does_not_wake_again_on_its_returned_batch() {
                 wakes, 1,
                 "a withheld wake re-woke on its own returned batch {wakes} times"
             );
-            let persisted = host.config.store.load(&host.config.session.id).unwrap();
+            let persisted = host
+                .role
+                .config
+                .store
+                .load(&host.role.config.session.id)
+                .unwrap();
             assert!(persisted.child_wake_suppressed);
             let pause_lines = host
+                .role
                 .config
                 .session
                 .transcript
@@ -1806,7 +1873,7 @@ fn idle_results_coalesce_and_admit_one_harness_turn_with_exact_journal() {
                 .unwrap(),
         );
         assert!(is_wake_delivery(
-            &host.config.session,
+            &host.role.config.session,
             item.as_ref().unwrap()
         ));
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
@@ -1819,14 +1886,15 @@ fn idle_results_coalesce_and_admit_one_harness_turn_with_exact_journal() {
                 .any(|event| matches!(event, HostEvent::Row(TranscriptRow::AutoContinue(_)))),
             "{published:?}"
         );
-        assert_eq!(host.config.session.root_turn_count, 1);
+        assert_eq!(host.role.config.session.root_turn_count, 1);
         let intents = submissions(host);
         assert_eq!(intents.len(), 1);
         assert_eq!(root_batch(host, &intents[0]).unwrap().message_ids.len(), 2);
         assert!(accepted(host, &intents[0]));
-        assert_eq!(host.config.session.prompt_history, [] as [String; 0]);
+        assert_eq!(host.role.config.session.prompt_history, [] as [String; 0]);
         assert!(
             !host
+                .role
                 .config
                 .session
                 .transcript
@@ -1844,8 +1912,9 @@ fn idle_results_coalesce_and_admit_one_harness_turn_with_exact_journal() {
                 .unwrap()
         );
         let locator = host.opened.locator();
-        let sessions = host.config.state_roots.runtime_sessions().unwrap();
+        let sessions = host.role.config.state_roots.runtime_sessions().unwrap();
         let history = host
+            .role
             .executor
             .block_on(
                 sessions.history_page(plakous::sessions::SessionHistoryPageRequest::new(
@@ -1870,8 +1939,13 @@ fn idle_results_coalesce_and_admit_one_harness_turn_with_exact_journal() {
                 .any(plakous::sessions::SessionHistoryItem::is_harness_authored)
         );
         // Reloading the committed record and reconciling cannot re-select this batch.
-        host.config.session = host.config.store.load(&host.config.session.id).unwrap();
-        host.child_wake = RootWake::default();
+        host.role.config.session = host
+            .role
+            .config
+            .store
+            .load(&host.role.config.session.id)
+            .unwrap();
+        host.role.child_wake = RootWake::default();
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 2).await)
                 .unwrap(),
@@ -1919,7 +1993,8 @@ fn a_withheld_wake_reconciled_as_a_duplicate_on_open_returns_its_mail() {
                     .unwrap(),
             );
             let intent = submissions(host)[0].clone();
-            host.executor
+            host.role
+                .executor
                 .block_on(async {
                     let submission = host
                         .opened
@@ -1935,7 +2010,11 @@ fn a_withheld_wake_reconciled_as_a_duplicate_on_open_returns_its_mail() {
                 })
                 .unwrap();
 
-            host.config.store.save(&mut host.config.session).unwrap();
+            host.role
+                .config
+                .store
+                .save(&mut host.role.config.session)
+                .unwrap();
             reopen_at_cut(host, |reopened| {
                 assert!(accepted(reopened, &submissions(reopened)[0]));
                 assert_eq!(
@@ -1946,9 +2025,10 @@ fn a_withheld_wake_reconciled_as_a_duplicate_on_open_returns_its_mail() {
                     "the withheld duplicate's mail is unread again"
                 );
                 let persisted = reopened
+                    .role
                     .config
                     .store
-                    .load(&reopened.config.session.id)
+                    .load(&reopened.role.config.session.id)
                     .unwrap();
                 assert!(persisted.child_wake_suppressed);
             });
@@ -1957,30 +2037,33 @@ fn a_withheld_wake_reconciled_as_a_duplicate_on_open_returns_its_mail() {
 }
 
 fn reopen_at_cut(
-    host: &mut NodeActor<'_, TestExtension>,
-    test: impl FnOnce(&mut NodeActor<'_, TestExtension>),
+    host: &mut RootActor<'_, TestExtension>,
+    test: impl FnOnce(&mut RootActor<'_, TestExtension>),
 ) {
-    host.executor
+    host.role
+        .executor
         .block_on(host.opened.detach())
         .unwrap()
         .unwrap();
-    let root = host.config.product_home.parent().unwrap();
+    let root = host.role.config.product_home.parent().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root);
-    config.state_roots = host.config.state_roots.clone();
-    config.store = host.config.store.clone();
-    config.session = config.store.load(&host.config.session.id).unwrap();
-    config.runtime_factory = host.config.runtime_factory.clone();
+    config.state_roots = host.role.config.state_roots.clone();
+    config.store = host.role.config.store.clone();
+    config.session = config.store.load(&host.role.config.session.id).unwrap();
+    config.runtime_factory = host.role.config.runtime_factory.clone();
     let mut reopened =
-        NodeActor::open_blocking(config, host.actions, host.events.clone(), None).unwrap();
+        RootActor::open_blocking(config, host.role.actions, host.role.events.clone(), None)
+            .unwrap();
     test(&mut reopened);
     // Keep the fixture's old host at the same released head and CAS revision.
     reopened
+        .role
         .executor
         .block_on(reopened.opened.detach())
         .unwrap()
         .unwrap();
     host.opened = reopened.opened;
-    host.config.session = reopened.config.session;
+    host.role.config.session = reopened.role.config.session;
 }
 
 #[test]
@@ -1994,7 +2077,8 @@ fn accepted_wake_reopens_with_duplicate_instruction_and_acknowledges_once() {
                 .unwrap(),
         );
         let intent = submissions(host)[0].clone();
-        host.executor
+        host.role
+            .executor
             .block_on(async {
                 let submission = host
                     .opened
@@ -2014,7 +2098,11 @@ fn accepted_wake_reopens_with_duplicate_instruction_and_acknowledges_once() {
             })
             .unwrap();
 
-        host.config.store.save(&mut host.config.session).unwrap();
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
+            .unwrap();
         assert_eq!(
             runtime
                 .read(|tree| tree.pending_mail("root").len())
@@ -2025,7 +2113,7 @@ fn accepted_wake_reopens_with_duplicate_instruction_and_acknowledges_once() {
             assert_eq!(submissions(reopened).len(), 1);
             assert!(accepted(reopened, &submissions(reopened)[0]));
             assert_eq!(
-                reopened.config.session.pending_queue,
+                reopened.role.config.session.pending_queue,
                 [] as [crate::sessions::queue::QueueItem; 0]
             );
             assert!(
@@ -2059,9 +2147,10 @@ fn prepared_wake_reopen_discards_the_delivery_and_user_prompt_carries_unread_mai
             );
             assert!(
                 reopened
+                    .role
                     .config
                     .store
-                    .load_intents(&reopened.config.session.id)
+                    .load_intents(&reopened.role.config.session.id)
                     .unwrap()
                     .submission(&command_id)
                     .is_none()
@@ -2071,7 +2160,7 @@ fn prepared_wake_reopen_discards_the_delivery_and_user_prompt_carries_unread_mai
                 [] as [crate::sessions::projector::Submission; 0]
             );
             assert_eq!(
-                reopened.config.session.pending_queue,
+                reopened.role.config.session.pending_queue,
                 [] as [crate::sessions::queue::QueueItem; 0]
             );
             assert_eq!(
@@ -2092,7 +2181,7 @@ fn prepared_wake_reopen_discards_the_delivery_and_user_prompt_carries_unread_mai
             reopened
                 .block(async |reopened| reopened.run_prompt(text, item, echoed, None).await)
                 .unwrap();
-            assert_eq!(reopened.config.session.root_turn_count, 1);
+            assert_eq!(reopened.role.config.session.root_turn_count, 1);
             assert_eq!(submissions(reopened).len(), 1);
             assert_eq!(
                 root_batch(reopened, &submissions(reopened)[0])
@@ -2120,7 +2209,7 @@ fn pre_admission_wake_failure_is_disposable_without_pausing_user_work() {
             host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
                 .unwrap(),
         );
-        host.child_wake.prepared_context = None;
+        host.role.child_wake.prepared_context = None;
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
             .unwrap();
         assert_eq!(
@@ -2128,12 +2217,12 @@ fn pre_admission_wake_failure_is_disposable_without_pausing_user_work() {
             [] as [crate::sessions::projector::Submission; 0]
         );
         assert_eq!(
-            host.config.session.pending_queue,
+            host.role.config.session.pending_queue,
             [] as [crate::sessions::queue::QueueItem; 0]
         );
-        assert!(!host.recovery.blocked());
+        assert!(!host.role.recovery.blocked());
         assert_eq!(
-            host.config.session.queue_drain_state,
+            host.role.config.session.queue_drain_state,
             QueueDrainState::LiveAutoDrain
         );
         assert_eq!(
@@ -2160,7 +2249,7 @@ fn pre_admission_wake_failure_is_disposable_without_pausing_user_work() {
         );
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
             .unwrap();
-        assert_eq!(host.config.session.root_turn_count, 1);
+        assert_eq!(host.role.config.session.root_turn_count, 1);
         assert!(
             runtime
                 .read(|tree| tree.pending_mail("root").is_empty())
@@ -2175,8 +2264,8 @@ fn wake_store_failure_emits_error_and_stays_attached_even_when_suppression_save_
         let now = Instant::now();
         host.block(async |host| host.child_wake_prompt(now).await)
             .unwrap();
-        let store = host.config.store.clone();
-        host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::refusing(
+        let store = host.role.config.store.clone();
+        host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::refusing(
             "injected store busy",
         ));
         assert!(matches!(
@@ -2184,14 +2273,14 @@ fn wake_store_failure_emits_error_and_stays_attached_even_when_suppression_save_
                 .unwrap(),
             HostStep::Continue
         ));
-        assert!(host.config.session.child_wake_suppressed);
+        assert!(host.role.config.session.child_wake_suppressed);
         assert_eq!(
-            host.config.session.pending_queue,
+            host.role.config.session.pending_queue,
             [] as [crate::sessions::queue::QueueItem; 0]
         );
         assert_eq!(
             store
-                .load_intents(&host.config.session.id)
+                .load_intents(&host.role.config.session.id)
                 .unwrap()
                 .submissions,
             [] as [crate::sessions::projector::Submission; 0]
@@ -2209,13 +2298,14 @@ fn wake_store_failure_emits_error_and_stays_attached_even_when_suppression_save_
             HostStep::Continue
         ));
         assert!(observed.try_iter().next().is_none());
-        host.config.store = store;
+        host.role.config.store = store;
         host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 3).await)
             .unwrap();
         assert!(
-            host.config
+            host.role
+                .config
                 .store
-                .load(&host.config.session.id)
+                .load(&host.role.config.session.id)
                 .unwrap()
                 .child_wake_suppressed
         );
@@ -2253,24 +2343,33 @@ fn transient_wake_refusal_discards_queue_and_intent_without_consuming_mail() {
             host.block(async |host| host.run_prompt(text, item, echoed, None).await)
                 .unwrap();
 
-            assert!(host.config.session.pending_queue.is_empty(), "{kind:?}");
+            assert!(
+                host.role.config.session.pending_queue.is_empty(),
+                "{kind:?}"
+            );
             assert_eq!(
                 submissions(host),
                 [] as [crate::sessions::projector::Submission; 0]
             );
-            assert!(host.config.session.child_wake_suppressed);
-            assert!(!host.recovery.blocked());
+            assert!(host.role.config.session.child_wake_suppressed);
+            assert!(!host.role.recovery.blocked());
             assert_eq!(
-                host.config.session.queue_drain_state,
+                host.role.config.session.queue_drain_state,
                 QueueDrainState::LiveAutoDrain
             );
-            let saved = host.config.store.load(&host.config.session.id).unwrap();
+            let saved = host
+                .role
+                .config
+                .store
+                .load(&host.role.config.session.id)
+                .unwrap();
             assert_eq!(
                 saved.pending_queue,
                 [] as [crate::sessions::queue::QueueItem; 0]
             );
             assert_eq!(
-                host.config
+                host.role
+                    .config
                     .store
                     .load_intents(&saved.id)
                     .unwrap()
@@ -2293,7 +2392,7 @@ fn transient_wake_refusal_discards_queue_and_intent_without_consuming_mail() {
             );
             host.block(async |host| host.run_prompt(text, item, echoed, None).await)
                 .unwrap();
-            assert_eq!(host.config.session.root_turn_count, 1);
+            assert_eq!(host.role.config.session.root_turn_count, 1);
             assert!(
                 runtime
                     .read(|tree| tree.pending_mail("root").is_empty())
@@ -2346,7 +2445,7 @@ impl tracing::Subscriber for WakeWarnings {
 fn with_wake_warnings(
     results: usize,
     test: impl FnOnce(
-        &mut NodeActor<'_, TestExtension>,
+        &mut RootActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &HostEventReceiver<TestExtension>,
         &WakeWarnings,
@@ -2373,13 +2472,14 @@ fn busy_context_meter_refresh_is_quiet_and_unavailable() {
             1,
         );
         let result = host
+            .role
             .executor
             .block_on(super::super::report_context(
                 &host.opened,
-                &host.events,
+                &host.role.events,
                 "after turn publication",
                 false,
-                host.config.session.context_counters(),
+                host.role.config.session.context_counters(),
             ))
             .expect("the executor drives the call")
             .unwrap();
@@ -2415,13 +2515,14 @@ fn nontransient_context_meter_failure_keeps_a_stage_specific_error() {
     with_host(1, |host, _, _, _| {
         read_faults::inject(super::super::super::usage::CONTEXT_QUERY_FAILED, None, 1);
         let error = host
+            .role
             .executor
             .block_on(super::super::report_context(
                 &host.opened,
-                &host.events,
+                &host.role.events,
                 "after recovery",
                 false,
-                host.config.session.context_counters(),
+                host.role.config.session.context_counters(),
             ))
             .expect("the executor drives the call")
             .unwrap_err();
@@ -2445,7 +2546,7 @@ fn a_transient_tree_feed_refusal_retries_and_wakes_exactly_once() {
                     .unwrap(),
                 HostStep::Continue
             ));
-            assert!(!host.config.session.child_wake_suppressed);
+            assert!(!host.role.config.session.child_wake_suppressed);
             assert_eq!(notice_texts(observed), [] as [String; 0], "{refusal:?}");
             let logged = warnings.take();
             assert_eq!(logged.len(), 1, "{logged:?}");
@@ -2515,8 +2616,8 @@ fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
         }
     }
     with_host(1, |host, runtime, _, observed| {
-        let durable = host.config.store.clone();
-        host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+        let durable = host.role.config.store.clone();
+        host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
             durable.clone(),
             LowStorage,
         ));
@@ -2526,7 +2627,7 @@ fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
                 .unwrap(),
             HostStep::Continue
         ));
-        assert!(!host.config.session.child_wake_suppressed);
+        assert!(!host.role.config.session.child_wake_suppressed);
         assert_eq!(
             submissions(host),
             [] as [crate::sessions::projector::Submission; 0]
@@ -2543,7 +2644,7 @@ fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
             1
         );
         assert_eq!(notice_texts(observed), [] as [String; 0]);
-        host.config.store = durable;
+        host.role.config.store = durable;
         let retry = now + QUIET_WINDOW + TRANSIENT_FIRST_DELAY;
         assert!(matches!(
             host.block(async |host| host
@@ -2556,7 +2657,7 @@ fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
             host.block(async |host| host.child_wake_prompt(retry).await)
                 .unwrap(),
         );
-        assert!(!host.config.session.child_wake_suppressed);
+        assert!(!host.role.config.session.child_wake_suppressed);
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
             .unwrap();
         assert_eq!(submissions(host).len(), 1);
@@ -2599,8 +2700,8 @@ fn a_busy_product_store_submission_retries_and_wakes_exactly_once() {
         let now = Instant::now();
         host.block(async |host| host.child_wake_prompt(now).await)
             .unwrap();
-        host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
-            host.config.store.clone(),
+        host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+            host.role.config.store.clone(),
             BusySubmissions(std::sync::atomic::AtomicUsize::new(1)),
         ));
         let ready = now + QUIET_WINDOW;
@@ -2609,7 +2710,7 @@ fn a_busy_product_store_submission_retries_and_wakes_exactly_once() {
                 .unwrap(),
             HostStep::Continue
         ));
-        assert!(!host.config.session.child_wake_suppressed);
+        assert!(!host.role.config.session.child_wake_suppressed);
         assert_eq!(notice_texts(observed), [] as [String; 0]);
         let logged = warnings.take();
         assert_eq!(logged.len(), 1, "{logged:?}");
@@ -2708,7 +2809,7 @@ fn spent_transient_retries_pause_with_a_rearm_that_later_wakes() {
             ));
             at += delay;
         }
-        assert!(!host.config.session.child_wake_suppressed);
+        assert!(!host.role.config.session.child_wake_suppressed);
         assert_eq!(
             submissions(host),
             [] as [crate::sessions::projector::Submission; 0]
@@ -2744,7 +2845,7 @@ fn a_permanent_read_refusal_still_pauses_until_the_next_prompt() {
                 .unwrap(),
             HostStep::Continue
         ));
-        assert!(host.config.session.child_wake_suppressed);
+        assert!(host.role.config.session.child_wake_suppressed);
         let notices = notice_texts(observed);
         assert!(
             notices
@@ -2792,7 +2893,7 @@ fn staggered_results_reset_the_quiet_window_and_coalesce() {
 fn runtime_shutdown_during_wake_compaction_parks_instead_of_deferring() {
     with_fixture(1, true, |host, _, _, observed| {
         let agent = host.opened.agent().unwrap().clone();
-        let injection = crate::runtime::test_kit::scripted_mut(&mut host.config);
+        let injection = crate::runtime::test_kit::scripted_mut(&mut host.role.config);
         let runtime = Arc::clone(&injection.runtime);
         let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let observed_stop = Arc::clone(&stopped);
@@ -2826,8 +2927,8 @@ fn runtime_shutdown_during_wake_compaction_parks_instead_of_deferring() {
             HostStep::Continue
         ));
         assert!(observed_stop.load(std::sync::atomic::Ordering::Acquire));
-        assert!(host.config.session.child_wake_suppressed);
-        assert!(host.child_wake.retry.is_none());
+        assert!(host.role.config.session.child_wake_suppressed);
+        assert!(host.role.child_wake.retry.is_none());
         assert_eq!(
             submissions(host),
             [] as [crate::sessions::projector::Submission; 0]
@@ -2856,12 +2957,12 @@ fn wake_preflight_attempts_compaction_before_preparing_delivery() {
             [] as [crate::sessions::projector::Submission; 0]
         );
         assert_eq!(
-            host.config.session.pending_queue,
+            host.role.config.session.pending_queue,
             [] as [crate::sessions::queue::QueueItem; 0]
         );
-        assert!(host.config.session.child_wake_suppressed);
+        assert!(host.role.config.session.child_wake_suppressed);
         assert!(
-            host.child_wake.retry.is_none(),
+            host.role.child_wake.retry.is_none(),
             "compaction errors must park, not defer"
         );
         let events: Vec<_> = observed.try_iter().collect();
@@ -2897,7 +2998,12 @@ fn wake_preflight_attempts_compaction_before_preparing_delivery() {
         assert!(!observed.try_iter().any(|event| matches!(
             event, HostEvent::ToolLine { name, state, .. } if name == "compact" && state == "running"
         )));
-        let persisted = host.config.store.load(&host.config.session.id).unwrap();
+        let persisted = host
+            .role
+            .config
+            .store
+            .load(&host.role.config.session.id)
+            .unwrap();
         assert!(persisted.child_wake_suppressed);
     });
 }
@@ -2934,18 +3040,18 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
         .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events.clone()),
         None,
     )
     .unwrap();
-    let store = host.config.store.clone();
-    let roots = host.config.state_roots.clone();
-    let id = host.config.session.id.clone();
-    host.config.session.touch();
-    store.save(&mut host.config.session).unwrap();
+    let store = host.role.config.store.clone();
+    let roots = host.role.config.state_roots.clone();
+    let id = host.role.config.session.id.clone();
+    host.role.config.session.touch();
+    store.save(&mut host.role.config.session).unwrap();
     actions.send(UserAction::Quit).unwrap();
     assert!(matches!(
         host.block(async |host| host.next_prompt(None).await)
@@ -2953,11 +3059,11 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
         HostStep::Quit
     ));
     assert_eq!(
-        host.config.session.pending_queue,
+        host.role.config.session.pending_queue,
         [] as [crate::sessions::queue::QueueItem; 0]
     );
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         QueueDrainState::RestoredPaused
     );
     host.block(async |host| host.release().await).unwrap();
@@ -2967,7 +3073,7 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
     config.store = store.clone();
     config.state_roots = roots.clone();
     config.session = store.load(&id).unwrap();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events.clone()),
@@ -2986,7 +3092,7 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
     );
     host.block(async |host| host.run_prompt(text, item, echoed, None).await)
         .unwrap();
-    assert_eq!(host.config.session.root_turn_count, 1);
+    assert_eq!(host.role.config.session.root_turn_count, 1);
     let journal = submissions(&host)[0].clone();
     assert!(accepted(&host, &journal));
     host.block(async |host| host.release().await).unwrap();
@@ -2995,7 +3101,7 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
     config.store = store.clone();
     config.state_roots = roots;
     config.session = store.load(&id).unwrap();
-    let mut host = NodeActor::open_blocking(
+    let mut host = RootActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -3012,7 +3118,7 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
             .unwrap(),
         HostStep::Continue
     ));
-    assert_eq!(host.config.session.root_turn_count, 1);
+    assert_eq!(host.role.config.session.root_turn_count, 1);
     // Reopen preserves the exact immutable submission, including its bytes.
     assert_eq!(submissions(&host)[0], journal);
     assert!(
@@ -3131,11 +3237,11 @@ fn a_noninteractive_face_never_reenables_wakes_from_home_configuration() {
         }
     }
     with_host(1, |host, _, _, _| {
-        host.config.interactive = false;
-        host.config.auto_continue = false;
-        host.config.surface = Some(Box::new(EnabledSurface));
+        host.role.config.interactive = false;
+        host.role.config.auto_continue = false;
+        host.role.config.surface = Some(Box::new(EnabledSurface));
         let now = Instant::now();
-        assert!(!host.config.prompt_host_facts().host_wakes);
+        assert!(!host.role.config.prompt_host_facts().host_wakes);
         for at in [now, now + QUIET_WINDOW] {
             assert!(matches!(
                 host.block(async |host| host.child_wake_prompt(at).await)
@@ -3143,16 +3249,16 @@ fn a_noninteractive_face_never_reenables_wakes_from_home_configuration() {
                 HostStep::Continue
             ));
         }
-        assert!(!host.config.auto_continue);
+        assert!(!host.role.config.auto_continue);
         assert_eq!(
             submissions(host),
             [] as [crate::sessions::projector::Submission; 0]
         );
-        host.config.interactive = true;
+        host.role.config.interactive = true;
         host.block(async |host| host.child_wake_prompt(now).await)
             .unwrap();
-        assert!(host.config.auto_continue);
-        assert!(host.config.prompt_host_facts().host_wakes);
+        assert!(host.role.config.auto_continue);
+        assert!(host.role.config.prompt_host_facts().host_wakes);
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
                 .unwrap(),
@@ -3165,17 +3271,17 @@ fn a_noninteractive_face_never_reenables_wakes_from_home_configuration() {
 fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
     with_host(1, |host, _, actions, _| {
         let now = Instant::now();
-        host.config.auto_continue = false;
+        host.role.config.auto_continue = false;
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now).await)
                 .unwrap(),
             HostStep::Continue
         ));
-        host.config.auto_continue = true;
-        let store = host.config.store.clone();
+        host.role.config.auto_continue = true;
+        let store = host.role.config.store.clone();
         host.suppress_child_wake(None).unwrap();
-        host.config.session = store.load(&host.config.session.id).unwrap();
-        assert!(host.config.session.child_wake_suppressed);
+        host.role.config.session = store.load(&host.role.config.session.id).unwrap();
+        assert!(host.role.config.session.child_wake_suppressed);
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
                 .unwrap(),
@@ -3190,15 +3296,16 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
         );
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
             .unwrap();
-        host.recovery = crate::runtime::host_loop::RootRecovery::Due;
+        host.role.recovery = crate::runtime::host_loop::RootRecovery::Due;
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now).await)
                 .unwrap(),
             HostStep::Continue
         ));
-        host.recovery = crate::runtime::host_loop::RootRecovery::Clear;
-        host.config.session.queue_drain_state = QueueDrainState::RestoredPaused;
-        host.config
+        host.role.recovery = crate::runtime::host_loop::RootRecovery::Clear;
+        host.role.config.session.queue_drain_state = QueueDrainState::RestoredPaused;
+        host.role
+            .config
             .session
             .pending_queue
             .push(SessionQueueItem::new("restored prompt"));
@@ -3207,8 +3314,8 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
                 .unwrap(),
             HostStep::Continue
         ));
-        host.config.session.pending_queue.clear();
-        host.config.session.queue_drain_state = QueueDrainState::LiveAutoDrain;
+        host.role.config.session.pending_queue.clear();
+        host.role.config.session.queue_drain_state = QueueDrainState::LiveAutoDrain;
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now).await)
                 .unwrap(),
@@ -3229,7 +3336,7 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
         assert_eq!(text, "human prompt");
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
             .unwrap();
-        assert_eq!(host.config.session.root_turn_count, 2);
+        assert_eq!(host.role.config.session.root_turn_count, 2);
         assert!(
             !submissions(host)
                 .last()
@@ -3287,7 +3394,7 @@ impl plakous::tools::ToolExecutor for WakeJobFixture {
 }
 
 impl WakeJobFixture {
-    fn complete(&self, host: &NodeActor<'_, TestExtension>, number: u32) {
+    fn complete(&self, host: &RootActor<'_, TestExtension>, number: u32) {
         let sessions = self.0.lock().unwrap().clone().unwrap();
         let id = sessions.session_for_number(number).unwrap();
         sessions
@@ -3297,7 +3404,8 @@ impl WakeJobFixture {
                 plakous::tools::JoinedProcessInputDisposition::KeepOpen,
             )
             .unwrap();
-        host.executor
+        host.role
+            .executor
             .block_on(async {
                 tokio::time::timeout(Duration::from_secs(5), async {
                     while sessions.joined_terminal_status(id).is_none() {
@@ -3444,13 +3552,14 @@ fn thirty_consecutive_wakes_admit_fresh_completions_without_a_user_prompt() {
                 );
                 let (text, item, echoed) = take_prompt(step);
                 assert!(is_wake_delivery(
-                    &host.config.session,
+                    &host.role.config.session,
                     item.as_ref().unwrap()
                 ));
                 let intents = host
+                    .role
                     .config
                     .store
-                    .load_intents(&host.config.session.id)
+                    .load_intents(&host.role.config.session.id)
                     .unwrap();
                 let intent = intents.submissions.last().unwrap();
                 assert_eq!(
@@ -3604,9 +3713,10 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                         .unwrap(),
                 );
                 let intents = host
+                    .role
                     .config
                     .store
-                    .load_intents(&host.config.session.id)
+                    .load_intents(&host.role.config.session.id)
                     .unwrap();
                 let intent = intents.submissions.last().unwrap();
                 assert_eq!(
@@ -3642,11 +3752,16 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                     HostStep::Continue
                 ));
                 let item = host
+                    .role
                     .config
                     .session
                     .enqueue_live("next user prompt")
                     .unwrap();
-                host.config.store.save(&mut host.config.session).unwrap();
+                host.role
+                    .config
+                    .store
+                    .save(&mut host.role.config.session)
+                    .unwrap();
                 host.block(async |host| {
                     host.run_prompt(item.text.clone(), Some(item), false, None)
                         .await
@@ -3746,12 +3861,17 @@ fn queued_user_prompt_and_shutdown_outrank_a_ready_wake() {
         host.block(async |host| host.child_wake_prompt(now).await)
             .unwrap();
         let item = host
+            .role
             .config
             .session
             .enqueue_live("queued user prompt")
             .unwrap();
-        host.config.store.save(&mut host.config.session).unwrap();
-        host.pending_start = Some(item);
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
+            .unwrap();
+        host.role.pending_start = Some(item);
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
                 .unwrap(),
@@ -3787,6 +3907,6 @@ fn queued_user_prompt_and_shutdown_outrank_a_ready_wake() {
                 .unwrap(),
             HostStep::Quit
         ));
-        assert_eq!(host.config.session.root_turn_count, 0);
+        assert_eq!(host.role.config.session.root_turn_count, 0);
     });
 }

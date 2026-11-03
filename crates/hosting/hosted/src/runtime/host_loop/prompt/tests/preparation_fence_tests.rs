@@ -63,12 +63,12 @@ fn every_stop_stage_has_identical_tui_and_jsonl_terminal_records() {
     }
 }
 
-fn wake_delivery(host: &mut NodeActor<'_, TestExtension>) -> SessionQueueItem {
-    let item = host.config.session.enqueue_live("host wake").unwrap();
-    host.config.session = crate::runtime::result_mail::prepare_instruction(
-        &host.config.topology_rows(),
-        host.config.store.as_ref(),
-        &host.config.session,
+fn wake_delivery(host: &mut RootActor<'_, TestExtension>) -> SessionQueueItem {
+    let item = host.role.config.session.enqueue_live("host wake").unwrap();
+    host.role.config.session = crate::runtime::result_mail::prepare_instruction(
+        &host.role.config.topology_rows(),
+        host.role.config.store.as_ref(),
+        &host.role.config.session,
         &item,
         "host wake",
         None,
@@ -86,20 +86,25 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     let item = wake_delivery(&mut host);
     let operator = host
+        .role
         .config
         .session
         .enqueue_live("operator behind wake")
         .unwrap();
-    host.config.store.save(&mut host.config.session).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::LiveAutoDrain
     );
-    host.prep_hooks.hook = Some((
+    host.role.prep_hooks.hook = Some((
         preparation::Stage::Settle,
         Box::pin(async move {
             actions.send(UserAction::Interrupt).unwrap();
@@ -111,15 +116,20 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
     })
     .unwrap();
     assert_eq!(
-        host.config.session.pending_queue,
+        host.role.config.session.pending_queue,
         std::slice::from_ref(&operator)
     );
     assert_eq!(
-        host.config.session.queue_drain_state,
+        host.role.config.session.queue_drain_state,
         SessionQueueDrainState::RestoredPaused
     );
-    let stored = host.config.store.load(&host.config.session.id).unwrap();
-    assert!(host.config.session.child_wake_suppressed);
+    let stored = host
+        .role
+        .config
+        .store
+        .load(&host.role.config.session.id)
+        .unwrap();
+    assert!(host.role.config.session.child_wake_suppressed);
     assert!(stored.child_wake_suppressed);
     assert_eq!(stored.pending_queue, [operator]);
     assert_eq!(
@@ -127,9 +137,10 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
         SessionQueueDrainState::RestoredPaused
     );
     let intents = host
+        .role
         .config
         .store
-        .load_intents(&host.config.session.id)
+        .load_intents(&host.role.config.session.id)
         .unwrap();
     assert!(
         !intents.wake_suppressions.is_empty(),
@@ -138,7 +149,7 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
     assert!(
         matches!(&intents.pause_causes.last().unwrap().value, sessions::projector::HostPauseCause::UnrecordedRefusal { reason } if reason.contains("preparation stopped"))
     );
-    assert_eq!(host.config.session.root_turn_count, 0);
+    assert_eq!(host.role.config.session.root_turn_count, 0);
     host.block(async |host| host.release().await).unwrap();
 }
 
@@ -150,13 +161,13 @@ fn mail_selection_and_missing_wake_context_failures_leave_a_terminal_status() {
         let (_, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host =
-            NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
                 .unwrap();
         let item = if wake {
             wake_delivery(&mut host)
         } else {
-            host.prep_hooks.mail_error = Some("injected mail read failure".into());
-            host.config.session.enqueue_live("operator").unwrap()
+            host.role.prep_hooks.mail_error = Some("injected mail read failure".into());
+            host.role.config.session.enqueue_live("operator").unwrap()
         };
         events.try_iter().for_each(drop);
         host.block(async |host| {
@@ -186,7 +197,7 @@ fn mail_selection_and_missing_wake_context_failures_leave_a_terminal_status() {
                 .count(),
             1
         );
-        assert_eq!(host.config.session.root_turn_count, 0);
+        assert_eq!(host.role.config.session.root_turn_count, 0);
         host.block(async |host| host.release().await).unwrap();
     }
 }
@@ -208,7 +219,7 @@ fn an_admitted_prompt_emits_exactly_one_busy_false() {
         }
     });
     let mut host =
-        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+        RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
     actions
         .send(UserAction::Prompt("one prompt".into()))
