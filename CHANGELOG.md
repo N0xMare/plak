@@ -162,6 +162,10 @@ an export.
 - `/reload` onto a build without an install manifest (a development or
   cargo-installed build) no longer falls back to an unverified resume on a
   busy machine; the reload probe answers without hashing the build.
+- An explicit `recover` with nothing pending answers before the next command
+  is handled, so a quit sent right after it no longer drops the answer. Urgent
+  actions sent during an in-place root recovery are answered in the order they
+  arrived.
 - An orchestration workspace path that cannot be inspected (permission or I/O
   error) now refuses the spawn, adopt, reclaim or restore instead of being
   treated as absent.
