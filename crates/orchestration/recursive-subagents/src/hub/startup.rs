@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
+use futures_util::FutureExt as _;
 use plakous::model::TurnId;
 
 use super::{
@@ -162,7 +163,8 @@ impl ChildStartup {
                     "child startup exceeded its join deadline at {:?}; owner retained",
                     self.stage()
                 ),
-            );
+            )
+            .await;
             Err(super::LiveCancelError::JoinExpired)
         }
     }
@@ -234,7 +236,7 @@ impl ProductTopologyRuntime {
     pub async fn reserve_startup_admitted(
         &self,
         agent_id: &str,
-        admit: impl FnOnce(&ProductAgentTree) -> Result<(), String>,
+        admit: impl FnOnce(&ProductAgentTree) -> Result<(), String> + Send + 'static,
     ) -> Result<ChildStartup, String> {
         let mut live = self.live.lock().await;
         if !self.admits_live(&live, agent_id) {
@@ -243,27 +245,52 @@ impl ProductTopologyRuntime {
             }
             return Err(STARTUP_SLOT_OCCUPIED.into());
         }
+        let agent = agent_id.to_owned();
+        let reserved = agent_id.to_owned();
         self.driver
-            .mutate(|tree| {
-                admit(tree)?;
-                let node = tree.node(agent_id).map_err(|error| error.message)?;
-                if node.status.is_terminal()
-                    || tree
-                        .attempt(agent_id)
-                        .is_some_and(|attempt| attempt.status.is_stopped())
-                {
-                    return Err("terminal child cannot hold startup ownership".to_owned());
-                }
-                tree.reserve_turn_owner(agent_id);
-                Ok::<_, String>(())
-            })
-            .map_err(|error| error.message)?
-            .0?;
+            .write_or_undo(
+                move |tree| {
+                    tree.detach();
+                    let reserved = reserve(tree, admit, &agent);
+                    // As a plain mutation: anything queued is not this
+                    // reservation's to settle.
+                    drop(tree.take_effects());
+                    reserved
+                },
+                // A caller dropped before it holds the reservation releases it.
+                move |tree, reserved_owner| {
+                    if reserved_owner.is_ok() {
+                        tree.release_turn_owner(&reserved);
+                    }
+                },
+            )
+            .await
+            .map_err(|error| error.message)??;
         let startup = ChildStartup::new(self.driver.clone(), agent_id.to_owned());
         live.starting.insert(agent_id.to_owned(), startup.clone());
         Ok(startup)
     }
+}
 
+fn reserve(
+    tree: &mut ProductAgentTree,
+    admit: impl FnOnce(&ProductAgentTree) -> Result<(), String>,
+    agent: &str,
+) -> Result<(), String> {
+    admit(tree)?;
+    let node = tree.node(agent).map_err(|error| error.message)?;
+    if node.status.is_terminal()
+        || tree
+            .attempt(agent)
+            .is_some_and(|attempt| attempt.status.is_stopped())
+    {
+        return Err("terminal child cannot hold startup ownership".to_owned());
+    }
+    tree.reserve_turn_owner(agent);
+    Ok(())
+}
+
+impl ProductTopologyRuntime {
     /// Atomically transfers a startup reservation to its acknowledged live turn.
     /// A cancelled reservation always returns the child to its startup owner.
     ///
@@ -287,9 +314,11 @@ impl ProductTopologyRuntime {
             return Err(child);
         }
         let turn = child.turn_id();
+        let agent = agent_id.clone();
         if self
             .driver
-            .mutate(|tree| tree.bind_turn_owner(&agent_id, turn.to_string()))
+            .mutate(move |tree| tree.bind_turn_owner(&agent, turn.to_string()))
+            .await
             .is_err()
         {
             return Err(child);
@@ -322,10 +351,10 @@ impl ProductTopologyRuntime {
                 return;
             }
         }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            publish_release(&self.driver, agent_id, release)
-        }))
-        .unwrap_or_else(|_| Err("child startup release publication panicked".into()));
+        let result = std::panic::AssertUnwindSafe(publish_release(&self.driver, agent_id, release))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| Err("child startup release publication panicked".into()));
         if let Err(error) = &result {
             record_retirement_fault(
                 &self.driver,
@@ -333,7 +362,8 @@ impl ProductTopologyRuntime {
                 startup.expected_attempt.as_ref(),
                 super::RetirementFaultSource::Owner,
                 error,
-            );
+            )
+            .await;
         }
         let recovery = {
             let mut live = self.live.lock().await;
@@ -343,20 +373,25 @@ impl ProductTopologyRuntime {
                 .is_some_and(|entry| entry.same_owner(startup))
             {
                 live.starting.remove(agent_id);
-                let _ = self.driver.mutate(|tree| {
-                    tree.release_turn_owner(agent_id);
-                    if result.is_ok()
-                        && tree
-                            .node(agent_id)
-                            .is_ok_and(|node| node.status == crate::protocol::NodeStatus::Closed)
-                    {
-                        tree.try_emit_tree_node_detached(
-                            self.driver.observer(),
-                            agent_id,
-                            crate::tree::NodeDetach::Closed,
-                        );
-                    }
-                });
+                let (writer, agent, released) =
+                    (self.driver.clone(), agent_id.to_owned(), result.is_ok());
+                let _ = self
+                    .driver
+                    .mutate(move |tree| {
+                        tree.release_turn_owner(&agent);
+                        if released
+                            && tree.node(&agent).is_ok_and(|node| {
+                                node.status == crate::protocol::NodeStatus::Closed
+                            })
+                        {
+                            tree.try_emit_tree_node_detached(
+                                writer.observer(),
+                                &agent,
+                                crate::tree::NodeDetach::Closed,
+                            );
+                        }
+                    })
+                    .await;
             }
             live.retirement_recovery.clone()
         };

@@ -3,6 +3,7 @@
     reason = "Delivery-ledger scenarios retain the complete prepare, bind, acknowledge, and duplicate-replay sequence."
 )]
 #![allow(clippy::unwrap_used, reason = "test assertions")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::{
     AgentCommand, AgentCommandKind, TreeDriver, acknowledge, command_attempt, duplicate_consumed,
@@ -117,6 +118,7 @@ fn explicit_child_intents_match_pre_port_rows_and_prompts() {
                 base_text: "continue",
                 batch,
             })
+            .block()
             .unwrap();
         let expected_text = if all_mail {
             "continue\n\nMessage:\nstanding instruction"
@@ -192,6 +194,7 @@ fn mail_start_batched_command_bytes() {
             base_text: "assignment\n\nMessage:\nresume",
             batch: BatchRule::MailStart("m1"),
         })
+        .block()
         .unwrap();
     let bytes = driver
         .read(|tree| {
@@ -237,6 +240,7 @@ fn child_ledger_prechange_bytes() {
             base_text: "continue",
             batch: BatchRule::WakeAll,
         })
+        .block()
         .unwrap();
     let bytes = driver
         .read(|tree| {
@@ -278,16 +282,19 @@ fn child_integrity_refusals_preserve_the_intent() {
             base_text: "work",
             batch: BatchRule::Results,
         })
+        .block()
         .unwrap();
     let before = driver
         .read(|tree| (tree.revision, tree.command("intent").cloned()))
         .unwrap();
-    let conflict = ChildLedger::new(&driver, &child).prepare(CommandIntent {
-        command_id: "intent",
-        kind: CommandKind::Start,
-        base_text: "changed",
-        batch: BatchRule::Results,
-    });
+    let conflict = ChildLedger::new(&driver, &child)
+        .prepare(CommandIntent {
+            command_id: "intent",
+            kind: CommandKind::Start,
+            base_text: "changed",
+            batch: BatchRule::Results,
+        })
+        .block();
     assert!(matches!(conflict, Err(LedgerError::Integrity(_))));
     for settlement in [
         Settlement::Recorded,
@@ -300,7 +307,9 @@ fn child_integrity_refusals_preserve_the_intent() {
         },
     ] {
         assert!(matches!(
-            ChildLedger::settlement_only(&driver).settle("intent", settlement),
+            ChildLedger::settlement_only(&driver)
+                .settle("intent", settlement)
+                .block(),
             Err(LedgerError::Integrity(_))
         ));
     }
@@ -333,19 +342,23 @@ fn interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable() {
         None,
     );
     // A host shutting down ends the capacity park at once.
-    driver.bind_storage_shutdown(std::sync::Arc::new(|| true));
+    let host = crate::agent_tree_tools::HostShutdown::new();
+    host.signal();
+    driver.bind_host_shutdown(host);
     let command = format!(
         "{}{child}:1:c1-a1:1",
         crate::driver::wake::WakeIdentity::CHILD_PREFIX
     );
     let mut ledger = ChildLedger::new(&driver, &child);
     let prepare = |ledger: &mut ChildLedger<'_>| {
-        ledger.prepare(CommandIntent {
-            command_id: &command,
-            kind: CommandKind::Wake,
-            base_text: "wake",
-            batch: BatchRule::WakeAll,
-        })
+        ledger
+            .prepare(CommandIntent {
+                command_id: &command,
+                kind: CommandKind::Wake,
+                base_text: "wake",
+                batch: BatchRule::WakeAll,
+            })
+            .block()
     };
     assert!(
         matches!(prepare(&mut ledger), Err(LedgerError::TreeStorageFull(error))
@@ -361,7 +374,9 @@ fn interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable() {
     assert_eq!(prepared.message_ids, ["m1"]);
     let before = driver.read(|tree| tree.command(&command).cloned()).unwrap();
     store.saves.store(1, Ordering::SeqCst);
-    let refused = ledger.settle(&command, Settlement::Refused { pause: None });
+    let refused = ledger
+        .settle(&command, Settlement::Refused { pause: None })
+        .block();
     let Err(LedgerError::TreeStorageFull(error)) = refused else {
         panic!("tree capacity refusal must remain typed")
     };
@@ -376,6 +391,7 @@ fn interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable() {
     );
     ledger
         .settle(&command, Settlement::Refused { pause: None })
+        .block()
         .unwrap();
     driver
         .read(|tree| {
@@ -471,9 +487,10 @@ fn duplicate_projection_second_save_refusal_restores_command_and_cursor() {
         driver
             .save(&mut driver.tree_handle_for_test().lock().unwrap())
             .unwrap();
-        let project = |tree: &mut ProductAgentTree| {
+        let (projected, record) = (child.clone(), record.clone());
+        let project = move |tree: &mut ProductAgentTree| {
             tree.project_feed(
-                &child,
+                &projected,
                 "00000000-0000-4000-8000-000000000001",
                 std::slice::from_ref(&record),
                 &crate::agent_tree::TreeFeedReads::default(),
@@ -482,7 +499,7 @@ fn duplicate_projection_second_save_refusal_restores_command_and_cursor() {
             .map_err(|error| error.to_string())
         };
         assert!(matches!(
-            persist_context(&driver, project),
+            persist_context(&driver, project.clone()).block(),
             Err(crate::driver::ledger::LedgerError::Unavailable(_))
         ));
         driver
@@ -495,7 +512,7 @@ fn duplicate_projection_second_save_refusal_restores_command_and_cursor() {
                 );
             })
             .unwrap();
-        persist_context(&driver, project).unwrap();
+        persist_context(&driver, project).block().unwrap();
         assert_eq!(
             driver
                 .read(|tree| tree.command("duplicate").unwrap().fact)
@@ -529,10 +546,11 @@ fn project_acceptance(
             operation_id: None,
         }],
     );
+    let recipient = recipient.to_owned();
     runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit(false, move |tree| {
             tree.project_feed(
-                recipient,
+                &recipient,
                 "00000000-0000-4000-8000-000000000001",
                 &[record],
                 &crate::agent_tree::TreeFeedReads::default(),
@@ -540,6 +558,7 @@ fn project_acceptance(
             .map(|_| ())
             .map_err(|error| error.to_string())
         })
+        .block()
         .unwrap();
 }
 
@@ -594,8 +613,9 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
     .unwrap();
     complete(&mut tree);
     let store = std::sync::Arc::new(crate::agent_tree::MemoryTreeStore::new());
-    let runtime =
-        crate::topology_runtime::insert_root_with(id.clone(), tree, store.clone(), None).unwrap();
+    let runtime = crate::topology_runtime::insert_root_with(id.clone(), tree, store.clone(), None)
+        .await
+        .unwrap();
     let prepared = ChildLedger::new(runtime.driver(), "root")
         .prepare(CommandIntent {
             command_id: "command-one",
@@ -603,12 +623,14 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
             base_text: "continue",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     runtime
         .mutate_then_emit(false, |tree| {
             complete(tree);
             Ok(())
         })
+        .await
         .unwrap();
     crate::topology_runtime::force_release(&id).await;
     let persisted = store.load(&id).unwrap().unwrap();
@@ -618,6 +640,7 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
         store,
         None,
     )
+    .await
     .unwrap();
     let replay = ChildLedger::new(runtime.driver(), "root")
         .prepare(CommandIntent {
@@ -626,6 +649,7 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
             base_text: "continue",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     assert_eq!(prepared.prompt, replay.prompt);
     assert_eq!(replay.message_ids.len(), 1);
@@ -637,6 +661,7 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
                 base_text: "changed",
                 batch: BatchRule::Results
             })
+            .await
             .is_err()
     );
     assert!(
@@ -647,11 +672,16 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
                 base_text: "continue",
                 batch: BatchRule::Results
             })
+            .await
             .is_err()
     );
     project_acceptance(&runtime, "root", "command-one");
-    acknowledge(runtime.driver(), "command-one", Settlement::Recorded).unwrap();
-    acknowledge(runtime.driver(), "command-one", Settlement::Recorded).unwrap();
+    acknowledge(runtime.driver(), "command-one", Settlement::Recorded)
+        .await
+        .unwrap();
+    acknowledge(runtime.driver(), "command-one", Settlement::Recorded)
+        .await
+        .unwrap();
     let second = ChildLedger::new(runtime.driver(), "root")
         .prepare(CommandIntent {
             command_id: "command-two",
@@ -659,6 +689,7 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
             base_text: "continue",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     assert_eq!(second.message_ids.len(), 1);
     assert_ne!(second.message_ids, prepared.message_ids);
@@ -667,6 +698,7 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
         "command-two",
         Settlement::Refused { pause: None },
     )
+    .await
     .unwrap();
     let third = ChildLedger::new(runtime.driver(), "root")
         .prepare(CommandIntent {
@@ -675,13 +707,16 @@ async fn prepared_child_context_is_exact_with_new_mail_and_requires_ack_before_n
             base_text: "continue",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     assert_eq!(
         third.message_ids, second.message_ids,
         "definitively rejected commands do not consume results"
     );
     assert!(
-        acknowledge(runtime.driver(), "command-two", Settlement::Recorded).is_err(),
+        acknowledge(runtime.driver(), "command-two", Settlement::Recorded)
+            .await
+            .is_err(),
         "a terminal rejected context cannot change outcome"
     );
     crate::topology_runtime::force_release(&id).await;
@@ -733,7 +768,9 @@ async fn a_mail_start_carries_other_unread_mail_and_acknowledges_it() {
     let started = tree
         .send_agent_message("root", &parent_mail(&child, "resume"), None)
         .unwrap();
-    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .await
+        .unwrap();
     let command = format!("plak:mail:{}:start", started.message_id);
     let prepared = ChildLedger::new(runtime.driver(), &child)
         .prepare(CommandIntent {
@@ -742,6 +779,7 @@ async fn a_mail_start_carries_other_unread_mail_and_acknowledges_it() {
             base_text: "assignment\n\nMessage:\nresume",
             batch: BatchRule::MailStart(&started.message_id),
         })
+        .await
         .unwrap();
     assert_eq!(
         prepared.prompt,
@@ -752,7 +790,9 @@ async fn a_mail_start_carries_other_unread_mail_and_acknowledges_it() {
         [started.message_id.clone(), earlier.message_id.clone()]
     );
     project_acceptance(&runtime, &child, &command);
-    acknowledge(runtime.driver(), &command, Settlement::Recorded).unwrap();
+    acknowledge(runtime.driver(), &command, Settlement::Recorded)
+        .await
+        .unwrap();
     assert!(
         runtime
             .read(|tree| tree.wake_mail(&child).is_empty())
@@ -770,7 +810,9 @@ async fn followup_and_steer_primary_mail_acknowledgement_requires_a_feed_fact() 
         let sent = tree
             .send_agent_message("root", &parent_mail(&child, "status?"), None)
             .unwrap();
-        let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None).unwrap();
+        let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+            .await
+            .unwrap();
         let command = format!("plak:mail:{}:{kind}", sent.message_id);
         let prepared = ChildLedger::new(runtime.driver(), &child)
             .prepare(CommandIntent {
@@ -779,9 +821,14 @@ async fn followup_and_steer_primary_mail_acknowledgement_requires_a_feed_fact() 
                 base_text: "status?",
                 batch: BatchRule::Delivered(&sent.message_id),
             })
+            .await
             .unwrap();
         assert_eq!(prepared.message_ids, std::slice::from_ref(&sent.message_id));
-        assert!(acknowledge(runtime.driver(), &command, Settlement::Recorded).is_err());
+        assert!(
+            acknowledge(runtime.driver(), &command, Settlement::Recorded)
+                .await
+                .is_err()
+        );
         assert_eq!(
             runtime
                 .read(|tree| tree.mail(&sent.message_id).unwrap().durable)
@@ -789,7 +836,9 @@ async fn followup_and_steer_primary_mail_acknowledgement_requires_a_feed_fact() 
             MailDurableState::Accepted
         );
         project_acceptance(&runtime, &child, &command);
-        acknowledge(runtime.driver(), &command, Settlement::Recorded).unwrap();
+        acknowledge(runtime.driver(), &command, Settlement::Recorded)
+            .await
+            .unwrap();
         assert_eq!(
             runtime
                 .read(|tree| tree.mail(&sent.message_id).unwrap().durable)
@@ -810,7 +859,9 @@ async fn another_attempts_prepared_wake_does_not_block_a_new_command() {
     tree.send_agent_message("root", &parent_mail(&child, "status?"), None)
         .unwrap();
     let attempt = tree.attempt(&child).unwrap().attempt_id.as_str().to_owned();
-    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .await
+        .unwrap();
     let stale = format!(
         "{}{child}:1:{child}-a9:3",
         crate::driver::wake::WakeIdentity::CHILD_PREFIX
@@ -826,6 +877,7 @@ async fn another_attempts_prepared_wake_does_not_block_a_new_command() {
             base_text: "wake",
             batch: BatchRule::WakeAll,
         })
+        .await
         .unwrap();
     // The attempt that journaled it ended; the current one carries on.
     assert_eq!(held.message_ids.len(), 1, "the stale wake holds the mail");
@@ -836,6 +888,7 @@ async fn another_attempts_prepared_wake_does_not_block_a_new_command() {
             base_text: "assignment",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     let current = format!(
         "{}{child}:1:{attempt}:3",
@@ -849,6 +902,7 @@ async fn another_attempts_prepared_wake_does_not_block_a_new_command() {
             base_text: "wake",
             batch: BatchRule::WakeAll,
         })
+        .await
         .unwrap();
     assert_eq!(blocking.message_ids.len(), 1);
     assert!(
@@ -859,6 +913,7 @@ async fn another_attempts_prepared_wake_does_not_block_a_new_command() {
                 base_text: "assignment",
                 batch: BatchRule::Results
             })
+            .await
             .is_err(),
         "a prepared batch of the current attempt still blocks"
     );
@@ -878,7 +933,9 @@ async fn command_prepared_without_results_does_not_gain_new_results_on_retry() {
         WriterMode::SingleLease,
     )
     .unwrap();
-    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .await
+        .unwrap();
     let prepared = ChildLedger::new(runtime.driver(), "root")
         .prepare(CommandIntent {
             command_id: "command-one",
@@ -886,12 +943,14 @@ async fn command_prepared_without_results_does_not_gain_new_results_on_retry() {
             base_text: "continue",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     runtime
         .mutate_then_emit(false, |tree| {
             complete(tree);
             Ok(())
         })
+        .await
         .unwrap();
     let replay = ChildLedger::new(runtime.driver(), "root")
         .prepare(CommandIntent {
@@ -900,6 +959,7 @@ async fn command_prepared_without_results_does_not_gain_new_results_on_retry() {
             base_text: "continue",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     assert_eq!(prepared.prompt, replay.prompt);
     assert_eq!(replay.message_ids, [] as [String; 0]);

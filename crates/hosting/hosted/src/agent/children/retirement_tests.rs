@@ -2,6 +2,7 @@
     clippy::too_many_lines,
     reason = "Child retirement scenarios exercise real submissions, delayed acknowledgements, terminal ownership, and replayed result publication."
 )]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::bind::{StartupWorker, child_create_failure};
 
@@ -80,29 +81,32 @@ async fn attempt_end_retires_self_and_all_descendants_after_one_retirement_fails
     let runtime = runtime(root.path());
     let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
     let (parent, children, identity) = runtime
-        .mutate_then_emit(false, |tree| {
-            let mut snapshot = tree.snapshot.clone();
-            snapshot.max_depth = 2;
-            snapshot.digest = snapshot.compute_digest();
-            tree.install_snapshot(snapshot);
-            let parent = tree
-                .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
-                .unwrap()
-                .agent_id;
-            tree.bind_attempt_turn(&parent, turn.to_string()).unwrap();
-            let children = (0..2)
-                .map(|_| {
-                    tree.spawn_agent(&parent, &SpawnAgentRequest::test_review(), None)
-                        .unwrap()
-                        .agent_id
-                })
-                .collect::<Vec<_>>();
-            let identity = ChildTurnIdentity {
-                attempt: tree.attempt(&parent).unwrap().attempt_id.clone(),
-                turn,
-            };
-            Ok((parent, children, identity))
+        .mutate_then_emit(false, {
+            move |tree| {
+                let mut snapshot = tree.snapshot.clone();
+                snapshot.max_depth = 2;
+                snapshot.digest = snapshot.compute_digest();
+                tree.install_snapshot(snapshot);
+                let parent = tree
+                    .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
+                    .unwrap()
+                    .agent_id;
+                tree.bind_attempt_turn(&parent, turn.to_string()).unwrap();
+                let children = (0..2)
+                    .map(|_| {
+                        tree.spawn_agent(&parent, &SpawnAgentRequest::test_review(), None)
+                            .unwrap()
+                            .agent_id
+                    })
+                    .collect::<Vec<_>>();
+                let identity = ChildTurnIdentity {
+                    attempt: tree.attempt(&parent).unwrap().attempt_id.clone(),
+                    turn,
+                };
+                Ok((parent, children, identity))
+            }
         })
+        .await
         .unwrap();
     for (id, failure) in [
         (parent.clone(), false),
@@ -181,8 +185,11 @@ fn refused_waiter_bind_does_not_unregister_a_concurrent_waiter() {
                     .unwrap()
                     .agent_id)
             })
+            .block()
             .unwrap();
-        let concurrent = TurnWaiterRegistration::register(runtime.driver(), &child).unwrap();
+        let concurrent = TurnWaiterRegistration::register(runtime.driver(), &child)
+            .block()
+            .unwrap();
         store
             .fail_at
             .store(store.saves.load(Ordering::SeqCst) + 1, Ordering::SeqCst);
@@ -196,11 +203,20 @@ fn refused_waiter_bind_does_not_unregister_a_concurrent_waiter() {
                 turn,
                 &mut registration
             )
+            .block()
             .is_err()
         );
-        drop(registration);
+        TurnWaiterRegistration::release_taken(&mut registration).block();
         assert!(runtime.read(|tree| tree.has_turn_waiter(&child)).unwrap());
-        drop(concurrent);
+        concurrent.release().block();
+        // The refused bind's registration was dropped with its writer and
+        // leaves through a writer of its own.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while runtime.read(|tree| tree.has_turn_waiter(&child)).unwrap()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert!(!runtime.read(|tree| tree.has_turn_waiter(&child)).unwrap());
     }
 }
@@ -274,36 +290,39 @@ async fn hosted_descendant_close_refusal_and_commit_cut_never_dispatch_unpublish
             let runtime = ProductTopologyRuntime::new(tree, store.clone(), vcs.clone(), None);
             let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
             let (parent, child, identity) = runtime
-                .mutate_then_emit(false, |tree| {
-                    let mut snapshot = tree.snapshot.clone();
-                    snapshot.max_depth = 2;
-                    snapshot.digest = snapshot.compute_digest();
-                    tree.install_snapshot(snapshot);
-                    let parent = tree
-                        .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
-                        .unwrap()
-                        .agent_id;
-                    tree.bind_attempt_turn(&parent, turn.to_string()).unwrap();
-                    let child = tree
-                        .spawn_agent(
-                            &parent,
-                            &SpawnAgentRequest::test_named(
-                                "implement",
-                                Tier::Mutate,
-                                "worker",
-                                "task",
+                .mutate_then_emit(false, {
+                    move |tree| {
+                        let mut snapshot = tree.snapshot.clone();
+                        snapshot.max_depth = 2;
+                        snapshot.digest = snapshot.compute_digest();
+                        tree.install_snapshot(snapshot);
+                        let parent = tree
+                            .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
+                            .unwrap()
+                            .agent_id;
+                        tree.bind_attempt_turn(&parent, turn.to_string()).unwrap();
+                        let child = tree
+                            .spawn_agent(
+                                &parent,
+                                &SpawnAgentRequest::test_named(
+                                    "implement",
+                                    Tier::Mutate,
+                                    "worker",
+                                    "task",
+                                )
+                                .with_fork(),
+                                None,
                             )
-                            .with_fork(),
-                            None,
-                        )
-                        .unwrap()
-                        .agent_id;
-                    let identity = ChildTurnIdentity {
-                        attempt: tree.attempt(&parent).unwrap().attempt_id.clone(),
-                        turn,
-                    };
-                    Ok((parent, child, identity))
+                            .unwrap()
+                            .agent_id;
+                        let identity = ChildTurnIdentity {
+                            attempt: tree.attempt(&parent).unwrap().attempt_id.clone(),
+                            turn,
+                        };
+                        Ok((parent, child, identity))
+                    }
                 })
+                .await
                 .unwrap();
             let before = runtime
                 .read(|tree| {
@@ -404,23 +423,27 @@ async fn late_terminal_cannot_mutate_a_replacement_turn() {
     let old = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
     let new = TurnId::from_str("00000000-0000-0000-0000-000000000002").unwrap();
     let (child, identity) = runtime
-        .mutate_then_emit(false, |tree| {
-            let child = tree
-                .spawn_agent(
-                    "root",
-                    &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
-                    None,
-                )
-                .unwrap()
-                .agent_id;
-            tree.bind_attempt_turn(&child, old.to_string()).unwrap();
-            let identity = ChildTurnIdentity {
-                attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
-                turn: old,
-            };
-            tree.bind_attempt_turn(&child, new.to_string()).unwrap();
-            Ok((child, identity))
+        .mutate_then_emit(false, {
+            let (new, old) = (new, old);
+            move |tree| {
+                let child = tree
+                    .spawn_agent(
+                        "root",
+                        &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                        None,
+                    )
+                    .unwrap()
+                    .agent_id;
+                tree.bind_attempt_turn(&child, old.to_string()).unwrap();
+                let identity = ChildTurnIdentity {
+                    attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
+                    turn: old,
+                };
+                tree.bind_attempt_turn(&child, new.to_string()).unwrap();
+                Ok((child, identity))
+            }
         })
+        .await
         .unwrap();
     let before = runtime.read(|tree| tree.revision).unwrap();
     finalize_child_turn(
@@ -431,7 +454,8 @@ async fn late_terminal_cannot_mutate_a_replacement_turn() {
         false,
         false,
         None,
-    );
+    )
+    .await;
     finalize_child_failure(
         runtime.driver(),
         &identity,
@@ -475,23 +499,31 @@ async fn failed_child_snapshot_error_keeps_original_failure_and_partial_candidat
     );
     let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
     let (child, identity) = runtime
-        .mutate_then_emit(false, |tree| {
-            let child = tree
-                .spawn_agent(
-                    "root",
-                    &SpawnAgentRequest::test_named("implement", Tier::Mutate, "implement", "work")
+        .mutate_then_emit(false, {
+            move |tree| {
+                let child = tree
+                    .spawn_agent(
+                        "root",
+                        &SpawnAgentRequest::test_named(
+                            "implement",
+                            Tier::Mutate,
+                            "implement",
+                            "work",
+                        )
                         .with_fork(),
-                    None,
-                )
-                .unwrap()
-                .agent_id;
-            tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
-            let identity = ChildTurnIdentity {
-                attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
-                turn,
-            };
-            Ok((child, identity))
+                        None,
+                    )
+                    .unwrap()
+                    .agent_id;
+                tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
+                let identity = ChildTurnIdentity {
+                    attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
+                    turn,
+                };
+                Ok((child, identity))
+            }
         })
+        .await
         .unwrap();
     vcs.seal_next_with(Err(VcsError::seal_failed("injected snapshot failure")));
     finalize_child_failure(
@@ -532,24 +564,28 @@ async fn failed_child_snapshot_is_reported_for_forks_only() {
             let runtime = runtime(root.path());
             let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
             let (child, identity) = runtime
-                .mutate_then_emit(false, |tree| {
-                    let mut request = SpawnAgentRequest::test_named(
-                        "implement",
-                        Tier::Mutate,
-                        "implement",
-                        "work",
-                    );
-                    if fork {
-                        request = request.with_fork();
+                .mutate_then_emit(false, {
+                    let (fork, turn) = (fork, turn);
+                    move |tree| {
+                        let mut request = SpawnAgentRequest::test_named(
+                            "implement",
+                            Tier::Mutate,
+                            "implement",
+                            "work",
+                        );
+                        if fork {
+                            request = request.with_fork();
+                        }
+                        let child = tree.spawn_agent("root", &request, None).unwrap().agent_id;
+                        tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
+                        let identity = ChildTurnIdentity {
+                            attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
+                            turn,
+                        };
+                        Ok((child, identity))
                     }
-                    let child = tree.spawn_agent("root", &request, None).unwrap().agent_id;
-                    tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
-                    let identity = ChildTurnIdentity {
-                        attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
-                        turn,
-                    };
-                    Ok((child, identity))
                 })
+                .await
                 .unwrap();
             finalize_child_failure(
                 runtime.driver(),
@@ -681,46 +717,50 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                 }
             }
             let child = runtime
-                .mutate_then_emit(false, |tree| {
-                    let child = tree
-                        .spawn_agent(
-                            "root",
-                            &SpawnAgentRequest::test_named(
-                                "implement",
-                                Tier::Mutate,
-                                "implement",
-                                "work",
+                .mutate_then_emit(false, {
+                    let (close_first, turn) = (close_first, turn);
+                    move |tree| {
+                        let child = tree
+                            .spawn_agent(
+                                "root",
+                                &SpawnAgentRequest::test_named(
+                                    "implement",
+                                    Tier::Mutate,
+                                    "implement",
+                                    "work",
+                                )
+                                .with_fork(),
+                                None,
                             )
-                            .with_fork(),
-                            None,
-                        )
-                        .unwrap()
-                        .agent_id;
-                    tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
-                    tree.set_active_turn(&child, true).unwrap();
-                    let token = tree.attempt(&child).unwrap().turn_token;
-                    tree.submit_result(
-                        &child,
-                        &SubmitResultRequest {
-                            turn_token: token,
-                            output_json: r#"{"ok":true}"#.into(),
-                        },
-                        None,
-                    )
-                    .unwrap();
-                    if close_first {
-                        tree.close_agent(
-                            "root",
-                            &AttemptScopedRequest {
-                                agent_id: child.clone(),
-                                expected_attempt_id: None,
+                            .unwrap()
+                            .agent_id;
+                        tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
+                        tree.set_active_turn(&child, true).unwrap();
+                        let token = tree.attempt(&child).unwrap().turn_token;
+                        tree.submit_result(
+                            &child,
+                            &SubmitResultRequest {
+                                turn_token: token,
+                                output_json: r#"{"ok":true}"#.into(),
                             },
                             None,
                         )
                         .unwrap();
+                        if close_first {
+                            tree.close_agent(
+                                "root",
+                                &AttemptScopedRequest {
+                                    agent_id: child.clone(),
+                                    expected_attempt_id: None,
+                                },
+                                None,
+                            )
+                            .unwrap();
+                        }
+                        Ok(child)
                     }
-                    Ok(child)
                 })
+                .await
                 .unwrap();
             let locator = session.locator();
             let registry = Arc::new(crate::jobs::JobRegistry::default());
@@ -776,11 +816,15 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                 .unwrap();
             plakous_tools::internal::promote(&service, job).unwrap();
             runtime
-                .mutate_then_emit(false, |tree| {
-                    tree.bind_session_locator(&child, locator.to_string())
-                        .unwrap();
-                    Ok(())
+                .mutate_then_emit(false, {
+                    let (child, locator) = (child.clone(), locator);
+                    move |tree| {
+                        tree.bind_session_locator(&child, locator.to_string())
+                            .unwrap();
+                        Ok(())
+                    }
                 })
+                .await
                 .unwrap();
             crate::agent_tree_tools::invoke_granted_topology_tool_on(
                 runtime.driver().clone(),
@@ -821,7 +865,9 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                     .is_ok()
             );
             spawn_topology_turn_waiter(
-                TurnWaiterRegistration::register(runtime.driver(), &child).unwrap(),
+                TurnWaiterRegistration::register(runtime.driver(), &child)
+                    .await
+                    .unwrap(),
                 runtime.live.clone(),
                 None,
                 Some(feed),
@@ -1004,14 +1050,17 @@ async fn retired_duplicate_restart_marks_child_recovery_required() {
     let runtime = runtime(root.path());
     let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
     let child = runtime
-        .mutate_then_emit(false, |tree| {
-            let child = tree
-                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
-                .unwrap();
-            tree.bind_attempt_turn(&child.agent_id, turn.to_string())
-                .unwrap();
-            Ok(child)
+        .mutate_then_emit(false, {
+            move |tree| {
+                let child = tree
+                    .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                    .unwrap();
+                tree.bind_attempt_turn(&child.agent_id, turn.to_string())
+                    .unwrap();
+                Ok(child)
+            }
         })
+        .await
         .unwrap();
     runtime
         .try_occupy_live(
@@ -1066,18 +1115,21 @@ async fn transient_gate_interrupt_wins_without_waiting_for_delay() {
     let runtime = runtime(root.path());
     let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
     let child = runtime
-        .mutate_then_emit(false, |tree| {
-            let child = tree
-                .spawn_agent(
-                    "root",
-                    &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
-                    None,
-                )
-                .unwrap();
-            tree.bind_attempt_turn(&child.agent_id, turn.to_string())
-                .unwrap();
-            Ok(child)
+        .mutate_then_emit(false, {
+            move |tree| {
+                let child = tree
+                    .spawn_agent(
+                        "root",
+                        &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                        None,
+                    )
+                    .unwrap();
+                tree.bind_attempt_turn(&child.agent_id, turn.to_string())
+                    .unwrap();
+                Ok(child)
+            }
         })
+        .await
         .unwrap();
     runtime
         .try_occupy_live(
@@ -1110,7 +1162,7 @@ async fn transient_gate_interrupt_wins_without_waiting_for_delay() {
             .is_pending()
     );
     runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
             tree.interrupt_agent(
                 "root",
                 &crate::agent_tree_protocol::AttemptScopedRequest {
@@ -1122,6 +1174,7 @@ async fn transient_gate_interrupt_wins_without_waiting_for_delay() {
             .map(|_| ())
             .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     assert!(!gate.await);
 }
@@ -1159,6 +1212,7 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
             tree.record_turn_completed(&child.agent_id).unwrap();
             Ok(parent)
         })
+        .await
         .unwrap();
     let controller = BoundaryController::quiet_from_evidence_path(
         CrashBoundary::None,
@@ -1192,10 +1246,14 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
     result.result().await.unwrap();
     let locator = session.locator();
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.bind_attempt_turn(&parent.agent_id, turn_id.to_string())
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let parent = parent.clone();
+            move |tree| {
+                tree.bind_attempt_turn(&parent.agent_id, turn_id.to_string())
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     runtime
         .try_occupy_live(
@@ -1304,9 +1362,11 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
                     base_text: &prompt,
                     batch: BatchRule::Results,
                 })
+                .await
                 .expect("same-attempt corrective context replays exactly");
             ChildLedger::settlement_only(runtime.driver())
                 .settle(&command, crate::driver::ledger::Settlement::Recorded)
+                .await
                 .map_err(String::from)
                 .unwrap();
             assert_eq!(
@@ -1315,21 +1375,25 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
             );
         }
         runtime
-            .mutate_then_emit(false, |tree| {
-                assert_eq!(
-                    tree.attempt(&parent.agent_id)
-                        .unwrap()
-                        .submit_harness_nudge
-                        .rounds(),
-                    2
-                );
-                tree.record_turn_completed(&parent.agent_id).unwrap();
-                Ok(())
+            .mutate_then_emit(false, {
+                let parent = parent.clone();
+                move |tree| {
+                    assert_eq!(
+                        tree.attempt(&parent.agent_id)
+                            .unwrap()
+                            .submit_harness_nudge
+                            .rounds(),
+                        2
+                    );
+                    tree.record_turn_completed(&parent.agent_id).unwrap();
+                    Ok(())
+                }
             })
+            .await
             .unwrap();
         if assignment == 0 {
             runtime
-                .mutate_then_emit(false, |tree| {
+                .mutate_then_emit_borrowed_for_test(false, |tree| {
                     tree.send_agent_message(
                         "root",
                         &crate::agent_tree_protocol::SendAgentMessageRequest {
@@ -1350,6 +1414,7 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
                     );
                     Ok(())
                 })
+                .await
                 .unwrap();
             let (mut live_map, delivery) = crate::agent::live::lock_for_transition(
                 &runtime.live,
@@ -1373,11 +1438,16 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
             completed_turn = result.turn_id();
             result.result().await.unwrap();
             runtime
-                .mutate_then_emit(false, |tree| {
-                    tree.bind_attempt_turn(&parent.agent_id, completed_turn.to_string())
-                        .unwrap();
-                    Ok(())
+                .mutate_then_emit(false, {
+                    let parent = parent.clone();
+                    let completed_turn = completed_turn;
+                    move |tree| {
+                        tree.bind_attempt_turn(&parent.agent_id, completed_turn.to_string())
+                            .unwrap();
+                        Ok(())
+                    }
                 })
+                .await
                 .unwrap();
         }
     }
@@ -1446,20 +1516,25 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
             tree.record_turn_completed(&child.agent_id).unwrap();
             Ok(parent)
         })
+        .await
         .unwrap();
     if empty {
         runtime
-            .mutate_then_emit(false, |tree| {
-                let ids = tree
-                    .pending_result_mail(&parent.agent_id)
-                    .into_iter()
-                    .map(|mail| mail.message_id.clone())
-                    .collect::<Vec<_>>();
-                for id in ids {
-                    tree.acknowledge_mail(&id).map_err(|error| error.message)?;
+            .mutate_then_emit(false, {
+                let parent = parent.clone();
+                move |tree| {
+                    let ids = tree
+                        .pending_result_mail(&parent.agent_id)
+                        .into_iter()
+                        .map(|mail| mail.message_id.clone())
+                        .collect::<Vec<_>>();
+                    for id in ids {
+                        tree.acknowledge_mail(&id).map_err(|error| error.message)?;
+                    }
+                    Ok(())
                 }
-                Ok(())
             })
+            .await
             .unwrap();
     }
     let evidence = root.path().join("result-recovery.jsonl");
@@ -1510,6 +1585,7 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
             base_text: "continue",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     let submission = session
         .agent()
@@ -1522,10 +1598,15 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
     // Durable cut: runtime admitted and tree bound the turn, but the
     // result-context acknowledgement has never run.
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.bind_attempt_turn(&parent.agent_id, prior_turn.unwrap_or(turn).to_string())
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let parent = parent.clone();
+            let (prior_turn, turn) = (prior_turn, turn);
+            move |tree| {
+                tree.bind_attempt_turn(&parent.agent_id, prior_turn.unwrap_or(turn).to_string())
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let locator = session.release().await.unwrap();
     drop(sessions);
@@ -1601,6 +1682,7 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
                 base_text: "next",
                 batch: BatchRule::Results
             })
+            .await
             .is_ok(),
         "recorded acceptance must not leave later commands permanently blocked"
     );
@@ -1612,22 +1694,22 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
 
 #[tokio::test]
 async fn fresh_child_start_retains_control_after_terminal_before_ack() {
-    child_start_control_fixture(false, true, false).await;
+    Box::pin(child_start_control_fixture(false, true, false)).await;
 }
 
 #[tokio::test]
 async fn duplicate_child_start_registers_existing_live_turn_without_redispatch() {
-    child_start_control_fixture(true, false, false).await;
+    Box::pin(child_start_control_fixture(true, false, false)).await;
 }
 
 #[tokio::test]
 async fn duplicate_child_start_without_live_turn_requires_reconciliation() {
-    child_start_control_fixture(true, true, false).await;
+    Box::pin(child_start_control_fixture(true, true, false)).await;
 }
 
 #[tokio::test]
 async fn duplicate_child_start_below_retention_preserves_its_projected_acceptance() {
-    child_start_control_fixture(true, true, true).await;
+    Box::pin(child_start_control_fixture(true, true, true)).await;
 }
 
 #[tokio::test]
@@ -1649,6 +1731,7 @@ async fn reclaimed_child_start_settles_consumed_without_binding() {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let evidence = root.path().join("reclaimed-start.jsonl");
     let binding = || {
@@ -1792,6 +1875,7 @@ async fn child_start_control_fixture(
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let evidence = root.path().join("start-control-evidence.jsonl");
     let release = root.path().join("release-provider");
@@ -1827,6 +1911,7 @@ async fn child_start_control_fixture(
             base_text: "work",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     if duplicate {
         let first = agent.start(command.clone(), "work").await.unwrap();
@@ -1929,6 +2014,7 @@ async fn child_start_control_fixture(
                 base_text: "work",
                 batch: BatchRule::Results,
             })
+            .await
             .unwrap();
         runtime
             .read(|tree| {
@@ -2008,6 +2094,7 @@ async fn real_session_late_start_ack_releases_after_deadline_without_redispatch(
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let evidence = root.path().join("startup-evidence.jsonl");
     let controller =
@@ -2091,25 +2178,29 @@ async fn real_session_late_start_ack_releases_after_deadline_without_redispatch(
         .unwrap_err();
     assert!(String::from(refused).contains("deadline"));
     runtime
-        .mutate_then_emit(false, |tree| {
-            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
-            assert!(tree.has_turn_owner(&id));
-            assert!(!tree.node(&id).unwrap().active_turn);
-            assert!(tree.attempt(&id).unwrap().turn_id.is_none());
-            assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
-            assert_eq!(tree.revision, tree.stored_revision);
-            tree.close_agent(
-                "root",
-                &AttemptScopedRequest {
-                    agent_id: id.clone(),
-                    expected_attempt_id: None,
-                },
-                None,
-            )
-            .unwrap();
-            assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
-            Ok(())
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
+                assert!(tree.has_turn_owner(&id));
+                assert!(!tree.node(&id).unwrap().active_turn);
+                assert!(tree.attempt(&id).unwrap().turn_id.is_none());
+                assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
+                assert_eq!(tree.revision, tree.stored_revision);
+                tree.close_agent(
+                    "root",
+                    &AttemptScopedRequest {
+                        agent_id: id.clone(),
+                        expected_attempt_id: None,
+                    },
+                    None,
+                )
+                .unwrap();
+                assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     assert!(runtime.live.lock().await.contains_key(&id));
     deliver_ack.notify_one();
@@ -2296,6 +2387,7 @@ async fn child_start_refusal_under_pressure(delete_fresh_session: bool, cancel_a
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let evidence = root.path().join("start-pressure-evidence.jsonl");
     let controller =
@@ -2631,6 +2723,7 @@ async fn failed_normal_release_clears_slot_and_fails_joined_close_canceller() {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     assert!(
         runtime
@@ -2744,19 +2837,22 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
             let runtime = runtime(root.path());
             let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
             let child_id = runtime
-                .mutate_then_emit(false, |tree| {
-                    let child = tree
-                        .spawn_agent(
-                            "root",
-                            &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
-                            None,
-                        )
-                        .unwrap()
-                        .agent_id;
-                    tree.set_active_turn(&child, true).unwrap();
-                    tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
-                    Ok(child)
+                .mutate_then_emit(false, {
+                    move |tree| {
+                        let child = tree
+                            .spawn_agent(
+                                "root",
+                                &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                                None,
+                            )
+                            .unwrap()
+                            .agent_id;
+                        tree.set_active_turn(&child, true).unwrap();
+                        tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
+                        Ok(child)
+                    }
                 })
+                .await
                 .unwrap();
             let entered = Arc::new(tokio::sync::Notify::new());
             let finish = Arc::new(tokio::sync::Notify::new());
@@ -2794,13 +2890,28 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
                     },
                 )
             };
-            let mut original = Box::pin(invoke());
-            assert!(
-                std::future::poll_fn(|cx| std::task::Poll::Ready(
-                    original.as_mut().poll(cx).is_pending()
-                ))
-                .await
-            );
+            // The original caller runs on its own task: its tree writers
+            // need it polled until the cancel enters.
+            let original = tokio::spawn({
+                let (driver, arguments, runtime) =
+                    (runtime.driver().clone(), arguments.clone(), runtime.clone());
+                async move {
+                    crate::agent_tree_tools::invoke_granted_topology_tool_on(
+                        driver,
+                        "root".into(),
+                        name,
+                        &arguments,
+                        "exact-cancel".into(),
+                        crate::agent_tree_tools::TopologyHostPorts {
+                            controller: Some(Arc::new(CancelOnly(ProductLiveCanceller {
+                                runtime,
+                            }))),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                }
+            });
             entered.notified().await;
             let pending = invoke().await.unwrap();
             assert_eq!(pending.kind(), ToolOutcomeKind::Failure);
@@ -2813,12 +2924,13 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
                 })
                 .unwrap();
             if abandon_caller {
-                drop(original);
+                original.abort();
             } else {
                 // Acceptance is independent of the deliberately blocked release.
                 assert_eq!(
                     tokio::time::timeout(Duration::from_secs(1), original)
                         .await
+                        .unwrap()
                         .unwrap()
                         .unwrap()
                         .kind(),
@@ -2913,6 +3025,7 @@ async fn fast_release_failure_acknowledges_intent_and_emits_one_owner_notice_for
                     .unwrap()
                     .agent_id)
             })
+            .await
             .unwrap();
         let turn = "00000000-0000-0000-0000-000000000001".parse().unwrap();
         assert!(
@@ -2976,6 +3089,7 @@ async fn stale_startup_caller_cannot_fault_a_new_turn_on_the_same_attempt() {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let startup = runtime.reserve_startup(&child).await.unwrap();
     let caller = StartupCaller::new(runtime.clone(), child.clone(), startup.clone());
@@ -2994,10 +3108,14 @@ async fn stale_startup_caller_cannot_fault_a_new_turn_on_the_same_attempt() {
             .is_ok()
     );
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.bind_attempt_turn(&child, first.to_string())
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let (child, first) = (child.clone(), first);
+            move |tree| {
+                tree.bind_attempt_turn(&child, first.to_string())
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     runtime.cancel_live(&child).await.unwrap();
     let second: TurnId = "00000000-0000-0000-0000-000000000002".parse().unwrap();
@@ -3020,10 +3138,14 @@ async fn stale_startup_caller_cannot_fault_a_new_turn_on_the_same_attempt() {
             .is_ok()
     );
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.bind_attempt_turn(&child, second.to_string())
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let child = child.clone();
+            move |tree| {
+                tree.bind_attempt_turn(&child, second.to_string())
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let snapshot = |tree: &crate::agent_tree::ProductAgentTree| {
         (
@@ -3093,6 +3215,7 @@ fn assert_late_caller_fault_is_scoped(site: &str) {
             .unwrap();
             Ok((child, identity))
         })
+        .block()
         .unwrap();
     let snapshot = |tree: &crate::agent_tree::ProductAgentTree| {
         (
@@ -3116,19 +3239,22 @@ fn assert_late_caller_fault_is_scoped(site: &str) {
             Some(&identity.attempt),
             "late start failure",
         )
+        .block()
         .unwrap(),
         "end" => turns::record_attempt_end_failure(
             runtime.driver(),
             &child,
             &identity,
             "late attempt-end failure",
-        ),
+        )
+        .block(),
         "reopen" => reopen::record_reopen_failure(
             &runtime,
             &child,
             Some(&identity.attempt),
             "late reopen failure",
         )
+        .block()
         .unwrap(),
         _ => unreachable!(),
     }
@@ -3170,6 +3296,7 @@ async fn stale_startup_caller_is_scoped_to_its_tree_and_attempt() {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let startup = runtime.reserve_startup(&child).await.unwrap();
     let caller = StartupCaller::new(runtime.clone(), child.clone(), startup.clone());
@@ -3177,24 +3304,28 @@ async fn stale_startup_caller_is_scoped_to_its_tree_and_attempt() {
         .finish_startup(&child, &startup, LiveRelease::default())
         .await;
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_completed(&child).unwrap();
-            tree.send_agent_message(
-                "root",
-                &SendAgentMessageRequest {
-                    agent_id: child.clone(),
-                    message: "next assignment".into(),
-                    purpose: Some(MessagePurpose::Followup),
-                    priority: None,
-                    in_reply_to: None,
-                    output_schema_json: None,
-                    refresh: None,
-                },
-                None,
-            )
-            .unwrap();
-            Ok(())
+        .mutate_then_emit(false, {
+            let child = child.clone();
+            move |tree| {
+                tree.record_turn_completed(&child).unwrap();
+                tree.send_agent_message(
+                    "root",
+                    &SendAgentMessageRequest {
+                        agent_id: child.clone(),
+                        message: "next assignment".into(),
+                        purpose: Some(MessagePurpose::Followup),
+                        priority: None,
+                        in_reply_to: None,
+                        output_schema_json: None,
+                        refresh: None,
+                    },
+                    None,
+                )
+                .unwrap();
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     let before = runtime
         .read(|tree| {

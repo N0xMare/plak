@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
+use crate::runtime::test_kit::BlockHere as _;
 
 use crate::runtime::test_kit::TestExtension;
 use plakous_host_protocol::status::HostPhase;
@@ -423,7 +424,9 @@ fn compact_binding_failure_leaves_no_workflow_request() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     let executor = ApplicationExecutor::new().unwrap();
-    let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary).unwrap();
+    let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary)
+        .block_here()
+        .unwrap();
     let opened = executor
         .block_on(crate::agent::build_or_open_bound_session(
             config.state_roots.runtime_sessions().unwrap(),

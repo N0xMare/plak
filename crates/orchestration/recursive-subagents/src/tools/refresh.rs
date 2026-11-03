@@ -19,13 +19,17 @@ impl TopologyTool {
                         .iter()
                         .any(|job| job.status == plakous::tools::JobStatus::Running)
                 });
+            let driver = self.driver.clone();
+            let (caller, request, operation) =
+                (caller.to_owned(), request.clone(), operation.to_owned());
             let (prepared, effects) = self
                 .driver
-                .mutate(|tree| {
-                    self.driver.fold_and_commit(tree, |tree| {
-                        tree.prepare_followup_refresh(caller, request, operation, running)
+                .mutate(move |tree| {
+                    driver.fold_and_commit(tree, |tree| {
+                        tree.prepare_followup_refresh(&caller, &request, &operation, running)
                     })
                 })
+                .await
                 .map_err(|error| {
                     ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
                 })?;

@@ -158,22 +158,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let item = candidate
             .enqueue_live(text.clone())
             .map_err(|_| CliFailure::new("transient continuation queue admission was refused"))?;
-        self.config.session = super::super::result_mail::prepare_with_command(
-            &self.config.topology_rows(),
-            self.config.store.as_ref(),
-            &candidate,
-            &item,
-            &text,
-            None,
-            command.as_str(),
-            crate::driver::ledger::CommandKind::Resume,
-        )
-        .map_err(CliFailure::from)
-        .inspect_err(|error| {
-            if error.store_refusal() == Some(crate::error::StoreRefusal::StorageFull) {
-                self.cancel_transient_resume();
-            }
-        })?;
+        self.config.session = self
+            .executor
+            .block_on(super::super::result_mail::prepare_with_command(
+                &self.config.topology_rows(),
+                self.config.store.as_ref(),
+                &candidate,
+                &item,
+                &text,
+                None,
+                command.as_str(),
+                crate::driver::ledger::CommandKind::Resume,
+            ))
+            .map_err(|_| CliFailure::new("application execution failed"))?
+            .map_err(CliFailure::from)
+            .inspect_err(|error| {
+                if error.store_refusal() == Some(crate::error::StoreRefusal::StorageFull) {
+                    self.cancel_transient_resume();
+                }
+            })?;
         self.pending_resume = None;
         Ok(HostStep::Prompt {
             text,

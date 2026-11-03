@@ -60,22 +60,52 @@ fn presentation_revisions_are_allocated_by_the_channel_not_a_sender_wrapper() {
 fn root_interrupt_is_not_process_shutdown_and_quit_remains_latched_after_dequeue() {
     let (sender, receiver) = intent_channel::<Core>();
     let interrupt = receiver.storage_interrupt_probe();
-    let shutdown = receiver.storage_shutdown_probe();
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&shutdowns);
+    receiver.on_shutdown(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
     sender.send(SessionIntent::Interrupt).unwrap();
     assert!(interrupt());
-    assert!(!shutdown());
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 0);
     assert_eq!(*receiver.try_recv().unwrap(), SessionIntent::Interrupt);
     assert!(
         !interrupt(),
         "a later root turn does not inherit an earlier interrupt"
     );
     sender.send(SessionIntent::Quit).unwrap();
-    assert!(shutdown());
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
     assert_eq!(*receiver.try_recv().unwrap(), SessionIntent::Quit);
-    assert!(
-        shutdown(),
-        "child shutdown remains visible after the host dequeues Quit"
+    drop(sender);
+    assert_eq!(
+        shutdowns.load(Ordering::SeqCst),
+        1,
+        "the shutdown hook runs once"
     );
+    let late = Arc::clone(&shutdowns);
+    receiver.on_shutdown(move || {
+        late.fetch_add(1, Ordering::SeqCst);
+    });
+    assert_eq!(
+        shutdowns.load(Ordering::SeqCst),
+        2,
+        "a hook registered after shutdown runs at once"
+    );
+}
+
+#[test]
+fn the_last_sender_dropping_runs_the_shutdown_hooks() {
+    let (sender, receiver) = intent_channel::<Core>();
+    let second = sender.clone();
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&shutdowns);
+    receiver.on_shutdown(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
+    drop(sender);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 0);
+    drop(second);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -112,7 +142,8 @@ use crate::observation::{
     TurnPhase,
 };
 use crate::views::transcript::{NoticeScope, TranscriptRow};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 
 #[test]
 fn running_process_count_is_shared_without_enqueuing_an_intent() {
@@ -330,7 +361,7 @@ fn timeout_and_interrupt_do_not_acknowledge_active_compaction() {
     reason = "the refusal hands the rejected action back verbatim"
 )]
 fn concurrent_senders_admit_one_nonrepeatable_generation() {
-    use std::sync::{Arc, Barrier};
+    use std::sync::Barrier;
 
     fn send(sender: &super::IntentSender<Core>) -> Result<(), IntentSendError> {
         sender.send(SessionIntent::Compact)
@@ -833,19 +864,17 @@ fn terminal_usage_observation_remains_bounded_at_saturation() {
     assert!(events.contains(&usage));
 }
 
-fn counting_notifier(
-    receiver: &super::ObservationReceiver<Core>,
-) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
-    let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let seen = std::sync::Arc::clone(&count);
+fn counting_notifier(receiver: &super::ObservationReceiver<Core>) -> Arc<AtomicUsize> {
+    let count = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&count);
     receiver.set_notify(move || {
-        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        seen.fetch_add(1, Ordering::SeqCst);
     });
     count
 }
 
-fn fired(count: &std::sync::atomic::AtomicUsize) -> usize {
-    count.load(std::sync::atomic::Ordering::SeqCst)
+fn fired(count: &AtomicUsize) -> usize {
+    count.load(Ordering::SeqCst)
 }
 
 /// A waiter outside the mailbox is woken once per empty to non-empty edge,

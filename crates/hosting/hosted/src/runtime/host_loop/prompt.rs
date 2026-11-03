@@ -677,7 +677,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         });
 
         let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
-        if let Err(error) = topology_state::mark_root_live_for_prompt(&tree_id) {
+        let marked = self
+            .executor
+            .block_on(topology_state::mark_root_live_for_prompt(&tree_id))
+            .map_err(|_| "application execution failed".to_owned())
+            .and_then(std::convert::identity);
+        if let Err(error) = marked {
             let _ = self.events.notice(TranscriptRow::error(
                 NoticeScope::Tree,
                 format!("tree admission restore failed: {error}"),

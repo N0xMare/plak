@@ -100,6 +100,7 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
         Arc::new(crate::agent_tree::MemoryTreeStore::new()),
         None,
     )
+    .await
     .unwrap();
     ChildLedger::new(runtime.driver(), "root")
         .prepare(CommandIntent {
@@ -108,6 +109,7 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
             base_text: "submit result",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     let evidence = root.path().join("restart-evidence.jsonl");
     let controller =

@@ -11,40 +11,46 @@ pub(super) async fn snapshot_failure(
     agent_id: &str,
 ) -> Option<String> {
     let (ticket, effects) = driver
-        .mutate(|tree| {
-            if !identity.still_owns(tree, agent_id) {
-                return Ok(None);
+        .mutate({
+            let (driver, identity, agent_id) =
+                (driver.clone(), identity.clone(), agent_id.to_owned());
+            move |tree| {
+                let (driver, identity, agent_id) = (&driver, &identity, agent_id.as_str());
+                if !identity.still_owns(tree, agent_id) {
+                    return Ok(None);
+                }
+                let node = tree.node(agent_id)?;
+                let Some(workspace) = tree.workspace(&node.workspace_id) else {
+                    return Ok(None);
+                };
+                if workspace.mode == WorkspaceMode::Inherit
+                    || workspace.status != WorkspaceStatus::Active
+                {
+                    return Ok(None);
+                }
+                let Some(base) = workspace.base_commit.clone() else {
+                    return Ok(None);
+                };
+                let ticket = (
+                    tree.vcs_port(),
+                    node.path.clone(),
+                    digest_text(&tree.tree_id),
+                    format!("failed-{}-{}", identity.attempt, identity.turn),
+                    base,
+                );
+                driver.fold_and_commit(tree, |tree| {
+                    tree.record_rescue_pin(
+                        agent_id,
+                        crate::agent_tree_protocol::CandidateId::from_persisted(ticket.3.clone()),
+                    )?;
+                    Ok(Some(ticket))
+                })
             }
-            let node = tree.node(agent_id)?;
-            let Some(workspace) = tree.workspace(&node.workspace_id) else {
-                return Ok(None);
-            };
-            if workspace.mode == WorkspaceMode::Inherit
-                || workspace.status != WorkspaceStatus::Active
-            {
-                return Ok(None);
-            }
-            let Some(base) = workspace.base_commit.clone() else {
-                return Ok(None);
-            };
-            let ticket = (
-                tree.vcs_port(),
-                node.path.clone(),
-                digest_text(&tree.tree_id),
-                format!("failed-{}-{}", identity.attempt, identity.turn),
-                base,
-            );
-            driver.fold_and_commit(tree, |tree| {
-                tree.record_rescue_pin(
-                    agent_id,
-                    crate::agent_tree_protocol::CandidateId::from_persisted(ticket.3.clone()),
-                )?;
-                Ok(Some(ticket))
-            })
         })
+        .await
         .ok()?;
     let ticket = ticket.ok()??;
-    driver.settle(effects).ok()?;
+    driver.settle(effects).await.ok()?;
     let (vcs, path, namespace, id, base) = ticket;
     let reference = candidate_ref(&namespace, &id);
     // The seal primitive leaves HEAD, the branch and the real index untouched,

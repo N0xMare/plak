@@ -61,7 +61,7 @@ mod wait;
 
 pub use cancel::{LiveCancelFailure, LiveCancelOutcome};
 pub use controller::{ChildController, ChildServices};
-pub use driver::TreeDriver;
+pub use driver::{HostShutdown, TreeDriver};
 pub use mail::{MailDeliveryAck, MailDeliveryFailure, MailDeliveryRequest};
 pub use registrations::{
     TopologyHostPorts, invoke_granted_topology_tool_on, topology_tool_registrations,
@@ -414,9 +414,9 @@ impl TopologyTool {
             TopologyKind::Interrupt => self.interrupt_with(operation_id, value).await,
             TopologyKind::Close => self.close_with(operation_id, value).await,
             TopologyKind::Recover => self.recover_with(value).await,
-            TopologyKind::Adopt => self.adopt_with(&operation_id, value),
+            TopologyKind::Adopt => self.adopt_with(&operation_id, value).await,
             TopologyKind::List | TopologyKind::Submit | TopologyKind::Discard => {
-                self.run_named(&operation_id, value)
+                self.run_named(&operation_id, value).await
             }
             TopologyKind::TaskOutput
             | TopologyKind::TaskKill
@@ -432,7 +432,7 @@ impl TopologyTool {
         clippy::too_many_lines,
         reason = "one dispatch match lowers every topology tool request to its typed executor and receipt"
     )]
-    fn run_named(
+    async fn run_named(
         &self,
         operation_id: &str,
         value: &Value,
@@ -487,14 +487,16 @@ impl TopologyTool {
             }
         }
         if self.kind == TopologyKind::List {
-            return match self.list_agents(&caller, value) {
+            return match self.list_agents(&caller, value).await {
                 Ok(payload) => ToolOutcome::success_text(payload.to_string()),
                 Err(error) => Self::topology_failure(&error),
             };
         }
+        let tool = self.clone();
+        let (operation, value) = (operation_id.to_owned(), value.clone());
         let (result, effects) = self
             .driver
-            .mutate(|tree| match self.kind {
+            .mutate(move |tree| match tool.kind {
                 TopologyKind::Spawn
                 | TopologyKind::Wait
                 | TopologyKind::Send
@@ -512,15 +514,15 @@ impl TopologyTool {
                     TopologyErrorCode::OperationRecoveryRequired,
                     "list_agents uses the split occupancy path",
                 )),
-                TopologyKind::Submit => decode::<SubmitResultRequest>(value).and_then(|request| {
-                    self.dispatch_mutating(
+                TopologyKind::Submit => decode::<SubmitResultRequest>(&value).and_then(|request| {
+                    tool.dispatch_mutating(
                         tree,
                         &caller,
-                        operation_id,
+                        &operation,
                         "submit_result",
                         &request,
                         |tree, caller, request, operation_id| {
-                            let vocabulary = self.vocabulary;
+                            let vocabulary = tool.vocabulary;
                             tree.submit_result_presented(caller, request, operation_id, |slot| {
                                 vocabulary.presented_name(slot)
                             })
@@ -532,11 +534,11 @@ impl TopologyTool {
                     TopologyErrorCode::OperationRecoveryRequired,
                     "adopt_candidate uses the split dispatch path",
                 )),
-                TopologyKind::Discard => decode::<WorkspaceIdRequest>(value).and_then(|request| {
-                    self.dispatch_mutating(
+                TopologyKind::Discard => decode::<WorkspaceIdRequest>(&value).and_then(|request| {
+                    tool.dispatch_mutating(
                         tree,
                         &caller,
-                        operation_id,
+                        &operation,
                         "discard_workspace",
                         &request,
                         |tree, caller, request, operation_id| {
@@ -546,27 +548,33 @@ impl TopologyTool {
                     .map(|(output, _replayed)| json!(output))
                 }),
             })
+            .await
             .map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
-        if let Err(error) = self.driver.settle(effects) {
+        if let Err(error) = self.driver.settle(effects).await {
             return Self::topology_failure(&error);
         }
         if self.kind == TopologyKind::Discard && result.is_ok() {
-            let tree = self.driver.lock().map_err(|error| {
-                ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
-            })?;
-            let Some(receipt) = tree
-                .operations()
-                .get(operation_id)
-                .and_then(|receipt| receipt.terminal_response.as_ref())
-            else {
+            let operation = operation_id.to_owned();
+            let receipt = self
+                .driver
+                .write(move |tree| {
+                    tree.operations()
+                        .get(&operation)
+                        .and_then(|receipt| receipt.terminal_response.clone())
+                })
+                .await
+                .map_err(|error| {
+                    ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
+                })?;
+            let Some(receipt) = receipt else {
                 return Self::topology_failure(&TopologyError::new(
                     TopologyErrorCode::OperationRecoveryRequired,
                     "discard did not publish a completed removal receipt",
                 ));
             };
-            return ToolOutcome::success_text(receipt.clone());
+            return ToolOutcome::success_text(receipt);
         }
         match result {
             Ok(payload) => ToolOutcome::success_text(payload.to_string()),
@@ -580,25 +588,37 @@ impl TopologyTool {
     /// against that snapshot. The occupancy is observational — a copy that
     /// changed between the two phases renders as the probe saw it — so a
     /// listing never holds the tree while a subprocess runs.
-    fn list_agents(&self, caller: &str, value: &Value) -> Result<Value, TopologyError> {
+    async fn list_agents(&self, caller: &str, value: &Value) -> Result<Value, TopologyError> {
         let request = decode::<ListAgentsRequest>(value)?;
         let probe = {
-            let tree = self.driver.lock()?;
-            tree.occupancy_probe(caller, &request)?
+            let (caller, request) = (caller.to_owned(), request.clone());
+            self.driver
+                .write(move |tree| tree.occupancy_probe(&caller, &request))
+                .await??
         };
-        let occupancy = probe.run(self.driver.vcs().as_ref());
-        let tree = self.driver.lock()?;
-        tree.list_agents_with(caller, &request, &occupancy)
-            .map(|output| json!(output))
+        let vcs = self.driver.vcs();
+        let occupancy = tokio::task::spawn_blocking(move || probe.run(vcs.as_ref()))
+            .await
+            .map_err(|_| {
+                TopologyError::new(
+                    TopologyErrorCode::OperationRecoveryRequired,
+                    "occupancy probe task failed",
+                )
+            })?;
+        let caller = caller.to_owned();
+        self.driver
+            .write(move |tree| {
+                tree.list_agents_with(&caller, &request, &occupancy)
+                    .map(|output| json!(output))
+            })
+            .await?
     }
 
     fn topology_failure(error: &TopologyError) -> Result<ToolOutcome, ToolRuntimeError> {
         ToolOutcome::failure_text(error.to_value().to_string())
     }
 
-    /// Runs an effects batch with the mutex released. A batch carrying an
-    /// `on_mint` hook can run for minutes, so it goes to a blocking thread;
-    /// seals, adopts, and unmints are short and run inline.
+    /// Runs an effects batch with the mutex released, on a blocking worker.
     async fn settle(&self, effects: Effects) -> Result<Settled, ToolRuntimeError> {
         self.settle_typed(effects)
             .await
@@ -606,19 +626,7 @@ impl TopologyTool {
     }
 
     async fn settle_typed(&self, effects: Effects) -> Result<Settled, TopologyError> {
-        if effects.hooks.is_empty() && effects.dormancy.is_empty() && effects.refreshes.is_empty() {
-            self.driver.settle(effects)
-        } else {
-            let driver = self.driver.clone();
-            tokio::task::spawn_blocking(move || driver.settle(effects))
-                .await
-                .unwrap_or_else(|error| {
-                    Err(TopologyError::new(
-                        TopologyErrorCode::OperationRecoveryRequired,
-                        format!("effects task failed: {error}"),
-                    ))
-                })
-        }
+        self.driver.settle(effects).await
     }
 
     fn dispatch_mutating<Req, Out>(

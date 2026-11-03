@@ -114,15 +114,20 @@ impl TreeStore for RecordingStore {
     }
 }
 
-fn publish<R>(driver: &TreeDriver, work: impl FnOnce(&mut ProductAgentTree) -> R) -> R {
+async fn publish<R: Send + 'static>(
+    driver: &TreeDriver,
+    work: impl FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
+) -> R {
+    let writer = driver.clone();
     let (result, effects) = driver
-        .mutate(|tree| {
+        .mutate(move |tree| {
             let result = work(tree);
-            driver.save(tree).unwrap();
+            writer.save(tree).unwrap();
             result
         })
+        .await
         .unwrap();
-    driver.settle(effects).unwrap();
+    driver.settle(effects).await.unwrap();
     result
 }
 
@@ -136,40 +141,46 @@ fn project(tree: &mut ProductAgentTree, child: usize, feed: &Feed) {
         .unwrap();
 }
 
-fn admit(driver: &TreeDriver, feeds: &Mutex<Vec<Feed>>, child: usize, round: u64) {
+async fn admit(driver: &TreeDriver, feeds: &Mutex<Vec<Feed>>, child: usize, round: u64) {
     let agent = format!("c{child}");
     let command = format!("command:{child}:{round}");
-    let mut all = feeds.lock().unwrap();
-    all[child].push(
-        child,
-        vec![FeedFact::CommandAccepted {
-            command_id: CommandId::new(&command).unwrap(),
-            kind: FeedCommandKind::Root {
-                origin: TurnOrigin::UserPrompt,
-            },
-            turn_id: Some(turn(child, round)),
-            sequence: round,
-            operation_id: None,
-        }],
-    );
-    let feed = all[child].clone();
-    drop(all);
-    publish(driver, |tree| {
-        let attempt = tree.attempt(&agent).unwrap().attempt_id.clone();
-        tree.record_command(AgentCommand::intent(
-            command,
-            &agent,
-            Some(attempt),
-            AgentCommandKind::Start,
-            "assignment",
-            Vec::new(),
-        ))
-        .unwrap();
-        project(tree, child, &feed);
-    });
+    let feed = {
+        let mut all = feeds.lock().unwrap();
+        all[child].push(
+            child,
+            vec![FeedFact::CommandAccepted {
+                command_id: CommandId::new(&command).unwrap(),
+                kind: FeedCommandKind::Root {
+                    origin: TurnOrigin::UserPrompt,
+                },
+                turn_id: Some(turn(child, round)),
+                sequence: round,
+                operation_id: None,
+            }],
+        );
+        all[child].clone()
+    };
+    publish(driver, {
+        let agent = agent.clone();
+        let feed = feed.clone();
+        move |tree| {
+            let attempt = tree.attempt(&agent).unwrap().attempt_id.clone();
+            tree.record_command(AgentCommand::intent(
+                command,
+                &agent,
+                Some(attempt),
+                AgentCommandKind::Start,
+                "assignment",
+                Vec::new(),
+            ))
+            .unwrap();
+            project(tree, child, &feed);
+        }
+    })
+    .await;
 }
 
-fn end(
+async fn end(
     driver: &TreeDriver,
     feeds: &Mutex<Vec<Feed>>,
     child: usize,
@@ -177,75 +188,81 @@ fn end(
     decision: ChildFinalizationDecision,
     failed: bool,
 ) {
-    let mut all = feeds.lock().unwrap();
-    let feed = &mut all[child];
-    if failed {
-        feed.reads.insert_failure(
-            turn(child, round).to_string(),
-            FailureRead {
-                kind: AgentErrorKind::Internal,
-                retryability: None,
-                phase: None,
-                http_status: None,
-                provider_code: None,
-                message: "scripted failure".into(),
-            },
-        );
-    }
-    feed.push(
-        child,
-        vec![FeedFact::TurnTerminal {
-            turn_id: turn(child, round),
-            command_id: CommandId::new(format!("command:{child}:{round}")).unwrap(),
-            outcome: if failed {
-                FeedTurnOutcome::Failed {
-                    kind: AgentErrorKind::Internal,
-                    model_kind: None,
-                    context: None,
-                }
-            } else {
-                FeedTurnOutcome::Completed {
-                    finish: FinishReason::Stop,
-                }
-            },
-            closed_exchange: !failed,
-            steering_settled_unapplied: false,
-            usage: TurnUsage::new(plakous::model::Usage::new(100, 10, 0, 0, 0), 1, 1, 1).unwrap(),
-        }],
-    );
-    let feed = feed.clone();
-    drop(all);
-    publish(driver, |tree| {
-        let agent = format!("c{child}");
+    let feed = {
+        let mut all = feeds.lock().unwrap();
+        let feed = &mut all[child];
         if failed {
-            let attempt = tree.attempt(&agent).unwrap().attempt_id.clone();
-            tree.record_failed_turn_notice(
+            feed.reads.insert_failure(
+                turn(child, round).to_string(),
+                FailureRead {
+                    kind: AgentErrorKind::Internal,
+                    retryability: None,
+                    phase: None,
+                    http_status: None,
+                    provider_code: None,
+                    message: "scripted failure".into(),
+                },
+            );
+        }
+        feed.push(
+            child,
+            vec![FeedFact::TurnTerminal {
+                turn_id: turn(child, round),
+                command_id: CommandId::new(format!("command:{child}:{round}")).unwrap(),
+                outcome: if failed {
+                    FeedTurnOutcome::Failed {
+                        kind: AgentErrorKind::Internal,
+                        model_kind: None,
+                        context: None,
+                    }
+                } else {
+                    FeedTurnOutcome::Completed {
+                        finish: FinishReason::Stop,
+                    }
+                },
+                closed_exchange: !failed,
+                steering_settled_unapplied: false,
+                usage: TurnUsage::new(plakous::model::Usage::new(100, 10, 0, 0, 0), 1, 1, 1)
+                    .unwrap(),
+            }],
+        );
+        feed.clone()
+    };
+    publish(driver, {
+        let feed = feed.clone();
+        move |tree| {
+            let agent = format!("c{child}");
+            if failed {
+                let attempt = tree.attempt(&agent).unwrap().attempt_id.clone();
+                tree.record_failed_turn_notice(
+                    &agent,
+                    &attempt,
+                    &turn(child, round).to_string(),
+                    "snapshot notice".into(),
+                )
+                .unwrap();
+            }
+            let projection = tree
+                .project_feed(&agent, &session(child), &feed.records, &feed.reads)
+                .unwrap();
+            let terminal = (decision == ChildFinalizationDecision::Finalize)
+                .then(|| projection.ended_turns.last().unwrap().1.clone());
+            tree.record_child_finalization(
                 &agent,
-                &attempt,
                 &turn(child, round).to_string(),
-                "snapshot notice".into(),
+                decision,
+                true,
+                terminal,
             )
             .unwrap();
+            project(tree, child, &feed);
         }
-        let projection = tree
-            .project_feed(&agent, &session(child), &feed.records, &feed.reads)
-            .unwrap();
-        let terminal = (decision == ChildFinalizationDecision::Finalize)
-            .then(|| projection.ended_turns.last().unwrap().1.clone());
-        tree.record_child_finalization(
-            &agent,
-            &turn(child, round).to_string(),
-            decision,
-            true,
-            terminal,
-        )
-        .unwrap();
-        project(tree, child, &feed);
-    });
+    })
+    .await;
 }
 
 #[allow(clippy::too_many_lines, reason = "one scripted commit-cut scenario")]
-fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
+async fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
     let vcs = Arc::new(FakeVcs::new());
     let feeds = Arc::new(Mutex::new(vec![Feed::default(); 8]));
     let store = Arc::new(RecordingStore {
@@ -264,31 +281,43 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
     )
     .unwrap();
     let driver = TreeDriver::new(Arc::new(Mutex::new(tree)), store.clone(), vcs.clone(), None);
-    publish(&driver, |_| ());
+    publish(&driver, |_| ()).await;
     feeds.lock().unwrap()[0].push(0, Vec::new());
     let root_feed = feeds.lock().unwrap()[0].clone();
-    publish(&driver, |tree| project(tree, 0, &root_feed));
+    publish(&driver, {
+        let root_feed = root_feed.clone();
+        move |tree| project(tree, 0, &root_feed)
+    })
+    .await;
     for child in 1..=7 {
-        publish(&driver, |tree| {
-            let mut request = if [1, 6, 7].contains(&child) {
-                SpawnAgentRequest::test_named("implement", Tier::Mutate, "worker", "scripted task")
-            } else {
-                SpawnAgentRequest::test_review()
-            };
-            request.output_schema_json = json!({
+        publish(&driver, {
+            move |tree| {
+                let mut request = if [1, 6, 7].contains(&child) {
+                    SpawnAgentRequest::test_named(
+                        "implement",
+                        Tier::Mutate,
+                        "worker",
+                        "scripted task",
+                    )
+                } else {
+                    SpawnAgentRequest::test_review()
+                };
+                request.output_schema_json = json!({
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object", "properties": {}, "required": [], "additionalProperties": false,
             })
             .to_string();
-            if [1, 6, 7].contains(&child) {
-                request.workspace = SpawnWorkspace::Fork;
+                if [1, 6, 7].contains(&child) {
+                    request.workspace = SpawnWorkspace::Fork;
+                }
+                assert_eq!(
+                    tree.spawn_agent("root", &request, None).unwrap().agent_id,
+                    format!("c{child}")
+                );
             }
-            assert_eq!(
-                tree.spawn_agent("root", &request, None).unwrap().agent_id,
-                format!("c{child}")
-            );
-        });
-        admit(&driver, &feeds, child, 1);
+        })
+        .await;
+        admit(&driver, &feeds, child, 1).await;
     }
     publish(&driver, |tree| {
         tree.send_agent_message(
@@ -305,24 +334,28 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
             None,
         )
         .unwrap();
-    });
+    })
+    .await;
     let wait_call: CallId = uuid(0x2000).parse().unwrap();
     feeds.lock().unwrap()[0].wait_evidence(false);
-    publish(&driver, |tree| {
-        let mail = tree.pending_mail("root");
-        assert_eq!(mail.len(), 1);
-        tree.acknowledge_mail(&mail[0].message_id).unwrap();
-        tree.remember_success(
-            &wait_call.to_string(),
-            "root",
-            "wait_agent",
-            &json!({}),
-            &json!({
-                "output": {}, "acknowledged": mail, "newly_delivered": [],
-            }),
-        )
-        .unwrap();
-    });
+    publish(&driver, {
+        move |tree| {
+            let mail = tree.pending_mail("root");
+            assert_eq!(mail.len(), 1);
+            tree.acknowledge_mail(&mail[0].message_id).unwrap();
+            tree.remember_success(
+                &wait_call.to_string(),
+                "root",
+                "wait_agent",
+                &json!({}),
+                &json!({
+                    "output": {}, "acknowledged": mail, "newly_delivered": [],
+                }),
+            )
+            .unwrap();
+        }
+    })
+    .await;
     let entry: EntryId = uuid(0x4000).parse().unwrap();
     feeds.lock().unwrap()[0].push(
         0,
@@ -338,7 +371,11 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
     );
     feeds.lock().unwrap()[0].wait_evidence(true);
     let root_feed = feeds.lock().unwrap()[0].clone();
-    publish(&driver, |tree| project(tree, 0, &root_feed));
+    publish(&driver, {
+        let root_feed = root_feed.clone();
+        move |tree| project(tree, 0, &root_feed)
+    })
+    .await;
     end(
         &driver,
         &feeds,
@@ -346,8 +383,9 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
         1,
         ChildFinalizationDecision::Park,
         false,
-    );
-    admit(&driver, &feeds, 1, 2);
+    )
+    .await;
+    admit(&driver, &feeds, 1, 2).await;
     end(
         &driver,
         &feeds,
@@ -355,8 +393,9 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
         2,
         ChildFinalizationDecision::Nudge,
         false,
-    );
-    admit(&driver, &feeds, 1, 3);
+    )
+    .await;
+    admit(&driver, &feeds, 1, 3).await;
     publish(&driver, |tree| {
         let token = tree.attempt("c1").unwrap().turn_token;
         tree.submit_result(
@@ -368,7 +407,8 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
             None,
         )
         .unwrap();
-    });
+    })
+    .await;
     end(
         &driver,
         &feeds,
@@ -376,7 +416,8 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
         3,
         ChildFinalizationDecision::Finalize,
         false,
-    );
+    )
+    .await;
     end(
         &driver,
         &feeds,
@@ -384,20 +425,24 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
         1,
         ChildFinalizationDecision::Finalize,
         true,
-    );
+    )
+    .await;
     publish(&driver, |tree| {
         tree.record_host_cancellation("c3").unwrap();
         tree.fold_due("c3").unwrap();
-    });
+    })
+    .await;
     publish(&driver, |tree| {
         tree.record_host_retirement("c4", "live release uncertain".into())
             .unwrap();
         tree.fold_due("c4").unwrap();
-    });
+    })
+    .await;
     publish(&driver, |tree| {
         tree.record_host_materialization("c6").unwrap();
         tree.fold_due("c6").unwrap();
-    });
+    })
+    .await;
     publish(&driver, |tree| {
         tree.close_agent(
             "root",
@@ -411,7 +456,8 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
         tree.record_host_retirement("c5", "deletion release uncertain".into())
             .unwrap();
         tree.fold_due("c5").unwrap();
-    });
+    })
+    .await;
     end(
         &driver,
         &feeds,
@@ -419,7 +465,8 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
         1,
         ChildFinalizationDecision::Finalize,
         false,
-    );
+    )
+    .await;
     publish(&driver, |tree| {
         tree.close_agent(
             "root",
@@ -437,7 +484,8 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
             Some("discard:7"),
         )
         .unwrap();
-    });
+    })
+    .await;
     let frames = store.frames.lock().unwrap().clone();
     assert_eq!(vcs.calls_of(FakeOp::Unmint).len(), 1);
     let final_tree = &frames.last().unwrap().tree;
@@ -870,11 +918,11 @@ fn assert_no_fault_records(reopened: &ProductAgentTree, ordinal: u64) {
     );
 }
 
-#[test]
-fn indexed_tree_store_commit_cut_matrix() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn indexed_tree_store_commit_cut_matrix() {
     use std::os::unix::process::ExitStatusExt;
     let root = tempfile::tempdir().unwrap();
-    let (frames, _) = scenario(root.path());
+    let (frames, _) = scenario(root.path()).await;
     for (index, frame) in frames.iter().enumerate() {
         write_frame(
             &root.path().join(format!("frame-{index}.sqlite3")),
@@ -971,7 +1019,19 @@ fn indexed_tree_store_commit_cut_matrix() {
     );
 }
 
-fn two_phase_scenario(root: &Path) -> Vec<Frame> {
+/// Folds `agent`'s due work, which queues exactly one seal, and settles it.
+async fn fold_one_seal(driver: &TreeDriver, agent: &'static str) {
+    let writer = driver.clone();
+    let (applied, effects) = driver
+        .mutate(move |tree| writer.fold_and_commit(tree, |tree| tree.fold_due(agent)))
+        .await
+        .unwrap();
+    applied.unwrap();
+    assert_eq!(effects.seals.len(), 1);
+    driver.settle(effects).await.unwrap();
+}
+
+async fn two_phase_scenario(root: &Path) -> Vec<Frame> {
     let vcs = Arc::new(FakeVcs::new());
     let feeds = Arc::new(Mutex::new(vec![Feed::default(); 3]));
     let store = Arc::new(RecordingStore {
@@ -990,9 +1050,9 @@ fn two_phase_scenario(root: &Path) -> Vec<Frame> {
     )
     .unwrap();
     let driver = TreeDriver::new(Arc::new(Mutex::new(tree)), store.clone(), vcs, None);
-    publish(&driver, |_| ());
+    publish(&driver, |_| ()).await;
     for child in 1..=2 {
-        publish(&driver, |tree| {
+        publish(&driver, move |tree| {
             let mut request =
                 SpawnAgentRequest::test_named("implement", Tier::Mutate, "worker", "task");
             request.workspace = SpawnWorkspace::Fork;
@@ -1002,8 +1062,9 @@ fn two_phase_scenario(root: &Path) -> Vec<Frame> {
                 &format!("{}/{}/{}", session(child), uuid(0xb), uuid(0x3001)),
             )
             .unwrap();
-        });
-        admit(&driver, &feeds, child, 1);
+        })
+        .await;
+        admit(&driver, &feeds, child, 1).await;
     }
     {
         let mut all = feeds.lock().unwrap();
@@ -1022,7 +1083,7 @@ fn two_phase_scenario(root: &Path) -> Vec<Frame> {
         );
     }
     let feed = feeds.lock().unwrap()[1].clone();
-    let terminal = publish(&driver, |tree| {
+    let terminal = publish(&driver, move |tree| {
         tree.project_feed("c1", &session(1), &feed.records, &feed.reads)
             .unwrap()
             .ended_turns
@@ -1030,7 +1091,8 @@ fn two_phase_scenario(root: &Path) -> Vec<Frame> {
             .unwrap()
             .1
             .clone()
-    });
+    })
+    .await;
     publish(&driver, |tree| {
         tree.record_child_finalization(
             "c1",
@@ -1040,13 +1102,9 @@ fn two_phase_scenario(root: &Path) -> Vec<Frame> {
             Some(terminal),
         )
         .unwrap();
-    });
-    let (applied, effects) = driver
-        .mutate(|tree| driver.fold_and_commit(tree, |tree| tree.fold_due("c1")))
-        .unwrap();
-    applied.unwrap();
-    assert_eq!(effects.seals.len(), 1);
-    driver.settle(effects).unwrap();
+    })
+    .await;
+    fold_one_seal(&driver, "c1").await;
     publish(&driver, |tree| {
         tree.submit_result(
             "c2",
@@ -1057,29 +1115,26 @@ fn two_phase_scenario(root: &Path) -> Vec<Frame> {
             None,
         )
         .unwrap();
-    });
+    })
+    .await;
     publish(&driver, |tree| {
         tree.record_host_cancellation("c2").unwrap();
-    });
-    let (applied, effects) = driver
-        .mutate(|tree| driver.fold_and_commit(tree, |tree| tree.fold_due("c2")))
-        .unwrap();
-    applied.unwrap();
-    assert_eq!(effects.seals.len(), 1);
-    driver.settle(effects).unwrap();
+    })
+    .await;
+    fold_one_seal(&driver, "c2").await;
     store.frames.lock().unwrap().clone()
 }
 
-#[test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(
     clippy::too_many_lines,
     reason = "indexed two-save cuts and their no-repeat oracle"
 )]
-fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
+async fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
     use plakous_recursive_subagents::protocol::AttemptStatus;
     use std::os::unix::process::ExitStatusExt;
     let root = tempfile::tempdir().unwrap();
-    let frames = two_phase_scenario(root.path());
+    let frames = two_phase_scenario(root.path()).await;
     let pending: BTreeSet<_> = frames
         .iter()
         .flat_map(|frame| {
@@ -1207,12 +1262,12 @@ fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
     eprintln!("two-save tree commit cuts={}", frames.len());
 }
 
-#[test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(
     clippy::too_many_lines,
     reason = "one deterministic resume commit-cut scenario"
 )]
-fn transient_resume_decision_commit_cuts_are_conservative_then_replayable() {
+async fn transient_resume_decision_commit_cuts_are_conservative_then_replayable() {
     use plakous_recursive_subagents::protocol::AttemptStatus;
     use std::os::unix::process::ExitStatusExt;
     let root = tempfile::tempdir().unwrap();
@@ -1232,12 +1287,16 @@ fn transient_resume_decision_commit_cuts_are_conservative_then_replayable() {
     let feeds = Mutex::new(vec![Feed::default(); 2]);
     feeds.lock().unwrap()[0].push(0, Vec::new());
     let root_feed = feeds.lock().unwrap()[0].clone();
-    publish(&driver, |tree| {
-        project(tree, 0, &root_feed);
-        tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
-            .unwrap();
-    });
-    admit(&driver, &feeds, 1, 1);
+    publish(&driver, {
+        let root_feed = root_feed.clone();
+        move |tree| {
+            project(tree, 0, &root_feed);
+            tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .unwrap();
+        }
+    })
+    .await;
+    admit(&driver, &feeds, 1, 1).await;
     let mut feed = feeds.lock().unwrap()[1].clone();
     feed.reads.insert_failure(
         turn(1, 1).to_string(),
@@ -1274,7 +1333,8 @@ fn transient_resume_decision_commit_cuts_are_conservative_then_replayable() {
             "snapshot notice".into(),
         )
         .unwrap();
-    });
+    })
+    .await;
     let before = driver.read(Clone::clone).unwrap();
     publish(&driver, |tree| {
         tree.record_child_finalization(
@@ -1285,7 +1345,8 @@ fn transient_resume_decision_commit_cuts_are_conservative_then_replayable() {
             None,
         )
         .unwrap();
-    });
+    })
+    .await;
     let after = driver.read(Clone::clone).unwrap();
     for (index, frame) in [&before, &after].into_iter().enumerate() {
         write_frame(&root.path().join(format!("frame-{index}.sqlite3")), frame);

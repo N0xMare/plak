@@ -372,7 +372,8 @@ pub(super) async fn api_session_runtime_binding_with_owner(
             topology_attach,
             opening_durable_session,
             acquired_owner,
-        )?
+        )
+        .await?
     }
     .with_plan(&tool_plan)?
     .with_skills(&node_skills(
@@ -458,9 +459,9 @@ pub(super) async fn api_session_runtime_binding_with_owner(
 
 /// Constructs the exact sealed runtime authority used by create, open, and
 /// driver-owned session workflows.
-pub fn coding_session_runtime_binding(
+pub async fn coding_session_runtime_binding(
     spec: ProductAgentSpec,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
 ) -> CliResult<SessionRuntimeBinding> {
     coding_session_runtime_binding_for(
         spec,
@@ -470,13 +471,14 @@ pub fn coding_session_runtime_binding(
         crate::topology_runtime::TopologyHubAttach::LookupOnly,
         &mut None,
     )
+    .await
 }
 
 /// Fresh conversation create (`/clear`) must attach a new root tree, not look
 /// up the previous hub lease.
-pub fn coding_session_runtime_binding_attaching_root(
+pub async fn coding_session_runtime_binding_attaching_root(
     spec: ProductAgentSpec,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
 ) -> CliResult<SessionRuntimeBinding> {
     coding_session_runtime_binding_for(
         spec,
@@ -486,13 +488,14 @@ pub fn coding_session_runtime_binding_attaching_root(
         crate::topology_runtime::TopologyHubAttach::AttachRoot,
         &mut None,
     )
+    .await
 }
 
 /// Builds a native runtime with the caller's attach choice and reports the
 /// tree id when that build took an `AttachRoot` lease.
-pub(crate) fn coding_session_runtime_binding_with_attach(
+pub(crate) async fn coding_session_runtime_binding_with_attach(
     spec: ProductAgentSpec,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
     attach: crate::topology_runtime::TopologyHubAttach,
     attached_tree: &mut Option<String>,
 ) -> CliResult<SessionRuntimeBinding> {
@@ -504,6 +507,7 @@ pub(crate) fn coding_session_runtime_binding_with_attach(
         attach,
         attached_tree,
     )
+    .await
 }
 
 pub(in crate::agent) const fn native_provider_kind(provider: NativeProvider) -> &'static str {
@@ -519,9 +523,9 @@ pub(in crate::agent) const fn native_provider_kind(provider: NativeProvider) -> 
     clippy::too_many_lines,
     reason = "Native runtime construction preserves provider-specific tool compilation, composition attachment, admission, and topology lease cleanup."
 )]
-pub(in crate::agent) fn coding_session_runtime_binding_for(
+pub(in crate::agent) async fn coding_session_runtime_binding_for(
     spec: ProductAgentSpec,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
     opening_durable_session: bool,
     fence: SessionToolFence,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
@@ -551,14 +555,14 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         topology_enabled: _,
         tool_selection,
     } = spec;
-    let _binding_span = tracing::info_span!(
+    let binding_span = tracing::info_span!(
         "session_runtime_binding",
         provider = native_provider_kind(provider),
         model = resolved.selected_model().as_str(),
         composition = composition.as_str(),
         session_id = plan_state_authority.as_str(),
-    )
-    .entered();
+    );
+    tracing::Instrument::instrument(async move {
     let model = resolved.model();
 
     let resolved_tool_mode = resolved.native_tool_mode();
@@ -653,7 +657,8 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             topology_attach,
             opening_durable_session,
             attached_tree,
-        )?
+        )
+        .await?
     }
     .with_plan(&tool_plan)?
     .with_skills(&native_node_skills(
@@ -1056,6 +1061,8 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             .request_policy(request_policy)
             .image_normalizer(crate::visual_read::normalizer()),
     ))
+    }, binding_span)
+    .await
 }
 
 pub(in crate::agent) fn ensure_workspace_excludes_product_state(
@@ -1074,11 +1081,11 @@ pub(in crate::agent) fn ensure_workspace_excludes_product_state(
 }
 
 /// Exact compaction runtime: same coding binding as the live turn with compact max output only.
-pub fn compaction_session_runtime_binding(
+pub async fn compaction_session_runtime_binding(
     spec: &ProductAgentSpec,
 ) -> CliResult<SessionRuntimeBinding> {
     let mut sink = std::io::sink();
-    let binding = coding_session_runtime_binding(spec.clone(), &mut sink)?;
+    let binding = coding_session_runtime_binding(spec.clone(), &mut sink).await?;
     binding
         .with_compaction_output_limit()
         .map_err(|_| CliFailure::new("compaction generation policy is invalid"))

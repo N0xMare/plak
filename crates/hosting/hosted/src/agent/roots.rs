@@ -18,8 +18,6 @@ mod recorded_sidecar;
 #[cfg(all(test, feature = "js"))]
 use recorded_sidecar::RecordedSidecar;
 
-type StorageShutdownProbe = Arc<dyn Fn() -> bool + Send + Sync>;
-
 /// Where a hosted session's agent tree is persisted: the product opens its
 /// store (`subagents.sqlite3` writer) and the roots hold the port,
 /// caching one opening per process.
@@ -177,7 +175,7 @@ pub struct ProductStateRoots {
     /// The shutdown of the attachment these roots were handed to. Every
     /// runtime-store handle and tree they open waits on it, and on nothing
     /// another attachment bound.
-    storage_shutdown: Option<StorageShutdownProbe>,
+    storage_shutdown: Option<crate::agent_tree_tools::HostShutdown>,
     /// The topology store the hub publishes trees through: opened once per
     /// process, on the first root attach, and never per compile.
     tree_store: Arc<Mutex<Option<Arc<dyn TreeStore>>>>,
@@ -210,16 +208,17 @@ pub struct ProductStateRoots {
 impl ProductStateRoots {
     /// These roots as one attachment hands them out: storage waits through
     /// them stop on that attachment's shutdown.
-    pub(crate) fn with_storage_shutdown(mut self, probe: StorageShutdownProbe) -> Self {
-        self.storage_shutdown = Some(probe);
+    pub(crate) fn with_storage_shutdown(
+        mut self,
+        shutdown: crate::agent_tree_tools::HostShutdown,
+    ) -> Self {
+        self.storage_shutdown = Some(shutdown);
         self
     }
 
-    /// The shutdown probe of the attachment these roots belong to.
-    pub(crate) fn storage_shutdown_probe(&self) -> StorageShutdownProbe {
-        self.storage_shutdown
-            .clone()
-            .unwrap_or_else(|| Arc::new(|| false))
+    /// The shutdown of the attachment these roots belong to.
+    pub(crate) fn host_shutdown(&self) -> Option<crate::agent_tree_tools::HostShutdown> {
+        self.storage_shutdown.clone()
     }
 
     /// These roots as one session hands them out: what they spawn belongs to
@@ -487,7 +486,10 @@ impl ProductStateRoots {
     pub fn runtime_sessions(&self) -> CliResult<Arc<AgentSessions>> {
         let shared = self.shared_runtime_sessions()?;
         Ok(match &self.storage_shutdown {
-            Some(probe) => Arc::new(shared.with_storage_interrupt(Arc::clone(probe))),
+            Some(shutdown) => {
+                let shutdown = shutdown.clone();
+                Arc::new(shared.with_storage_interrupt(Arc::new(move || shutdown.is_signalled())))
+            }
             None => shared,
         })
     }
@@ -523,13 +525,13 @@ impl ProductStateRoots {
                     .is_some_and(|store| store.storage_unavailable())
         });
         let backend = SessionBackend::sqlite_with_storage_probe(&self.runtime_database, probe)
-        .map_err(|error| {
-            let raw = format!("plak runtime database could not be opened: {error}");
-            CliFailure::new(
-                crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
-            )
-            .with_optional_remedy(crate::storage_pressure::sessions_remedy(&error).as_ref())
-        })?;
+            .map_err(|error| {
+                let raw = format!("plak runtime database could not be opened: {error}");
+                CliFailure::new(
+                    crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
+                )
+                .with_optional_remedy(crate::storage_pressure::sessions_remedy(&error).as_ref())
+            })?;
         let sessions = Arc::new(AgentSessions::new(backend).map_err(|_| {
             CliFailure::new("plak durable session runtime could not be initialized")
         })?);

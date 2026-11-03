@@ -23,8 +23,6 @@ fn restored_tree(id: &str, root: &Path) -> ProductAgentTree {
 struct ParkedCapacityStore {
     inner: crate::tree::MemoryTreeStore,
     full: AtomicBool,
-    parked: Mutex<Option<mpsc::Sender<()>>>,
-    release: Mutex<mpsc::Receiver<()>>,
 }
 
 impl TreeStore for ParkedCapacityStore {
@@ -51,36 +49,13 @@ impl TreeStore for ParkedCapacityStore {
     }
 }
 
-impl ParkedCapacityStore {
-    /// The park's shutdown probe: once full, it reports the park and holds it
-    /// until the test releases it, then ends the wait.
-    fn shutdown_probe(self: &Arc<Self>) -> Arc<dyn Fn() -> bool + Send + Sync> {
-        let store = Arc::clone(self);
-        Arc::new(move || {
-            if !store.full.load(Ordering::Acquire) {
-                return false;
-            }
-            if let Some(parked) = store.parked.lock().unwrap().take() {
-                parked.send(()).unwrap();
-                store.release.lock().unwrap().recv().unwrap();
-            }
-            true
-        })
-    }
-}
-
-struct ReleaseOnDrop(mpsc::Sender<()>);
-impl Drop for ReleaseOnDrop {
-    fn drop(&mut self) {
-        let _ = self.0.send(());
-    }
-}
-
 #[tokio::test]
 async fn restored_nonquiescent_tree_is_paused_immediately_after_insert() {
     let root = tempfile::tempdir().unwrap();
     let id = test_support::unique_tree_id();
-    let runtime = insert_root(id.clone(), restored_tree(&id, root.path()), None).unwrap();
+    let runtime = insert_root(id.clone(), restored_tree(&id, root.path()), None)
+        .await
+        .unwrap();
     assert_eq!(
         runtime.read(|tree| tree.state).unwrap(),
         TreeAdmissionState::RestoredPaused
@@ -90,17 +65,13 @@ async fn restored_nonquiescent_tree_is_paused_immediately_after_insert() {
     force_release(&id).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn detached_capacity_refused_resume_publishes_live_then_rolls_back_paused() {
     let root = tempfile::tempdir().unwrap();
     let id = test_support::unique_tree_id();
-    let (parked, ready) = mpsc::channel();
-    let (release, released) = mpsc::channel();
     let store = Arc::new(ParkedCapacityStore {
         inner: crate::tree::MemoryTreeStore::new(),
         full: AtomicBool::new(false),
-        parked: Mutex::new(Some(parked)),
-        release: Mutex::new(released),
     });
     let runtime = insert_root_with(
         id.clone(),
@@ -108,36 +79,46 @@ async fn detached_capacity_refused_resume_publishes_live_then_rolls_back_paused(
         store.clone(),
         None,
     )
+    .await
     .unwrap();
-    runtime.driver().bind_storage_shutdown(store.shutdown_probe());
+    let host = crate::tools::HostShutdown::new();
+    runtime.driver().bind_host_shutdown(host.clone());
     assert_eq!(hub_tree_is_restored_paused(&id), Some(true));
     store.full.store(true, Ordering::Release);
-    std::thread::scope(|scope| {
-        let release = ReleaseOnDrop(release);
-        let writer = runtime.clone();
-        let task = scope.spawn(move || {
-            let driver = writer.driver();
-            let mut tree = driver.lock().unwrap();
-            driver.fold_and_commit_guarded(&mut tree, ProductAgentTree::resume_tree)
-        });
-        ready.recv_timeout(Duration::from_secs(30)).unwrap();
-        assert!(runtime.driver().storage_unavailable());
-        let state = runtime.read(|tree| tree.state).unwrap();
-        assert_eq!(
-            state,
-            TreeAdmissionState::Live,
-            "the guard released the resumed live image"
-        );
-        assert_eq!(
-            hub_tree_is_restored_paused(&id),
-            Some(state == TreeAdmissionState::RestoredPaused)
-        );
-        drop(release);
-        assert_eq!(
-            task.join().unwrap().unwrap_err().code,
-            crate::protocol::TopologyErrorCode::RecoveryStorageUnavailable
-        );
+    let writer = runtime.clone();
+    let task = tokio::spawn(async move {
+        let driver = writer.driver().clone();
+        let folding = driver.clone();
+        driver
+            .write(move |tree| folding.fold_and_commit_guarded(tree, ProductAgentTree::resume_tree))
+            .await
+            .unwrap()
     });
+    // The writer parks on the refused publication, holding a detached copy.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !runtime.driver().storage_unavailable() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(runtime.driver().storage_unavailable());
+    let state = runtime.read(|tree| tree.state).unwrap();
+    assert_eq!(
+        state,
+        TreeAdmissionState::Live,
+        "the guard released the resumed live image"
+    );
+    assert_eq!(
+        hub_tree_is_restored_paused(&id),
+        Some(state == TreeAdmissionState::RestoredPaused)
+    );
+    // The host's shutdown ends the park.
+    host.signal();
+    assert_eq!(
+        task.await.unwrap().unwrap_err().code,
+        crate::protocol::TopologyErrorCode::RecoveryStorageUnavailable
+    );
     assert_eq!(
         runtime.read(|tree| tree.state).unwrap(),
         TreeAdmissionState::RestoredPaused
@@ -176,6 +157,7 @@ async fn live_admission_readers_do_not_mistake_tree_contention_for_pause() {
         test_support::bootstrap(&id, root.path().to_owned()),
         None,
     )
+    .await
     .unwrap();
     with_tree_locked(&runtime, || {
         assert_eq!(hub_tree_is_restored_paused(&id), Some(false));
@@ -193,35 +175,42 @@ async fn paused_admission_is_visible_under_contention_and_tracks_resume() {
         test_support::bootstrap(&id, root.path().to_owned()),
         None,
     )
+    .await
     .unwrap();
     // Startup legitimately lifts a singleton's restored pause. Install the
     // paused state after startup so this test exercises the attached reader.
-    runtime.driver().lock().unwrap().state = TreeAdmissionState::RestoredPaused;
+    runtime
+        .driver()
+        .locked_for_test(|tree| tree.state = TreeAdmissionState::RestoredPaused);
     with_tree_locked(&runtime, || {
         assert_eq!(hub_tree_is_restored_paused(&id), Some(true));
         assert!(is_restored_paused(&id));
     });
     // Internal guarded changes and detached public mutations must both
     // publish the final state, including a transition back to a real pause.
-    runtime.driver().lock().unwrap().state = TreeAdmissionState::Live;
+    runtime
+        .driver()
+        .locked_for_test(|tree| tree.state = TreeAdmissionState::Live);
     with_tree_locked(&runtime, || {
         assert_eq!(hub_tree_is_restored_paused(&id), Some(false));
     });
     let ((), effects) = runtime
         .driver()
         .mutate(|tree| tree.state = TreeAdmissionState::RestoredPaused)
+        .await
         .unwrap();
     assert!(effects.is_empty());
-    runtime.driver().settle(effects).unwrap();
+    runtime.driver().settle(effects).await.unwrap();
     with_tree_locked(&runtime, || {
         assert_eq!(hub_tree_is_restored_paused(&id), Some(true));
     });
     let ((), effects) = runtime
         .driver()
         .mutate(|tree| tree.state = TreeAdmissionState::Live)
+        .await
         .unwrap();
     assert!(effects.is_empty());
-    runtime.driver().settle(effects).unwrap();
+    runtime.driver().settle(effects).await.unwrap();
     with_tree_locked(&runtime, || {
         assert_eq!(hub_tree_is_restored_paused(&id), Some(false));
     });

@@ -3,12 +3,17 @@
 use super::*;
 
 /// One tree with its store and its VCS port: the engine every tree mutation
-/// runs on. [`Self::mutate`] locks and applies; the effects the
+/// runs on. [`Self::mutate`] queues one writer and applies; the effects the
 /// mutation queued come out with the result and [`Self::settle`] runs them
-/// with the mutex released, re-locking once to record them and publish.
+/// with the mutex released, writing once more to record them and publish.
 /// [`Self::save`] is the fenced whole-tree publish. The guard a caller sees
 /// inside `mutate` is the tree alone — it offers no VCS, so a subprocess
 /// under the lock is not expressible here.
+///
+/// Writers run one at a time in the order they asked, each on a blocking
+/// worker; a capacity-refused publication parks in the async caller, raced
+/// against its agent's cancellation and the tree's shutdown. [`Self::read`]
+/// and [`Self::try_read`] read the live tree throughout.
 #[derive(Clone)]
 pub struct TreeDriver {
     /// The tree under its one mutex.
@@ -34,21 +39,59 @@ pub struct TreeDriver {
     pub(crate) retirement_faults: tokio::sync::broadcast::Sender<(String, String)>,
     pub(super) observer: Option<Arc<dyn TopologyObserver>>,
     next_reclaim_probe: Arc<Mutex<u64>>,
-    storage_waiting: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the tree's store is refusing publications for capacity.
+    storage_waiting: Arc<tokio::sync::watch::Sender<bool>>,
     // Readers must not infer admission state from a busy tree mutex. Every
     // mutation guard installs this predicate before releasing the live tree.
     restored_paused: Arc<std::sync::atomic::AtomicBool>,
-    mutation_owner: Arc<Mutex<()>>,
+    writer: Arc<storage::TreeWriter>,
     storage_parking: Arc<storage::StorageParking>,
-    /// The shutdown of the host that attached this tree, bound once.
-    host_shutdown: Arc<std::sync::OnceLock<StorageShutdown>>,
+    /// The agent a publication waits for when no other owner is named.
+    root_agent_id: Arc<str>,
+    /// The shutdown of the host that attached this tree last.
+    host_shutdown: Arc<Mutex<Option<HostShutdown>>>,
     publication_owner: Option<String>,
     capacity_retry_interval: std::time::Duration,
     checkout_sizes: Arc<Mutex<std::collections::BTreeMap<String, CheckoutSize>>>,
 }
 
 type RetirementRecovery = Arc<dyn Fn() + Send + Sync>;
-type StorageShutdown = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// One writer turn's work, with its result already handed off.
+type ErasedWork = Box<dyn FnOnce(&mut storage::TreeMutationGuard<'_>) + Send>;
+
+/// A host's shutdown, latched once signalled: a tree writer waiting on a
+/// storage outage selects on it rather than polling.
+#[derive(Clone, Debug, Default)]
+pub struct HostShutdown(tokio_util::sync::CancellationToken);
+
+impl HostShutdown {
+    /// A signal not yet raised.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Raises the signal; it stays raised.
+    pub fn signal(&self) {
+        self.0.cancel();
+    }
+
+    /// Whether the signal was raised.
+    #[must_use]
+    pub fn is_signalled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+}
+
+/// How a writer waits for its turn.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Turn {
+    /// Gives up while queued once its publication would be refused anyway.
+    Abandonable,
+    /// Owed work: waits for its turn whatever was cancelled.
+    Owed,
+}
 
 struct CheckoutSize {
     generation: u64,
@@ -116,6 +159,27 @@ impl TreeDriver {
         self.capacity_retry_interval = std::time::Duration::ZERO;
     }
 
+    /// Runs `work` as this tree's writer on the calling thread, for a test
+    /// with no other writer. A capacity refusal inside it is not parked.
+    ///
+    /// # Panics
+    ///
+    /// Panics when another writer holds the tree or the tree is poisoned.
+    #[cfg(test)]
+    pub(crate) fn locked_for_test<R>(
+        &self,
+        work: impl FnOnce(&mut storage::TreeMutationGuard<'_>) -> R,
+    ) -> R {
+        let _permit = self
+            .writer
+            .order()
+            .try_lock_owned()
+            .unwrap_or_else(|_| panic!("a synchronous test runs with no other writer"));
+        let mut tree = storage::TreeMutationGuard::lock(&self.tree, &self.restored_paused)
+            .unwrap_or_else(|()| panic!("topology tree lock is poisoned"));
+        work(&mut tree)
+    }
+
     /// Binds `tree` to `store` and `vcs`, installing `vcs` as the tree's own
     /// port so the mint inside `spawn_agent` and the effects run here drive
     /// one implementation. Reopen-owned base-pin reconciliation completes
@@ -153,11 +217,15 @@ impl TreeDriver {
                 guard.complete(completed);
             }
         }
-        let restored_paused = tree
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .state
-            == crate::tree::TreeAdmissionState::RestoredPaused;
+        let (restored_paused, root_agent_id) = {
+            let tree = tree
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                tree.state == crate::tree::TreeAdmissionState::RestoredPaused,
+                Arc::from(tree.root_agent_id.as_str()),
+            )
+        };
         Self {
             tree,
             store,
@@ -170,10 +238,11 @@ impl TreeDriver {
             retirement_faults: tokio::sync::broadcast::channel(64).0,
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
-            storage_waiting: Arc::default(),
+            storage_waiting: Arc::new(tokio::sync::watch::Sender::new(false)),
             restored_paused: Arc::new(std::sync::atomic::AtomicBool::new(restored_paused)),
-            mutation_owner: Arc::default(),
+            writer: Arc::default(),
             storage_parking: Arc::default(),
+            root_agent_id,
             host_shutdown: Arc::default(),
             publication_owner: None,
             capacity_retry_interval: std::time::Duration::from_secs(5),
@@ -216,32 +285,34 @@ impl TreeDriver {
         })
         .await
         .map_err(|_| Self::lock_poisoned())??;
-        let (owners, effects) = self.mutate(|tree| {
-            let snapshot = tree.clone();
-            match tree.reclaim_dormant(now, &sizes).and_then(|owners| {
-                if tree.revision != tree.stored_revision || !owners.is_empty() {
-                    self.save(tree)?;
+        let driver = self.clone();
+        let (owners, effects) = self
+            .mutate(move |tree| {
+                let snapshot = tree.clone();
+                match tree.reclaim_dormant(now, &sizes).and_then(|owners| {
+                    if tree.revision != tree.stored_revision || !owners.is_empty() {
+                        driver.save(tree)?;
+                    }
+                    Ok(owners)
+                }) {
+                    Ok(owners) => Ok(owners),
+                    Err(error) => {
+                        *tree = snapshot;
+                        Err(error)
+                    }
                 }
-                Ok(owners)
-            }) {
-                Ok(owners) => Ok(owners),
-                Err(error) => {
-                    *tree = snapshot;
-                    Err(error)
-                }
-            }
-        })?;
+            })
+            .await?;
         let owners = owners?;
         if let Err(error) = self.stop_agent_jobs(&owners).await {
             // No VCS effect was dispatched. Release only process-local
             // claims so the acknowledged intent survives for recovery.
-            let _ = self.mutate(ProductAgentTree::abandon_reclamation_dispatch);
+            let _ = self
+                .mutate(ProductAgentTree::abandon_reclamation_dispatch)
+                .await;
             return Err(error);
         }
-        let driver = self.clone();
-        let settled = tokio::task::spawn_blocking(move || driver.settle(effects))
-            .await
-            .map_err(|_| Self::lock_poisoned())??;
+        let settled = self.settle(effects).await?;
         if let Some(error) = settled.cleanup_failures.into_iter().next() {
             return Err(error);
         }
@@ -254,19 +325,22 @@ impl TreeDriver {
         &self,
         sessions: &plakous::sessions::AgentSessions,
     ) -> Result<(), TopologyError> {
-        let (tickets, _) = self.mutate(|tree| {
-            let snapshot = tree.clone();
-            match tree
-                .prepare_child_retention(plakous::model::now_unix_millis())
-                .and_then(|tickets| self.save(tree).map(|()| tickets))
-            {
-                Ok(tickets) => Ok(tickets),
-                Err(error) => {
-                    *tree = snapshot;
-                    Err(error)
+        let driver = self.clone();
+        let (tickets, _) = self
+            .mutate(move |tree| {
+                let snapshot = tree.clone();
+                match tree
+                    .prepare_child_retention(plakous::model::now_unix_millis())
+                    .and_then(|tickets| driver.save(tree).map(|()| tickets))
+                {
+                    Ok(tickets) => Ok(tickets),
+                    Err(error) => {
+                        *tree = snapshot;
+                        Err(error)
+                    }
                 }
-            }
-        })?;
+            })
+            .await?;
         for ticket in tickets? {
             self.stop_agent_jobs(std::slice::from_ref(&ticket.agent_id))
                 .await?;
@@ -303,15 +377,18 @@ impl TreeDriver {
                     }
                 }
             }
-            let (finished, _) = self.mutate(|tree| {
-                self.fold_and_commit(tree, |tree| tree.finish_child_retention(&ticket))
-            })?;
+            let driver = self.clone();
+            let (finished, _) = self
+                .mutate(move |tree| {
+                    driver.fold_and_commit(tree, |tree| tree.finish_child_retention(&ticket))
+                })
+                .await?;
             finished?;
         }
-        self.cleanup_candidate_pins()
+        self.cleanup_candidate_pins().await
     }
 
-    fn cleanup_candidate_pins(&self) -> Result<(), TopologyError> {
+    async fn cleanup_candidate_pins(&self) -> Result<(), TopologyError> {
         let pending = self.read(ProductAgentTree::pending_pin_cleanup)??;
         let (namespace, launch, vcs) = self.read(|tree| {
             (
@@ -321,18 +398,32 @@ impl TreeDriver {
             )
         })?;
         for ticket in pending {
-            for candidate in &ticket.candidates {
-                vcs.unpin(&launch, &namespace, candidate.as_str())
-                    .map_err(|_| {
-                        TopologyError::new(
-                            TopologyErrorCode::WorkspaceRecoveryRequired,
-                            "collected candidate pin cleanup remains pending; intent retained",
-                        )
-                    })?;
+            let unpinned = {
+                let (vcs, launch, namespace, candidates) = (
+                    vcs.clone(),
+                    launch.clone(),
+                    namespace.clone(),
+                    ticket.candidates.clone(),
+                );
+                tokio::task::spawn_blocking(move || {
+                    candidates.iter().try_for_each(|candidate| {
+                        vcs.unpin(&launch, &namespace, candidate.as_str())
+                    })
+                })
+                .await
+            };
+            if !matches!(unpinned, Ok(Ok(()))) {
+                return Err(TopologyError::new(
+                    TopologyErrorCode::WorkspaceRecoveryRequired,
+                    "collected candidate pin cleanup remains pending; intent retained",
+                ));
             }
-            let (finished, _) = self.mutate(|tree| {
-                self.fold_and_commit(tree, |tree| tree.acknowledge_pin_cleanup(&ticket))
-            })?;
+            let driver = self.clone();
+            let (finished, _) = self
+                .mutate(move |tree| {
+                    driver.fold_and_commit(tree, |tree| tree.acknowledge_pin_cleanup(&ticket))
+                })
+                .await?;
             finished?;
         }
         Ok(())
@@ -404,9 +495,7 @@ impl TreeDriver {
                     return std::task::Poll::Ready(None);
                 }
                 for index in 0..tasks.len() {
-                    if let std::task::Poll::Ready(joined) =
-                        Pin::new(&mut tasks[index]).poll(cx)
-                    {
+                    if let std::task::Poll::Ready(joined) = Pin::new(&mut tasks[index]).poll(cx) {
                         tasks.swap_remove(index);
                         return std::task::Poll::Ready(Some(joined));
                     }
@@ -511,19 +600,25 @@ impl TreeDriver {
             .map(|(id, error)| format!("{id}: {error}"))
             .collect::<Vec<_>>()
             .join("; ");
-        let mut tree = self.lock()?;
-        let mut recorded = false;
-        for (id, error) in failures {
-            recorded |= tree
-                .record_host_retirement_for_attempt(
-                    &id,
-                    expected.get(&id).and_then(Option::as_ref),
-                    error,
-                )
-                .and_then(|value| self.apply_recorded_guarded(&mut tree, &id).map(|()| value))?;
-        }
-        self.save_guarded(&mut tree)?;
-        drop(tree);
+        let driver = self.clone();
+        let recorded = self
+            .write(move |tree| {
+                let mut recorded = false;
+                for (id, error) in failures {
+                    recorded |= tree
+                        .record_host_retirement_for_attempt(
+                            &id,
+                            expected.get(&id).and_then(Option::as_ref),
+                            error,
+                        )
+                        .and_then(|value| {
+                            driver.apply_recorded_guarded(tree, &id).map(|()| value)
+                        })?;
+                }
+                driver.save_guarded(tree)?;
+                Ok::<_, TopologyError>(recorded)
+            })
+            .await??;
         if recorded {
             self.request_retirement_recovery();
         }
@@ -540,14 +635,227 @@ impl TreeDriver {
         )
     }
 
-    /// The tree's guard, for a read that queues nothing.
+    /// Runs `work` as this tree's next writer, after every writer that asked
+    /// before it, on a blocking worker with the live tree as its guard. The
+    /// guard detaches lazily, on its first capacity-refused save.
+    ///
+    /// While queued, a writer gives up only when the tree cannot publish and
+    /// its agent was cancelled or the tree or its host is shutting down: it
+    /// would park at once. A capacity-refused save inside `work` parks here,
+    /// in the caller, raced against the same signals; dropping this future
+    /// stops the park, but `work` itself runs to its end and keeps the tree
+    /// until then.
     ///
     /// # Errors
     ///
-    /// Refuses when the tree mutex is poisoned.
-    pub(crate) fn lock(&self) -> Result<storage::TreeMutationGuard<'_>, TopologyError> {
-        storage::TreeMutationGuard::lock(&self.tree, &self.mutation_owner, &self.restored_paused)
-            .map_err(|()| Self::lock_poisoned())
+    /// Refuses when the tree is poisoned, or when a queued writer gives up.
+    pub(crate) async fn write<R, W>(&self, work: W) -> Result<R, TopologyError>
+    where
+        W: FnOnce(&mut storage::TreeMutationGuard<'_>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.write_turn(work, |_, _| {}, Turn::Abandonable).await
+    }
+
+    /// [`Self::write`] for work that is owed: a process-local release or an
+    /// effect's completion. It waits for its turn whatever was cancelled, so
+    /// what it releases or records is never stranded; only a publication
+    /// inside it can be refused.
+    pub(crate) async fn write_owed<R, W>(&self, work: W) -> Result<R, TopologyError>
+    where
+        W: FnOnce(&mut storage::TreeMutationGuard<'_>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.write_turn(work, |_, _| {}, Turn::Owed).await
+    }
+
+    /// [`Self::write`], for work whose result claims process-local state the
+    /// caller must release: when the caller is gone by the time `work`
+    /// returns, `undo` gets the result in the same writer turn instead, and
+    /// a result the caller dropped unread gets it as the next writer.
+    pub(crate) async fn write_or_undo<R, W, U>(&self, work: W, undo: U) -> Result<R, TopologyError>
+    where
+        W: FnOnce(&mut storage::TreeMutationGuard<'_>) -> R + Send + 'static,
+        U: Fn(&mut storage::TreeMutationGuard<'_>, R) + Send + Sync + 'static,
+        R: Send + 'static,
+    {
+        self.write_turn(work, undo, Turn::Abandonable).await
+    }
+
+    /// The typed face of [`Self::write_erased`]: only the work, its result
+    /// hand-off and its undo are generic, so each caller's closure does not
+    /// instantiate the writer's queue, park loop and blocking task again.
+    async fn write_turn<R, W, U>(&self, work: W, undo: U, turn: Turn) -> Result<R, TopologyError>
+    where
+        W: FnOnce(&mut storage::TreeMutationGuard<'_>) -> R + Send + 'static,
+        U: Fn(&mut storage::TreeMutationGuard<'_>, R) + Send + Sync + 'static,
+        R: Send + 'static,
+    {
+        let undo = Arc::new(undo);
+        let (deliver, delivered) = tokio::sync::oneshot::channel();
+        let mut delivered = Unread {
+            result: Some(delivered),
+            on_unread: Some({
+                let (driver, undo) = (self.clone(), Arc::clone(&undo));
+                Box::new(move |result: R| {
+                    driver.undo_as_next_writer(Box::new(move |tree| (*undo)(tree, result)));
+                })
+            }),
+        };
+        let work: ErasedWork = Box::new(move |tree| {
+            let result = work(tree);
+            if let Err(result) = deliver.send(result) {
+                (*undo)(tree, result);
+            }
+        });
+        self.write_erased(work, turn).await?;
+        delivered.take().await.map_err(|_| Self::lock_poisoned())
+    }
+
+    /// Runs `undo` as the tree's next writer, on a blocking worker: an undo
+    /// never saves, so it needs no park.
+    fn undo_as_next_writer(&self, undo: ErasedWork) {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+        let driver = self.clone();
+        drop(tokio::task::spawn_blocking(move || {
+            let _permit = driver.writer.order().blocking_lock_owned();
+            if let Ok(mut tree) =
+                storage::TreeMutationGuard::lock(&driver.tree, &driver.restored_paused)
+            {
+                undo(&mut tree);
+            }
+        }));
+    }
+
+    /// Waits for the writer's turn as `turn` says, then runs `work` on a
+    /// blocking worker, waiting out any capacity park it hands back here.
+    async fn write_erased(&self, work: ErasedWork, turn: Turn) -> Result<(), TopologyError> {
+        if self.writer.is_poisoned() {
+            return Err(Self::lock_poisoned());
+        }
+        // The host this request was made for, as the tree knows it now.
+        let host = self.host_shutdown_signal();
+        let queued = self.storage_parking.begin(self.publication_agent());
+        let permit = match turn {
+            Turn::Owed => self.writer.order().lock_owned().await,
+            Turn::Abandonable => self.queue_writer(queued.token(), host.as_ref()).await?,
+        };
+        drop(queued);
+        let (parks, mut parked) = tokio::sync::mpsc::unbounded_channel();
+        let driver = self.clone();
+        let mut running = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _writer = driver.writer.enter(parks);
+            let mut tree = storage::TreeMutationGuard::lock(&driver.tree, &driver.restored_paused)
+                .map_err(|()| Self::lock_poisoned())?;
+            work(&mut tree);
+            Ok::<_, TopologyError>(())
+        });
+        loop {
+            let finished = match select(&mut running, Box::pin(parked.recv())).await {
+                Either::Left((finished, _)) => finished,
+                Either::Right((Some(park), _)) => {
+                    let retry = self.park(&park.token, host.as_ref()).await;
+                    let _ = park.resume.send(retry);
+                    continue;
+                }
+                Either::Right((None, running)) => running.await,
+            };
+            return match finished {
+                Ok(result) => result,
+                Err(error) if error.is_panic() => {
+                    self.writer.poison();
+                    Err(Self::lock_poisoned())
+                }
+                // The runtime is shutting down under the writer: nothing ran
+                // to its end that a retry could not run again.
+                Err(_) => Err(TopologyError::new(
+                    TopologyErrorCode::RecoveryStorageUnavailable,
+                    "the tree writer was cancelled with its runtime",
+                )),
+            };
+        }
+    }
+
+    fn publication_agent(&self) -> &str {
+        self.publication_owner
+            .as_deref()
+            .unwrap_or(&self.root_agent_id)
+    }
+
+    /// Waits for this writer's turn, giving up only once the tree cannot
+    /// publish while the agent, the tree or the host is stopping.
+    async fn queue_writer(
+        &self,
+        cancelled: &tokio_util::sync::CancellationToken,
+        host: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, TopologyError> {
+        let order = self.writer.order();
+        let mut turn = Box::pin(order.lock_owned());
+        let mut stopping = Box::pin(self.stopping(cancelled, host));
+        let mut unavailable = self.storage_waiting.subscribe();
+        // Before the stop is signalled, only it or the turn can end the wait.
+        match select(&mut turn, &mut stopping).await {
+            Either::Left((permit, _)) => return Ok(permit),
+            Either::Right(((), _)) => {}
+        }
+        loop {
+            if *unavailable.borrow_and_update() {
+                return Err(TopologyError::new(
+                    TopologyErrorCode::RecoveryStorageUnavailable,
+                    "tree publication stopped while queued behind a storage outage",
+                ));
+            }
+            match select(&mut turn, Box::pin(unavailable.changed())).await {
+                Either::Left((permit, _)) => return Ok(permit),
+                Either::Right((Ok(()), _)) => {}
+                Either::Right((Err(_), _)) => return Ok(turn.await),
+            }
+        }
+    }
+
+    /// One capacity park: `true` to retry the save after the interval,
+    /// `false` once the write's agent was cancelled or the tree or its host
+    /// is shutting down.
+    async fn park(
+        &self,
+        cancelled: &tokio_util::sync::CancellationToken,
+        host: Option<&tokio_util::sync::CancellationToken>,
+    ) -> bool {
+        if cancelled.is_cancelled()
+            || self.storage_parking.stopped().is_cancelled()
+            || host.is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
+        {
+            return false;
+        }
+        let interval = Box::pin(tokio::time::sleep(self.capacity_retry_interval));
+        matches!(
+            select(interval, Box::pin(self.stopping(cancelled, host))).await,
+            Either::Left(_)
+        )
+    }
+
+    /// Resolves once the write's agent is cancelled or the tree or its host
+    /// is shutting down: latched signals, so it never polls.
+    async fn stopping(
+        &self,
+        cancelled: &tokio_util::sync::CancellationToken,
+        host: Option<&tokio_util::sync::CancellationToken>,
+    ) {
+        let host = async {
+            match host {
+                Some(host) => host.cancelled().await,
+                None => std::future::pending().await,
+            }
+        };
+        let tree = self.storage_parking.stopped().cancelled();
+        let _ = select(
+            Box::pin(cancelled.cancelled()),
+            select(Box::pin(tree), Box::pin(host)),
+        )
+        .await;
     }
 
     pub(crate) fn is_restored_paused(&self) -> bool {
@@ -573,7 +881,7 @@ impl TreeDriver {
     ///
     /// Refuses when the tree mutex is poisoned.
     pub fn read<R>(&self, work: impl FnOnce(&ProductAgentTree) -> R) -> Result<R, TopologyError> {
-        if self.mutation_owner.is_poisoned() {
+        if self.writer.is_poisoned() {
             return Err(Self::lock_poisoned());
         }
         let tree = self.tree.lock().map_err(|_| Self::lock_poisoned())?;
@@ -585,7 +893,7 @@ impl TreeDriver {
     /// `None` when the tree is locked or poisoned — a caller rendering a view
     /// would rather skip a frame than block behind a turn.
     pub fn try_read<R>(&self, work: impl FnOnce(&ProductAgentTree) -> R) -> Option<R> {
-        if self.mutation_owner.is_poisoned() {
+        if self.writer.is_poisoned() {
             return None;
         }
         let tree = self.tree.try_lock().ok()?;
@@ -600,22 +908,73 @@ impl TreeDriver {
         &self.tree
     }
 
-    /// Locks the tree, applies `work`, and takes the effects it queued.
+    /// Runs `work` as the tree's next writer and takes the effects it queued.
     ///
     /// Clones the whole tree on every call so a callback that publishes can
     /// park without holding the live tree mutex. Internal guarded mutations
-    /// instead detach lazily on their first capacity-refused save.
-    pub fn mutate<R>(
-        &self,
-        work: impl FnOnce(&mut ProductAgentTree) -> R,
-    ) -> Result<(R, Effects), TopologyError> {
-        let mut tree = self.lock()?;
-        // The callback receives a plain prepared tree and can publish it.
-        // Unlike the internal guarded path, its borrow cannot release a lock.
-        tree.detach();
-        let result = work(&mut tree);
-        let effects = tree.take_effects();
-        Ok((result, effects))
+    /// instead detach lazily on their first capacity-refused save. `work` is
+    /// a message: it owns what it uses and runs on a blocking worker.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a poisoned tree, or a queued writer that gave up.
+    pub async fn mutate<R, W>(&self, work: W) -> Result<(R, Effects), TopologyError>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.mutate_turn(work, Turn::Abandonable).await
+    }
+
+    /// [`Self::mutate`] for owed work, such as releasing a process-local
+    /// registration: it waits for its turn whatever was cancelled.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a poisoned tree.
+    pub async fn mutate_owed<R, W>(&self, work: W) -> Result<(R, Effects), TopologyError>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.mutate_turn(work, Turn::Owed).await
+    }
+
+    async fn mutate_turn<R, W>(&self, work: W, turn: Turn) -> Result<(R, Effects), TopologyError>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let owner = self.clone();
+        self.write_turn(
+            move |tree| {
+                // The callback receives a plain prepared tree and can publish it.
+                // Unlike the internal guarded path, its borrow cannot release a lock.
+                tree.detach();
+                let result = work(tree);
+                let effects = tree.take_effects();
+                (result, effects)
+            },
+            // A caller gone before its effects reached it leaves them to a
+            // release owner, which settles them.
+            move |_, (_, effects): (R, Effects)| owner.settle_detached(effects),
+            turn,
+        )
+        .await
+    }
+
+    /// Settles `effects` no caller is left to settle, as a release owner.
+    pub(crate) fn settle_detached(&self, effects: Effects) {
+        if effects.is_empty() {
+            return;
+        }
+        let driver = self.clone();
+        drop(self.spawn_release_owner(async move {
+            if let Err(error) = driver.settle(effects).await {
+                tracing::error!(target: "plak.topology", code = ?error.code,
+                    "effects settled for a departed caller were refused");
+            }
+        }));
     }
 
     /// One mutation, settled: applies `work`, then runs everything it queued
@@ -629,16 +988,31 @@ impl TreeDriver {
     ///
     /// Refuses a poisoned mutex, and reports the first save error the drain
     /// hit after every effect the port ran has been recorded.
-    pub fn mutate_and_settle<R>(
-        &self,
-        work: impl FnOnce(&mut ProductAgentTree) -> R,
-    ) -> Result<(R, Settled), TopologyError> {
-        let (result, effects) = self.mutate(|tree| {
-            let result = work(tree);
-            self.save(tree).map(|()| result)
-        })?;
+    pub async fn mutate_and_settle<R, W>(&self, work: W) -> Result<(R, Settled), TopologyError>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        // A release owner: a caller that leaves mid-way strands no effect.
+        let driver = self.clone();
+        self.owned(async move { driver.mutate_and_settle_here(work).await })
+            .await
+    }
+
+    async fn mutate_and_settle_here<R, W>(&self, work: W) -> Result<(R, Settled), TopologyError>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let driver = self.clone();
+        let (result, effects) = self
+            .mutate(move |tree| {
+                let result = work(tree);
+                driver.save(tree).map(|()| result)
+            })
+            .await?;
         let result = result?;
-        let settled = self.settle(effects)?;
+        let settled = self.settle_here(effects).await?;
         Ok((result, settled))
     }
 
@@ -649,66 +1023,135 @@ impl TreeDriver {
     /// them. Every effect already run is recorded before reporting the error.
     /// Destructive removal requires an acknowledged preparation; a refused
     /// preparation retains the copy and records recovery without dispatch.
-    pub fn settle(&self, mut effects: Effects) -> Result<Settled, TopologyError> {
+    ///
+    /// The port runs on a blocking worker; each recording is one writer.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a poisoned tree, effects without an acknowledged revision,
+    /// and reports the first save error after recording every run effect.
+    pub async fn settle(&self, effects: Effects) -> Result<Settled, TopologyError> {
+        if effects.is_empty() {
+            return Ok(Settled::default());
+        }
+        // A release owner: a caller that leaves mid-way strands no effect.
+        let driver = self.clone();
+        self.owned(async move { driver.settle_here(effects).await })
+            .await
+    }
+
+    /// Runs `work` as a release owner and waits for it: a caller that leaves
+    /// leaves it running.
+    pub(crate) async fn owned<T, F>(&self, work: F) -> Result<T, TopologyError>
+    where
+        F: Future<Output = Result<T, TopologyError>> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.spawn_release_owner(work).await.map_err(|_| {
+            TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "the tree's release owner failed",
+            )
+        })?
+    }
+
+    /// [`Self::settle`] on the calling task, for a caller that already is
+    /// a release owner.
+    pub(crate) async fn settle_here(&self, mut effects: Effects) -> Result<Settled, TopologyError> {
         let mut settled = Settled::default();
         let mut first_save_error = None;
         while !effects.is_empty() {
-            let refused = {
-                let tree = self.lock()?;
-                if tree.revision != tree.stored_revision
-                    && (!effects.base_pins.is_empty()
-                        || !effects.refreshes.is_empty()
-                        || !effects.seals.is_empty()
-                        || !effects.adopts.is_empty()
-                        || !effects.dormancy.is_empty())
-                {
-                    return Err(TopologyError::new(
+            let (admitted, refused) = self
+                .write_owed(move |tree| {
+                    let refused = Self::admit_settled_effects(tree, &mut effects)?;
+                    Ok::<_, TopologyError>((effects, refused))
+                })
+                .await??;
+            let vcs = Arc::clone(&self.vcs);
+            let mut completed = tokio::task::spawn_blocking(move || admitted.run(vcs.as_ref()))
+                .await
+                .map_err(|_| {
+                    TopologyError::new(
                         TopologyErrorCode::OperationRecoveryRequired,
-                        "seal and adopt effects require an acknowledged revision",
-                    ));
-                }
-                let mut refused = Vec::new();
-                effects.unmints.retain(|ticket| {
-                    let admitted = tree.revision == tree.stored_revision
-                        && ticket.workspace_id.as_deref().is_some_and(|id| {
-                            tree.workspace(id).is_some_and(|row| {
-                                row.status == crate::protocol::WorkspaceStatus::Discarding
-                                    && row.path == ticket.path
-                            })
-                        })
-                        && ticket.operation_id.as_deref().is_none_or(|id| {
-                            tree.operations().get(id).is_some_and(|receipt| {
-                                receipt.terminal_response.is_none()
-                                    && receipt.terminal_code.is_none()
-                            })
-                        });
-                    if !admitted {
-                        refused.push(ticket.clone());
-                    }
-                    admitted
-                });
-                refused
-            };
-            let mut completed = effects.run(self.vcs.as_ref());
+                        "effects task failed",
+                    )
+                })?;
             completed.refuse_unpublished_unmints(refused);
-            let mut tree = self.lock()?;
-            let more = tree.complete(completed);
+            let driver = self.clone();
+            // Recorded whenever the turn comes: only the publication below
+            // may be refused.
+            let (more, next, save_error) = self
+                .write_owed(move |tree| {
+                    let more = tree.complete(completed);
+                    tree.lift_restored_pause_if_quiescent();
+                    if let Err(error) = driver.save_guarded(tree) {
+                        // No follow-on refresh write was dispatched. Keep its intent
+                        // for exact-state recovery rather than a stranded local hold.
+                        tree.abandon_queued_refresh_dispatches();
+                        // Completed effects remain recorded. Follow-on reservations
+                        // stay queued until a later successful publication.
+                        return (more, Effects::default(), Some(error));
+                    }
+                    (more, tree.take_effects(), None)
+                })
+                .await?;
             settled.adopts.extend(more.adopts);
             settled.hook_failures.extend(more.hook_failures);
             settled.seal_failures.extend(more.seal_failures);
             settled.cleanup_failures.extend(more.cleanup_failures);
-            tree.lift_restored_pause_if_quiescent();
-            if let Err(error) = self.save_guarded(&mut tree) {
+            if let Some(error) = save_error {
                 first_save_error = Some(error);
-                // No follow-on refresh write was dispatched. Keep its intent
-                // for exact-state recovery rather than a stranded local hold.
-                tree.abandon_queued_refresh_dispatches();
-                // Completed effects remain recorded. Follow-on reservations
-                // stay queued until a later successful publication.
                 break;
             }
-            effects = tree.take_effects();
+            effects = next;
         }
+        Self::settled_outcome(settled, first_save_error)
+    }
+
+    /// Refuses effects that need an acknowledged revision on an
+    /// unacknowledged tree, and takes the unmints the tree no longer admits.
+    fn admit_settled_effects(
+        tree: &ProductAgentTree,
+        effects: &mut Effects,
+    ) -> Result<Vec<crate::tree::UnmintTicket>, TopologyError> {
+        if tree.revision != tree.stored_revision
+            && (!effects.base_pins.is_empty()
+                || !effects.refreshes.is_empty()
+                || !effects.seals.is_empty()
+                || !effects.adopts.is_empty()
+                || !effects.dormancy.is_empty())
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "seal and adopt effects require an acknowledged revision",
+            ));
+        }
+        let mut refused = Vec::new();
+        effects.unmints.retain(|ticket| {
+            let admitted = tree.revision == tree.stored_revision
+                && ticket.workspace_id.as_deref().is_some_and(|id| {
+                    tree.workspace(id).is_some_and(|row| {
+                        row.status == crate::protocol::WorkspaceStatus::Discarding
+                            && row.path == ticket.path
+                    })
+                })
+                && ticket.operation_id.as_deref().is_none_or(|id| {
+                    tree.operations().get(id).is_some_and(|receipt| {
+                        receipt.terminal_response.is_none() && receipt.terminal_code.is_none()
+                    })
+                });
+            if !admitted {
+                refused.push(ticket.clone());
+            }
+            admitted
+        });
+        Ok(refused)
+    }
+
+    fn settled_outcome(
+        settled: Settled,
+        first_save_error: Option<TopologyError>,
+    ) -> Result<Settled, TopologyError> {
         match first_save_error {
             Some(error) => {
                 if let Some(seal) = settled.seal_failures.first() {
@@ -741,24 +1184,27 @@ impl TreeDriver {
         Arc::clone(&self.vcs)
     }
 
-    pub(crate) fn fold_startup(&self) -> Result<Effects, TopologyError> {
-        let mut tree = self.lock()?;
-        if tree.revision != tree.stored_revision {
-            self.save_guarded(&mut tree)?;
-        }
-        let targets = tree.startup_fold_targets();
-        let lift_pause = tree.state == crate::protocol::TreeAdmissionState::RestoredPaused
-            && tree.quiescence_refusal().is_none();
-        if targets.is_empty() && tree.pending_close_folds.is_empty() && !lift_pause {
-            return Ok(tree.take_effects());
-        }
-        self.fold_and_commit_guarded(&mut tree, |tree| {
-            for agent in targets {
-                tree.fold_due_in_place(&agent)?;
+    pub(crate) async fn fold_startup(&self) -> Result<Effects, TopologyError> {
+        let driver = self.clone();
+        self.write(move |tree| {
+            if tree.revision != tree.stored_revision {
+                driver.save_guarded(tree)?;
             }
-            Ok(())
-        })?;
-        Ok(tree.take_effects())
+            let targets = tree.startup_fold_targets();
+            let lift_pause = tree.state == crate::protocol::TreeAdmissionState::RestoredPaused
+                && tree.quiescence_refusal().is_none();
+            if targets.is_empty() && tree.pending_close_folds.is_empty() && !lift_pause {
+                return Ok(tree.take_effects());
+            }
+            driver.fold_and_commit_guarded(tree, |tree| {
+                for agent in targets {
+                    tree.fold_due_in_place(&agent)?;
+                }
+                Ok(())
+            })?;
+            Ok(tree.take_effects())
+        })
+        .await?
     }
 
     /// Whole-tree publish as the store's compare-and-swap:
@@ -766,6 +1212,9 @@ impl TreeDriver {
     /// since it was loaded. Always sent — an operation receipt lands
     /// without a revision bump — and always safe: an unchanged revision is
     /// a compare-and-swap hit only for the handle the store acknowledged.
+    ///
+    /// Call it inside [`Self::mutate`]: a capacity refusal parks only in a
+    /// writer; anywhere else it is returned at once.
     pub fn save(&self, tree: &mut ProductAgentTree) -> Result<(), TopologyError> {
         let owner = self
             .publication_owner
@@ -796,21 +1245,19 @@ impl TreeDriver {
         &self,
         tree: &mut ProductAgentTree,
         mut first: Option<Result<crate::tree::Revision, crate::tree::TreeStoreError>>,
-        wait: &storage::StorageWait<'_>,
+        wait: &storage::StorageWait,
     ) -> Result<(), TopologyError> {
         let acknowledged = loop {
             match first.take().unwrap_or_else(|| self.store.save(tree)) {
                 Ok(revision) => {
                     self.storage_waiting
-                        .store(false, std::sync::atomic::Ordering::Release);
+                        .send_if_modified(|waiting| std::mem::replace(waiting, false));
                     break revision;
                 }
                 Err(error) if error.kind == crate::tree::TreeStoreErrorKind::StorageFull => {
-                    if !self.storage_unavailable() {
-                        self.storage_waiting
-                            .store(true, std::sync::atomic::Ordering::Release);
-                    }
-                    if !wait.wait(self.capacity_retry_interval, || self.host_shutting_down()) {
+                    self.storage_waiting
+                        .send_if_modified(|waiting| !std::mem::replace(waiting, true));
+                    if !self.writer.park(wait.token()) {
                         return Err(error.into());
                     }
                 }
@@ -827,10 +1274,10 @@ impl TreeDriver {
     }
 
     /// Process-local publication pause, readable without taking the tree lock.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn storage_unavailable(&self) -> bool {
-        self.storage_waiting
-            .load(std::sync::atomic::Ordering::Acquire)
+        *self.storage_waiting.borrow()
     }
 
     /// Interrupts a capacity-refused publication, including a write whose
@@ -843,16 +1290,22 @@ impl TreeDriver {
         self.storage_parking.shutdown();
     }
 
-    /// Binds the shutdown of the host that attached this tree. A
-    /// capacity-refused publication stops waiting once it reports true. The
-    /// first binding holds for the tree's life; later attachments of the same
-    /// tree keep it.
-    pub fn bind_storage_shutdown(&self, probe: StorageShutdown) {
-        let _ = self.host_shutdown.set(probe);
+    /// Binds the shutdown of the host that attached this tree last. Each
+    /// writer takes the binding current when it asks for its turn, and stops
+    /// waiting for a refused publication once that host's signal is latched.
+    pub fn bind_host_shutdown(&self, signal: HostShutdown) {
+        *self
+            .host_shutdown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(signal);
     }
 
-    fn host_shutting_down(&self) -> bool {
-        self.host_shutdown.get().is_some_and(|probe| probe())
+    fn host_shutdown_signal(&self) -> Option<tokio_util::sync::CancellationToken> {
+        self.host_shutdown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|signal| signal.0.clone())
     }
 
     /// Applies consequences only to an acknowledged tree, and publishes them
@@ -930,7 +1383,7 @@ impl TreeDriver {
     ///
     /// # Errors
     /// Refuses a changed feed, another intent/effect, or a failed revision CAS.
-    pub fn withdraw_unstarted_followup(
+    pub async fn withdraw_unstarted_followup(
         &self,
         agent_id: &str,
         message_id: &str,
@@ -938,16 +1391,25 @@ impl TreeDriver {
         tail: u64,
         receipt: Option<(String, TopologyErrorCode)>,
     ) -> Result<(), TopologyError> {
-        let mut tree = self.lock().map_err(|_| {
+        let driver = self.clone();
+        let (agent_id, message_id, session_id) = (
+            agent_id.to_owned(),
+            message_id.to_owned(),
+            session_id.to_owned(),
+        );
+        self.write(move |tree| {
+            driver.fold_and_commit_guarded(tree, |tree| {
+                tree.withdraw_unstarted_followup(&agent_id, &message_id, &session_id, tail)?;
+                settle_followup_refusal(tree, &agent_id, &message_id, receipt)
+            })
+        })
+        .await
+        .map_err(|_| {
             TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
                 "tree lock is poisoned",
             )
-        })?;
-        self.fold_and_commit_guarded(&mut tree, |tree| {
-            tree.withdraw_unstarted_followup(agent_id, message_id, session_id, tail)?;
-            settle_followup_refusal(tree, agent_id, message_id, receipt)
-        })
+        })?
     }
 
     /// Publishes recorded host decisions before projecting their consequences.
@@ -1036,6 +1498,34 @@ pub(super) fn driver_for_tree(
         Err(TreeRuntimeError::new(format!(
             "topology tree {tree_id} is not attached to the hub; no store to persist it"
         )))
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+mod test_support;
+
+/// A writer's result on its way to its caller. Dropped unread, it hands the
+/// result to the writer's undo as the tree's next writer.
+struct Unread<R> {
+    result: Option<tokio::sync::oneshot::Receiver<R>>,
+    on_unread: Option<Box<dyn FnOnce(R) + Send>>,
+}
+
+impl<R> Unread<R> {
+    fn take(&mut self) -> tokio::sync::oneshot::Receiver<R> {
+        self.result
+            .take()
+            .unwrap_or_else(|| tokio::sync::oneshot::channel().1)
+    }
+}
+
+impl<R> Drop for Unread<R> {
+    fn drop(&mut self) {
+        if let (Some(mut result), Some(on_unread)) = (self.result.take(), self.on_unread.take())
+            && let Ok(result) = result.try_recv()
+        {
+            on_unread(result);
+        }
     }
 }
 

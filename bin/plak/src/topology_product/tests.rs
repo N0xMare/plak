@@ -1,12 +1,13 @@
 use super::*;
 use crate::product_config::ProductConfig;
+use plakous_hosted::runtime::test_kit::{BlockHere as _, BlockOn as _};
 
 use plakous_hosted::topology_runtime::test_support::{bootstrap, unique_tree_id};
 use plakous_hosted::topology_runtime::{force_release, insert_root, insert_root_with};
 
 /// Every test here writes the global scope; project-scope apply is
 /// covered by the product-config save tests.
-fn apply_roster(
+async fn apply_roster(
     paths: &crate::home::paths::PlakPaths,
     bind: Option<&RosterApplyRootBind>,
     config: &ProductConfig,
@@ -17,6 +18,7 @@ fn apply_roster(
         config,
         crate::product_config::ConfigWriteScope::User,
     )
+    .await
 }
 
 async fn stop_all_then_apply(
@@ -77,7 +79,9 @@ async fn headless_successor_epoch_and_a_live_hub_cannot_overwrite_each_other() {
         let mut genesis = bootstrap(tree_id, paths.home().to_path_buf());
         genesis.acknowledge_revision(store.save(&genesis).unwrap());
         let hub_copy = ProductAgentTree::reopen(store.load(tree_id).unwrap().unwrap());
-        insert_root_with(tree_id.to_owned(), hub_copy, Arc::clone(&store), None).unwrap()
+        insert_root_with(tree_id.to_owned(), hub_copy, Arc::clone(&store), None)
+            .block()
+            .unwrap()
     };
 
     // The headless process publishes first: the hub's next save is
@@ -147,7 +151,7 @@ async fn cli_prompt_resumes_restored_paused_tree() {
     )
     .unwrap();
     tree.restore_paused();
-    let runtime = insert_root(tree_id.clone(), tree, None).unwrap();
+    let runtime = insert_root(tree_id.clone(), tree, None).await.unwrap();
     assert_eq!(
         runtime.tree_handle_for_test().lock().unwrap().state,
         plakous_hosted::agent_tree::TreeAdmissionState::RestoredPaused
@@ -155,7 +159,7 @@ async fn cli_prompt_resumes_restored_paused_tree() {
     assert!(plakous_hosted::topology_runtime::is_restored_paused(
         &tree_id
     ));
-    resume_tree_for_cli_prompt(&paths, &tree_id).unwrap();
+    resume_tree_for_cli_prompt(&paths, &tree_id).await.unwrap();
     assert_eq!(
         runtime.tree_handle_for_test().lock().unwrap().state,
         plakous_hosted::agent_tree::TreeAdmissionState::Live
@@ -171,7 +175,9 @@ fn resume_tree_hub_miss_is_fail_closed() {
     let root = tempfile::tempdir().unwrap();
     let paths = crate::home::paths::PlakPaths::explicit(root.path().join("p"));
     paths.ensure_layout().unwrap();
-    let error = resume_tree_for_cli_prompt(&paths, "missing-tree").unwrap_err();
+    let error = resume_tree_for_cli_prompt(&paths, "missing-tree")
+        .block()
+        .unwrap_err();
     assert!(error.contains("missing from the hub"));
 }
 
@@ -284,20 +290,20 @@ async fn save_is_rejected_on_a_live_epoch_and_leaves_the_file_byte_identical() {
         None,
     )
     .unwrap();
-    let runtime = insert_root(tree_id.clone(), tree, None).unwrap();
+    let runtime = insert_root(tree_id.clone(), tree, None).await.unwrap();
 
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
 
     // Live descendants.
     assert_eq!(
-        apply_roster(&paths, Some(&bind(&tree_id, true)), &next),
+        apply_roster(&paths, Some(&bind(&tree_id, true)), &next).await,
         Err(RosterApplyError::Refused(
             RosterApplyRefusal::LiveDescendants
         ))
     );
     // Root busy is its own refusal.
     assert_eq!(
-        apply_roster(&paths, Some(&bind(&tree_id, false)), &next),
+        apply_roster(&paths, Some(&bind(&tree_id, false)), &next).await,
         Err(RosterApplyError::Refused(RosterApplyRefusal::RootBusy))
     );
     // Pending spawns and restored-paused are distinct strings.
@@ -314,7 +320,7 @@ async fn save_is_rejected_on_a_live_epoch_and_leaves_the_file_byte_identical() {
         tree.restore_paused();
     }
     assert_eq!(
-        apply_roster(&paths, Some(&bind(&tree_id, true)), &next),
+        apply_roster(&paths, Some(&bind(&tree_id, true)), &next).await,
         Err(RosterApplyError::Refused(
             RosterApplyRefusal::RestoredPaused
         ))
@@ -337,6 +343,7 @@ async fn a_terminal_tree_with_an_idle_root_applies_a_successor_epoch_at_once() {
         bootstrap(&tree_id, paths.home().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     let before = runtime
         .tree_handle_for_test()
@@ -347,7 +354,7 @@ async fn a_terminal_tree_with_an_idle_root_applies_a_successor_epoch_at_once() {
 
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
     assert_eq!(
-        apply_roster(&paths, Some(&bind(&tree_id, true)), &next),
+        apply_roster(&paths, Some(&bind(&tree_id, true)), &next).await,
         Ok(RosterApplyOutcome::Applied)
     );
 
@@ -384,6 +391,7 @@ async fn a_failed_write_installs_no_epoch() {
         crate::store::tree::tree_store(&paths).unwrap(),
         None,
     )
+    .await
     .unwrap();
 
     // An invalid roster never publishes and never installs an epoch.
@@ -391,7 +399,7 @@ async fn a_failed_write_installs_no_epoch() {
     invalid.working_set =
         plakous_hosted::agent_tree_protocol::WorkingSet::parse(["absent"]).expect("working set");
     assert!(matches!(
-        apply_roster(&paths, Some(&bind(&tree_id, true)), &invalid),
+        apply_roster(&paths, Some(&bind(&tree_id, true)), &invalid).await,
         Err(RosterApplyError::BeforePublication(_))
     ));
     assert!(!paths.config_file().is_file());
@@ -423,12 +431,12 @@ async fn stop_all_then_apply_closes_descendants_then_applies_the_same_save() {
             None,
         )
         .unwrap();
-    let runtime = insert_root(tree_id.clone(), tree, None).unwrap();
+    let runtime = insert_root(tree_id.clone(), tree, None).await.unwrap();
 
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
     // The plain save is fenced while the child is live.
     assert_eq!(
-        apply_roster(&paths, Some(&bind(&tree_id, true)), &next),
+        apply_roster(&paths, Some(&bind(&tree_id, true)), &next).await,
         Err(RosterApplyError::Refused(
             RosterApplyRefusal::LiveDescendants
         ))
@@ -479,12 +487,12 @@ async fn stop_all_then_apply_lifts_a_restored_pause_and_later_saves_still_answer
     // Reopened after a quit or an interrupt: the tree is paused and its
     // running child is demoted to a non-terminal `paused`.
     tree.restore_paused();
-    let runtime = insert_root(tree_id.clone(), tree, None).unwrap();
+    let runtime = insert_root(tree_id.clone(), tree, None).await.unwrap();
 
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
     // The plain save is refused, naming the pause and not the descendants.
     assert_eq!(
-        apply_roster(&paths, Some(&bind(&tree_id, true)), &next),
+        apply_roster(&paths, Some(&bind(&tree_id, true)), &next).await,
         Err(RosterApplyError::Refused(
             RosterApplyRefusal::RestoredPaused
         ))
@@ -520,7 +528,7 @@ async fn stop_all_then_apply_lifts_a_restored_pause_and_later_saves_still_answer
     // answers `Applied` on its own: nothing is left holding the fence up.
     let after = roster_config("review", "critic", "claude", "claude-opus-5");
     assert_eq!(
-        apply_roster(&paths, Some(&bind(&tree_id, true)), &after),
+        apply_roster(&paths, Some(&bind(&tree_id, true)), &after).await,
         Ok(RosterApplyOutcome::Applied)
     );
     assert_eq!(
@@ -554,7 +562,7 @@ async fn a_partial_close_leaves_the_fence_up_and_the_save_rejected() {
     .unwrap();
     // A pending spawn is not closed by stop-all: the fence stays up.
     tree.set_pending_spawns_for_test(1);
-    let runtime = insert_root(tree_id.clone(), tree, None).unwrap();
+    let runtime = insert_root(tree_id.clone(), tree, None).await.unwrap();
 
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
     assert_eq!(
@@ -573,7 +581,7 @@ fn a_headless_config_set_fences_every_persisted_tree() {
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
     // No trees at all: the save lands with no epoch to install it into.
     assert_eq!(
-        apply_roster(&paths, None, &next),
+        apply_roster(&paths, None, &next).block_here(),
         Ok(RosterApplyOutcome::Saved)
     );
     assert_saved_config_matches(&paths, &next);
@@ -587,7 +595,7 @@ fn a_headless_config_set_fences_every_persisted_tree() {
     crate::store::tree::save_tree(&paths, &mut quiescent).unwrap();
     let other = roster_config("review", "critic", "claude", "claude-opus-5");
     assert_eq!(
-        apply_roster(&paths, None, &other),
+        apply_roster(&paths, None, &other).block_here(),
         Ok(RosterApplyOutcome::Saved)
     );
     assert_saved_config_matches(&paths, &other);
@@ -605,7 +613,7 @@ fn a_headless_config_set_fences_every_persisted_tree() {
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     let third = roster_config("review", "scribe", "codex", "gpt-5.6-luna");
     assert_eq!(
-        apply_roster(&paths, None, &third),
+        apply_roster(&paths, None, &third).block_here(),
         Err(RosterApplyError::Refused(
             RosterApplyRefusal::LiveDescendants
         ))
@@ -623,7 +631,7 @@ fn a_store_that_cannot_be_read_names_itself_and_not_live_descendants() {
     std::fs::create_dir_all(paths.subagents_database()).unwrap();
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
     let Err(RosterApplyError::Refused(RosterApplyRefusal::StoreUnavailable(message))) =
-        apply_roster(&paths, None, &next)
+        apply_roster(&paths, None, &next).block_here()
     else {
         panic!("an unreadable store must refuse as StoreUnavailable");
     };
@@ -686,7 +694,9 @@ fn install_successor_epoch_persists_when_hub_misses() {
     let mut tree = bootstrap(&tree_id, paths.home().to_path_buf());
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     assert!(lookup(&tree_id).is_none());
-    install_successor_epoch(&paths, &tree_id, "grok", "grok-4.6", Some("low"), None).unwrap();
+    install_successor_epoch(&paths, &tree_id, "grok", "grok-4.6", Some("low"), None)
+        .block_here()
+        .unwrap();
     let loaded = crate::store::tree::load_tree(&paths, &tree_id)
         .unwrap()
         .unwrap();

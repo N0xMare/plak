@@ -43,6 +43,7 @@ async fn slow_follow_up_allows_list_steer_and_close_without_losing_or_duplicatin
             Arc::new(crate::agent_tree::MemoryTreeStore::new()),
             None,
         )
+        .await
         .unwrap();
         let controller = BoundaryController::quiet_from_evidence_path(
             CrashBoundary::None,
@@ -179,6 +180,7 @@ async fn terminal_release_fixture(child: bool) {
         Arc::new(crate::agent_tree::MemoryTreeStore::new()),
         None,
     )
+    .await
     .unwrap();
     let controller = BoundaryController::quiet_from_evidence_path(
         CrashBoundary::None,

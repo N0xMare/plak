@@ -798,7 +798,7 @@ pub(crate) async fn project_tree_as(
     let feed = crate::agent::read_tree_feed(sessions, runtime_session, cursor).await?;
     if let Some(runtime) = runtime {
         if let TreePass::RunningTurn { through } = pass {
-            return Ok(apply_running_root_feed(&runtime, &feed, &root, through)?);
+            return Ok(apply_running_root_feed(&runtime, &feed, &root, through).await?);
         }
         crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
             crate::agent::feed_projection::apply_on_runtime(&runtime, feed, &root)
@@ -812,7 +812,7 @@ pub(crate) async fn project_tree_as(
     };
     let before = tree.feed_cursor(&session_key);
     crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
-        feed.apply_checked(&mut tree, &root)
+        std::future::ready(feed.apply_checked(&mut tree, &root))
     })
     .await
     .map_err(|error| error.message)?;
@@ -830,7 +830,7 @@ pub(crate) async fn project_tree_as(
 /// # Errors
 ///
 /// Any other projector refusal or a refused tree save, with nothing applied.
-pub(crate) fn apply_running_root_feed(
+pub(crate) async fn apply_running_root_feed(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     feed: &crate::agent_tree::TreeFeed,
     root: &str,
@@ -847,9 +847,9 @@ pub(crate) fn apply_running_root_feed(
     if feed.records.is_empty() {
         return Ok(TreePassOutcome::Idle);
     }
-    running_pass_outcome(crate::agent::feed_projection::apply_on_runtime(
-        runtime, &feed, root,
-    ))
+    running_pass_outcome(
+        crate::agent::feed_projection::apply_on_runtime(runtime, Arc::new(feed), root).await,
+    )
 }
 
 pub(in crate::runtime) fn running_pass_outcome(

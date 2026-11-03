@@ -23,8 +23,8 @@ impl TopologyObserver for UsageObserver {
     fn epoch_advanced(&self, _: &str) {}
 }
 
-#[test]
-fn release_locator_is_derived_from_its_feed_not_its_returned_locator() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn release_locator_is_derived_from_its_feed_not_its_returned_locator() {
     use crate::protocol::SpawnAgentRequest;
     use crate::tree::{TreeFeed, TreeFeedReads};
     use plakous::sessions::feed::{FeedFact, FeedHeader, FeedRecord, FeedTurnOutcome};
@@ -42,15 +42,19 @@ fn release_locator_is_derived_from_its_feed_not_its_returned_locator() {
     let head = "00000000-0000-4000-8000-000000003001";
     let locator = format!("{session}/{branch}/{head}");
     let child = runtime
-        .mutate_then_emit(false, |tree| {
-            let child = tree
-                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
-                .map_err(|error| error.message)?
-                .agent_id;
-            tree.record_child_session(&child, &locator)
-                .map_err(|error| error.message)?;
-            Ok(child)
+        .mutate_then_emit(false, {
+            let locator = locator.clone();
+            move |tree| {
+                let child = tree
+                    .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                    .map_err(|error| error.message)?
+                    .agent_id;
+                tree.record_child_session(&child, &locator)
+                    .map_err(|error| error.message)?;
+                Ok(child)
+            }
         })
+        .await
         .unwrap();
     publish_release(
         runtime.driver(),
@@ -60,6 +64,7 @@ fn release_locator_is_derived_from_its_feed_not_its_returned_locator() {
             ..LiveRelease::default()
         },
     )
+    .await
     .unwrap();
     runtime
         .read(|tree| assert!(tree.node(&child).unwrap().session_locator.is_none()))
@@ -109,6 +114,7 @@ fn release_locator_is_derived_from_its_feed_not_its_returned_locator() {
             failure: None,
         },
     )
+    .await
     .unwrap();
     let emitted = observer.0.lock().unwrap().clone();
     assert_eq!(emitted.len(), 1);
@@ -122,6 +128,7 @@ fn release_locator_is_derived_from_its_feed_not_its_returned_locator() {
             ..LiveRelease::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(*observer.0.lock().unwrap(), emitted);
     runtime
@@ -152,6 +159,7 @@ async fn lookup_returns_the_same_tree_arc() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     let second = lookup(&tree_id).expect("hub should occupy after insert");
     assert!(Arc::ptr_eq(
@@ -180,9 +188,12 @@ async fn child_resolve_does_not_load_or_pause() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
-    let generation = runtime.driver().lock().unwrap().host_generation;
-    let state = runtime.driver().lock().unwrap().state;
+    let generation = runtime
+        .driver()
+        .locked_for_test(|tree| tree.host_generation);
+    let state = runtime.driver().locked_for_test(|tree| tree.state);
     let loaded = AtomicBool::new(false);
     let resolved = resolve_topology_runtime(
         &tree_id,
@@ -195,6 +206,7 @@ async fn child_resolve_does_not_load_or_pause() {
             Err(TreeRuntimeError::new("child compile must not load_tree"))
         },
     )
+    .await
     .unwrap();
     assert!(!loaded.load(Ordering::SeqCst));
     assert!(Arc::ptr_eq(
@@ -224,6 +236,7 @@ async fn missing_hub_child_fails_closed_without_bootstrap() {
             Err(TreeRuntimeError::new("must not bootstrap"))
         },
     )
+    .await
     .err()
     .expect("child compile without hub must fail closed");
     assert!(!loaded.load(Ordering::SeqCst));
@@ -250,6 +263,7 @@ async fn missing_hub_root_lookup_does_not_bootstrap() {
             Err(TreeRuntimeError::new("must not bootstrap"))
         },
     )
+    .await
     .err()
     .expect("root lookup-only without hub must fail closed");
     assert!(!loaded.load(Ordering::SeqCst));
@@ -279,6 +293,7 @@ async fn missing_hub_child_does_not_clobber_durable_tree() {
         None,
         |_| Ok(bootstrap(&tree_id, root.path().to_path_buf())),
     )
+    .await
     .err()
     .expect("child miss must not bootstrap even when attach is requested");
     assert!(
@@ -307,6 +322,7 @@ async fn attach_root_load_runs_once_then_lookup_shares() {
             Ok(bootstrap(&tree_id, root.path().to_path_buf()))
         },
     )
+    .await
     .unwrap();
     let second = resolve_topology_runtime(
         &tree_id,
@@ -319,6 +335,7 @@ async fn attach_root_load_runs_once_then_lookup_shares() {
             Err(TreeRuntimeError::new("second attach must not reload"))
         },
     )
+    .await
     .unwrap();
     assert_eq!(loads.load(Ordering::SeqCst), 1);
     assert!(Arc::ptr_eq(
@@ -340,6 +357,7 @@ async fn attach_root_resolve_acquires_one_lease() {
         None,
         |_| Ok(bootstrap(&tree_id, root.path().to_path_buf())),
     )
+    .await
     .unwrap();
     release_root_lease(&tree_id).await.unwrap();
     assert!(lookup(&tree_id).is_none());
@@ -354,6 +372,7 @@ async fn overlapping_root_leases_keep_the_hub() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     process_hub().acquire_root_lease(&tree_id).unwrap();
     process_hub().acquire_root_lease(&tree_id).unwrap();
@@ -376,6 +395,7 @@ async fn the_trees_tasks_end_with_its_last_root_lease_not_with_a_root() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     process_hub().acquire_root_lease(&tree_id).unwrap();
     process_hub().acquire_root_lease(&tree_id).unwrap();
@@ -409,6 +429,7 @@ async fn child_release_does_not_drop_hub() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     process_hub().acquire_root_lease(&tree_id).unwrap();
     release_unleased(&tree_id).await;
@@ -426,6 +447,7 @@ async fn failed_attach_release_unleased_removes_hub() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     release_unleased(&tree_id).await;
     assert!(lookup(&tree_id).is_none());
@@ -465,6 +487,7 @@ async fn cancel_live_missing_agent_is_idempotent() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     // Nothing was ever live here, so every cancel is `NotLive` — not a
     // failure, and not a cancel either. Folding both into `Ok(())` is
@@ -489,6 +512,7 @@ async fn crash_cut_reattach_is_single_flight() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     let held = runtime.lock_reattach().await;
     assert!(runtime.try_lock_reattach().is_err());
@@ -520,6 +544,7 @@ async fn a_turn_racing_shutdown_is_drained_or_refused_but_never_orphaned() {
         bootstrap(&tree_id, std::env::temp_dir()),
         None,
     )
+    .await
     .unwrap();
 
     {
@@ -568,7 +593,7 @@ fn the_closed_flag_is_read_under_the_lock_the_insert_takes() {
         "the admission reads the flag and the map together"
     );
     let occupy = source
-        .split("pub async fn try_occupy_live_admitted(")
+        .split("pub async fn try_occupy_live_admitted<")
         .nth(1)
         .expect("try_occupy_live_admitted is the admission entry");
     let occupy = &occupy[..occupy.find("\n    }\n").unwrap_or(occupy.len())];
@@ -624,8 +649,8 @@ impl TreeStore for AttachProbeStore {
     }
 }
 
-#[test]
-fn attach_startup_is_unlocked_and_skips_an_empty_consequence() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attach_startup_is_unlocked_and_skips_an_empty_consequence() {
     let root = tempfile::tempdir().unwrap();
     let hub = Arc::new(TopologyHub::new());
     let store = Arc::new(AttachProbeStore {
@@ -643,10 +668,12 @@ fn attach_startup_is_unlocked_and_skips_an_empty_consequence() {
             vcs.clone(),
             None,
         )
+        .await
         .unwrap();
     assert_eq!(store.saves.load(Ordering::SeqCst), 1);
     let occupant = hub
         .insert_root("attach-probe", tree, store.clone(), vcs, None)
+        .await
         .unwrap();
     assert!(Arc::ptr_eq(&runtime, &occupant));
     assert_eq!(store.saves.load(Ordering::SeqCst), 1);
@@ -675,8 +702,8 @@ impl TreeStore for RefusingStore {
     }
 }
 
-#[test]
-fn initial_publish_refusal_does_not_mutate_or_dispatch_queued_seal() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn initial_publish_refusal_does_not_mutate_or_dispatch_queued_seal() {
     use crate::protocol::{AttemptScopedRequest, NodeStatus, SpawnAgentRequest, Tier, WriterMode};
     use plakous_workspace::occupancy_vcs::fake::FakeVcs;
     let root = tempfile::tempdir().unwrap();
@@ -704,34 +731,39 @@ fn initial_publish_refusal_does_not_mutate_or_dispatch_queued_seal() {
         .agent_id;
     let runtime = ProductTopologyRuntime::new(tree, Arc::new(RefusingStore), vcs.clone(), None);
     let error = runtime
-        .mutate_then_emit(false, |tree| {
-            tree.close_agent(
-                "root",
-                &AttemptScopedRequest {
-                    agent_id: child.clone(),
-                    expected_attempt_id: None,
-                },
-                None,
-            )
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let child = child.clone();
+            move |tree| {
+                tree.close_agent(
+                    "root",
+                    &AttemptScopedRequest {
+                        agent_id: child.clone(),
+                        expected_attempt_id: None,
+                    },
+                    None,
+                )
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap_err();
     assert!(error.contains("initial publish refused"));
-    let mut tree = runtime.driver().lock().unwrap();
-    assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
-    assert!(tree.attempt(&child).unwrap().candidate_id.is_none());
-    assert!(
-        vcs.calls_of(plakous_workspace::occupancy_vcs::fake::FakeOp::Seal)
-            .is_empty()
-    );
-    assert!(
-        tree.take_effects().is_empty(),
-        "no cleanup may remain stranded"
-    );
+    runtime.driver().locked_for_test(|tree| {
+        assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
+        assert!(tree.attempt(&child).unwrap().candidate_id.is_none());
+        assert!(
+            vcs.calls_of(plakous_workspace::occupancy_vcs::fake::FakeOp::Seal)
+                .is_empty()
+        );
+        assert!(
+            tree.take_effects().is_empty(),
+            "no cleanup may remain stranded"
+        );
+    });
 }
 
-#[test]
-fn initial_publish_refusal_dispatches_no_hook_or_removal() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn initial_publish_refusal_dispatches_no_hook_or_removal() {
     use crate::protocol::{NodeStatus, SpawnAgentRequest, Tier, WriterMode};
     use plakous_workspace::occupancy_vcs::{
         VcsError,
@@ -767,22 +799,24 @@ fn initial_publish_refusal_dispatches_no_hook_or_removal() {
     assert!(
         runtime
             .mutate_then_emit(false, |_| Ok(()))
+            .await
             .unwrap_err()
             .contains("initial publish refused")
     );
     assert!(vcs.calls_of(FakeOp::Hook).is_empty());
     assert!(vcs.calls_of(FakeOp::Unmint).is_empty());
     assert!(path.exists());
-    let mut tree = runtime.driver().lock().unwrap();
-    assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
-    assert!(
-        !tree.take_effects().is_empty(),
-        "unpublished hook remains queued"
-    );
+    runtime.driver().locked_for_test(|tree| {
+        assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
+        assert!(
+            !tree.take_effects().is_empty(),
+            "unpublished hook remains queued"
+        );
+    });
 }
 
-#[test]
-fn effect_free_mutation_publishes_acknowledged_revision() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn effect_free_mutation_publishes_acknowledged_revision() {
     let root = tempfile::tempdir().unwrap();
     let store = memory_store();
     let runtime = ProductTopologyRuntime::new(
@@ -796,6 +830,7 @@ fn effect_free_mutation_publishes_acknowledged_revision() {
             tree.record_fault("root", "durable fault");
             Ok(())
         })
+        .await
         .unwrap();
     assert!(store.load("effect-free").unwrap().is_some());
     runtime
@@ -847,6 +882,7 @@ async fn retirement_owner_emits_one_recovery_detach_and_notice_despite_late_fail
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let entered = Arc::new(tokio::sync::Notify::new());
     let finish = Arc::new(tokio::sync::Notify::new());
@@ -970,6 +1006,7 @@ async fn joiner_deadline_does_not_refault_a_settled_release() {
                 .map(|child| child.agent_id)
                 .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     let entered = Arc::new(tokio::sync::Notify::new());
     let finish = Arc::new(tokio::sync::Notify::new());
@@ -1002,19 +1039,32 @@ async fn joiner_deadline_does_not_refault_a_settled_release() {
                 return;
             };
             let runtime = weak.upgrade().unwrap();
-            runtime
-                .mutate_then_emit(false, |tree| {
-                    let attempt = tree.attempt(&child).unwrap().attempt_id.clone();
-                    tree.recover_host_decision(
-                        &child,
-                        &attempt,
-                        RecoveryResolution::RecoveredWithoutTurn {
-                            message: "quiescent".into(),
-                        },
-                    )
-                    .map_err(|error| error.message)
-                })
-                .unwrap();
+            let decided = child.clone();
+            // The recovery hook is synchronous: run the publication to its end,
+            // on its own runtime, before polling the joiner in the gap.
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .unwrap()
+                            .block_on(runtime.mutate_then_emit(false, move |tree| {
+                                let attempt = tree.attempt(&decided).unwrap().attempt_id.clone();
+                                tree.recover_host_decision(
+                                    &decided,
+                                    &attempt,
+                                    RecoveryResolution::RecoveredWithoutTurn {
+                                        message: "quiescent".into(),
+                                    },
+                                )
+                                .map_err(|error| error.message)
+                            }))
+                    })
+                    .join()
+                    .unwrap()
+            })
+            .unwrap();
             // Release is published and settled, but the worker has not returned
             // its shared completion yet. Poll the expired joiner in this gap.
             let mut cx = Context::from_waker(futures_util::task::noop_waker_ref());
@@ -1032,15 +1082,14 @@ async fn joiner_deadline_does_not_refault_a_settled_release() {
     entered.notified().await;
     let completion = runtime.live.lock().await.retiring[&id].completion.clone();
     tokio::time::advance(HOST_RETIRE_JOIN_TIMEOUT).await;
-    tokio::task::yield_now().await;
-    runtime
-        .read(|tree| {
-            assert_eq!(
-                tree.attempt(&id).unwrap().status,
-                AttemptStatus::RecoveryRequired
-            );
-        })
-        .unwrap();
+    // The joiner's fault is one tree writer on a blocking worker.
+    while runtime
+        .read(|tree| tree.attempt(&id).unwrap().status)
+        .unwrap()
+        != AttemptStatus::RecoveryRequired
+    {
+        tokio::task::yield_now().await;
+    }
     finish.notify_one();
     completion.await.unwrap();
     runtime
@@ -1267,6 +1316,7 @@ async fn startup_join_deadline_records_its_stage() {
                 .map(|child| child.agent_id)
                 .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     let startup = runtime.reserve_startup(&id).await.unwrap();
     startup.set_stage(ChildStartupStage::Releasing);
@@ -1329,7 +1379,7 @@ async fn owner_release_failure_fences_unstarted_followup() {
             tree.record_turn_completed(&id).unwrap();
             Ok(id)
         })
-        .unwrap();
+        .await.unwrap();
     let first = runtime
         .read(|tree| tree.attempt(&id).unwrap().attempt_id.clone())
         .unwrap();
@@ -1354,35 +1404,39 @@ async fn owner_release_failure_fences_unstarted_followup() {
     let child = id.clone();
     let cancel = tokio::spawn(async move { owner.cancel_live(&child).await });
     entered.notified().await;
-    let mut opener = String::new();
-    runtime
-        .mutate_then_emit(false, |tree| {
-            opener = tree
-                .send_agent_message(
-                    "root",
-                    &SendAgentMessageRequest {
-                        refresh: None,
-                        agent_id: id.clone(),
-                        message: "again".into(),
-                        purpose: Some(MessagePurpose::Followup),
-                        priority: None,
-                        in_reply_to: None,
-                        output_schema_json: None,
-                    },
-                    None,
-                )
-                .map_err(|error| error.message)?
-                .message_id;
-            assert_ne!(tree.attempt(&id).unwrap().attempt_id, first);
-            assert!(tree.attempt(&id).unwrap().turn_id.is_none());
-            let mut without_release_failure = tree.clone();
-            assert!(
-                without_release_failure
-                    .withdraw_unstarted_followup(&id, &opener, SESSION, 0)
-                    .is_ok()
-            );
-            Ok(())
+    let opener = runtime
+        .mutate_then_emit(false, {
+            let first = first.clone();
+            let id = id.clone();
+            move |tree| {
+                let opener = tree
+                    .send_agent_message(
+                        "root",
+                        &SendAgentMessageRequest {
+                            refresh: None,
+                            agent_id: id.clone(),
+                            message: "again".into(),
+                            purpose: Some(MessagePurpose::Followup),
+                            priority: None,
+                            in_reply_to: None,
+                            output_schema_json: None,
+                        },
+                        None,
+                    )
+                    .map_err(|error| error.message)?
+                    .message_id;
+                assert_ne!(tree.attempt(&id).unwrap().attempt_id, first);
+                assert!(tree.attempt(&id).unwrap().turn_id.is_none());
+                let mut without_release_failure = tree.clone();
+                assert!(
+                    without_release_failure
+                        .withdraw_unstarted_followup(&id, &opener, SESSION, 0)
+                        .is_ok()
+                );
+                Ok(opener)
+            }
         })
+        .await
         .unwrap();
     assert!(runtime.reserve_startup(&id).await.is_err());
     finish.notify_one();
@@ -1392,43 +1446,48 @@ async fn owner_release_failure_fences_unstarted_followup() {
     ));
     assert!(!runtime.live.lock().await.contains_key(&id));
     runtime
-        .mutate_then_emit(false, |tree| {
-            assert!(
-                tree.withdraw_unstarted_followup(&id, &opener, SESSION, 0)
-                    .is_err(),
-                "owner evidence must prevent silent rollback"
-            );
-            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
-            let attempt = tree.attempt(&id).unwrap();
-            assert_eq!(attempt.status, AttemptStatus::RecoveryRequired);
-            assert_eq!(attempt.failure.as_ref().unwrap().kind, "session_retirement");
-            assert!(
-                attempt
-                    .failure
-                    .as_ref()
-                    .unwrap()
-                    .message
-                    .contains("owner release failed")
-            );
-            assert!(matches!(
-                tree.recovery_need(&id).unwrap(),
-                crate::tree::RecoveryNeed::Session { .. }
-            ));
-            tree.record_host_materialization(&id)
-                .and_then(|value| tree.fold_due(&id).map(|_| value))
-                .map_err(|error| error.message)?;
-            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
-            assert!(
-                tree.attempt(&id)
-                    .unwrap()
-                    .failure
-                    .as_ref()
-                    .unwrap()
-                    .message
-                    .contains("owner release failed")
-            );
-            Ok(())
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            let opener = opener.clone();
+            move |tree| {
+                assert!(
+                    tree.withdraw_unstarted_followup(&id, &opener, SESSION, 0)
+                        .is_err(),
+                    "owner evidence must prevent silent rollback"
+                );
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
+                let attempt = tree.attempt(&id).unwrap();
+                assert_eq!(attempt.status, AttemptStatus::RecoveryRequired);
+                assert_eq!(attempt.failure.as_ref().unwrap().kind, "session_retirement");
+                assert!(
+                    attempt
+                        .failure
+                        .as_ref()
+                        .unwrap()
+                        .message
+                        .contains("owner release failed")
+                );
+                assert!(matches!(
+                    tree.recovery_need(&id).unwrap(),
+                    crate::tree::RecoveryNeed::Session { .. }
+                ));
+                tree.record_host_materialization(&id)
+                    .and_then(|value| tree.fold_due(&id).map(|_| value))
+                    .map_err(|error| error.message)?;
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
+                assert!(
+                    tree.attempt(&id)
+                        .unwrap()
+                        .failure
+                        .as_ref()
+                        .unwrap()
+                        .message
+                        .contains("owner release failed")
+                );
+                Ok(())
+            }
         })
+        .await
         .unwrap();
 }
 
@@ -1612,6 +1671,7 @@ async fn abandoned_caller_still_records_panicking_release_fault() {
             .unwrap();
             Ok(())
         })
+        .await
         .unwrap();
     let entered = Arc::new(tokio::sync::Notify::new());
     let finish = Arc::new(tokio::sync::Notify::new());
@@ -1702,6 +1762,7 @@ async fn shutdown_joins_existing_retirement_and_concurrent_active_release() {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
     let entered = Arc::new(tokio::sync::Notify::new());
@@ -1736,11 +1797,12 @@ async fn shutdown_joins_existing_retirement_and_concurrent_active_release() {
     let cancel = tokio::spawn(async move { owner.cancel_live("root").await });
     entered.notified().await;
     let mut shutdown = Box::pin(shutdown_runtime(runtime.clone()));
-    assert!(
-        std::future::poll_fn(|cx| std::task::Poll::Ready(shutdown.as_mut().poll(cx).is_pending()))
-            .await
-    );
-    second_entered.notified().await;
+    // Drive the shutdown until it starts the second child's retirement.
+    tokio::select! {
+        biased;
+        () = second_entered.notified() => {}
+        _ = shutdown.as_mut() => panic!("shutdown finished before the child retired"),
+    }
     second_finish.notify_one();
     assert!(
         std::future::poll_fn(|cx| std::task::Poll::Ready(shutdown.as_mut().poll(cx).is_pending()))
@@ -1869,6 +1931,7 @@ async fn process_exit_abandonment_aborts_a_stuck_release_owner() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     let entered = Arc::new(tokio::sync::Notify::new());
     let finish = Arc::new(tokio::sync::Notify::new());
@@ -1981,6 +2044,7 @@ async fn batch_cancel_starts_all_releases_before_waiting_and_joins_overlap() {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let ids = vec![child, "root".to_owned()];
     let mut barriers = Vec::new();
@@ -2130,10 +2194,12 @@ async fn shutdown_aborts_an_explicit_child_recover() {
     let root = tempfile::tempdir().unwrap();
     let runtime = recovery_runtime("explicit-recover-shutdown", root.path());
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
-    assert!(runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
-        let _dropped = dropped_tx;
-        std::future::pending::<()>().await;
-    })));
+    assert!(
+        runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
+            let _dropped = dropped_tx;
+            std::future::pending::<()>().await;
+        }))
+    );
     assert!(runtime.recovery_pass.lock().unwrap().task.is_none());
     let _ = tokio::time::timeout(Duration::from_secs(4), shutdown_runtime(runtime.clone()))
         .await
@@ -2159,12 +2225,15 @@ async fn abandon_live_agents_aborts_an_explicit_child_recover() {
         bootstrap(&tree_id, root.path().to_path_buf()),
         None,
     )
+    .await
     .unwrap();
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
-    assert!(runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
-        let _dropped = dropped_tx;
-        std::future::pending::<()>().await;
-    })));
+    assert!(
+        runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
+            let _dropped = dropped_tx;
+            std::future::pending::<()>().await;
+        }))
+    );
     let _agents = abandon_live_agents(&tree_id).await;
     assert!(
         tokio::time::timeout(Duration::from_secs(2), dropped_rx)

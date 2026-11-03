@@ -253,7 +253,7 @@ fn send_tool(driver: TreeDriver, deliverer: Option<Arc<dyn ChildController>>) ->
                 use plakous::sessions::feed::{FeedFact, FeedRecord};
                 let ack = self.inner.deliver(request.clone()).await?;
                 let command = format!("fixture:mail:{}", request.message_id);
-                self.driver.mutate_and_settle(|tree| {
+                self.driver.mutate_and_settle({ let command = command.clone(); let request = request.clone(); move |tree| {
                     let session = tree.node(&request.agent_id)?.session_locator.as_deref()
                         .and_then(|locator| locator.parse::<plakous::sessions::SessionLocator>().ok())
                         .map_or_else(|| "00000000-0000-4000-8000-000000000001".to_owned(), |locator| locator.session_id().to_string());
@@ -272,7 +272,7 @@ fn send_tool(driver: TreeDriver, deliverer: Option<Arc<dyn ChildController>>) ->
                     }]);
                     tree.project_feed(&request.agent_id, &session, &[record], &crate::tree::TreeFeedReads::default()).map_err(TopologyError::from)?;
                     Ok::<_, TopologyError>(())
-                }).map_err(|error| MailDeliveryFailure::RecoveryRequired(error.message.into()))?.0
+                } }).await.map_err(|error| MailDeliveryFailure::RecoveryRequired(error.message.into()))?.0
                     .map_err(|error| MailDeliveryFailure::RecoveryRequired(error.message.into()))?;
                 Ok(ack)
             })
@@ -698,7 +698,9 @@ impl ChildController for StubDeliverer {
                 let tail = tree.feed_cursor(&session);
                 (session, tail)
             })?;
-            driver.withdraw_unstarted_followup(&agent_id, &message_id, &session, tail, receipt)
+            driver
+                .withdraw_unstarted_followup(&agent_id, &message_id, &session, tail, receipt)
+                .await
         })
     }
     fn deliver(

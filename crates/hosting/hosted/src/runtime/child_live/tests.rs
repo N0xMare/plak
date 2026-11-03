@@ -2,6 +2,7 @@
     clippy::too_many_lines,
     reason = "Live child transcript scenarios compare streamed rows against committed history through yields, gaps, and subsequent turns."
 )]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;
 use crate::runtime::test_support::empty_transcript_call;
@@ -1012,7 +1013,9 @@ fn test_runtime(root: &std::path::Path) -> (String, Arc<ProductTopologyRuntime>)
         crate::agent_tree_protocol::WriterMode::SingleLease,
     )
     .unwrap();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .block()
+        .unwrap();
     let runtime = crate::topology_runtime::lookup(&tree_id).unwrap();
     (tree_id, runtime)
 }
@@ -1175,6 +1178,7 @@ async fn unknown_root_unbound_and_another_trees_agents_answer_with_a_note() {
                 .map(|spawned| spawned.agent_id)
                 .map_err(|error| format!("{error:?}"))
         })
+        .await
         .unwrap();
     let other_tree = format!("agent-view-other-{}", uuid::Uuid::new_v4());
     let mut other = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(

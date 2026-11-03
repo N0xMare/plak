@@ -4416,6 +4416,30 @@ rows, and its activity kind and subject derive from the canonical name, exactly
 as a live row's do.
 
 Production consumers access tree state through `TreeDriver` and hub closures.
+Each tree has one writer at a time, in arrival order. A mutation is an owned
+(`Send + 'static`) closure that the driver runs on the blocking pool, with the
+live tree as its guard; reads and `try_read` take the live tree directly and
+never queue. A capacity-refused save inside a writer parks in the caller's
+async task, not on the worker: an async sleep at the tree's retry interval
+raced against the writing agent's cancellation, the tree's shutdown and the
+shutdown of the host that attached the tree last. These are latched signals,
+selected on directly; each writer takes the host signal current when it asks
+for its turn. A queued writer gives up only while the tree cannot publish and
+its agent or the tree or host is stopping. Dropping a mutation's future stops
+its park, but the closure itself runs to its end.
+
+Owed work never gives up its turn: releasing a process-local claim (mail
+consumers, turn waiter registrations) and admitting and completing effects
+wait for the tree whatever was cancelled, so a completed effect is always
+recorded and only its publication may be refused. A claim is released by an
+explicit writer; one dropped instead is released by an owed writer run as a
+release owner. Where no runtime will run one, a turn waiter registration
+leaves on a thread of its own, and a mail claim is logged as an error and
+holds until the tree is next opened.
+Effects never depend on their caller staying: a mutation whose caller is
+gone before its effects reach it hands them to a release owner, and a settle
+or a hub mutation that publishes and settles runs as a release owner the
+caller awaits.
 A mutation retains the store-acknowledged revision from its explicit publish;
 settling an empty effect batch does not itself publish a mutation. Every queued
 effect is drained after the tree mutex is released, including when the initial

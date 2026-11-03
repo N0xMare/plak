@@ -4,6 +4,7 @@
 //! a refold as debt for a later pass.
 
 #![allow(clippy::unwrap_used, reason = "unit tests")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::HostLoop;
 use super::wait_settlement_tests::{receipts_and_unread, wait_outside_history, with_unread_result};
@@ -87,7 +88,8 @@ fn a_committed_wait_retires_its_receipt_and_advances_the_cursor() {
             &history_page(host, cursor + 1, &call),
             "root",
             cursor + 1,
-        );
+        )
+        .block();
         assert_eq!(outcome, Ok(TreePassOutcome::Applied));
         assert_eq!(receipts_and_unread(runtime).0, 0);
         assert_eq!(cursor_and_revision(host, runtime).0, cursor + 1);
@@ -99,7 +101,8 @@ fn nothing_past_the_cursor_publishes_nothing() {
     with_unread_result(|host, runtime| {
         wait_outside_history(host, runtime);
         let before = cursor_and_revision(host, runtime);
-        let outcome = apply_running_root_feed(runtime, &page(host, Vec::new()), "root", u64::MAX);
+        let outcome =
+            apply_running_root_feed(runtime, &page(host, Vec::new()), "root", u64::MAX).block();
         assert_eq!(outcome, Ok(TreePassOutcome::Idle));
         assert_eq!(cursor_and_revision(host, runtime), before);
         assert_eq!(receipts_and_unread(runtime).0, 1);
@@ -131,14 +134,16 @@ fn a_refused_read_leaves_the_receipt_and_the_next_pass_retires_it_once() {
 
         let committed = history_page(host, before.0 + 1, &call);
         assert_eq!(
-            apply_running_root_feed(runtime, &committed, "root", before.0 + 1),
+            apply_running_root_feed(runtime, &committed, "root", before.0 + 1).block(),
             Ok(TreePassOutcome::Applied)
         );
         let after = cursor_and_revision(host, runtime);
         assert_eq!(after.0, before.0 + 1);
         assert_eq!(receipts_and_unread(runtime).0, 0);
         // The same record again is behind the cursor: the pass is inert.
-        apply_running_root_feed(runtime, &committed, "root", before.0 + 1).unwrap();
+        apply_running_root_feed(runtime, &committed, "root", before.0 + 1)
+            .block()
+            .unwrap();
         assert_eq!(cursor_and_revision(host, runtime).0, after.0);
         assert_eq!(receipts_and_unread(runtime).0, 0);
     });
@@ -161,7 +166,8 @@ fn a_page_that_needs_a_refold_is_deferred_not_refolded() {
             &history_page(host, before.0 + 2, &call),
             "root",
             u64::MAX,
-        );
+        )
+        .block();
         assert!(
             matches!(outcome, Ok(TreePassOutcome::Deferred(_))),
             "{outcome:?}"
@@ -181,13 +187,13 @@ fn a_delayed_round_observation_cannot_absorb_a_later_rounds_feed() {
         feed.records
             .extend(history_page(host, cursor + 2, &call).records);
         assert_eq!(
-            apply_running_root_feed(runtime, &feed, "root", cursor + 1),
+            apply_running_root_feed(runtime, &feed, "root", cursor + 1).block(),
             Ok(TreePassOutcome::Applied)
         );
         assert_eq!(cursor_and_revision(host, runtime).0, cursor + 1);
         assert_eq!(receipts_and_unread(runtime).0, 0);
         assert_eq!(
-            apply_running_root_feed(runtime, &feed, "root", cursor + 2),
+            apply_running_root_feed(runtime, &feed, "root", cursor + 2).block(),
             Ok(TreePassOutcome::Applied)
         );
         assert_eq!(cursor_and_revision(host, runtime).0, cursor + 2);
@@ -202,7 +208,7 @@ fn a_running_prefix_behind_retention_is_deferred_without_a_newer_head_seed() {
         let mut feed = page(host, Vec::new());
         feed.below_retained = Some(before.0 + 2);
         assert!(matches!(
-            apply_running_root_feed(runtime, &feed, "root", before.0 + 1),
+            apply_running_root_feed(runtime, &feed, "root", before.0 + 1).block(),
             Ok(TreePassOutcome::Deferred(_))
         ));
         assert_eq!(cursor_and_revision(host, runtime), before);

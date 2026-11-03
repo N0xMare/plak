@@ -27,10 +27,12 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
     ) -> CliResult<Self> {
         let storage_interrupt = actions.storage_interrupt_probe();
-        config.state_roots = config
-            .state_roots
-            .clone()
-            .with_storage_shutdown(actions.storage_shutdown_probe());
+        let shutdown = crate::agent_tree_tools::HostShutdown::new();
+        actions.on_shutdown({
+            let shutdown = shutdown.clone();
+            move || shutdown.signal()
+        });
+        config.state_roots = config.state_roots.clone().with_storage_shutdown(shutdown);
         config.store = config
             .store
             .clone()
@@ -269,6 +271,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                     .collect::<Vec<_>>();
                 super::super::result_mail::RootBatchJoin::new(&rows)
                     .join_pending_root_commands(&config.session.id, &pending)
+                    .await
             });
             if let Ok(Err(error)) = projected {
                 log_ev(

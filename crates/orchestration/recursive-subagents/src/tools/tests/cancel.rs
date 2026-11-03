@@ -69,13 +69,12 @@ async fn assert_saved_cancel_ack(drop_signal: bool) {
                     .await
             }
         });
-        assert!(
-            std::future::poll_fn(|cx| std::task::Poll::Ready(
-                invocation.as_mut().poll(cx).is_pending()
-            ))
-            .await
-        );
-        canceller.started.notified().await;
+        // Drive the call until its retirement reaches the canceller.
+        tokio::select! {
+            biased;
+            () = canceller.started.notified() => {}
+            _ = invocation.as_mut() => panic!("the call returned before dispatch started"),
+        }
         let outcome = tokio::time::timeout(
             plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
                 + std::time::Duration::from_secs(1),
@@ -377,6 +376,7 @@ async fn close_cancels_closed_ids_in_domain_order() {
         let calls = canceller.calls.lock().unwrap();
         assert_eq!(calls.as_slice(), &[vec!["c1".to_owned()]]);
     }
+    driver.join_retirement_tasks().await.unwrap();
     assert_eq!(
         tree.lock().unwrap().node("c1").unwrap().status,
         NodeStatus::Closed
@@ -484,7 +484,9 @@ async fn fail_closed_session_does_not_project_unsaved_materialization() {
         observer: Some(Arc::clone(&observer)),
         cell_budget: test_budget(),
     };
-    let _ = tool.fail_closed_session(&agent_id, "materialization failed");
+    let _ = tool
+        .fail_closed_session(&agent_id, "materialization failed")
+        .await;
     driver
         .read(|tree| {
             assert_eq!(

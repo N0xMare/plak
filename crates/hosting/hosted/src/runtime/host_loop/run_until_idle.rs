@@ -275,16 +275,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 let item = candidate
                     .enqueue_live(super::wake::WAKE_PROMPT)
                     .map_err(|_| CliFailure::new("run continuation queue admission was refused"))?;
-                self.config.session = super::super::result_mail::prepare_instruction(
-                    &self.config.topology_rows(),
-                    self.config.store.as_ref(),
-                    &candidate,
-                    &item,
-                    &command,
-                    batch,
-                    &trigger_ids,
-                )
-                .map_err(CliFailure::from)?;
+                self.config.session = self
+                    .executor
+                    .block_on(super::super::result_mail::prepare_instruction(
+                        &self.config.topology_rows(),
+                        self.config.store.as_ref(),
+                        &candidate,
+                        &item,
+                        &command,
+                        batch,
+                        &trigger_ids,
+                    ))
+                    .map_err(|_| CliFailure::new("application execution failed"))?
+                    .map_err(CliFailure::from)?;
                 let triggers = notices
                     .iter()
                     .map(|job| format!("p{} {}", job.number, job_status(job.status)))

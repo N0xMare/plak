@@ -3,6 +3,7 @@
     reason = "Root wake scenarios drive real child results, storage refusal, interrupt joins, and repeated post-terminal job delivery."
 )]
 #![allow(clippy::unwrap_used, reason = "offline host assertions")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;
 use crate::agent_tree::{MailDurableState, ProductAgentTree};
@@ -310,6 +311,7 @@ fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
                     tree.set_active_turn(&child.agent_id, true)
                         .map_err(|error| error.message)
                 })
+                .block()
                 .unwrap();
             let _ = observed.try_iter().count();
             let records = host.config.store.clone();
@@ -407,6 +409,7 @@ fn run_waits_without_a_turn_and_timeout_interrupts_resumable_children() {
                     .map_err(|error| error.message)?;
                 Ok(())
             })
+            .block()
             .unwrap();
         let mut state = completed_run(25);
         state.run.as_mut().unwrap().deadline = Some(Instant::now() + Duration::from_millis(40));
@@ -507,6 +510,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                             .unwrap()
                             .agent_id)
                     })
+                    .block()
                     .unwrap();
                 let path = runtime
                     .read(|tree| tree.node(&child).unwrap().path.clone())
@@ -554,13 +558,17 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                 let turn = submission.turn().unwrap();
                 let result = submission.result().unwrap().clone();
                 runtime
-                    .mutate_then_emit(false, |tree| {
-                        tree.bind_session_locator(&child, session.locator().to_string())
-                            .unwrap();
-                        tree.bind_attempt_turn(&child, turn_id.to_string()).unwrap();
-                        tree.set_active_turn(&child, true).unwrap();
-                        Ok(())
+                    .mutate_then_emit(false, {
+                        let (child, locator, turn_id) =
+                            (child.clone(), session.locator().to_string(), turn_id);
+                        move |tree| {
+                            tree.bind_session_locator(&child, locator).unwrap();
+                            tree.bind_attempt_turn(&child, turn_id.to_string()).unwrap();
+                            tree.set_active_turn(&child, true).unwrap();
+                            Ok(())
+                        }
                     })
+                    .block()
                     .unwrap();
                 let attached = crate::agent::AttachedCodingSession::opened_for_host_tests(
                     sessions.clone(),
@@ -732,8 +740,9 @@ fn with_configured_fixture(
         tree.record_turn_completed(&child.agent_id).unwrap();
     }
     tree.settle_for_test();
-    let runtime =
-        crate::topology_runtime::insert_root(config.session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(config.session.id.clone(), tree, None)
+        .block()
+        .unwrap();
     configure(&mut config, &runtime);
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
@@ -856,25 +865,29 @@ fn configure_fanout_wait(
     let mut request = SpawnAgentRequest::test_review();
     request.output_schema_json = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"summary":{"type":"string"}},"required":["summary"],"additionalProperties":false}"#.into();
     runtime
-        .mutate_then_emit(false, |tree| {
-            for _ in 0..8 {
-                let child = tree
-                    .spawn_agent("root", &request, None)
+        .mutate_then_emit(false, {
+            let request = request.clone();
+            move |tree| {
+                for _ in 0..8 {
+                    let child = tree
+                        .spawn_agent("root", &request, None)
+                        .map_err(|error| error.message)?;
+                    tree.submit_result(
+                        &child.agent_id,
+                        &SubmitResultRequest {
+                            turn_token: 1,
+                            output_json: format!(r#"{{"summary":"{}"}}"#, "done ".repeat(60)),
+                        },
+                        None,
+                    )
                     .map_err(|error| error.message)?;
-                tree.submit_result(
-                    &child.agent_id,
-                    &SubmitResultRequest {
-                        turn_token: 1,
-                        output_json: format!(r#"{{"summary":"{}"}}"#, "done ".repeat(60)),
-                    },
-                    None,
-                )
-                .map_err(|error| error.message)?;
-                tree.record_turn_completed(&child.agent_id)
-                    .map_err(|error| error.message)?;
+                    tree.record_turn_completed(&child.agent_id)
+                        .map_err(|error| error.message)?;
+                }
+                Ok(())
             }
-            Ok(())
         })
+        .block()
         .unwrap();
     let agent_ids: Vec<String> = runtime
         .read(|tree| {
@@ -1184,12 +1197,16 @@ fn a_loss_between_canonical_abandonment_and_tree_settlement_still_restores_mail(
             // The settled tree save is lost: the store goes back to the
             // tree as it was before that open, over its current revision.
             runtime
-                .mutate_then_emit(false, |tree| {
-                    let revision = tree.stored_revision;
-                    *tree = before.clone();
-                    tree.stored_revision = revision;
-                    Ok(())
+                .mutate_then_emit(false, {
+                    let before = before.clone();
+                    move |tree| {
+                        let revision = tree.stored_revision;
+                        *tree = before.clone();
+                        tree.stored_revision = revision;
+                        Ok(())
+                    }
                 })
+                .block()
                 .unwrap();
             assert!(
                 runtime
@@ -1366,25 +1383,30 @@ fn prompt_whose_mail_alone_overflows(
             tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                 .map_err(|error| error.message)
         })
+        .block()
         .unwrap();
     for index in 0..5 {
         runtime
-            .mutate_then_emit(false, |tree| {
-                tree.send_agent_message(
-                    &child.agent_id,
-                    &SendAgentMessageRequest {
-                        refresh: None,
-                        agent_id: "root".into(),
-                        message: format!("{index}{}", "f".repeat(1_900)),
-                        purpose: Some(MessagePurpose::Finding),
-                        priority: None,
-                        in_reply_to: None,
-                        output_schema_json: None,
-                    },
-                    None,
-                )
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let child = child.clone();
+                move |tree| {
+                    tree.send_agent_message(
+                        &child.agent_id,
+                        &SendAgentMessageRequest {
+                            refresh: None,
+                            agent_id: "root".into(),
+                            message: format!("{index}{}", "f".repeat(1_900)),
+                            purpose: Some(MessagePurpose::Finding),
+                            priority: None,
+                            in_reply_to: None,
+                            output_schema_json: None,
+                        },
+                        None,
+                    )
+                    .map_err(|error| error.message)
+                }
             })
+            .block()
             .unwrap();
     }
     let project = |text: &str| {
@@ -2638,11 +2660,19 @@ fn runtime_shutdown_during_wake_compaction_parks_instead_of_deferring() {
             if role == crate::runtime::RuntimeRole::Compact {
                 // Stop after the pending-context read, before the compact
                 // endpoint is called: this is not a failed read.
-                plakous::application::ApplicationExecutor::new()
-                    .unwrap()
-                    .block_on(agent.shutdown())
-                    .unwrap()
-                    .unwrap();
+                // The factory runs on the host's executor: stop on another.
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| {
+                            plakous::application::ApplicationExecutor::new()
+                                .unwrap()
+                                .block_on(agent.shutdown())
+                                .unwrap()
+                                .unwrap();
+                        })
+                        .join()
+                        .unwrap();
+                });
                 stopped.store(true, std::sync::atomic::Ordering::Release);
             }
             runtime(role)
@@ -2754,8 +2784,9 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
     .unwrap();
     tree.record_turn_completed(&child.agent_id).unwrap();
     tree.settle_for_test();
-    let runtime =
-        crate::topology_runtime::insert_root(config.session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(config.session.id.clone(), tree, None)
+        .block()
+        .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = HostLoop::open(
@@ -2844,6 +2875,7 @@ fn finding_does_not_wake_but_question_does_and_resets_quiet_window() {
                 tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                     .map_err(|error| error.message)
             })
+            .block()
             .unwrap();
         let mail = |purpose, body: &str| SendAgentMessageRequest {
             refresh: None,
@@ -2855,14 +2887,18 @@ fn finding_does_not_wake_but_question_does_and_resets_quiet_window() {
             output_schema_json: None,
         };
         runtime
-            .mutate_then_emit(false, |tree| {
-                tree.send_agent_message(
-                    &child.agent_id,
-                    &mail(MessagePurpose::Finding, "finding"),
-                    None,
-                )
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let (child, mail) = (child.clone(), mail);
+                move |tree| {
+                    tree.send_agent_message(
+                        &child.agent_id,
+                        &mail(MessagePurpose::Finding, "finding"),
+                        None,
+                    )
+                    .map_err(|error| error.message)
+                }
             })
+            .block()
             .unwrap();
         let now = Instant::now();
         assert!(matches!(
@@ -2874,14 +2910,18 @@ fn finding_does_not_wake_but_question_does_and_resets_quiet_window() {
             HostStep::Continue
         ));
         runtime
-            .mutate_then_emit(false, |tree| {
-                tree.send_agent_message(
-                    &child.agent_id,
-                    &mail(MessagePurpose::Question, "question"),
-                    None,
-                )
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let (child, mail) = (child.clone(), mail);
+                move |tree| {
+                    tree.send_agent_message(
+                        &child.agent_id,
+                        &mail(MessagePurpose::Question, "question"),
+                        None,
+                    )
+                    .map_err(|error| error.message)
+                }
             })
+            .block()
             .unwrap();
         assert!(matches!(
             host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
@@ -3188,6 +3228,7 @@ fn post_child_result(runtime: &crate::topology_runtime::ProductTopologyRuntime) 
             tree.record_turn_completed(&child.agent_id)
                 .map_err(|error| error.message)
         })
+        .block()
         .unwrap();
 }
 
@@ -3285,6 +3326,7 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                             .map_err(|error| error.message)?;
                         Ok(child)
                     })
+                    .block()
                     .unwrap();
                 let now = Instant::now();
                 host.child_wake_prompt(now).unwrap();
@@ -3324,19 +3366,23 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                 }
                 let arrived = second + Duration::from_secs(1);
                 runtime
-                    .mutate_then_emit(false, |tree| {
-                        tree.submit_result(
-                            &child.agent_id,
-                            &SubmitResultRequest {
-                                turn_token: 1,
-                                output_json: r#"{"ok":true}"#.into(),
-                            },
-                            None,
-                        )
-                        .map_err(|error| error.message)?;
-                        tree.record_turn_completed(&child.agent_id)
-                            .map_err(|error| error.message)
+                    .mutate_then_emit(false, {
+                        let child = child.clone();
+                        move |tree| {
+                            tree.submit_result(
+                                &child.agent_id,
+                                &SubmitResultRequest {
+                                    turn_token: 1,
+                                    output_json: r#"{"ok":true}"#.into(),
+                                },
+                                None,
+                            )
+                            .map_err(|error| error.message)?;
+                            tree.record_turn_completed(&child.agent_id)
+                                .map_err(|error| error.message)
+                        }
                     })
+                    .block()
                     .unwrap();
                 let mail_ids = runtime
                     .read(|tree| {

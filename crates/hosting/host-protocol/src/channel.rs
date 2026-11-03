@@ -147,7 +147,12 @@ struct IntentQueue<P: ProtocolExtension> {
     /// The task awaiting [`IntentReceiver::ready`], woken wherever `ready`
     /// is notified.
     waiter: Mutex<Option<Waker>>,
+    /// Run once when shutdown is first requested or the last sender drops;
+    /// `None` once they ran.
+    shutdown_hooks: Mutex<Option<Vec<ShutdownHook>>>,
 }
+
+type ShutdownHook = Box<dyn FnOnce() + Send>;
 
 struct QueuedIntent<P: ProtocolExtension> {
     action: SessionIntent<P>,
@@ -181,6 +186,22 @@ const fn nonrepeatable_index(bit: u8) -> usize {
 }
 
 impl<P: ProtocolExtension> IntentQueue<P> {
+    fn shutting_down(&self) -> bool {
+        self.shutdown_requested.load(Ordering::Acquire) || self.senders.load(Ordering::Acquire) == 0
+    }
+
+    /// Runs the shutdown hooks once.
+    fn run_shutdown_hooks(&self) {
+        let hooks = self
+            .shutdown_hooks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        for hook in hooks.into_iter().flatten() {
+            hook();
+        }
+    }
+
     fn wake_waiter(&self) {
         let waiter = self
             .waiter
@@ -349,6 +370,7 @@ impl<P: ProtocolExtension> Drop for IntentSender<P> {
         if self.0.senders.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.0.ready.notify_one();
             self.0.wake_waiter();
+            self.0.run_shutdown_hooks();
         }
     }
 }
@@ -383,6 +405,7 @@ impl<P: ProtocolExtension> IntentSender<P> {
         self.0.urgent.fetch_or(PENDING_QUIT, Ordering::Release);
         self.0.ready.notify_one();
         self.0.wake_waiter();
+        self.0.run_shutdown_hooks();
     }
     /// Enqueue through the bounded mailbox. Interrupt uses a coalescing urgent
     /// lane. Quit is independently coalesced and observed only after accepted
@@ -429,6 +452,9 @@ impl<P: ProtocolExtension> IntentSender<P> {
             self.0.urgent.fetch_or(urgent_bit, Ordering::Release);
             self.0.ready.notify_one();
             self.0.wake_waiter();
+            if urgent_bit == PENDING_QUIT {
+                self.0.run_shutdown_hooks();
+            }
             return Ok(());
         }
         let nonrepeatable = nonrepeatable_bit(&action);
@@ -483,7 +509,7 @@ impl<P: ProtocolExtension> Drop for IntentReceiver<P> {
 impl<P: ProtocolExtension> IntentReceiver<P> {
     /// A read-only interrupt/shutdown signal for the attached root's storage
     /// owner. Never bind this to children sharing its stores; they use their
-    /// own cancellation and [`Self::storage_shutdown_probe`]. This never
+    /// own cancellation and [`Self::on_shutdown`]. This never
     /// consumes an intent or acknowledges cancellation.
     #[must_use]
     pub fn storage_interrupt_probe(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
@@ -495,15 +521,23 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
         })
     }
 
-    /// Process shutdown only: an interrupt of the root must not abandon a
-    /// child's retained publication. Shutdown stays latched after dequeue.
-    #[must_use]
-    pub fn storage_shutdown_probe(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
-        let queue = Arc::clone(&self.0);
-        Arc::new(move || {
-            queue.shutdown_requested.load(Ordering::Acquire)
-                || queue.senders.load(Ordering::Acquire) == 0
-        })
+    /// Runs `hook` once, when shutdown is first requested or the last sender
+    /// drops, and at once when that already happened. Process shutdown only:
+    /// an interrupt of the root must not abandon a child's retained
+    /// publication.
+    pub fn on_shutdown(&self, hook: impl FnOnce() + Send + 'static) {
+        let mut hooks = self
+            .0
+            .shutdown_hooks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match hooks.as_mut() {
+            Some(pending) if !self.0.shutting_down() => pending.push(Box::new(hook)),
+            _ => {
+                drop(hooks);
+                hook();
+            }
+        }
     }
 
     /// Replaces the observational process view without filling the event queue.
@@ -722,6 +756,7 @@ pub fn intent_channel<P: ProtocolExtension>() -> (IntentSender<P>, IntentReceive
         receiver_alive: AtomicBool::new(true),
         ready: Condvar::new(),
         waiter: Mutex::new(None),
+        shutdown_hooks: Mutex::new(Some(Vec::new())),
     });
     (IntentSender(Arc::clone(&shared)), IntentReceiver(shared))
 }

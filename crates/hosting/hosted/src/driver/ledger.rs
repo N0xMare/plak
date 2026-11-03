@@ -133,9 +133,13 @@ impl From<LedgerError> for String {
 pub(crate) type LedgerFuture<'a> =
     Pin<Box<dyn Future<Output = Result<bool, LedgerError>> + Send + 'a>>;
 
+/// One write-ahead step of a [`CommandLedger`].
+pub(crate) type LedgerStep<'a, T> =
+    Pin<Box<dyn Future<Output = Result<T, LedgerError>> + Send + 'a>>;
+
 pub(crate) trait CommandLedger: Send + Sync {
-    fn prepare(&mut self, intent: CommandIntent<'_>) -> Result<Prepared, LedgerError>;
-    fn settle(&mut self, command_id: &str, settlement: Settlement) -> Result<(), LedgerError>;
+    fn prepare<'a>(&'a mut self, intent: CommandIntent<'a>) -> LedgerStep<'a, Prepared>;
+    fn settle<'a>(&'a mut self, command_id: &'a str, settlement: Settlement) -> LedgerStep<'a, ()>;
     fn duplicate_consumed<'a>(
         &'a self,
         sessions: &'a AgentSessions,

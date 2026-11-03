@@ -117,7 +117,15 @@ async fn close_acknowledges_actual_cancel_after_delivery_lock_and_stops_the_chil
         std::future::poll_fn(|cx| std::task::Poll::Ready(closing.as_mut().poll(cx).is_pending()))
             .await
     );
+    // The close's tree writers run off this task: keep polling it until it
+    // waits on the delivery barrier.
     while barrier.try_read().is_ok() {
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(
+                closing.as_mut().poll(cx).is_pending()
+            ))
+            .await
+        );
         tokio::task::yield_now().await;
     }
     tokio::task::yield_now().await;
@@ -320,6 +328,7 @@ impl Fixture {
             Arc::new(crate::agent_tree::MemoryTreeStore::new()),
             None,
         )
+        .await
         .unwrap();
         let gate = GateHandle::new();
         let plan = Arc::new(
@@ -354,20 +363,23 @@ impl Fixture {
             panic!("created session required")
         };
         runtime
-            .mutate_then_emit(false, |tree| {
-                tree.record_child_session(&child, &session.locator().to_string())
-                    .unwrap();
-                let attempt = tree.attempt(&child).unwrap().attempt_id.clone();
-                tree.record_command(crate::agent_tree::AgentCommand::intent(
-                    "fixture:start",
-                    &child,
-                    Some(attempt),
-                    crate::agent_tree::AgentCommandKind::Start,
-                    "start",
-                    Vec::new(),
-                ))
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let (child, locator) = (child.clone(), session.locator().to_string());
+                move |tree| {
+                    tree.record_child_session(&child, &locator).unwrap();
+                    let attempt = tree.attempt(&child).unwrap().attempt_id.clone();
+                    tree.record_command(crate::agent_tree::AgentCommand::intent(
+                        "fixture:start",
+                        &child,
+                        Some(attempt),
+                        crate::agent_tree::AgentCommandKind::Start,
+                        "start",
+                        Vec::new(),
+                    ))
+                    .map_err(|error| error.message)
+                }
             })
+            .await
             .unwrap();
         let agent = session.agent().clone();
         let submission = agent
@@ -379,11 +391,15 @@ impl Fixture {
             .await
             .unwrap();
         runtime
-            .mutate_then_emit(false, |tree| {
-                feed.apply(tree, &child)
-                    .map(|_| ())
-                    .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let (feed, child) = (feed.clone(), child.clone());
+                move |tree| {
+                    feed.apply(tree, &child)
+                        .map(|_| ())
+                        .map_err(|error| error.message)
+                }
             })
+            .await
             .unwrap();
         let live = ProductLiveChild::new(
             &crate::TaskSet::new(),
@@ -461,6 +477,7 @@ impl Fixture {
                 base_text: "follow up",
                 batch: BatchRule::Results,
             })
+            .await
             .unwrap()
             .prompt;
         let delivery = self

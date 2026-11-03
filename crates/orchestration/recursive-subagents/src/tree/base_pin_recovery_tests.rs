@@ -46,8 +46,8 @@ impl Fixture {
     }
 }
 
-#[test]
-fn base_pin_attachment_survives_dropped_first_mutation_effects() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn base_pin_attachment_survives_dropped_first_mutation_effects() {
     for failed in [false, true] {
         let mut fixture = Fixture::interrupted();
         fixture.reopen();
@@ -70,9 +70,13 @@ fn base_pin_attachment_survives_dropped_first_mutation_effects() {
         );
         assert_eq!(fixture.vcs.calls_of(FakeOp::RestoreBase).len(), 1);
         // This also models a mutation whose caller fails before settlement.
-        drop(driver.mutate(|_| ()).unwrap());
+        drop(driver.mutate(|_| ()).await.unwrap());
         let (admitted, settled) = driver
-            .mutate_and_settle(|tree| tree.begin_adopt("root", &fixture.request))
+            .mutate_and_settle({
+                let request = fixture.request.clone();
+                move |tree| tree.begin_adopt("root", &request)
+            })
+            .await
             .unwrap();
         if failed {
             let error = admitted.unwrap_err();
@@ -85,7 +89,7 @@ fn base_pin_attachment_survives_dropped_first_mutation_effects() {
             assert!(settled.adopts[0].is_ok());
             assert_eq!(fixture.vcs.calls_of(FakeOp::Adopt).len(), 1);
         }
-        driver.settle(Effects::default()).unwrap();
+        driver.settle(Effects::default()).await.unwrap();
         assert_eq!(fixture.vcs.calls_of(FakeOp::RestoreBase).len(), 1);
     }
 }
@@ -120,8 +124,8 @@ fn base_pin_attachment_publication_failure_has_a_remedy_instead_of_pending() {
     assert_eq!(fixture.vcs.calls_of(FakeOp::RestoreBase).len(), 0);
 }
 
-#[test]
-fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
     let mut fixture = Fixture::interrupted();
     fixture.reopen();
     assert!(fixture.tree.take_effects().is_empty());
@@ -139,22 +143,26 @@ fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
         fixture.vcs.clone(),
         None,
     );
-    let settled = driver.settle(Effects::default()).unwrap();
+    let settled = driver.settle(Effects::default()).await.unwrap();
     assert_eq!(settled.cleanup_failures, Vec::new());
     let (submitted, _) = driver
-        .mutate_and_settle(|tree| {
-            tree.submit_result(
-                &fixture.observer,
-                &SubmitResultRequest {
-                    turn_token: 1,
-                    output_json: "{\"ok\":true}".into(),
-                },
-                Some("unrelated-submit"),
-            )
+        .mutate_and_settle({
+            let observer = fixture.observer.clone();
+            move |tree| {
+                tree.submit_result(
+                    &observer,
+                    &SubmitResultRequest {
+                        turn_token: 1,
+                        output_json: "{\"ok\":true}".into(),
+                    },
+                    Some("unrelated-submit"),
+                )
+            }
         })
+        .await
         .unwrap();
     assert!(submitted.is_ok(), "{submitted:?}");
-    driver.settle(Effects::default()).unwrap();
+    driver.settle(Effects::default()).await.unwrap();
     let mut tree = driver.read(Clone::clone).unwrap();
     assert_eq!(
         tree.begin_adopt("root", &fixture.request).unwrap_err().code,

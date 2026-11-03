@@ -432,7 +432,9 @@ async fn a_compacted_call_answers_from_its_row_and_a_childs_call_only_by_agent_i
     let (mut tree, child_agent) = tree(&tree_id, workspace);
     tree.bind_session_locator(&child_agent, child.locator().to_string())
         .unwrap();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let mut session = SessionRecord::new(workspace.to_path_buf());
     session.id.clone_from(&tree_id);
     session.plakous_locator = Some(root.locator());

@@ -468,12 +468,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         ));
         send_last_user_prompt_at(events, config, opened);
         report_rebind_context(executor, opened, events, config);
-        install_rebind_epoch(config)?;
+        install_rebind_epoch(executor, config)?;
         Ok(())
     }
 }
 
 fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
     config: &HostConfig<P>,
 ) -> CliResult<()> {
     let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
@@ -491,13 +492,15 @@ fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(
                 config.session.effort.as_deref(),
             )?,
         );
-        topology_state::install_successor_epoch(
-            &config.topology_rows(),
-            snapshot,
-            &tree_id,
-            &|observation| config.state_roots.emit_product(observation),
-        )
-        .map_err(CliFailure::new)?;
+        executor
+            .block_on(topology_state::install_successor_epoch(
+                &config.topology_rows(),
+                snapshot,
+                &tree_id,
+                &|observation| config.state_roots.emit_product(observation),
+            ))
+            .map_err(|_| CliFailure::new("application execution failed"))?
+            .map_err(CliFailure::new)?;
         if let (Some(session_id), Some(tree_id_text)) = (
             crate::product_observation::session_id_from_text(&tree_id),
             crate::product_observation::BoundedText64::new(&tree_id),

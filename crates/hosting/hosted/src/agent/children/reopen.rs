@@ -61,29 +61,28 @@ pub(in crate::agent) async fn rejoin_recovered_start(
     // and releases the recovered turn below without touching that binding.
     // The turn's waiter registers with the bind and is dropped only after a
     // lost occupy unbound it, so the bound turn never reads as unwatched.
-    let mut registration = None;
-    let bound = runtime.prepare_then_emit(|tree| {
-        let current = tree
-            .attempt(agent_id)
-            .ok_or_else(|| "recovered child turn has no attempt to bind".to_owned())?
-            .turn_id
-            .clone();
-        match current {
-            None => {
-                registration = TurnWaiterRegistration::enter(runtime.driver(), tree, agent_id);
-                Ok(true)
+    let driver = runtime.driver().clone();
+    let id = agent_id.to_owned();
+    let bound = runtime
+        .prepare_then_emit(move |tree| {
+            let current = tree
+                .attempt(&id)
+                .ok_or_else(|| "recovered child turn has no attempt to bind".to_owned())?
+                .turn_id
+                .clone();
+            match current {
+                None => Ok(TurnWaiterRegistration::enter(&driver, tree, &id)),
+                Some(current) if current == turn.to_string() => {
+                    Ok(TurnWaiterRegistration::enter(&driver, tree, &id))
+                }
+                Some(current) => Err(format!(
+                    "recovered child turn {turn} does not match the turn {current} the attempt binds"
+                )),
             }
-            Some(current) if current == turn.to_string() => {
-                registration = TurnWaiterRegistration::enter(runtime.driver(), tree, agent_id);
-                Ok(false)
-            }
-            Some(current) => Err(format!(
-                "recovered child turn {turn} does not match the turn {current} the attempt binds"
-            )),
-        }
-    });
-    match bound {
-        Ok(_) => {}
+        })
+        .await;
+    let mut registration = match bound {
+        Ok(registration) => registration,
         Err(error) => {
             let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
                 &runtime.driver().tasks(),
@@ -95,7 +94,7 @@ pub(in crate::agent) async fn rejoin_recovered_start(
             .await;
             return Err(error.into());
         }
-    }
+    };
     let occupied = occupy_recovered_turn(
         runtime,
         agent_id.to_owned(),
@@ -106,7 +105,7 @@ pub(in crate::agent) async fn rejoin_recovered_start(
         &mut registration,
     )
     .await;
-    drop(registration);
+    TurnWaiterRegistration::release_taken(&mut registration).await;
     let occupied = occupied?;
     #[cfg(test)]
     crate::agent::park::hooks::after_recovered_occupy(agent_id).await;
@@ -125,7 +124,7 @@ pub(super) async fn occupy_recovered_child(
     recovered: RecoveredTurnHandle,
 ) -> Result<TurnId, String> {
     let (turn, control, result) = (recovered.turn_id(), recovered.control(), recovered.result());
-    let mut registration = TurnWaiterRegistration::register(runtime.driver(), &agent_id);
+    let mut registration = TurnWaiterRegistration::register(runtime.driver(), &agent_id).await;
     occupy_recovered_turn(
         runtime,
         agent_id,
@@ -412,17 +411,19 @@ pub(in crate::agent) async fn reattach_inflight_children(
         // The resume held this child for its reopen wake; whatever happens
         // to that wake below, the hold ends with this iteration.
         let held = agent_id.clone();
-        let release_hold = || {
-            mutate_child(runtime.driver(), &held, |tree| {
-                tree.release_reopen_hold(&held);
-            });
+        let release_hold = async || {
+            let child = held.clone();
+            mutate_child(runtime.driver(), &held, move |tree| {
+                tree.release_reopen_hold(&child);
+            })
+            .await;
         };
         let Some(owner) = owner.as_ref() else {
-            release_hold();
+            release_hold().await;
             continue;
         };
         if runtime.live.lock().await.contains_key(&agent_id) || runtime.is_recycling(&agent_id) {
-            release_hold();
+            release_hold().await;
             continue;
         }
         match reopen_spawned_child(
@@ -460,7 +461,7 @@ pub(in crate::agent) async fn reattach_inflight_children(
                     };
                     let _ = session.release_opened().await;
                     abandoned_children.push((agent_id, report, evidence));
-                    release_hold();
+                    release_hold().await;
                     continue;
                 }
                 // An interrupt that ended the hold leaves the child
@@ -493,17 +494,18 @@ pub(in crate::agent) async fn reattach_inflight_children(
                 failed.push(agent_id);
             }
         }
-        release_hold();
+        release_hold().await;
     }
     let live_ids: std::collections::HashSet<String> =
         runtime.live.lock().await.keys().cloned().collect();
+    let observer = parent.state_roots().topology_observer();
+    let driver = runtime.driver().clone();
     mutate_child(
         runtime.driver(),
         &runtime
             .read(|tree| tree.root_agent_id.clone())
             .unwrap_or_default(),
-        |tree| {
-            let observer = parent.state_roots().topology_observer();
+        move |tree| {
             for (agent_id, report, evidence) in &abandoned_children {
                 if live_ids.contains(agent_id) {
                     continue;
@@ -516,7 +518,7 @@ pub(in crate::agent) async fn reattach_inflight_children(
                     crate::runtime::events::abandoned_turn_operator_line(report).to_owned(),
                     evidence.clone(),
                 );
-                if recorded.is_err() || runtime.driver().apply_recorded(tree, agent_id).is_err() {
+                if recorded.is_err() || driver.apply_recorded(tree, agent_id).is_err() {
                     continue;
                 }
                 if let Some(status) = tree
@@ -547,12 +549,7 @@ pub(in crate::agent) async fn reattach_inflight_children(
                 }
                 let _ = tree
                     .record_host_materialization(agent_id)
-                    .and_then(|value| {
-                        runtime
-                            .driver()
-                            .apply_recorded(tree, agent_id)
-                            .map(|()| value)
-                    });
+                    .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value));
                 let status = tree
                     .node(agent_id)
                     .ok()
@@ -561,9 +558,10 @@ pub(in crate::agent) async fn reattach_inflight_children(
                 tree.try_emit_tree_node_detached(observer.as_ref(), agent_id, status);
             }
             let root_id = tree.root_agent_id.clone();
-            persist_or_fault(runtime.driver(), tree, &root_id);
+            persist_or_fault(&driver, tree, &root_id);
         },
-    );
+    )
+    .await;
 }
 
 /// How long a child reopen waits for a lease its lost parent still held: one
@@ -1121,22 +1119,25 @@ pub(super) async fn reconcile_reopened_child_results(
             return Err(error);
         }
         crate::agent::ledger::project_feed(runtime, agent_id, &sessions, session_id).await?;
-        record_reopen_failure(runtime, agent_id, expected_attempt.as_ref(), &error)?;
+        record_reopen_failure(runtime, agent_id, expected_attempt.as_ref(), &error).await?;
         return Err(error);
     }
     Ok(ChildReopen::Attached { session, recovered })
 }
 
-pub(super) fn record_reopen_failure(
+pub(super) async fn record_reopen_failure(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     agent_id: &str,
     expected: Option<&crate::agent_tree_protocol::AttemptId>,
     error: &str,
 ) -> Result<(), String> {
-    runtime.record_then_apply(agent_id, |tree| {
-        tree.record_host_retirement_for_attempt(agent_id, expected, error.to_owned())
-            .map(|_| ())
-    })
+    let (id, expected, error) = (agent_id.to_owned(), expected.cloned(), error.to_owned());
+    runtime
+        .record_then_apply(agent_id, move |tree| {
+            tree.record_host_retirement_for_attempt(&id, expected.as_ref(), error)
+                .map(|_| ())
+        })
+        .await
 }
 
 #[cfg(test)]

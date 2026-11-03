@@ -765,11 +765,14 @@ pub fn resume_opened_continue_tree(
     tree_id: &str,
 ) -> CliResult<()> {
     if resume_tree {
-        crate::topology_product::resume_topology_tree_for_cli_prompt(paths, tree_id)?;
-        executor
-            .block_on(product_agent::rejoin_inflight_after_resume(tree_id))
+        return executor
+            .block_on(async {
+                crate::topology_product::resume_topology_tree_for_cli_prompt(paths, tree_id)
+                    .await?;
+                product_agent::rejoin_inflight_after_resume(tree_id).await;
+                Ok(())
+            })
             .map_err(application_execution_failure)?;
-        return Ok(());
     }
     if product_agent::topology_tree_is_restored_paused(tree_id) {
         return Err(CliFailure::new(product_agent::RESTORED_PAUSED_REFUSAL)

@@ -304,17 +304,7 @@ impl Drop for StartupCaller {
             return;
         }
         self.startup.request_cancel();
-        let _ = self.runtime.record_then_apply(&self.agent_id, |tree| {
-            self.startup
-                .record_retirement_failure(
-                    tree,
-                    format!(
-                        "child startup caller left at {:?}; cancellation and release remain owned",
-                        self.startup.stage()
-                    ),
-                )
-                .map(|_| ())
-        });
+        let stage = self.startup.stage();
         let runtime = self.runtime.clone();
         let agent_id = self.agent_id.clone();
         let startup = self.startup.clone();
@@ -324,6 +314,18 @@ impl Drop for StartupCaller {
             return;
         }
         self.runtime.driver().spawn_release_owner(async move {
+            let left = startup.clone();
+            let _ = runtime
+                .record_then_apply(&agent_id, move |tree| {
+                    left.record_retirement_failure(
+                        tree,
+                        format!(
+                            "child startup caller left at {stage:?}; cancellation and release remain owned"
+                        ),
+                    )
+                    .map(|_| ())
+                })
+                .await;
             runtime.cancel_startup(&agent_id, &startup).await;
         });
     }
@@ -774,6 +776,7 @@ pub(super) async fn production_child_runtime(
         crate::topology_runtime::TopologyHubAttach::LookupOnly,
         &mut None,
     )
+    .await
 }
 
 #[allow(

@@ -1,6 +1,7 @@
 use super::*;
 use crate::agent_tree_protocol::{SpawnAgentRequest, Tier};
 use crate::occupancy_vcs::fake::{FakeOp, FakeVcs};
+use crate::runtime::test_kit::BlockOn as _;
 use crate::topology_runtime::ProductTopologyRuntime;
 use plakous::model::TurnId;
 use std::{str::FromStr, sync::Arc};
@@ -42,6 +43,7 @@ fn setup(
             };
             Ok((child, identity))
         })
+        .block()
         .unwrap();
     (runtime, vcs, child, identity)
 }
@@ -54,10 +56,14 @@ async fn failed_worktree_pins_each_turn_of_the_same_attempt_separately() {
         .await
         .unwrap();
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.bind_attempt_turn(&child, turn(2).to_string()).unwrap();
-            Ok(())
+        .mutate_then_emit(false, {
+            let child = child.clone();
+            move |tree| {
+                tree.bind_attempt_turn(&child, turn(2).to_string()).unwrap();
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     identity.turn = turn(2);
     let second = snapshot_failure(runtime.driver(), &identity, &child)
@@ -108,11 +114,15 @@ async fn failed_worktree_does_not_seal_an_inactive_workspace() {
     let root = tempfile::tempdir().unwrap();
     let (runtime, vcs, child, identity) = setup(root.path());
     runtime
-        .mutate_then_emit(false, |tree| {
-            let workspace = tree.node(&child).unwrap().workspace_id.clone();
-            tree.set_workspace_adopting_for_test(&workspace, "root");
-            Ok(())
+        .mutate_then_emit(false, {
+            let child = child.clone();
+            move |tree| {
+                let workspace = tree.node(&child).unwrap().workspace_id.clone();
+                tree.set_workspace_adopting_for_test(&workspace, "root");
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     assert!(
         snapshot_failure(runtime.driver(), &identity, &child)

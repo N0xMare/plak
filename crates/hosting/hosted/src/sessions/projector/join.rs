@@ -13,15 +13,12 @@ use super::views::SessionViews;
 /// session with its mail unread.
 pub trait ProductTreeJoin: Send + Sync {
     /// Joins the pending root command ids of product session `session_id`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the tree store's refusal.
-    fn join_pending_root_commands(
-        &self,
-        session_id: &str,
-        pending_command_ids: &[String],
-    ) -> Result<(), String>;
+    /// The future resolves to the tree store's refusal, if any.
+    fn join_pending_root_commands<'a>(
+        &'a self,
+        session_id: &'a str,
+        pending_command_ids: &'a [String],
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
 }
 
 /// The command ids of the submissions the views hold no fact for, in

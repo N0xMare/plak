@@ -101,11 +101,13 @@ pub(crate) fn requested_tree_resume(
 /// # Errors
 ///
 /// Returns a redaction-safe failure when the tree cannot be resumed.
-pub fn resume_topology_tree_for_cli_prompt(
+pub async fn resume_topology_tree_for_cli_prompt(
     paths: &crate::home::paths::PlakPaths,
     tree_id: &str,
 ) -> plakous_hosted::CliResult<()> {
-    resume_tree_for_cli_prompt(paths, tree_id).map_err(plakous_hosted::CliFailure::new)
+    resume_tree_for_cli_prompt(paths, tree_id)
+        .await
+        .map_err(plakous_hosted::CliFailure::new)
 }
 
 /// Tree-only queries for headless flows. Session ancestry uses the record
@@ -136,14 +138,14 @@ pub(crate) fn epoch_blocks_rebind(paths: &crate::home::paths::PlakPaths, tree_id
 ///
 /// The hub's runtime owns the store now; `_paths` stays in the signature
 /// for the product callers until they are handed the hub.
-pub(crate) fn resume_tree_for_cli_prompt(
+pub(crate) async fn resume_tree_for_cli_prompt(
     _paths: &crate::home::paths::PlakPaths,
     tree_id: &str,
 ) -> Result<(), String> {
-    plakous_hosted::runtime::resume_tree(tree_id)
+    plakous_hosted::runtime::resume_tree(tree_id).await
 }
 
-pub(crate) fn install_successor_epoch(
+pub(crate) async fn install_successor_epoch(
     paths: &crate::home::paths::PlakPaths,
     tree_id: &str,
     account: &str,
@@ -161,6 +163,7 @@ pub(crate) fn install_successor_epoch(
     plakous_hosted::runtime::install_successor_epoch(paths, snapshot, tree_id, &|observation| {
         crate::telemetry_sink::try_emit_product(product_telemetry, observation);
     })
+    .await
 }
 
 /// Why a roster or orchestration apply was refused. Every arm
@@ -253,24 +256,13 @@ pub struct RosterApplyRootBind {
 /// `scope` names which file the save lands in — the global home or the
 /// trusted project override. The installed epoch always carries the
 /// *effective* config either way.
-pub fn apply_roster(
+pub async fn apply_roster(
     paths: &crate::home::paths::PlakPaths,
     bind: Option<&RosterApplyRootBind>,
     config: &crate::product_config::ProductConfig,
     scope: crate::product_config::ConfigWriteScope,
 ) -> Result<RosterApplyOutcome, RosterApplyError> {
-    if let Some(refusal) = roster_apply_refusal(paths, bind) {
-        return Err(RosterApplyError::Refused(refusal));
-    }
-    let durability = match config.save_scoped(paths, scope) {
-        Ok(()) => None,
-        Err(crate::product_config::ConfigSaveError::BeforePublication(error)) => {
-            return Err(RosterApplyError::BeforePublication(error));
-        }
-        Err(crate::product_config::ConfigSaveError::PublishedDurabilityUncertain(error)) => {
-            Some(error)
-        }
-    };
+    let durability = save_roster(paths, bind, config, scope)?;
     let Some(bind) = bind else {
         return Ok(RosterApplyOutcome::Saved);
     };
@@ -285,6 +277,7 @@ pub fn apply_roster(
         bind.effort.as_deref(),
         None,
     )
+    .await
     .map_err(|error| {
         RosterApplyError::PublishedWithoutEpoch(format!(
             "config.toml was saved but the epoch was not replaced: {error}; the next session picks it up at genesis"
@@ -293,6 +286,39 @@ pub fn apply_roster(
     Ok(durability.map_or(RosterApplyOutcome::Applied, |error| {
         RosterApplyOutcome::AppliedDurabilityUncertain(error)
     }))
+}
+
+/// [`apply_roster`] for a headless `plak config set`, which names no tree:
+/// every persisted tree must be quiescent, and only the file is saved.
+pub fn apply_unbound_roster(
+    paths: &crate::home::paths::PlakPaths,
+    config: &crate::product_config::ProductConfig,
+    scope: crate::product_config::ConfigWriteScope,
+) -> Result<RosterApplyOutcome, RosterApplyError> {
+    save_roster(paths, None, config, scope)?;
+    Ok(RosterApplyOutcome::Saved)
+}
+
+/// The admitted save of an apply; `Some` names a published save whose
+/// durability is uncertain.
+fn save_roster(
+    paths: &crate::home::paths::PlakPaths,
+    bind: Option<&RosterApplyRootBind>,
+    config: &crate::product_config::ProductConfig,
+    scope: crate::product_config::ConfigWriteScope,
+) -> Result<Option<String>, RosterApplyError> {
+    if let Some(refusal) = roster_apply_refusal(paths, bind) {
+        return Err(RosterApplyError::Refused(refusal));
+    }
+    match config.save_scoped(paths, scope) {
+        Ok(()) => Ok(None),
+        Err(crate::product_config::ConfigSaveError::BeforePublication(error)) => {
+            Err(RosterApplyError::BeforePublication(error))
+        }
+        Err(crate::product_config::ConfigSaveError::PublishedDurabilityUncertain(error)) => {
+            Ok(Some(error))
+        }
+    }
 }
 
 /// `None` when the apply is admitted. With no attached tree every persisted
@@ -389,7 +415,7 @@ pub async fn stop_all_then_apply(
     stop_all_now(paths, &bind.tree_id)
         .await
         .map_err(RosterApplyError::BeforePublication)?;
-    apply_roster(paths, Some(bind), config, scope)
+    apply_roster(paths, Some(bind), config, scope).await
 }
 
 async fn stop_all_now(paths: &crate::home::paths::PlakPaths, tree_id: &str) -> Result<(), String> {
@@ -403,16 +429,18 @@ async fn stop_all_now(paths: &crate::home::paths::PlakPaths, tree_id: &str) -> R
             .map_err(|error| error.message)?;
         return crate::store::tree::save_tree(paths, &mut tree).map_err(|error| error.message);
     };
-    let closed_ids = runtime.mutate_then_emit(false, |tree| {
-        let root = tree.root_agent_id.clone();
-        let closed = tree
-            .stop_all(&root, Some(&operation_id))
-            .map_err(|error| error.message)?;
-        Ok(closed
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect::<Vec<String>>())
-    })?;
+    let closed_ids = runtime
+        .mutate_then_emit(false, move |tree| {
+            let root = tree.root_agent_id.clone();
+            let closed = tree
+                .stop_all(&root, Some(&operation_id))
+                .map_err(|error| error.message)?;
+            Ok(closed
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<String>>())
+        })
+        .await?;
     let cancel = runtime.cancel_live_many(&closed_ids).await;
     if !cancel.is_clean() {
         let message = cancel

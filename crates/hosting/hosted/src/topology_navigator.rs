@@ -84,7 +84,7 @@ pub(crate) async fn dispatch_topology_navigator_action<
             emit_snapshot(&runtime, session, send, true);
         }
         UserAction::ResumeTopologyTree => {
-            resume_tree(session, &runtime, send);
+            resume_tree(session, &runtime, send).await;
             // The caller starts the tree's background recovery pass.
             crate::agent::rejoin_inflight_after_resume(&tree_id).await;
         }
@@ -236,13 +236,13 @@ fn read_tree<R, P: plakous_host_protocol::ProtocolExtension>(
 /// One navigator mutation: applied under the mutex, published, and whatever
 /// it queued settled — the navigator never holds the tree itself, so it
 /// cannot strand an effect.
-fn mutate_tree<R, P: plakous_host_protocol::ProtocolExtension>(
+async fn mutate_tree<R: Send + 'static, P: plakous_host_protocol::ProtocolExtension>(
     runtime: &ProductTopologyRuntime,
     send: impl Fn(ContentEvent<P>) + Copy,
     what: &str,
-    work: impl FnOnce(&mut ProductAgentTree) -> Result<R, String>,
+    work: impl FnOnce(&mut ProductAgentTree) -> Result<R, String> + Send + 'static,
 ) -> Option<R> {
-    match runtime.mutate_then_emit(false, work) {
+    match runtime.mutate_then_emit(false, work).await {
         Ok(result) => Some(result),
         Err(error) => {
             send(ContentEvent::Row(TranscriptRow::error(
@@ -268,7 +268,7 @@ fn emit_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     send(ContentEvent::TopologyNavigatorSnapshot(snapshot));
 }
 
-fn resume_tree<P: plakous_host_protocol::ProtocolExtension>(
+async fn resume_tree<P: plakous_host_protocol::ProtocolExtension>(
     session: &SessionRecord,
     runtime: &ProductTopologyRuntime,
     send: impl Fn(ContentEvent<P>) + Copy,
@@ -289,6 +289,7 @@ fn resume_tree<P: plakous_host_protocol::ProtocolExtension>(
     } else if mutate_tree(runtime, send, "tree resume failed", |tree| {
         tree.resume_tree().map_err(|error| error.message)
     })
+    .await
     .is_none()
     {
         return;
@@ -412,12 +413,13 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
     agent_id: &str,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
-    if mutate_tree(runtime, send, "interrupt failed", |tree| {
+    let agent = agent_id.to_owned();
+    if mutate_tree(runtime, send, "interrupt failed", move |tree| {
         let root = tree.root_agent_id.clone();
         tree.interrupt_agent(
             &root,
             &AttemptScopedRequest {
-                agent_id: agent_id.to_owned(),
+                agent_id: agent,
                 expected_attempt_id: None,
             },
             Some(&operation_id),
@@ -425,6 +427,7 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
         .map(|_| ())
         .map_err(|error| error.message)
     })
+    .await
     .is_none()
     {
         return;
@@ -440,20 +443,23 @@ async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
     agent_id: &str,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
-    let Some(closed) = mutate_tree(runtime, send, "close failed", |tree| {
+    let agent = agent_id.to_owned();
+    let Some(closed) = mutate_tree(runtime, send, "close failed", move |tree| {
         let root = tree.root_agent_id.clone();
         let closed = tree
             .close_agent(
                 &root,
                 &AttemptScopedRequest {
-                    agent_id: agent_id.to_owned(),
+                    agent_id: agent,
                     expected_attempt_id: None,
                 },
                 Some(&operation_id),
             )
             .map_err(|error| error.message)?;
         Ok(closed)
-    }) else {
+    })
+    .await
+    else {
         return;
     };
     let closed_ids: Vec<String> = closed.into_iter().map(|(id, _)| id).collect();
@@ -467,13 +473,15 @@ async fn stop_all<P: plakous_host_protocol::ProtocolExtension>(
     send: impl Fn(ContentEvent<P>) + Copy,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
-    let Some(closed) = mutate_tree(runtime, send, "stop-all failed", |tree| {
+    let Some(closed) = mutate_tree(runtime, send, "stop-all failed", move |tree| {
         let root = tree.root_agent_id.clone();
         let closed = tree
             .stop_all(&root, Some(&operation_id))
             .map_err(|error| error.message)?;
         Ok(closed)
-    }) else {
+    })
+    .await
+    else {
         return;
     };
     let closed_ids: Vec<String> = closed.into_iter().map(|(id, _)| id).collect();
@@ -484,16 +492,24 @@ async fn stop_all<P: plakous_host_protocol::ProtocolExtension>(
 async fn signal_retirement(runtime: &ProductTopologyRuntime, ids: &[String]) {
     {
         let live = runtime.live.lock().await;
-        let _ =
-            runtime.driver().mutate(|tree| {
-                for id in ids.iter().filter(|id| !live.contains_key(id)) {
+        let detached: Vec<String> = ids
+            .iter()
+            .filter(|id| !live.contains_key(id))
+            .cloned()
+            .collect();
+        let observer = runtime.observer();
+        let _ = runtime
+            .driver()
+            .mutate(move |tree| {
+                for id in &detached {
                     if let Some(status) = tree.node(id).ok().and_then(|node| {
                         crate::agent_tree::NodeDetach::from_node_status(node.status)
                     }) {
-                        tree.try_emit_tree_node_detached(runtime.observer().as_ref(), id, status);
+                        tree.try_emit_tree_node_detached(observer.as_ref(), id, status);
                     }
                 }
-            });
+            })
+            .await;
     }
     let join = runtime.begin_cancel_live_many(ids).await;
     runtime.driver().tasks().spawn(async move {

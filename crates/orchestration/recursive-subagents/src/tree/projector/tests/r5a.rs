@@ -72,8 +72,8 @@ fn close_drain_never_restarts_a_deleted_fold() {
     assert!(tree.pending_close_folds.is_empty());
 }
 
-#[test]
-fn startup_defers_ancestor_cascade_until_deleted_descendant_rebuilds() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_defers_ancestor_cascade_until_deleted_descendant_rebuilds() {
     use crate::hub::TopologyHub;
     let (_tmp, mut tree) = tree();
     tree.grants_mut_for_test("root").max_depth = 2;
@@ -93,6 +93,7 @@ fn startup_defers_ancestor_cascade_until_deleted_descendant_rebuilds() {
     let loaded = ProductAgentTree::reopen(store.load(&id).unwrap().unwrap());
     let runtime = TopologyHub::new()
         .insert_root(&id, loaded, store, Arc::new(FakeVcs::default()), None)
+        .await
         .unwrap();
     runtime
         .read(|tree| {
@@ -102,16 +103,21 @@ fn startup_defers_ancestor_cascade_until_deleted_descendant_rebuilds() {
         .unwrap();
     let ((), _effects) = runtime
         .driver()
-        .mutate(|tree| {
-            runtime
-                .driver()
-                .fold_and_commit(tree, |tree| {
-                    tree.project_feed(&child, CHILD_SESSION, &[], &TreeFeedReads::default())
-                        .map_err(TopologyError::from)?;
-                    Ok(())
-                })
-                .unwrap();
+        .mutate({
+            let child = child.clone();
+            let runtime = runtime.clone();
+            move |tree| {
+                runtime
+                    .driver()
+                    .fold_and_commit(tree, |tree| {
+                        tree.project_feed(&child, CHILD_SESSION, &[], &TreeFeedReads::default())
+                            .map_err(TopologyError::from)?;
+                        Ok(())
+                    })
+                    .unwrap();
+            }
         })
+        .await
         .unwrap();
     runtime
         .read(|tree| {

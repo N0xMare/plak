@@ -8,6 +8,7 @@
     clippy::too_many_lines,
     reason = "Child recovery scenarios reconstruct persisted attempts and reconcile ownership, terminal outcomes, and queued deliveries."
 )]
+use crate::runtime::test_kit::BlockOn as _;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -100,9 +101,11 @@ async fn child_retirement_capacity_pause_keeps_attempt_pending_until_operator_ca
         panic!("created child session")
     };
     let locator = session.release().await.unwrap();
-    mutate_and_publish(&fixture.runtime, &id, |tree| {
-        tree.record_child_session(&id, &locator.to_string())
+    mutate_and_publish(&fixture.runtime, &id, {
+        let (id, locator) = (id.clone(), locator);
+        move |tree| tree.record_child_session(&id, &locator.to_string())
     })
+    .await
     .unwrap();
     let prior = fixture
         .runtime
@@ -111,8 +114,13 @@ async fn child_retirement_capacity_pause_keeps_attempt_pending_until_operator_ca
     fixture.store.capacity_full.store(true, Ordering::Release);
     let runtime = fixture.runtime.clone();
     let child = id.clone();
-    let task = tokio::task::spawn_blocking(move || {
-        runtime.record_then_apply(&child, |tree| tree.record_host_cancellation(&child))
+    let task = tokio::spawn(async move {
+        runtime
+            .record_then_apply(&child, {
+                let child = child.clone();
+                move |tree| tree.record_host_cancellation(&child)
+            })
+            .await
     });
     tokio::time::timeout(Duration::from_secs(5), async {
         while !fixture.store.storage_unavailable() {
@@ -173,17 +181,21 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
         let command = format!("deleted:{id}");
         fixture
             .runtime
-            .mutate_then_emit(false, |tree| {
-                tree.record_command(AgentCommand::intent(
-                    &command,
-                    id,
-                    tree.attempt(id).map(|attempt| attempt.attempt_id.clone()),
-                    AgentCommandKind::Start,
-                    "fail".to_owned(),
-                    Vec::new(),
-                ))
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let (command, id) = (command.clone(), id.to_owned());
+                move |tree| {
+                    tree.record_command(AgentCommand::intent(
+                        &command,
+                        &id,
+                        tree.attempt(&id).map(|attempt| attempt.attempt_id.clone()),
+                        AgentCommandKind::Start,
+                        "fail".to_owned(),
+                        Vec::new(),
+                    ))
+                    .map_err(|error| error.message)
+                }
             })
+            .await
             .unwrap();
         let sessions = fixture.sessions();
         let CreateSessionOutcome::Created { session, .. } = sessions
@@ -199,10 +211,11 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
         let binding = session.locator();
         fixture
             .runtime
-            .mutate_then_emit(false, |tree| {
+            .mutate_then_emit_borrowed_for_test(false, |tree| {
                 tree.record_child_session(id, &binding.to_string())
                     .map_err(|error| error.message)
             })
+            .await
             .unwrap();
         session
             .agent()
@@ -253,16 +266,21 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
             .unwrap();
             Ok((parent, child, sessionless))
         })
+        .await
         .unwrap();
     let child_feed = terminal(&fixture, &child).await;
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            child_feed
-                .apply(tree, &child)
-                .map(|_| ())
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let (child, child_feed) = (child.clone(), child_feed.clone());
+            move |tree| {
+                child_feed
+                    .apply(tree, &child)
+                    .map(|_| ())
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let parent_feed = terminal(&fixture, &parent).await;
     let mut live = fixture.runtime.read(ProductAgentTree::clone).unwrap();
@@ -312,6 +330,7 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
         store.clone(),
         None,
     )
+    .await
     .unwrap();
     runtime.remember_rejoin_spec(Arc::new(fixture.parent.clone()));
     let targets = runtime
@@ -388,6 +407,7 @@ async fn acknowledged_queued_effect_settles_once_when_feed_is_refused() {
             .map(|spawned| spawned.agent_id)
             .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     let driver = fixture.runtime.driver();
     {
@@ -411,7 +431,13 @@ async fn acknowledged_queued_effect_settles_once_when_feed_is_refused() {
     };
     assert_eq!(fixture.vcs.calls_of(FakeOp::Seal).len(), 0);
     assert!(
-        super::super::feed_projection::apply_on_driver(driver, &feed, "missing-agent").is_err()
+        super::super::feed_projection::apply_on_driver(
+            driver,
+            Arc::new(feed.clone()),
+            "missing-agent"
+        )
+        .await
+        .is_err()
     );
     assert_eq!(
         fixture.vcs.calls_of(FakeOp::Seal).len(),
@@ -419,7 +445,13 @@ async fn acknowledged_queued_effect_settles_once_when_feed_is_refused() {
         "a refused feed must not drop earlier acknowledged tickets"
     );
     assert!(
-        super::super::feed_projection::apply_on_driver(driver, &feed, "missing-agent").is_err()
+        super::super::feed_projection::apply_on_driver(
+            driver,
+            Arc::new(feed.clone()),
+            "missing-agent"
+        )
+        .await
+        .is_err()
     );
     assert_eq!(fixture.vcs.calls_of(FakeOp::Seal).len(), 1);
     assert!(!driver.read(ProductAgentTree::owes_effects).unwrap());
@@ -446,7 +478,7 @@ async fn stale_incremental_feed_retries_once_from_start_without_losing_wait_evid
     };
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
             tree.record_child_session(&id, &session.locator().to_string())
                 .unwrap();
             tree.record_command(AgentCommand::intent(
@@ -460,6 +492,7 @@ async fn stale_incremental_feed_retries_once_from_start_without_losing_wait_evid
             .unwrap();
             Ok(())
         })
+        .await
         .unwrap();
     session
         .agent()
@@ -478,11 +511,12 @@ async fn stale_incremental_feed_retries_once_from_start_without_losing_wait_evid
         .unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
             tree.project_feed(&id, &full.session_id, &full.records[..1], &full.reads)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         })
+        .await
         .unwrap();
     let mut stale = read_tree_feed(&sessions, locator.session_id(), 1)
         .await
@@ -498,6 +532,7 @@ async fn stale_incremental_feed_retries_once_from_start_without_losing_wait_evid
             tree.clear_feed_views();
             Ok(())
         })
+        .await
         .unwrap();
     let mut calls = 0;
     let (projection, _) = retry_tree_feed(&sessions, stale.clone(), |feed| {
@@ -525,7 +560,7 @@ async fn stale_incremental_feed_retries_once_from_start_without_losing_wait_evid
     let mut calls = 0;
     let refused = retry_tree_feed(&sessions, stale, |_| {
         calls += 1;
-        Err::<(), _>(TreeProjectorError::RefoldRequired)
+        std::future::ready(Err::<(), _>(TreeProjectorError::RefoldRequired))
     })
     .await
     .unwrap_err();
@@ -552,20 +587,23 @@ async fn explicit_deleted_fold_rebuilds_in_the_existing_recovery_pass() {
     };
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_child_session(&id, &session.locator().to_string())
+        .mutate_then_emit(false, {
+            let (id, locator) = (id.clone(), session.locator().to_string());
+            move |tree| {
+                tree.record_child_session(&id, &locator).unwrap();
+                tree.record_command(AgentCommand::intent(
+                    "live-rebuild-start",
+                    &id,
+                    tree.attempt(&id).map(|attempt| attempt.attempt_id.clone()),
+                    AgentCommandKind::Start,
+                    "fail",
+                    Vec::new(),
+                ))
                 .unwrap();
-            tree.record_command(AgentCommand::intent(
-                "live-rebuild-start",
-                &id,
-                tree.attempt(&id).map(|attempt| attempt.attempt_id.clone()),
-                AgentCommandKind::Start,
-                "fail",
-                Vec::new(),
-            ))
-            .unwrap();
-            Ok(())
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     session
         .agent()
@@ -584,19 +622,24 @@ async fn explicit_deleted_fold_rebuilds_in_the_existing_recovery_pass() {
         .unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            feed.apply(tree, &id)
-                .map(|_| ())
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let (feed, id) = (feed.clone(), id.clone());
+            move |tree| {
+                feed.apply(tree, &id)
+                    .map(|_| ())
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let mut expected = fixture.runtime.read(ProductAgentTree::clone).unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
             tree.clear_feed_views();
             Ok(())
         })
+        .await
         .unwrap();
     let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
     assert!(report.refused.is_empty(), "{:?}", report.refused);
@@ -902,6 +945,7 @@ async fn panicking_child_create_frees_startup_owner_and_triggers_recovery() {
                 spawned,
             })
         })
+        .await
         .unwrap();
     let id = start.spawned.agent_id.clone();
     let panic_binding = fixture.binding.install(Arc::new(|_, _, _| {
@@ -980,19 +1024,23 @@ async fn late_release_recovery(submitted: bool, installed: bool) {
     if submitted {
         fixture
             .runtime
-            .mutate_then_emit(false, |tree| {
-                let token = tree.attempt(&id).unwrap().turn_token;
-                tree.submit_result(
-                    &id,
-                    &crate::agent_tree_protocol::SubmitResultRequest {
-                        turn_token: token,
-                        output_json: r#"{"ok":true}"#.into(),
-                    },
-                    None,
-                )
-                .unwrap();
-                Ok(())
+            .mutate_then_emit(false, {
+                let id = id.clone();
+                move |tree| {
+                    let token = tree.attempt(&id).unwrap().turn_token;
+                    tree.submit_result(
+                        &id,
+                        &crate::agent_tree_protocol::SubmitResultRequest {
+                            turn_token: token,
+                            output_json: r#"{"ok":true}"#.into(),
+                        },
+                        None,
+                    )
+                    .unwrap();
+                    Ok(())
+                }
             })
+            .await
             .unwrap();
         if installed {
             install_retirement_recovery(&fixture.runtime, &fixture.tree_id).await;
@@ -1214,6 +1262,7 @@ impl Fixture {
             Arc::clone(&store) as Arc<dyn TreeStore>,
             None,
         )
+        .block()
         .unwrap();
         let parent = SpawnParent::Api(ApiTopologyParent {
             created_output_bound: None,
@@ -1266,6 +1315,7 @@ impl Fixture {
                     .map(|spawned| spawned.agent_id)
                     .map_err(|error| error.message)
             })
+            .block()
             .unwrap()
     }
 
@@ -1282,6 +1332,7 @@ impl Fixture {
                 .map(|spawned| spawned.agent_id)
                 .map_err(|error| error.message)
             })
+            .await
             .unwrap();
         let sessions = self.sessions();
         let (session, handle, _) = self.start_failing_turn(&sessions, &id).await;
@@ -1289,11 +1340,15 @@ impl Fixture {
         self.bind_turn(&id, &session.locator(), handle.turn_id());
         session.release().await.unwrap();
         self.runtime
-            .mutate_then_emit(false, |tree| {
-                tree.record_host_retirement(&id, "lost owner".into())
-                    .and_then(|value| tree.fold_due(&id).map(|_| value))
-                    .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let id = id.clone();
+                move |tree| {
+                    tree.record_host_retirement(&id, "lost owner".into())
+                        .and_then(|value| tree.fold_due(&id).map(|_| value))
+                        .map_err(|error| error.message)
+                }
             })
+            .await
             .unwrap();
         id
     }
@@ -1386,7 +1441,7 @@ impl Fixture {
 
     fn bind_turn(&self, id: &str, locator: &SessionLocator, turn: plakous::model::TurnId) {
         self.runtime
-            .mutate_then_emit(false, |tree| {
+            .mutate_then_emit_borrowed_for_test(false, |tree| {
                 tree.bind_session_locator(id, locator.to_string())
                     .map_err(|error| error.message)?;
                 tree.bind_attempt_turn(id, turn.to_string())
@@ -1394,6 +1449,7 @@ impl Fixture {
                 tree.set_active_turn(id, true)
                     .map_err(|error| error.message)
             })
+            .block()
             .unwrap();
     }
 
@@ -1432,6 +1488,7 @@ impl Fixture {
         refuse_checkpoints(&self.database());
         spawn_topology_turn_waiter(
             crate::agent::children::TurnWaiterRegistration::register(self.runtime.driver(), &id)
+                .await
                 .unwrap(),
             Arc::clone(&self.runtime.live),
             None,
@@ -1559,7 +1616,7 @@ impl Fixture {
 
     fn admit_followup(&self, id: &str) {
         self.runtime
-            .mutate_then_emit(false, |tree| {
+            .mutate_then_emit_borrowed_for_test(false, |tree| {
                 tree.send_agent_message(
                     "root",
                     &SendAgentMessageRequest {
@@ -1576,6 +1633,7 @@ impl Fixture {
                 .map(|_| ())
                 .map_err(|error| error.message)
             })
+            .block()
             .unwrap();
     }
 }
@@ -1664,22 +1722,26 @@ async fn quiescent_failed_child_terminal_before_tree_publication_delivers_withhe
     fixture.bind_turn(&id, &source, handle.turn_id());
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.submit_result(
-                &id,
-                &crate::agent_tree_protocol::SubmitResultRequest {
-                    turn_token: 1,
-                    output_json: r#"{"ok":true}"#.into(),
-                },
-                None,
-            )
-            .map_err(|error| error.message)?;
-            assert!(
-                tree.pending_result_mail("root").is_empty(),
-                "result remains withheld before terminal publication"
-            );
-            Ok(())
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.submit_result(
+                    &id,
+                    &crate::agent_tree_protocol::SubmitResultRequest {
+                        turn_token: 1,
+                        output_json: r#"{"ok":true}"#.into(),
+                    },
+                    None,
+                )
+                .map_err(|error| error.message)?;
+                assert!(
+                    tree.pending_result_mail("root").is_empty(),
+                    "result remains withheld before terminal publication"
+                );
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     let terminal = handle.result().await.unwrap();
     assert!(matches!(terminal.outcome(), TurnResultOutcome::Failed(_)));
@@ -1696,6 +1758,7 @@ async fn quiescent_failed_child_terminal_before_tree_publication_delivers_withhe
             *tree = reopened;
             Ok(())
         })
+        .await
         .unwrap();
     assert_eq!(fixture.status(&id), NodeStatus::Paused);
     fixture
@@ -1703,6 +1766,7 @@ async fn quiescent_failed_child_terminal_before_tree_publication_delivers_withhe
         .mutate_then_emit(false, |tree| {
             tree.resume_tree().map_err(|error| error.message)
         })
+        .await
         .unwrap();
     crate::agent::rejoin_inflight_after_resume(&fixture.tree_id).await;
     assert_eq!(fixture.attempt_status(&id), AttemptStatus::Failed);
@@ -1728,10 +1792,14 @@ async fn quiescent_failed_child_terminal_before_tree_publication_delivers_withhe
         .unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.acknowledge_mail(&message)
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let message = message.clone();
+            move |tree| {
+                tree.acknowledge_mail(&message)
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let (ok, repeated) = fixture.recover_agent(&id).await;
     assert!(ok, "{repeated}");
@@ -1793,10 +1861,14 @@ async fn recover_agent_settles_a_stranded_child_through_the_product_reopen() {
     assert_eq!(fixture.attempt_status(&id), AttemptStatus::Running);
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_completed(&id)
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_completed(&id)
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let before = fixture.live_nodes();
     let (succeeded, closed) = fixture
@@ -2177,14 +2249,18 @@ async fn a_held_lease_is_refused_as_recovery_lease_held() {
     fixture.bind_turn(&id, &held.locator(), handle.turn_id());
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_failure(
-                &id,
-                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                "child turn outcome is unknown".into(),
-            )
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_failure(
+                    &id,
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "child turn outcome is unknown".into(),
+                )
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let before = fixture.snapshot(&id);
 
@@ -2314,17 +2390,21 @@ async fn a_recovery_and_the_waiter_settle_an_attempt_once() {
     );
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.recover_host_decision(
-                &id,
-                &attempt_id,
-                RecoveryResolution::TurnAbandoned {
-                    message: "the waiter's recycle abandoned it".into(),
-                },
-            )
-            .map(|_| ())
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let (attempt_id, id) = (attempt_id.clone(), id.clone());
+            move |tree| {
+                tree.recover_host_decision(
+                    &id,
+                    &attempt_id,
+                    RecoveryResolution::TurnAbandoned {
+                        message: "the waiter's recycle abandoned it".into(),
+                    },
+                )
+                .map(|_| ())
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     drop(lock);
     let receipt = recovering.await.unwrap().unwrap();
@@ -2335,14 +2415,18 @@ async fn a_recovery_and_the_waiter_settle_an_attempt_once() {
     let revision = fixture.runtime.read(|tree| tree.revision).unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_failure(
-                &id,
-                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                "late waiter".into(),
-            )
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_failure(
+                    &id,
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "late waiter".into(),
+                )
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     assert_eq!(fixture.status(&id), NodeStatus::Failed);
     assert_eq!(fixture.failure_kind(&id).as_deref(), Some(TURN_ABANDONED));
@@ -2365,6 +2449,7 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
             .map(|spawned| spawned.agent_id)
             .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     let sessions = fixture.sessions();
     let (session, handle, _) = fixture.start_failing_turn(&sessions, &id).await;
@@ -2373,10 +2458,14 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
     session.release().await.unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_completed(&id)
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_completed(&id)
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let candidate = fixture
         .runtime
@@ -2388,7 +2477,7 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
     let ((), _abandoned) = fixture
         .runtime
         .driver()
-        .mutate(|tree| {
+        .mutate_borrowed_for_test(|tree| {
             tree.begin_adopt(
                 "root",
                 &AdoptCandidateRequest {
@@ -2408,6 +2497,7 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
                 ProductAgentTree::reopen(fixture.store.load(&fixture.tree_id).unwrap().unwrap());
             tree.set_vcs(fixture.vcs.clone());
         })
+        .await
         .unwrap();
 
     id
@@ -2515,6 +2605,7 @@ async fn a_create_refused_before_it_wrote_anything_is_a_definite_spawn_refusal()
             tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                 .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     let operation = spawn_child_operation_id(&fixture.tree_id, &spawned.agent_id).unwrap();
     let start = crate::agent_tree_tools::SpawnStart {
@@ -2572,14 +2663,18 @@ async fn a_startup_whose_create_never_produced_a_session_settles_failed_and_clos
     let id = fixture.spawn();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_host_retirement(
-                &id,
-                "startup Creating: child session could not be created (Revalidation)".into(),
-            )
-            .and_then(|value| tree.fold_due(&id).map(|_| value))
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_host_retirement(
+                    &id,
+                    "startup Creating: child session could not be created (Revalidation)".into(),
+                )
+                .and_then(|value| tree.fold_due(&id).map(|_| value))
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     assert_eq!(fixture.status(&id), NodeStatus::RecoveryRequired);
     assert!(fixture.locator(&id).is_none());
@@ -2625,14 +2720,18 @@ async fn followup_to_a_never_created_child_is_refused_and_the_node_stays_closabl
     let id = fixture.spawn();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_host_retirement(
-                &id,
-                "startup Creating: child session could not be created (Revalidation)".into(),
-            )
-            .and_then(|value| tree.fold_due(&id).map(|_| value))
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_host_retirement(
+                    &id,
+                    "startup Creating: child session could not be created (Revalidation)".into(),
+                )
+                .and_then(|value| tree.fold_due(&id).map(|_| value))
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
@@ -2707,6 +2806,7 @@ async fn a_followup_while_the_previous_slot_retires_starts_once_it_is_vacant() {
             );
             Ok(())
         })
+        .await
         .unwrap();
     let id = fixture.stuck_child().await;
     let (recovered, receipt) = fixture.recover_agent(&id).await;
@@ -2823,14 +2923,18 @@ async fn startup_uncertainty_settles_through_the_spawns_create() {
         };
         fixture
             .runtime
-            .mutate_then_emit(false, |tree| {
-                tree.record_host_retirement(
-                    &id,
-                    "startup Creating: child session could not be created".into(),
-                )
-                .and_then(|value| tree.fold_due(&id).map(|_| value))
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let id = id.clone();
+                move |tree| {
+                    tree.record_host_retirement(
+                        &id,
+                        "startup Creating: child session could not be created".into(),
+                    )
+                    .and_then(|value| tree.fold_due(&id).map(|_| value))
+                    .map_err(|error| error.message)
+                }
             })
+            .await
             .unwrap();
         assert!(fixture.locator(&id).is_none());
 
@@ -3135,11 +3239,15 @@ async fn a_live_owner_is_never_reopened_under() {
     let startup = fixture.runtime.reserve_startup(&id).await.unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_host_retirement(&id, "startup Starting: deadline".into())
-                .and_then(|value| tree.fold_due(&id).map(|_| value))
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_host_retirement(&id, "startup Starting: deadline".into())
+                    .and_then(|value| tree.fold_due(&id).map(|_| value))
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let port = RefusingPort::default();
     let error = recover_child(&fixture.runtime, &port, &id, None)
@@ -3317,6 +3425,7 @@ async fn a_recycling_waiter_is_an_owner_that_recovery_never_waits_on() {
     );
     spawn_topology_turn_waiter(
         crate::agent::children::TurnWaiterRegistration::register(fixture.runtime.driver(), &id)
+            .await
             .unwrap(),
         Arc::clone(&fixture.runtime.live),
         None,
@@ -3422,6 +3531,7 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
     );
     spawn_topology_turn_waiter(
         crate::agent::children::TurnWaiterRegistration::register(fixture.runtime.driver(), &id)
+            .await
             .unwrap(),
         Arc::clone(&fixture.runtime.live),
         None,
@@ -3467,14 +3577,18 @@ async fn recover_agent_finalization_debt_settles_as_recovered_without_turn() {
     fixture.bind_turn(&id, &locator, handle.turn_id());
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_failure(
-                &id,
-                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                "delivered terminal with no unfinished work".into(),
-            )
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_failure(
+                    &id,
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "delivered terminal with no unfinished work".into(),
+                )
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
@@ -3521,40 +3635,59 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
     };
     let locator = session.release().await.unwrap();
     assert!(sessions.head_is_quiescent(locator).await.unwrap());
-    mutate_and_publish(&fixture.runtime, &id, |tree| {
-        tree.record_child_session(&id, &locator.to_string())
+    mutate_and_publish(&fixture.runtime, &id, {
+        let (id, locator) = (id.clone(), locator);
+        move |tree| tree.record_child_session(&id, &locator.to_string())
     })
+    .await
     .unwrap();
     let feed = read_tree_feed(&sessions, locator.session_id(), 0)
         .await
         .unwrap();
-    mutate_and_publish(&fixture.runtime, &id, |tree| feed.apply(tree, &id)).unwrap();
-    fixture
-        .runtime
-        .record_then_apply(&id, |tree| tree.record_host_cancellation(&id))
-        .unwrap();
-    let opening = mutate_and_publish(&fixture.runtime, &id, |tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: id.clone(),
-                message: "followup that never reached Start".into(),
-                purpose: Some(MessagePurpose::Followup),
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
+    mutate_and_publish(&fixture.runtime, &id, {
+        let (feed, id) = (feed.clone(), id.clone());
+        move |tree| feed.apply(tree, &id)
     })
+    .await
     .unwrap();
     fixture
         .runtime
-        .record_then_apply(&id, |tree| {
-            tree.record_fault(&id, "followup Start submission outcome is unknown");
-            tree.record_host_materialization(&id)
+        .record_then_apply(&id, {
+            let id = id.clone();
+            move |tree| tree.record_host_cancellation(&id)
         })
+        .await
+        .unwrap();
+    let opening = mutate_and_publish(&fixture.runtime, &id, {
+        let id = id.clone();
+        move |tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: id.clone(),
+                    message: "followup that never reached Start".into(),
+                    purpose: Some(MessagePurpose::Followup),
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+        }
+    })
+    .await
+    .unwrap();
+    fixture
+        .runtime
+        .record_then_apply(&id, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_fault(&id, "followup Start submission outcome is unknown");
+                tree.record_host_materialization(&id)
+            }
+        })
+        .await
         .unwrap();
     assert_eq!(fixture.status(&id), NodeStatus::RecoveryRequired);
     let opened = fixture
@@ -3618,21 +3751,25 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
             }));
         })
         .unwrap();
-    let next = mutate_and_publish(&fixture.runtime, &id, |tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: id.clone(),
-                message: "new followup only".into(),
-                purpose: Some(MessagePurpose::Followup),
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
+    let next = mutate_and_publish(&fixture.runtime, &id, {
+        let id = id.clone();
+        move |tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: id.clone(),
+                    message: "new followup only".into(),
+                    purpose: Some(MessagePurpose::Followup),
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+        }
     })
+    .await
     .unwrap();
     let replay_feed = read_tree_feed(&sessions, locator.session_id(), 0)
         .await
@@ -3710,6 +3847,7 @@ async fn a_start_whose_slot_is_taken_during_reopen_answers_slot_busy() {
             tree.install_snapshot(crate::orchestration::OrchestrationSnapshot::freeze(roster));
             Ok(())
         })
+        .await
         .unwrap();
     let id = fixture.spawn();
     let sessions = fixture.sessions();
@@ -3726,10 +3864,14 @@ async fn a_start_whose_slot_is_taken_during_reopen_answers_slot_busy() {
     let locator = session.release().await.unwrap();
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.bind_session_locator(&id, locator.to_string())
-                .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let (id, locator) = (id.clone(), locator);
+            move |tree| {
+                tree.bind_session_locator(&id, locator.to_string())
+                    .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let held = Arc::new(Mutex::new(None::<crate::topology_runtime::ChildStartup>));
     let (runtime, child, slot) = (Arc::clone(&fixture.runtime), id.clone(), Arc::clone(&held));
@@ -3820,18 +3962,22 @@ async fn interrupted_child_with_an_ended_bound_turn(fixture: &Fixture) -> (Strin
     );
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.interrupt_agent(
-                "root",
-                &crate::agent_tree_protocol::AttemptScopedRequest {
-                    agent_id: id.clone(),
-                    expected_attempt_id: None,
-                },
-                None,
-            )
-            .map(|_| ())
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.interrupt_agent(
+                    "root",
+                    &crate::agent_tree_protocol::AttemptScopedRequest {
+                        agent_id: id.clone(),
+                        expected_attempt_id: None,
+                    },
+                    None,
+                )
+                .map(|_| ())
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
     (id, locator)
@@ -3913,10 +4059,14 @@ async fn an_interrupted_turn_its_waiter_still_watches_waits_for_the_release() {
     let (id, locator) = interrupted_child_with_an_ended_bound_turn(&fixture).await;
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.enter_turn_waiter(&id);
-            Ok(())
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.enter_turn_waiter(&id);
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     let outcome = deliver_queued(&fixture, &id, &locator).await;
     assert_eq!(
@@ -4036,12 +4186,16 @@ async fn refold_reread_spans_more_than_sixty_four_synthetic_pages() {
     let fixture = Fixture::new(&session.to_string());
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            let root = tree.root_agent_id.clone();
-            let projection = feed.apply(tree, &root).unwrap();
-            assert_eq!(projection.cursor, count as u64);
-            Ok(())
+        .mutate_then_emit(false, {
+            let (count, feed) = (count, feed.clone());
+            move |tree| {
+                let root = tree.root_agent_id.clone();
+                let projection = feed.apply(tree, &root).unwrap();
+                assert_eq!(projection.cursor, count as u64);
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
@@ -4089,10 +4243,14 @@ async fn cursor_read_only_pages_new_records_of_a_ten_thousand_record_feed() {
     let fixture = Fixture::new(&session.to_string());
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.seed_feed_cursor(&session.to_string(), cursor);
-            Ok(())
+        .mutate_then_emit(false, {
+            let (cursor, session) = (cursor, session);
+            move |tree| {
+                tree.seed_feed_cursor(&session.to_string(), cursor);
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     let cursor = fixture
         .runtime
@@ -4204,6 +4362,7 @@ async fn operator_recover_dispatch_refuses_what_the_host_will_not_settle() {
             tree.state = crate::agent_tree_protocol::TreeAdmissionState::RestoredPaused;
             Ok(())
         })
+        .await
         .unwrap();
     let notes = navigator_notes(&fixture, recover_action(&fixture, revision, &id, &attempt)).await;
     assert!(
@@ -4219,6 +4378,7 @@ async fn operator_recover_dispatch_refuses_what_the_host_will_not_settle() {
             tree.state = crate::agent_tree_protocol::TreeAdmissionState::Live;
             Ok(())
         })
+        .await
         .unwrap();
     let notes = navigator_notes(
         &fixture,
@@ -4259,14 +4419,18 @@ async fn operator_recover_dispatch_refuses_what_the_host_will_not_settle() {
 
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_failure(
-                &id,
-                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                "child turn outcome is unknown".into(),
-            )
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_failure(
+                    &id,
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "child turn outcome is unknown".into(),
+                )
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     let notes = navigator_notes(
         &fixture,
@@ -4320,14 +4484,18 @@ async fn operator_recover_dispatch_refuses_a_held_lease_after_the_wait() {
     fixture.bind_turn(&id, &held.locator(), handle.turn_id());
     fixture
         .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_turn_failure(
-                &id,
-                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                "child turn outcome is unknown".into(),
-            )
-            .map_err(|error| error.message)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_failure(
+                    &id,
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "child turn outcome is unknown".into(),
+                )
+                .map_err(|error| error.message)
+            }
         })
+        .await
         .unwrap();
     test_lease_wait::set(Duration::from_millis(200));
     let attempt = attempt_of(&fixture, &id);

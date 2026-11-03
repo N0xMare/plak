@@ -1,3 +1,4 @@
+use crate::runtime::test_kit::BlockOn as _;
 use std::sync::Arc;
 
 use super::ProductStateRoots;
@@ -198,15 +199,17 @@ fn unreadable_roster_refuses_fresh_genesis_without_publishing_a_tree() {
         product_home: Some(home.path().to_path_buf()),
         tool_selection: crate::tool_plan::NodeToolSelection::default(),
     });
+    let mut attached = None;
     let result = crate::agent::build::topology_extensions_if_enabled(
         &parent,
         "offline-model",
         crate::topology_runtime::TopologyHubAttach::AttachRoot,
         false,
-        &mut None,
+        &mut attached,
     );
     assert!(
         result
+            .block()
             .err()
             .is_some_and(|error| error.message() == "named config error")
     );
@@ -269,6 +272,7 @@ fn inspecting_a_persisted_tree_compiles_its_tools_without_attaching_or_saving() 
             true,
             &mut owner,
         )
+        .block()
         .unwrap();
         assert!(!extensions.is_empty(), "the tree's tools compile");
         assert_eq!(owner, None, "no root lease is claimed");
@@ -290,6 +294,7 @@ fn inspecting_a_persisted_tree_compiles_its_tools_without_attaching_or_saving() 
         true,
         &mut None,
     )
+    .block()
     .unwrap();
     assert!(!extensions.is_empty());
     assert_eq!(live_facts(), before);
@@ -415,6 +420,7 @@ async fn a_root_attach_keeps_the_trees_tasks_apart_from_the_session() {
         true,
         &mut owner,
     )
+    .await
     .unwrap();
     assert_eq!(owner.as_deref(), Some(tree_id.as_str()));
     let tree = crate::topology_runtime::lookup(&tree_id).unwrap();

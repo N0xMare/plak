@@ -8,6 +8,7 @@
 //! crate that composes it.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+use plakous_hosted::runtime::test_kit::BlockOn as _;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -137,8 +138,9 @@ async fn invoke_tool_spawn_on_the_hub_refuses_openrouter_native_ptc_without_a_bi
     let mut router = RosterBinding::leaf("openrouter", "vendor/model");
     router.composition = Some(CompositionSelection::NativePtc.into());
     tree.pin_template("review", router);
-    let runtime =
-        plakous_hosted::topology_runtime::insert_root(tree_id.clone(), tree, None).expect("hub");
+    let runtime = plakous_hosted::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .expect("hub");
     assert!(runtime.rejoin_spec().is_none(), "no binder on this hub");
     let receipt = invoke_topology_tool_on_hub(
         &tree_id,
@@ -459,7 +461,7 @@ fn cancelled_running_child_skips_detach_from_finalize() {
     let observer =
         crate::telemetry::topology::ProductTopologyObserver::port(Some(Arc::clone(&writer)))
             .expect("a writer yields the product observer");
-    finalize_topology_child_turn(&driver_over(&tree), &child, true, false, Some(&observer));
+    finalize_topology_child_turn(&driver_over(&tree), &child, true, false, Some(&observer)).block();
     let mut detached = 0_u32;
     loop {
         match receiver.try_recv() {
@@ -512,6 +514,7 @@ async fn child_seal_persists_after_the_root_released_the_hub() {
         Arc::clone(&store),
         None,
     )
+    .await
     .expect("hub");
     let driver = runtime.driver().clone();
     let child = {
@@ -552,7 +555,7 @@ async fn child_seal_persists_after_the_root_released_the_hub() {
         !pending.is_empty(),
         "a failed mutate copy seals its partial work"
     );
-    children::settle_or_fault(&driver, pending, &child);
+    children::settle_or_fault(&driver, pending, &child).await;
     let persisted = store.load(&tree_id).expect("load").expect("rows");
     let rows = persisted.rows();
     assert_eq!(rows.node(&child).expect("node").status, NodeStatus::Failed);
@@ -596,7 +599,9 @@ async fn mail_start_composition_of_an_openrouter_child_never_takes_the_oauth_spe
         assert_eq!(node.account, "openrouter");
         ChildBoundBind::of(node)
     };
-    plakous_hosted::topology_runtime::insert_root(tree_id.clone(), tree, None).expect("hub");
+    plakous_hosted::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .expect("hub");
 
     let mut openrouter = openrouter_test_parent();
     openrouter.topology_tree_id = Some(tree_id.clone());

@@ -263,16 +263,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let item = candidate
             .enqueue_live(text.as_str())
             .map_err(|_| CliFailure::new("the continuation was refused by the queue"))?;
-        self.config.session = super::super::result_mail::prepare_instruction(
-            &self.config.topology_rows(),
-            self.config.store.as_ref(),
-            &candidate,
-            &item,
-            &text,
-            None,
-            &["host-continuation".to_owned()],
-        )
-        .map_err(CliFailure::from)?;
+        self.config.session = self
+            .executor
+            .block_on(super::super::result_mail::prepare_instruction(
+                &self.config.topology_rows(),
+                self.config.store.as_ref(),
+                &candidate,
+                &item,
+                &text,
+                None,
+                &["host-continuation".to_owned()],
+            ))
+            .map_err(|_| CliFailure::new("application execution failed"))?
+            .map_err(CliFailure::from)?;
         Ok(HostStep::Prompt {
             text: item.text.clone(),
             queued_delivery: Some(item),
@@ -446,16 +449,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .map_err(|_| CliFailure::new("child wake queue admission was refused"))?;
         // Queue identity and the exact instruction batch publish atomically;
         // an unresolved wake cannot be edited or exported as a user prompt.
-        self.config.session = super::super::result_mail::prepare_instruction(
-            &self.config.topology_rows(),
-            self.config.store.as_ref(),
-            &candidate,
-            &item,
-            &command,
-            batch,
-            &ids,
-        )
-        .map_err(CliFailure::from)?;
+        self.config.session = self
+            .executor
+            .block_on(super::super::result_mail::prepare_instruction(
+                &self.config.topology_rows(),
+                self.config.store.as_ref(),
+                &candidate,
+                &item,
+                &command,
+                batch,
+                &ids,
+            ))
+            .map_err(|_| CliFailure::new("application execution failed"))?
+            .map_err(CliFailure::from)?;
         self.child_wake.park();
         Ok(HostStep::Prompt {
             text: item.text.clone(),

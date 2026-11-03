@@ -5,6 +5,7 @@ use crate::agent_tree_protocol::{
     MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest, SubmitResultRequest,
     TreeAdmissionState, WriterMode,
 };
+use crate::runtime::test_kit::BlockOn as _;
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::fresh_injected_attached_host;
 use crate::sessions::{NoticeScope, NoticeTone, TranscriptRow};
@@ -103,8 +104,9 @@ pub(super) fn with_configured_tree(
         tree.record_turn_completed(&child.agent_id).unwrap();
     }
     tree.settle_for_test();
-    let runtime =
-        crate::topology_runtime::insert_root(config.session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(config.session.id.clone(), tree, None)
+        .block()
+        .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = HostLoop::open(
@@ -153,6 +155,7 @@ pub(super) fn spawn_child(runtime: &crate::topology_runtime::ProductTopologyRunt
             tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                 .map_err(|error| error.message)
         })
+        .block()
         .unwrap();
 }
 
@@ -167,6 +170,7 @@ pub(super) fn pause_tree(runtime: &crate::topology_runtime::ProductTopologyRunti
             tree.state = TreeAdmissionState::RestoredPaused;
             Ok(())
         })
+        .block()
         .unwrap();
 }
 
@@ -338,6 +342,7 @@ fn consumed_child_result_zero_survives_lifecycle_saturation() {
                 let id = tree.unread_mail("root").next().unwrap().message_id.clone();
                 tree.acknowledge_mail(&id).map_err(|error| error.message)
             })
+            .block()
             .unwrap();
         host.publish_pending_continuation();
         assert_eq!(host.pending_track.last.unwrap().results, 0);
@@ -362,6 +367,7 @@ fn pending_refused_zero_is_resent_when_facts_are_unchanged() {
                 let id = tree.unread_mail("root").next().unwrap().message_id.clone();
                 tree.acknowledge_mail(&id).map_err(|error| error.message)
             })
+            .block()
             .unwrap();
         // Terminal receipts cannot be evicted to admit the zero snapshot.
         while host
@@ -410,24 +416,29 @@ fn unread_questions_raise_and_clear_the_indicator() {
                 tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                     .map_err(|error| error.message)
             })
+            .block()
             .unwrap();
         runtime
-            .mutate_then_emit(false, |tree| {
-                tree.send_agent_message(
-                    &child.agent_id,
-                    &SendAgentMessageRequest {
-                        refresh: None,
-                        agent_id: "root".into(),
-                        message: "question".into(),
-                        purpose: Some(MessagePurpose::Question),
-                        priority: None,
-                        in_reply_to: None,
-                        output_schema_json: None,
-                    },
-                    None,
-                )
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let child = child.clone();
+                move |tree| {
+                    tree.send_agent_message(
+                        &child.agent_id,
+                        &SendAgentMessageRequest {
+                            refresh: None,
+                            agent_id: "root".into(),
+                            message: "question".into(),
+                            purpose: Some(MessagePurpose::Question),
+                            priority: None,
+                            in_reply_to: None,
+                            output_schema_json: None,
+                        },
+                        None,
+                    )
+                    .map_err(|error| error.message)
+                }
             })
+            .block()
             .unwrap();
         host.publish_pending_continuation();
         let raised = snapshots(observed);

@@ -1,4 +1,5 @@
 use crate::agent_tree_protocol::{NodeStatus, SpawnAgentRequest};
+use crate::runtime::test_kit::BlockOn as _;
 
 struct DelayedChild(
     std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -72,6 +73,7 @@ fn root_interrupt_signals_children_and_shutdown_joins_their_release() {
             tree.set_active_turn(&id, true).unwrap();
             Ok(id)
         })
+        .block()
         .unwrap();
     let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let finish = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -148,6 +150,7 @@ fn a_root_interrupt_stops_running_children() {
             }
             Ok(ids)
         })
+        .block()
         .unwrap();
     assert_eq!(
         executor
@@ -166,4 +169,89 @@ fn a_root_interrupt_stops_running_children() {
         .unwrap()
         .block_on(crate::topology_runtime::force_release(&tree_id))
         .unwrap();
+}
+
+/// A tree store whose capacity the test switches.
+struct SwitchedCapacity {
+    inner: crate::agent_tree::MemoryTreeStore,
+    full: std::sync::atomic::AtomicBool,
+}
+
+impl crate::agent_tree::TreeStore for SwitchedCapacity {
+    fn exists(&self, id: &str) -> Result<bool, crate::agent_tree::TreeStoreError> {
+        self.inner.exists(id)
+    }
+    fn ids(&self) -> Result<Vec<String>, crate::agent_tree::TreeStoreError> {
+        self.inner.ids()
+    }
+    fn load(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::agent_tree::PersistedTree>, crate::agent_tree::TreeStoreError> {
+        self.inner.load(id)
+    }
+    fn save(
+        &self,
+        tree: &crate::agent_tree::ProductAgentTree,
+    ) -> Result<crate::agent_tree::Revision, crate::agent_tree::TreeStoreError> {
+        if self.full.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(crate::agent_tree::TreeStoreError::storage_full());
+        }
+        self.inner.save(tree)
+    }
+}
+
+/// A root publication on a full tree store parks in its caller, then
+/// publishes once capacity returns, or stops when the host shuts down.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_root_publication_parks_on_a_full_tree_store_until_released_or_shut_down() {
+    use std::sync::atomic::Ordering;
+    let root = tempfile::tempdir().unwrap();
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    let store = std::sync::Arc::new(SwitchedCapacity {
+        inner: crate::agent_tree::MemoryTreeStore::new(),
+        full: std::sync::atomic::AtomicBool::new(false),
+    });
+    let runtime = crate::topology_runtime::insert_root_with(
+        tree_id.clone(),
+        crate::topology_runtime::test_support::bootstrap(&tree_id, root.path().to_path_buf()),
+        store.clone(),
+        None,
+    )
+    .await
+    .unwrap();
+    let host = crate::agent_tree_tools::HostShutdown::new();
+    runtime.driver().bind_host_shutdown(host.clone());
+    let spawn = |runtime: std::sync::Arc<crate::topology_runtime::ProductTopologyRuntime>| {
+        tokio::spawn(async move {
+            runtime
+                .mutate_then_emit(false, |tree| {
+                    tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                        .map(|_| ())
+                        .map_err(|error| error.message)
+                })
+                .await
+        })
+    };
+    store.full.store(true, Ordering::Release);
+    let released = spawn(runtime.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!released.is_finished(), "the publication parks");
+    store.full.store(false, Ordering::Release);
+    released.await.unwrap().unwrap();
+    store.full.store(true, Ordering::Release);
+    let shut = spawn(runtime.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!shut.is_finished(), "the publication parks again");
+    host.signal();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(5), shut)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err(),
+        "the host's shutdown ends the park without publishing"
+    );
+    store.full.store(false, Ordering::Release);
+    crate::topology_runtime::force_release(&tree_id).await;
 }

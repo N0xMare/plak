@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::TaskHandle;
 use plakous::agent::{
     Agent, AgentEvent, AgentEventKind, AgentViewSnapshot, TurnViewState, ViewRequest,
 };
@@ -12,7 +13,6 @@ use plakous::sessions::{AgentSessions, SessionLocator, SessionTranscriptSource};
 use plakous_host_protocol::Core;
 use plakous_host_protocol::views::transcript::{TranscriptItem, TranscriptScope};
 use plakous_host_protocol::views::{ChildProgress, PresentationSnapshot, TreeView};
-use crate::TaskHandle;
 
 use super::child_projection::ChildObservation;
 #[cfg(test)]

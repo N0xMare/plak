@@ -15,6 +15,12 @@ use super::{
 
 #[cfg(test)]
 mod diagnostics;
+mod resume;
+
+pub(in crate::agent) use resume::wait_resume_gate;
+#[cfg(test)]
+pub(super) use resume::wait_transient_gate;
+use resume::{resume_allowed, try_transient_resume};
 
 fn warn_recovery_required(
     agent_id: &str,
@@ -33,29 +39,37 @@ fn warn_recovery_required(
 /// that never gets its waiter drops it. A send tells a bound turn its waiter
 /// will still release from one nobody watches by it (spec 03 section 9).
 ///
-/// Dropping it takes the tree lock: never drop one while holding that lock.
+/// Leave it with [`Self::release`]; a registration dropped instead (a
+/// panic, an aborted task) leaves through an owed tree writer run by a
+/// release owner, or on a thread of its own when no runtime will run one.
 pub(in crate::agent) struct TurnWaiterRegistration {
     pub(super) driver: TreeDriver,
     pub(super) agent_id: String,
     pub(super) attempt: crate::agent_tree_protocol::AttemptId,
+    entered: bool,
 }
 
-pub(super) fn register_admitted_turn(
+pub(super) async fn register_admitted_turn(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     admission: StartAdmission,
     agent_id: &str,
     turn_id: TurnId,
     registration: &mut Option<TurnWaiterRegistration>,
 ) -> Result<(), String> {
-    runtime.prepare_then_emit(|tree| {
-        admission.check(tree, agent_id)?;
-        tree.bind_turn_owner(agent_id, turn_id.to_string());
-        *registration = TurnWaiterRegistration::enter(runtime.driver(), tree, agent_id);
-        if admission == StartAdmission::ReopenWake {
-            tree.unpark_child(agent_id);
-        }
-        Ok(())
-    })
+    let driver = runtime.driver().clone();
+    let id = agent_id.to_owned();
+    *registration = runtime
+        .prepare_then_emit(move |tree| {
+            admission.check(tree, &id)?;
+            tree.bind_turn_owner(&id, turn_id.to_string());
+            let registration = TurnWaiterRegistration::enter(&driver, tree, &id);
+            if admission == StartAdmission::ReopenWake {
+                tree.unpark_child(&id);
+            }
+            Ok(registration)
+        })
+        .await?;
+    Ok(())
 }
 
 impl TurnWaiterRegistration {
@@ -72,26 +86,92 @@ impl TurnWaiterRegistration {
             driver: driver.clone(),
             agent_id: agent_id.to_owned(),
             attempt,
+            entered: true,
         })
     }
 
     /// [`Self::enter`] under its own tree lock.
-    pub(in crate::agent) fn register(driver: &TreeDriver, agent_id: &str) -> Option<Self> {
+    pub(in crate::agent) async fn register(driver: &TreeDriver, agent_id: &str) -> Option<Self> {
+        let writer = driver.clone();
+        let id = agent_id.to_owned();
         let (registration, effects) = driver
-            .mutate(|tree| Self::enter(driver, tree, agent_id))
+            .mutate(move |tree| Self::enter(&writer, tree, &id))
+            .await
             .ok()?;
-        settle_or_fault(driver, effects, agent_id);
+        settle_or_fault(driver, effects, agent_id).await;
         registration
+    }
+
+    /// Ends the registration before its holder goes on.
+    pub(in crate::agent) async fn release(mut self) {
+        self.entered = false;
+        // A release owner: a holder that leaves mid-way still leaves it.
+        let leave = Self::leave(self.driver.clone(), self.agent_id.clone());
+        let _ = self.driver.spawn_release_owner(leave).await;
+    }
+
+    /// Releases an optional registration.
+    pub(in crate::agent) async fn release_taken(registration: &mut Option<Self>) {
+        if let Some(registration) = registration.take() {
+            registration.release().await;
+        }
+    }
+
+    async fn leave(driver: TreeDriver, agent_id: String) {
+        let id = agent_id.clone();
+        // Owed: the registration is left however long an outage holds the tree.
+        let left = driver
+            .mutate_owed(move |tree| tree.leave_turn_waiter(&id))
+            .await;
+        if let Ok(((), effects)) = left {
+            settle_or_fault(&driver, effects, &agent_id).await;
+        }
     }
 }
 
 impl Drop for TurnWaiterRegistration {
     fn drop(&mut self) {
-        let left = self
-            .driver
-            .mutate(|tree| tree.leave_turn_waiter(&self.agent_id));
-        if let Ok(((), effects)) = left {
-            settle_or_fault(&self.driver, effects, &self.agent_id);
+        if !std::mem::take(&mut self.entered) {
+            return;
+        }
+        let mut pending = PendingLeave(Some((self.driver.clone(), self.agent_id.clone())));
+        if tokio::runtime::Handle::try_current().is_err() {
+            // Leaves on a thread of its own as `pending` drops.
+            return;
+        }
+        // A release owner, which no root's release aborts. A task its
+        // shutting-down runtime never starts drops `pending` unrun, which
+        // then leaves on a thread of its own.
+        drop(self.driver.spawn_release_owner(async move {
+            if let Some((driver, agent_id)) = pending.0.take() {
+                Self::leave(driver, agent_id).await;
+            }
+        }));
+    }
+}
+
+/// A registration's leave no task has started: dropped so, it leaves on a
+/// thread with a runtime of its own.
+struct PendingLeave(Option<(TreeDriver, String)>);
+
+impl Drop for PendingLeave {
+    fn drop(&mut self) {
+        let Some((driver, agent_id)) = self.0.take() else {
+            return;
+        };
+        let leave = TurnWaiterRegistration::leave(driver, agent_id.clone());
+        let leaver = std::thread::Builder::new().name("plak-waiter-leave".into());
+        let spawned = leaver.spawn(move || {
+            if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                runtime.block_on(leave);
+            }
+        });
+        if spawned.is_err() {
+            tracing::error!(target: "plak.topology", agent_id = %agent_id,
+                "dropped turn waiter registration could not be left");
         }
     }
 }
@@ -116,7 +196,7 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
     let agent_id = registration.agent_id.clone();
     let attempt = registration.attempt.clone();
     registration.driver.clone().spawn_release_owner(async move {
-        let _registration = registration;
+        let registration = registration;
         let mut pending = Some(result);
         // What the last wake carried, so leftovers cannot wake forever.
         let mut carried = crate::agent::park::Arrivals::new();
@@ -290,33 +370,37 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
                     project_turn_end(&driver, feed.as_ref(), &agent_id).await;
                 }
                 let pending = driver
-                    .mutate(|tree| {
-                        if !identity.still_owns(tree, &agent_id) {
+                    .mutate({
+let (identity, agent_id, driver, observer) = (identity.clone(), agent_id.clone(), driver.clone(), observer.clone());
+move |tree| {
+let (identity, agent_id, driver, observer) = (&identity, &agent_id, &driver, &observer);
+if !identity.still_owns(tree, agent_id) {
                             return;
                         }
                         tree.record_fault(
-                            &agent_id,
+                            agent_id,
                             "the turn was cancelled outside the host; nothing interrupted it",
                         );
                         // the seal is a subprocess and runs with
                         // the lock released.
                         let published =
-                            tree.record_host_cancellation(&agent_id).and_then(|value| {
-                                driver.apply_recorded(tree, &agent_id).map(|()| value)
+                            tree.record_host_cancellation(agent_id).and_then(|value| {
+                                driver.apply_recorded(tree, agent_id).map(|()| value)
                             });
                         if let Err(error) = published {
-                            tree.record_fault(&agent_id, error.message);
+                            tree.record_fault(agent_id, error.message);
                             return;
                         }
                         tree.try_emit_tree_node_detached(
                             observer.as_ref(),
-                            &agent_id,
+                            agent_id,
                             crate::agent_tree::NodeDetach::Failed,
                         );
-                    })
-                    .map(|((), effects)| effects)
+}
+})
+                    .await.map(|((), effects)| effects)
                     .unwrap_or_default();
-                settle_or_fault(&driver, pending, &agent_id);
+                settle_or_fault(&driver, pending, &agent_id).await;
                 retire_live_child(&driver, &live, &agent_id, completed_turn).await;
                 break;
             }
@@ -417,7 +501,7 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
                             cancelled,
                             true,
                             observer.as_ref(),
-                        );
+                        ).await;
                         retire_live_child(&driver, &live, &agent_id, completed_turn).await;
                         break;
                     }
@@ -458,7 +542,7 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
                             cancelled,
                             submitted,
                             observer.as_ref(),
-                        );
+                        ).await;
                         retire_live_child(&driver, &live, &agent_id, completed_turn).await;
                         break;
                     }
@@ -479,7 +563,7 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
                         cancelled,
                         true,
                         observer.as_ref(),
-                    );
+                    ).await;
                     retire_live_child(&driver, &live, &agent_id, completed_turn).await;
                     break;
                 }
@@ -505,6 +589,7 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
                 }
             }
         }
+        registration.release().await;
     });
 }
 
@@ -533,7 +618,8 @@ async fn finish_interrupted_turn(
         true,
         false,
         observer,
-    );
+    )
+    .await;
     retire_live_child(driver, live, agent_id, identity.turn).await;
 }
 
@@ -553,8 +639,9 @@ async fn end_failed_wake(
 ) {
     tracing::error!(target: "plak.topology", agent_id, error = %error,
         "parked child wake was not admitted; ending the attempt");
-    let unpark = || {
-        mutate_child(driver, agent_id, |tree| tree.unpark_child(agent_id));
+    let unpark = async || {
+        let id = agent_id.to_owned();
+        mutate_child(driver, agent_id, move |tree| tree.unpark_child(&id)).await;
     };
     let reconciliation_required = driver
         .read(|tree| {
@@ -564,13 +651,18 @@ async fn end_failed_wake(
         })
         .unwrap_or(false);
     if reconciliation_required {
-        unpark();
+        unpark().await;
         retire_live_child(driver, live, agent_id, identity.turn).await;
         return;
     }
-    let ending = mutate_child(driver, agent_id, |tree| {
-        identity.still_owns(tree, agent_id) && tree.mark_park_ending(agent_id)
+    let ending = mutate_child(driver, agent_id, {
+        let (identity, agent_id) = (identity.clone(), agent_id.to_owned());
+        move |tree| {
+            let (identity, agent_id) = (&identity, agent_id.as_str());
+            identity.still_owns(tree, agent_id) && tree.mark_park_ending(agent_id)
+        }
     })
+    .await
     .unwrap_or(false);
     if !ending {
         let interrupted = driver
@@ -581,7 +673,7 @@ async fn end_failed_wake(
                     })
             })
             .unwrap_or(false);
-        unpark();
+        unpark().await;
         if interrupted {
             finish_interrupted_turn(driver, live, agent_id, identity, observer).await;
         } else {
@@ -589,22 +681,33 @@ async fn end_failed_wake(
         }
         return;
     }
-    mutate_child(driver, agent_id, |tree| {
-        let settled = tree
-            .record_failed_wake_mail(agent_id, &identity.turn.to_string(), error)
-            .and_then(|()| tree.project_mail_decisions(agent_id));
-        if let Err(error) = settled {
-            tree.record_fault(agent_id, error.message);
+    mutate_child(driver, agent_id, {
+        let (identity, agent_id, driver, error) = (
+            identity.clone(),
+            agent_id.to_owned(),
+            driver.clone(),
+            error.to_owned(),
+        );
+        move |tree| {
+            let (identity, agent_id, driver, error) =
+                (&identity, agent_id.as_str(), &driver, error.as_str());
+            let settled = tree
+                .record_failed_wake_mail(agent_id, &identity.turn.to_string(), error)
+                .and_then(|()| tree.project_mail_decisions(agent_id));
+            if let Err(error) = settled {
+                tree.record_fault(agent_id, error.message);
+            }
+            persist_or_fault(driver, tree, agent_id);
         }
-        persist_or_fault(driver, tree, agent_id);
-    });
+    })
+    .await;
     #[cfg(test)]
     crate::agent::park::hooks::before_failed_wake_end(agent_id).await;
     if end_attempt_work(driver, live, agent_id, identity)
         .await
         .is_err()
     {
-        unpark();
+        unpark().await;
         return;
     }
     finalize_child_turn(
@@ -615,8 +718,9 @@ async fn end_failed_wake(
         false,
         true,
         observer,
-    );
-    unpark();
+    )
+    .await;
+    unpark().await;
     retire_live_child(driver, live, agent_id, identity.turn).await;
 }
 
@@ -712,34 +816,46 @@ async fn finalize_failed_child_result(
         } else {
             String::new()
         };
-        mutate_child(driver, agent_id, |tree| {
-            if identity.still_owns(tree, agent_id)
-                && tree
-                    .record_failed_turn_notice(
-                        agent_id,
-                        &identity.attempt,
-                        &identity.turn.to_string(),
-                        notice,
-                    )
-                    .is_ok()
-            {
-                persist_or_fault(driver, tree, agent_id);
+        mutate_child(driver, agent_id, {
+            let (identity, agent_id, driver) =
+                (identity.clone(), agent_id.to_owned(), driver.clone());
+            move |tree| {
+                let (identity, agent_id, driver) = (&identity, agent_id.as_str(), &driver);
+                if identity.still_owns(tree, agent_id)
+                    && tree
+                        .record_failed_turn_notice(
+                            agent_id,
+                            &identity.attempt,
+                            &identity.turn.to_string(),
+                            notice,
+                        )
+                        .is_ok()
+                {
+                    persist_or_fault(driver, tree, agent_id);
+                }
             }
-        });
+        })
+        .await;
     }
     project_turn_end(driver, feed, agent_id).await;
-    mutate_child(driver, agent_id, |tree| {
-        if !identity.still_owns(tree, agent_id) {
-            return;
+    mutate_child(driver, agent_id, {
+        let (identity, agent_id, observer) =
+            (identity.clone(), agent_id.to_owned(), observer.cloned());
+        move |tree| {
+            let (identity, agent_id, observer) = (&identity, agent_id.as_str(), observer.as_ref());
+            if !identity.still_owns(tree, agent_id) {
+                return;
+            }
+            if let Some(detach) = tree
+                .node(agent_id)
+                .ok()
+                .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
+            {
+                tree.try_emit_tree_node_detached(observer, agent_id, detach);
+            }
         }
-        if let Some(detach) = tree
-            .node(agent_id)
-            .ok()
-            .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
-        {
-            tree.try_emit_tree_node_detached(observer, agent_id, detach);
-        }
-    });
+    })
+    .await;
     true
 }
 
@@ -781,39 +897,56 @@ pub(in crate::agent) async fn finalize_child_failure(
     if let Some(snapshot) = failed_worktree::snapshot_failure(driver, identity, agent_id).await {
         message.push_str(&snapshot);
     }
+    let waits = match waits {
+        FailedTurnWaits::Settle(terminal) => Some(terminal.clone()),
+        FailedTurnWaits::Keep => None,
+    };
     let pending = driver
-        .mutate(|tree| {
+        .mutate({
+            let (identity, agent_id, driver) =
+                (identity.clone(), agent_id.to_owned(), driver.clone());
+            move |tree| {
+                let (identity, agent_id, driver) = (&identity, agent_id.as_str(), &driver);
+                if !identity.still_owns(tree, agent_id) {
+                    return;
+                }
+                let evidence = match &waits {
+                    Some(terminal) => crate::agent::wait_evidence_in(
+                        terminal,
+                        tree.retained_wait_receipts(agent_id),
+                    ),
+                    None => Vec::new(),
+                };
+                if let Err(error) = tree
+                    .record_host_turn_failure(agent_id, disposition, message, evidence)
+                    .and_then(|()| driver.apply_recorded(tree, agent_id))
+                {
+                    tree.record_fault(agent_id, error.message);
+                }
+            }
+        })
+        .await
+        .map(|((), effects)| effects)
+        .unwrap_or_default();
+    settle_or_fault(driver, pending, agent_id).await;
+    mutate_child(driver, agent_id, {
+        let (identity, agent_id, observer) =
+            (identity.clone(), agent_id.to_owned(), observer.cloned());
+        move |tree| {
+            let (identity, agent_id, observer) = (&identity, agent_id.as_str(), observer.as_ref());
             if !identity.still_owns(tree, agent_id) {
                 return;
             }
-            let evidence = match waits {
-                FailedTurnWaits::Settle(terminal) => {
-                    crate::agent::wait_evidence_in(terminal, tree.retained_wait_receipts(agent_id))
-                }
-                FailedTurnWaits::Keep => Vec::new(),
-            };
-            if let Err(error) = tree
-                .record_host_turn_failure(agent_id, disposition, message, evidence)
-                .and_then(|()| driver.apply_recorded(tree, agent_id))
+            if let Some(detach) = tree
+                .node(agent_id)
+                .ok()
+                .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
             {
-                tree.record_fault(agent_id, error.message);
+                tree.try_emit_tree_node_detached(observer, agent_id, detach);
             }
-        })
-        .map(|((), effects)| effects)
-        .unwrap_or_default();
-    settle_or_fault(driver, pending, agent_id);
-    mutate_child(driver, agent_id, |tree| {
-        if !identity.still_owns(tree, agent_id) {
-            return;
         }
-        if let Some(detach) = tree
-            .node(agent_id)
-            .ok()
-            .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
-        {
-            tree.try_emit_tree_node_detached(observer, agent_id, detach);
-        }
-    });
+    })
+    .await;
 }
 
 /// The child session whose feed a turn waiter projects when a turn ends.
@@ -856,24 +989,31 @@ async fn project_turn_end(
         }
         Err(error) => Err(String::from(error)),
     };
-    let terminal = mutate_child(driver, agent_id, |tree| match applied {
-        Ok(projection) => Ok(projection
-            .ended_turns
-            .into_iter()
-            .filter(|(_, terminal)| {
-                tree.attempt(agent_id)
-                    .is_some_and(|attempt| attempt.attempt_id == terminal.attempt_id)
-            })
-            .map(|(_, terminal)| terminal)
-            .next_back()),
-        Err(error) => {
-            tree.record_fault(
-                agent_id,
-                format!("the child's turn end was not projected: {error}"),
-            );
-            Err(())
+    let terminal = mutate_child(driver, agent_id, {
+        let agent_id = agent_id.to_owned();
+        move |tree| {
+            let agent_id = agent_id.as_str();
+            match applied {
+                Ok(projection) => Ok(projection
+                    .ended_turns
+                    .into_iter()
+                    .filter(|(_, terminal)| {
+                        tree.attempt(agent_id)
+                            .is_some_and(|attempt| attempt.attempt_id == terminal.attempt_id)
+                    })
+                    .map(|(_, terminal)| terminal)
+                    .next_back()),
+                Err(error) => {
+                    tree.record_fault(
+                        agent_id,
+                        format!("the child's turn end was not projected: {error}"),
+                    );
+                    Err(())
+                }
+            }
         }
-    })?
+    })
+    .await?
     .ok()?;
     if terminal.is_some() {
         return terminal;
@@ -883,7 +1023,14 @@ async fn project_turn_end(
     match read_finalize_terminal(driver, &source.sessions, source.session, agent_id).await {
         Ok(terminal) => Some(terminal),
         Err(error) => {
-            mutate_child(driver, agent_id, |tree| tree.record_fault(agent_id, error));
+            mutate_child(driver, agent_id, {
+                let agent_id = agent_id.to_owned();
+                move |tree| {
+                    let agent_id = agent_id.as_str();
+                    tree.record_fault(agent_id, error);
+                }
+            })
+            .await;
             None
         }
     }
@@ -943,7 +1090,7 @@ pub(in crate::agent) fn child_turn_was_cancelled(
 }
 
 #[cfg(any(test, feature = "test-support"))]
-pub fn finalize_topology_child_turn(
+pub async fn finalize_topology_child_turn(
     driver: &TreeDriver,
     agent_id: &str,
     cancelled: bool,
@@ -958,14 +1105,15 @@ pub fn finalize_topology_child_turn(
         cancelled,
         terminal_ok,
         observer,
-    );
+    )
+    .await;
 }
 
 #[allow(
     clippy::too_many_lines,
     reason = "Child finalization reconciles canonical outcome and tree attempt state before publishing the result and releasing its runtime."
 )]
-pub(super) fn finalize_child_turn(
+pub(super) async fn finalize_child_turn(
     driver: &TreeDriver,
     agent_id: &str,
     identity: Option<&ChildTurnIdentity>,
@@ -979,302 +1127,129 @@ pub(super) fn finalize_child_turn(
     // ticket; phase two runs the snapshot with the lock dropped; phase three
     // re-locks to record the candidate.
     let pending = driver
-        .mutate(|tree| {
-            if identity.is_some_and(|identity| !identity.still_owns(tree, agent_id)) {
-                return;
-            }
-            if cancelled
-                && tree
-                    .node(agent_id)
-                    .is_ok_and(|node| node.status != crate::agent_tree_protocol::NodeStatus::Closed)
-            {
-                tree.release_turn_owner(agent_id);
-                persist_or_fault(driver, tree, agent_id);
-                return;
-            }
-            if !terminal_ok && !cancelled {
-                let recorded = tree.record_host_turn_failure(
-                    agent_id,
-                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
-                    "child session materialization did not complete".to_owned(),
-                    Vec::new(),
-                );
-                if recorded.is_ok() && persist_or_fault(driver, tree, agent_id) {
+        .mutate({
+            let (identity, agent_id, driver, terminal) = (
+                identity.cloned(),
+                agent_id.to_owned(),
+                driver.clone(),
+                terminal.clone(),
+            );
+            move |tree| {
+                let (identity, agent_id, driver, terminal) =
+                    (identity.as_ref(), agent_id.as_str(), &driver, &terminal);
+                if identity.is_some_and(|identity| !identity.still_owns(tree, agent_id)) {
+                    return;
+                }
+                if cancelled
+                    && tree.node(agent_id).is_ok_and(|node| {
+                        node.status != crate::agent_tree_protocol::NodeStatus::Closed
+                    })
+                {
+                    tree.release_turn_owner(agent_id);
+                    persist_or_fault(driver, tree, agent_id);
+                    return;
+                }
+                if !terminal_ok && !cancelled {
+                    let recorded = tree.record_host_turn_failure(
+                        agent_id,
+                        crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                        "child session materialization did not complete".to_owned(),
+                        Vec::new(),
+                    );
+                    if recorded.is_ok() && persist_or_fault(driver, tree, agent_id) {
+                        tree.release_turn_owner(agent_id);
+                        if let Err(error) =
+                            driver.fold_and_commit(tree, |tree| tree.fold_due(agent_id).map(|_| ()))
+                        {
+                            tree.record_fault(agent_id, error.message);
+                        }
+                    }
+                    return;
+                }
+                let turn = identity
+                    .map(|identity| identity.turn.to_string())
+                    .or_else(|| terminal.as_ref().map(|terminal| terminal.turn_id.clone()));
+                if let Some(turn) = turn {
+                    if tree
+                        .record_child_finalization(
+                            agent_id,
+                            &turn,
+                            crate::agent_tree::ChildFinalizationDecision::Finalize,
+                            true,
+                            terminal.clone(),
+                        )
+                        .is_err()
+                        || !persist_or_fault(driver, tree, agent_id)
+                    {
+                        return;
+                    }
                     tree.release_turn_owner(agent_id);
                     if let Err(error) =
                         driver.fold_and_commit(tree, |tree| tree.fold_due(agent_id).map(|_| ()))
                     {
                         tree.record_fault(agent_id, error.message);
                     }
-                }
-                return;
-            }
-            let turn = identity
-                .map(|identity| identity.turn.to_string())
-                .or_else(|| terminal.as_ref().map(|terminal| terminal.turn_id.clone()));
-            if let Some(turn) = turn {
-                if tree
-                    .record_child_finalization(
-                        agent_id,
-                        &turn,
-                        crate::agent_tree::ChildFinalizationDecision::Finalize,
-                        true,
-                        terminal.clone(),
-                    )
-                    .is_err()
-                    || !persist_or_fault(driver, tree, agent_id)
-                {
                     return;
                 }
-                tree.release_turn_owner(agent_id);
-                if let Err(error) =
-                    driver.fold_and_commit(tree, |tree| tree.fold_due(agent_id).map(|_| ()))
-                {
-                    tree.record_fault(agent_id, error.message);
+                // Topology-only fixtures have no runtime feed. Production never
+                // substitutes a live observation for committed terminal evidence.
+                #[cfg(any(test, feature = "test-support"))]
+                if identity.is_none() {
+                    tree.release_turn_owner(agent_id);
+                    if terminal_ok {
+                        let _ = tree.record_turn_completed(agent_id);
+                    } else if !cancelled {
+                        let _ = tree
+                            .record_host_materialization(agent_id)
+                            .and_then(|value| {
+                                driver.apply_recorded(tree, agent_id).map(|()| value)
+                            });
+                    }
+                    if cancelled
+                        && tree.node(agent_id).is_ok_and(|node| {
+                            node.status == crate::agent_tree_protocol::NodeStatus::Closed
+                        })
+                    {
+                        tree.begin_seal(agent_id);
+                    }
                 }
-                return;
+                persist_or_fault(driver, tree, agent_id);
             }
-            // Topology-only fixtures have no runtime feed. Production never
-            // substitutes a live observation for committed terminal evidence.
-            #[cfg(any(test, feature = "test-support"))]
-            if identity.is_none() {
-                tree.release_turn_owner(agent_id);
-                if terminal_ok {
-                    let _ = tree.record_turn_completed(agent_id);
-                } else if !cancelled {
-                    let _ = tree
-                        .record_host_materialization(agent_id)
-                        .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value));
-                }
-                if cancelled
-                    && tree.node(agent_id).is_ok_and(|node| {
-                        node.status == crate::agent_tree_protocol::NodeStatus::Closed
-                    })
-                {
-                    tree.begin_seal(agent_id);
-                }
-            }
-            persist_or_fault(driver, tree, agent_id);
         })
+        .await
         .map(|((), effects)| effects)
         .unwrap_or_default();
-    settle_or_fault(driver, pending, agent_id);
-    mutate_child(driver, agent_id, |tree| {
-        if identity.is_some_and(|identity| !identity.still_owns(tree, agent_id)) {
-            return;
-        }
-        if cancelled {
-            let skip_emit = tree
-                .node(agent_id)
-                .is_ok_and(|node| !node.status.is_terminal());
-            if skip_emit {
+    settle_or_fault(driver, pending, agent_id).await;
+    mutate_child(driver, agent_id, {
+        let (identity, agent_id, observer) =
+            (identity.cloned(), agent_id.to_owned(), observer.cloned());
+        move |tree| {
+            let (identity, agent_id, observer) =
+                (identity.as_ref(), agent_id.as_str(), observer.as_ref());
+            if identity.is_some_and(|identity| !identity.still_owns(tree, agent_id)) {
                 return;
             }
-        }
-        let status = tree
-            .node(agent_id)
-            .ok()
-            .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
-            .unwrap_or(if terminal_ok {
-                crate::agent_tree::NodeDetach::Completed
-            } else {
-                crate::agent_tree::NodeDetach::Failed
-            });
-        tree.try_emit_tree_node_detached(observer, agent_id, status);
-    });
-}
-
-fn resume_allowed_in(
-    tree: &crate::agent_tree::ProductAgentTree,
-    agent_id: &str,
-    identity: &ChildTurnIdentity,
-) -> bool {
-    identity.still_owns(tree, agent_id)
-        && tree
-            .node(agent_id)
-            .is_ok_and(|node| node.status == crate::agent_tree_protocol::NodeStatus::Running)
-        && tree
-            .attempt(agent_id)
-            .is_some_and(|attempt| !attempt.status.is_stopped() && attempt.output_json.is_none())
-        && !tree.attempt_turns_spent(agent_id)
-}
-
-fn resume_allowed(driver: &TreeDriver, agent_id: &str, identity: &ChildTurnIdentity) -> bool {
-    driver
-        .read(|tree| resume_allowed_in(tree, agent_id, identity))
-        .unwrap_or(false)
-}
-
-pub(super) async fn wait_transient_gate(
-    driver: &TreeDriver,
-    live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
-    agent_id: &str,
-    identity: &ChildTurnIdentity,
-    gate: ResumeGate,
-) -> bool {
-    let probe = live
-        .lock()
-        .await
-        .get(agent_id)
-        .and_then(crate::topology_runtime::LiveChildHandle::reachability_probe);
-    wait_resume_gate(driver, live.into(), None, agent_id, identity, probe, gate).await
-}
-
-pub(in crate::agent) async fn wait_resume_gate(
-    driver: &TreeDriver,
-    live: Option<&Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>>,
-    startup: Option<&ChildStartup>,
-    agent_id: &str,
-    identity: &ChildTurnIdentity,
-    probe: Option<plakous::model::ReachabilityProbe>,
-    gate: ResumeGate,
-) -> bool {
-    let cancellation = plakous::model::CancellationToken::new();
-    transient::wait_gate(
-        gate,
-        probe,
-        &cancellation,
-        Some(std::time::Duration::from_secs(1)),
-        || {
-            let notify = driver
-                .read(crate::agent_tree::ProductAgentTree::waiters)
-                .ok()?;
-            let mut notified = Box::pin(notify.notified_owned());
-            notified.as_mut().enable();
-            Some(notified)
-        },
-        || async move {
-            resume_allowed(driver, agent_id, identity)
-                && !startup.is_some_and(ChildStartup::is_cancelled)
-                && if let Some(live) = live {
-                    live.lock()
-                        .await
-                        .get(agent_id)
-                        .is_some_and(|child| child.turn_id() == identity.turn)
-                } else {
-                    true
+            if cancelled {
+                let skip_emit = tree
+                    .node(agent_id)
+                    .is_ok_and(|node| !node.status.is_terminal());
+                if skip_emit {
+                    return;
                 }
-        },
-    )
-    .await
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "Transient child resume revalidates ownership, pending instructions, and canonical turn state before reconnecting the same attempt."
-)]
-async fn try_transient_resume(
-    driver: &TreeDriver,
-    live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
-    agent_id: &str,
-    identity: &ChildTurnIdentity,
-    feed: Option<&ChildFeedSource>,
-    result: &TurnResult,
-    observer: Option<&Arc<dyn crate::agent_tree::TopologyObserver>>,
-) -> Option<Result<TurnResultHandle, ()>> {
-    let TurnResultOutcome::Failed(error) = result.outcome() else {
-        return None;
-    };
-    let gate = transient::failure_gate(result)?;
-    if !resume_allowed(driver, agent_id, identity) {
-        return None;
-    }
-    let plan = driver
-        .read(|tree| {
-            let spent = tree
-                .transient_resume_count(agent_id, &identity.attempt)
-                .ok()?;
-            transient::plan(
-                gate,
-                ResumeOwner::Child {
-                    agent: agent_id,
-                    attempt: &identity.attempt,
-                },
-                error.message(),
-                spent,
-                tree.snapshot.transient_resumes,
-            )
-        })
-        .ok()
-        .flatten()?;
-    let notice = failed_worktree::snapshot_failure(driver, identity, agent_id)
-        .await
-        .unwrap_or_default();
-    let (saved, effects) = driver
-        .mutate(|tree| {
-            if !identity.still_owns(tree, agent_id) {
-                return Err("attempt changed".to_owned());
             }
-            tree.record_child_finalization(
-                agent_id,
-                &identity.turn.to_string(),
-                crate::agent_tree::ChildFinalizationDecision::Resume { round: plan.round },
-                false,
-                None,
-            )
-            .map_err(|error| error.message)?;
-            // The notice is the projector's join barrier: never release it before
-            // the immutable continuation decision is durably saved.
-            tree.record_failed_turn_notice(
-                agent_id,
-                &identity.attempt,
-                &identity.turn.to_string(),
-                notice,
-            )
-            .map_err(|error| error.message)?;
-            if !persist_or_fault(driver, tree, agent_id) {
-                return Err("continuation decision could not be saved".to_owned());
-            }
-            Ok(())
-        })
-        .ok()?;
-    settle_or_fault(driver, effects, agent_id);
-    if saved.is_err() {
-        return Some(Err(()));
-    }
-    project_turn_end(driver, feed, agent_id).await;
-    mutate_child(driver, agent_id, |tree| {
-        if resume_allowed_in(tree, agent_id, identity) {
-            let _ = tree.park_child(agent_id, Vec::new());
-            if gate == ResumeGate::Network {
-                tree.mark_transient_wait(agent_id, true);
-            }
+            let status = tree
+                .node(agent_id)
+                .ok()
+                .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
+                .unwrap_or(if terminal_ok {
+                    crate::agent_tree::NodeDetach::Completed
+                } else {
+                    crate::agent_tree::NodeDetach::Failed
+                });
+            tree.try_emit_tree_node_detached(observer, agent_id, status);
         }
-    });
-    if !wait_transient_gate(driver, live, agent_id, identity, gate).await {
-        mutate_child(driver, agent_id, |tree| tree.unpark_child(agent_id));
-        return Some(Err(()));
-    }
-    if let Ok(next) = start_instruction_turn(
-        driver,
-        live,
-        agent_id,
-        identity,
-        plan.command_id,
-        plan.text,
-        CommandKind::Resume,
-    )
-    .await
-    {
-        Some(Ok(next))
-    } else {
-        if resume_allowed(driver, agent_id, identity) {
-            let _ = end_attempt_work(driver, live, agent_id, identity).await;
-            finalize_child_failure(
-                driver,
-                identity,
-                agent_id,
-                crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
-                    kind: "turn_failed",
-                },
-                error.message().to_owned(),
-                FailedTurnWaits::Settle(result),
-                observer,
-            )
-            .await;
-        }
-        Some(Err(()))
-    }
+    })
+    .await;
 }
 
 pub(super) async fn start_submit_harness_turn(
@@ -1306,22 +1281,31 @@ pub(super) async fn start_submit_harness_turn(
         })
         .map_err(|error| error.message)??;
     let (decision, effects) = driver
-        .mutate(|tree| {
-            tree.record_child_finalization(
-                agent_id,
-                &identity.turn.to_string(),
-                crate::agent_tree::ChildFinalizationDecision::Nudge,
-                false,
-                None,
-            )
-            .map_err(|error| error.message)?;
-            if !persist_or_fault(driver, tree, agent_id) {
-                return Err("child nudge decision could not be saved".to_owned());
+        .mutate({
+            let (driver, agent_id, identity) =
+                (driver.clone(), agent_id.to_owned(), identity.clone());
+            move |tree| {
+                let (driver, agent_id, identity) = (&driver, agent_id.as_str(), &identity);
+                tree.record_child_finalization(
+                    agent_id,
+                    &identity.turn.to_string(),
+                    crate::agent_tree::ChildFinalizationDecision::Nudge,
+                    false,
+                    None,
+                )
+                .map_err(|error| error.message)?;
+                if !persist_or_fault(driver, tree, agent_id) {
+                    return Err("child nudge decision could not be saved".to_owned());
+                }
+                Ok(())
             }
-            Ok(())
         })
+        .await
         .map_err(|error| error.message)?;
-    driver.settle(effects).map_err(|error| error.message)?;
+    driver
+        .settle(effects)
+        .await
+        .map_err(|error| error.message)?;
     decision?;
     start_instruction_turn(
         driver,
@@ -1361,6 +1345,7 @@ pub(in crate::agent) async fn start_instruction_turn(
                 BatchRule::Results
             },
         })
+        .await
         .map_err(String::from)?;
     let (mut live_map, delivery) =
         crate::agent::live::lock_for_transition(live, agent_id, identity.turn).await?;
@@ -1385,6 +1370,7 @@ pub(in crate::agent) async fn start_instruction_turn(
                 &command_text,
                 crate::driver::ledger::Settlement::Refused { pause: None },
             )
+            .await
             .map_err(String::from)?;
         return Err(if transient {
             "transient continuation was cancelled"
@@ -1432,26 +1418,32 @@ pub(in crate::agent) async fn start_instruction_turn(
     drop(live_map);
     let feed = read.await;
     let (published, effects) = driver
-        .mutate(|tree| {
-            if !identity.still_owns(tree, agent_id) {
-                return Err("child attempt has already been replaced".into());
+        .mutate({
+            let (driver, agent_id, identity) =
+                (driver.clone(), agent_id.to_owned(), identity.clone());
+            move |tree| {
+                let (driver, agent_id, identity) = (&driver, agent_id.as_str(), &identity);
+                if !identity.still_owns(tree, agent_id) {
+                    return Err("child attempt has already been replaced".into());
+                }
+                if transient {
+                    tree.unpark_child(agent_id);
+                }
+                tree.bind_turn_owner(agent_id, turn_id.to_string());
+                if let Some(feed) = feed? {
+                    feed.apply(tree, agent_id).map_err(|error| error.message)?;
+                }
+                // Once Start was admitted the result must retain a waiter even
+                // when persistence refuses this publication. The fault remains
+                // visible and the acknowledged revision is not advanced.
+                persist_or_fault(driver, tree, agent_id);
+                Ok::<_, String>(())
             }
-            if transient {
-                tree.unpark_child(agent_id);
-            }
-            tree.bind_turn_owner(agent_id, turn_id.to_string());
-            if let Some(feed) = feed? {
-                feed.apply(tree, agent_id).map_err(|error| error.message)?;
-            }
-            // Once Start was admitted the result must retain a waiter even
-            // when persistence refuses this publication. The fault remains
-            // visible and the acknowledged revision is not advanced.
-            persist_or_fault(driver, tree, agent_id);
-            Ok::<_, String>(())
         })
+        .await
         .unwrap_or_else(|error| (Err(error.message), crate::agent_tree::Effects::default()));
     if let Err(error) = published {
-        settle_or_fault(driver, effects, agent_id);
+        settle_or_fault(driver, effects, agent_id).await;
         if let Err(retirement_error) =
             crate::topology_runtime::retire_live(driver, live, agent_id, Some(turn_id), true).await
         {
@@ -1461,9 +1453,10 @@ pub(in crate::agent) async fn start_instruction_turn(
     }
     if let Err(error) = crate::agent::ledger::ChildLedger::settlement_only(driver)
         .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
+        .await
         .map_err(String::from)
     {
-        settle_or_fault(driver, effects, agent_id);
+        settle_or_fault(driver, effects, agent_id).await;
         if let Err(retirement_error) =
             crate::topology_runtime::retire_live(driver, live, agent_id, Some(turn_id), true).await
         {
@@ -1471,6 +1464,6 @@ pub(in crate::agent) async fn start_instruction_turn(
         }
         return Err(error);
     }
-    settle_or_fault(driver, effects, agent_id);
+    settle_or_fault(driver, effects, agent_id).await;
     Ok(result)
 }

@@ -79,18 +79,14 @@ impl Fixture {
             .unwrap()
     }
 
-    fn mutate<R>(&self, work: impl FnOnce(&mut ProductAgentTree) -> R) -> R {
-        let mut out = None;
+    async fn mutate<R>(&self, work: impl FnOnce(&mut ProductAgentTree) -> R) -> R {
         self.runtime
-            .mutate_then_emit(false, |tree| {
-                out = Some(work(tree));
-                Ok(())
-            })
-            .unwrap();
-        out.unwrap()
+            .mutate_then_emit_borrowed_for_test(false, |tree| Ok(work(tree)))
+            .await
+            .unwrap()
     }
 
-    fn submit(&self) {
+    async fn submit(&self) {
         self.mutate(|tree| {
             tree.submit_result(
                 &self.child,
@@ -101,7 +97,8 @@ impl Fixture {
                 None,
             )
             .unwrap();
-        });
+        })
+        .await;
         for gate in &self.provider_gates {
             gate.release();
         }
@@ -147,14 +144,10 @@ async fn fixture_with_probe(
         Arc::new(crate::occupancy_vcs::fake::FakeVcs::new()),
         None,
     ));
-    let mut child = None;
-    runtime
-        .mutate_then_emit(false, |tree| {
-            child = Some(setup(tree));
-            Ok(())
-        })
+    let child = runtime
+        .mutate_then_emit_borrowed_for_test(false, |tree| Ok(setup(tree)))
+        .await
         .unwrap();
-    let child = child.unwrap();
     let mut provider_gates = Vec::new();
     for step in steps.as_array_mut().unwrap() {
         if let Some(stream) = step
@@ -218,7 +211,7 @@ async fn fixture_with_probe(
         panic!("created child session required")
     };
     runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
             tree.record_child_session(&child, &session.locator().to_string())
                 .map_err(|error| error.message)?;
             let attempt = tree.attempt(&child).unwrap().attempt_id.clone();
@@ -232,10 +225,13 @@ async fn fixture_with_probe(
             ))
             .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     let agent = session.agent().clone();
     let registration =
-        super::super::children::TurnWaiterRegistration::register(runtime.driver(), &child).unwrap();
+        super::super::children::TurnWaiterRegistration::register(runtime.driver(), &child)
+            .await
+            .unwrap();
     let submission = agent
         .start(CommandId::new("park:assignment").unwrap(), "assignment")
         .await
@@ -248,12 +244,13 @@ async fn fixture_with_probe(
         .await
         .unwrap();
     runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
             initial_feed
                 .apply(tree, &child)
                 .map(|_| ())
                 .map_err(|error| error.message)
         })
+        .await
         .unwrap();
     let attached = AttachedCodingSession {
         output_bound_rederived: None,
@@ -402,7 +399,7 @@ async fn transient_failure_continues_same_attempt_after_exact_route_probe() {
             assert!(command.text.contains("Do not repeat completed actions"));
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.provider_gates[0].release();
     fixture.until("submitted continuation", settled).await;
     assert_eq!(
@@ -532,6 +529,7 @@ async fn assert_reopened_transient_resume(journaled: bool) {
                 base_text: &prompt,
                 batch: BatchRule::WakeAll,
             })
+            .await
             .unwrap();
     }
     wake_held(&fixture, attached).await;
@@ -558,7 +556,7 @@ async fn assert_reopened_transient_resume(journaled: bool) {
             );
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.provider_gates[0].release();
     fixture.until("reopened submission", settled).await;
 }
@@ -669,17 +667,19 @@ async fn reopened_transient_wait_interrupt_and_close_cancel_startup_without_disp
                 .contains_key(&fixture.child),
             "the pending gate has a hub-owned startup reservation"
         );
-        fixture.mutate(|tree| {
-            let request = crate::agent_tree_protocol::AttemptScopedRequest {
-                agent_id: fixture.child.clone(),
-                expected_attempt_id: None,
-            };
-            if close {
-                tree.close_agent("root", &request, None).unwrap();
-            } else {
-                tree.interrupt_agent("root", &request, None).unwrap();
-            }
-        });
+        fixture
+            .mutate(|tree| {
+                let request = crate::agent_tree_protocol::AttemptScopedRequest {
+                    agent_id: fixture.child.clone(),
+                    expected_attempt_id: None,
+                };
+                if close {
+                    tree.close_agent("root", &request, None).unwrap();
+                } else {
+                    tree.interrupt_agent("root", &request, None).unwrap();
+                }
+            })
+            .await;
         fixture.runtime.cancel_live(&fixture.child).await.unwrap();
         fixture
             .runtime
@@ -765,7 +765,7 @@ async fn a_live_job_parks_the_child_and_its_terminal_wakes_it_to_submit() {
             );
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
     fixture
         .runtime
@@ -814,18 +814,20 @@ async fn a_live_child_parks_the_hub_its_result_wakes_it_and_an_empty_end_is_nudg
         .unwrap();
     assert_eq!(waiting.agents, [grandchild.clone()]);
     assert_eq!(waiting.processes, [] as [String; 0]);
-    fixture.mutate(|tree| {
-        tree.submit_result(
-            &grandchild,
-            &SubmitResultRequest {
-                turn_token: 1,
-                output_json: r#"{"ok":true}"#.to_owned(),
-            },
-            None,
-        )
-        .unwrap();
-        tree.record_turn_completed(&grandchild).unwrap();
-    });
+    fixture
+        .mutate(|tree| {
+            tree.submit_result(
+                &grandchild,
+                &SubmitResultRequest {
+                    turn_token: 1,
+                    output_json: r#"{"ok":true}"#.to_owned(),
+                },
+                None,
+            )
+            .unwrap();
+            tree.record_turn_completed(&grandchild).unwrap();
+        })
+        .await;
     fixture.until("the wake turn", turns(2)).await;
     let wakes = fixture.wake_prompts();
     assert_eq!(wakes.len(), 1);
@@ -845,7 +847,7 @@ async fn a_live_child_parks_the_hub_its_result_wakes_it_and_an_empty_end_is_nudg
             .read(|tree| tree.wake_mail(&fixture.child).is_empty())
             .unwrap()
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -858,7 +860,7 @@ async fn a_completed_wake_is_observable_after_its_live_turn_ends() {
     )
     .await;
     fixture.until("the park", parked).await;
-    parent_mail(&fixture, "also check the docs");
+    parent_mail(&fixture, "also check the docs").await;
     // Deliberately observe only after the fast wake has ended and parked.
     fixture
         .until("the completed wake's park", |tree, child| {
@@ -890,22 +892,24 @@ async fn parent_mail_wakes_a_parked_child_and_an_interrupt_keeps_its_job() {
     )
     .await;
     fixture.until("the park", parked).await;
-    let sent = fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: "also check the docs".into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let sent = fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "also check the docs".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     assert_eq!(sent.disposition, crate::agent_tree::MailDisposition::Queued);
     fixture.until("the wake turn", turns(2)).await;
     assert_eq!(
@@ -917,17 +921,19 @@ async fn parent_mail_wakes_a_parked_child_and_an_interrupt_keeps_its_job() {
     );
     // The job still runs, so the wake turn's end parks again.
     fixture.until("the second park", parked).await;
-    let status = fixture.mutate(|tree| {
-        tree.interrupt_agent(
-            "root",
-            &crate::agent_tree_protocol::AttemptScopedRequest {
-                agent_id: fixture.child.clone(),
-                expected_attempt_id: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let status = fixture
+        .mutate(|tree| {
+            tree.interrupt_agent(
+                "root",
+                &crate::agent_tree_protocol::AttemptScopedRequest {
+                    agent_id: fixture.child.clone(),
+                    expected_attempt_id: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     assert_eq!(status, NodeStatus::Interrupted);
     fixture.runtime.cancel_live(&fixture.child).await.unwrap();
     fixture
@@ -1000,22 +1006,24 @@ async fn wake_turns_count_toward_max_turns() {
     )
     .await;
     fixture.until("the park", parked).await;
-    fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: "status?".into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap();
-    });
+    fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "status?".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap();
+        })
+        .await;
     // The wake is the second turn; its end cannot park past the ceiling.
     fixture.until("the attempt to settle", settled).await;
     fixture
@@ -1086,16 +1094,18 @@ async fn lose_and_reopen(fixture: &Fixture) -> AttachedCodingSession {
 async fn wake_held(fixture: &Fixture, attached: AttachedCodingSession) {
     // Rebuild the allocation seed before resume takes its hold. The wake
     // preparation still owns the first retained feed/terminal pass.
-    fixture.mutate(|tree| {
-        tree.project_feed(
-            &fixture.child,
-            &attached.locator().session_id().to_string(),
-            &[],
-            &crate::agent_tree::TreeFeedReads::default(),
-        )
-        .unwrap()
-    });
-    fixture.mutate(|tree| tree.resume_tree().unwrap());
+    fixture
+        .mutate(|tree| {
+            tree.project_feed(
+                &fixture.child,
+                &attached.locator().session_id().to_string(),
+                &[],
+                &crate::agent_tree::TreeFeedReads::default(),
+            )
+            .unwrap()
+        })
+        .await;
+    fixture.mutate(|tree| tree.resume_tree().unwrap()).await;
     assert_eq!(
         wake_reopened(&fixture.runtime, &fixture.child, attached)
             .await
@@ -1123,11 +1133,11 @@ async fn rejoin_held(
     attached: AttachedCodingSession,
     control: plakous::agent::TurnControl,
     result: TurnResultHandle,
-    before_rejoin: impl FnOnce(&Fixture),
+    before_rejoin: impl AsyncFnOnce(&Fixture),
 ) -> Reopened {
     let turn = result.turn_id();
-    fixture.mutate(|tree| tree.resume_tree().unwrap());
-    before_rejoin(fixture);
+    fixture.mutate(|tree| tree.resume_tree().unwrap()).await;
+    before_rejoin(fixture).await;
     super::super::children::reconcile_reopened_results(
         &fixture.runtime,
         &fixture.child,
@@ -1148,23 +1158,25 @@ async fn rejoin_held(
     .unwrap()
 }
 
-fn parent_mail(fixture: &Fixture, text: &str) {
-    fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: text.into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap();
-    });
+async fn parent_mail(fixture: &Fixture, text: &str) {
+    fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: text.into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap();
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -1203,7 +1215,7 @@ async fn a_reopen_wakes_a_parked_child_once_with_its_stopped_process() {
             .read(|tree| tree.parked_reopen_targets().is_empty())
             .unwrap()
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -1293,7 +1305,7 @@ async fn a_lost_wake_start_is_retried_exactly_after_a_reopen() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    parent_mail(&fixture, "status?");
+    parent_mail(&fixture, "status?").await;
     let lost = fixture
         .runtime
         .read(|tree| wake_command(tree, &fixture.child))
@@ -1307,6 +1319,7 @@ async fn a_lost_wake_start_is_retried_exactly_after_a_reopen() {
             base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
             batch: BatchRule::WakeAll,
         })
+        .await
         .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the wake turn", turns(2)).await;
@@ -1333,7 +1346,7 @@ async fn a_lost_wake_start_is_retried_exactly_after_a_reopen() {
     assert!(wakes[0].0.ends_with(&lost));
     assert_eq!(wakes[0].1, "Some(Accepted)");
     assert_eq!(fixture.wake_prompts(), [prepared.prompt]);
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -1365,9 +1378,10 @@ async fn behind_retention_retry_survives_a_consumed_command_and_a_caught_up_curs
                 base_text: "exact lost wake",
                 batch: BatchRule::WakeAll,
             })
+            .await
             .unwrap();
     }
-    fixture.mutate(ProductAgentTree::clear_feed_views);
+    fixture.mutate(ProductAgentTree::clear_feed_views).await;
     // Retain only the release/open suffix, not the assignment's facts.
     let connection = rusqlite::Connection::open(fixture.root.path().join("park.sqlite3")).unwrap();
     connection
@@ -1388,7 +1402,10 @@ async fn behind_retention_retry_survives_a_consumed_command_and_a_caught_up_curs
             panic!("the unresolved command must be retried")
         };
         assert_eq!(command.command_id, expected);
-        command.settle(fixture.runtime.driver(), true).unwrap();
+        command
+            .settle(fixture.runtime.driver(), true)
+            .await
+            .unwrap();
         assert!(
             fixture
                 .runtime
@@ -1425,6 +1442,7 @@ async fn reopened_wake_consumes_the_whole_retention_queue_on_one_attachment() {
                 base_text: "exact lost wake",
                 batch: BatchRule::WakeAll,
             })
+            .await
             .unwrap();
         let submission = attached
             .agent()
@@ -1434,7 +1452,7 @@ async fn reopened_wake_consumes_the_whole_retention_queue_on_one_attachment() {
             .unwrap();
         submission.result().unwrap().clone().result().await.unwrap();
     }
-    fixture.mutate(ProductAgentTree::clear_feed_views);
+    fixture.mutate(ProductAgentTree::clear_feed_views).await;
     let connection = rusqlite::Connection::open(fixture.root.path().join("park.sqlite3")).unwrap();
     connection
         .execute_batch(
@@ -1459,7 +1477,7 @@ async fn reopened_wake_consumes_the_whole_retention_queue_on_one_attachment() {
             assert_eq!(tree.attempt(&fixture.child).unwrap().usage.turns, 1);
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -1486,6 +1504,7 @@ async fn reopened_wake_consumes_a_reclaimed_command_without_binding_it() {
             base_text: "exact lost wake",
             batch: BatchRule::WakeAll,
         })
+        .await
         .unwrap();
     attached
         .agent()
@@ -1557,7 +1576,7 @@ async fn reopened_wake_consumes_a_reclaimed_command_without_binding_it() {
         recovered_turn: None,
         topology_owner: None,
     };
-    fixture.mutate(ProductAgentTree::clear_feed_views);
+    fixture.mutate(ProductAgentTree::clear_feed_views).await;
     let connection = rusqlite::Connection::open(fixture.root.path().join("park.sqlite3")).unwrap();
     connection.execute_batch("DELETE FROM session_feed WHERE seq < (SELECT feed_tail FROM sessions);\
             UPDATE sessions SET feed_retained_from=feed_tail, feed_bytes=(SELECT COALESCE(sum(length(record)),0) FROM session_feed);").unwrap();
@@ -1575,7 +1594,7 @@ async fn reopened_wake_consumes_a_reclaimed_command_without_binding_it() {
             assert_eq!(tree.attempt(&fixture.child).unwrap().usage.turns, 1);
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -1611,6 +1630,7 @@ async fn an_unrecorded_corrective_round_is_withdrawn_at_the_reopen_wake() {
             base_text: "submit your result",
             batch: BatchRule::Results,
         })
+        .await
         .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the wake turn", turns(2)).await;
@@ -1637,7 +1657,7 @@ async fn an_unrecorded_corrective_round_is_withdrawn_at_the_reopen_wake() {
         [crate::child_prompts::PLAK_CHILD_WAKE_PROMPT.to_owned()],
         "one fresh wake, not the corrective text"
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -1653,23 +1673,25 @@ async fn a_reopen_settles_lost_await_receipts_before_the_wake() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    parent_mail(&fixture, "use the v2 schema");
-    fixture.mutate(|tree| {
-        let mail = tree.wake_mail(&fixture.child).pop().unwrap();
-        tree.remember_success(
-            "lost-wait",
-            &fixture.child,
-            "wait_agent",
-            &json!({}),
-            &json!({"output": {}, "acknowledged": [mail], "newly_delivered": []}),
-        )
-        .unwrap();
-        tree.acknowledge_mail(&mail.message_id).unwrap();
-        assert_eq!(
-            tree.wake_mail(&fixture.child),
-            [] as [plakous_recursive_subagents::tree::MailRecord; 0]
-        );
-    });
+    parent_mail(&fixture, "use the v2 schema").await;
+    fixture
+        .mutate(|tree| {
+            let mail = tree.wake_mail(&fixture.child).pop().unwrap();
+            tree.remember_success(
+                "lost-wait",
+                &fixture.child,
+                "wait_agent",
+                &json!({}),
+                &json!({"output": {}, "acknowledged": [mail], "newly_delivered": []}),
+            )
+            .unwrap();
+            tree.acknowledge_mail(&mail.message_id).unwrap();
+            assert_eq!(
+                tree.wake_mail(&fixture.child),
+                [] as [plakous_recursive_subagents::tree::MailRecord; 0]
+            );
+        })
+        .await;
     wake_held(&fixture, attached).await;
     fixture.until("the wake turn", turns(2)).await;
     assert!(
@@ -1685,7 +1707,7 @@ async fn a_reopen_settles_lost_await_receipts_before_the_wake() {
             crate::child_prompts::PLAK_CHILD_WAKE_PROMPT
         )]
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -1705,11 +1727,13 @@ async fn a_reopen_with_max_turns_spent_ends_the_attempt_blocked() {
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
     // A second turn the lost process bound and spent before it parked.
-    fixture.mutate(|tree| {
-        tree.bind_attempt_turn(&fixture.child, "00000000-0000-0000-0000-0000000000f2")
-            .unwrap();
-        tree.release_attempt_turn(&fixture.child).unwrap();
-    });
+    fixture
+        .mutate(|tree| {
+            tree.bind_attempt_turn(&fixture.child, "00000000-0000-0000-0000-0000000000f2")
+                .unwrap();
+            tree.release_attempt_turn(&fixture.child).unwrap();
+        })
+        .await;
     wake_held(&fixture, attached).await;
     fixture
         .runtime
@@ -1727,7 +1751,7 @@ async fn a_reopen_with_max_turns_spent_ends_the_attempt_blocked() {
 #[tokio::test]
 async fn child_deadline_fire_is_admitted_by_the_park_adapter() {
     let fixture = fixture(json!([held("thinking"), held("woke")]), leaf).await;
-    parent_mail(&fixture, "wake at the coalescing deadline");
+    parent_mail(&fixture, "wake at the coalescing deadline").await;
     let facts = read_facts(
         fixture.runtime.driver(),
         &fixture.runtime.live,
@@ -1754,14 +1778,14 @@ async fn child_deadline_fire_is_admitted_by_the_park_adapter() {
         .await;
     assert_eq!(fixture.wake_prompts().len(), 1);
     assert!(fixture.wake_prompts()[0].contains("wake at the coalescing deadline"));
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the awakened child to settle", settled).await;
 }
 
 #[tokio::test]
 async fn an_arrival_without_live_work_wakes_instead_of_nudging() {
     let fixture = fixture(json!([held("thinking"), held("woke")]), leaf).await;
-    parent_mail(&fixture, "use the v2 schema");
+    parent_mail(&fixture, "use the v2 schema").await;
     fixture.provider_gates[0].release();
     fixture.until("the wake turn", turns(2)).await;
     assert_eq!(
@@ -1771,7 +1795,7 @@ async fn an_arrival_without_live_work_wakes_instead_of_nudging() {
             crate::child_prompts::PLAK_CHILD_WAKE_PROMPT
         )]
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
     fixture
         .runtime
@@ -1798,22 +1822,24 @@ async fn a_retried_mail_start_acknowledges_its_mail() {
     let attached = lose_and_reopen(&fixture).await;
     // The lost process accepted parent mail as a Start, journaled that
     // Start and died before the runtime recorded it.
-    let sent = fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: "use the v2 schema".into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let sent = fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "use the v2 schema".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     assert_eq!(
         sent.disposition,
         crate::agent_tree::MailDisposition::Started
@@ -1826,6 +1852,7 @@ async fn a_retried_mail_start_acknowledges_its_mail() {
             base_text: "assignment\n\nMessage:\nuse the v2 schema",
             batch: BatchRule::MailStart(&sent.message_id),
         })
+        .await
         .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the retried Start", turns(2)).await;
@@ -1837,7 +1864,7 @@ async fn a_retried_mail_start_acknowledges_its_mail() {
                 .any(|mail| mail.message_id == sent.message_id)
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
     assert!(
         !unread,
@@ -1876,17 +1903,19 @@ async fn an_interrupt_racing_the_park_decision_releases_the_bound_turn() {
                 .is_some_and(|attempt| attempt.usage.tool_calls >= 1)
         })
         .await;
-    let status = fixture.mutate(|tree| {
-        tree.interrupt_agent(
-            "root",
-            &crate::agent_tree_protocol::AttemptScopedRequest {
-                agent_id: fixture.child.clone(),
-                expected_attempt_id: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let status = fixture
+        .mutate(|tree| {
+            tree.interrupt_agent(
+                "root",
+                &crate::agent_tree_protocol::AttemptScopedRequest {
+                    agent_id: fixture.child.clone(),
+                    expected_attempt_id: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     assert_eq!(status, NodeStatus::Interrupted);
     drop(held);
     fixture
@@ -1898,22 +1927,24 @@ async fn an_interrupt_racing_the_park_decision_releases_the_bound_turn() {
         .runtime
         .read(|tree| tree.attempt(&fixture.child).unwrap().turn_id.clone())
         .unwrap();
-    let sent = fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: "resume".into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let sent = fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "resume".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     fixture
         .registry
         .stop_all(Duration::from_millis(250))
@@ -1950,24 +1981,28 @@ async fn an_interrupt_racing_the_wake_admission_keeps_the_attempt() {
             let (runtime, child) = (Arc::clone(&runtime), child.clone());
             Box::pin(async move {
                 runtime
-                    .mutate_then_emit(false, |tree| {
-                        tree.interrupt_agent(
-                            "root",
-                            &crate::agent_tree_protocol::AttemptScopedRequest {
-                                agent_id: child.clone(),
-                                expected_attempt_id: None,
-                            },
-                            None,
-                        )
-                        .map(|_| ())
-                        .map_err(|error| error.message)
+                    .mutate_then_emit(false, {
+                        let child = child.clone();
+                        move |tree| {
+                            tree.interrupt_agent(
+                                "root",
+                                &crate::agent_tree_protocol::AttemptScopedRequest {
+                                    agent_id: child.clone(),
+                                    expected_attempt_id: None,
+                                },
+                                None,
+                            )
+                            .map(|_| ())
+                            .map_err(|error| error.message)
+                        }
                     })
+                    .await
                     .unwrap();
                 runtime.cancel_live(&child).await.unwrap();
             })
         }),
     );
-    parent_mail(&fixture, "status?");
+    parent_mail(&fixture, "status?").await;
     fixture
         .until("the wake batch to be released", |tree, child| {
             tree.commands().values().any(|command| {
@@ -2006,22 +2041,24 @@ async fn an_interrupt_racing_the_wake_admission_keeps_the_attempt() {
         plakous::tools::JobStatus::Running,
         "an interrupt keeps the child's processes"
     );
-    let resumed = fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: "resume".into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let resumed = fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "resume".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     assert_eq!(
         resumed.disposition,
         crate::agent_tree::MailDisposition::Started
@@ -2047,7 +2084,7 @@ async fn mail_during_a_failed_wake_end_is_refused_not_started() {
     fixture.until("the park", parked).await;
     // A result recorded while parked: the next wake is refused, as for a
     // spent or terminal attempt.
-    fixture.submit();
+    fixture.submit().await;
     let observed = Arc::new(std::sync::Mutex::new(None));
     let runtime = Arc::clone(&fixture.runtime);
     let child = fixture.child.clone();
@@ -2057,38 +2094,40 @@ async fn mail_during_a_failed_wake_end_is_refused_not_started() {
         Arc::new(move || {
             let (runtime, child, seen) = (Arc::clone(&runtime), child.clone(), Arc::clone(&seen));
             Box::pin(async move {
-                let mut sent = None;
-                let mut status = None;
-                runtime
-                    .mutate_then_emit(false, |tree| {
-                        sent = Some(
-                            tree.send_agent_message(
-                                "root",
-                                &SendAgentMessageRequest {
-                                    refresh: None,
-                                    agent_id: child.clone(),
-                                    message: "one more thing".into(),
-                                    purpose: None,
-                                    priority: None,
-                                    in_reply_to: None,
-                                    output_schema_json: None,
-                                },
-                                None,
-                            )
-                            .map_err(|error| error.code),
-                        );
-                        status = tree
-                            .interrupt_agent(
-                                "root",
-                                &crate::agent_tree_protocol::AttemptScopedRequest {
-                                    agent_id: child.clone(),
-                                    expected_attempt_id: None,
-                                },
-                                None,
-                            )
-                            .ok();
-                        Ok(())
+                let (sent, status) = runtime
+                    .mutate_then_emit(false, {
+                        let child = child.clone();
+                        move |tree| {
+                            let sent = Some(
+                                tree.send_agent_message(
+                                    "root",
+                                    &SendAgentMessageRequest {
+                                        refresh: None,
+                                        agent_id: child.clone(),
+                                        message: "one more thing".into(),
+                                        purpose: None,
+                                        priority: None,
+                                        in_reply_to: None,
+                                        output_schema_json: None,
+                                    },
+                                    None,
+                                )
+                                .map_err(|error| error.code),
+                            );
+                            let status = tree
+                                .interrupt_agent(
+                                    "root",
+                                    &crate::agent_tree_protocol::AttemptScopedRequest {
+                                        agent_id: child.clone(),
+                                        expected_attempt_id: None,
+                                    },
+                                    None,
+                                )
+                                .ok();
+                            Ok((sent, status))
+                        }
                     })
+                    .await
                     .unwrap();
                 let (locator, path) = runtime
                     .read(|tree| {
@@ -2125,8 +2164,13 @@ async fn mail_during_a_failed_wake_end_is_refused_not_started() {
             })
         }),
     );
-    parent_mail(&fixture, "status?");
-    fixture.until("the attempt to settle", settled).await;
+    parent_mail(&fixture, "status?").await;
+    // The ending wake unparks the child after the attempt settles.
+    fixture
+        .until("the attempt to settle unparked", |tree, child| {
+            settled(tree, child) && !tree.is_parked(child)
+        })
+        .await;
     let (sent, status, started) = observed.lock().unwrap().take().unwrap();
     assert_eq!(
         sent.unwrap().unwrap_err(),
@@ -2213,7 +2257,7 @@ async fn a_started_mail_never_joins_a_turn_another_command_admitted() {
         Err(crate::agent_tree_tools::MailDeliveryFailure::TurnEnded),
         "a Started mail was acknowledged by a turn its command did not admit"
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -2229,17 +2273,19 @@ async fn a_mail_start_on_a_starting_slot_is_retried_not_reopened() {
     )
     .await;
     fixture.until("the park", parked).await;
-    fixture.mutate(|tree| {
-        tree.interrupt_agent(
-            "root",
-            &crate::agent_tree_protocol::AttemptScopedRequest {
-                agent_id: fixture.child.clone(),
-                expected_attempt_id: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    fixture
+        .mutate(|tree| {
+            tree.interrupt_agent(
+                "root",
+                &crate::agent_tree_protocol::AttemptScopedRequest {
+                    agent_id: fixture.child.clone(),
+                    expected_attempt_id: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     fixture.runtime.cancel_live(&fixture.child).await.unwrap();
     fixture
         .until("the interrupted turn to unwind", |tree, child| {
@@ -2325,12 +2371,14 @@ async fn a_start_whose_slot_is_taken_before_its_reservation_does_not_fault_the_c
 #[tokio::test]
 async fn mail_claimed_at_turn_end_parks_and_wakes_when_its_delivery_returns() {
     let fixture = fixture(json!([held("thinking"), held("woke")]), leaf).await;
-    parent_mail(&fixture, "use the v2 schema");
-    let message = fixture.mutate(|tree| {
-        let mail = tree.wake_mail(&fixture.child).pop().unwrap();
-        tree.set_delivery_claim_for_test(&mail.message_id, true);
-        mail.message_id
-    });
+    parent_mail(&fixture, "use the v2 schema").await;
+    let message = fixture
+        .mutate(|tree| {
+            let mail = tree.wake_mail(&fixture.child).pop().unwrap();
+            tree.set_delivery_claim_for_test(&mail.message_id, true);
+            mail.message_id
+        })
+        .await;
     fixture.provider_gates[0].release();
     fixture.until("the park", parked).await;
     fixture
@@ -2342,7 +2390,9 @@ async fn mail_claimed_at_turn_end_parks_and_wakes_when_its_delivery_returns() {
         })
         .unwrap();
     // The delivery found the turn ended and left the mail unread.
-    fixture.mutate(|tree| tree.set_delivery_claim_for_test(&message, false));
+    fixture
+        .mutate(|tree| tree.set_delivery_claim_for_test(&message, false))
+        .await;
     fixture.until("the wake turn", turns(2)).await;
     assert_eq!(
         fixture.wake_prompts(),
@@ -2351,7 +2401,7 @@ async fn mail_claimed_at_turn_end_parks_and_wakes_when_its_delivery_returns() {
             crate::child_prompts::PLAK_CHILD_WAKE_PROMPT
         )]
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
     assert_eq!(
         fixture
@@ -2404,6 +2454,7 @@ async fn a_reopen_does_not_retry_another_attempts_wake() {
             base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
             batch: BatchRule::WakeAll,
         })
+        .await
         .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the wake turn", turns(2)).await;
@@ -2435,7 +2486,7 @@ async fn a_reopen_does_not_retry_another_attempts_wake() {
             assert_eq!(response, "Some(Accepted)");
         }
     }
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -2452,22 +2503,24 @@ async fn an_admitted_mail_start_rejoins_after_the_reopen_reconcile() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    let sent = fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: "use the v2 schema".into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let sent = fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "use the v2 schema".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     assert_eq!(
         sent.disposition,
         crate::agent_tree::MailDisposition::Started
@@ -2480,6 +2533,7 @@ async fn an_admitted_mail_start_rejoins_after_the_reopen_reconcile() {
             base_text: "assignment\n\nMessage:\nuse the v2 schema",
             batch: BatchRule::MailStart(&sent.message_id),
         })
+        .await
         .unwrap();
     // The lost process admitted the Start and died before binding its turn.
     let submission = attached
@@ -2494,7 +2548,7 @@ async fn an_admitted_mail_start_rejoins_after_the_reopen_reconcile() {
     let control = submission.turn().unwrap().control();
     let result = submission.result().unwrap().clone();
     let turn = result.turn_id();
-    let rejoined = rejoin_held(&fixture, attached, control, result, |_| {}).await;
+    let rejoined = rejoin_held(&fixture, attached, control, result, async |_| {}).await;
     assert_eq!(rejoined, Reopened::Done);
     fixture
         .runtime
@@ -2516,7 +2570,7 @@ async fn an_admitted_mail_start_rejoins_after_the_reopen_reconcile() {
             .unwrap()
             .is_empty()
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -2534,25 +2588,27 @@ async fn a_mail_start_never_claims_a_recovered_turn_another_command_admitted() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    let send = |text: &str| {
-        fixture.mutate(|tree| {
-            tree.send_agent_message(
-                "root",
-                &SendAgentMessageRequest {
-                    refresh: None,
-                    agent_id: fixture.child.clone(),
-                    message: text.into(),
-                    purpose: None,
-                    priority: None,
-                    in_reply_to: None,
-                    output_schema_json: None,
-                },
-                None,
-            )
-            .unwrap()
-        })
+    let send = async |text: &str| {
+        fixture
+            .mutate(|tree| {
+                tree.send_agent_message(
+                    "root",
+                    &SendAgentMessageRequest {
+                        refresh: None,
+                        agent_id: fixture.child.clone(),
+                        message: text.into(),
+                        purpose: None,
+                        priority: None,
+                        in_reply_to: None,
+                        output_schema_json: None,
+                    },
+                    None,
+                )
+                .unwrap()
+            })
+            .await
     };
-    let journaled = send("use the v2 schema");
+    let journaled = send("use the v2 schema").await;
     let command = format!("plak:mail:{}:start", journaled.message_id);
     let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
         .prepare(CommandIntent {
@@ -2561,6 +2617,7 @@ async fn a_mail_start_never_claims_a_recovered_turn_another_command_admitted() {
             base_text: "assignment\n\nMessage:\nuse the v2 schema",
             batch: BatchRule::MailStart(&journaled.message_id),
         })
+        .await
         .unwrap();
     // The lost process admitted that Start and died before binding it.
     let submission = attached
@@ -2572,7 +2629,7 @@ async fn a_mail_start_never_claims_a_recovered_turn_another_command_admitted() {
     let control = submission.turn().unwrap().control();
     let result = submission.result().unwrap().clone();
     let turn = result.turn_id();
-    let late = send("keep the old field too");
+    let late = send("keep the old field too").await;
     assert_eq!(
         late.disposition,
         crate::agent_tree::MailDisposition::Started
@@ -2614,7 +2671,7 @@ async fn a_mail_start_never_claims_a_recovered_turn_another_command_admitted() {
             assert_eq!(unread, std::slice::from_ref(&late.message_id));
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -2631,25 +2688,27 @@ async fn a_recovered_turn_that_ends_before_the_rejoin_returns_stays_ended() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    let send = |text: &str| {
-        fixture.mutate(|tree| {
-            tree.send_agent_message(
-                "root",
-                &SendAgentMessageRequest {
-                    refresh: None,
-                    agent_id: fixture.child.clone(),
-                    message: text.into(),
-                    purpose: None,
-                    priority: None,
-                    in_reply_to: None,
-                    output_schema_json: None,
-                },
-                None,
-            )
-            .unwrap()
-        })
+    let send = async |text: &str| {
+        fixture
+            .mutate(|tree| {
+                tree.send_agent_message(
+                    "root",
+                    &SendAgentMessageRequest {
+                        refresh: None,
+                        agent_id: fixture.child.clone(),
+                        message: text.into(),
+                        purpose: None,
+                        priority: None,
+                        in_reply_to: None,
+                        output_schema_json: None,
+                    },
+                    None,
+                )
+                .unwrap()
+            })
+            .await
     };
-    let journaled = send("use the v2 schema");
+    let journaled = send("use the v2 schema").await;
     let command = format!("plak:mail:{}:start", journaled.message_id);
     let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
         .prepare(CommandIntent {
@@ -2658,6 +2717,7 @@ async fn a_recovered_turn_that_ends_before_the_rejoin_returns_stays_ended() {
             base_text: "assignment\n\nMessage:\nuse the v2 schema",
             batch: BatchRule::MailStart(&journaled.message_id),
         })
+        .await
         .unwrap();
     let submission = attached
         .agent()
@@ -2668,7 +2728,7 @@ async fn a_recovered_turn_that_ends_before_the_rejoin_returns_stays_ended() {
     let control = submission.turn().unwrap().control();
     let result = submission.result().unwrap().clone();
     let turn = result.turn_id();
-    let late = send("keep the old field too");
+    let late = send("keep the old field too").await;
     super::super::children::reconcile_reopened_results(
         &fixture.runtime,
         &fixture.child,
@@ -2685,18 +2745,22 @@ async fn a_recovered_turn_that_ends_before_the_rejoin_returns_stays_ended() {
             let (runtime, child) = (Arc::clone(&runtime), child.clone());
             Box::pin(async move {
                 runtime
-                    .mutate_then_emit(false, |tree| {
-                        tree.submit_result(
-                            &child,
-                            &SubmitResultRequest {
-                                turn_token: 1,
-                                output_json: r#"{"ok":true}"#.to_owned(),
-                            },
-                            None,
-                        )
-                        .map(|_| ())
-                        .map_err(|error| error.message)
+                    .mutate_then_emit(false, {
+                        let child = child.clone();
+                        move |tree| {
+                            tree.submit_result(
+                                &child,
+                                &SubmitResultRequest {
+                                    turn_token: 1,
+                                    output_json: r#"{"ok":true}"#.to_owned(),
+                                },
+                                None,
+                            )
+                            .map(|_| ())
+                            .map_err(|error| error.message)
+                        }
                     })
+                    .await
                     .unwrap();
                 tokio::time::timeout(Duration::from_secs(30), async {
                     while !runtime.read(|tree| settled(tree, &child)).unwrap() {
@@ -2750,22 +2814,24 @@ async fn a_recovered_turn_on_an_attempt_bound_to_another_turn_is_refused() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    let sent = fixture.mutate(|tree| {
-        tree.send_agent_message(
-            "root",
-            &SendAgentMessageRequest {
-                refresh: None,
-                agent_id: fixture.child.clone(),
-                message: "use the v2 schema".into(),
-                purpose: None,
-                priority: None,
-                in_reply_to: None,
-                output_schema_json: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    let sent = fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "use the v2 schema".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     let command = format!("plak:mail:{}:start", sent.message_id);
     let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
         .prepare(CommandIntent {
@@ -2774,6 +2840,7 @@ async fn a_recovered_turn_on_an_attempt_bound_to_another_turn_is_refused() {
             base_text: "assignment\n\nMessage:\nuse the v2 schema",
             batch: BatchRule::MailStart(&sent.message_id),
         })
+        .await
         .unwrap();
     let submission = attached
         .agent()
@@ -2793,10 +2860,12 @@ async fn a_recovered_turn_on_an_attempt_bound_to_another_turn_is_refused() {
     .await
     .unwrap();
     let other = "00000000-0000-0000-0000-0000000000b2";
-    fixture.mutate(|tree| {
-        tree.bind_attempt_turn(&fixture.child, other).unwrap();
-        tree.set_active_turn(&fixture.child, true).unwrap();
-    });
+    fixture
+        .mutate(|tree| {
+            tree.bind_attempt_turn(&fixture.child, other).unwrap();
+            tree.set_active_turn(&fixture.child, true).unwrap();
+        })
+        .await;
     let rejoined = super::super::children::rejoin_recovered_start(
         &fixture.runtime,
         &fixture.child,
@@ -2846,7 +2915,7 @@ async fn an_admitted_wake_with_mail_rejoins_after_the_reopen_reconcile() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    parent_mail(&fixture, "status?");
+    parent_mail(&fixture, "status?").await;
     let command = fixture
         .runtime
         .read(|tree| wake_command(tree, &fixture.child))
@@ -2859,6 +2928,7 @@ async fn an_admitted_wake_with_mail_rejoins_after_the_reopen_reconcile() {
             base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
             batch: BatchRule::WakeAll,
         })
+        .await
         .unwrap();
     assert!(context.prompt.ends_with("\n\nMessage:\nstatus?"));
     let submission = attached
@@ -2872,7 +2942,7 @@ async fn an_admitted_wake_with_mail_rejoins_after_the_reopen_reconcile() {
         .unwrap();
     let control = submission.turn().unwrap().control();
     let result = submission.result().unwrap().clone();
-    let rejoined = rejoin_held(&fixture, attached, control, result, |_| {}).await;
+    let rejoined = rejoin_held(&fixture, attached, control, result, async |_| {}).await;
     assert_eq!(rejoined, Reopened::Done);
     fixture.until("the rejoined wake", turns(2)).await;
     assert!(
@@ -2882,7 +2952,7 @@ async fn an_admitted_wake_with_mail_rejoins_after_the_reopen_reconcile() {
             .unwrap(),
         "the rejoined wake acknowledged its batch"
     );
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -2900,7 +2970,7 @@ async fn an_interrupt_of_a_held_child_cancels_its_rejoined_turn() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    parent_mail(&fixture, "status?");
+    parent_mail(&fixture, "status?").await;
     let command = fixture
         .runtime
         .read(|tree| wake_command(tree, &fixture.child))
@@ -2913,6 +2983,7 @@ async fn an_interrupt_of_a_held_child_cancels_its_rejoined_turn() {
             base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
             batch: BatchRule::WakeAll,
         })
+        .await
         .unwrap();
     let submission = attached
         .agent()
@@ -2925,18 +2996,20 @@ async fn an_interrupt_of_a_held_child_cancels_its_rejoined_turn() {
         .unwrap();
     let control = submission.turn().unwrap().control();
     let result = submission.result().unwrap().clone();
-    let rejoined = rejoin_held(&fixture, attached, control, result, |fixture| {
-        let status = fixture.mutate(|tree| {
-            tree.interrupt_agent(
-                "root",
-                &crate::agent_tree_protocol::AttemptScopedRequest {
-                    agent_id: fixture.child.clone(),
-                    expected_attempt_id: None,
-                },
-                None,
-            )
-            .unwrap()
-        });
+    let rejoined = rejoin_held(&fixture, attached, control, result, async |fixture| {
+        let status = fixture
+            .mutate(|tree| {
+                tree.interrupt_agent(
+                    "root",
+                    &crate::agent_tree_protocol::AttemptScopedRequest {
+                        agent_id: fixture.child.clone(),
+                        expected_attempt_id: None,
+                    },
+                    None,
+                )
+                .unwrap()
+            })
+            .await;
         assert_eq!(status, NodeStatus::Interrupted);
     })
     .await;
@@ -2991,7 +3064,7 @@ async fn an_interrupt_of_a_held_child_stops_its_reopen_wake() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    fixture.mutate(|tree| tree.resume_tree().unwrap());
+    fixture.mutate(|tree| tree.resume_tree().unwrap()).await;
     assert!(
         fixture
             .runtime
@@ -2999,17 +3072,19 @@ async fn an_interrupt_of_a_held_child_stops_its_reopen_wake() {
             .unwrap(),
         "the resume holds the child for its reopen wake"
     );
-    fixture.mutate(|tree| {
-        tree.interrupt_agent(
-            "root",
-            &crate::agent_tree_protocol::AttemptScopedRequest {
-                agent_id: fixture.child.clone(),
-                expected_attempt_id: None,
-            },
-            None,
-        )
-        .unwrap()
-    });
+    fixture
+        .mutate(|tree| {
+            tree.interrupt_agent(
+                "root",
+                &crate::agent_tree_protocol::AttemptScopedRequest {
+                    agent_id: fixture.child.clone(),
+                    expected_attempt_id: None,
+                },
+                None,
+            )
+            .unwrap()
+        })
+        .await;
     let interrupted = fixture
         .runtime
         .read(|tree| {
@@ -3059,20 +3134,22 @@ async fn an_interrupt_during_a_reopen_wake_start_is_not_overwritten() {
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    parent_mail(&fixture, "status?");
-    fixture.mutate(|tree| {
-        tree.resume_tree().unwrap();
-        assert!(tree.begin_reopen_wake(&fixture.child));
-        tree.interrupt_agent(
-            "root",
-            &crate::agent_tree_protocol::AttemptScopedRequest {
-                agent_id: fixture.child.clone(),
-                expected_attempt_id: None,
-            },
-            None,
-        )
-        .unwrap();
-    });
+    parent_mail(&fixture, "status?").await;
+    fixture
+        .mutate(|tree| {
+            tree.resume_tree().unwrap();
+            assert!(tree.begin_reopen_wake(&fixture.child));
+            tree.interrupt_agent(
+                "root",
+                &crate::agent_tree_protocol::AttemptScopedRequest {
+                    agent_id: fixture.child.clone(),
+                    expected_attempt_id: None,
+                },
+                None,
+            )
+            .unwrap();
+        })
+        .await;
     let command = fixture
         .runtime
         .read(|tree| wake_command(tree, &fixture.child))
@@ -3127,7 +3204,7 @@ async fn an_interrupt_after_a_reopen_wake_was_admitted_settles_its_batch_read() 
     .await;
     fixture.until("the park", parked).await;
     let attached = lose_and_reopen(&fixture).await;
-    parent_mail(&fixture, "status?");
+    parent_mail(&fixture, "status?").await;
     let runtime = Arc::clone(&fixture.runtime);
     let child = fixture.child.clone();
     hooks::set_after_start_admission(
@@ -3136,23 +3213,27 @@ async fn an_interrupt_after_a_reopen_wake_was_admitted_settles_its_batch_read() 
             let (runtime, child) = (Arc::clone(&runtime), child.clone());
             Box::pin(async move {
                 runtime
-                    .mutate_then_emit(false, |tree| {
-                        tree.interrupt_agent(
-                            "root",
-                            &crate::agent_tree_protocol::AttemptScopedRequest {
-                                agent_id: child.clone(),
-                                expected_attempt_id: None,
-                            },
-                            None,
-                        )
-                        .map(|_| ())
-                        .map_err(|error| error.message)
+                    .mutate_then_emit(false, {
+                        let child = child.clone();
+                        move |tree| {
+                            tree.interrupt_agent(
+                                "root",
+                                &crate::agent_tree_protocol::AttemptScopedRequest {
+                                    agent_id: child.clone(),
+                                    expected_attempt_id: None,
+                                },
+                                None,
+                            )
+                            .map(|_| ())
+                            .map_err(|error| error.message)
+                        }
                     })
+                    .await
                     .unwrap();
             })
         }),
     );
-    fixture.mutate(|tree| tree.resume_tree().unwrap());
+    fixture.mutate(|tree| tree.resume_tree().unwrap()).await;
     let woke = wake_reopened(&fixture.runtime, &fixture.child, attached).await;
     let (status, turn, unread) = fixture
         .runtime
@@ -3213,18 +3294,20 @@ async fn a_wake_fact_outranks_a_pre_admission_withdrawal() {
                         base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
                         batch: BatchRule::WakeAll,
                     })
+                    .await
                     .unwrap();
                 ChildLedger::settlement_only(runtime.driver())
                     .settle(
                         &command,
                         crate::driver::ledger::Settlement::Refused { pause: None },
                     )
+                    .await
                     .map_err(String::from)
                     .unwrap();
             })
         }),
     );
-    parent_mail(&fixture, "status?");
+    parent_mail(&fixture, "status?").await;
     fixture.until("the admitted wake", turns(2)).await;
     fixture
         .runtime
@@ -3240,7 +3323,7 @@ async fn a_wake_fact_outranks_a_pre_admission_withdrawal() {
             );
         })
         .unwrap();
-    fixture.submit();
+    fixture.submit().await;
     fixture.until("the attempt to settle", settled).await;
 }
 
@@ -3260,10 +3343,18 @@ fn an_aborted_turn_waiter_leaves_its_registration() {
         .read(|tree| tree.has_turn_waiter(&fixture.child))
         .unwrap();
     rt.shutdown_timeout(Duration::from_secs(5));
-    let after = fixture
-        .runtime
-        .read(|tree| tree.has_turn_waiter(&fixture.child))
-        .unwrap();
+    // The dropped registration leaves through a writer of its own.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let after = loop {
+        let after = fixture
+            .runtime
+            .read(|tree| tree.has_turn_waiter(&fixture.child))
+            .unwrap();
+        if !after || std::time::Instant::now() > deadline {
+            break after;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
     // Session handles may need a reactor to drop.
     std::mem::forget(fixture);
     assert!(registered, "the waiter registered");

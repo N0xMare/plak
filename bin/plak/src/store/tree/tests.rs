@@ -870,6 +870,7 @@ mod hub_reload {
             super::super::tree_store(&paths).unwrap(),
             None,
         )
+        .await
         .unwrap();
         let extensions = plakous_hosted::topology_extensions::topology_tool_extensions(
             Arc::clone(runtime.tree_handle_for_test()),

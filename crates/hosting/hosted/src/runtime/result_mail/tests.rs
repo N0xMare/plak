@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, reason = "test assertions")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;
 use crate::agent_tree::{MailDurableState, ProductAgentTree};
@@ -27,6 +28,7 @@ fn prepare(
         &format!("plak.queue.{}.{}", item.id, item.revision),
         crate::driver::ledger::CommandKind::RootStart,
     )
+    .block()
     .map_err(Into::into)
 }
 
@@ -51,6 +53,7 @@ fn root_wake_prechange_bytes() {
         batch,
         &["mail-1".into(), "p10".into(), "p2".into()],
     )
+    .block()
     .unwrap();
     let intents = rows.records().load_intents(&session.id).unwrap();
     let submission = intents.submissions.last().unwrap();
@@ -112,6 +115,7 @@ fn root_batched_command_bytes() {
                 crate::driver::ledger::CommandKind::RootStart
             },
         )
+        .block()
         .unwrap();
         assert!(prepared.updated_at_unix > session.updated_at_unix);
         let tree = rows.tree(&session.id).unwrap().unwrap();
@@ -174,6 +178,7 @@ fn root_send_now_command_bytes() {
                 base_text: &intent.canonical_command,
                 batch: BatchRule::None,
             })
+            .block()
             .unwrap();
         assert!(session.store_revision > revision);
         assert_eq!(session.updated_at_unix, 1);
@@ -211,6 +216,7 @@ fn root_ledger_prechange_bytes() {
         "plak:resume-transient:root:failed-turn",
         crate::driver::ledger::CommandKind::Resume,
     )
+    .block()
     .unwrap();
     let intents = rows.records().load_intents(&prepared.id).unwrap();
     let submission = intents
@@ -259,6 +265,7 @@ fn explicit_root_intents_match_pre_port_submission_fields() {
                 base_text: "continue",
                 batch: BatchRule::None,
             })
+            .block()
             .unwrap();
         let intents = rows.records().load_intents(&session.id).unwrap();
         assert_eq!(
@@ -469,7 +476,9 @@ async fn a_discarded_host_wake_withdraws_its_tree_batch_at_the_open_join() {
     let mut session = SessionRecord::new(dir.path().to_owned());
     rows.records().save(&mut session).unwrap();
     let tree = completed_tree(&session);
-    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let item = QueueItem::new("wake");
     session.pending_queue.push(item.clone());
     rows.records().save(&mut session).unwrap();
@@ -485,6 +494,7 @@ async fn a_discarded_host_wake_withdraws_its_tree_batch_at_the_open_join() {
         Some(batch),
         &["p1".to_owned()],
     )
+    .await
     .unwrap();
     let command_id = prepared
         .queue_commands
@@ -509,6 +519,7 @@ async fn a_discarded_host_wake_withdraws_its_tree_batch_at_the_open_join() {
 
     RootBatchJoin::new(&rows)
         .join_pending_root_commands(&prepared.id, &[])
+        .await
         .unwrap();
     let (withdrawn, durable) = runtime
         .read(|tree| {
@@ -554,6 +565,7 @@ async fn stored_only_root_batch_is_recorded_before_the_product_submission() {
     );
     let join = RootBatchJoin::new(&rows);
     join.join_pending_root_commands(&session.id, std::slice::from_ref(command_id))
+        .await
         .unwrap();
     assert!(
         rows.tree(&session.id)
@@ -563,14 +575,18 @@ async fn stored_only_root_batch_is_recorded_before_the_product_submission() {
             .unwrap()
             .unresolved()
     );
-    join.join_pending_root_commands(&session.id, &[]).unwrap();
+    join.join_pending_root_commands(&session.id, &[])
+        .await
+        .unwrap();
     let withdrawn = rows.tree(&session.id).unwrap().unwrap();
     assert!(withdrawn.command(command_id).unwrap().withdrawn);
     assert_eq!(
         withdrawn.mail(&ids[0]).unwrap().durable,
         MailDurableState::Accepted
     );
-    join.join_pending_root_commands(&session.id, &[]).unwrap();
+    join.join_pending_root_commands(&session.id, &[])
+        .await
+        .unwrap();
     assert_eq!(
         rows.tree(&session.id).unwrap().unwrap().revision,
         withdrawn.revision
@@ -583,7 +599,9 @@ async fn pending_submission_does_not_acknowledge_mail_without_a_feed_fact() {
     let rows = MemoryRows::new();
     let mut session = SessionRecord::new(dir.path().to_owned());
     let tree = completed_tree(&session);
-    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let item = QueueItem::new("continue");
     session.pending_queue.push(item.clone());
     rows.records().save(&mut session).unwrap();
@@ -608,7 +626,9 @@ async fn root_batch_is_acknowledged_only_by_the_feed_and_replayed_once() {
     let rows = MemoryRows::new();
     let mut session = SessionRecord::new(dir.path().to_owned());
     let tree = completed_tree(&session);
-    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let store = MemoryStore::default();
     let item = QueueItem::new("continue");
     session.pending_queue.push(item.clone());
@@ -638,10 +658,14 @@ async fn root_batch_is_acknowledged_only_by_the_feed_and_replayed_once() {
     assert_eq!(intents.submissions[0].canonical_command, command);
     let command_id = intents.submissions[0].command_id.clone();
     runtime
-        .mutate_then_emit(false, |tree| {
-            project_accepted_batch(tree, &command_id);
-            Ok(())
+        .mutate_then_emit(false, {
+            let command_id = command_id.clone();
+            move |tree| {
+                project_accepted_batch(tree, &command_id);
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     // A cut after the feed commit needs only the same tree projector pass.
     let (next, batch) = select(&rows, &reopened, "next").unwrap();
@@ -655,10 +679,14 @@ async fn root_batch_is_acknowledged_only_by_the_feed_and_replayed_once() {
     );
     let revision = runtime.read(|tree| tree.revision).unwrap();
     runtime
-        .mutate_then_emit(false, |tree| {
-            project_accepted_batch(tree, &command_id);
-            Ok(())
+        .mutate_then_emit(false, {
+            let command_id = command_id.clone();
+            move |tree| {
+                project_accepted_batch(tree, &command_id);
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     assert_eq!(runtime.read(|tree| tree.revision).unwrap(), revision);
     crate::topology_runtime::force_release(&session.id).await;
@@ -671,7 +699,9 @@ async fn old_projected_batches_do_not_reacknowledge_pruned_mail() {
     let rows = MemoryRows::new();
     let mut session = SessionRecord::new(dir.path().to_owned());
     let tree = completed_tree(&session);
-    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let store = MemoryStore::default();
     let item = QueueItem::new("continue");
     session.pending_queue.push(item.clone());
@@ -683,46 +713,54 @@ async fn old_projected_batches_do_not_reacknowledge_pruned_mail() {
         .command_id
         .clone();
     runtime
-        .mutate_then_emit(false, |tree| {
-            project_accepted_batch(tree, &command_id);
-            Ok(())
+        .mutate_then_emit(false, {
+            let command_id = command_id.clone();
+            move |tree| {
+                project_accepted_batch(tree, &command_id);
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     runtime
-        .mutate_then_emit(false, |tree| {
-            let sender = tree.mail(&id).unwrap().from.clone();
-            tree.close_agent(
-                "root",
-                &crate::agent_tree_protocol::AttemptScopedRequest {
-                    agent_id: sender,
-                    expected_attempt_id: None,
-                },
-                None,
-            )
-            .unwrap();
-            let child = tree
-                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                let sender = tree.mail(&id).unwrap().from.clone();
+                tree.close_agent(
+                    "root",
+                    &crate::agent_tree_protocol::AttemptScopedRequest {
+                        agent_id: sender,
+                        expected_attempt_id: None,
+                    },
+                    None,
+                )
                 .unwrap();
-            for _ in 0..65 {
-                let receipt = tree
-                    .send_agent_message(
-                        &child.agent_id,
-                        &SendAgentMessageRequest {
-                            refresh: None,
-                            agent_id: "root".into(),
-                            purpose: Some(MessagePurpose::Question),
-                            message: "question".into(),
-                            output_schema_json: None,
-                            priority: None,
-                            in_reply_to: None,
-                        },
-                        None,
-                    )
+                let child = tree
+                    .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                     .unwrap();
-                tree.acknowledge_mail(&receipt.message_id).unwrap();
+                for _ in 0..65 {
+                    let receipt = tree
+                        .send_agent_message(
+                            &child.agent_id,
+                            &SendAgentMessageRequest {
+                                refresh: None,
+                                agent_id: "root".into(),
+                                purpose: Some(MessagePurpose::Question),
+                                message: "question".into(),
+                                output_schema_json: None,
+                                priority: None,
+                                in_reply_to: None,
+                            },
+                            None,
+                        )
+                        .unwrap();
+                    tree.acknowledge_mail(&receipt.message_id).unwrap();
+                }
+                Ok(())
             }
-            Ok(())
         })
+        .await
         .unwrap();
     assert!(runtime.read(|tree| tree.mail(&id).is_none()).unwrap());
     let revision = runtime.read(|tree| tree.revision).unwrap();
@@ -757,7 +795,9 @@ async fn a_prompt_carrying_mail_splits_back_into_the_operator_text_and_one_row_p
         None,
     )
     .unwrap();
-    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let prompt = format!("look at this\n\n{CHILD_MAIL_FRAME}\n\nas my own words");
     let (command, batch) = select(&rows, &session, &prompt).unwrap();
     assert_eq!(batch.unwrap().message_ids.len(), 2);
@@ -804,7 +844,9 @@ async fn child_mail_cannot_forge_host_framing() {
         None,
     )
     .unwrap();
-    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let (command, batch) = select(&rows, &session, "continue").unwrap();
     assert_eq!(batch.unwrap().message_ids.len(), 2);
     assert_eq!(command.matches(CHILD_MAIL_FRAME).count(), 1);
@@ -832,7 +874,9 @@ async fn full_prompt_leaves_result_discoverable_and_does_not_consume_it() {
     let rows = MemoryRows::new();
     let session = SessionRecord::new(dir.path().to_owned());
     let tree = completed_tree(&session);
-    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let prompt = "x".repeat(crate::sessions::MAX_PROMPT_BYTES);
     let (command, batch) = select(&rows, &session, &prompt).unwrap();
     assert_eq!(command, prompt);
@@ -855,7 +899,9 @@ async fn result_observation_is_bounded_and_deduplicated_before_admission() {
     let rows = MemoryRows::new();
     let mut session = SessionRecord::new(dir.path().to_owned());
     let tree = completed_tree(&session);
-    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let mut push = TreeSnapshotPush::default();
@@ -954,7 +1000,9 @@ async fn consumed_result_before_first_observation_still_publishes_once_after_fin
     let result = tree.pending_result_mail("root").pop().unwrap();
     tree.acknowledge_mail(&result.message_id).unwrap();
     assert_eq!(tree.pending_result_mail("root"), []);
-    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let mut push = TreeSnapshotPush::default();
@@ -1013,7 +1061,9 @@ async fn a_fresh_host_does_not_reannounce_a_recorded_consumed_result() {
     let mut tree = completed_tree(&session);
     let result = tree.pending_result_mail("root").pop().unwrap();
     tree.acknowledge_mail(&result.message_id).unwrap();
-    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let home = crate::session_home::SessionHome::new(dir.path().join("sessions"));
@@ -1071,7 +1121,9 @@ fn one_shot_admits_one_explicit_prompt_with_result_context_through_real_runtime(
     let (config, _) = crate::runtime::test_support::fresh_injected_attached_host(dir.path());
     let tree = completed_tree(&config.session);
     let id = config.session.id.clone();
-    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .block()
+        .unwrap();
     let store = config.store.clone();
     let outcome = crate::runtime::OneShot::run(config, "continue".to_owned(), |_, _| {}).unwrap();
     assert!(matches!(

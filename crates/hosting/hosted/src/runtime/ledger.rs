@@ -45,8 +45,8 @@ use plakous::sessions::AgentSessions;
 use crate::agent_tree::{ProductAgentTree, TopologyError};
 use crate::agent_tree_protocol::TopologyErrorCode;
 use crate::driver::ledger::{
-    BatchRule, CommandIntent, CommandKind, CommandLedger, LedgerError, LedgerFuture, Prepared,
-    Settlement,
+    BatchRule, CommandIntent, CommandKind, CommandLedger, LedgerError, LedgerFuture, LedgerStep,
+    Prepared, Settlement,
 };
 use crate::runtime::TopologyRows;
 use crate::session_store::SessionRecordStore;
@@ -57,44 +57,51 @@ use crate::sessions::{QueueItem, ResultMailBatch, SessionRecord};
 /// its command id, before the product writes the submission (spec 03
 /// section 8). Writing the same batch again is a no-op, so a resubmission
 /// reuses it. Stored-only trees record the same intent through their rows.
-fn record_root_batch(
-    rows: &dyn TopologyRows,
+async fn record_root_batch(
+    rows: &(dyn TopologyRows + Sync),
     command_id: &str,
     command: &str,
     batch: &ResultMailBatch,
 ) -> Result<(), TopologyError> {
-    let record = |tree: &mut ProductAgentTree| {
+    let (command_id, command, recipient, message_ids) = (
+        command_id.to_owned(),
+        command.to_owned(),
+        batch.recipient.clone(),
+        batch.message_ids.clone(),
+    );
+    let record = move |tree: &mut ProductAgentTree| {
         tree.record_command(crate::agent_tree::AgentCommand::intent(
             command_id,
-            batch.recipient.clone(),
+            recipient,
             None,
             crate::agent_tree::AgentCommandKind::RootBatch,
             command,
-            batch.message_ids.clone(),
+            message_ids,
         ))
     };
-    mutate_root_batch(rows, batch, record)
+    mutate_root_batch(rows, batch, record).await
 }
 
-fn withdraw_root_batch(
-    rows: &dyn TopologyRows,
+async fn withdraw_root_batch(
+    rows: &(dyn TopologyRows + Sync),
     command_id: &str,
     batch: &ResultMailBatch,
 ) -> Result<(), TopologyError> {
-    let withdraw = |tree: &mut ProductAgentTree| {
-        tree.withdraw_command(command_id);
+    let command_id = command_id.to_owned();
+    let withdraw = move |tree: &mut ProductAgentTree| {
+        tree.withdraw_command(&command_id);
         Ok(())
     };
-    mutate_root_batch(rows, batch, withdraw)
+    mutate_root_batch(rows, batch, withdraw).await
 }
 
-fn mutate_root_batch(
-    rows: &dyn TopologyRows,
+async fn mutate_root_batch(
+    rows: &(dyn TopologyRows + Sync),
     batch: &ResultMailBatch,
-    work: impl FnOnce(&mut ProductAgentTree) -> Result<(), TopologyError>,
+    work: impl FnOnce(&mut ProductAgentTree) -> Result<(), TopologyError> + Send + 'static,
 ) -> Result<(), TopologyError> {
     if let Some(runtime) = crate::topology_runtime::lookup(&batch.tree_id) {
-        return runtime.mutate_then_emit_typed(false, work);
+        return runtime.mutate_then_emit_typed(false, work).await;
     }
     let mut tree = rows
         .tree(&batch.tree_id)
@@ -146,7 +153,58 @@ impl<'a> RootLedger<'a> {
 }
 
 impl CommandLedger for RootLedger<'_> {
-    fn prepare(&mut self, intent: CommandIntent<'_>) -> Result<Prepared, LedgerError> {
+    fn prepare<'a>(&'a mut self, intent: CommandIntent<'a>) -> LedgerStep<'a, Prepared> {
+        Box::pin(self.prepare_root(intent))
+    }
+
+    fn settle<'a>(&'a mut self, command_id: &'a str, settlement: Settlement) -> LedgerStep<'a, ()> {
+        Box::pin(async move {
+            match settlement {
+                Settlement::Recorded => Ok(()),
+                Settlement::Consumed => self
+                    .store
+                    .discard_submission(self.session, command_id, None)
+                    .map_err(LedgerError::Store),
+                Settlement::Refused { pause } => self
+                    .store
+                    .discard_submission(self.session, command_id, pause)
+                    .map_err(LedgerError::Store),
+            }
+        })
+    }
+
+    fn duplicate_consumed<'a>(
+        &'a self,
+        sessions: &'a AgentSessions,
+        session: SessionId,
+        command_id: &'a str,
+    ) -> LedgerFuture<'a> {
+        Box::pin(async move {
+            let projection_store = self.projection_store.ok_or_else(|| {
+                LedgerError::Integrity("duplicate settlement requires a projection store".into())
+            })?;
+            let locator = self.session.plakous_locator.ok_or_else(|| {
+                LedgerError::Integrity("submission has no runtime locator".into())
+            })?;
+            if locator.session_id() != session {
+                return Err(LedgerError::Integrity(
+                    "duplicate session does not match submission".into(),
+                ));
+            }
+            project_duplicate(
+                sessions,
+                projection_store,
+                &self.session.id,
+                locator,
+                command_id,
+            )
+            .await
+        })
+    }
+}
+
+impl RootLedger<'_> {
+    async fn prepare_root(&mut self, intent: CommandIntent<'_>) -> Result<Prepared, LedgerError> {
         let (kind, target_turn_id) = match intent.kind {
             CommandKind::RootStart => (SubmissionKind::RootStart, None),
             CommandKind::RootSteer(turn) => (SubmissionKind::SendNowSteer, Some(turn.to_string())),
@@ -217,6 +275,7 @@ impl CommandLedger for RootLedger<'_> {
         let mut candidate = self.session.clone();
         if let Some(batch) = &batch {
             record_root_batch(self.rows, intent.command_id, intent.base_text, batch)
+                .await
                 .map_err(LedgerError::from)?;
         }
         if batch_preparation {
@@ -228,6 +287,7 @@ impl CommandLedger for RootLedger<'_> {
                 && let Some(batch) = &batch
             {
                 withdraw_root_batch(self.rows, intent.command_id, batch)
+                    .await
                     .map_err(LedgerError::from)?;
             }
             return Err(error.into());
@@ -237,49 +297,6 @@ impl CommandLedger for RootLedger<'_> {
             prompt: intent.base_text.to_owned(),
             message_ids: batch.map_or_else(Vec::new, |batch| batch.message_ids),
             instruction: intent.kind.is_instruction(),
-        })
-    }
-
-    fn settle(&mut self, command_id: &str, settlement: Settlement) -> Result<(), LedgerError> {
-        match settlement {
-            Settlement::Recorded => Ok(()),
-            Settlement::Consumed => self
-                .store
-                .discard_submission(self.session, command_id, None)
-                .map_err(LedgerError::Store),
-            Settlement::Refused { pause } => self
-                .store
-                .discard_submission(self.session, command_id, pause)
-                .map_err(LedgerError::Store),
-        }
-    }
-
-    fn duplicate_consumed<'a>(
-        &'a self,
-        sessions: &'a AgentSessions,
-        session: SessionId,
-        command_id: &'a str,
-    ) -> LedgerFuture<'a> {
-        Box::pin(async move {
-            let projection_store = self.projection_store.ok_or_else(|| {
-                LedgerError::Integrity("duplicate settlement requires a projection store".into())
-            })?;
-            let locator = self.session.plakous_locator.ok_or_else(|| {
-                LedgerError::Integrity("submission has no runtime locator".into())
-            })?;
-            if locator.session_id() != session {
-                return Err(LedgerError::Integrity(
-                    "duplicate session does not match submission".into(),
-                ));
-            }
-            project_duplicate(
-                sessions,
-                projection_store,
-                &self.session.id,
-                locator,
-                command_id,
-            )
-            .await
         })
     }
 }

@@ -830,6 +830,7 @@ async fn spawn_close_emits_tree_node_spawned_and_detached() {
         .close_with("op-close-telemetry".into(), &agent_id_request("c1"))
         .await
         .unwrap();
+    driver.join_retirement_tasks().await.unwrap();
     let spawned = recorder.spawned.lock().unwrap().clone();
     let detached = recorder.detached.lock().unwrap().clone();
     assert_eq!(spawned.len(), 1);

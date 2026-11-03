@@ -118,6 +118,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                     base_text: &command,
                     batch: result_batch.map_or(BatchRule::None, BatchRule::RootResults),
                 })
+                .await
                 .map_err(crate::session_store::RecordStoreError::from)
                 .inspect_err(|error| {
                     log_queue_persist_failed(
@@ -185,6 +186,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                             forget_unadmitted_root_submission(&mut candidate, item, host_authored);
                             RootLedger::new(rows, store, &mut candidate, item)
                                 .settle(&command_text, Settlement::Refused { pause: None })
+                                .await
                                 .map_err(String::from)
                                 .inspect_err(|save_error| {
                                     log_queue_persist_failed(
@@ -316,6 +318,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                                 }),
                             },
                         )
+                        .await
                         .map_err(String::from)
                     {
                         log_queue_persist_failed(
@@ -372,6 +375,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             candidate.record_notice(row.clone());
             RootLedger::new(rows, store, &mut candidate, item)
                 .settle(&command_text, Settlement::Consumed)
+                .await
                 .map_err(String::from)
                 .inspect_err(|error| {
                     log_queue_persist_failed(

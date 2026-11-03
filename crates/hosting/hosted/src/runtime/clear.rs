@@ -182,8 +182,9 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     clippy::too_many_arguments,
     reason = "Takes the attached source session, the new product session id and create operation id, and the host output channels and start instant that the clear reports through."
 )]
-pub(super) fn production_build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn production_build_clear_candidate<
+    P: plakous_host_protocol::ProtocolExtension,
+>(
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
     target_product_session_id: &str,
@@ -205,9 +206,7 @@ pub(super) fn production_build_clear_candidate<P: plakous_host_protocol::Protoco
         target.transcript.clear();
         target.prompt_history.clear();
         target.pending_queue.clear();
-        let runtime = executor
-            .block_on(cached_api_runtime_for_record(config, &target, false))
-            .map_err(|_| CliFailure::new("application execution failed"))??;
+        let runtime = cached_api_runtime_for_record(config, &target, false).await?;
         observe_phase(
             events,
             HostLifecyclePhase::ClearResolveAuthority,
@@ -216,9 +215,9 @@ pub(super) fn production_build_clear_candidate<P: plakous_host_protocol::Protoco
         );
         let operation = SessionOperationId::new(create_operation_id)
             .map_err(|_| CliFailure::new("OpenRouter clear operation identity is invalid"))?;
-        let session = executor
-            .block_on(opened.create_with_runtime(operation, opened.clear_job_counter(runtime)?))
-            .map_err(|_| CliFailure::new("application execution failed"))?
+        let session = opened
+            .create_with_runtime(operation, opened.clear_job_counter(runtime)?)
+            .await
             .map_err(|error| *error.failure)?;
         return Ok((session, None));
     }
@@ -265,12 +264,13 @@ pub(super) fn production_build_clear_candidate<P: plakous_host_protocol::Protoco
             topology_enabled,
         },
         stderr_buf,
-    )?;
+    )
+    .await?;
     let operation = SessionOperationId::new(create_operation_id)
         .map_err(|_| CliFailure::new("native clear operation identity is invalid"))?;
-    let session = executor
-        .block_on(opened.create_with_runtime(operation, opened.clear_job_counter(runtime)?))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    let session = opened
+        .create_with_runtime(operation, opened.clear_job_counter(runtime)?)
+        .await
         .map_err(|error| *error.failure)?;
     Ok((session, None))
 }
@@ -513,16 +513,17 @@ pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>
     Option<std::sync::Arc<ResolvedProvider>>,
 )> {
     let factory = config.runtime_factory.clone();
-    factory.clear(
-        executor,
-        config,
-        opened,
-        target_product_session_id,
-        create_operation_id,
-        stderr_buf,
-        events,
-        started,
-    )
+    executor
+        .block_on(factory.clear(
+            config,
+            opened,
+            target_product_session_id,
+            create_operation_id,
+            stderr_buf,
+            events,
+            started,
+        ))
+        .map_err(|_| CliFailure::new("application execution failed"))?
 }
 
 #[cfg(test)]

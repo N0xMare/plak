@@ -3,6 +3,7 @@
     reason = "Rebind scenarios construct and reopen production API branches to verify complete staging lineage and immutable source authority."
 )]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use crate::runtime::test_kit::TestExtension;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
@@ -322,6 +323,7 @@ fn topology_tool_names(tree_id: &str) -> Vec<String> {
         true,
         &mut None,
     )
+    .block()
     .unwrap()
     .names()
     .map(ToString::to_string)
@@ -1027,7 +1029,10 @@ fn prepared_fork_across_open(
     )
     .unwrap();
     let published = canonical_published.then(|| {
-        let runtime = fork::fork_runtime_binding(executor, &config, &mut Vec::new()).unwrap();
+        let runtime = executor
+            .block_on(fork::fork_runtime_binding(&config, &mut Vec::new()))
+            .unwrap()
+            .unwrap();
         let outcome = executor
             .block_on(opened.fork(
                 SessionOperationId::new(&request.operation_id).unwrap(),
@@ -1155,7 +1160,10 @@ fn a_saved_fork_names_the_agents_md_it_reread() {
     )
     .unwrap();
     let source = executor.block_on(opened.detach()).unwrap().unwrap();
-    let runtime = fork::fork_runtime_binding(&executor, &config, &mut Vec::new()).unwrap();
+    let runtime = executor
+        .block_on(fork::fork_runtime_binding(&config, &mut Vec::new()))
+        .unwrap()
+        .unwrap();
     let sessions = config.state_roots.runtime_sessions().unwrap();
     let outcome = executor
         .block_on(

@@ -273,33 +273,39 @@ impl RetirementJoin {
     }
 }
 
-fn publish_release(
+async fn publish_release(
     driver: &TreeDriver,
     agent_id: &str,
     release: LiveRelease,
 ) -> Result<(), String> {
-    let publication = (|| {
+    let feed = release.feed;
+    let publication = async {
+        let writer = driver.clone();
+        let agent = agent_id.to_owned();
         let (result, effects) = driver
-            .mutate(|tree| {
+            .mutate(move |tree| {
                 if tree.revision != tree.stored_revision {
-                    driver.save(tree).map_err(|error| error.message)?;
+                    writer.save(tree).map_err(|error| error.message)?;
                 }
-                driver
+                writer
                     .fold_and_commit(tree, |tree| {
-                        if let Some(feed) = release.feed {
-                            feed.apply(tree, agent_id)?;
+                        if let Some(feed) = feed {
+                            feed.apply(tree, &agent)?;
                         }
                         Ok(())
                     })
                     .map_err(|error| error.message)
             })
+            .await
             .map_err(|error| error.message)?;
         result?;
         driver
             .settle(effects)
+            .await
             .map(|_| ())
             .map_err(|error| error.message)
-    })();
+    }
+    .await;
     match (release.failure, publication) {
         (Some(failure), Err(publication)) => Err(format!(
             "{failure}; locator publication failed: {publication}"
@@ -328,7 +334,7 @@ enum RetirementFaultSource {
     Joiner,
 }
 
-fn record_retirement_fault(
+async fn record_retirement_fault(
     driver: &TreeDriver,
     agent_id: &str,
     expected: Option<&crate::protocol::AttemptId>,
@@ -336,53 +342,62 @@ fn record_retirement_fault(
     error: &str,
 ) {
     tracing::error!(target: "plak.topology", agent_id, error, "child retirement failed");
+    let writer = driver.clone();
+    let (agent_id_owned, expected, error_owned) =
+        (agent_id.to_owned(), expected.cloned(), error.to_owned());
     // Fault reporting must not unwind out of the release it is fencing.
-    let recorded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        driver.mutate_and_settle(|tree| {
-            // Only the live release owner can fence a committed terminal result:
-            // terminal observation itself does not establish successful release.
-            // A different current attempt can only be an unstarted followup:
-            // the retiring slot still excludes startup. Fence it rather than
-            // allowing rollback to erase the owner's release failure.
-            let fenced = match source {
-                RetirementFaultSource::Owner | RetirementFaultSource::OwnerAlreadyReported => tree
-                    .record_host_retirement(agent_id, error.to_owned())
-                    .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value))
-                    .map(|()| true),
-                RetirementFaultSource::Joiner => tree
-                    .record_host_retirement_for_attempt(agent_id, expected, error.to_owned())
-                    .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value)),
-            };
-            if let Err(publish) = fenced {
-                tree.record_fault(agent_id, error);
-                tracing::error!(target: "plak.topology", agent_id, error = %publish.message,
+    let recorded = std::panic::AssertUnwindSafe(driver.mutate_and_settle(move |tree| {
+        let (agent_id, expected, error, driver) = (
+            agent_id_owned.as_str(),
+            expected.as_ref(),
+            error_owned.as_str(),
+            &writer,
+        );
+        // Only the live release owner can fence a committed terminal result:
+        // terminal observation itself does not establish successful release.
+        // A different current attempt can only be an unstarted followup:
+        // the retiring slot still excludes startup. Fence it rather than
+        // allowing rollback to erase the owner's release failure.
+        let fenced = match source {
+            RetirementFaultSource::Owner | RetirementFaultSource::OwnerAlreadyReported => tree
+                .record_host_retirement(agent_id, error.to_owned())
+                .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value))
+                .map(|()| true),
+            RetirementFaultSource::Joiner => tree
+                .record_host_retirement_for_attempt(agent_id, expected, error.to_owned())
+                .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value)),
+        };
+        if let Err(publish) = fenced {
+            tree.record_fault(agent_id, error);
+            tracing::error!(target: "plak.topology", agent_id, error = %publish.message,
                 "child retirement could not be fenced");
-            }
-            if let Err(error) = driver.save(tree) {
-                tracing::error!(target: "plak.topology", agent_id, error = %error.message,
+        }
+        if let Err(error) = driver.save(tree) {
+            tracing::error!(target: "plak.topology", agent_id, error = %error.message,
                 "child retirement fault could not be persisted");
-            }
-            if matches!(source, RetirementFaultSource::Owner) {
-                tree.try_emit_tree_node_detached(
-                    driver.observer(),
-                    agent_id,
-                    crate::tree::NodeDetach::RecoveryRequired,
-                );
-                let closed = tree.attempt(agent_id).is_some_and(|attempt| {
-                    attempt.status == crate::protocol::AttemptStatus::Closed
-                });
-                let prefix = if closed {
-                    "close applied; live cancel failed"
-                } else {
-                    "child retirement failed"
-                };
-                let _ = driver.retirement_faults.send((
-                    agent_id.to_owned(),
-                    format!("{prefix} for {agent_id}: {error}; recover_agent required"),
-                ));
-            }
-        })
-    }));
+        }
+        if matches!(source, RetirementFaultSource::Owner) {
+            tree.try_emit_tree_node_detached(
+                driver.observer(),
+                agent_id,
+                crate::tree::NodeDetach::RecoveryRequired,
+            );
+            let closed = tree
+                .attempt(agent_id)
+                .is_some_and(|attempt| attempt.status == crate::protocol::AttemptStatus::Closed);
+            let prefix = if closed {
+                "close applied; live cancel failed"
+            } else {
+                "child retirement failed"
+            };
+            let _ = driver.retirement_faults.send((
+                agent_id.to_owned(),
+                format!("{prefix} for {agent_id}: {error}; recover_agent required"),
+            ));
+        }
+    }))
+    .catch_unwind()
+    .await;
     match recorded {
         Ok(Ok(_)) => {}
         Ok(Err(error)) => {
@@ -600,7 +615,7 @@ impl TopologyHub {
 
     /// Inserts a working copy over `store` and `vcs`, or returns the
     /// occupant if this tree is already attached.
-    pub fn insert_root(
+    pub async fn insert_root(
         &self,
         tree_id: impl Into<String>,
         tree: ProductAgentTree,
@@ -616,31 +631,39 @@ impl TopologyHub {
         let effects = runtime
             .driver
             .fold_startup()
+            .await
             .map_err(|error| TreeRuntimeError::new(error.message));
-        let mut entries = self.entries()?;
-        if let Some(entry) = entries.get(&tree_id) {
-            let occupant = Arc::clone(&entry.runtime);
-            drop(entries);
+        let occupant = {
+            let mut entries = self.entries()?;
+            if let Some(entry) = entries.get(&tree_id) {
+                Some(Arc::clone(&entry.runtime))
+            } else {
+                if effects.is_ok() {
+                    entries.insert(
+                        tree_id,
+                        HubEntry {
+                            runtime: Arc::clone(&runtime),
+                            root_leases: 0,
+                        },
+                    );
+                }
+                None
+            }
+        };
+        if let Some(occupant) = occupant {
             if let Ok(effects) = effects {
                 runtime
                     .driver
                     .settle(effects)
+                    .await
                     .map_err(|error| TreeRuntimeError::new(error.message))?;
             }
             return Ok(occupant);
         }
-        let effects = effects?;
-        entries.insert(
-            tree_id,
-            HubEntry {
-                runtime: Arc::clone(&runtime),
-                root_leases: 0,
-            },
-        );
-        drop(entries);
         runtime
             .driver
-            .settle(effects)
+            .settle(effects?)
+            .await
             .map_err(|error| TreeRuntimeError::new(error.message))?;
         Ok(runtime)
     }
@@ -663,7 +686,7 @@ impl TopologyHub {
     /// Looks the tree up, or load/bootstraps it only for an attaching root.
     /// `store` is asked for only on that bootstrap path: a hub hit opens
     /// nothing.
-    pub fn resolve(
+    pub async fn resolve(
         &self,
         tree_id: &str,
         is_root: bool,
@@ -686,7 +709,8 @@ impl TopologyHub {
             let store = store()?;
             let tree = load_or_bootstrap(store.as_ref())?;
             let vcs = tree.vcs_port();
-            self.insert_root(tree_id, tree, store, vcs, observer)?
+            self.insert_root(tree_id, tree, store, vcs, observer)
+                .await?
         };
         if attach == TopologyHubAttach::AttachRoot {
             self.acquire_root_lease(tree_id)?;
@@ -818,36 +842,40 @@ pub fn workspace_base_for_root(root: &Path) -> Result<Option<String>, ProbeError
 /// if this tree is already attached. Test attach only: production roots
 /// attach through [`resolve_topology_runtime`] with the product's store.
 #[cfg(any(test, feature = "test-support"))]
-pub fn insert_root(
+pub async fn insert_root(
     tree_id: impl Into<String>,
     tree: ProductAgentTree,
     observer: Option<Arc<dyn TopologyObserver>>,
 ) -> TreeRuntimeResult<Arc<ProductTopologyRuntime>> {
     let vcs = tree.vcs_port();
-    process_hub().insert_root(
-        tree_id,
-        tree,
-        Arc::new(crate::tree::MemoryTreeStore::new()),
-        vcs,
-        observer,
-    )
+    process_hub()
+        .insert_root(
+            tree_id,
+            tree,
+            Arc::new(crate::tree::MemoryTreeStore::new()),
+            vcs,
+            observer,
+        )
+        .await
 }
 
 /// Inserts a working copy over an explicit store, or returns the occupant.
 #[cfg(any(test, feature = "test-support"))]
-pub fn insert_root_with(
+pub async fn insert_root_with(
     tree_id: impl Into<String>,
     tree: ProductAgentTree,
     store: Arc<dyn TreeStore>,
     observer: Option<Arc<dyn TopologyObserver>>,
 ) -> TreeRuntimeResult<Arc<ProductTopologyRuntime>> {
     let vcs = tree.vcs_port();
-    process_hub().insert_root(tree_id, tree, store, vcs, observer)
+    process_hub()
+        .insert_root(tree_id, tree, store, vcs, observer)
+        .await
 }
 
 /// Looks up the hub, or load/bootstraps it only for an attaching root, over
 /// the store the product hands out for it (asked for on that path alone).
-pub fn resolve_topology_runtime(
+pub async fn resolve_topology_runtime(
     tree_id: &str,
     is_root: bool,
     attach: TopologyHubAttach,
@@ -855,7 +883,9 @@ pub fn resolve_topology_runtime(
     observer: Option<Arc<dyn TopologyObserver>>,
     load_or_bootstrap: impl FnOnce(&dyn TreeStore) -> TreeRuntimeResult<ProductAgentTree>,
 ) -> TreeRuntimeResult<Arc<ProductTopologyRuntime>> {
-    process_hub().resolve(tree_id, is_root, attach, store, observer, load_or_bootstrap)
+    process_hub()
+        .resolve(tree_id, is_root, attach, store, observer, load_or_bootstrap)
+        .await
 }
 
 /// Failures retained while shutting down an owned tree.
@@ -977,7 +1007,9 @@ pub mod test_support {
         };
 
         let tree_id = unique_tree_id();
-        let runtime = insert_root(tree_id.clone(), bootstrap(&tree_id, root), None).unwrap();
+        let runtime = insert_root(tree_id.clone(), bootstrap(&tree_id, root), None)
+            .await
+            .unwrap();
         let opened = AtomicBool::new(false);
         for (is_root, attach) in [
             (true, TopologyHubAttach::AttachRoot),
@@ -995,6 +1027,7 @@ pub mod test_support {
                 None,
                 |_| Err(TreeRuntimeError::new("a hub hit must not load a tree")),
             )
+            .await
             .unwrap();
             assert!(Arc::ptr_eq(
                 runtime.tree_handle_for_test(),

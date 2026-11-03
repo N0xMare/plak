@@ -103,8 +103,8 @@ fn repeatedly_closing_an_already_closed_subtree_adds_no_intents() {
     assert_eq!(tree.operations, operations);
 }
 
-#[test]
-fn startup_folds_a_crash_window_finalize_and_settles_its_seal_once() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_folds_a_crash_window_finalize_and_settles_its_seal_once() {
     use crate::hub::TopologyHub;
     use plakous_workspace::occupancy_vcs::fake::FakeOp;
     let (_tmp, vcs, mut tree) = fake_tree();
@@ -131,6 +131,7 @@ fn startup_folds_a_crash_window_finalize_and_settles_its_seal_once() {
     let loaded = ProductAgentTree::reopen(store.load(&id).unwrap().unwrap());
     let runtime = TopologyHub::new()
         .insert_root(&id, loaded, store.clone(), vcs.clone(), None)
+        .await
         .unwrap();
     runtime
         .read(|tree| {
@@ -152,6 +153,7 @@ fn startup_folds_a_crash_window_finalize_and_settles_its_seal_once() {
     let loaded = ProductAgentTree::reopen(store.load(&id).unwrap().unwrap());
     let runtime = TopologyHub::new()
         .insert_root(&id, loaded, store, vcs.clone(), None)
+        .await
         .unwrap();
     assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
     runtime

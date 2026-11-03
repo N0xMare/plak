@@ -126,16 +126,18 @@ pub fn epoch_rebind_refusal(
 
 /// Explicit ResumeTree on a restored tree; a tree that is not paused is a
 /// no-op, and a tree with no hub cannot be resumed at all.
-pub fn resume_tree(tree_id: &str) -> Result<(), String> {
+pub async fn resume_tree(tree_id: &str) -> Result<(), String> {
     let Some(runtime) = lookup(tree_id) else {
         return Err("topology tree is missing from the hub; cannot ResumeTree".to_owned());
     };
-    runtime.mutate_then_emit(false, |tree| {
-        if tree.state != TreeAdmissionState::RestoredPaused {
-            return Ok(());
-        }
-        tree.resume_tree().map_err(|error| error.message)
-    })
+    runtime
+        .mutate_then_emit(false, |tree| {
+            if tree.state != TreeAdmissionState::RestoredPaused {
+                return Ok(());
+            }
+            tree.resume_tree().map_err(|error| error.message)
+        })
+        .await
 }
 
 /// Root Ctrl-C: cancels this turn and interrupts every running descendant,
@@ -157,16 +159,16 @@ async fn interrupt_root(tree_id: &str, exiting: bool) -> Result<usize, String> {
     let Some(runtime) = lookup(tree_id) else {
         return Ok(0);
     };
-    let mut interrupted = Vec::new();
-    let publication = runtime.mutate_then_emit(false, |tree| {
-        interrupted = tree
-            .interrupt_running_descendants()
-            .map_err(|error| error.message)?;
-        tree.mark_root_interrupted();
-        Ok(())
-    });
+    let mut interrupted = runtime
+        .mutate_then_emit(false, |tree| {
+            let interrupted = tree
+                .interrupt_running_descendants()
+                .map_err(|error| error.message)?;
+            tree.mark_root_interrupted();
+            Ok(interrupted)
+        })
+        .await?;
     let count = interrupted.len();
-    publication?;
     if exiting {
         interrupted = runtime.live.lock().await.keys().cloned().collect();
     }
@@ -206,28 +208,32 @@ async fn cancel_interrupted_children(
 }
 
 /// Next root prompt on the same frozen tuple returns Live.
-pub(crate) fn mark_root_live_for_prompt(tree_id: &str) -> Result<(), String> {
+pub(crate) async fn mark_root_live_for_prompt(tree_id: &str) -> Result<(), String> {
     let Some(runtime) = lookup(tree_id) else {
         return Ok(());
     };
-    runtime.mutate_then_emit(false, |tree| {
-        tree.mark_root_live_for_prompt();
-        Ok(())
-    })
+    runtime
+        .mutate_then_emit(false, |tree| {
+            tree.mark_root_live_for_prompt();
+            Ok(())
+        })
+        .await
 }
 
 /// Freeze the next epoch for a tree whose root just rebound.
-pub fn install_successor_epoch(
+pub async fn install_successor_epoch(
     rows: &dyn TreeRows,
     snapshot: OrchestrationSnapshot,
     tree_id: &str,
     emit: &dyn Fn(crate::product_observation::ProductObservation),
 ) -> Result<(), String> {
     if let Some(runtime) = lookup(tree_id) {
-        runtime.mutate_then_emit(true, |tree| {
-            tree.begin_successor_epoch(snapshot)
-                .map_err(|error| error.message)
-        })?;
+        runtime
+            .mutate_then_emit(true, |tree| {
+                tree.begin_successor_epoch(snapshot)
+                    .map_err(|error| error.message)
+            })
+            .await?;
         return Ok(());
     }
     install_successor_epoch_headless(rows, snapshot, tree_id, emit)

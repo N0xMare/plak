@@ -106,23 +106,32 @@ async fn close_runtime_admission(runtime: &ProductTopologyRuntime) -> TopologySh
     }
     finish_explicit_recovers(runtime).await;
     let mut failure = TopologyShutdownError::default();
-    if let Ok(mut tree) = runtime.driver().lock() {
-        tree.emit_shutdown_detaches(runtime.observer().as_ref());
-        // Detaches are observations, not rows: nothing to publish unless the
-        // tree moved since the store last acknowledged it.
-        if tree.revision != tree.stored_revision
-            && let Err(error) = runtime.driver.save_guarded(&mut tree)
-        {
-            tracing::warn!(
-                target: "plak.topology",
-                tree_id = %tree.tree_id,
-                error = %error.message,
-                "tree was not persisted at hub shutdown"
-            );
-            failure.tree_failure = Some(error.message);
-        }
-    } else {
-        failure.tree_failure = Some("topology tree lock is poisoned".into());
+    let driver = runtime.driver.clone();
+    let observer = runtime.observer();
+    let saved = runtime
+        .driver()
+        .write(move |tree| {
+            tree.emit_shutdown_detaches(observer.as_ref());
+            // Detaches are observations, not rows: nothing to publish unless the
+            // tree moved since the store last acknowledged it.
+            if tree.revision != tree.stored_revision
+                && let Err(error) = driver.save_guarded(tree)
+            {
+                tracing::warn!(
+                    target: "plak.topology",
+                    tree_id = %tree.tree_id,
+                    error = %error.message,
+                    "tree was not persisted at hub shutdown"
+                );
+                return Err(error.message);
+            }
+            Ok(())
+        })
+        .await;
+    match saved {
+        Ok(Ok(())) => {}
+        Ok(Err(message)) => failure.tree_failure = Some(message),
+        Err(_) => failure.tree_failure = Some("topology tree lock is poisoned".into()),
     }
     failure
 }
@@ -218,7 +227,8 @@ async fn join_runtime_children(
                 retirement.expected_attempt.as_ref(),
                 RetirementFaultSource::Joiner,
                 &error,
-            );
+            )
+            .await;
             failure.child_failures.push((agent_id, error));
         }
     }
@@ -242,7 +252,8 @@ async fn join_runtime_children(
                 startup.expected_attempt.as_ref(),
                 RetirementFaultSource::Joiner,
                 &error,
-            );
+            )
+            .await;
             failure.child_failures.push((id, error));
         }
     }

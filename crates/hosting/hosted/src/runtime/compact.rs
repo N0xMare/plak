@@ -301,7 +301,14 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
             ))
         })?;
     config.state_roots.set_frozen_skills(Some(frozen));
-    let runtime = host_runtime_binding(config, stderr_buf, RuntimeRole::Compact);
+    let runtime = executor
+        .block_on(host_runtime_binding(
+            config,
+            stderr_buf,
+            RuntimeRole::Compact,
+        ))
+        .map_err(|_| CliFailure::new("application execution failed"))
+        .and_then(|runtime| runtime);
     config.state_roots.set_frozen_skills(None);
     let runtime = runtime?;
     let operation_id = SessionOperationId::new(operation)

@@ -2,6 +2,7 @@
 //! what its checkpoint did with the turn's exchange.
 
 #![allow(clippy::unwrap_used, reason = "unit tests")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::{HostLoop, TerminalErrorPresentation, TurnHostOutcome};
 use crate::agent::TerminalExchange;
@@ -42,8 +43,9 @@ pub(super) fn with_unread_result(
     .unwrap();
     tree.record_turn_completed(&child.agent_id).unwrap();
     tree.settle_for_test();
-    let runtime =
-        crate::topology_runtime::insert_root(config.session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(config.session.id.clone(), tree, None)
+        .block()
+        .unwrap();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = HostLoop::open(
@@ -163,8 +165,8 @@ fn a_cancelled_turn_with_a_closed_exchange_retires_its_waits_for_good() {
         // Seed the committed cancellation this topology-only fixture's
         // synthetic TurnHostOutcome represents.
         let session = host.opened.locator().session_id();
-        runtime.mutate_then_emit(false, |tree| {
-            let seq = tree.feed_cursor(&session.to_string()) + 1;
+        runtime.mutate_then_emit_borrowed_for_test(false, |tree| {
+let seq = tree.feed_cursor(&session.to_string()) + 1;
             let header = serde_json::from_value(serde_json::json!({
                 "session_id": session, "seq": seq,
                 "branch_id": host.opened.locator().branch_id(), "committed_at_ms": seq,
@@ -180,7 +182,7 @@ fn a_cancelled_turn_with_a_closed_exchange_retires_its_waits_for_good() {
             }]);
             tree.project_feed("root", &session.to_string(), &[record], &crate::agent_tree::TreeFeedReads::default())
                 .map(|_| ()).map_err(|error| error.to_string())
-        }).unwrap();
+}).block().unwrap();
         host.publish_terminal(
             Ok(TurnHostOutcome::Interrupted {
                 assistant: String::new(),

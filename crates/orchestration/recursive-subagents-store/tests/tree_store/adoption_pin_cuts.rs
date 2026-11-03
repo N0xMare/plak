@@ -30,20 +30,20 @@ enum Cut {
     AfterRecordCommit,
 }
 
-#[test]
-fn git_adoption_base_pin_commit_cuts_follow_the_committed_row() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn git_adoption_base_pin_commit_cuts_follow_the_committed_row() {
     for cut in [
         Cut::BeforeLanding,
         Cut::AfterLanding,
         Cut::BeforeRecordCommit,
         Cut::AfterRecordCommit,
     ] {
-        adoption_cut(false, cut);
+        adoption_cut(false, cut).await;
     }
 }
 
-#[test]
-fn jj_adoption_base_pin_commit_cuts_allow_hosted_fence_construction() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jj_adoption_base_pin_commit_cuts_allow_hosted_fence_construction() {
     if !jj_available() {
         return;
     }
@@ -53,11 +53,11 @@ fn jj_adoption_base_pin_commit_cuts_allow_hosted_fence_construction() {
         Cut::BeforeRecordCommit,
         Cut::AfterRecordCommit,
     ] {
-        adoption_cut(true, cut);
+        adoption_cut(true, cut).await;
     }
 }
 
-fn adoption_cut(jj: bool, cut: Cut) {
+async fn adoption_cut(jj: bool, cut: Cut) {
     let repo = if jj { jj_repo() } else { git_repo() };
     let tmp = tempfile::tempdir().unwrap();
     let store = Arc::new(SqliteTreeStore::open(&tmp.path().join("tree.sqlite3")).unwrap());
@@ -150,10 +150,10 @@ fn adoption_cut(jj: bool, cut: Cut) {
         "{cut:?}"
     );
     assert_reopened_status(&store, &child.workspace.id, cut);
-    driver.settle(Effects::default()).unwrap();
+    driver.settle(Effects::default()).await.unwrap();
     assert_eq!(read_base(repo.path(), jj, &child.agent_id), expected);
     if let Some(request) = retry {
-        assert_retry_lands(&driver, repo.path(), &child, &request, &expected);
+        assert_retry_lands(&driver, repo.path(), &child, &request, &expected).await;
     }
 }
 
@@ -169,7 +169,7 @@ fn assert_reopened_status(store: &SqliteTreeStore, workspace: &str, cut: Cut) {
     );
 }
 
-fn assert_retry_lands(
+async fn assert_retry_lands(
     driver: &TreeDriver,
     launch: &Path,
     child: &plakous_recursive_subagents::tree::SpawnAgentOutput,
@@ -177,7 +177,11 @@ fn assert_retry_lands(
     expected: &str,
 ) {
     let (admitted, landed) = driver
-        .mutate_and_settle(|tree| tree.begin_adopt("root", request))
+        .mutate_and_settle({
+            let request = request.clone();
+            move |tree| tree.begin_adopt("root", &request)
+        })
+        .await
         .unwrap();
     admitted.unwrap();
     assert!(landed.adopts[0].is_ok());
@@ -185,7 +189,7 @@ fn assert_retry_lands(
         .read(|tree| row_base(tree, &child.workspace.id))
         .unwrap();
     assert_ne!(published, expected);
-    driver.settle(Effects::default()).unwrap();
+    driver.settle(Effects::default()).await.unwrap();
     assert_eq!(
         read_base(launch, false, &child.agent_id),
         published,

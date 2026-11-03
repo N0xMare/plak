@@ -152,8 +152,9 @@ async fn hub_working_copy_is_shared_across_compiles_and_persists() {
     let mut tree = bootstrap_tree(&tree_id, root.path());
     let store: Arc<dyn TreeStore> = Arc::new(MemoryTreeStore::new());
     tree.acknowledge_revision(store.save(&tree).unwrap());
-    let runtime =
-        crate::hub::insert_root_with(tree_id.clone(), tree, Arc::clone(&store), None).unwrap();
+    let runtime = crate::hub::insert_root_with(tree_id.clone(), tree, Arc::clone(&store), None)
+        .await
+        .unwrap();
     let parent_tree = Arc::clone(runtime.tree_handle_for_test());
     let child_lookup = crate::hub::lookup(&tree_id).unwrap();
     assert!(Arc::ptr_eq(
@@ -209,6 +210,7 @@ async fn read_only_spawn_tool_binds_caller_copy_and_adopt_is_not_sealed() {
     assert!(!launch.join(".plak/worktrees").exists());
     let adopt = adopt_tool(driver.clone())
         .adopt_with("op-adopt", &json!({ "candidate_id": "cand-c1-1" }))
+        .await
         .unwrap();
     assert_eq!(adopt.kind(), ToolOutcomeKind::Failure);
     assert_eq!(outcome_json(&adopt)["code"], "not_sealed");
@@ -309,28 +311,38 @@ async fn discard_wire_waits_for_cleanup_and_replays_only_its_acknowledged_outcom
         vcs.seal_next_with(Ok(FakeVcs::base_for(id)));
         // Finished, not closed: a closed copy would already be pruned.
         driver
-            .mutate_and_settle(|tree| {
-                tree.record_turn_completed(id).unwrap();
-                driver.save(tree).unwrap();
+            .mutate_and_settle({
+                let driver = driver.clone();
+                move |tree| {
+                    tree.record_turn_completed(id).unwrap();
+                    driver.save(tree).unwrap();
+                }
             })
+            .await
             .unwrap();
         let request = WorkspaceIdRequest {
             workspace_id: workspace_id.clone(),
         };
         let (pending, effects) = driver
-            .mutate(|tree| {
-                let pending = tree
-                    .discard_workspace("root", &request, Some("cleanup-discard"))
-                    .unwrap();
-                driver.save(tree).unwrap();
-                pending
+            .mutate({
+                let request = request.clone();
+                let driver = driver.clone();
+                move |tree| {
+                    let pending = tree
+                        .discard_workspace("root", &request, Some("cleanup-discard"))
+                        .unwrap();
+                    driver.save(tree).unwrap();
+                    pending
+                }
             })
+            .await
             .unwrap();
         assert_eq!(pending.status, WorkspaceStatus::Discarding);
         let tool = discard_tool(driver.clone());
         let arguments = workspace_request(&workspace_id);
         assert_eq!(
             tool.run_named("cleanup-discard", &arguments)
+                .await
                 .unwrap()
                 .kind(),
             ToolOutcomeKind::Failure
@@ -354,8 +366,8 @@ async fn discard_wire_waits_for_cleanup_and_replays_only_its_acknowledged_outcom
         if fail {
             vcs.unmint_next_with(Err(VcsError::mint_unavailable("injected cleanup failure")));
         }
-        assert_eq!(driver.settle(effects).is_err(), fail);
-        let replay = tool.run_named("cleanup-discard", &arguments).unwrap();
+        assert_eq!(driver.settle(effects).await.is_err(), fail);
+        let replay = tool.run_named("cleanup-discard", &arguments).await.unwrap();
         assert_eq!(
             replay.kind(),
             if fail {
@@ -454,20 +466,24 @@ async fn discard_publication_cuts_never_remove_unprepared_or_replay_unpublished_
         vcs.seal_next_with(Ok(FakeVcs::base_for("c1")));
         // Finished, not closed: a closed copy would already be pruned.
         driver
-            .mutate_and_settle(|tree| {
-                tree.record_turn_completed("c1").unwrap();
-                driver.save(tree).unwrap();
+            .mutate_and_settle({
+                let driver = driver.clone();
+                move |tree| {
+                    tree.record_turn_completed("c1").unwrap();
+                    driver.save(tree).unwrap();
+                }
             })
+            .await
             .unwrap();
         *store.remaining.lock().unwrap() = Some(cut);
         let tool = discard_tool(driver.clone());
         let args = workspace_request(&workspace);
         assert_eq!(
-            tool.run_named("discard-cut", &args).unwrap().kind(),
+            tool.run_named("discard-cut", &args).await.unwrap().kind(),
             ToolOutcomeKind::Failure
         );
         assert_eq!(
-            tool.run_named("discard-cut", &args).unwrap().kind(),
+            tool.run_named("discard-cut", &args).await.unwrap().kind(),
             ToolOutcomeKind::Failure
         );
         assert_eq!(vcs.calls_of(FakeOp::Unmint).len(), usize::from(cut == 2));
@@ -480,7 +496,7 @@ async fn discard_publication_cuts_never_remove_unprepared_or_replay_unpublished_
                 .is_none()
         );
         *store.remaining.lock().unwrap() = None;
-        let replay = tool.run_named("discard-cut", &args).unwrap();
+        let replay = tool.run_named("discard-cut", &args).await.unwrap();
         assert_eq!(
             replay.kind(),
             if cut == 2 {
@@ -513,6 +529,7 @@ async fn closing_a_child_prunes_its_copy() {
         .await
         .unwrap();
     assert_eq!(closed.kind(), ToolOutcomeKind::Success);
+    driver.join_retirement_tasks().await.unwrap();
     // The copy never diverged, so no candidate holds it: closing removes
     // the worktree and its branch without a discard.
     assert!(!child_path.exists());
@@ -653,6 +670,7 @@ async fn discard_tool_refuses_running_occupant() {
         .to_owned();
     let refused = discard_tool(driver.clone())
         .run_named("op-discard-running", &workspace_request(&workspace_id))
+        .await
         .unwrap();
     assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
     assert_eq!(outcome_json(&refused)["code"], "discard_not_applicable");
@@ -683,6 +701,7 @@ async fn close_tool_seals_an_idle_copy_after_the_lock_drops() {
         .await
         .unwrap();
     assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    driver.join_retirement_tasks().await.unwrap();
     {
         let mut tree = tree.lock().unwrap();
         assert_eq!(
@@ -722,6 +741,7 @@ async fn adopt_with_running_jobs_succeeds_and_warns_by_id() {
     let tool = adopt_tool(driver.clone());
     let outcome = tool
         .adopt_with("adopt-running-job", &json!({"candidate_id": candidate_id}))
+        .await
         .unwrap();
     assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
     let ToolResultPart::Text(block) = &outcome.parts()[0] else {
@@ -743,6 +763,7 @@ async fn adopt_with_running_jobs_succeeds_and_warns_by_id() {
     .unwrap();
     let replay = tool
         .adopt_with("adopt-running-job", &json!({"candidate_id": candidate_id}))
+        .await
         .unwrap();
     assert_eq!(
         outcome_json(&replay),
@@ -781,7 +802,7 @@ async fn adopt_tool_lands_outside_the_lock_and_records_the_receipt() {
         evidence: None,
     })
     .unwrap();
-    let outcome = tool.adopt_with("op-adopt", &request).unwrap();
+    let outcome = tool.adopt_with("op-adopt", &request).await.unwrap();
     assert_eq!(
         outcome.kind(),
         ToolOutcomeKind::Success,
@@ -793,7 +814,7 @@ async fn adopt_tool_lands_outside_the_lock_and_records_the_receipt() {
         std::fs::read_to_string(root.path().join("H.txt")).unwrap(),
         "child\n"
     );
-    let replay = tool.adopt_with("op-adopt", &request).unwrap();
+    let replay = tool.adopt_with("op-adopt", &request).await.unwrap();
     assert_eq!(outcome_json(&replay), outcome_json(&outcome));
     let refused = tool
         .adopt_with(
@@ -807,6 +828,7 @@ async fn adopt_tool_lands_outside_the_lock_and_records_the_receipt() {
             })
             .unwrap(),
         )
+        .await
         .unwrap();
     assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
     assert_eq!(outcome_json(&refused)["code"], "not_sealed");

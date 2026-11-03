@@ -699,9 +699,11 @@ pub(super) async fn recover_child(
         RecoveryNeed::NotRequired => {
             // A previous effect completion may be recorded only in memory
             // after a refused publish. A no-op must not claim it is durable.
-            return mutate_and_publish(runtime, agent_id, |tree| {
-                tree.recover_receipt(agent_id, expected_attempt_id, false)
-            });
+            let (id, expected) = (agent_id.to_owned(), expected_attempt_id.cloned());
+            return mutate_and_publish(runtime, agent_id, move |tree| {
+                tree.recover_receipt(&id, expected.as_ref(), false)
+            })
+            .await;
         }
         RecoveryNeed::Workspace { code, reason } => {
             return Err(TopologyError::new(code, reason));
@@ -713,48 +715,58 @@ pub(super) async fn recover_child(
         } => (attempt_id, locator, path),
     };
     if rebuilding && locator.is_none() {
-        return mutate_and_publish(runtime, agent_id, |tree| {
-            tree.rebuild_sessionless_fold(agent_id)?;
-            tree.recover_receipt(agent_id, Some(&attempt_id), true)
-        });
+        let (id, attempt) = (agent_id.to_owned(), attempt_id.clone());
+        return mutate_and_publish(runtime, agent_id, move |tree| {
+            tree.rebuild_sessionless_fold(&id)?;
+            tree.recover_receipt(&id, Some(&attempt), true)
+        })
+        .await;
     }
-    let refused = |refusal: PortRefusal| {
+    let refused = async |refusal: PortRefusal| {
         if refusal.terminal {
             let code = code_name(refusal.error.code);
-            mutate_child(runtime.driver(), agent_id, |tree| {
-                tree.record_terminal_recovery_refusal(
-                    agent_id,
-                    &attempt_id,
-                    &code,
-                    &refusal.error.message,
-                );
-            });
+            let (id, attempt, message) = (
+                agent_id.to_owned(),
+                attempt_id.clone(),
+                refusal.error.message.clone(),
+            );
+            mutate_child(runtime.driver(), agent_id, move |tree| {
+                tree.record_terminal_recovery_refusal(&id, &attempt, &code, &message);
+            })
+            .await;
         }
         refusal.error
     };
     let locator = if let Some(locator) = locator {
         locator
     } else {
-        match port
-            .replay_create(runtime, agent_id)
-            .await
-            .map_err(refused)?
-        {
+        let replayed = match port.replay_create(runtime, agent_id).await {
+            Ok(replayed) => replayed,
+            Err(refusal) => return Err(refused(refusal).await),
+        };
+        match replayed {
             ReplayedCreate::Session(created) => {
-                mutate_and_publish(runtime, agent_id, |tree| {
-                    tree.record_child_session(agent_id, &created)
-                })?;
+                let (id, session) = (agent_id.to_owned(), created.clone());
+                mutate_and_publish(runtime, agent_id, move |tree| {
+                    tree.record_child_session(&id, &session)
+                })
+                .await?;
                 created
             }
             ReplayedCreate::NeverCreated(message) => {
                 let recorded = runtime
-                    .record_then_apply(agent_id, |tree| {
-                        tree.record_host_recovery(
-                            agent_id,
-                            &attempt_id,
-                            RecoveryResolution::NeverCreated { message },
-                        )
+                    .record_then_apply(agent_id, {
+                        let (agent_id, attempt_id) = (agent_id.to_owned(), attempt_id.clone());
+                        move |tree| {
+                            let (agent_id, attempt_id) = (agent_id.as_str(), &attempt_id);
+                            tree.record_host_recovery(
+                                agent_id,
+                                attempt_id,
+                                RecoveryResolution::NeverCreated { message },
+                            )
+                        }
                     })
+                    .await
                     .map_err(|error| session_refusal(&error))?;
                 return runtime
                     .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), recorded))
@@ -762,10 +774,10 @@ pub(super) async fn recover_child(
             }
         }
     };
-    let reopened = port
-        .reopen(agent_id, &path, &locator)
-        .await
-        .map_err(refused)?;
+    let reopened = match port.reopen(agent_id, &path, &locator).await {
+        Ok(reopened) => reopened,
+        Err(refusal) => return Err(refused(refusal).await),
+    };
     let retained = runtime
         .read(|tree| tree.retained_wait_receipts(agent_id))
         .map_err(|error| session_refusal(&error.message))?;
@@ -774,16 +786,23 @@ pub(super) async fn recover_child(
         .map_err(|error| session_refusal(&error.message))?;
     let sessions = Arc::clone(&reopened.session.sessions);
     let (resolution, feed) = release_reopened(agent_id, reopened, retained, cursor).await?;
-    let (projection, _feed) = super::feed_projection::retry_tree_feed(&sessions, feed, |feed| {
-        let mut refusal = None;
-        mutate_and_publish(runtime, agent_id, |tree| {
-            feed.apply_checked(tree, agent_id)
-                .inspect_err(|error| refusal = Some(error.clone()))
-                .map_err(TopologyError::from)
+    let (projection, _feed) =
+        super::feed_projection::retry_tree_feed(&sessions, feed, |feed| async move {
+            let refusal = super::feed_projection::RefusalSlot::default();
+            let (seen, id) = (refusal.clone(), agent_id.to_owned());
+            mutate_and_publish(runtime, agent_id, move |tree| {
+                feed.apply_checked(tree, &id)
+                    .inspect_err(|error| seen.record(error))
+                    .map_err(TopologyError::from)
+            })
+            .await
+            .map_err(|error| {
+                refusal
+                    .take()
+                    .unwrap_or(crate::agent_tree::TreeProjectorError::Tree(error))
+            })
         })
-        .map_err(|error| refusal.unwrap_or(crate::agent_tree::TreeProjectorError::Tree(error)))
-    })
-    .await?;
+        .await?;
     if rebuilding {
         return runtime
             .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), true))
@@ -793,9 +812,14 @@ pub(super) async fn recover_child(
         true
     } else {
         runtime
-            .record_then_apply(agent_id, |tree| {
-                tree.record_host_recovery(agent_id, &attempt_id, resolution)
+            .record_then_apply(agent_id, {
+                let (agent_id, attempt_id) = (agent_id.to_owned(), attempt_id.clone());
+                move |tree| {
+                    let (agent_id, attempt_id) = (agent_id.as_str(), &attempt_id);
+                    tree.record_host_recovery(agent_id, attempt_id, resolution)
+                }
             })
+            .await
             .map_err(|error| session_refusal(&error))?
     };
     runtime
@@ -880,10 +904,12 @@ async fn release_reopened(
 /// in only once the store took it, so a refused publish leaves the tree as it
 /// was and is reported as `recovery_storage_unavailable`. Effect completions
 /// are recorded after that publication; their failures are returned too.
-fn mutate_and_publish<R>(
+async fn mutate_and_publish<R: Send + 'static>(
     runtime: &ProductTopologyRuntime,
     agent_id: &str,
-    work: impl FnOnce(&mut crate::agent_tree::ProductAgentTree) -> Result<R, TopologyError>,
+    work: impl FnOnce(&mut crate::agent_tree::ProductAgentTree) -> Result<R, TopologyError>
+    + Send
+    + 'static,
 ) -> Result<R, TopologyError> {
     let driver = &runtime.driver().for_agent(agent_id);
     let publish_refusal = |error: TopologyError| {
@@ -896,20 +922,25 @@ fn mutate_and_publish<R>(
         )
     };
     let (result, effects) = driver
-        .mutate(|tree| -> Result<R, TopologyError> {
-            if tree.revision != tree.stored_revision {
-                driver.save(tree).map_err(publish_refusal)?;
+        .mutate({
+            let driver = driver.clone();
+            move |tree| -> Result<R, TopologyError> {
+                let driver = &driver;
+                if tree.revision != tree.stored_revision {
+                    driver.save(tree).map_err(publish_refusal)?;
+                }
+                let mut work_refusal = None;
+                driver
+                    .fold_and_commit(tree, |tree| {
+                        work(tree).inspect_err(|error| work_refusal = Some(error.clone()))
+                    })
+                    .map_err(|error| work_refusal.unwrap_or_else(|| publish_refusal(error)))
             }
-            let mut work_refusal = None;
-            driver
-                .fold_and_commit(tree, |tree| {
-                    work(tree).inspect_err(|error| work_refusal = Some(error.clone()))
-                })
-                .map_err(|error| work_refusal.unwrap_or_else(|| publish_refusal(error)))
         })
+        .await
         .map_err(|error| session_refusal(&error.message))?;
     let result = result?;
-    let settled = driver.settle(effects).map_err(|error| {
+    let settled = driver.settle(effects).await.map_err(|error| {
         let code = match error.code {
             TopologyErrorCode::OperationRecoveryRequired => {
                 TopologyErrorCode::RecoveryStorageUnavailable

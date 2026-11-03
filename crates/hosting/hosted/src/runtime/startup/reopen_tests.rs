@@ -3,6 +3,7 @@
     reason = "Startup reopen scenarios retain persisted session facts and frozen construction inputs through runtime reattachment."
 )]
 #![allow(clippy::unwrap_used, reason = "offline reopen assertions")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -188,8 +189,9 @@ fn root_startup_rejoins_certified_decision_once_and_settles_waits() {
     )
     .unwrap();
     tree.acknowledge_mail(&mail.message_id).unwrap();
-    let runtime =
-        crate::topology_runtime::insert_root(config.session.id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(config.session.id.clone(), tree, None)
+        .block()
+        .unwrap();
     let executor = ApplicationExecutor::new().unwrap();
     executor.block_on(async {
         let mut opened = build_session_from_config(&mut config, &mut Vec::new()).await.unwrap();

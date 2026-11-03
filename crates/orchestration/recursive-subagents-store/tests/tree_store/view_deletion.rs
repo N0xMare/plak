@@ -1059,12 +1059,12 @@ fn assert_candidate_view_rebuild(sql: bool) {
     assert_eq!(tree.attempt(child).unwrap(), &expected);
 }
 
-#[test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(
     clippy::too_many_lines,
     reason = "opening and withdrawal cuts share one SQLite fixture"
 )]
-fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs() {
+async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs() {
     use plakous_recursive_subagents::protocol::{
         AttemptScopedRequest, MessagePurpose, SendAgentMessageRequest,
     };
@@ -1151,6 +1151,7 @@ fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs() {
                 plakous_recursive_subagents::protocol::TopologyErrorCode::Capacity,
             )),
         )
+        .await
         .unwrap();
     let saved = store.load("tree").unwrap().unwrap();
     assert!(!saved.rows().attempts().contains_key(&next_attempt));

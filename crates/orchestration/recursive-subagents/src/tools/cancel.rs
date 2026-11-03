@@ -53,20 +53,24 @@ impl TopologyTool {
                 );
             }
         };
+        let tool = self.clone();
+        let (writer_caller, writer_operation, writer_request) =
+            (caller.clone(), operation_id.clone(), request.clone());
         let (status, effects) = self
             .driver
-            .mutate(|tree| {
-                self.dispatch_mutating(
+            .mutate(move |tree| {
+                tool.dispatch_mutating(
                     tree,
-                    &caller,
-                    &operation_id,
+                    &writer_caller,
+                    &writer_operation,
                     "interrupt_agent",
-                    &request,
+                    &writer_request,
                     |tree, caller, request, operation_id| {
                         tree.interrupt_agent(caller, request, operation_id)
                     },
                 )
             })
+            .await
             .map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
@@ -98,14 +102,16 @@ impl TopologyTool {
                     &operation_id,
                     &caller,
                     "interrupt_agent",
-                    &request,
-                    &status,
-                    &cancellation,
-                )?;
+                    request.clone(),
+                    status,
+                    cancellation.is_ok(),
+                )
+                .await?;
                 match cancellation {
                     Ok(_) => ToolOutcome::success_text(payload.to_string()),
                     Err(failure) => {
                         tool.fail_closed_cancel(failure, std::slice::from_ref(&request.agent_id))
+                            .await
                     }
                 }
             },
@@ -139,20 +145,24 @@ impl TopologyTool {
         // an idle closed copy seals, and the snapshot MUST run
         // with the tree mutex released. Phase one closes and queues tickets
         // under the lock; the seals land after it drops.
+        let tool = self.clone();
+        let (writer_caller, writer_operation, writer_request) =
+            (caller.clone(), operation_id.clone(), request.clone());
         let (closed, effects) = self
             .driver
-            .mutate(|tree| {
-                self.dispatch_mutating(
+            .mutate(move |tree| {
+                tool.dispatch_mutating(
                     tree,
-                    &caller,
-                    &operation_id,
+                    &writer_caller,
+                    &writer_operation,
                     "close_agent",
-                    &request,
+                    &writer_request,
                     |tree, caller, request, operation_id| {
                         tree.close_agent(caller, request, operation_id)
                     },
                 )
             })
+            .await
             .map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
@@ -230,30 +240,37 @@ impl TopologyTool {
                 });
             }
             {
-                let mut tree = tool.driver.lock().map_err(|_| {
-                    ToolRuntimeError::new(
-                        ToolRuntimeErrorKind::Execution,
-                        "topology tree lock is poisoned",
-                    )
-                })?;
-                for (agent_id, status) in &closed {
-                    let detach =
-                        NodeDetach::from_node_status(*status).unwrap_or(NodeDetach::Closed);
-                    tree.try_emit_tree_node_detached(tool.observer.as_ref(), agent_id, detach);
-                }
+                let observer = tool.observer.clone();
+                let detached = closed.clone();
+                tool.driver
+                    .write(move |tree| {
+                        for (agent_id, status) in &detached {
+                            let detach =
+                                NodeDetach::from_node_status(*status).unwrap_or(NodeDetach::Closed);
+                            tree.try_emit_tree_node_detached(observer.as_ref(), agent_id, detach);
+                        }
+                    })
+                    .await
+                    .map_err(|_| {
+                        ToolRuntimeError::new(
+                            ToolRuntimeErrorKind::Execution,
+                            "topology tree lock is poisoned",
+                        )
+                    })?;
             }
             tool.finish_cancel_receipt(
                 &operation_id,
                 &caller,
                 "close_agent",
-                &request,
-                &closed,
-                &cancellation,
-            )?;
+                request,
+                closed,
+                cancellation.is_ok(),
+            )
+            .await?;
             settled?;
             match cancellation {
                 Ok(_) => ToolOutcome::success_text(payload.to_string()),
-                Err(failure) => tool.fail_closed_cancel(failure, &ids),
+                Err(failure) => tool.fail_closed_cancel(failure, &ids).await,
             }
         })
         .await?;
@@ -341,66 +358,76 @@ impl TopologyTool {
         }
     }
 
-    fn finish_cancel_receipt<Req: serde::Serialize, Out: serde::Serialize>(
+    async fn finish_cancel_receipt<Req, Out>(
         &self,
         operation_id: &str,
         caller: &str,
-        tool_name: &str,
-        request: &Req,
-        output: &Out,
-        cancellation: &Result<LiveCancelOutcome, LiveCancelFailure>,
-    ) -> Result<(), ToolRuntimeError> {
+        tool_name: &'static str,
+        request: Req,
+        output: Out,
+        cancelled: bool,
+    ) -> Result<(), ToolRuntimeError>
+    where
+        Req: serde::Serialize + Send + 'static,
+        Out: serde::Serialize + Send + 'static,
+    {
+        let driver = self.driver.clone();
+        let (operation_id, caller) = (operation_id.to_owned(), caller.to_owned());
         let (result, effects) = self
             .driver
-            .mutate(|tree| {
-                if cancellation.is_ok() {
-                    tree.remember_success(operation_id, caller, tool_name, request, output)?;
+            .mutate(move |tree| {
+                if cancelled {
+                    tree.remember_success(&operation_id, &caller, tool_name, &request, &output)?;
                 } else {
                     tree.remember_failure(
-                        operation_id,
-                        caller,
+                        &operation_id,
+                        &caller,
                         tool_name,
-                        request,
+                        &request,
                         TopologyErrorCode::OperationRecoveryRequired,
                     )?;
                 }
-                if let Err(error) = self.driver.save(tree) {
+                if let Err(error) = driver.save(tree) {
                     // A refused publish cannot leave an in-memory success replay.
                     tree.remember_failure(
-                        operation_id,
-                        caller,
+                        &operation_id,
+                        &caller,
                         tool_name,
-                        request,
+                        &request,
                         TopologyErrorCode::OperationRecoveryRequired,
                     )?;
                     return Err(error);
                 }
                 Ok(())
             })
+            .await
             .map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
-        self.driver.settle(effects).map_err(|error| {
+        self.driver.settle(effects).await.map_err(|error| {
             ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
         })?;
         result
             .map_err(|error| ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message))
     }
 
-    fn fail_closed_cancel(
+    async fn fail_closed_cancel(
         &self,
         failure: LiveCancelFailure,
         targets: &[String],
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         let mut recorded = false;
         for owner in &failure.owner_failures {
-            let id = &owner.agent_id;
-            if !targets.contains(id) {
+            if !targets.contains(&owner.agent_id) {
                 continue;
             }
+            let driver = self.driver.clone();
+            let observer = self.observer.clone();
+            let owner = owner.clone();
             let (result, effects) = self
                 .driver
-                .mutate(|tree| {
+                .mutate(move |tree| {
+                    let id = &owner.agent_id;
                     if !owner.matches(tree) {
                         return Ok(false);
                     }
@@ -410,22 +437,23 @@ impl TopologyTool {
                             owner.expected_attempt_id.as_ref(),
                             owner.message.clone(),
                         )
-                        .and_then(|value| self.driver.apply_recorded(tree, id).map(|()| value))?;
+                        .and_then(|value| driver.apply_recorded(tree, id).map(|()| value))?;
                     if !changed {
                         return Ok(false);
                     }
                     tree.try_emit_tree_node_detached(
-                        self.observer.as_ref(),
+                        observer.as_ref(),
                         id,
                         NodeDetach::RecoveryRequired,
                     );
-                    self.driver.save(tree)?;
+                    driver.save(tree)?;
                     Ok(true)
                 })
+                .await
                 .map_err(|error| {
                     ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
                 })?;
-            self.driver.settle(effects).map_err(|error| {
+            self.driver.settle(effects).await.map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
             recorded |= result.map_err(|error: TopologyError| {
@@ -444,48 +472,50 @@ impl TopologyTool {
         )
     }
 
-    pub(super) fn fail_closed_session(
+    pub(super) async fn fail_closed_session(
         &self,
         agent_id: &str,
         message: impl Into<plakous_host_protocol::status::HostFailure>,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         let failure = message.into();
         let message = failure.diagnostic.as_str().to_owned();
-        let (persist_error, pending) = {
-            let Ok(mut tree) = self.driver.lock() else {
-                return ToolOutcome::failure_text(
-                    json!({
-                        "code": TopologyErrorCode::OperationRecoveryRequired,
-                        "message": format!(
-                            "{message}; topology tree lock is poisoned while persisting recovery"
-                        ),
-                    })
-                    .to_string(),
-                );
-            };
-            tree.record_fault(agent_id, message.clone());
-            // the partial-work seal runs with the lock released.
-            let materialized = tree
-                .record_host_materialization(agent_id)
-                .and_then(|value| {
-                    self.driver
-                        .apply_recorded_guarded(&mut tree, agent_id)
-                        .map(|()| value)
-                });
-            let status = tree
-                .node(agent_id)
-                .ok()
-                .and_then(|node| NodeDetach::from_node_status(node.status))
-                .unwrap_or(NodeDetach::RecoveryRequired);
-            tree.try_emit_tree_node_detached(self.observer.as_ref(), agent_id, status);
-            let pending = if materialized.is_ok() {
-                tree.take_effects()
-            } else {
-                Effects::default()
-            };
-            (materialized, pending)
+        let driver = self.driver.clone();
+        let observer = self.observer.clone();
+        let (agent, fault) = (agent_id.to_owned(), message.clone());
+        let recorded = self
+            .driver
+            .write(move |tree| {
+                tree.record_fault(&agent, fault);
+                // the partial-work seal runs with the lock released.
+                let materialized = tree
+                    .record_host_materialization(&agent)
+                    .and_then(|value| driver.apply_recorded_guarded(tree, &agent).map(|()| value));
+                let status = tree
+                    .node(&agent)
+                    .ok()
+                    .and_then(|node| NodeDetach::from_node_status(node.status))
+                    .unwrap_or(NodeDetach::RecoveryRequired);
+                tree.try_emit_tree_node_detached(observer.as_ref(), &agent, status);
+                let pending = if materialized.is_ok() {
+                    tree.take_effects()
+                } else {
+                    Effects::default()
+                };
+                (materialized, pending)
+            })
+            .await;
+        let Ok((persist_error, pending)) = recorded else {
+            return ToolOutcome::failure_text(
+                json!({
+                    "code": TopologyErrorCode::OperationRecoveryRequired,
+                    "message": format!(
+                        "{message}; topology tree lock is poisoned while persisting recovery"
+                    ),
+                })
+                .to_string(),
+            );
         };
-        if let Err(error) = self.driver.settle(pending) {
+        if let Err(error) = self.driver.settle(pending).await {
             return Self::topology_failure(&error);
         }
         let error = match persist_error {

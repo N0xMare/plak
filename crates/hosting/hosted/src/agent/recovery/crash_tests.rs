@@ -8,6 +8,7 @@
     clippy::expect_used,
     reason = "process crash fixture"
 )]
+use crate::runtime::test_kit::BlockOn as _;
 
 use std::io::{BufRead, Read, Write};
 use std::os::unix::process::ExitStatusExt as _;
@@ -197,8 +198,9 @@ impl Fixture {
             )
             .unwrap()
         };
-        let runtime =
-            crate::topology_runtime::insert_root_with(&tree_id, tree, store, None).unwrap();
+        let runtime = crate::topology_runtime::insert_root_with(&tree_id, tree, store, None)
+            .block()
+            .unwrap();
         let parent = SpawnParent::Api(ApiTopologyParent {
             created_output_bound: None,
             prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
@@ -244,19 +246,25 @@ impl Fixture {
     async fn cut(&self, mode: &str, gate: &GateHandle) {
         let id = self
             .runtime
-            .mutate_then_emit(false, |tree| {
-                let name = crate::agent_tree_protocol::TemplateName::parse("review").unwrap();
-                let mut binding = tree.snapshot.binding(&name).unwrap().clone();
-                binding.max_turns = Some(if matches!(mode, "wake" | "idle" | "wake-prepared") {
-                    2
-                } else {
-                    1
-                });
-                tree.pin_template("review", binding);
-                tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
-                    .map(|spawned| spawned.agent_id)
-                    .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let mode = mode.to_owned();
+                move |tree| {
+                    let name = crate::agent_tree_protocol::TemplateName::parse("review").unwrap();
+                    let mut binding = tree.snapshot.binding(&name).unwrap().clone();
+                    binding.max_turns = Some(
+                        if matches!(mode.as_str(), "wake" | "idle" | "wake-prepared") {
+                            2
+                        } else {
+                            1
+                        },
+                    );
+                    tree.pin_template("review", binding);
+                    tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                        .map(|spawned| spawned.agent_id)
+                        .map_err(|error| error.message)
+                }
             })
+            .await
             .unwrap();
         let sessions = self.parent.state_roots().runtime_sessions().unwrap();
         let CreateSessionOutcome::Created { session, .. } = sessions
@@ -275,19 +283,23 @@ impl Fixture {
         )
         .unwrap();
         self.runtime
-            .mutate_then_emit(false, |tree| {
-                tree.record_child_session(&id, &session.locator().to_string())
-                    .map_err(|error| error.message)?;
-                tree.record_command(crate::agent_tree::AgentCommand::intent(
-                    "child-crash:start",
-                    &id,
-                    tree.attempt(&id).map(|attempt| attempt.attempt_id.clone()),
-                    crate::agent_tree::AgentCommandKind::Start,
-                    "assignment",
-                    Vec::new(),
-                ))
-                .map_err(|error| error.message)
+            .mutate_then_emit(false, {
+                let (id, locator) = (id.clone(), session.locator().to_string());
+                move |tree| {
+                    tree.record_child_session(&id, &locator)
+                        .map_err(|error| error.message)?;
+                    tree.record_command(crate::agent_tree::AgentCommand::intent(
+                        "child-crash:start",
+                        &id,
+                        tree.attempt(&id).map(|attempt| attempt.attempt_id.clone()),
+                        crate::agent_tree::AgentCommandKind::Start,
+                        "assignment",
+                        Vec::new(),
+                    ))
+                    .map_err(|error| error.message)
+                }
             })
+            .await
             .unwrap();
         let submission = session
             .agent()
@@ -300,7 +312,7 @@ impl Fixture {
         if matches!(mode, "wake" | "idle" | "wake-prepared") {
             result.result().await.unwrap();
             self.runtime
-                .mutate_then_emit(false, |tree| {
+                .mutate_then_emit_borrowed_for_test(false, |tree| {
                     if mode != "idle" {
                         tree.send_agent_message(
                             "root",
@@ -326,6 +338,7 @@ impl Fixture {
                     )
                     .map_err(|error| error.message)
                 })
+                .await
                 .unwrap();
         } else if mode == "certified" {
             tokio::time::timeout(Duration::from_secs(20), async {
@@ -350,11 +363,12 @@ impl Fixture {
             .await
             .unwrap();
         self.runtime
-            .mutate_then_emit(false, |tree| {
+            .mutate_then_emit_borrowed_for_test(false, |tree| {
                 feed.apply(tree, &id)
                     .map(|_| ())
                     .map_err(|error| error.message)
             })
+            .await
             .unwrap();
         if matches!(mode, "idle" | "wake-prepared") {
             if mode == "wake-prepared" {
@@ -369,6 +383,7 @@ impl Fixture {
                         base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
                         batch: BatchRule::WakeAll,
                     })
+                    .await
                     .unwrap();
             }
             cut_ready(&id).await;
@@ -446,12 +461,16 @@ impl Fixture {
             };
             let closed = self
                 .runtime
-                .mutate_then_emit(false, |tree| {
-                    tree.prepare_operation("retirement-cut", "root", "close_agent", &request)
-                        .map_err(|error| error.message)?;
-                    tree.close_agent("root", &request, None)
-                        .map_err(|error| error.message)
+                .mutate_then_emit(false, {
+                    let request = request.clone();
+                    move |tree| {
+                        tree.prepare_operation("retirement-cut", "root", "close_agent", &request)
+                            .map_err(|error| error.message)?;
+                        tree.close_agent("root", &request, None)
+                            .map_err(|error| error.message)
+                    }
                 })
+                .await
                 .unwrap();
             if mode == "retire-intent" {
                 cut_ready(&id).await;
@@ -467,16 +486,20 @@ impl Fixture {
             }
             assert!(join.await.is_clean());
             self.runtime
-                .mutate_then_emit(false, |tree| {
-                    tree.remember_success(
-                        "retirement-cut",
-                        "root",
-                        "close_agent",
-                        &request,
-                        &closed,
-                    )
-                    .map_err(|error| error.message)
+                .mutate_then_emit(false, {
+                    let closed = closed.clone();
+                    move |tree| {
+                        tree.remember_success(
+                            "retirement-cut",
+                            "root",
+                            "close_agent",
+                            &request,
+                            &closed,
+                        )
+                        .map_err(|error| error.message)
+                    }
                 })
+                .await
                 .unwrap();
             cut_ready(&id).await;
         }
@@ -520,7 +543,7 @@ impl Fixture {
     }
 
     async fn recover(&self, id: &str, abandoned: bool) {
-        crate::runtime::resume_tree(&self.tree_id).unwrap();
+        crate::runtime::resume_tree(&self.tree_id).await.unwrap();
         super::super::children::reattach_inflight_children(&self.parent, &self.runtime).await;
         let _ = super::run_tree_recovery_pass(&self.tree_id).await;
         self.until_settled(id).await;
@@ -828,10 +851,10 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
     let id = kill_owner(root.path(), "certified");
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Fixture::new(root.path(), "certified", None, true);
-        crate::runtime::resume_tree(&fixture.tree_id).unwrap();
+        crate::runtime::resume_tree(&fixture.tree_id).await.unwrap();
         fixture
             .runtime
-            .mutate_then_emit(false, |tree| {
+            .mutate_then_emit_borrowed_for_test(false, |tree| {
                 let mail = tree
                     .send_agent_message(
                         "root",
@@ -859,8 +882,9 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
                 tree.acknowledge_mail(&mail.message_id)
                     .map_err(|error| error.message)
             })
+            .await
             .unwrap();
-        crate::runtime::resume_tree(&fixture.tree_id).unwrap();
+        crate::runtime::resume_tree(&fixture.tree_id).await.unwrap();
         let locator = std::fs::read_to_string(root.path().join("created-locator")).unwrap();
         let path = root.path().to_string_lossy().into_owned();
         let super::super::children::ChildReopen::Attached { session, recovered } =
@@ -1017,12 +1041,16 @@ fn recover_agent_waits_for_a_still_held_child_lease() {
         let fixture = Fixture::new(root.path(), "mid", None, true);
         fixture
             .runtime
-            .record_then_apply(&id, |tree| {
-                tree.record_host_retirement(
-                    &id,
-                    "retirement could not release the live lease".into(),
-                )
+            .record_then_apply(&id, {
+                let id = id.clone();
+                move |tree| {
+                    tree.record_host_retirement(
+                        &id,
+                        "retirement could not release the live lease".into(),
+                    )
+                }
             })
+            .await
             .unwrap();
         let recoverer = super::ProductChildRecoverer {
             parent: fixture.parent.clone(),

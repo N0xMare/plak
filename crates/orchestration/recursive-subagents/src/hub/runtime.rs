@@ -72,11 +72,15 @@ impl ProductTopologyRuntime {
     /// # Errors
     ///
     /// Refuses a poisoned mutex and reports a failed settle.
-    pub fn mutate_and_settle<R>(
+    pub async fn mutate_and_settle<R, W>(
         &self,
-        work: impl FnOnce(&mut ProductAgentTree) -> R,
-    ) -> Result<(R, crate::tree::Settled), crate::tree::TopologyError> {
-        self.driver.mutate_and_settle(work)
+        work: W,
+    ) -> Result<(R, crate::tree::Settled), crate::tree::TopologyError>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.driver.mutate_and_settle(work).await
     }
 
     /// One mutation, published, and everything it queued settled — the whole
@@ -91,11 +95,11 @@ impl ProductTopologyRuntime {
     /// Refuses a poisoned mutex, a refused publish, and a failed settle;
     /// `work`'s own refusal comes back unchanged. Refused consequences are
     /// rolled back and no unacknowledged effect runs.
-    pub fn mutate_then_emit<R>(
-        &self,
-        epoch_advanced: bool,
-        work: impl FnOnce(&mut ProductAgentTree) -> Result<R, String>,
-    ) -> Result<R, String> {
+    pub async fn mutate_then_emit<R, W>(&self, epoch_advanced: bool, work: W) -> Result<R, String>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> Result<R, String> + Send + 'static,
+        R: Send + 'static,
+    {
         self.mutate_then_emit_typed(epoch_advanced, |tree| {
             work(tree).map_err(|message| {
                 crate::tree::TopologyError::new(
@@ -104,6 +108,7 @@ impl ProductTopologyRuntime {
                 )
             })
         })
+        .await
         .map_err(|error| error.message)
     }
 
@@ -112,29 +117,43 @@ impl ProductTopologyRuntime {
     /// # Errors
     /// Refuses a poisoned mutex, failed mutation, publication or settlement.
     /// A refused publication rolls back consequences without draining effects.
-    pub fn mutate_then_emit_typed<R>(
+    pub async fn mutate_then_emit_typed<R, W>(
         &self,
         epoch_advanced: bool,
-        work: impl FnOnce(&mut ProductAgentTree) -> Result<R, crate::tree::TopologyError>,
-    ) -> Result<R, crate::tree::TopologyError> {
-        let (result, effects) = {
-            let mut tree = self.driver.lock().map_err(|_| {
-                crate::tree::TopologyError::new(
-                    crate::protocol::TopologyErrorCode::OperationRecoveryRequired,
-                    "topology tree lock is poisoned",
-                )
-            })?;
-            if tree.revision != tree.stored_revision {
-                self.driver.save_guarded(&mut tree)?;
-            }
-            let result = self.driver.fold_and_commit_guarded(&mut tree, work)?;
-            if epoch_advanced && let Some(observer) = self.observer.as_ref() {
-                observer.epoch_advanced(&tree.tree_id);
-            }
-            (result, tree.take_effects())
-        };
-        self.driver.settle(effects)?;
-        Ok(result)
+        work: W,
+    ) -> Result<R, crate::tree::TopologyError>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> Result<R, crate::tree::TopologyError> + Send + 'static,
+        R: Send + 'static,
+    {
+        let owner = self.driver.clone();
+        let observer = self.observer.clone();
+        // A release owner: a caller that leaves mid-way strands no effect.
+        self.driver
+            .owned(async move {
+                let driver = owner.clone();
+                let (result, effects) = owner
+                    .write(move |tree| {
+                        if tree.revision != tree.stored_revision {
+                            driver.save_guarded(tree)?;
+                        }
+                        let result = driver.fold_and_commit_guarded(tree, work)?;
+                        if epoch_advanced && let Some(observer) = observer.as_ref() {
+                            observer.epoch_advanced(&tree.tree_id);
+                        }
+                        Ok::<_, crate::tree::TopologyError>((result, tree.take_effects()))
+                    })
+                    .await
+                    .map_err(|_| {
+                        crate::tree::TopologyError::new(
+                            crate::protocol::TopologyErrorCode::OperationRecoveryRequired,
+                            "topology tree lock is poisoned",
+                        )
+                    })??;
+                owner.settle_here(effects).await?;
+                Ok(result)
+            })
+            .await
     }
 
     /// Installs process-local ownership before the consequence snapshot.
@@ -143,25 +162,40 @@ impl ProductTopologyRuntime {
     ///
     /// # Errors
     /// Reports failed preparation, publication, or effect settlement.
-    pub fn prepare_then_emit<R>(
-        &self,
-        prepare: impl FnOnce(&mut ProductAgentTree) -> Result<R, String>,
-    ) -> Result<R, String> {
-        let (result, effects) = {
-            let mut tree = self.driver.lock().map_err(|error| error.message)?;
-            if tree.revision != tree.stored_revision {
-                self.driver
-                    .save_guarded(&mut tree)
-                    .map_err(|error| error.message)?;
-            }
-            let result = prepare(&mut tree)?;
-            self.driver
-                .fold_and_commit_guarded(&mut tree, |_| Ok(()))
-                .map_err(|error| error.message)?;
-            (result, tree.take_effects())
-        };
-        self.driver.settle(effects).map_err(|error| error.message)?;
-        Ok(result)
+    pub async fn prepare_then_emit<R, W>(&self, prepare: W) -> Result<R, String>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> Result<R, String> + Send + 'static,
+        R: Send + 'static,
+    {
+        let owner = self.driver.clone();
+        // A release owner: a caller that leaves mid-way strands no effect.
+        self.driver
+            .owned(async move {
+                let driver = owner.clone();
+                let prepared = async {
+                    let (result, effects) = owner
+                        .write(move |tree| {
+                            if tree.revision != tree.stored_revision {
+                                driver.save_guarded(tree).map_err(|error| error.message)?;
+                            }
+                            let result = prepare(tree)?;
+                            driver
+                                .fold_and_commit_guarded(tree, |_| Ok(()))
+                                .map_err(|error| error.message)?;
+                            Ok::<_, String>((result, tree.take_effects()))
+                        })
+                        .await
+                        .map_err(|error| error.message)??;
+                    owner
+                        .settle_here(effects)
+                        .await
+                        .map_err(|error| error.message)?;
+                    Ok::<_, String>(result)
+                };
+                Ok(prepared.await)
+            })
+            .await
+            .map_err(|error| error.message)?
     }
 
     /// Records and publishes an intent before folding its consequences.
@@ -170,36 +204,38 @@ impl ProductTopologyRuntime {
     ///
     /// # Errors
     /// Reports a failed recording, either publish, or effect settlement.
-    pub fn record_then_apply<R>(
-        &self,
-        agent_id: &str,
-        record: impl FnOnce(&mut ProductAgentTree) -> Result<R, crate::tree::TopologyError>,
-    ) -> Result<R, String> {
-        let (result, effects) = {
-            let mut tree = self.driver.lock().map_err(|error| error.message)?;
-            let result = record(&mut tree).map_err(|error| error.message)?;
-            self.driver
-                .apply_recorded_guarded(&mut tree, agent_id)
-                .map_err(|error| error.message)?;
-            (result, tree.take_effects())
-        };
-        self.driver.settle(effects).map_err(|error| error.message)?;
-        Ok(result)
-    }
-
-    /// Fenced whole-tree publish of the runtime's tree; `epoch_advanced`
-    /// reports the install to the observer once the rows are durable, never
-    /// before, so nothing is announced that a refused publish did not keep.
-    pub fn save_then_emit(
-        &self,
-        tree: &mut ProductAgentTree,
-        epoch_advanced: bool,
-    ) -> Result<(), String> {
-        self.driver.save(tree).map_err(|error| error.message)?;
-        if epoch_advanced && let Some(observer) = self.observer.as_ref() {
-            observer.epoch_advanced(&tree.tree_id);
-        }
-        Ok(())
+    pub async fn record_then_apply<R, W>(&self, agent_id: &str, record: W) -> Result<R, String>
+    where
+        W: FnOnce(&mut ProductAgentTree) -> Result<R, crate::tree::TopologyError> + Send + 'static,
+        R: Send + 'static,
+    {
+        let owner = self.driver.clone();
+        let agent_id = agent_id.to_owned();
+        // A release owner: a caller that leaves mid-way strands no effect.
+        self.driver
+            .owned(async move {
+                let driver = owner.clone();
+                let recorded = async {
+                    let (result, effects) = owner
+                        .write(move |tree| {
+                            let result = record(tree).map_err(|error| error.message)?;
+                            driver
+                                .apply_recorded_guarded(tree, &agent_id)
+                                .map_err(|error| error.message)?;
+                            Ok::<_, String>((result, tree.take_effects()))
+                        })
+                        .await
+                        .map_err(|error| error.message)??;
+                    owner
+                        .settle_here(effects)
+                        .await
+                        .map_err(|error| error.message)?;
+                    Ok::<_, String>(result)
+                };
+                Ok(recorded.await)
+            })
+            .await
+            .map_err(|error| error.message)?
     }
 
     /// This tree's telemetry port, when one was installed.
@@ -383,7 +419,7 @@ impl ProductTopologyRuntime {
         agent_id: String,
         child: Box<dyn LiveChildHandle>,
     ) -> Result<TurnId, Box<dyn LiveChildHandle>> {
-        self.try_occupy_live_admitted(agent_id, child, || Ok(()))
+        self.try_occupy_live_admitted(agent_id, child, || std::future::ready(Ok(())))
             .await
             .map_err(|(child, _)| child)
     }
@@ -396,12 +432,16 @@ impl ProductTopologyRuntime {
     /// # Errors
     ///
     /// Returns the rejected handle, with `admit`'s refusal when it refused.
-    pub async fn try_occupy_live_admitted(
+    pub async fn try_occupy_live_admitted<A, F>(
         &self,
         agent_id: String,
         child: Box<dyn LiveChildHandle>,
-        admit: impl FnOnce() -> Result<(), String>,
-    ) -> Result<TurnId, (Box<dyn LiveChildHandle>, Option<String>)> {
+        admit: A,
+    ) -> Result<TurnId, (Box<dyn LiveChildHandle>, Option<String>)>
+    where
+        A: FnOnce() -> F,
+        F: Future<Output = Result<(), String>>,
+    {
         if self.is_closed() {
             return Err((child, None));
         }
@@ -409,13 +449,15 @@ impl ProductTopologyRuntime {
         if !self.admits_live(&live, &agent_id) {
             return Err((child, None));
         }
-        if let Err(refusal) = admit() {
+        if let Err(refusal) = admit().await {
             return Err((child, Some(refusal)));
         }
         let turn_id = child.turn_id();
+        let agent = agent_id.clone();
         if let Err(error) = self
             .driver
-            .mutate(|tree| tree.bind_turn_owner(&agent_id, turn_id.to_string()))
+            .mutate(move |tree| tree.bind_turn_owner(&agent, turn_id.to_string()))
+            .await
         {
             return Err((child, Some(error.message)));
         }
@@ -533,3 +575,6 @@ impl ProductTopologyRuntime {
         }
     }
 }
+
+#[cfg(any(test, feature = "test-support"))]
+mod test_support;

@@ -395,7 +395,9 @@ async fn conflict_notices_use_operation_ids_with_reused_absent_and_empty_display
     let tree_id = session.id.clone();
     let (tree, vcs, candidate) =
         crate::runtime::test_support::finished_fork_tree(dir.path(), &tree_id);
-    let runtime = crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let (events, received) = host_event_sink();
     let mut projection = TurnProjection::default();
     let mut push = TreeSnapshotPush::default();

@@ -1,3 +1,4 @@
+use crate::runtime::test_kit::BlockOn as _;
 use crate::runtime::test_kit::TestExtension;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type Sender = crate::runtime::Sender<TestExtension>;
@@ -41,7 +42,9 @@ fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
         crate::agent_tree_protocol::WriterMode::SingleLease,
     )
     .unwrap();
-    let runtime = crate::topology_runtime::insert_root(id, tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(id, tree, None)
+        .block()
+        .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sender, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = HostLoop::open(config, &receiver, Sender::over(sender), None).unwrap();

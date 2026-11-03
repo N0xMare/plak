@@ -572,7 +572,7 @@ pub(super) enum SessionSource<'a> {
     /// topology attached.
     Native {
         spec: Box<ProductAgentSpec>,
-        stderr: &'a mut dyn Write,
+        stderr: &'a mut (dyn Write + Send),
     },
     /// An API topology parent: its runtime is compiled here and its topology
     /// attached.
@@ -685,7 +685,7 @@ pub async fn build_coding_session(
     spec: ProductAgentSpec,
     create_operation_id: &str,
     seed: Option<PortableSessionHistory>,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
 ) -> CliResult<AttachedCodingSession> {
     build_coding_session_seed(
         spec,
@@ -700,7 +700,7 @@ pub(crate) async fn build_coding_session_seed(
     spec: ProductAgentSpec,
     create_operation_id: &str,
     seed: Option<SeededHistory>,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
 ) -> CliResult<AttachedCodingSession> {
     let operation_id = SessionOperationId::new(create_operation_id)
         .map_err(|_| CliFailure::new("plak create operation identity is invalid"))?;
@@ -722,7 +722,7 @@ pub(crate) async fn build_coding_session_seed(
 pub async fn open_coding_session(
     spec: ProductAgentSpec,
     locator: SessionLocator,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     let operation_id = SessionOperationId::new(format!("plak:open:{}", uuid::Uuid::new_v4()))
         .map_err(|_| CliFailure::new("plak open operation identity is invalid"))?;
@@ -768,7 +768,7 @@ pub async fn build_runtime_session(
 pub(crate) async fn verify_coding_session(
     spec: ProductAgentSpec,
     locator: SessionLocator,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
 ) -> Result<(), CodingSessionOpenFailure> {
     let operation_id = SessionOperationId::new(format!("plak:verify:{}", uuid::Uuid::new_v4()))
         .map_err(|_| CliFailure::new("plak verify operation identity is invalid"))?;
@@ -814,7 +814,7 @@ async fn attach_native_source(
     target: RuntimeTarget,
     seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
-    stderr: &mut dyn Write,
+    stderr: &mut (dyn Write + Send),
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     let sessions = spec
         .state_roots
@@ -841,7 +841,8 @@ async fn attach_native_source(
             SessionToolFence::Full,
             target.root_topology_attach(),
             &mut None,
-        )?;
+        )
+        .await?;
         return attach_runtime_source(
             sessions,
             runtime,
@@ -861,7 +862,9 @@ async fn attach_native_source(
         SessionToolFence::Full,
         target.root_topology_attach(),
         &mut None,
-    ) {
+    )
+    .await
+    {
         Ok(runtime) => runtime,
         Err(error) => {
             if let Err(cleanup) = crate::topology_runtime::release_root_lease(&tree_id).await {

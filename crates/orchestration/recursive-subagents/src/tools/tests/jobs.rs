@@ -162,13 +162,16 @@ impl ChildController for ExpiredCloseCanceller {
     {
         let _ = signalled.send(());
         Box::pin(async move {
+            let driver = self.0.clone();
+            let agent = ids[0].clone();
             self.0
-                .mutate_and_settle(|tree| {
-                    tree.record_host_retirement(&ids[0], "owner deadline".into())
-                        .and_then(|value| tree.fold_due(&ids[0]).map(|_| value))
+                .mutate_and_settle(move |tree| {
+                    tree.record_host_retirement(&agent, "owner deadline".into())
+                        .and_then(|value| tree.fold_due(&agent).map(|_| value))
                         .unwrap();
-                    self.0.save(tree).unwrap();
+                    driver.save(tree).unwrap();
                 })
+                .await
                 .unwrap();
             Err(LiveCancelFailure {
                 message: "joiner deadline; owner retained".into(),
@@ -193,22 +196,33 @@ impl plakous::tools::JobHost for RecoverDuringJobStop {
         _: plakous::model::SessionId,
         _: plakous::model::BranchId,
     ) -> Option<plakous::tools::JoinedSessionsPort> {
-        self.driver
-            .mutate_and_settle(|tree| {
-                let attempt = tree.attempt(&self.child).unwrap().attempt_id.clone();
-                tree.release_turn_owner(&self.child);
-                tree.set_active_turn(&self.child, false).unwrap();
-                tree.recover_host_decision(
-                    &self.child,
-                    &attempt,
-                    crate::tree::RecoveryResolution::RecoveredWithoutTurn {
-                        message: "late release returned during job stop".into(),
-                    },
-                )
-                .unwrap();
-                self.driver.save(tree).unwrap();
-            })
-            .unwrap();
+        let (driver, child) = (self.driver.clone(), self.child.clone());
+        // The job host port is synchronous: publish, on its own runtime,
+        // before answering.
+        let publisher = self.driver.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(publisher.mutate_and_settle(move |tree| {
+                    let attempt = tree.attempt(&child).unwrap().attempt_id.clone();
+                    tree.release_turn_owner(&child);
+                    tree.set_active_turn(&child, false).unwrap();
+                    tree.recover_host_decision(
+                        &child,
+                        &attempt,
+                        crate::tree::RecoveryResolution::RecoveredWithoutTurn {
+                            message: "late release returned during job stop".into(),
+                        },
+                    )
+                    .unwrap();
+                    driver.save(tree).unwrap();
+                }))
+        })
+        .join()
+        .unwrap()
+        .unwrap();
         None
     }
 
@@ -277,7 +291,11 @@ async fn settling_unrelated_effects_does_not_stop_historical_attempt_jobs() {
     let driver = driver_on(tree, store);
     let (jobs, _opened) = install_running_job(&driver, &child.agent_id, root.path()).await;
     driver
-        .mutate_and_settle(|tree| tree.record_turn_completed(&child.agent_id))
+        .mutate_and_settle({
+            let child = child.clone();
+            move |tree| tree.record_turn_completed(&child.agent_id)
+        })
+        .await
         .unwrap()
         .0
         .unwrap();
@@ -749,8 +767,8 @@ async fn grok_kill_on_a_child_interrupts_and_never_closes() {
 /// A Grok hub's refusals name the tools that hub was given. A submit
 /// blocked on a live child offers the output and kill tools, never
 /// `wait_agent` or `interrupt_agent`.
-#[test]
-fn grok_hub_refusals_do_not_name_wait_agent_or_interrupt_agent() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grok_hub_refusals_do_not_name_wait_agent_or_interrupt_agent() {
     let root = tempfile::tempdir().unwrap();
     let mut tree = bootstrap_tree("grok-refusal", root.path());
     tree.spawn_agent("root", &spawn_request(), None).unwrap();
@@ -761,6 +779,7 @@ fn grok_hub_refusals_do_not_name_wait_agent_or_interrupt_agent() {
             "grok-submit-live",
             &json!({"turn_token": 1, "output_json": "{\"ok\":true}"}),
         )
+        .await
         .unwrap();
     let payload = outcome_json(&outcome);
     assert_eq!(payload["code"], "live_work");

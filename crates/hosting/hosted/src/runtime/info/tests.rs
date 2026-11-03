@@ -213,7 +213,9 @@ async fn the_session_root_template_is_a_template_name_never_the_session_title() 
     let mut snapshot = tree.snapshot.clone();
     snapshot.root_template = Some("frozen-root".to_owned());
     tree.install_snapshot(snapshot);
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     assert_eq!(
         session_root_template(&paths, &session, fact.as_ref()).as_deref(),
         Some("frozen-root")

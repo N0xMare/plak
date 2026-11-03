@@ -1032,7 +1032,7 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
     Ok(prepared.runtime)
 }
 
-pub(super) fn production_host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn production_host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     stderr_buf: &mut Vec<u8>,
     role: RuntimeRole,
@@ -1069,15 +1069,15 @@ pub(super) fn production_host_runtime_binding<P: plakous_host_protocol::Protocol
         max_model_rounds: config.max_model_rounds,
         topology_enabled: config.topology_enabled,
     };
-    native_runtime_for_record(spec, role, stderr_buf)
+    native_runtime_for_record(spec, role, stderr_buf).await
 }
 
-pub(super) fn native_runtime_for_record(
+pub(super) async fn native_runtime_for_record(
     spec: ProductAgentSpec,
     role: RuntimeRole,
-    stderr: &mut dyn std::io::Write,
+    stderr: &mut (dyn std::io::Write + Send),
 ) -> CliResult<SessionRuntimeBinding> {
-    let binding = coding_session_runtime_binding(spec, stderr)?;
+    let binding = coding_session_runtime_binding(spec, stderr).await?;
     if role == RuntimeRole::Compact {
         binding
             .with_compaction_output_limit()
@@ -1162,12 +1162,12 @@ async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
     let factory = config.runtime_factory.clone();
     factory.create(config, seed, stderr).await
 }
-pub(super) fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     stderr: &mut Vec<u8>,
     role: RuntimeRole,
 ) -> CliResult<SessionRuntimeBinding> {
-    config.runtime_factory.runtime(config, role, stderr)
+    config.runtime_factory.runtime(config, role, stderr).await
 }
 pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,

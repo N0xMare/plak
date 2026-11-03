@@ -1232,7 +1232,9 @@ async fn followup_cancel_and_slot_expiry_with_a_future_tail_hold_recovery_and_re
                     let tail = tree.feed_cursor(&session) + 1;
                     (session, tail)
                 })?;
-                driver.withdraw_unstarted_followup(&agent, &message, &session, tail, receipt)
+                driver
+                    .withdraw_unstarted_followup(&agent, &message, &session, tail, receipt)
+                    .await
             })
         }
     }
@@ -1664,6 +1666,58 @@ async fn start_held_at_admission() -> (
     });
     until_calls(&deliverer, 1).await;
     (root, tree, gate, pending)
+}
+
+/// A send dropped mid-delivery leaves its delivery claim and its Start
+/// reservation to a release owner, which empties both.
+#[tokio::test]
+async fn a_send_dropped_mid_delivery_releases_its_claims() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, tree) = persist_fixture(&root);
+    let driver = driver_on(tree, Arc::clone(&store));
+    spawn_tool(
+        driver.clone(),
+        Some(Arc::new(StubBinder::bind_only()) as Arc<dyn ChildController>),
+    )
+    .spawn_with(
+        "op-spawn-bind".into(),
+        &serde_json::to_value(spawn_request()).unwrap(),
+    )
+    .await
+    .unwrap();
+    let (stub, _gate) = StubDeliverer::ok().holding_from(0);
+    let deliverer = Arc::new(stub);
+    let tool = Arc::new(send_tool(
+        driver.clone(),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
+    ));
+    let pending = tokio::spawn(async move {
+        tool.send_with("op-dropped".into(), &send_request("c1", "hello", None))
+            .await
+    });
+    until_calls(&deliverer, 1).await;
+    driver
+        .read(|tree| {
+            assert!(!tree.delivery_claims.is_empty());
+            assert!(!tree.start_reservations.is_empty());
+        })
+        .unwrap();
+    pending.abort();
+    assert!(pending.await.unwrap_err().is_cancelled());
+    let owners = driver.release_owners();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while !owners.is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    driver
+        .read(|tree| {
+            assert!(tree.delivery_claims.is_empty());
+            assert!(tree.start_reservations.is_empty());
+        })
+        .unwrap();
 }
 
 /// A Start whose turn was interrupted and released before the delivery

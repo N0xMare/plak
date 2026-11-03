@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+use plakous_hosted::runtime::test_kit::BlockOn as _;
 
 use super::*;
 use crate::home::paths::PlakPaths;
@@ -54,6 +55,7 @@ impl ChildUsageFixture {
             store,
             Some(observer),
         )
+        .block()
         .unwrap();
         let session = "00000000-0000-4000-8000-0000000000c1";
         let turn = "00000000-0000-4000-8000-000000001001".parse().unwrap();
@@ -107,11 +109,12 @@ impl ChildUsageFixture {
     }
 
     fn project(&self) -> Result<plakous_hosted::agent_tree::TreeProjection, String> {
-        self.runtime.mutate_then_emit(false, |tree| {
-            self.feed
-                .apply(tree, &self.child)
-                .map_err(|error| error.message)
-        })
+        let (feed, child) = (self.feed.clone(), self.child.clone());
+        self.runtime
+            .mutate_then_emit(false, move |tree| {
+                feed.apply(tree, &child).map_err(|error| error.message)
+            })
+            .block()
     }
 }
 
@@ -182,7 +185,11 @@ fn failed_child_usage_save_retries_without_reload_and_emits_once() {
         cursor
     );
     store.fail.store(false, std::sync::atomic::Ordering::SeqCst);
-    fixture.runtime.mutate_then_emit(false, |_| Ok(())).unwrap();
+    fixture
+        .runtime
+        .mutate_then_emit(false, |_| Ok(()))
+        .block()
+        .unwrap();
     assert!(fixture.receiver.try_recv().is_err());
     assert_eq!(fixture.project().unwrap().applied, 1);
     assert!(
@@ -223,6 +230,7 @@ fn child_projected_usage_is_one_keyed_row_across_reprojection_and_rebuild() {
             tree.clear_feed_views();
             Ok(())
         })
+        .block()
         .unwrap();
     assert_eq!(project().applied, 1);
     telemetry

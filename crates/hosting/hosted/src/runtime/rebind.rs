@@ -115,7 +115,7 @@ pub(super) fn decided_topology_tree_id<P: plakous_host_protocol::ProtocolExtensi
 /// the caller can drop exactly that lease. `None` means this path took none:
 /// a lookup, an injected runtime, or a failure before attach. The caller
 /// releases only that id with [`release_profile_build_lease`].
-pub(super) fn native_rebind_runtime<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn native_rebind_runtime<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     route: &RebindRoute,
     own_tree: bool,
@@ -130,13 +130,16 @@ pub(super) fn native_rebind_runtime<P: plakous_host_protocol::ProtocolExtension>
         RebindRoute::Native { spec, .. } => spec.as_deref(),
         RebindRoute::Api(_) => None,
     };
-    config.runtime_factory.rebind_runtime(
-        config,
-        spec,
-        attach,
-        matches!(route, RebindRoute::Native { .. }),
-        stderr_buf,
-    )
+    config
+        .runtime_factory
+        .rebind_runtime(
+            config,
+            spec,
+            attach,
+            matches!(route, RebindRoute::Native { .. }),
+            stderr_buf,
+        )
+        .await
 }
 
 /// Drops the lease a profile fork's runtime build took on the tree it
@@ -959,8 +962,12 @@ fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
     // took is dropped below.
     let (runtime, mut target) = match target {
         ProfileTarget::Native(target) => {
-            let (runtime, tree) =
-                native_rebind_runtime(config, &target.route, own_tree, stderr_buf);
+            let (runtime, tree) = run_watched(
+                executor,
+                watch,
+                native_rebind_runtime(config, &target.route, own_tree, stderr_buf),
+            )
+            .map_err(|_| CliFailure::new("application execution failed"))?;
             *attached_tree = tree;
             (runtime?, *target)
         }

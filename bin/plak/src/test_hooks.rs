@@ -198,8 +198,13 @@ fn prepare_scripted_tree(
         // process hub *and* hands back the runtime that owns it, so the navigator
         // and the tools are looking at one tree rather than two copies of one.
         // Building a `TreeDriver` directly would leave the hub empty.
-        plakous_hosted::topology_runtime::insert_root_with(tree_id, tree, Arc::clone(&store), None)
-            .map_err(|error| format!("offline scripted tree could not attach: {error}"))?
+        run_to_end(plakous_hosted::topology_runtime::insert_root_with(
+            tree_id,
+            tree,
+            Arc::clone(&store),
+            None,
+        ))?
+        .map_err(|error| format!("offline scripted tree could not attach: {error}"))?
     };
     let driver = runtime.driver().clone();
     let binder = Arc::new(ScriptedChildBinder {
@@ -220,6 +225,27 @@ fn prepare_scripted_tree(
         state_roots,
     });
     Ok(PreparedTree { driver, binder })
+}
+
+/// Runs `future` to its end on its own runtime and thread: the fixture's
+/// configuration path is synchronous, and may itself run on a runtime thread.
+fn run_to_end<F>(future: F) -> Result<F::Output, String>
+where
+    F: Future + Send,
+    F::Output: Send,
+{
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map(|runtime| runtime.block_on(future))
+                    .map_err(|error| format!("offline fixture runtime: {error}"))
+            })
+            .join()
+            .map_err(|_| "offline fixture runtime panicked".to_owned())?
+    })
 }
 
 fn scripted_tree_vcs(plan: &ScriptPlan) -> Arc<dyn plakous_hosted::occupancy_vcs::VcsOps> {
@@ -375,10 +401,11 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
             };
             // Finish the scripted attempt before returning the root's send.
             // No child commit can then race the root's next provider step.
+            let writer = self.driver.clone();
             let (result, effects) = self
                 .driver
-                .mutate(|tree| {
-                    self.driver.fold_and_commit(tree, |tree| {
+                .mutate(move |tree| {
+                    writer.fold_and_commit(tree, |tree| {
                         tree.acknowledge_mail(&request.message_id)?;
                         tree.submit_result(
                             &request.agent_id,
@@ -392,9 +419,10 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
                         tree.record_turn_completed(&request.agent_id)
                     })
                 })
+                .await
                 .map_err(failure)?;
             result.map_err(failure)?;
-            let settled = self.driver.settle(effects).map_err(failure)?;
+            let settled = self.driver.settle(effects).await.map_err(failure)?;
             if let Some(error) = settled.cleanup_failures.into_iter().next() {
                 return Err(failure(error));
             }
@@ -505,35 +533,41 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
                     )
                 })?;
                 let (completed, effects) = driver
-                    .mutate(|tree| {
-                        tree.record_child_session(&agent_id, &locator)?;
-                        driver.save(tree)?;
-                        tree.project_feed(
-                            &agent_id,
-                            &session.session_id().to_string(),
-                            &[],
-                            &plakous_hosted::agent_tree::TreeFeedReads::default(),
-                        )
-                        .map_err(plakous_hosted::agent_tree_protocol::TopologyError::from)?;
-                        driver.save(tree)?;
-                        if let Ok(node) = tree.node(&agent_id) {
-                            std::fs::write(node.path.join("child.txt"), "child\n").ok();
+                    .mutate({
+                        let (driver, agent_id, locator) =
+                            (driver.clone(), agent_id.clone(), locator.clone());
+                        move |tree| {
+                            tree.record_child_session(&agent_id, &locator)?;
+                            driver.save(tree)?;
+                            tree.project_feed(
+                                &agent_id,
+                                &session.session_id().to_string(),
+                                &[],
+                                &plakous_hosted::agent_tree::TreeFeedReads::default(),
+                            )
+                            .map_err(plakous_hosted::agent_tree_protocol::TopologyError::from)?;
+                            driver.save(tree)?;
+                            if let Ok(node) = tree.node(&agent_id) {
+                                std::fs::write(node.path.join("child.txt"), "child\n").ok();
+                            }
+                            tree.submit_result(
+                                &agent_id,
+                                &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
+                                    turn_token: start.turn_token,
+                                    output_json: "{\"summary\":\"offline scripted child done\"}"
+                                        .into(),
+                                },
+                                None,
+                            )?;
+                            tree.record_turn_completed(&agent_id)?;
+                            tree.settle_for_test();
+                            driver.save(tree)
                         }
-                        tree.submit_result(
-                            &agent_id,
-                            &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
-                                turn_token: start.turn_token,
-                                output_json: "{\"summary\":\"offline scripted child done\"}".into(),
-                            },
-                            None,
-                        )?;
-                        tree.record_turn_completed(&agent_id)?;
-                        tree.settle_for_test();
-                        driver.save(tree)
                     })
+                    .await
                     .map_err(failure)?;
                 completed.map_err(failure)?;
-                driver.settle(effects).map_err(failure)?;
+                driver.settle(effects).await.map_err(failure)?;
                 return Ok(plakous_hosted::agent_tree_tools::SpawnBound {
                     durably_registered: true,
                     session_locator: locator,
@@ -562,30 +596,37 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
                         });
                         tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
                     }
-                    let _ = driver.mutate(|tree| {
-                        if let Ok(node) = tree.node(&agent_id) {
-                            std::fs::write(node.path.join("child.txt"), "child\n").ok();
-                        }
-                        let turn_token = tree
-                            .attempt(&agent_id)
-                            .map_or(1, |attempt| attempt.turn_token);
-                        let submitted = tree.submit_result(
-                            &agent_id,
-                            &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
-                                turn_token,
-                                output_json: "{\"summary\":\"offline scripted child done\"}"
-                                    .to_owned(),
-                            },
-                            None,
-                        );
-                        if submitted.is_ok() {
-                            tree.record_turn_completed(&agent_id).ok();
-                        }
-                        tree.settle_for_test();
-                        if publish {
-                            driver.save(tree).ok();
-                        }
-                    });
+                    let _ = driver
+                        .mutate({
+                            let (agent_id, driver, publish) =
+                                (agent_id.clone(), driver.clone(), publish);
+                            move |tree| {
+                                if let Ok(node) = tree.node(&agent_id) {
+                                    std::fs::write(node.path.join("child.txt"), "child\n").ok();
+                                }
+                                let turn_token = tree
+                                    .attempt(&agent_id)
+                                    .map_or(1, |attempt| attempt.turn_token);
+                                let submitted = tree.submit_result(
+                                    &agent_id,
+                                    &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
+                                        turn_token,
+                                        output_json:
+                                            "{\"summary\":\"offline scripted child done\"}"
+                                                .to_owned(),
+                                    },
+                                    None,
+                                );
+                                if submitted.is_ok() {
+                                    tree.record_turn_completed(&agent_id).ok();
+                                }
+                                tree.settle_for_test();
+                                if publish {
+                                    driver.save(tree).ok();
+                                }
+                            }
+                        })
+                        .await;
                     return;
                 }
             });
@@ -708,6 +749,37 @@ fn process_child_script(quiescent: bool) -> Result<Arc<ScriptPlan>, String> {
     Ok(plan)
 }
 
+/// Records the process child's session and its Start intent.
+async fn record_process_child_start(
+    runtime: &plakous_hosted::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+    session: &plakous::sessions::OpenedSession,
+    command: &str,
+    prompt: &'static str,
+) -> Result<(), String> {
+    let (child, locator, command) = (
+        agent_id.to_owned(),
+        session.locator().to_string(),
+        command.to_owned(),
+    );
+    runtime
+        .mutate_then_emit(false, move |tree| {
+            tree.record_child_session(&child, &locator)
+                .map_err(|error| error.message)?;
+            tree.record_command(plakous_hosted::agent_tree::AgentCommand::intent(
+                command,
+                &child,
+                tree.attempt(&child)
+                    .map(|attempt| attempt.attempt_id.clone()),
+                plakous_hosted::agent_tree::AgentCommandKind::Start,
+                prompt,
+                Vec::new(),
+            ))
+            .map_err(|error| error.message)
+        })
+        .await
+}
+
 async fn bind_process_child(
     runtime: Option<Arc<plakous_hosted::topology_runtime::ProductTopologyRuntime>>,
     roots: product_agent::ProductStateRoots,
@@ -744,20 +816,7 @@ async fn bind_process_child(
     let command_id = plakous::agent::CommandId::new(format!("offline-child:{agent_id}:start"))
         .map_err(|error| error.to_string())?;
     let prompt = "start a background process";
-    runtime.mutate_then_emit(false, |tree| {
-        tree.record_child_session(&agent_id, &session.locator().to_string())
-            .map_err(|error| error.message)?;
-        tree.record_command(plakous_hosted::agent_tree::AgentCommand::intent(
-            command_id.as_str(),
-            &agent_id,
-            tree.attempt(&agent_id)
-                .map(|attempt| attempt.attempt_id.clone()),
-            plakous_hosted::agent_tree::AgentCommandKind::Start,
-            prompt,
-            Vec::new(),
-        ))
-        .map_err(|error| error.message)
-    })?;
+    record_process_child_start(&runtime, &agent_id, &session, command_id.as_str(), prompt).await?;
     let mut turn = session
         .agent()
         .start(command_id, prompt)
@@ -789,11 +848,14 @@ async fn bind_process_child(
     let feed =
         plakous_hosted::runtime::test_kit::child_feed(&sessions, session.locator().session_id())
             .await?;
-    runtime.mutate_then_emit(false, |tree| {
-        feed.apply(tree, &agent_id)
-            .map(|_| ())
-            .map_err(|error| error.message)
-    })?;
+    let child = agent_id.clone();
+    runtime
+        .mutate_then_emit(false, move |tree| {
+            feed.apply(tree, &child)
+                .map(|_| ())
+                .map_err(|error| error.message)
+        })
+        .await?;
     // Retain a live attempt with a durable promotion, either between turns
     // or inside a cancellable model stream.
     runtime

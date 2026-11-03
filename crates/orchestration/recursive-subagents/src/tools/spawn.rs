@@ -137,7 +137,7 @@ impl TopologyTool {
         clippy::too_many_lines,
         reason = "adoption preserves the prepared receipt across unlocked landing and acknowledged tree publication"
     )]
-    pub(super) fn adopt_with(
+    pub(super) async fn adopt_with(
         &self,
         operation_id: &str,
         value: &Value,
@@ -167,52 +167,63 @@ impl TopologyTool {
             )
         };
         let effects = {
-            let mut tree = self.driver.lock().map_err(|_| lock_poisoned())?;
-            let prepared = tree
-                .prepare_operation(operation_id, &caller, "adopt_candidate", &request)
-                .and_then(|prior| match prior {
-                    Some(prior) => Ok(Some(prior)),
-                    None => self.driver.save_guarded(&mut tree).map(|()| None),
-                });
-            match prepared {
-                Ok(Some(prior)) => {
-                    if let Some(files_changed) = serde_json::from_str::<Value>(&prior)
-                        .ok()
-                        .and_then(|receipt| receipt.get("files_changed")?.as_u64())
-                        .and_then(|files| u32::try_from(files).ok())
-                    {
-                        crate::call_facts::leave(
-                            operation_id,
-                            crate::call_facts::TopologyCallFacts::Adopted { files_changed },
-                        );
-                    }
-                    return ToolOutcome::success_text(prior);
-                }
-                Ok(None) => {}
-                Err(error) => return Self::topology_failure(&error),
-            }
-            if let Err(error) = self
+            let driver = self.driver.clone();
+            let (operation_id, caller, request) =
+                (operation_id.to_owned(), caller.clone(), request.clone());
+            let prepared = self
                 .driver
-                .fold_and_commit_guarded(&mut tree, |tree| tree.begin_adopt(&caller, &request))
-            {
-                // Prepare persisted a non-terminal receipt; close it.
-                if let Err(persist) = tree
-                    .remember_failure(
-                        operation_id,
-                        &caller,
-                        "adopt_candidate",
-                        &request,
-                        error.code,
-                    )
-                    .and_then(|()| self.driver.save_guarded(&mut tree))
-                {
-                    return Self::topology_failure(&persist);
-                }
-                return Self::topology_failure(&error);
+                .write(move |tree| {
+                    let prepared = tree
+                        .prepare_operation(&operation_id, &caller, "adopt_candidate", &request)
+                        .and_then(|prior| match prior {
+                            Some(prior) => Ok(Some(prior)),
+                            None => driver.save_guarded(tree).map(|()| None),
+                        });
+                    match prepared {
+                        Ok(Some(prior)) => {
+                            if let Some(files_changed) = serde_json::from_str::<Value>(&prior)
+                                .ok()
+                                .and_then(|receipt| receipt.get("files_changed")?.as_u64())
+                                .and_then(|files| u32::try_from(files).ok())
+                            {
+                                crate::call_facts::leave(
+                                    &operation_id,
+                                    crate::call_facts::TopologyCallFacts::Adopted { files_changed },
+                                );
+                            }
+                            return Err(ToolOutcome::success_text(prior));
+                        }
+                        Ok(None) => {}
+                        Err(error) => return Err(Self::topology_failure(&error)),
+                    }
+                    if let Err(error) = driver
+                        .fold_and_commit_guarded(tree, |tree| tree.begin_adopt(&caller, &request))
+                    {
+                        // Prepare persisted a non-terminal receipt; close it.
+                        if let Err(persist) = tree
+                            .remember_failure(
+                                &operation_id,
+                                &caller,
+                                "adopt_candidate",
+                                &request,
+                                error.code,
+                            )
+                            .and_then(|()| driver.save_guarded(tree))
+                        {
+                            return Err(Self::topology_failure(&persist));
+                        }
+                        return Err(Self::topology_failure(&error));
+                    }
+                    Ok(tree.take_effects())
+                })
+                .await
+                .map_err(|_| lock_poisoned())?;
+            match prepared {
+                Ok(effects) => effects,
+                Err(done) => return done,
             }
-            tree.take_effects()
         };
-        let landed = match self.driver.settle(effects) {
+        let landed = match self.driver.settle(effects).await {
             Ok(settled) => settled.adopts.into_iter().next().unwrap_or_else(|| {
                 Err(TopologyError::new(
                     TopologyErrorCode::OperationRecoveryRequired,
@@ -221,52 +232,67 @@ impl TopologyTool {
             }),
             Err(error) => return Self::topology_failure(&error),
         };
-        let mut tree = self.driver.lock().map_err(|_| lock_poisoned())?;
-        let conflict = tree.take_adopt_conflict(request.candidate_id.as_str());
-        match landed {
-            Ok(outcome) => {
-                crate::call_facts::leave(
-                    operation_id,
-                    crate::call_facts::TopologyCallFacts::Adopted {
-                        files_changed: outcome.files_changed,
-                    },
-                );
-                let mut outcome = json!(outcome);
-                if !warning.is_empty() {
-                    outcome["warning"] = json!(warning);
+        let driver = self.driver.clone();
+        let operation_id = operation_id.to_owned();
+        self.driver
+            .write(move |tree| {
+                let conflict = tree.take_adopt_conflict(request.candidate_id.as_str());
+                match landed {
+                    Ok(outcome) => {
+                        crate::call_facts::leave(
+                            &operation_id,
+                            crate::call_facts::TopologyCallFacts::Adopted {
+                                files_changed: outcome.files_changed,
+                            },
+                        );
+                        let mut outcome = json!(outcome);
+                        if !warning.is_empty() {
+                            outcome["warning"] = json!(warning);
+                        }
+                        if let Err(error) = tree
+                            .remember_success(
+                                &operation_id,
+                                &caller,
+                                "adopt_candidate",
+                                &request,
+                                &outcome,
+                            )
+                            .and_then(|()| driver.save_guarded(tree))
+                        {
+                            return Self::topology_failure(&error);
+                        }
+                        ToolOutcome::success_text(outcome.to_string())
+                    }
+                    Err(error) => {
+                        if let Some((paths, candidate)) =
+                            conflict.filter(|_| error.code == TopologyErrorCode::MergeConflict)
+                        {
+                            crate::call_facts::leave(
+                                &operation_id,
+                                crate::call_facts::TopologyCallFacts::AdoptConflict {
+                                    paths,
+                                    candidate,
+                                },
+                            );
+                        }
+                        if let Err(persist) = tree
+                            .remember_failure(
+                                &operation_id,
+                                &caller,
+                                "adopt_candidate",
+                                &request,
+                                error.code,
+                            )
+                            .and_then(|()| driver.save_guarded(tree))
+                        {
+                            return Self::topology_failure(&persist);
+                        }
+                        Self::topology_failure(&error)
+                    }
                 }
-                if let Err(error) = tree
-                    .remember_success(operation_id, &caller, "adopt_candidate", &request, &outcome)
-                    .and_then(|()| self.driver.save_guarded(&mut tree))
-                {
-                    return Self::topology_failure(&error);
-                }
-                ToolOutcome::success_text(outcome.to_string())
-            }
-            Err(error) => {
-                if let Some((paths, candidate)) =
-                    conflict.filter(|_| error.code == TopologyErrorCode::MergeConflict)
-                {
-                    crate::call_facts::leave(
-                        operation_id,
-                        crate::call_facts::TopologyCallFacts::AdoptConflict { paths, candidate },
-                    );
-                }
-                if let Err(persist) = tree
-                    .remember_failure(
-                        operation_id,
-                        &caller,
-                        "adopt_candidate",
-                        &request,
-                        error.code,
-                    )
-                    .and_then(|()| self.driver.save_guarded(&mut tree))
-                {
-                    return Self::topology_failure(&persist);
-                }
-                Self::topology_failure(&error)
-            }
-        }
+            })
+            .await
+            .map_err(|_| lock_poisoned())?
     }
 
     /// `spawn_agent` in three phases, the same shape the
@@ -284,9 +310,17 @@ impl TopologyTool {
         operation_id: &str,
         request: &SpawnAgentRequest,
     ) -> Result<(Result<(SpawnAgentOutput, bool), TopologyError>, Effects), ToolRuntimeError> {
+        let tool = self.clone();
+        let (caller, operation_id, request) =
+            (caller.to_owned(), operation_id.to_owned(), request.clone());
         let (phase, effects) = self
             .driver
-            .mutate(|tree| self.spawn_reserve_locked(tree, caller, operation_id, request))
+            .mutate({
+                let (caller, operation_id, request) =
+                    (caller.clone(), operation_id.clone(), request.clone());
+                move |tree| tool.spawn_reserve_locked(tree, &caller, &operation_id, &request)
+            })
+            .await
             .map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
@@ -303,32 +337,34 @@ impl TopologyTool {
             .unwrap_or_else(|error| {
                 Err(VcsError::mint_failed(format!("mint task failed: {error}")))
             });
+        let driver = self.driver.clone();
         let (result, more) = self
             .driver
-            .mutate(|tree| match minted {
+            .mutate(move |tree| match minted {
                 Ok(minted) => match tree.spawn_commit(*reservation, Some(minted)) {
                     Ok(output) => {
-                        self.driver.save(tree)?;
+                        driver.save(tree)?;
                         Ok((output, false))
                     }
                     Err(error) => {
                         tree.remember_failure(
-                            operation_id,
-                            caller,
+                            &operation_id,
+                            &caller,
                             "spawn_agent",
-                            request,
+                            &request,
                             error.code,
                         )?;
-                        self.driver.save(tree)?;
+                        driver.save(tree)?;
                         Err(error)
                     }
                 },
                 Err(error) => {
                     let error = tree.spawn_abort(*reservation, topology_error_from_vcs(error));
-                    self.driver.save(tree)?;
+                    driver.save(tree)?;
                     Err(error)
                 }
             })
+            .await
             .map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
@@ -422,22 +458,38 @@ impl TopologyTool {
         // receipt. Account readiness may change before replay, so inspect the
         // recorded request before consulting the current account state.
         let replay = {
-            let mut tree = self.driver.lock().map_err(|_| {
-                ToolRuntimeError::new(
-                    ToolRuntimeErrorKind::Execution,
-                    "topology tree lock is poisoned",
-                )
-            })?;
-            if let Some(prior) = tree.operations().get(&operation_id) {
-                if prior.caller_agent_id != caller {
-                    return Self::topology_failure(&TopologyError::new(
-                        TopologyErrorCode::OperationRecoveryRequired,
-                        "retry caller conflicts with the prepared operation",
-                    ));
-                }
-                Some(tree.prepare_operation(&operation_id, &caller, "spawn_agent", &request))
-            } else {
-                None
+            let (operation_id, caller, request) =
+                (operation_id.clone(), caller.clone(), request.clone());
+            let replay = self
+                .driver
+                .write(move |tree| {
+                    if let Some(prior) = tree.operations().get(&operation_id) {
+                        if prior.caller_agent_id != caller {
+                            return Err(TopologyError::new(
+                                TopologyErrorCode::OperationRecoveryRequired,
+                                "retry caller conflicts with the prepared operation",
+                            ));
+                        }
+                        Ok(Some(tree.prepare_operation(
+                            &operation_id,
+                            &caller,
+                            "spawn_agent",
+                            &request,
+                        )))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .await
+                .map_err(|_| {
+                    ToolRuntimeError::new(
+                        ToolRuntimeErrorKind::Execution,
+                        "topology tree lock is poisoned",
+                    )
+                })?;
+            match replay {
+                Ok(replay) => replay,
+                Err(error) => return Self::topology_failure(&error),
             }
         };
         let replay = match replay {
@@ -471,39 +523,46 @@ impl TopologyTool {
             && let Some(binder) = self.binder()
         {
             let binding = {
-                let tree = self.driver.lock().map_err(|_| {
-                    ToolRuntimeError::new(
-                        ToolRuntimeErrorKind::Execution,
-                        "topology tree lock is poisoned",
-                    )
-                })?;
-                let caller_template = match tree.node(&caller) {
-                    Ok(node) => node.template.clone(),
+                let (caller, request) = (caller.clone(), request.clone());
+                let binding = self
+                    .driver
+                    .write(move |tree| {
+                        let caller_template = tree.node(&caller)?.template.clone();
+                        if tree.snapshot.binding(&request.template).is_none() {
+                            return Err(TopologyError::new(
+                                TopologyErrorCode::TemplateUnknown,
+                                format!(
+                                    "template {} is not in this tree epoch's roster",
+                                    request.template
+                                ),
+                            ));
+                        }
+                        if !tree.snapshot.menu_contains(
+                            caller_template.as_ref().map(TemplateName::as_str),
+                            &request.template,
+                        ) {
+                            return Err(TopologyError::new(
+                                TopologyErrorCode::TemplateNotSpawnable,
+                                format!(
+                                    "template {} is not on this node's spawn menu: the root spawns the working \
+                                     set, every other node its own template's spawns list minus itself",
+                                    request.template
+                                ),
+                            ));
+                        }
+                        Ok(tree.snapshot.binding(&request.template).cloned())
+                    })
+                    .await
+                    .map_err(|_| {
+                        ToolRuntimeError::new(
+                            ToolRuntimeErrorKind::Execution,
+                            "topology tree lock is poisoned",
+                        )
+                    })?;
+                match binding {
+                    Ok(binding) => binding,
                     Err(error) => return Self::topology_failure(&error),
-                };
-                if tree.snapshot.binding(&request.template).is_none() {
-                    return Self::topology_failure(&TopologyError::new(
-                        TopologyErrorCode::TemplateUnknown,
-                        format!(
-                            "template {} is not in this tree epoch's roster",
-                            request.template
-                        ),
-                    ));
                 }
-                if !tree.snapshot.menu_contains(
-                    caller_template.as_ref().map(TemplateName::as_str),
-                    &request.template,
-                ) {
-                    return Self::topology_failure(&TopologyError::new(
-                        TopologyErrorCode::TemplateNotSpawnable,
-                        format!(
-                            "template {} is not on this node's spawn menu: the root spawns the working \
-                             set, every other node its own template's spawns list minus itself",
-                            request.template
-                        ),
-                    ));
-                }
-                tree.snapshot.binding(&request.template).cloned()
             };
             if let Err(error) = binder.admit_spawn(&request) {
                 return Self::topology_failure(&error);
@@ -535,190 +594,239 @@ impl TopologyTool {
         if let Some(error) = settled.hook_failures.into_iter().next() {
             return Self::topology_failure(&error);
         }
+        let poisoned = || {
+            ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Execution,
+                "topology tree lock is poisoned",
+            )
+        };
         if !replayed {
-            let tree = self.driver.lock().map_err(|_| {
-                ToolRuntimeError::new(
-                    ToolRuntimeErrorKind::Execution,
-                    "topology tree lock is poisoned",
-                )
-            })?;
-            if let Some(observer) = self.observer.as_ref() {
-                observer.node_spawned(
-                    &tree.tree_id,
-                    &output.agent_id,
-                    Some(caller.as_str()),
-                    request.template.as_str(),
-                );
-            }
+            let observer = self.observer.clone();
+            let (agent_id, caller, template) = (
+                output.agent_id.clone(),
+                caller.clone(),
+                request.template.clone(),
+            );
+            self.driver
+                .write(move |tree| {
+                    if let Some(observer) = observer.as_ref() {
+                        observer.node_spawned(
+                            &tree.tree_id,
+                            &agent_id,
+                            Some(caller.as_str()),
+                            template.as_str(),
+                        );
+                    }
+                })
+                .await
+                .map_err(|_| poisoned())?;
         }
         let already_bound = {
-            let tree = self.driver.lock().map_err(|_| {
-                ToolRuntimeError::new(
-                    ToolRuntimeErrorKind::Execution,
-                    "topology tree lock is poisoned",
-                )
-            })?;
-            if replayed {
-                let node = tree.node(&output.agent_id).map_err(|error| {
-                    ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
-                })?;
-                let unresolved = tree.attempt(&output.agent_id).is_some_and(|attempt| {
-                    attempt.has_unresolved_session_failure()
-                        || (node.active_turn && attempt.turn_id.is_none())
-                });
-                if unresolved {
+            let agent_id = output.agent_id.clone();
+            let bound = self
+                .driver
+                .write(move |tree| {
+                    if replayed {
+                        let node = tree.node(&agent_id).map_err(|error| {
+                            Ok(ToolRuntimeError::new(
+                                ToolRuntimeErrorKind::Execution,
+                                error.message,
+                            ))
+                        })?;
+                        let unresolved = tree.attempt(&agent_id).is_some_and(|attempt| {
+                            attempt.has_unresolved_session_failure()
+                                || (node.active_turn && attempt.turn_id.is_none())
+                        });
+                        if unresolved {
+                            return Err(Err(()));
+                        }
+                    }
+                    Ok(tree
+                        .node(&agent_id)
+                        .ok()
+                        .and_then(|node| node.session_locator.clone()))
+                })
+                .await
+                .map_err(|_| poisoned())?;
+            match bound {
+                Ok(bound) => bound,
+                Err(Ok(error)) => return Err(error),
+                Err(Err(())) => {
                     return ToolOutcome::failure_text(json!({ "code": TopologyErrorCode::OperationRecoveryRequired, "message": "child startup or session outcome remains unresolved; exact replay cannot dispatch another start" }).to_string());
                 }
             }
-            tree.node(&output.agent_id)
-                .ok()
-                .and_then(|node| node.session_locator.clone())
         };
         if already_bound.is_some() {
-            let mut tree = self.driver.lock().map_err(|_| {
-                ToolRuntimeError::new(
-                    ToolRuntimeErrorKind::Execution,
-                    "topology tree lock is poisoned",
-                )
-            })?;
-            if let Err(error) = tree.record_session_bound_after_failure(&output.agent_id) {
-                return ToolOutcome::failure_text(
+            let driver = self.driver.clone();
+            let agent_id = output.agent_id.clone();
+            let recorded = self
+                .driver
+                .write(move |tree| {
+                    if let Err(error) = tree.record_session_bound_after_failure(&agent_id) {
+                        return BoundAfterFailure::Refused(error);
+                    }
+                    if let Err(error) = driver.save_guarded(tree) {
+                        return BoundAfterFailure::Unpersisted(error);
+                    }
+                    match driver.fold_and_commit_guarded(tree, |tree| {
+                        tree.fold_due_in_place(&agent_id).map(|_| ())
+                    }) {
+                        Ok(()) => BoundAfterFailure::Folded,
+                        Err(error) => BoundAfterFailure::FoldRefused(error),
+                    }
+                })
+                .await
+                .map_err(|_| poisoned())?;
+            return match recorded {
+                BoundAfterFailure::Refused(error) => ToolOutcome::failure_text(
                     json!({ "code": error.code, "message": error.message }).to_string(),
-                );
-            }
-            if let Err(error) = self.driver.save_guarded(&mut tree) {
-                drop(tree);
-                return self.fail_closed_session(
-                    &output.agent_id,
-                    format!("bound locator could not be persisted: {}", error.message),
-                );
-            }
-            if let Err(error) = self.driver.fold_and_commit_guarded(&mut tree, |tree| {
-                tree.fold_due_in_place(&output.agent_id).map(|_| ())
-            }) {
-                return Self::topology_failure(&error);
-            }
-            return ToolOutcome::success_text(json!(output).to_string());
+                ),
+                BoundAfterFailure::Unpersisted(error) => {
+                    self.fail_closed_session(
+                        &output.agent_id,
+                        format!("bound locator could not be persisted: {}", error.message),
+                    )
+                    .await
+                }
+                BoundAfterFailure::FoldRefused(error) => Self::topology_failure(&error),
+                BoundAfterFailure::Folded => ToolOutcome::success_text(json!(output).to_string()),
+            };
         }
         if let Some(binder) = self.binder() {
             let start = {
-                let tree = self.driver.lock().map_err(|_| {
-                    ToolRuntimeError::new(
-                        ToolRuntimeErrorKind::Execution,
-                        "topology tree lock is poisoned",
-                    )
-                })?;
-                let node = tree.node(&output.agent_id).map_err(|error| {
-                    ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
-                })?;
-                SpawnStart {
-                    spawned: output.clone(),
-                    description: node.description.clone(),
-                    prompt: node.prompt.clone(),
-                    output_schema_json: node.output_schema_json.clone(),
-                    turn_token: tree
-                        .attempt(&output.agent_id)
-                        .map(|attempt| attempt.turn_token)
-                        .unwrap_or(1),
-                    path: node.path.display().to_string(),
-                    tier: node.tier,
-                    account: node.account.clone(),
-                    tuple_id: node.tuple_id.clone(),
-                    effort: node.effort.clone(),
-                }
+                let spawned = output.clone();
+                self.driver
+                    .write(move |tree| {
+                        let node = tree.node(&spawned.agent_id).map_err(|error| {
+                            ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
+                        })?;
+                        Ok::<_, ToolRuntimeError>(SpawnStart {
+                            description: node.description.clone(),
+                            prompt: node.prompt.clone(),
+                            output_schema_json: node.output_schema_json.clone(),
+                            turn_token: tree
+                                .attempt(&spawned.agent_id)
+                                .map(|attempt| attempt.turn_token)
+                                .unwrap_or(1),
+                            path: node.path.display().to_string(),
+                            tier: node.tier,
+                            account: node.account.clone(),
+                            tuple_id: node.tuple_id.clone(),
+                            effort: node.effort.clone(),
+                            spawned,
+                        })
+                    })
+                    .await
+                    .map_err(|_| poisoned())??
             };
             match binder.bind(start).await {
                 Ok(bound) => {
                     if bound.durably_registered {
                         return ToolOutcome::success_text(json!(output).to_string());
                     }
-                    let mut tree = self.driver.lock().map_err(|_| {
-                        ToolRuntimeError::new(
-                            ToolRuntimeErrorKind::Execution,
-                            "topology tree lock is poisoned",
-                        )
-                    })?;
-                    let bind = match tree
-                        .node(&output.agent_id)
-                        .ok()
-                        .and_then(|node| node.session_locator.as_deref())
-                    {
-                        Some(existing) if existing == bound.session_locator => {
-                            tree.record_child_session(&output.agent_id, &bound.session_locator)
-                        }
-                        Some(_) => Err(TopologyError::new(
-                            TopologyErrorCode::OperationRecoveryRequired,
-                            "bound session locator differs from startup publication",
-                        )),
-                        None => tree.record_child_session(&output.agent_id, &bound.session_locator),
-                    };
-                    if let Err(error) = bind {
-                        return ToolOutcome::failure_text(
+                    let driver = self.driver.clone();
+                    let agent_id = output.agent_id.clone();
+                    let recorded = self
+                        .driver
+                        .write(move |tree| {
+                            let bind = match tree
+                                .node(&agent_id)
+                                .ok()
+                                .and_then(|node| node.session_locator.as_deref())
+                            {
+                                Some(existing) if existing == bound.session_locator => {
+                                    tree.record_child_session(&agent_id, &bound.session_locator)
+                                }
+                                Some(_) => Err(TopologyError::new(
+                                    TopologyErrorCode::OperationRecoveryRequired,
+                                    "bound session locator differs from startup publication",
+                                )),
+                                None => {
+                                    tree.record_child_session(&agent_id, &bound.session_locator)
+                                }
+                            };
+                            if let Err(error) = bind {
+                                return BoundSession::Refused(error);
+                            }
+                            if let Err(error) = driver.save_guarded(tree) {
+                                return BoundSession::Unpersisted(format!(
+                                    "bound session intent could not be persisted: {}",
+                                    error.message
+                                ));
+                            }
+                            let Ok(locator) = bound
+                                .session_locator
+                                .parse::<plakous::sessions::SessionLocator>()
+                            else {
+                                return BoundSession::InvalidAllocation;
+                            };
+                            if let Err(error) = tree.project_feed(
+                                &agent_id,
+                                &locator.session_id().to_string(),
+                                &[],
+                                &crate::tree::TreeFeedReads::default(),
+                            ) {
+                                return BoundSession::ProjectionRefused(TopologyError::from(error));
+                            }
+                            if let Some(turn_id) = bound.turn_id {
+                                tree.bind_turn_owner(&agent_id, turn_id);
+                            }
+                            if let Err(error) = driver.save_guarded(tree) {
+                                return BoundSession::Unpersisted(format!(
+                                    "bound locator could not be persisted: {}",
+                                    error.message
+                                ));
+                            }
+                            BoundSession::Recorded
+                        })
+                        .await
+                        .map_err(|_| poisoned())?;
+                    return match recorded {
+                        BoundSession::Refused(error) => ToolOutcome::failure_text(
                             json!({ "code": error.code, "message": error.message }).to_string(),
-                        );
-                    }
-                    if let Err(error) = self.driver.save_guarded(&mut tree) {
-                        drop(tree);
-                        return self.fail_closed_session(
-                            &output.agent_id,
-                            format!(
-                                "bound session intent could not be persisted: {}",
-                                error.message
-                            ),
-                        );
-                    }
-                    let locator = bound
-                        .session_locator
-                        .parse::<plakous::sessions::SessionLocator>()
-                        .map_err(|_| {
-                            ToolRuntimeError::new(
-                                ToolRuntimeErrorKind::Execution,
-                                "bound session allocation is invalid",
-                            )
-                        })?;
-                    if let Err(error) = tree.project_feed(
-                        &output.agent_id,
-                        &locator.session_id().to_string(),
-                        &[],
-                        &crate::tree::TreeFeedReads::default(),
-                    ) {
-                        return Self::topology_failure(&TopologyError::from(error));
-                    }
-                    if let Some(turn_id) = bound.turn_id {
-                        tree.bind_turn_owner(&output.agent_id, turn_id);
-                    }
-                    if let Err(error) = self.driver.save_guarded(&mut tree) {
-                        drop(tree);
-                        return self.fail_closed_session(
-                            &output.agent_id,
-                            format!("bound locator could not be persisted: {}", error.message),
-                        );
-                    }
-                    return ToolOutcome::success_text(json!(output).to_string());
+                        ),
+                        BoundSession::Unpersisted(message) => {
+                            self.fail_closed_session(&output.agent_id, message).await
+                        }
+                        BoundSession::InvalidAllocation => Err(ToolRuntimeError::new(
+                            ToolRuntimeErrorKind::Execution,
+                            "bound session allocation is invalid",
+                        )),
+                        BoundSession::ProjectionRefused(error) => Self::topology_failure(&error),
+                        BoundSession::Recorded => {
+                            ToolOutcome::success_text(json!(output).to_string())
+                        }
+                    };
                 }
                 Err(SpawnBindError::Refused(message)) => {
+                    let driver = self.driver.clone();
+                    let observer = self.observer.clone();
+                    let (caller, request, operation_id, agent_id, diagnostic) = (
+                        caller.clone(),
+                        request.clone(),
+                        operation_id.clone(),
+                        output.agent_id.clone(),
+                        message.diagnostic.as_str().to_owned(),
+                    );
                     let (persisted, effects) = self
                         .driver
-                        .mutate(|tree| {
+                        .mutate(move |tree| {
                             let error = tree.fail_spawn_refused(
                                 &caller,
                                 &request,
                                 Some(&operation_id),
-                                &output.agent_id,
-                                message.diagnostic.as_str(),
+                                &agent_id,
+                                &diagnostic,
                             );
                             let status = tree
-                                .node(&output.agent_id)
+                                .node(&agent_id)
                                 .ok()
                                 .and_then(|node| NodeDetach::from_node_status(node.status))
                                 .unwrap_or(NodeDetach::RecoveryRequired);
-                            tree.try_emit_tree_node_detached(
-                                self.observer.as_ref(),
-                                &output.agent_id,
-                                status,
-                            );
-                            self.driver.save(tree).map(|()| error)
+                            tree.try_emit_tree_node_detached(observer.as_ref(), &agent_id, status);
+                            driver.save(tree).map(|()| error)
                         })
+                        .await
                         .map_err(|error| {
                             ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
                         })?;
@@ -730,27 +838,32 @@ impl TopologyTool {
                     };
                 }
                 Err(SpawnBindError::RecoveryRequired { stage, message }) => {
+                    let driver = self.driver.clone();
+                    let (agent_id, attempt_id, reason) = (
+                        output.agent_id.clone(),
+                        output.attempt_id.clone(),
+                        format!("startup {stage:?}: {message}"),
+                    );
                     let (persisted, effects) = self
                         .driver
-                        .mutate(|tree| {
+                        .mutate(move |tree| {
                             let recorded = tree
                                 .record_host_retirement_for_attempt(
-                                    &output.agent_id,
-                                    Some(&output.attempt_id),
-                                    format!("startup {stage:?}: {message}"),
+                                    &agent_id,
+                                    Some(&attempt_id),
+                                    reason,
                                 )
                                 .and_then(|value| {
-                                    self.driver
-                                        .apply_recorded(tree, &output.agent_id)
-                                        .map(|()| value)
+                                    driver.apply_recorded(tree, &agent_id).map(|()| value)
                                 })?;
-                            self.driver.save(tree)?;
+                            driver.save(tree)?;
                             Ok::<_, TopologyError>(recorded)
                         })
+                        .await
                         .map_err(|error| {
                             ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
                         })?;
-                    self.driver.settle(effects).map_err(|error| {
+                    self.driver.settle(effects).await.map_err(|error| {
                         ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
                     })?;
                     match persisted {
@@ -764,4 +877,21 @@ impl TopologyTool {
         }
         ToolOutcome::success_text(json!(output).to_string())
     }
+}
+
+/// What recording a session bound after a failed startup came to.
+enum BoundAfterFailure {
+    Refused(TopologyError),
+    Unpersisted(TopologyError),
+    FoldRefused(TopologyError),
+    Folded,
+}
+
+/// What recording a freshly bound child session came to.
+enum BoundSession {
+    Refused(TopologyError),
+    Unpersisted(String),
+    InvalidAllocation,
+    ProjectionRefused(TopologyError),
+    Recorded,
 }

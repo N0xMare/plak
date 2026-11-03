@@ -142,13 +142,17 @@ async fn navigator_close_of_starting_child_emits_closed_detach() {
             );
             let _ = runtime
                 .driver()
-                .mutate(|tree| {
-                    tree.try_emit_tree_node_detached(
-                        runtime.observer().as_ref(),
-                        &id,
-                        NodeDetach::Closed,
-                    );
+                .mutate({
+                    let (id, observer) = (id.clone(), runtime.observer());
+                    move |tree| {
+                        tree.try_emit_tree_node_detached(
+                            observer.as_ref(),
+                            &id,
+                            NodeDetach::Closed,
+                        );
+                    }
                 })
+                .await
                 .unwrap();
             assert_eq!(
                 *observer.0.lock().unwrap(),
@@ -763,7 +767,9 @@ async fn attach_intents_paint_a_restored_paused_tree_and_never_resume_it() {
     tree.spawn_agent("root", &spawn_req(), Some("op-spawn"))
         .unwrap();
     tree.restore_paused();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let session = session_for(&tree_id, root.path().to_path_buf());
 
     for action in [
@@ -822,7 +828,9 @@ async fn hub_open_emits_snapshot() {
     tree.spawn_agent("root", &spawn_req(), Some("op-spawn"))
         .unwrap();
     let revision = tree.revision;
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
     dispatch_captured_action(
@@ -862,7 +870,9 @@ async fn resume_and_interrupt_resnapshot() {
         .spawn_agent("root", &spawn_req(), Some("op-spawn"))
         .unwrap();
     tree.restore_paused();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
     dispatch_captured_action(
@@ -959,7 +969,9 @@ async fn refresh_re_emits_the_current_revision_even_when_it_did_not_advance() {
     )
     .unwrap();
     let revision = tree.revision;
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
     for _ in 0..2 {
@@ -1050,9 +1062,7 @@ impl crate::topology_runtime::LiveChildHandle for RetiringChild {
 
 #[tokio::test(start_paused = true)]
 async fn navigator_background_join_does_not_refault_a_settled_release() {
-    use std::future::Future;
     use std::sync::{Arc, Mutex};
-    use std::task::{Context, Poll};
     let root = tempdir().unwrap();
     let mut tree = crate::topology_runtime::test_support::bootstrap(
         "navigator-joiner-race",
@@ -1088,7 +1098,7 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
     let owner = runtime.clone();
     let id = child.clone();
     let notes = events.clone();
-    let pending: std::pin::Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(async move {
+    let closing = tokio::spawn(async move {
         close_node(
             &session,
             &owner,
@@ -1097,8 +1107,8 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
         )
         .await;
     });
-    let pending = Arc::new(Mutex::new(Some(pending)));
-    let close = pending.clone();
+    let recovery: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::default();
+    let recovered = recovery.clone();
     let weak = Arc::downgrade(&runtime);
     let id = child.clone();
     runtime
@@ -1108,32 +1118,27 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
             if owner.live.try_lock().unwrap().contains_key(&id) {
                 return;
             }
-            owner
-                .mutate_then_emit(false, |tree| {
-                    let attempt = tree.attempt(&id).unwrap().attempt_id.clone();
-                    tree.recover_host_decision(
-                        &id,
-                        &attempt,
-                        crate::agent_tree::RecoveryResolution::RecoveredWithoutTurn {
-                            message: "late release is quiescent".into(),
-                        },
-                    )
-                    .map_err(|error| error.message)?;
-                    Ok(())
-                })
-                .unwrap();
-            let pending = close.lock().unwrap().take();
-            if let Some(mut close) = pending {
-                let mut cx = Context::from_waker(std::task::Waker::noop());
-                assert!(matches!(close.as_mut().poll(&mut cx), Poll::Ready(())));
-            }
+            let id = id.clone();
+            let decided = tokio::spawn(async move {
+                owner
+                    .mutate_then_emit(false, move |tree| {
+                        let attempt = tree.attempt(&id).unwrap().attempt_id.clone();
+                        tree.recover_host_decision(
+                            &id,
+                            &attempt,
+                            crate::agent_tree::RecoveryResolution::RecoveredWithoutTurn {
+                                message: "late release is quiescent".into(),
+                            },
+                        )
+                        .map_err(|error| error.message)?;
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            });
+            *recovery.lock().unwrap() = Some(decided);
         }))
         .await;
-    {
-        let mut close = pending.lock().unwrap();
-        let mut cx = Context::from_waker(std::task::Waker::noop());
-        assert!(close.as_mut().unwrap().as_mut().poll(&mut cx).is_pending());
-    }
     entered.notified().await;
     tokio::time::advance(
         plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
@@ -1143,10 +1148,11 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
     .await;
     tokio::task::yield_now().await;
     finish.notify_one();
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
+    closing.await.expect("the close finished");
+    let recovery = recovered.lock().unwrap().take();
+    if let Some(recovery) = recovery {
+        recovery.await.expect("the recovery decision finished");
     }
-    assert!(pending.lock().unwrap().is_none());
     runtime
         .read(|tree| {
             assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Closed);

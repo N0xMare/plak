@@ -3,6 +3,7 @@
     reason = "Scheduled compaction scenarios preserve paid-dispatch identity and successor admission through real placeholder and capacity transitions."
 )]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
+use crate::runtime::test_kit::BlockHere as _;
 
 use super::{
     SCHEDULED_COMPACT_FAILED_FITS_NOTE, SCHEDULED_COMPACT_MAIL_DEFERRED_NOTE,
@@ -89,7 +90,9 @@ fn scheduled_length_failure_uses_live_paid_flag_after_a_real_placeholder_commit(
     });
     config.compaction_enabled = true;
     let executor = ApplicationExecutor::new().unwrap();
-    let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary).unwrap();
+    let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary)
+        .block_here()
+        .unwrap();
     let opened = executor
         .block_on(crate::agent::build_or_open_bound_session(
             config.state_roots.runtime_sessions().unwrap(),
@@ -617,7 +620,9 @@ fn scheduled_compaction_admits_a_fitting_successor_above_the_occupancy_trigger()
     });
     config.compaction_enabled = true;
     let executor = ApplicationExecutor::new().unwrap();
-    let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary).unwrap();
+    let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary)
+        .block_here()
+        .unwrap();
     let opened = executor
         .block_on(crate::agent::build_or_open_bound_session(
             config.state_roots.runtime_sessions().unwrap(),

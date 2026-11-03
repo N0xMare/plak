@@ -1,4 +1,5 @@
 use super::accepted_duplicate_consumed;
+use crate::runtime::test_kit::{BlockHere as _, BlockOn as _};
 use crate::sessions;
 
 #[cfg(test)]
@@ -29,6 +30,7 @@ fn reloaded_pending_steer_retries_the_identical_submission() {
     };
     RootLedger::new(&rows, rows.records(), &mut session, &item)
         .prepare(intent())
+        .block()
         .unwrap();
     let stored = rows
         .records()
@@ -42,6 +44,7 @@ fn reloaded_pending_steer_retries_the_identical_submission() {
     let revision = session.store_revision;
     RootLedger::new(&rows, rows.records(), &mut session, &item)
         .prepare(intent())
+        .block()
         .unwrap();
     assert!(
         session.store_revision > revision,
@@ -58,7 +61,9 @@ fn reloaded_pending_steer_retries_the_identical_submission() {
     let before = session.clone();
     item.submitted_at_ms += 1;
     assert!(matches!(
-        RootLedger::new(&rows, rows.records(), &mut session, &item).prepare(intent()),
+        RootLedger::new(&rows, rows.records(), &mut session, &item)
+            .prepare(intent())
+            .block_here(),
         Err(LedgerError::Integrity(_))
     ));
     assert_eq!(session, before);
@@ -113,18 +118,21 @@ fn live_steer_skips_intent_reads_and_preserves_typed_store_refusals() {
     let before = session.clone();
     let item = sessions::QueueItem::new("steer");
     let command = format!("plak.send-now.{}.{}", item.id, item.revision);
-    let result = RootLedger::new(&rows, &store, &mut session, &item).prepare(CommandIntent {
-        command_id: &command,
-        kind: CommandKind::RootSteer("00000000-0000-4000-8000-000000000001".parse().unwrap()),
-        base_text: "steer",
-        batch: BatchRule::None,
-    });
+    let result = RootLedger::new(&rows, &store, &mut session, &item)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::RootSteer("00000000-0000-4000-8000-000000000001".parse().unwrap()),
+            base_text: "steer",
+            batch: BatchRule::None,
+        })
+        .block_here();
     assert!(
         matches!(result, Err(LedgerError::Store(error)) if error.refusal() == Some(StoreRefusal::StorageFull))
     );
     for settlement in [Settlement::Consumed, Settlement::Refused { pause: None }] {
-        let result =
-            RootLedger::new(&rows, &store, &mut session, &item).settle(&command, settlement);
+        let result = RootLedger::new(&rows, &store, &mut session, &item)
+            .settle(&command, settlement)
+            .block_here();
         assert!(
             matches!(result, Err(LedgerError::Store(error)) if error.refusal() == Some(StoreRefusal::StorageFull))
         );

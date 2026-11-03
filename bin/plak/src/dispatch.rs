@@ -74,7 +74,7 @@ pub(super) fn execute_config_set(
         // from a quiescent tree. A headless `plak config set` names no
         // session, so every persisted tree must be quiescent; the file
         // is then saved and a new session reads it at genesis.
-        let outcome = topology_product::apply_roster(paths, None, &cfg, scope)
+        let outcome = topology_product::apply_unbound_roster(paths, &cfg, scope)
             .map_err(|error| CliFailure::new(error.into_message()))?;
         let disposition = match outcome {
             topology_product::RosterApplyOutcome::Saved => {

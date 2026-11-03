@@ -96,14 +96,14 @@ impl LiveChildTable {
                     () = tokio::time::sleep(HOST_RETIRE_JOIN_TIMEOUT) => {
                         tracing::warn!(target: "plak.topology", agent_id = %worker_id,
                             "slow child retirement; release owner retained");
-                        record_retirement_fault(&driver, &worker_id, expected_attempt.as_ref(), RetirementFaultSource::Owner, RETIRE_JOIN_EXPIRED);
+                        record_retirement_fault(&driver, &worker_id, expected_attempt.as_ref(), RetirementFaultSource::Owner, RETIRE_JOIN_EXPIRED).await;
                         fault_recorded = true;
                         release.await
                     }
                 };
                 release_returned = true;
                 cleanup_failure.clone_from(&released.failure);
-                publish_release(&driver, &worker_id, released)
+                publish_release(&driver, &worker_id, released).await
             })
             .catch_unwind()
             .await
@@ -119,7 +119,8 @@ impl LiveChildTable {
                         RetirementFaultSource::Owner
                     },
                     error,
-                );
+                )
+                .await;
                 fault_recorded = true;
             }
             {
@@ -130,20 +131,24 @@ impl LiveChildTable {
                     .is_some_and(|retirement| retirement.turn == turn)
                 {
                     live.retiring.remove(&worker_id);
-                    let _ = driver.mutate(|tree| {
-                        tree.release_turn_owner(&worker_id);
-                        if result.is_ok()
-                            && tree.node(&worker_id).is_ok_and(|node| {
-                                node.status == crate::protocol::NodeStatus::Closed
-                            })
-                        {
-                            tree.try_emit_tree_node_detached(
-                                driver.observer(),
-                                &worker_id,
-                                crate::tree::NodeDetach::Closed,
-                            );
-                        }
-                    });
+                    let (writer, agent, released) =
+                        (driver.clone(), worker_id.clone(), result.is_ok());
+                    let _ = driver
+                        .mutate(move |tree| {
+                            tree.release_turn_owner(&agent);
+                            if released
+                                && tree.node(&agent).is_ok_and(|node| {
+                                    node.status == crate::protocol::NodeStatus::Closed
+                                })
+                            {
+                                tree.try_emit_tree_node_detached(
+                                    writer.observer(),
+                                    &agent,
+                                    crate::tree::NodeDetach::Closed,
+                                );
+                            }
+                        })
+                        .await;
                 }
             }
             tracing::info!(target: "plak.topology", agent_id = %worker_id,

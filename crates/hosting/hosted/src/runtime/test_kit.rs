@@ -486,6 +486,7 @@ pub fn install_idle_topology_hub(
             ))
         },
     )
+    .block()
     .unwrap()
 }
 
@@ -511,6 +512,7 @@ pub async fn install_failing_child_shutdown(
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     assert!(
         runtime
@@ -601,6 +603,7 @@ pub async fn install_hanging_child_shutdown(
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     assert!(
         runtime
@@ -850,37 +853,41 @@ impl ScriptedRuntimeFactory {
 impl super::factory::sealed::Sealed for ScriptedRuntimeFactory {}
 
 impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for ScriptedRuntimeFactory {
-    fn clear(
-        &self,
-        executor: &plakous::application::ApplicationExecutor,
-        config: &mut HostConfig<P>,
-        opened: &AttachedCodingSession,
-        _target_product_session_id: &str,
-        create_operation_id: &str,
-        _stderr_buf: &mut Vec<u8>,
-        events: &Sender<P>,
+    fn clear<'a>(
+        &'a self,
+        config: &'a mut HostConfig<P>,
+        opened: &'a AttachedCodingSession,
+        _target_product_session_id: &'a str,
+        create_operation_id: &'a str,
+        _stderr_buf: &'a mut Vec<u8>,
+        events: &'a Sender<P>,
         started: std::time::Instant,
-    ) -> CliResult<(
-        AttachedCodingSession,
-        Option<Arc<plakous::subscriptions::ResolvedProvider>>,
-    )> {
-        config.live_topology_enabled()?;
-        let operation = SessionOperationId::new(create_operation_id)
-            .map_err(|_| CliFailure::new("injected clear operation identity is invalid"))?;
-        let session = executor
-            .block_on(opened.create_with_runtime(
-                operation,
-                opened.clear_job_counter(self.binding(config, RuntimeRole::Primary)?)?,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(|error| *error.failure)?;
-        super::startup::observe_phase(
-            events,
-            super::HostLifecyclePhase::ClearResolveAuthority,
-            started,
-            config.session.pending_queue.len(),
-        );
-        Ok((session, None))
+    ) -> RuntimeFuture<
+        'a,
+        CliResult<(
+            AttachedCodingSession,
+            Option<Arc<plakous::subscriptions::ResolvedProvider>>,
+        )>,
+    > {
+        Box::pin(async move {
+            config.live_topology_enabled()?;
+            let operation = SessionOperationId::new(create_operation_id)
+                .map_err(|_| CliFailure::new("injected clear operation identity is invalid"))?;
+            let session = opened
+                .create_with_runtime(
+                    operation,
+                    opened.clear_job_counter(self.binding(config, RuntimeRole::Primary)?)?,
+                )
+                .await
+                .map_err(|error| *error.failure)?;
+            super::startup::observe_phase(
+                events,
+                super::HostLifecyclePhase::ClearResolveAuthority,
+                started,
+                config.session.pending_queue.len(),
+            );
+            Ok((session, None))
+        })
     }
     fn api_runtime<'a>(
         &'a self,
@@ -900,13 +907,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
             attached_tree,
         )
     }
-    fn runtime(
-        &self,
-        config: &HostConfig<P>,
+    fn runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
         role: RuntimeRole,
-        _: &mut Vec<u8>,
-    ) -> CliResult<SessionRuntimeBinding> {
-        self.binding(config, role)
+        _: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
+        Box::pin(std::future::ready(self.binding(config, role)))
     }
     fn open_head<'a>(
         &'a self,
@@ -979,22 +986,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
         }
         Box::pin(self.open_binding(config, locator, RuntimeRole::Rebind))
     }
-    fn fork_runtime(
-        &self,
-        _: &plakous::application::ApplicationExecutor,
-        config: &HostConfig<P>,
-        _: &mut Vec<u8>,
-    ) -> CliResult<SessionRuntimeBinding> {
-        self.binding(config, RuntimeRole::Primary)
+    fn fork_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        _: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
+        Box::pin(std::future::ready(
+            self.binding(config, RuntimeRole::Primary),
+        ))
     }
-    fn rebind_runtime(
-        &self,
-        config: &HostConfig<P>,
-        spec: Option<&ProductAgentSpec>,
+    fn rebind_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        spec: Option<&'a ProductAgentSpec>,
         attach: crate::topology_runtime::TopologyHubAttach,
         native_target: bool,
-        stderr: &mut Vec<u8>,
-    ) -> (CliResult<SessionRuntimeBinding>, Option<String>) {
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, (CliResult<SessionRuntimeBinding>, Option<String>)> {
         if spec.is_some() {
             return super::ProductionRuntimeFactory.rebind_runtime(
                 config,
@@ -1010,7 +1018,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(attach);
         }
-        (self.binding(config, RuntimeRole::Rebind), None)
+        Box::pin(std::future::ready((
+            self.binding(config, RuntimeRole::Rebind),
+            None,
+        )))
     }
     fn input_window(
         &self,
@@ -1165,6 +1176,65 @@ impl Drop for ChildRuntimeGuard {
     }
 }
 
+/// Runs a future to its end from synchronous test code, which the host loop
+/// and its fixtures are: on a shared test runtime, from a separate thread when
+/// the caller is itself on a runtime.
+pub trait BlockOn: Future + Send + Sized
+where
+    Self::Output: Send,
+{
+    /// Blocks the calling thread until the future completes.
+    #[allow(
+        clippy::expect_used,
+        reason = "a test runtime that cannot start, or a blocked future that panicked, fails its test"
+    )]
+    fn block(self) -> Self::Output {
+        static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+        let runtime = RUNTIME.get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("test runtime")
+        });
+        if tokio::runtime::Handle::try_current().is_err() {
+            return runtime.block_on(self);
+        }
+        thread::scope(|scope| {
+            scope
+                .spawn(|| runtime.block_on(self))
+                .join()
+                .expect("blocked test future panicked")
+        })
+    }
+}
+
+impl<F> BlockOn for F
+where
+    F: Future + Send,
+    F::Output: Send,
+{
+}
+
+/// [`BlockOn`] for a future that is not `Send`, from a thread outside any
+/// runtime.
+pub trait BlockHere: Future + Sized {
+    /// Blocks the calling thread, which must not be on a runtime.
+    #[allow(
+        clippy::expect_used,
+        reason = "a test runtime that cannot start fails its test"
+    )]
+    fn block_here(self) -> Self::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(self)
+    }
+}
+
+impl<F: Future> BlockHere for F {}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "deterministic factory-boundary fixture")]
 mod factory_boundary_tests {
@@ -1242,6 +1312,7 @@ mod factory_boundary_tests {
                     false,
                     &mut Vec::new()
                 )
+                .block_here()
                 .0
                 .is_ok()
         );
@@ -1255,6 +1326,7 @@ mod factory_boundary_tests {
                     true,
                     &mut Vec::new()
                 )
+                .block_here()
                 .0
                 .is_ok()
         );

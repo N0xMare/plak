@@ -11,7 +11,7 @@ pub(super) fn task_process_number(id: &str) -> Option<u64> {
 }
 
 /// `get_command_or_subagent_output` on a node granted agent tools.
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct TaskOutputRequest {
     pub(super) task_ids: Vec<String>,
@@ -27,7 +27,7 @@ pub(super) struct TaskKillRequest {
 }
 
 /// Pi's `wait` on a node granted agent tools.
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct JobsWaitRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]

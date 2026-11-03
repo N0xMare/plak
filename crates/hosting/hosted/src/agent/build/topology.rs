@@ -201,7 +201,7 @@ pub(in crate::agent) fn topology_home_stated(
     }
 }
 
-pub(crate) fn topology_extensions_if_enabled(
+pub(crate) async fn topology_extensions_if_enabled(
     parent: &SpawnParent,
     selected_tuple: &str,
     attach: crate::topology_runtime::TopologyHubAttach,
@@ -215,9 +215,10 @@ pub(crate) fn topology_extensions_if_enabled(
         opening_durable_session,
         acquired_owner,
     )
+    .await
 }
 
-pub(super) fn topology_extensions_if_enabled_with_owner(
+pub(super) async fn topology_extensions_if_enabled_with_owner(
     parent: &SpawnParent,
     selected_tuple: &str,
     attach: crate::topology_runtime::TopologyHubAttach,
@@ -235,7 +236,8 @@ pub(super) fn topology_extensions_if_enabled_with_owner(
                 attach,
                 true,
                 acquired_owner,
-            );
+            )
+            .await;
         }
         // Single-agent compact recompiles the coding runtime after attach.
         // `subagents=false` never inserts a hub; LookupOnly must not fail closed.
@@ -248,7 +250,8 @@ pub(super) fn topology_extensions_if_enabled_with_owner(
             attach,
             true,
             acquired_owner,
-        );
+        )
+        .await;
     }
     if crate::topology_runtime::lookup(spawn_parent_tree_id(parent)).is_some() {
         return topology_extensions_from_hub_with_owner(
@@ -257,7 +260,8 @@ pub(super) fn topology_extensions_if_enabled_with_owner(
             attach,
             true,
             acquired_owner,
-        );
+        )
+        .await;
     }
     if !topology_home_stated(parent, opening_durable_session)? {
         return Ok(ProductToolExtensions::empty());
@@ -288,7 +292,8 @@ pub(super) fn topology_extensions_if_enabled_with_owner(
             attach,
             true,
             acquired_owner,
-        );
+        )
+        .await;
     }
     // The gate is read live, from the file, at the moment a fresh root would
     // open a tree — not from the attach-time snapshot on the spec. A
@@ -299,6 +304,7 @@ pub(super) fn topology_extensions_if_enabled_with_owner(
         return Ok(ProductToolExtensions::empty());
     }
     topology_extensions_from_hub_with_owner(parent, selected_tuple, attach, false, acquired_owner)
+        .await
 }
 
 /// The topology catalog an exact-reopen verification compiles, always over a
@@ -357,7 +363,7 @@ fn inspected_topology_extensions(
     topology_extensions_from_runtime(detached, parent, spawn_parent_caller_id(parent))
 }
 
-fn topology_extensions_from_hub_with_owner(
+async fn topology_extensions_from_hub_with_owner(
     parent: &SpawnParent,
     selected_tuple: &str,
     attach: crate::topology_runtime::TopologyHubAttach,
@@ -399,14 +405,15 @@ fn topology_extensions_from_hub_with_owner(
             )
             .map_err(|error| crate::agent_tree::TreeRuntimeError::new(error.message()))
         },
-    )?;
+    )
+    .await?;
     // The resolver has acquired this lease; hub existence alone is not ownership.
     // Publish the marker before compiling extensions, which may still fail.
     if attach == crate::topology_runtime::TopologyHubAttach::AttachRoot {
         *acquired_owner = Some(spawn_parent_tree_id(parent).to_owned());
-        runtime
-            .driver()
-            .bind_storage_shutdown(roots.storage_shutdown_probe());
+        if let Some(host) = roots.host_shutdown() {
+            runtime.driver().bind_host_shutdown(host);
+        }
     }
     topology_extensions_from_runtime(runtime, parent, caller_id)
 }

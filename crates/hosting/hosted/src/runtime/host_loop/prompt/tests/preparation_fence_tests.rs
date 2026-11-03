@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::test_kit::BlockOn as _;
 use crate::surface_protocol::UserAction;
 use plakous_host_protocol::status::HostPhase;
 
@@ -73,6 +74,7 @@ fn wake_delivery(host: &mut HostLoop<'_, TestExtension>) -> SessionQueueItem {
         None,
         &["p1".into()],
     )
+    .block()
     .unwrap();
     item
 }

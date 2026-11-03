@@ -3,6 +3,7 @@
     reason = "Clear scenarios exercise durable intent publication, successor projection, and source preservation across the complete rebuild."
 )]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
+use crate::runtime::test_kit::BlockHere as _;
 
 use crate::runtime::test_kit::TestExtension;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
@@ -113,6 +114,7 @@ fn clear_intent_projection(admit: bool, fork_source: bool) {
             config
                 .runtime_factory
                 .runtime(&config, RuntimeRole::Primary, &mut Vec::new())
+                .block_here()
                 .unwrap(),
         ))
         .unwrap()

@@ -84,9 +84,8 @@ impl HttpTransport for NativeHttpTransport {
                 .iter()
                 .map(|(name, value)| (name.as_str().to_owned(), value.as_bytes().to_vec()))
                 .collect();
-            let body = futures_util::stream::unfold(
-                Some(response.into_body()),
-                |body| async move {
+            let body =
+                futures_util::stream::unfold(Some(response.into_body()), |body| async move {
                     let mut body = body?;
                     let chunk = body.next_chunk().await?;
                     Some(match chunk {
@@ -99,9 +98,8 @@ impl HttpTransport for NativeHttpTransport {
                             None,
                         ),
                     })
-                },
-            )
-            .boxed();
+                })
+                .boxed();
             Ok(HttpResponse::new(status, headers, body))
         })
     }

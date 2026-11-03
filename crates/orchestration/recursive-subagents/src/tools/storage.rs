@@ -1,46 +1,40 @@
-//! Retained mutation ownership without holding the live tree mutex while parked.
+//! The tree's one writer, and the capacity park it hands to its async caller.
+//!
+//! Writers run one at a time, in the order they asked. Each runs on a
+//! blocking worker with the live tree mutex as its guard, so no async worker
+//! performs a store write or holds the tree. A capacity-refused publication
+//! detaches the live tree and asks the async caller to park: a sleep raced
+//! against that write's cancellation and the tree's shutdown. Readers keep the
+//! live tree throughout.
 
 use crate::tree::ProductAgentTree;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
-
-pub(crate) fn blocking<R>(work: impl FnOnce() -> R) -> R {
-    if tokio::runtime::Handle::try_current()
-        .is_ok_and(|handle| handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
-    {
-        tokio::task::block_in_place(work)
-    } else {
-        work()
-    }
-}
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use tokio_util::sync::CancellationToken;
 
 pub(crate) struct TreeMutationGuard<'a> {
     live: &'a Mutex<ProductAgentTree>,
     locked: Option<MutexGuard<'a, ProductAgentTree>>,
     candidate: Option<ProductAgentTree>,
-    restored_paused: &'a std::sync::atomic::AtomicBool,
-    _owner: MutexGuard<'a, ()>,
+    restored_paused: &'a AtomicBool,
 }
 
 impl<'a> TreeMutationGuard<'a> {
     pub(super) fn lock(
         live: &'a Mutex<ProductAgentTree>,
-        owner: &'a Mutex<()>,
-        restored_paused: &'a std::sync::atomic::AtomicBool,
+        restored_paused: &'a AtomicBool,
     ) -> Result<Self, ()> {
-        let owner = blocking(|| owner.lock()).map_err(|_| ())?;
-        let locked = blocking(|| live.lock()).map_err(|_| ())?;
+        let locked = live.lock().map_err(|_| ())?;
         Ok(Self {
             live,
             locked: Some(locked),
             candidate: None,
             restored_paused,
-            _owner: owner,
         })
     }
 
-    pub(super) fn detach(&mut self) {
+    pub(crate) fn detach(&mut self) {
         if let Some(locked) = self.locked.take() {
             self.candidate = Some(locked.clone());
             self.publish_admission(&locked);
@@ -50,7 +44,7 @@ impl<'a> TreeMutationGuard<'a> {
     fn publish_admission(&self, tree: &ProductAgentTree) {
         self.restored_paused.store(
             tree.state == crate::tree::TreeAdmissionState::RestoredPaused,
-            std::sync::atomic::Ordering::Release,
+            Ordering::Release,
         );
     }
 }
@@ -77,103 +71,151 @@ impl DerefMut for TreeMutationGuard<'_> {
 impl Drop for TreeMutationGuard<'_> {
     fn drop(&mut self) {
         if let Some(candidate) = &mut self.candidate {
-            let mut live = self
-                .live
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut live = self.live.lock().unwrap_or_else(PoisonError::into_inner);
             std::mem::swap(&mut *live, candidate);
             self.publish_admission(&live);
+            // A detached writer's wakes fired before its copy went live: a
+            // waiter that woke and read the live tree in between saw the old
+            // rows, so wake it again now that they are current.
+            live.waiters().notify_waiters();
         } else if let Some(locked) = &self.locked {
             self.publish_admission(locked);
         }
     }
 }
 
+/// Every registered wait of this tree, queued or parked, by the agent that
+/// owns it, and the tree's shutdown.
 #[derive(Default)]
 pub(super) struct StorageParking {
-    stopped: std::sync::atomic::AtomicBool,
-    active: Mutex<Option<(String, std::sync::Arc<std::sync::atomic::AtomicBool>)>>,
-    wake: Condvar,
+    stopped: CancellationToken,
+    waits: Mutex<Vec<(String, CancellationToken)>>,
 }
 
 impl StorageParking {
     pub(super) fn shutdown(&self) {
-        self.stopped
-            .store(true, std::sync::atomic::Ordering::Release);
-        self.wake.notify_all();
+        self.stopped.cancel();
     }
 
-    pub(super) fn begin(&self, agent: &str) -> StorageWait<'_> {
-        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let mut active = self
-            .active
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *active = Some((agent.to_owned(), cancelled.clone()));
+    pub(super) fn stopped(&self) -> &CancellationToken {
+        &self.stopped
+    }
+
+    /// Registers one wait of `agent` until the returned handle drops.
+    pub(super) fn begin(self: &Arc<Self>, agent: &str) -> StorageWait {
+        let token = CancellationToken::new();
+        self.lock().push((agent.to_owned(), token.clone()));
         StorageWait {
-            parking: self,
-            cancelled,
+            parking: Arc::clone(self),
+            token,
         }
     }
 
+    /// Cancels every wait `agent` registered, queued or parked.
     pub(super) fn cancel(&self, agent: &str) {
-        if let Some((owner, cancelled)) = &*self
-            .active
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            && owner == agent
-        {
-            cancelled.store(true, std::sync::atomic::Ordering::Release);
-            self.wake.notify_all();
+        for (owner, token) in self.lock().iter() {
+            if owner == agent {
+                token.cancel();
+            }
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Vec<(String, CancellationToken)>> {
+        self.waits.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// One registered wait; dropping it unregisters the wait.
+pub(super) struct StorageWait {
+    parking: Arc<StorageParking>,
+    token: CancellationToken,
+}
+
+impl StorageWait {
+    pub(super) fn token(&self) -> &CancellationToken {
+        &self.token
+    }
+}
+
+impl Drop for StorageWait {
+    fn drop(&mut self) {
+        let mut waits = self.parking.lock();
+        if let Some(index) = waits.iter().position(|(_, token)| token == &self.token) {
+            waits.swap_remove(index);
         }
     }
 }
 
-pub(super) struct StorageWait<'a> {
-    parking: &'a StorageParking,
-    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+/// A running writer's request to park: the write's cancellation, and where
+/// the caller answers whether to retry.
+pub(super) struct ParkRequest {
+    pub(super) token: CancellationToken,
+    pub(super) resume: std::sync::mpsc::SyncSender<bool>,
 }
 
-impl Drop for StorageWait<'_> {
-    fn drop(&mut self) {
-        self.parking
-            .active
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+type ParkSender = tokio::sync::mpsc::UnboundedSender<ParkRequest>;
+
+/// The order writers run in, and how the running one reaches its caller.
+#[derive(Default)]
+pub(super) struct TreeWriter {
+    /// Tokio's mutex is fair: writers take it in the order they asked.
+    order: Arc<tokio::sync::Mutex<()>>,
+    /// The running writer's park channel, with the blocking worker it runs
+    /// on. Only a save on that worker parks through it.
+    current: Mutex<Option<(std::thread::ThreadId, ParkSender)>>,
+    /// A writer panicked: the tree is refused like a poisoned mutex.
+    poisoned: AtomicBool,
+}
+
+impl TreeWriter {
+    pub(super) fn order(&self) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(&self.order)
+    }
+
+    pub(super) fn is_poisoned(&self) -> bool {
+        self.poisoned.load(Ordering::Acquire)
+    }
+
+    pub(super) fn poison(&self) {
+        self.poisoned.store(true, Ordering::Release);
+    }
+
+    /// Marks the current blocking worker as the running writer until the
+    /// returned scope drops.
+    pub(super) fn enter(&self, parks: ParkSender) -> WriterScope<'_> {
+        *self.slot() = Some((std::thread::current().id(), parks));
+        WriterScope(self)
+    }
+
+    /// Hands a park to the running writer's caller and blocks this worker
+    /// until it answers. `false` outside a writer, or once the caller is gone.
+    pub(super) fn park(&self, token: &CancellationToken) -> bool {
+        let parks = match &*self.slot() {
+            Some((thread, parks)) if *thread == std::thread::current().id() => parks.clone(),
+            _ => return false,
+        };
+        let (resume, resumed) = std::sync::mpsc::sync_channel(1);
+        if parks
+            .send(ParkRequest {
+                token: token.clone(),
+                resume,
+            })
+            .is_err()
+        {
+            return false;
+        }
+        resumed.recv().unwrap_or(false)
+    }
+
+    fn slot(&self) -> MutexGuard<'_, Option<(std::thread::ThreadId, ParkSender)>> {
+        self.current.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-impl StorageWait<'_> {
-    pub(super) fn wait(&self, interval: Duration, shutdown: impl Fn() -> bool) -> bool {
-        blocking(|| {
-            let next = Instant::now() + interval;
-            let mut active = self
-                .parking
-                .active
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            loop {
-                if self.cancelled.load(std::sync::atomic::Ordering::Acquire)
-                    || self
-                        .parking
-                        .stopped
-                        .load(std::sync::atomic::Ordering::Acquire)
-                    || shutdown()
-                {
-                    return false;
-                }
-                let remaining = next.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    return true;
-                }
-                active = self
-                    .parking
-                    .wake
-                    .wait_timeout(active, remaining.min(Duration::from_millis(100)))
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .0;
-            }
-        })
+pub(super) struct WriterScope<'a>(&'a TreeWriter);
+
+impl Drop for WriterScope<'_> {
+    fn drop(&mut self) {
+        self.0.slot().take();
     }
 }

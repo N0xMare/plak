@@ -148,7 +148,10 @@ pub(in crate::agent) async fn start_child_turn_as(
     let deadline = tokio::time::Instant::now() + SPAWN_MATERIALIZE_TIMEOUT;
     let reserved = tokio::time::timeout_at(
         deadline,
-        runtime.reserve_startup_admitted(agent_id, |tree| admission.check(tree, agent_id)),
+        runtime.reserve_startup_admitted(agent_id, {
+            let id = agent_id.to_owned();
+            move |tree| admission.check(tree, &id)
+        }),
     )
     .await
     .unwrap_or_else(|_| Err("child startup admission deadline exceeded".into()));
@@ -173,17 +176,20 @@ pub(in crate::agent) async fn start_child_turn_as(
             let released_attempt = expected_attempt.clone();
             runtime.driver().spawn_release_owner(async move {
                 if attached.release_opened().await.is_err() {
-                    let _ = owner.record_then_apply(&id, |tree| {
-                        tree.record_host_retirement_for_attempt(
-                            &id,
-                            released_attempt.as_ref(),
-                            "rejected startup attachment release failed".into(),
-                        )
-                        .map(|_| ())
-                    });
+                    let child = id.clone();
+                    let _ = owner
+                        .record_then_apply(&id, move |tree| {
+                            tree.record_host_retirement_for_attempt(
+                                &child,
+                                released_attempt.as_ref(),
+                                "rejected startup attachment release failed".into(),
+                            )
+                            .map(|_| ())
+                        })
+                        .await;
                 }
             });
-            record_start_failure(runtime, agent_id, expected_attempt.as_ref(), &error)?;
+            record_start_failure(runtime, agent_id, expected_attempt.as_ref(), &error).await?;
             return Err(error.into());
         }
     };
@@ -207,16 +213,19 @@ pub(in crate::agent) async fn start_child_turn_as(
     await_child_start(caller, task, deadline).await
 }
 
-pub(super) fn record_start_failure(
+pub(super) async fn record_start_failure(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     agent_id: &str,
     expected: Option<&crate::agent_tree_protocol::AttemptId>,
     error: &str,
 ) -> Result<(), String> {
-    runtime.record_then_apply(agent_id, |tree| {
-        tree.record_host_retirement_for_attempt(agent_id, expected, error.to_owned())
-            .map(|_| ())
-    })
+    let (id, expected, error) = (agent_id.to_owned(), expected.cloned(), error.to_owned());
+    runtime
+        .record_then_apply(agent_id, move |tree| {
+            tree.record_host_retirement_for_attempt(&id, expected.as_ref(), error)
+                .map(|_| ())
+        })
+        .await
 }
 
 pub(super) async fn await_child_start(
@@ -231,15 +240,15 @@ pub(super) async fn await_child_start(
         Err(_) => Err("child startup acknowledgement deadline exceeded; owner retained for cancellation and release".into()),
     };
     if let Err(ChildStartFailure::Failed(error)) = &result {
+        let startup = caller.startup.clone();
+        let failure = error.clone();
         caller
             .runtime
-            .record_then_apply(&caller.agent_id, |tree| {
-                caller
-                    .startup
-                    .record_retirement_failure(tree, error.clone())
-                    .map(|_| ())
+            .record_then_apply(&caller.agent_id, move |tree| {
+                startup.record_retirement_failure(tree, failure).map(|_| ())
             })
-            .map_err(|error| ChildStartFailure::Failed(error.clone()))?;
+            .await
+            .map_err(ChildStartFailure::Failed)?;
     }
     result
 }
@@ -316,12 +325,15 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     admission: StartAdmission,
     acknowledged: impl Future<Output = ()> + Send,
 ) -> Result<TurnId, ChildStartFailure> {
-    let publication = runtime.mutate_then_emit(false, |tree| {
-        let locator = attached.locator().to_string();
-        tree.record_child_session(agent_id, &locator)
-            .map_err(|error| error.message)?;
-        Ok(())
-    });
+    let locator = attached.locator().to_string();
+    let child = agent_id.to_owned();
+    let publication = runtime
+        .mutate_then_emit(false, move |tree| {
+            tree.record_child_session(&child, &locator)
+                .map_err(|error| error.message)?;
+            Ok(())
+        })
+        .await;
     if let Err(error) = publication {
         release_startup(runtime, agent_id, startup, attached).await;
         return Err(error.into());
@@ -359,6 +371,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                     base_text: &prompt,
                     batch,
                 })
+                .await
                 .map_err(String::from)
             {
                 Ok(context) => (context, None),
@@ -422,11 +435,13 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         {
             Ok(false) => break submission,
             consumed => {
-                let settled = consumed.and_then(|_| {
-                    crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
+                let settled = match consumed {
+                    Ok(_) => crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
                         .settle(&command_text, crate::driver::ledger::Settlement::Consumed)
-                        .map_err(String::from)
-                });
+                        .await
+                        .map_err(String::from),
+                    Err(error) => Err(error),
+                };
                 if let Err(error) = settled {
                     release_startup(runtime, agent_id, startup, attached).await;
                     return Err(error.into());
@@ -451,11 +466,12 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                 let next = if let Some(next) = pending.pop_front() {
                     Ok((next.command_id, next.context))
                 } else {
-                    runtime
+                    match runtime
                         .read(|tree| crate::agent::park::wake_command(tree, agent_id))
                         .map_err(|error| error.message)
                         .and_then(std::convert::identity)
-                        .and_then(|id| {
+                    {
+                        Ok(id) => {
                             crate::agent::ledger::ChildLedger::new(runtime.driver(), agent_id)
                                 .prepare(CommandIntent {
                                     command_id: &id,
@@ -463,9 +479,12 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                                     base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
                                     batch: BatchRule::WakeAll,
                                 })
+                                .await
                                 .map_err(String::from)
                                 .map(|context| (id, context))
-                        })
+                        }
+                        Err(error) => Err(error),
+                    }
                 };
                 match next.and_then(|(id, context)| {
                     CommandId::new(id.clone())
@@ -494,6 +513,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                 &command_text,
                 crate::driver::ledger::Settlement::Refused { pause: None },
             )
+            .await
             .map_err(String::from);
         // Claim removal authority before the first cleanup await. A caller
         // cancellation that wins first keeps the uncertain fresh genesis for
@@ -547,7 +567,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     // (unregistered) on every path that never spawns the waiter.
     let mut registration = None;
     if let Err(error) =
-        register_admitted_turn(runtime, admission, agent_id, turn_id, &mut registration)
+        register_admitted_turn(runtime, admission, agent_id, turn_id, &mut registration).await
     {
         // Projection precedes release: the construction attachment is not
         // itself evidence that the command was admitted.
@@ -558,6 +578,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             projection.map_err(ChildStartFailure::from)?;
             crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
                 .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
+                .await
                 .map_err(String::from)
                 .map_err(ChildStartFailure::from)?;
             return Err(ChildStartFailure::HoldEndedAfterAdmission(error));
@@ -566,7 +587,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     }
     if let Err(error) = crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await
     {
-        drop(registration.take());
+        super::TurnWaiterRegistration::release_taken(&mut registration).await;
         release_startup(runtime, agent_id, startup, attached).await;
         return Err(error.into());
     }
@@ -578,7 +599,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         _ => None,
     };
     let Some(control) = control else {
-        drop(registration.take());
+        super::TurnWaiterRegistration::release_taken(&mut registration).await;
         release_startup(runtime, agent_id, startup, attached).await;
         if submission.acknowledgement.disposition()
             == plakous::agent::CommandAckDisposition::Duplicate
@@ -590,7 +611,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         return Err("child turn control is unavailable".into());
     };
     let Some(result) = submission.result.clone() else {
-        drop(registration.take());
+        super::TurnWaiterRegistration::release_taken(&mut registration).await;
         release_startup(runtime, agent_id, startup, attached).await;
         return Err("start produced no result handle".into());
     };
@@ -619,12 +640,13 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     let bound = if accepted {
         crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
             .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
+            .await
             .map_err(String::from)
     } else {
         Err("child command was not admitted; result context retained".to_owned())
     };
     if let Err(error) = bound {
-        drop(registration.take());
+        super::TurnWaiterRegistration::release_taken(&mut registration).await;
         startup.set_stage(ChildStartupStage::Releasing);
         runtime
             .finish_startup(
@@ -655,7 +677,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         }
         Err(loser) => {
             // No waiter will be spawned: release must not wait for its notice.
-            drop(registration.take());
+            super::TurnWaiterRegistration::release_taken(&mut registration).await;
             startup.set_stage(ChildStartupStage::Releasing);
             runtime
                 .finish_startup(
@@ -694,13 +716,13 @@ pub async fn retire_live_child(
 
 /// Applies one child mutation and settles its effects after releasing the lock.
 /// Callers explicitly publish their durable mutation within `work`.
-pub(in crate::agent) fn mutate_child<R>(
+pub(in crate::agent) async fn mutate_child<R: Send + 'static>(
     driver: &TreeDriver,
     agent_id: &str,
-    work: impl FnOnce(&mut crate::agent_tree::ProductAgentTree) -> R,
+    work: impl FnOnce(&mut crate::agent_tree::ProductAgentTree) -> R + Send + 'static,
 ) -> Option<R> {
-    let (result, effects) = driver.mutate(work).ok()?;
-    settle_or_fault(driver, effects, agent_id);
+    let (result, effects) = driver.mutate(work).await.ok()?;
+    settle_or_fault(driver, effects, agent_id).await;
     Some(result)
 }
 
@@ -743,11 +765,15 @@ pub fn persist_or_fault(
 /// drain records every effect before a refused publish is reported, so a
 /// seal that ran is in the tree even when the store would not take it; the
 /// refusal is then surfaced like [`persist_or_fault`].
-pub fn settle_or_fault(driver: &TreeDriver, effects: crate::agent_tree::Effects, agent_id: &str) {
+pub async fn settle_or_fault(
+    driver: &TreeDriver,
+    effects: crate::agent_tree::Effects,
+    agent_id: &str,
+) {
     if effects.is_empty() {
         return;
     }
-    let Err(error) = driver.for_agent(agent_id).settle(effects) else {
+    let Err(error) = driver.for_agent(agent_id).settle(effects).await else {
         return;
     };
     if error.code == crate::agent_tree_protocol::TopologyErrorCode::RecoveryStorageUnavailable {
@@ -759,13 +785,15 @@ pub fn settle_or_fault(driver: &TreeDriver, effects: crate::agent_tree::Effects,
         error = %error.message,
         "tree effects were recorded but their publish was refused"
     );
-    mutate_child(driver, agent_id, |tree| {
-        let reason = match tree.fault_reason(agent_id) {
+    let id = agent_id.to_owned();
+    Box::pin(mutate_child(driver, agent_id, move |tree| {
+        let reason = match tree.fault_reason(&id) {
             Some(prior) => format!("{prior}; tree publish refused: {}", error.message),
             None => format!("tree publish refused: {}", error.message),
         };
-        tree.record_fault(agent_id, reason);
-    });
+        tree.record_fault(&id, reason);
+    }))
+    .await;
 }
 
 #[derive(Clone)]
@@ -799,13 +827,16 @@ pub(in crate::agent) async fn end_spent_attempt(
     terminal: crate::agent_tree::ChildTerminal,
 ) -> Result<(), String> {
     let driver = &runtime.driver().for_agent(agent_id);
+    let writer = driver.clone();
+    let id = agent_id.to_owned();
     let (closed, effects) = driver
-        .mutate(|tree| {
+        .mutate(move |tree| {
             if tree.revision != tree.stored_revision {
-                driver.save(tree)?;
+                writer.save(tree)?;
             }
-            driver.fold_and_commit(tree, |tree| tree.close_live_descendants(agent_id))
+            writer.fold_and_commit(tree, |tree| tree.close_live_descendants(&id))
         })
+        .await
         .map_err(|error| error.message)?;
     let closed = closed.map_err(|error| error.message)?;
     for child in &closed {
@@ -819,7 +850,10 @@ pub(in crate::agent) async fn end_spent_attempt(
         .stop_agent_jobs(&owners)
         .await
         .map_err(|error| error.message)?;
-    driver.settle(effects).map_err(|error| error.message)?;
+    driver
+        .settle(effects)
+        .await
+        .map_err(|error| error.message)?;
     finalize_child_turn(
         driver,
         agent_id,
@@ -828,7 +862,8 @@ pub(in crate::agent) async fn end_spent_attempt(
         false,
         true,
         runtime.observer().as_ref(),
-    );
+    )
+    .await;
     Ok(())
 }
 
@@ -840,13 +875,17 @@ pub(in crate::agent) async fn end_attempt_work(
 ) -> Result<(), String> {
     let driver = &driver.for_agent(agent_id);
     let result = async {
+        let writer = driver.clone();
+        let owner = identity.clone();
+        let id = agent_id.to_owned();
         let (result, effects) = driver
-            .mutate(|tree| {
+            .mutate(move |tree| {
                 if tree.revision != tree.stored_revision {
-                    driver.save(tree)?;
+                    writer.save(tree)?;
                 }
-                driver.fold_and_commit(tree, |tree| {
-                    if !identity.still_owns(tree, agent_id)
+                let agent_id = id.as_str();
+                writer.fold_and_commit(tree, |tree| {
+                    if !owner.still_owns(tree, agent_id)
                         || tree.node(agent_id).is_ok_and(|node| {
                             matches!(
                                 node.status,
@@ -877,11 +916,13 @@ pub(in crate::agent) async fn end_attempt_work(
                     Ok((closed, failure, true))
                 })
             })
+            .await
             .map_err(|error| error.message)?;
         let (closed, mut failure, ended) = result.map_err(|error| error.message)?;
         if !ended {
             return driver
                 .settle(effects)
+                .await
                 .map(|_| ())
                 .map_err(|error| error.message);
         }
@@ -909,7 +950,7 @@ pub(in crate::agent) async fn end_attempt_work(
         if let Err(error) = driver.stop_agent_jobs(&owners).await {
             failure.get_or_insert(error.message);
         }
-        if let Err(error) = driver.settle(effects) {
+        if let Err(error) = driver.settle(effects).await {
             failure.get_or_insert(error.message);
         }
         failure.map_or(Ok::<_, String>(()), Err)
@@ -917,21 +958,28 @@ pub(in crate::agent) async fn end_attempt_work(
     .await;
     if let Err(error) = &result {
         retire_live_child(driver, live, agent_id, identity.turn).await;
-        record_attempt_end_failure(driver, agent_id, identity, error);
+        record_attempt_end_failure(driver, agent_id, identity, error).await;
     }
     result
 }
 
-pub(super) fn record_attempt_end_failure(
+pub(super) async fn record_attempt_end_failure(
     driver: &TreeDriver,
     agent_id: &str,
     identity: &ChildTurnIdentity,
     error: &str,
 ) {
-    mutate_child(driver, agent_id, |tree| {
+    let writer = driver.clone();
+    let (id, attempt, error) = (
+        agent_id.to_owned(),
+        identity.attempt.clone(),
+        error.to_owned(),
+    );
+    mutate_child(driver, agent_id, move |tree| {
         let _ = tree
-            .record_host_retirement_for_attempt(agent_id, Some(&identity.attempt), error.to_owned())
-            .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value));
-        persist_or_fault(driver, tree, agent_id);
-    });
+            .record_host_retirement_for_attempt(&id, Some(&attempt), error)
+            .and_then(|value| writer.apply_recorded(tree, &id).map(|()| value));
+        persist_or_fault(&writer, tree, &id);
+    })
+    .await;
 }

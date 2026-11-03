@@ -55,11 +55,11 @@ pub(super) async fn settle_waits(
         crate::agent::read_tree_feed(opened.sessions(), locator.session_id(), cursor).await?;
     feed.reads.insert_waits(locator, evidence);
     seed_wait_head(&mut feed, locator)?;
-    let settle = |tree: &mut crate::agent_tree::ProductAgentTree| {
+    let settle = move |tree: &mut crate::agent_tree::ProductAgentTree| {
         feed.apply(tree, &caller).map_err(|error| error.message)
     };
     if let Some(runtime) = runtime {
-        runtime.mutate_then_emit(false, settle)?;
+        runtime.mutate_then_emit(false, settle).await?;
     } else if let Some(mut tree) = stored {
         settle(&mut tree)?;
         rows.save_tree(&mut tree).map_err(|error| error.message)?;
@@ -172,32 +172,36 @@ impl<'a> RootBatchJoin<'a> {
 }
 
 impl crate::sessions::projector::ProductTreeJoin for RootBatchJoin<'_> {
-    fn join_pending_root_commands(
-        &self,
-        session_id: &str,
-        pending_command_ids: &[String],
-    ) -> Result<(), String> {
-        let session = self.rows.session(session_id)?;
-        let tree_id = super::rebind::durable_tree_id(self.rows, &session);
-        let join = |tree: &mut crate::agent_tree::ProductAgentTree| {
-            tree.join_pending_root_commands(pending_command_ids);
-            Ok::<(), String>(())
-        };
-        if let Some(runtime) = crate::topology_runtime::lookup(&tree_id) {
-            return runtime.mutate_then_emit(false, join);
-        }
-        let Some(mut tree) = self.rows.tree(&tree_id)? else {
-            return Ok(());
-        };
-        if tree
-            .join_pending_root_commands(pending_command_ids)
-            .is_empty()
-        {
-            return Ok(());
-        }
-        self.rows
-            .save_tree(&mut tree)
-            .map_err(|error| error.message)
+    fn join_pending_root_commands<'a>(
+        &'a self,
+        session_id: &'a str,
+        pending_command_ids: &'a [String],
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move {
+            let session = self.rows.session(session_id)?;
+            let tree_id = super::rebind::durable_tree_id(self.rows, &session);
+            if let Some(runtime) = crate::topology_runtime::lookup(&tree_id) {
+                let pending = pending_command_ids.to_vec();
+                return runtime
+                    .mutate_then_emit(false, move |tree| {
+                        tree.join_pending_root_commands(&pending);
+                        Ok::<(), String>(())
+                    })
+                    .await;
+            }
+            let Some(mut tree) = self.rows.tree(&tree_id)? else {
+                return Ok(());
+            };
+            if tree
+                .join_pending_root_commands(pending_command_ids)
+                .is_empty()
+            {
+                return Ok(());
+            }
+            self.rows
+                .save_tree(&mut tree)
+                .map_err(|error| error.message)
+        })
     }
 }
 
@@ -241,7 +245,7 @@ pub(super) fn select(
     Ok((command, batch))
 }
 
-pub(super) fn prepare_instruction(
+pub(super) async fn prepare_instruction(
     rows: &(dyn TopologyRows + Sync),
     store: &dyn crate::session_store::SessionRecordStore,
     session: &SessionRecord,
@@ -266,13 +270,14 @@ pub(super) fn prepare_instruction(
         &command_id,
         crate::driver::ledger::CommandKind::HostWake,
     )
+    .await
 }
 
 #[allow(
     clippy::too_many_arguments,
     reason = "Result-mail preparation binds the original command identity and delivery bytes to the current tree and session records."
 )]
-pub(super) fn prepare_with_command(
+pub(super) async fn prepare_with_command(
     rows: &(dyn TopologyRows + Sync),
     store: &dyn crate::session_store::SessionRecordStore,
     session: &SessionRecord,
@@ -291,6 +296,7 @@ pub(super) fn prepare_with_command(
             base_text: command,
             batch: batch.map_or(BatchRule::None, BatchRule::RootResults),
         })
+        .await
         .map_err(crate::session_store::RecordStoreError::from)?;
     Ok(candidate)
 }

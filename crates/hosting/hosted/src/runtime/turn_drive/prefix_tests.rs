@@ -1,6 +1,7 @@
 //! Real runtime commits ahead of a deliberately delayed hosted observer.
 
 #![allow(clippy::unwrap_used, reason = "test-owned commits and rendezvous")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -96,7 +97,9 @@ fn observe_delayed_turn(rounds: usize) -> Observation {
         crate::agent_tree_protocol::WriterMode::SingleLease,
     )
     .unwrap();
-    let _runtime = crate::topology_runtime::insert_root(id.clone(), tree, None).unwrap();
+    let _runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .block()
+        .unwrap();
     let (allow, observed) = pause_admission(&mut config);
     probes().lock().unwrap().insert(
         id.clone(),

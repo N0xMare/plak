@@ -670,7 +670,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/topology_navigator.rs"): {"error"},
     ("plakous-hosted", "src/runtime/topology_state.rs"): {"error"},
     ("plakous-recursive-subagents", "src/tools/jobs.rs"): {"json"},
-    ("plakous-recursive-subagents", "src/tools/mail.rs"): {"json"},
+    # A claim or effect no owner could release logs only ids and the error code.
+    ("plakous-recursive-subagents", "src/tools/driver.rs"): {"error"},
+    ("plakous-recursive-subagents", "src/tools/mail.rs"): {"error", "json"},
     ("plakous-recursive-subagents", "src/tools/mod.rs"): {"json"},
     ("plakous-recursive-subagents", "src/tools/registrations.rs"): {"json"},
     ("plakous-recursive-subagents", "src/tools/spawn.rs"): {"json"},

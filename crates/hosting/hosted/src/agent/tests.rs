@@ -4,6 +4,7 @@
     clippy::too_many_lines,
     reason = "Agent construction scenarios exercise frozen tools, native bindings, reopened profiles, and tree attachment using real session fixtures."
 )]
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;
 
@@ -2026,7 +2027,9 @@ async fn child_processing_tier_is_its_own_cards() {
         )
         .expect("standard spawn")
         .agent_id;
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).expect("hub");
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .expect("hub");
     assert_eq!(
         spawn_roster_processing_tier(&tree_id, &fast_child),
         fast.processing_tier
@@ -3518,7 +3521,7 @@ fn finalize_of_an_interrupted_turn_seals_nothing() {
         .expect("interrupt");
         spawned.agent_id
     };
-    finalize_topology_child_turn(&driver_over(&tree), &child, true, false, None);
+    finalize_topology_child_turn(&driver_over(&tree), &child, true, false, None).block();
     let tree = tree.lock().expect("lock");
     assert_eq!(
         tree.node(&child).expect("node").status,
@@ -3741,7 +3744,9 @@ async fn api_child_pin_follows_the_api_table_for_its_node_model() {
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         children.push((name, spawned.agent_id));
     }
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).expect("hub");
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .expect("hub");
     for (name, agent_id) in children {
         let pinned = frozen_openrouter_child_pin(&tree_id, &agent_id);
         match name {
@@ -3812,7 +3817,9 @@ async fn a_child_binds_its_own_frozen_card_tools() {
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         children.push((name, spawned.agent_id));
     }
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).expect("hub");
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .expect("hub");
     for (name, agent_id) in children {
         let names: Vec<String> = frozen_child_tool_selection(&tree_id, &agent_id)
             .expect(name)

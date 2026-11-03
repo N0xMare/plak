@@ -3,6 +3,7 @@ use super::recover_tests::{script, scripted_host_with, turn_completed, wait_for}
 use super::test_support::{install_live_descendant_on_hub, send_attached_action};
 use crate::agent_tree_protocol::{MessagePurpose, SendAgentMessageRequest};
 use crate::runtime::spawn_host_worker;
+use crate::runtime::test_kit::BlockOn as _;
 use crate::runtime::test_kit::TestExtension;
 
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
@@ -54,6 +55,7 @@ fn child_mail_preempts_a_waiting_process_in_a_root_turn() {
             .map(|receipt| receipt.message_id)
             .map_err(|error| error.message)
         })
+        .block()
         .unwrap();
     wait_for(
         &events,
@@ -162,6 +164,7 @@ fn send_question(hub: &crate::topology_runtime::ProductTopologyRuntime) {
         .map(|_| ())
         .map_err(|error| error.message)
     })
+    .block()
     .unwrap();
 }
 

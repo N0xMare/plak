@@ -158,7 +158,9 @@ async fn a_child_finished_before_the_first_observation_keeps_its_notices_once() 
         Some("adopt-operation-1"),
     )
     .unwrap();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let home = SessionHome::new(root.path().join("sessions"));
@@ -329,7 +331,9 @@ async fn a_question_before_the_first_tree_observation_is_announced_once() {
             None,
         )
         .unwrap();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let home = SessionHome::new(root.path().join("sessions"));
@@ -445,7 +449,9 @@ async fn adoption_notices_use_merge_operations_not_reused_or_absent_call_ids() {
             wait: None,
         }));
     }
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let home = SessionHome::new(root.path().join("sessions"));
     for _ in 0..2 {
         emit_tree_snapshot_if_revision_advanced(
@@ -534,7 +540,9 @@ async fn reverting_announces_one_adoption_and_one_existing_tree_notice() {
     request.revert = true;
     tree.adopt_candidate("root", &request, Some("op-revert"))
         .unwrap();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let home = SessionHome::new(root.path().join("sessions"));
@@ -693,7 +701,9 @@ async fn tree_snapshot_pushes_on_any_node_revision_and_drops_non_advancing() {
         WriterMode::SingleLease,
     )
     .unwrap();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let mut last_revision = TreeSnapshotPush::default();
@@ -937,6 +947,7 @@ async fn the_tree_push_resolves_its_tree_id_once_per_bound_session() {
         .unwrap(),
         None,
     )
+    .await
     .unwrap();
     let mut push = TreeSnapshotPush::default();
     assert!(push.runtime(&paths, &session).is_some());
@@ -983,7 +994,9 @@ async fn a_childs_abandoned_turn_reaches_the_callers_face_once() {
         WriterMode::SingleLease,
     )
     .unwrap();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
     let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(sender);
     let mut push = TreeSnapshotPush::default();
@@ -1086,6 +1099,7 @@ async fn a_session_switch_re_resolves_the_tree_and_pushes_keep_arriving() {
         .unwrap(),
         None,
     )
+    .await
     .unwrap();
     let (events, rx) = host_event_sink();
     let mut push = TreeSnapshotPush::default();
@@ -1123,7 +1137,9 @@ async fn a_session_switch_re_resolves_the_tree_and_pushes_keep_arriving() {
         None,
     )
     .unwrap();
-    crate::topology_runtime::insert_root(second_tree.clone(), tree, None).unwrap();
+    crate::topology_runtime::insert_root(second_tree.clone(), tree, None)
+        .await
+        .unwrap();
 
     emit_tree_snapshot_if_revision_advanced(
         &paths,

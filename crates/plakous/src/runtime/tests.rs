@@ -33,7 +33,10 @@ async fn an_aborted_task_is_dropped_before_it_finishes() {
         drop(sender);
     }));
     task.abort();
-    assert!(receiver.await.is_err(), "the aborted task dropped its future");
+    assert!(
+        receiver.await.is_err(),
+        "the aborted task dropped its future"
+    );
     while !task.is_finished() {
         tokio::task::yield_now().await;
     }
@@ -54,7 +57,8 @@ async fn native_http_transport_refuses_a_request_it_cannot_frame_before_sending(
     use super::http::NativeHttpTransport;
     use super::{HttpRequest, HttpTransport, HttpTransportErrorKind};
 
-    let client = plakous_http::Client::new(plakous_http::Limits::for_streaming_inference()).unwrap();
+    let client =
+        plakous_http::Client::new(plakous_http::Limits::for_streaming_inference()).unwrap();
     let transport = NativeHttpTransport::new(client, Duration::from_secs(1));
     for request in [
         HttpRequest::new("GET", "http://example.invalid/"),

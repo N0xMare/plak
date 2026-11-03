@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, reason = "test assertions")]
+use crate::runtime::test_kit::BlockOn as _;
 
 use std::sync::{
     Arc,
@@ -117,12 +118,12 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
                 rows.trees.clone(),
                 None,
             )
+            .block()
             .unwrap();
             // The capacity park ends at once, as on a host shutting down.
-            let trees = rows.trees.clone();
-            runtime
-                .driver()
-                .bind_storage_shutdown(Arc::new(move || trees.full.load(Ordering::SeqCst)));
+            let host = crate::agent_tree_tools::HostShutdown::new();
+            host.signal();
+            runtime.driver().bind_host_shutdown(host);
             runtime
         });
         let read_tree = || {
@@ -147,7 +148,7 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
             )
         };
         rows.trees.full.store(true, Ordering::SeqCst);
-        let error = prepare().unwrap_err();
+        let error = prepare().await.unwrap_err();
         assert_eq!(error.refusal(), Some(StoreRefusal::StorageFull));
         let failure = crate::runtime::DriveTurnError::from(error)
             .storage_failure()
@@ -158,9 +159,11 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
         assert_eq!(read_tree().pending_mail("root").len(), 1);
         rows.trees.full.store(false, Ordering::SeqCst);
         // A crash after the tree write still retries the same immutable batch.
-        record_root_batch(&rows, &id, &command, &batch).unwrap();
+        record_root_batch(&rows, &id, &command, &batch)
+            .await
+            .unwrap();
         let first = read_tree().command(&id).unwrap().clone();
-        let prepared = prepare().unwrap();
+        let prepared = prepare().await.unwrap();
         let submission = rows
             .records
             .load_intents(&session.id)
@@ -183,12 +186,12 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
             1
         );
         rows.trees.full.store(true, Ordering::SeqCst);
-        let error = withdraw_root_batch(&rows, &id, &batch).unwrap_err();
+        let error = withdraw_root_batch(&rows, &id, &batch).await.unwrap_err();
         let error = RecordStoreError::from(LedgerError::from(error));
         assert_eq!(error.refusal(), Some(StoreRefusal::StorageFull));
         assert_eq!(read_tree().command(&id), Some(&first));
         rows.trees.full.store(false, Ordering::SeqCst);
-        withdraw_root_batch(&rows, &id, &batch).unwrap();
+        withdraw_root_batch(&rows, &id, &batch).await.unwrap();
         assert!(read_tree().command(&id).unwrap().withdrawn);
         assert_eq!(read_tree().pending_mail("root").len(), 1);
         if live {

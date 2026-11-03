@@ -1,5 +1,6 @@
 //! Startup owners belong to the tree's retained release owners: neither the
 //! tree's last-lease shutdown nor a closed tree task set cuts their release.
+use crate::runtime::test_kit::BlockOn as _;
 
 use super::bind::StartupWorker;
 use crate::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
@@ -27,7 +28,9 @@ fn tree_with_child(
         .spawn_agent("root", &SpawnAgentRequest::test_review(), Some("op-spawn"))
         .unwrap()
         .agent_id;
-    let runtime = crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    let runtime = crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .block()
+        .unwrap();
     (tree_id, runtime, child)
 }
 
@@ -94,18 +97,22 @@ async fn a_startup_in_flight_at_the_last_lease_shutdown_finishes_its_release() {
 
 /// Every spawn in the files that own child sessions is a release owner, at
 /// exactly these sites, so moving one onto the abortable tree task set (or a
-/// bare `tokio::spawn`) fails here. The one other spawn is a local JoinSet
-/// its caller joins.
+/// bare `tokio::spawn`) fails here. The other spawns are a local JoinSet
+/// its caller joins and the thread a dropped turn waiter registration leaves
+/// on.
 #[test]
 fn child_owner_spawns_stay_release_owners() {
     let files: [(&str, &str, usize); 5] = [
         ("bind.rs", include_str!("bind.rs"), 3),
         ("turns.rs", include_str!("turns.rs"), 2),
-        ("waiter.rs", include_str!("waiter.rs"), 1),
+        ("waiter.rs", include_str!("waiter.rs"), 3),
         ("deliver.rs", include_str!("deliver.rs"), 1),
         ("park.rs", include_str!("../park.rs"), 1),
     ];
-    let allowed = [("turns.rs", "retirements.spawn")];
+    let allowed = [
+        ("turns.rs", "retirements.spawn"),
+        ("waiter.rs", "leaver.spawn"),
+    ];
     for (name, source, owners) in files {
         let code = source.split_whitespace().collect::<String>();
         assert!(

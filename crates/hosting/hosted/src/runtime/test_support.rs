@@ -1,4 +1,5 @@
 //! Shared fixtures for the `runtime` unit tests.
+use crate::runtime::test_kit::BlockOn as _;
 
 use crate::runtime::test_kit::TestExtension;
 type HostConfig = crate::runtime::HostConfig<TestExtension>;
@@ -431,7 +432,9 @@ pub(super) fn install_live_descendant_on_hub(tree_id: &str, workspace: &std::pat
     .unwrap();
     tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .unwrap();
-    crate::topology_runtime::insert_root(tree_id, tree, None).unwrap();
+    crate::topology_runtime::insert_root(tree_id, tree, None)
+        .block()
+        .unwrap();
 }
 
 pub(super) fn code_mode_source_with_a_prefix(root: &std::path::Path) -> HostConfig {

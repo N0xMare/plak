@@ -512,8 +512,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if let Some(state) = one_shot.as_deref_mut() {
             let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
             let resumed = if state.resume_tree {
-                topology_state::resume_tree(&tree_id)
-                    .map_err(CliFailure::new)
+                self.executor
+                    .block_on(topology_state::resume_tree(&tree_id))
+                    .map_err(|_| CliFailure::new("application execution failed"))
+                    .and_then(|resumed| resumed.map_err(CliFailure::new))
                     .and_then(|()| {
                         self.executor
                             .block_on(crate::agent::rejoin_inflight_after_resume(&tree_id))

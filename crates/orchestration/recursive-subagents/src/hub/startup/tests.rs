@@ -3,7 +3,7 @@ use crate::hub::{LiveCancelOutcome, shutdown_runtime, test_support};
 use crate::protocol::{AttemptScopedRequest, NodeStatus, SpawnAgentRequest};
 use std::path::Path;
 
-fn fixture(root: &Path) -> (Arc<ProductTopologyRuntime>, String) {
+async fn fixture(root: &Path) -> (Arc<ProductTopologyRuntime>, String) {
     let runtime = Arc::new(ProductTopologyRuntime::new(
         test_support::bootstrap("startup-test", root.to_path_buf()),
         test_support::memory_store(),
@@ -17,6 +17,7 @@ fn fixture(root: &Path) -> (Arc<ProductTopologyRuntime>, String) {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     (runtime, id)
 }
@@ -27,15 +28,19 @@ async fn clean_startup_release_triggers_recovery_only_for_unresolved_nodes() {
 
     for unresolved in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let (runtime, id) = fixture(root.path());
+        let (runtime, id) = fixture(root.path()).await;
         let startup = runtime.reserve_startup(&id).await.unwrap();
         if unresolved {
             runtime
-                .mutate_then_emit(false, |tree| {
-                    tree.record_host_retirement(&id, "caller deadline".into())
-                        .and_then(|value| tree.fold_due(&id).map(|_| value))
-                        .map_err(|error| error.message)
+                .mutate_then_emit(false, {
+                    let id = id.clone();
+                    move |tree| {
+                        tree.record_host_retirement(&id, "caller deadline".into())
+                            .and_then(|value| tree.fold_due(&id).map(|_| value))
+                            .map_err(|error| error.message)
+                    }
                 })
+                .await
                 .unwrap();
         }
         let calls = Arc::new(AtomicUsize::new(0));
@@ -97,6 +102,7 @@ async fn startup_publication_failure_clears_reservation_but_keeps_fault() {
                 .unwrap()
                 .agent_id)
         })
+        .await
         .unwrap();
     let startup = runtime.reserve_startup(&id).await.unwrap();
     store.refuse.store(true, Ordering::SeqCst);
@@ -125,7 +131,7 @@ async fn startup_publication_failure_clears_reservation_but_keeps_fault() {
 #[tokio::test]
 async fn startup_ownership_never_writes_the_active_turn_view() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let before = runtime.read(|tree| tree.revision).unwrap();
     let startup = runtime.reserve_startup(&id).await.unwrap();
     runtime
@@ -143,7 +149,7 @@ async fn startup_ownership_never_writes_the_active_turn_view() {
 #[tokio::test]
 async fn definite_precreate_refusal_releases_empty_reservation() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let startup = runtime.reserve_startup(&id).await.unwrap();
     // No session create or command was admitted: no release remains to join.
     runtime
@@ -166,25 +172,29 @@ async fn definite_precreate_refusal_releases_empty_reservation() {
 #[tokio::test]
 async fn pending_startup_reserves_close_until_late_release() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let startup = runtime.reserve_startup(&id).await.unwrap();
     assert!(runtime.reserve_startup(&id).await.is_err());
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.close_agent(
-                "root",
-                &AttemptScopedRequest {
-                    agent_id: id.clone(),
-                    expected_attempt_id: None,
-                },
-                None,
-            )
-            .unwrap();
-            assert!(tree.has_turn_owner(&id));
-            assert!(!tree.node(&id).unwrap().active_turn);
-            assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
-            Ok(())
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.close_agent(
+                    "root",
+                    &AttemptScopedRequest {
+                        agent_id: id.clone(),
+                        expected_attempt_id: None,
+                    },
+                    None,
+                )
+                .unwrap();
+                assert!(tree.has_turn_owner(&id));
+                assert!(!tree.node(&id).unwrap().active_turn);
+                assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
+                Ok(())
+            }
         })
+        .await
         .unwrap();
     let owner = runtime.clone();
     let child = id.clone();
@@ -219,7 +229,7 @@ async fn pending_startup_reserves_close_until_late_release() {
 #[tokio::test(start_paused = true)]
 async fn startup_release_failure_clears_reservation_but_keeps_fault_and_no_seal() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let startup = runtime.reserve_startup(&id).await.unwrap();
     startup.set_stage(ChildStartupStage::Releasing);
     assert!(runtime.cancel_live(&id).await.is_err());
@@ -241,24 +251,28 @@ async fn startup_release_failure_clears_reservation_but_keeps_fault_and_no_seal(
     );
     assert!(!runtime.live.lock().await.contains_key(&id));
     runtime
-        .mutate_then_emit(false, |tree| {
-            tree.record_host_materialization(&id)
-                .and_then(|value| tree.fold_due(&id).map(|_| value))
-                .unwrap();
-            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
-            assert!(!tree.has_turn_owner(&id));
-            assert!(!tree.node(&id).unwrap().active_turn);
-            assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
-            assert_eq!(tree.node(&id).unwrap().session_locator.as_deref(), None);
-            Ok(())
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_host_materialization(&id)
+                    .and_then(|value| tree.fold_due(&id).map(|_| value))
+                    .unwrap();
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
+                assert!(!tree.has_turn_owner(&id));
+                assert!(!tree.node(&id).unwrap().active_turn);
+                assert!(tree.attempt(&id).unwrap().candidate_id.is_none());
+                assert_eq!(tree.node(&id).unwrap().session_locator.as_deref(), None);
+                Ok(())
+            }
         })
+        .await
         .unwrap();
 }
 
 #[tokio::test(start_paused = true)]
 async fn lost_start_ack_times_out_cancel_but_keeps_late_owner() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let startup = runtime.reserve_startup(&id).await.unwrap();
     startup.set_stage(ChildStartupStage::Starting);
     let error = runtime.cancel_live(&id).await.unwrap_err();
@@ -295,7 +309,7 @@ async fn lost_start_ack_times_out_cancel_but_keeps_late_owner() {
 #[tokio::test(start_paused = true)]
 async fn slow_startup_release_within_the_retire_deadline_is_not_fenced() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let startup = runtime.reserve_startup(&id).await.unwrap();
     startup.set_stage(ChildStartupStage::Releasing);
     let owner = runtime.clone();
@@ -332,7 +346,7 @@ async fn slow_startup_release_within_the_retire_deadline_is_not_fenced() {
 #[tokio::test]
 async fn shutdown_requests_startup_cancellation_and_joins_release() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let startup = runtime.reserve_startup(&id).await.unwrap();
     let owner = runtime.clone();
     let shutdown = tokio::spawn(async move { shutdown_runtime(owner).await });
@@ -348,10 +362,10 @@ async fn shutdown_requests_startup_cancellation_and_joins_release() {
     assert!(runtime.live.lock().await.is_empty());
 }
 
-#[test]
-fn definite_refusal_cleanup_excludes_late_cancellation() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn definite_refusal_cleanup_excludes_late_cancellation() {
     let root = tempfile::tempdir().unwrap();
-    let (runtime, id) = fixture(root.path());
+    let (runtime, id) = fixture(root.path()).await;
     let startup = ChildStartup::new(runtime.driver.clone(), id.clone());
     assert!(startup.claim_definite_refusal_cleanup());
     startup.request_cancel();

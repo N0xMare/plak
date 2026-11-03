@@ -32,8 +32,8 @@ enum WakeSubmission {
     Uncertain,
 }
 
-fn settle_wake(
-    ledger: &mut dyn CommandLedger,
+async fn settle_wake(
+    ledger: &mut (dyn CommandLedger + Send),
     command_id: &str,
     outcome: WakeSubmission,
 ) -> Result<(), LedgerError> {
@@ -44,7 +44,7 @@ fn settle_wake(
         WakeSubmission::Refused => Settlement::Refused { pause: None },
         WakeSubmission::Uncertain => return Ok(()),
     };
-    ledger.settle(command_id, settlement)
+    ledger.settle(command_id, settlement).await
 }
 
 /// What an unsubmitted child turn end means.
@@ -148,15 +148,21 @@ pub(super) async fn turn_end(
         Err(_) => None,
     };
     if let Some(handle) = follow_up {
-        let bound = mutate_child(driver, agent_id, |tree| {
+        let (id, attempt, turn) = (
+            agent_id.to_owned(),
+            identity.attempt.clone(),
+            handle.turn_id().to_string(),
+        );
+        let bound = mutate_child(driver, agent_id, move |tree| {
             let owns = tree
-                .attempt(agent_id)
-                .is_some_and(|attempt| attempt.attempt_id == identity.attempt);
+                .attempt(&id)
+                .is_some_and(|current| current.attempt_id == attempt);
             if owns {
-                tree.bind_turn_owner(agent_id, handle.turn_id().to_string());
+                tree.bind_turn_owner(&id, turn);
             }
             owns
-        });
+        })
+        .await;
         if bound == Some(true) {
             return TurnEnd::FollowUp(handle);
         }
@@ -197,27 +203,32 @@ pub(super) async fn park_until_wake(
         .await
         .map(|facts| facts.running)
         .unwrap_or_default();
-    let parked = mutate_child(driver, agent_id, |tree| {
-        if !identity.still_owns(tree, agent_id) {
-            return false;
+    let parked = mutate_child(driver, agent_id, {
+        let (identity, agent_id, driver) = (identity.clone(), agent_id.to_owned(), driver.clone());
+        move |tree| {
+            let (identity, agent_id, driver) = (&identity, agent_id.as_str(), &driver);
+            if !identity.still_owns(tree, agent_id) {
+                return false;
+            }
+            if tree
+                .record_child_finalization(
+                    agent_id,
+                    &identity.turn.to_string(),
+                    crate::agent_tree::ChildFinalizationDecision::Park,
+                    true,
+                    None,
+                )
+                .is_err()
+                || !persist_or_fault(driver, tree, agent_id)
+            {
+                return false;
+            }
+            let parked = tree.park_child(agent_id, processes).is_ok();
+            persist_or_fault(driver, tree, agent_id);
+            parked
         }
-        if tree
-            .record_child_finalization(
-                agent_id,
-                &identity.turn.to_string(),
-                crate::agent_tree::ChildFinalizationDecision::Park,
-                true,
-                None,
-            )
-            .is_err()
-            || !persist_or_fault(driver, tree, agent_id)
-        {
-            return false;
-        }
-        let parked = tree.park_child(agent_id, processes).is_ok();
-        persist_or_fault(driver, tree, agent_id);
-        parked
-    });
+    })
+    .await;
     if parked != Some(true) {
         return end_park(driver, live, agent_id, identity).await;
     }
@@ -258,9 +269,14 @@ pub(super) async fn park_until_wake(
             }
             WakeDecision::Idle => {}
         }
-        mutate_child(driver, agent_id, |tree| {
-            tree.refresh_parked(agent_id, facts.running);
-        });
+        mutate_child(driver, agent_id, {
+            let agent_id = agent_id.to_owned();
+            move |tree| {
+                let agent_id = agent_id.as_str();
+                tree.refresh_parked(agent_id, facts.running);
+            }
+        })
+        .await;
         let mut process_exit = Box::pin(async move {
             if let Some(changes) = job_changes.as_mut()
                 && changes.changed().await.is_ok()
@@ -316,7 +332,14 @@ async fn end_park(
     agent_id: &str,
     identity: &ChildTurnIdentity,
 ) -> ParkEnd {
-    mutate_child(driver, agent_id, |tree| tree.unpark_child(agent_id));
+    mutate_child(driver, agent_id, {
+        let agent_id = agent_id.to_owned();
+        move |tree| {
+            let agent_id = agent_id.as_str();
+            tree.unpark_child(agent_id);
+        }
+    })
+    .await;
     if interrupted(driver, agent_id, identity) {
         return ParkEnd::Interrupted;
     }
@@ -370,12 +393,17 @@ async fn start_wake_turn(
     identity: &ChildTurnIdentity,
 ) -> Result<TurnResultHandle, WakeRefusal> {
     let (begun, effects) = driver
-        .mutate(|tree| {
-            let command = wake_command(tree, agent_id)?;
-            Ok::<_, String>(tree.begin_wake(agent_id).then_some(command))
+        .mutate({
+            let agent_id = agent_id.to_owned();
+            move |tree| {
+                let agent_id = agent_id.as_str();
+                let command = wake_command(tree, agent_id)?;
+                Ok::<_, String>(tree.begin_wake(agent_id).then_some(command))
+            }
         })
+        .await
         .map_err(|error| WakeRefusal::Failed(error.message))?;
-    settle_or_fault(driver, effects, agent_id);
+    settle_or_fault(driver, effects, agent_id).await;
     let Some(command_text) = begun.map_err(WakeRefusal::Failed)? else {
         return Err(WakeRefusal::ParkEnded);
     };
@@ -391,6 +419,7 @@ async fn start_wake_turn(
             base_text: prompt,
             batch: BatchRule::WakeAll,
         })
+        .await
         .map_err(String::from)
         .map_err(WakeRefusal::Failed)?;
     let Ok((mut live_map, delivery)) =
@@ -401,6 +430,7 @@ async fn start_wake_turn(
             &command_text,
             WakeSubmission::Refused,
         )
+        .await
         .map_err(String::from)
         .map_err(WakeRefusal::Failed)?;
         return Err(WakeRefusal::ParkEnded);
@@ -420,6 +450,7 @@ async fn start_wake_turn(
             &command_text,
             WakeSubmission::Refused,
         )
+        .await
         .map_err(String::from)
         .map_err(WakeRefusal::Failed)?;
         return Err(WakeRefusal::ParkEnded);
@@ -458,6 +489,7 @@ async fn start_wake_turn(
                     &command_text,
                     settlement,
                 )
+                .await
                 .map_err(|settle| WakeRefusal::Failed(format!("{error}; {settle}")))?;
             }
             return Err(WakeRefusal::Failed(error));
@@ -469,28 +501,36 @@ async fn start_wake_turn(
     drop(live_map);
     let feed = read.await;
     let (published, effects) = driver
-        .mutate(|tree| {
-            if !identity.still_owns(tree, agent_id) {
-                return Err("child attempt has already been replaced".into());
+        .mutate({
+            let (identity, agent_id, driver) =
+                (identity.clone(), agent_id.to_owned(), driver.clone());
+            move |tree| {
+                let (identity, agent_id, driver) = (&identity, agent_id.as_str(), &driver);
+                if !identity.still_owns(tree, agent_id) {
+                    return Err("child attempt has already been replaced".into());
+                }
+                tree.bind_turn_owner(agent_id, turn_id.to_string());
+                if let Some(feed) = feed? {
+                    feed.apply(tree, agent_id).map_err(|error| error.message)?;
+                }
+                tree.unpark_child(agent_id);
+                persist_or_fault(driver, tree, agent_id);
+                Ok::<_, String>(())
             }
-            tree.bind_turn_owner(agent_id, turn_id.to_string());
-            if let Some(feed) = feed? {
-                feed.apply(tree, agent_id).map_err(|error| error.message)?;
-            }
-            tree.unpark_child(agent_id);
-            persist_or_fault(driver, tree, agent_id);
-            Ok::<_, String>(())
         })
+        .await
         .unwrap_or_else(|error| (Err(error.message), crate::agent_tree::Effects::default()));
-    settle_or_fault(driver, effects, agent_id);
-    let acknowledged = published.and_then(|()| {
-        settle_wake(
+    settle_or_fault(driver, effects, agent_id).await;
+    let acknowledged = match published {
+        Ok(()) => settle_wake(
             &mut crate::agent::ledger::ChildLedger::settlement_only(driver),
             &command_text,
             WakeSubmission::Recorded,
         )
-        .map_err(String::from)
-    });
+        .await
+        .map_err(String::from),
+        Err(error) => Err(error),
+    };
     if let Err(error) = acknowledged {
         // The wake was admitted (and possibly bound) but its batch could not
         // be settled: like a restart that needs reconciliation, the wake
@@ -539,8 +579,11 @@ pub(super) const REOPEN_HOLD_ENDED: &str =
     "the reopen hold ended before the wake; an interrupt or close won the race";
 
 /// Moves a held child to its reopen wake (spec 03 section 14.1).
-fn begin_reopen_wake(driver: &TreeDriver, agent_id: &str) -> bool {
-    mutate_child(driver, agent_id, |tree| tree.begin_reopen_wake(agent_id)).unwrap_or(false)
+async fn begin_reopen_wake(driver: &TreeDriver, agent_id: &str) -> bool {
+    let id = agent_id.to_owned();
+    mutate_child(driver, agent_id, move |tree| tree.begin_reopen_wake(&id))
+        .await
+        .unwrap_or(false)
 }
 
 /// Whether an interrupt or close ended a reopen wake's hold: the node no
@@ -559,7 +602,7 @@ fn reopen_hold_ended(driver: &TreeDriver, agent_id: &str) -> bool {
 
 /// Settles `command_id`'s prepared batch, if it is still prepared: read when
 /// the runtime admitted the command, unread otherwise.
-fn settle_prepared(
+async fn settle_prepared(
     driver: &TreeDriver,
     agent_id: &str,
     command_id: &str,
@@ -567,7 +610,7 @@ fn settle_prepared(
 ) -> Result<(), String> {
     for command in crate::agent::ledger::prepared_commands(driver, agent_id)? {
         if command.command_id == command_id {
-            command.settle(driver, admitted)?;
+            command.settle(driver, admitted).await?;
         }
     }
     Ok(())
@@ -590,7 +633,7 @@ pub(super) async fn wake_reopened(
     agent_id: &str,
     attached: super::AttachedCodingSession,
 ) -> Result<Reopened, String> {
-    if !begin_reopen_wake(runtime.driver(), agent_id) {
+    if !begin_reopen_wake(runtime.driver(), agent_id).await {
         let _ = attached.release_opened().await;
         return Ok(Reopened::HoldEnded);
     }
@@ -655,12 +698,12 @@ pub(super) async fn wake_reopened(
                 // batch is in history, so it settles read, as a rejoin whose
                 // hold ended does, or the resume would deliver it again.
                 Err(super::children::ChildStartFailure::HoldEndedAfterAdmission(_)) => {
-                    settle_prepared(runtime.driver(), agent_id, &command_id, true)?;
+                    settle_prepared(runtime.driver(), agent_id, &command_id, true).await?;
                     Ok(Reopened::HoldEnded)
                 }
                 // The refusal names the hold; nothing else is at fault.
                 Err(_) if reopen_hold_ended(runtime.driver(), agent_id) => {
-                    settle_prepared(runtime.driver(), agent_id, &command_id, false)?;
+                    settle_prepared(runtime.driver(), agent_id, &command_id, false).await?;
                     Ok(Reopened::HoldEnded)
                 }
                 Err(failure) => Err(failure.into()),
@@ -714,11 +757,14 @@ async fn start_reopened_resume(
     resume: ReopenedResume,
 ) -> Result<Reopened, String> {
     let startup = match runtime
-        .reserve_startup_admitted(agent_id, |tree| {
-            if tree.reopen_wake_admissible(agent_id) {
-                Ok(())
-            } else {
-                Err(REOPEN_HOLD_ENDED.to_owned())
+        .reserve_startup_admitted(agent_id, {
+            let id = agent_id.to_owned();
+            move |tree| {
+                if tree.reopen_wake_admissible(&id) {
+                    Ok(())
+                } else {
+                    Err(REOPEN_HOLD_ENDED.to_owned())
+                }
             }
         })
         .await
@@ -729,9 +775,14 @@ async fn start_reopened_resume(
             return Err(error);
         }
     };
-    mutate_child(runtime.driver(), agent_id, |tree| {
-        tree.mark_transient_wait(agent_id, resume.plan.gate == ResumeGate::Network);
-    });
+    mutate_child(runtime.driver(), agent_id, {
+        let agent_id = agent_id.to_owned();
+        move |tree| {
+            let agent_id = agent_id.as_str();
+            tree.mark_transient_wait(agent_id, resume.plan.gate == ResumeGate::Network);
+        }
+    })
+    .await;
     let owner = runtime.clone();
     let id = agent_id.to_owned();
     // The startup reservation belongs to this task, not the global reattach
@@ -748,7 +799,8 @@ async fn start_reopened_resume(
         )
         .await;
         if !ready {
-            mutate_child(owner.driver(), &id, |tree| tree.unpark_child(&id));
+            let child = id.clone();
+            mutate_child(owner.driver(), &id, move |tree| tree.unpark_child(&child)).await;
             super::children::release_startup(&owner, &id, &startup, attached).await;
             return;
         }
@@ -787,7 +839,8 @@ async fn start_reopened_resume(
             .await;
         }
         if started.is_err() {
-            mutate_child(owner.driver(), &id, |tree| tree.unpark_child(&id));
+            let child = id.clone();
+            mutate_child(owner.driver(), &id, move |tree| tree.unpark_child(&child)).await;
         }
     });
     Ok(Reopened::Done)
@@ -885,7 +938,7 @@ async fn prepare_reopened_wake(
             // The exact pending Resume keeps its original prompt and mail;
             // withdrawing it would make an accepted retry impossible to bind.
             if prior.command_id != plan.command_id.as_str() {
-                prior.settle(driver, false)?;
+                prior.settle(driver, false).await?;
             }
         }
         return Ok(ReopenedWake::Resume(ReopenedResume {
@@ -906,7 +959,7 @@ async fn prepare_reopened_wake(
         // an unrecorded corrective round is re-derived from the attempt's
         // state: both are withdrawn, their mail unread.
         if command.is_corrective() || command.for_other_attempt(attempt.as_ref()) {
-            command.settle(driver, false)?;
+            command.settle(driver, false).await?;
             continue;
         }
         unrecorded.push(command);
@@ -929,7 +982,7 @@ async fn prepare_reopened_wake(
     // More than one never-admitted command has no single exact retry: none
     // ran, so their mail returns to unread and one fresh wake carries it.
     for command in unrecorded {
-        command.settle(driver, false)?;
+        command.settle(driver, false).await?;
     }
     Ok(ReopenedWake::Start(None))
 }
@@ -964,7 +1017,7 @@ async fn rejoin_turn(
     result: TurnResultHandle,
 ) -> Result<Reopened, String> {
     let driver = &runtime.driver().for_agent(agent_id);
-    let begun = begin_reopen_wake(driver, agent_id);
+    let begun = begin_reopen_wake(driver, agent_id).await;
     // The feed pass binds the turn to the command that admitted it and
     // acknowledges that command's batch: the batch is in the session's
     // history even if the turn is cancelled below, so the resume never
@@ -991,19 +1044,25 @@ async fn rejoin_turn(
     // The turn's waiter registers with the bind, before the slot is visible;
     // a rejoin that never spawns the waiter drops it.
     let mut registration = None;
+    let slot = &mut registration;
     let occupied = runtime
-        .try_occupy_live_admitted(agent_id.to_owned(), child, || {
-            mutate_child(driver, agent_id, |tree| {
-                if !tree.reopen_wake_admissible(agent_id) {
+        .try_occupy_live_admitted(agent_id.to_owned(), child, || async move {
+            let writer = driver.clone();
+            let id = agent_id.to_owned();
+            let admitted = mutate_child(driver, agent_id, move |tree| {
+                if !tree.reopen_wake_admissible(&id) {
                     return Err(REOPEN_HOLD_ENDED.to_owned());
                 }
-                registration =
-                    super::children::TurnWaiterRegistration::enter(driver, tree, agent_id);
-                tree.unpark_child(agent_id);
-                persist_or_fault(driver, tree, agent_id);
-                Ok(())
+                let registration =
+                    super::children::TurnWaiterRegistration::enter(&writer, tree, &id);
+                tree.unpark_child(&id);
+                persist_or_fault(&writer, tree, &id);
+                Ok(registration)
             })
-            .unwrap_or_else(|| Err("topology tree is unavailable".to_owned()))
+            .await
+            .unwrap_or_else(|| Err("topology tree is unavailable".to_owned()))?;
+            *slot = admitted;
+            Ok(())
         })
         .await;
     match occupied {
@@ -1045,7 +1104,7 @@ async fn admitted_command(
     let driver = &runtime.driver().for_agent(agent_id);
     crate::agent::ledger::project_child_feed(runtime, agent_id, attached).await?;
     for command in crate::agent::ledger::prepared_commands(driver, agent_id)? {
-        command.settle(driver, false)?;
+        command.settle(driver, false).await?;
     }
     crate::agent::ledger::accepted_command(driver, agent_id, turn)?.ok_or_else(|| {
         "a reopened parked child runs a turn no journaled command admitted; recovery required"

@@ -395,12 +395,12 @@ use plakous_hosted::{
 use std::sync::Arc;
 struct ExternalFactory;
 impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
-    fn runtime(
-        &self,
-        config: &HostConfig<plakous_host_protocol::Core>,
+    fn runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<plakous_host_protocol::Core>,
         role: RuntimeRole,
-        stderr: &mut Vec<u8>,
-    ) -> CliResult<SessionRuntimeBinding> {
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
         unreachable!()
     }
     fn open_head<'a>(
@@ -439,22 +439,21 @@ impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
         unreachable!()
     }
-    fn fork_runtime(
-        &self,
-        executor: &plakous::application::ApplicationExecutor,
-        config: &HostConfig<plakous_host_protocol::Core>,
-        stderr: &mut Vec<u8>,
-    ) -> CliResult<SessionRuntimeBinding> {
+    fn fork_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<plakous_host_protocol::Core>,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
         unreachable!()
     }
-    fn rebind_runtime(
-        &self,
-        config: &HostConfig<plakous_host_protocol::Core>,
-        spec: Option<&ProductAgentSpec>,
+    fn rebind_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<plakous_host_protocol::Core>,
+        spec: Option<&'a ProductAgentSpec>,
         attach: plakous_hosted::topology_runtime::TopologyHubAttach,
         native_target: bool,
-        stderr: &mut Vec<u8>,
-    ) -> (CliResult<SessionRuntimeBinding>, Option<String>) {
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, (CliResult<SessionRuntimeBinding>, Option<String>)> {
         unreachable!()
     }
     fn input_window(
@@ -463,20 +462,22 @@ impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
     ) -> CliResult<SessionInputWindow> {
         unreachable!()
     }
-    fn clear(
-        &self,
-        executor: &plakous::application::ApplicationExecutor,
-        config: &mut HostConfig<plakous_host_protocol::Core>,
-        opened: &AttachedCodingSession,
-        target_product_session_id: &str,
-        create_operation_id: &str,
-        stderr_buf: &mut Vec<u8>,
-        events: &Sender<plakous_host_protocol::Core>,
+    fn clear<'a>(
+        &'a self,
+        config: &'a mut HostConfig<plakous_host_protocol::Core>,
+        opened: &'a AttachedCodingSession,
+        target_product_session_id: &'a str,
+        create_operation_id: &'a str,
+        stderr_buf: &'a mut Vec<u8>,
+        events: &'a Sender<plakous_host_protocol::Core>,
         started: std::time::Instant,
-    ) -> CliResult<(
-        AttachedCodingSession,
-        Option<Arc<plakous::subscriptions::ResolvedProvider>>,
-    )> {
+    ) -> RuntimeFuture<
+        'a,
+        CliResult<(
+            AttachedCodingSession,
+            Option<Arc<plakous::subscriptions::ResolvedProvider>>,
+        )>,
+    > {
         unreachable!()
     }
     fn api_runtime<'a>(

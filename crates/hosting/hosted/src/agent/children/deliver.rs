@@ -138,13 +138,17 @@ impl ProductMailDeliverer {
                 Err(refused("child session has an admitted turn".to_owned()))
             } else {
                 match crate::agent::ledger::feed_bounds(&attached.sessions, session_id).await {
-                    Ok((_, tail)) => driver.withdraw_unstarted_followup(
-                        &agent_id,
-                        &message_id,
-                        &session_id.to_string(),
-                        tail,
-                        receipt,
-                    ),
+                    Ok((_, tail)) => {
+                        driver
+                            .withdraw_unstarted_followup(
+                                &agent_id,
+                                &message_id,
+                                &session_id.to_string(),
+                                tail,
+                                receipt,
+                            )
+                            .await
+                    }
                     Err(error) => Err(refused(error)),
                 }
             };
@@ -367,6 +371,7 @@ impl ProductMailDeliverer {
                     base_text: &request.body,
                     batch: BatchRule::Delivered(&request.message_id),
                 })
+                .await
                 .map_err(String::from)?;
         let (delivery, turn_id, read) = {
             let live = self.runtime.live.lock().await;
@@ -388,11 +393,14 @@ impl ProductMailDeliverer {
             .map_err(|_| "follow-up delivery task failed".to_owned())?
             .map_err(turn_ended_or)?;
         if let Some(feed) = read.await? {
-            self.runtime.mutate_then_emit(false, |tree| {
-                feed.apply(tree, &request.agent_id)
-                    .map(|_| ())
-                    .map_err(|error| error.message)
-            })?;
+            let agent_id = request.agent_id.clone();
+            self.runtime
+                .mutate_then_emit(false, move |tree| {
+                    feed.apply(tree, &agent_id)
+                        .map(|_| ())
+                        .map_err(|error| error.message)
+                })
+                .await?;
         }
         Ok(crate::agent_tree_tools::MailDeliveryAck {
             turn_id: Some(turn_id.to_string()),
@@ -416,6 +424,7 @@ impl ProductMailDeliverer {
                     base_text: &request.body,
                     batch: BatchRule::Delivered(&request.message_id),
                 })
+                .await
                 .map_err(String::from)?;
         let (control, turn_id) = {
             let live = self.runtime.live.lock().await;
@@ -443,11 +452,14 @@ impl ProductMailDeliverer {
         if let Some(read) = read
             && let Some(feed) = read.await?
         {
-            self.runtime.mutate_then_emit(false, |tree| {
-                feed.apply(tree, &request.agent_id)
-                    .map(|_| ())
-                    .map_err(|error| error.message)
-            })?;
+            let agent_id = request.agent_id.clone();
+            self.runtime
+                .mutate_then_emit(false, move |tree| {
+                    feed.apply(tree, &agent_id)
+                        .map(|_| ())
+                        .map_err(|error| error.message)
+                })
+                .await?;
         }
         Ok(crate::agent_tree_tools::MailDeliveryAck {
             turn_id: Some(turn_id.to_string()),

@@ -52,7 +52,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             canonical_command: item.text.clone(),
             submitted_at_ms: item.submitted_at_ms,
         });
-        let dispatch = (|| -> Result<_, String> {
+        let dispatch = async {
             let command_id =
                 CommandId::new(&intent.command_id).map_err(|error| error.to_string())?;
             let turn_id = intent
@@ -69,13 +69,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         base_text: &intent.canonical_command,
                         batch: BatchRule::None,
                     })
+                    .await
                     .map_err(String::from)?;
-            Ok(plakous::agent::TurnCommand::Steer {
+            Ok::<_, String>(plakous::agent::TurnCommand::Steer {
                 command_id,
                 turn_id,
                 input: item.user_input(&prepared.prompt),
             })
-        })();
+        }
+        .await;
         let command = match dispatch {
             Ok(command) => command,
             Err(error) => {
@@ -101,6 +103,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     if let Err(save_error) =
                         RootLedger::new(self.host.rows, self.host.store, self.host.session, &item)
                             .settle(&intent.command_id, Settlement::Refused { pause: None })
+                            .await
                             .map_err(String::from)
                     {
                         report_queue_persist_failed(
@@ -196,6 +199,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             candidate.record_notice(row.clone());
             match RootLedger::new(self.host.rows, self.host.store, &mut candidate, &item)
                 .settle(&intent.command_id, Settlement::Consumed)
+                .await
                 .map_err(String::from)
             {
                 Ok(()) => {
@@ -246,6 +250,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             &intent.command_id,
                             Settlement::Refused { pause: Some(cause) },
                         )
+                        .await
                         .map_err(String::from)
                 {
                     report_queue_persist_failed(

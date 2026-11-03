@@ -129,7 +129,10 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     }
     stderr_buf.clear();
     config.state_roots.set_inherited_skills(inherited_skills);
-    let built = fork_runtime_binding(executor, config, stderr_buf);
+    let built = executor
+        .block_on(fork_runtime_binding(config, stderr_buf))
+        .map_err(|_| CliFailure::new("application execution failed"))
+        .and_then(|built| built);
     config.state_roots.set_inherited_skills(None);
     let runtime = match built {
         Ok(runtime) => runtime,
@@ -330,26 +333,24 @@ pub(super) fn fork_refusal(kind: AgentSessionsErrorKind, message: &str) -> Optio
 
 /// The runtime a fork recompiles from: this session's own binding and tree,
 /// built from the files as they are now. It takes no topology lease.
-pub(super) fn production_fork_runtime<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn production_fork_runtime<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
     if config.session.target_selection.api_target().is_none() {
-        return host_runtime_binding(config, stderr_buf, RuntimeRole::Primary);
+        return host_runtime_binding(config, stderr_buf, RuntimeRole::Primary).await;
     }
     let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
     let mut attached = None;
-    executor
-        .block_on(api_runtime_for_record(
-            config,
-            &config.session,
-            false,
-            crate::topology_runtime::TopologyHubAttach::LookupOnly,
-            Some(&tree_id),
-            &mut attached,
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    api_runtime_for_record(
+        config,
+        &config.session,
+        false,
+        crate::topology_runtime::TopologyHubAttach::LookupOnly,
+        Some(&tree_id),
+        &mut attached,
+    )
+    .await
 }
 
 fn fork_progress<P: plakous_host_protocol::ProtocolExtension>(
@@ -411,14 +412,11 @@ fn discard_unstarted_fork<P: plakous_host_protocol::ProtocolExtension>(
         .map_err(CliFailure::new)
 }
 
-pub(super) fn fork_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn fork_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     stderr: &mut Vec<u8>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
-    config
-        .runtime_factory
-        .fork_runtime(executor, config, stderr)
+    config.runtime_factory.fork_runtime(config, stderr).await
 }
 
 #[cfg(test)]
