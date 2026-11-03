@@ -80,9 +80,9 @@ provider qualification, recovery certification, or source compatibility.
 | --- | --- |
 | Supported | A documented consumer product with an explicit inventory, a compatibility baseline, a direct external workflow, and a correctness obligation |
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
-| Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely and never published |
+| Repository-only | Test, fixture, and crash-harness packages, and the runner packages before their first release, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 37 packages: five supported, 29 published internal, three
+The workspace holds 38 packages: five supported, 29 published internal, four
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -109,10 +109,15 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 A retired package stops at its last published version; that version is not yanked.
 
-**Repository-only (3)**
+**Repository-only (4)**
 
 `plakous-test-support`, `plakous-offline-crash-harness`,
-`plakous-mcp-fake-server`.
+`plakous-mcp-fake-server`, `plakous-runner-protocol`.
+
+`plakous-runner-protocol` (layer `common`) is the runner protocol (chapter 01
+§8.4). It stays repository-only until runners are reachable from the product;
+until then nothing published depends on it. The `common` layer admits the
+repository-only class for this reason.
 
 Every one of these declares its `layer` and `class` in `[package.metadata.plakous]`,
 and `tools/gate/check_workspace.py` (via `tools/gate/plakous_policy.py`) checks each
@@ -127,7 +132,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | Directory | Contents | Layer |
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
-| `crates/common/` | attempt, http, auth | common |
+| `crates/common/` | attempt, http, auth, runner-protocol | common |
 | `crates/runtimes/` | cell, js-runtime, py-worker | engine |
 | `crates/protocols/` | Responses (with its shared dialect hosts), exchange, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
@@ -1789,7 +1794,8 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 ### 7.5 Portable crates
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
-list. It starts as `plakous-model`. A crate joins that tuple only in the change
+list: `plakous-model` and `plakous-runner-protocol`, whose closure is `serde`
+and `serde_json` and whose defaults are portable. A crate joins that tuple only in the change
 that makes its normal dependency closure pass the fence below and its library
 check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
 claim: `wasm32-unknown-unknown` stays an unsupported product target (section 2).

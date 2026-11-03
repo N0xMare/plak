@@ -15,6 +15,7 @@ members = [
     "crates/providers/anthropic",
     "crates/common/attempt",
     "crates/common/auth",
+    "crates/common/runner-protocol",
     "crates/runtimes/cell",
     "crates/runtimes/js-runtime",
     "crates/runtimes/py-worker",
@@ -222,7 +223,7 @@ vendor = ["vendor/{short}"]
 
 [workspace.metadata.plakous.classes]
 core = ["supported"]
-common = ["published-internal"]
+common = ["published-internal", "repository-only"]
 engine = ["published-internal"]
 protocol = ["published-internal"]
 provider = ["published-internal"]

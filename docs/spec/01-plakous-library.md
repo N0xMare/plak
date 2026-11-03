@@ -5529,6 +5529,44 @@ session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
+**Runner protocol v1.** `plakous-runner-protocol` (repository-only, chapter
+06 §3) defines what a host and a runner say to each other over one byte
+stream. Nothing implements either end yet and no product path reaches it.
+
+- **Frames.** A big-endian `u32` length, then one JSON value. Neither end
+  reads or writes a frame over 16 MiB; an answer that would exceed it is
+  replaced by a `ResourceLimit` backend error that is not proven to have had
+  no effect, since the operation ran.
+- **Handshake.** The runner speaks first: `Hello { version, binary_id,
+  runner_id, instance, boot_id, descriptor, capabilities, path, home,
+  job_bound }`. The version triple is the protocol version (1), the source
+  revision and the build flavor, and binding requires an exact match; the
+  binary id is evidence and is never compared. `instance` is fresh for every
+  runner process and `boot_id` names the machine boot it runs in. The
+  descriptor is the `Runner` descriptor its operations present, never
+  `local`. The host answers `Bind { host_id, host_instance, version }`. The
+  runner refuses any frame before `Bind` (`Unbound`) and a `Bind` of another
+  version; the host refuses a runner of another version before any request.
+- **Requests.** Each request names its class, its owner, the remaining
+  deadline as a duration (the ends share no clock), a digest (lowercase hex
+  SHA-256 of the RFC 8785 JSON of its operation) and a `replay` flag. An
+  `EffectCall { call_id, attempt_id }` (from `OperationClass::EffectCall`) is
+  keyed by host, line, generation, call and attempt, and must name its owner.
+  A `BuildRead` (from `Unkeyed`) is keyed by its request id alone and is never
+  recorded. The operations of this version are `workspace.read`,
+  `repository.query`, `workspace.mutate` and `process.execute`, whose payloads
+  and errors are the execution environment's own schema; the protocol
+  frames, keys and orders them without interpreting them. Control frames are
+  `Cancel`, `Preempt`, `Ack`, `TransferOwner` and `Ping`; no operation of this
+  version reads a yield, so a runner accepts `Preempt` and changes nothing.
+  Services, process streams, jobs and joined sessions are not carried yet: a
+  runner that does not advertise the `streams` capability answers them
+  `Unsupported`, with no effect, as it answers the `ProcessObservation { job,
+  cursor }` and `OwnerControl { control_id }` request classes. Those classes
+  and the stream frame (`Stream { stream, seq, event }`, with data, credit and
+  close events) are already part of the grammar, so jobs and streams arrive
+  without a version change.
+
 Every potentially effectful invocation follows one small protocol: validate →
 authorize or approve → record identity → dispatch → observe outcome → commit or
 reconcile. A mutating tool has exactly one durable operation with states

@@ -1,0 +1,21 @@
+[package]
+name = "plakous-runner-protocol"
+description = "Runner protocol v1: frames, handshake, request classes and operations between a Plakous host and a runner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "common"
+class = "repository-only"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -57,8 +57,8 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 37 packages: five supported, 29 published internal
-(the vendored `plakous-codex-code-mode-protocol` among them), and three
+The workspace contains 38 packages: five supported, 29 published internal
+(the vendored `plakous-codex-code-mode-protocol` among them), and four
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
 `publish = false` (chapter 06 §1).
@@ -67,9 +67,12 @@ to crates.io as one exact cohort; the repository-only packages set
   `plak`. Each has an exact inventory pinned by a compile fixture or process
   test, not by whatever happens to be `pub`.
 - **Published internal:** the common, engine, protocol, provider, store,
-  harness, host, and vendor crates listed in the crate map below.
+  harness, host, and vendor crates listed in the crate map below, except the
+  runner protocol.
 - **Repository-only:** `plakous-test-support`,
-  `plakous-offline-crash-harness`, and `plakous-mcp-fake-server`.
+  `plakous-offline-crash-harness`, `plakous-mcp-fake-server`, and
+  `plakous-runner-protocol` (the runner protocol, unreleased until runners are
+  reachable from the product).
 
 Complete-workflow embedders depend on `plakous` alone. Narrow component
 embedders may use `plakous-agent`, `plakous-model` (Custom model integration),
@@ -106,6 +109,7 @@ classes and directory policy.
 | `plakous-attempt` | `crates/common/attempt` | `common` | Family-agnostic attempt lifecycle: phase transitions, observation ledger, pure acceptance outcomes |
 | `plakous-http` | `crates/common/http` | `common` | Provider-blind bounded HTTP transport and SSE framing. One fresh connection per execute unless the client is explicitly pooled; no redirect, proxy, retry, or auth semantics |
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
+| `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol v1: length-prefixed JSON frames, the hello and bind handshake, request classes, owner transfer and answers; repository-only |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |
