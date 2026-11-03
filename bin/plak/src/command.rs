@@ -80,6 +80,7 @@ pub(crate) enum Command {
     },
     SecretList,
     Mcp(crate::commands::mcp::McpCommand),
+    Runner(crate::commands::runner::RunnerCommand),
     Usage {
         account: Option<String>,
         session_id: Option<String>,
@@ -312,6 +313,7 @@ impl Command {
             Self::KeySet { .. } | Self::KeyClear { .. } | Self::KeyStatus { .. } => "key",
             Self::SecretSet { .. } | Self::SecretRm { .. } | Self::SecretList => "secret",
             Self::Mcp(_) => "mcp",
+            Self::Runner(_) => "runner",
             Self::Usage { .. } => "usage",
             Self::SessionList
             | Self::SessionShow { .. }

@@ -15,6 +15,7 @@ COMMANDS:
   key         API key set/clear/status (openai, xai-api, anthropic, openrouter)
   secret      Named secrets config.toml refers to (set/rm/list; values never printed)
   mcp         MCP servers: add/list/show/test/remove, enable on templates
+  runner      Runner daemon on this machine; pair with and list remote runners
   run         Non-interactive one-shot agent run
   agent       Long-lived JSONL host client (stdio; same host as TUI)
   resume      Resume session (cwd picker or UUID)

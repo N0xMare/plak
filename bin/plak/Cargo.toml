@@ -66,7 +66,7 @@ time = { version = "0.3", features = ["formatting", "local-offset"] }
 # Prompt send times resolve each stamp in the process zone. `tz-system` loads
 # it once; `tzdb-zoneinfo` reads the host zoneinfo for that stamp's offset.
 jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 # Configuration is real TOML: `toml` loads the typed schema with spans for
 # diagnostics, `toml_edit` makes a single-key save keep the file's comments.
 toml.workspace = true

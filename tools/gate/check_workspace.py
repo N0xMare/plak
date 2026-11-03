@@ -362,10 +362,22 @@ FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS = {
     "product_compaction",
 }
 SourceKey = tuple[str, str]
+# Each compile-time environment macro the product may use, with the one
+# variable it names, in source order.
+EXPECTED_COMPILE_TIME_ENVIRONMENT: dict[SourceKey, list[tuple[str, str]]] = {
+    ("plak", "src/commands/exchange_capture.rs"): [("env", "CARGO_MANIFEST_DIR")],
+    ("plak", "src/build_identity.rs"): [("option_env", "PLAK_SOURCE_REVISION")],
+}
+
 EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
     ("plak", "src/environment.rs"): [
+        # The runner daemon's PATH and HOME, and the login shell that answers
+        # a PATH runner.toml leaves unset (spec 04 §2.9).
+        ("var_os", (("string", "PATH"),)),
+        ("var_os", (("string", "HOME"),)),
+        ("var_os", (("string", "SHELL"),)),
         ("var_os", (("string", "PLAK_RELOAD_APPLY_ORCHESTRATION"),)),
     ],
     # Maintainer/test-hooks private inference capture, explicitly selected per process.
@@ -483,7 +495,10 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # files under `bin/plak/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plak", "src/cli/render.rs"): ("include_str",) * 25,
+    ("plak", "src/cli/render.rs"): ("include_str",) * 26,
+    # The source revision the build recipe states, half of the version
+    # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
+    ("plak", "src/build_identity.rs"): ("option_env",),
     # Each route owns its four bundled role files; the common multi-provider
     # profile remains in profiles.rs. The total stays sixteen documents.
     ("plak", "src/profiles.rs"): ("include_str",) * 4,
@@ -511,6 +526,14 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ],
     ("plak", "src/commands/support.rs"): [
         ("std::process::Command", (("identifier", "program"),)),
+    ],
+    # `plak runner connect` starts `plak runner serve` detached with a cleared
+    # environment, asks the login shell for PATH once, bounded, and reads the
+    # macOS boot time for the daemon's boot id.
+    ("plak", "src/commands/runner.rs"): [
+        ("std::process::Command", (("identifier", "executable"),)),
+        ("std::process::Command", (("identifier", "shell"),)),
+        ("std::process::Command", (("string", "sysctl"),)),
     ],
     # Product-only, best-effort local host provenance for Harbor login pins.
     ("plak", "src/commands/login_host.rs"): [
@@ -563,6 +586,8 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ],
 }
 EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
+    # The host's ssh dial to a runner pipes its link through stdin/stdout.
+    ("plak", "src/commands/runner/dial.rs"): {"Stdio"},
     ("plak", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},
     ("plak", "src/main.rs"): {"ExitCode"},
     ("plak", "src/lib.rs"): {"ExitCode"},
@@ -606,7 +631,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runner_reader.rs"): {"json"},
     # `test-hooks` only: scripted offline model plans for child fixtures.
     ("plak", "src/test_hooks.rs"): {"json"},
-    ("plak", "src/build_identity.rs"): {"cfg"},
+    ("plak", "src/build_identity.rs"): {"cfg", "option_env"},
     ("plak", "src/tui/launch_intro.rs"): {"cfg"},
     # The `test-support`-only persistence benchmark checks that its final
     # reload retained every transcript line it timed.
@@ -1475,6 +1500,45 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # The export document names its runner by the library's runner identity.
     ("plak", "src/carry/document.rs"): {"tools": {"RunnerId"}},
+    # `plak runner`: the daemon over the hidden runner ends, its environment
+    # and identity, and the host's inspecting link (spec 02 §3.1).
+    ("plak", "src/commands/runner.rs"): {
+        "model": {"RunId"},
+        "runner": {
+            "ClientWindows",
+            "FileOwnerFloors",
+            "RunnerClient",
+            "RunnerIdentity",
+            "RunnerLimits",
+            "RunnerOptions",
+            "RunnerService",
+            "daemon",
+            "protocol",
+            "Bind",
+            "LineStatus",
+            "Refusal",
+        },
+        "tools": {
+            "ExecutionEnvironment",
+            "ExecutionEnvironmentConfig",
+            "ExecutionEnvironmentScope",
+            "RunnerId",
+            "runner",
+        },
+    },
+    # The host's strict ssh dial and journaled bind to a runner.
+    ("plak", "src/commands/runner/dial.rs"): {
+        "runner": {
+            "CallJournal",
+            "ClientWindows",
+            "FileCallJournal",
+            "RunnerClient",
+            "protocol",
+            "Bind",
+            "Hello",
+            "VersionTriple",
+        },
+    },
     # Re-adoption of a runner's lines through a lease-only head (spec 01 §8.4).
     ("plakous-hosted", "src/runner_adoption.rs"): {
         "runner": {"RunnerClient"},
@@ -2655,14 +2719,34 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
         if environment_paths & {"vars", "vars_os"}:
             errors.append(f"{package}:{path}: plak CLI contains ambient environment iteration")
         expected_generated = EXPECTED_PRODUCT_GENERATED_MACROS.get((package, path), ())
-        if "env" not in expected_generated and any(
+        if any(
             token == RustToken("identifier", macro)
             and index + 1 < len(tokens)
             and tokens[index + 1].value == "!"
             for index, token in enumerate(tokens)
             for macro in ("env", "option_env")
+            if macro not in expected_generated
         ):
             errors.append(f"{package}:{path}: plak CLI contains compile-time environment access")
+        compile_time = [
+            (
+                token.value,
+                tokens[index + 3].value
+                if index + 3 < len(tokens) and tokens[index + 3].kind == "string"
+                else "",
+            )
+            for index, token in enumerate(tokens)
+            if token.kind == "identifier"
+            and token.value in {"env", "option_env"}
+            and index + 1 < len(tokens)
+            and tokens[index + 1].value == "!"
+        ]
+        expected_compile_time = EXPECTED_COMPILE_TIME_ENVIRONMENT.get((package, path), [])
+        if compile_time != expected_compile_time:
+            errors.append(
+                f"{package}:{path}: compile-time environment {compile_time!r}, "
+                f"expected {expected_compile_time!r}"
+            )
         actual = [
             (name, tuple((token.kind, token.value) for token in arguments))
             for name, arguments in environment_calls

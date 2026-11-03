@@ -64,6 +64,12 @@ impl TopCommand {
             Self::Secret {
                 action: Some(action),
             } => action.into_command(),
+            Self::Runner { action: None } => Ok(Command::CommandHelp {
+                command: "runner".to_owned(),
+            }),
+            Self::Runner {
+                action: Some(action),
+            } => action.into_command(),
             Self::Mcp { action: None } => Ok(Command::CommandHelp {
                 command: "mcp".to_owned(),
             }),

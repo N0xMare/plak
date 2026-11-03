@@ -1,0 +1,412 @@
+//! `plak runner`: this machine's runner daemon and the host's view of its
+//! runners (spec 02 §1, spec 01 §8.4).
+//!
+//! On a runner machine, `serve` runs the daemon in the foreground and
+//! `connect --stdio` (what a host's ssh runs) bridges to it, starting it
+//! detached when none answers. `allow` pairs a host by adding its identity
+//! to the allowlist, and `ps` lists the lines and jobs the daemon holds. On a
+//! host, `pair <name>` pairs this host with `[runners.<name>]` over ssh and
+//! `ps <name>` lists that runner's lines.
+
+mod dial;
+mod home;
+
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use plakous::runner::daemon;
+use plakous::runner::protocol::{Bind, LineStatus, Refusal};
+use plakous::runner::{
+    ClientWindows, FileOwnerFloors, RunnerClient, RunnerIdentity, RunnerLimits, RunnerOptions,
+    RunnerService,
+};
+use plakous::tools::{
+    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
+};
+use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
+
+use crate::home::paths::PlakPaths;
+use dial::{ssh_command, version};
+use home::RunnerHome;
+
+/// How long `connect` waits for a daemon it started to listen.
+const START_WAIT: Duration = Duration::from_secs(10);
+
+/// A `plak runner` command.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum RunnerCommand {
+    Serve,
+    Connect,
+    Allow { host_id: String },
+    Ps { name: Option<String> },
+    Pair { name: String },
+}
+
+/// Runs one `plak runner` command.
+pub(crate) fn run(
+    paths: &PlakPaths,
+    command: RunnerCommand,
+    stdout: &mut dyn std::io::Write,
+) -> CliResult<ProcessOutcome> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("plak-runner")
+        .build()
+        .map_err(|error| CliFailure::new(format!("the runner runtime did not start: {error}")))?;
+    match command {
+        RunnerCommand::Serve => runtime.block_on(serve(paths)),
+        RunnerCommand::Connect => runtime.block_on(connect(paths)),
+        RunnerCommand::Allow { host_id } => allow(paths, &host_id, stdout),
+        RunnerCommand::Ps { name: None } => runtime.block_on(ps_local(paths, stdout)),
+        RunnerCommand::Ps { name: Some(name) } => runtime.block_on(ps_remote(paths, &name, stdout)),
+        RunnerCommand::Pair { name } => runtime.block_on(pair(paths, &name, stdout)),
+    }?;
+    Ok(ProcessOutcome::Success)
+}
+
+/// `plak runner serve`: the daemon, in the foreground, until it is idle.
+async fn serve(paths: &PlakPaths) -> CliResult<()> {
+    let home = RunnerHome::of(paths);
+    let config = home.config()?;
+    let Some(first) = config.roots.first() else {
+        return Err(CliFailure::new(format!(
+            "{} lists no roots; a runner serves only workspaces under its roots",
+            home.config_path().display()
+        )));
+    };
+    home::private_directory(home.root())?;
+    // A root in or around the product home would hand a host this machine's
+    // own files: the runner's allowlist and floors, and every secret and
+    // credential the home holds.
+    let excluded = paths.home().to_path_buf();
+    for root in &config.roots {
+        if home::overlaps_home(root, &excluded) {
+            return Err(CliFailure::new(format!(
+                "{}: root {} lies inside or around the product home {}; list workspace roots apart from it",
+                home.config_path().display(),
+                root.display(),
+                excluded.display()
+            )));
+        }
+    }
+    if !home::admitted_workspace(&config.roots, &excluded, first) {
+        return Err(CliFailure::new(format!(
+            "runner root {} cannot be served: it does not resolve to a directory under the runner's roots",
+            first.display()
+        )));
+    }
+    let scope = ExecutionEnvironmentScope::Run(
+        plakous::model::RunId::try_from(uuid::Uuid::new_v4())
+            .map_err(|error| CliFailure::new(error.to_string()))?,
+    );
+    let environment =
+        ExecutionEnvironment::host(scope, first, first, ExecutionEnvironmentConfig::default())
+            .map_err(|error| {
+                CliFailure::new(format!("runner root {}: {error}", first.display()))
+            })?;
+    let (roots, outside) = (config.roots.clone(), excluded.clone());
+    let workspaces = Arc::new(move |root: &Path, cwd: &Path| {
+        if !home::admitted_workspace(&roots, &outside, root) {
+            return Err(plakous::tools::runner::workspace_refusal());
+        }
+        ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
+    });
+    let roots = config.roots.clone();
+    let probe_paths =
+        Arc::new(move |candidate: &Path| home::admitted_probe_path(&roots, &excluded, candidate));
+    let allowlist_home = home.clone();
+    let hosts = Arc::new(move |host_id: &str| {
+        // Read at every bind, so a pairing made while the daemon runs holds.
+        allowlist_home
+            .config()
+            .is_ok_and(|config| config.hosts.iter().any(|allowed| allowed == host_id))
+    });
+    let floors = FileOwnerFloors::open(home.floors_path()).map_err(|error| {
+        CliFailure::new(format!(
+            "{} could not be read: {error}",
+            home.floors_path().display()
+        ))
+    })?;
+    let runner_id = RunnerId::new(home.runner_id()?)
+        .map_err(|error| CliFailure::new(format!("runner id: {error}")))?;
+    let service = RunnerService::with_options(
+        environment,
+        RunnerIdentity {
+            runner_id,
+            version: version(),
+            boot_id: boot_id(),
+            binary_id: crate::build_identity::known_binary_id(),
+        },
+        RunnerOptions {
+            limits: RunnerLimits::default(),
+            workspaces: Some(workspaces),
+            extension: None,
+            hosts: Some(hosts),
+            probe_paths: Some(probe_paths),
+            local_host: Some(home::host_id(paths)?),
+            floors: Some(Arc::new(floors)),
+            path: crate::environment::inherited_path(),
+            home: crate::environment::inherited_home(),
+        },
+    )
+    .map_err(|error| CliFailure::new(format!("the runner did not start: {error}")))?;
+    let socket = daemon::socket_path(&home.run_directory(), &version());
+    match daemon::serve_socket(service, &socket, config.idle_exit()).await {
+        Ok(()) => Ok(()),
+        // One daemon per user and build is enough.
+        Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
+        Err(error) => Err(CliFailure::new(error.to_string())),
+    }
+}
+
+/// `plak runner connect --stdio`: bridges stdin and stdout to the daemon,
+/// starting it detached when none answers.
+async fn connect(paths: &PlakPaths) -> CliResult<()> {
+    let home = RunnerHome::of(paths);
+    let config = home.config()?;
+    let socket = daemon::socket_path(&home.run_directory(), &version());
+    let start = || start_daemon(paths, &home, &config);
+    daemon::bridge_stdio(&socket, start, START_WAIT)
+        .await
+        .map_err(|error| CliFailure::new(format!("the runner link failed: {error}")))
+}
+
+/// Starts `plak runner serve` detached, in its own process group, with a
+/// cleared environment: `PATH` and `HOME` from `runner.toml` (a login shell
+/// answers a missing `PATH`), and this product home.
+fn start_daemon(
+    paths: &PlakPaths,
+    home: &RunnerHome,
+    config: &home::RunnerToml,
+) -> std::io::Result<()> {
+    let executable = std::env::current_exe()?;
+    let user_home = config
+        .home
+        .clone()
+        .or_else(crate::environment::inherited_home)
+        .unwrap_or_default();
+    let path = match &config.path {
+        Some(path) => path.clone(),
+        None => login_shell_path()
+            .or_else(crate::environment::inherited_path)
+            .unwrap_or_else(|| "/usr/bin:/bin".to_owned()),
+    };
+    home::private_directory(home.root())
+        .map_err(|error| std::io::Error::other(error.message().to_owned()))?;
+    let log = {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(home.log_path())?;
+        // An older log keeps the mode it was created with.
+        log.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        log
+    };
+    let mut command = std::process::Command::new(executable);
+    command
+        .args(["runner", "serve"])
+        .env_clear()
+        .env("PATH", path)
+        .env("HOME", user_home)
+        .env("PLAK_HOME", paths.home())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(log);
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command.spawn().map(drop)
+}
+
+/// The `PATH` the user's login shell sets, asked once with a 5 s bound.
+fn login_shell_path() -> Option<String> {
+    let shell = crate::environment::login_shell()?;
+    let mut child = std::process::Command::new(shell)
+        .args(["-l", "-c", "printf %s \"$PATH\""])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    let mut path = String::new();
+    std::io::Read::read_to_string(child.stdout.as_mut()?, &mut path).ok()?;
+    (!path.is_empty() && !path.contains('\n')).then_some(path)
+}
+
+/// `plak runner allow <host-id>`: pairs a host with this machine's runner.
+fn allow(paths: &PlakPaths, host_id: &str, stdout: &mut dyn std::io::Write) -> CliResult<()> {
+    let home = RunnerHome::of(paths);
+    let added = home.allow(host_id)?;
+    let line = if added {
+        format!("host {host_id} may use this runner")
+    } else {
+        format!("host {host_id} was already paired")
+    };
+    writeln!(stdout, "{line}").map_err(|_| CliFailure::new("stdout failed"))
+}
+
+/// `plak runner ps`: the lines and jobs this machine's daemon holds, for
+/// every host.
+async fn ps_local(paths: &PlakPaths, stdout: &mut dyn std::io::Write) -> CliResult<()> {
+    let home = RunnerHome::of(paths);
+    let socket = daemon::socket_path(&home.run_directory(), &version());
+    let Ok(stream) = tokio::net::UnixStream::connect(&socket).await else {
+        writeln!(stdout, "no runner is running").map_err(|_| CliFailure::new("stdout failed"))?;
+        return Ok(());
+    };
+    let bind = Bind {
+        host_id: home::host_id(paths)?,
+        host_instance: uuid::Uuid::new_v4().hyphenated().to_string(),
+        version: version(),
+        inspect: true,
+    };
+    let (client, _) = RunnerClient::connect(stream, bind, ClientWindows::default())
+        .await
+        .map_err(|error| CliFailure::new(format!("the runner: {error}")))?;
+    let lines = client
+        .lines()
+        .await
+        .map_err(|error| CliFailure::new(format!("the runner: {error:?}")))?;
+    render_lines(&lines, stdout)
+}
+
+/// `plak runner ps <name>`: what a configured runner holds, over ssh.
+async fn ps_remote(
+    paths: &PlakPaths,
+    name: &str,
+    stdout: &mut dyn std::io::Write,
+) -> CliResult<()> {
+    let destination = configured(paths, name)?;
+    let dialed = dial::dial(paths, name, &destination, true).await?;
+    let lines = dialed
+        .client
+        .lines()
+        .await
+        .map_err(|error| CliFailure::new(format!("runner {name}: {error:?}")))?;
+    render_lines(&lines, stdout)
+}
+
+/// `plak runner pair <name>`: adds this host to `[runners.<name>]`'s
+/// allowlist over ssh, then binds to it to prove the pairing, and records
+/// the runner's identity.
+async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) -> CliResult<()> {
+    let ours = version();
+    if ours.source_revision == "unknown" {
+        return Err(CliFailure::new(
+            "this build does not know its source revision, so it cannot pair with a remote runner; install a release or maintainer build",
+        ));
+    }
+    let destination = configured(paths, name)?;
+    let host_id = home::host_id(paths)?;
+    let status = ssh_command(&destination, &["plak", "runner", "allow", &host_id])
+        .stdin(std::process::Stdio::null())
+        .status()
+        .await
+        .map_err(|error| CliFailure::new(format!("ssh could not be started: {error}")))?;
+    if !status.success() {
+        return Err(CliFailure::new(format!(
+            "runner {name}: `plak runner allow` did not succeed over ssh ({status})"
+        )));
+    }
+    let dialed = dial::dial(paths, name, &destination, false).await?;
+    // The bind is proved by an answer the runner gives only a paired host.
+    if let Err(error) = dialed.client.lines().await {
+        let reason = match dialed.client.refusal() {
+            Some(Refusal::NotPaired { .. }) => "the runner does not list this host".to_owned(),
+            Some(refusal) => format!("{refusal:?}"),
+            None => format!("{error:?}"),
+        };
+        return Err(CliFailure::new(format!("runner {name}: {reason}")));
+    }
+    let record = PairedRunner {
+        runner_id: &dialed.hello.runner_id,
+        source_revision: &dialed.hello.version.source_revision,
+        flavor: &dialed.hello.version.flavor,
+        binary_id: dialed.hello.binary_id.as_deref(),
+    };
+    let directory = paths.home().join("runners").join(name);
+    home::private_directory(&directory)?;
+    home::write_private(
+        &directory.join("runner.json"),
+        &serde_json::to_vec_pretty(&record).map_err(|error| CliFailure::new(error.to_string()))?,
+    )?;
+    writeln!(
+        stdout,
+        "paired host {host_id} with runner {name} ({})",
+        dialed.hello.runner_id
+    )
+    .map_err(|_| CliFailure::new("stdout failed"))
+}
+
+/// What a host records of a runner it paired with.
+#[derive(serde::Serialize)]
+struct PairedRunner<'a> {
+    runner_id: &'a str,
+    source_revision: &'a str,
+    flavor: &'a str,
+    binary_id: Option<&'a str>,
+}
+
+fn configured(paths: &PlakPaths, name: &str) -> CliResult<String> {
+    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    config
+        .runners
+        .get(name)
+        .map(|runner| runner.ssh.clone())
+        .ok_or_else(|| {
+            CliFailure::new(format!(
+                "no [runners.{name}] in config.toml; add it with an ssh destination"
+            ))
+        })
+}
+
+fn render_lines(lines: &[LineStatus], stdout: &mut dyn std::io::Write) -> CliResult<()> {
+    let mut text = String::new();
+    if lines.is_empty() {
+        text.push_str("no lines\n");
+    }
+    for line in lines {
+        let jobs = line.jobs["jobs"].as_array().map_or(0, Vec::len);
+        let held = if line.adopted { "held" } else { "orphaned" };
+        text.push_str(&format!(
+            "host {} line {} {held} {} job{}\n",
+            line.host_id,
+            line.line,
+            jobs,
+            if jobs == 1 { "" } else { "s" }
+        ));
+    }
+    stdout
+        .write_all(text.as_bytes())
+        .map_err(|_| CliFailure::new("stdout failed"))
+}
+
+/// The machine boot this daemon belongs to: Linux's boot id, or the boot
+/// time elsewhere.
+fn boot_id() -> String {
+    if let Ok(id) = std::fs::read_to_string("/proc/sys/kernel/random/boot_id") {
+        return id.trim().to_owned();
+    }
+    std::process::Command::new("sysctl")
+        .args(["-n", "kern.boottime"])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
+}

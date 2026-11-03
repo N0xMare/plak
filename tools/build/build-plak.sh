@@ -117,6 +117,13 @@ if [[ "$profile" == release ]]; then
   # Linkage proof needs raw symbols; strip only the staged shipping copies.
   export CARGO_PROFILE_RELEASE_STRIP=debuginfo
 fi
+# A clean checkout states the source revision it builds, half of the
+# version triple runners bind on; anything else builds as `unknown`, which
+# pairs with no remote runner.
+if [[ -z "$(git -C "$repo_root" status --porcelain 2>/dev/null)" ]]; then
+  PLAK_SOURCE_REVISION="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
+  export PLAK_SOURCE_REVISION
+fi
 cargo build --locked ${offline[@]+"${offline[@]}"} -p plak ${plak_features[@]+"${plak_features[@]}"} ${profile_flag[@]+"${profile_flag[@]}"}
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 [[ "$target_dir" == /* ]] || target_dir="$repo_root/$target_dir"

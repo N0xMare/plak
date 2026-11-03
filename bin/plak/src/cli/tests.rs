@@ -946,6 +946,39 @@ fn product_command_argv_matrix() {
             |c| matches!(c, Command::SecretRm { name } if name == "linear-ws"),
         ),
         (&["secret", "list"], |c| matches!(c, Command::SecretList)),
+        (&["runner", "serve"], |c| {
+            matches!(
+                c,
+                Command::Runner(crate::commands::runner::RunnerCommand::Serve)
+            )
+        }),
+        (&["runner", "connect", "--stdio"], |c| {
+            matches!(
+                c,
+                Command::Runner(crate::commands::runner::RunnerCommand::Connect)
+            )
+        }),
+        (
+            &["runner", "connect"],
+            |c| matches!(c, Command::CommandHelp { command } if command == "runner"),
+        ),
+        (&["runner", "ps"], |c| {
+            matches!(
+                c,
+                Command::Runner(crate::commands::runner::RunnerCommand::Ps { name: None })
+            )
+        }),
+        (&["runner", "pair", "build"], |c| {
+            matches!(
+                c,
+                Command::Runner(crate::commands::runner::RunnerCommand::Pair { name })
+                    if name == "build"
+            )
+        }),
+        (
+            &["runner"],
+            |c| matches!(c, Command::CommandHelp { command } if command == "runner"),
+        ),
         (
             &["secret"],
             |c| matches!(c, Command::CommandHelp { command } if command == "secret"),

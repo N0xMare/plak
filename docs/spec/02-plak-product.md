@@ -289,6 +289,13 @@ launch directory — the cwd of the process, resolved once.
   telemetry/telemetry-v21.sqlite3 disposable analytics, schema 21
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
+  host-id                     this home's host identity for runners, 0600, made at first pairing or dial
+  runners/<name>/runner.json  a paired runner's identity and version, 0600
+  runners/<name>/calls/       the keyed calls this host sent the runner and has no answer for (chapter 01 §8.4)
+  runner/                     this machine's runner home, 0700 (an existing one is closed to 0700):
+                              runner.toml (07 §3.7), runner-id, owners.json (the owner floors),
+                              run/ (0700: the 0600 daemon socket and the 0600 lock file the daemon
+                              holds for its life), serve.log (0600, the detached daemon's stderr)
 ```
 
 `state/<key>/` is the durable root of one build: its three authorities and
@@ -2292,6 +2299,7 @@ version. There is no top-level prompt positional.
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state and older-schema telemetry (including its SQLite sidecars); retain current/newer telemetry and session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
 | `telemetry status [--views]`, `telemetry sql [<query>] [--json]`, `telemetry prune [--max-age-days <n>] [--max-bytes <n>] [--yes]` | the local analytics store |
 | `models [<account>]` | read-only catalog discovery, in every build |
+| `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>` | Runners (chapter 01 §8.4, chapter 04 §2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 §3.7); `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plak runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plak runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. No session is placed on a runner yet. |
 | `version`, `help [<command>]` | |
 
 `session show` also inspects the root session's canonical Plakous branch head

@@ -212,6 +212,7 @@ not (
   | test(runner_killed_mid_job_restarts_with_its_owner_floor)
   | test(host_killed_mid_call_is_recovered_and_readopted_by_its_host_id)
   | test(a_returning_host_readopts_its_line_under_a_lease_only_head)
+  | test(a_runner_daemon_pairs_bridges_lists_and_exits_idle)
 )
 '''
 
@@ -372,6 +373,7 @@ default-filter = '''
   | test(runner_killed_mid_job_restarts_with_its_owner_floor)
   | test(host_killed_mid_call_is_recovered_and_readopted_by_its_host_id)
   | test(a_returning_host_readopts_its_line_under_a_lease_only_head)
+  | test(a_runner_daemon_pairs_bridges_lists_and_exits_idle)
 '''
 
 # Per-test timing: each lane writes target/nextest/<profile>/junit.xml

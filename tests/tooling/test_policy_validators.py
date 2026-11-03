@@ -1533,6 +1533,7 @@ class RepositoryPolicyTests(unittest.TestCase):
             | set(workspace_policy.EXPECTED_PRODUCT_PROCESS_IMPORTS)
             | set(workspace_policy.ALLOWED_CLI_MACROS_BY_SOURCE)
             | set(workspace_policy.EXPECTED_PRODUCT_GENERATED_MACROS)
+            | set(workspace_policy.EXPECTED_COMPILE_TIME_ENVIRONMENT)
         )
         for package_name, relative in sorted(keys):
             with self.subTest(pin=f"{package_name}:{relative}"):
@@ -2294,6 +2295,22 @@ fn decode() { tags!(); }
                 sources = self.cli_security_fixture()
                 sources[package][path] += extra
                 self.assertTrue(self.validate_fixture(sources))
+
+    def test_compile_time_environment_is_pinned_to_its_variable(self) -> None:
+        source = (
+            "pub(crate) const SOURCE_REVISION: &str = "
+            'match option_env!("PLAK_SOURCE_REVISION") { Some(r) => r, None => "unknown" };'
+        )
+
+        def pinned_errors(text: str) -> list[str]:
+            errors = workspace_policy.validate_cli_security_sources(
+                "plak", {"src/build_identity.rs": text}
+            )
+            return [error for error in errors if "compile-time environment" in error]
+
+        self.assertEqual(pinned_errors(source), [])
+        self.assertTrue(pinned_errors(source.replace("PLAK_SOURCE_REVISION", "HOME")))
+        self.assertTrue(pinned_errors(source + '\nconst H: Option<&str> = option_env!("HOME");'))
 
     def test_pins_are_keyed_by_package_not_path(self) -> None:
         """The same relative path under another package carries no pin."""

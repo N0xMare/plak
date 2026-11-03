@@ -21,6 +21,7 @@ mod mcp_text;
 #[cfg(feature = "maintainer")]
 pub(crate) mod reload_rehearsal;
 pub(crate) mod run;
+pub(crate) mod runner;
 pub mod secret;
 pub mod session;
 pub mod support;

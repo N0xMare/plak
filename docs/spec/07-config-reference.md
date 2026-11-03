@@ -173,9 +173,10 @@ The families are not `plak config set` keys: they are authored in the file, a
 save leaves them exactly as written, and `plak config show` prints the
 canonical rendering of the tool and server tables after the keys.
 
-`[host] resume_after_loss`, `[mcp_servers.<id>] placement` and
-`[runners.<name>]` are accepted, validated and inert until their steps (node
-recovery for the first, runner placement for the other two). A 0.0.3 build
+`[host] resume_after_loss` and `[mcp_servers.<id>] placement` are accepted,
+validated and inert until their steps (node recovery for the first, runner
+placement for the second); `[runners.<name>]` is read by `plak runner pair` and
+`plak runner ps` (§3.6) and by nothing else yet. A 0.0.3 build
 refuses a `config.toml` that sets any of them (unknown section or key), so
 `plak` writes them only when the operator sets them: `plak config init` and a
 fresh save write the `[host]` header commented out, a save of another key
@@ -421,17 +422,33 @@ only from the home.
 ### 3.6 `[runners.<name>]`
 
 One machine a host may run a node's tools on, reached over ssh as
-`ssh <strict options> <ssh> plak runner connect --stdio`. `<name>` matches
-`[a-z][a-z0-9-]{0,31}` and is never `local`, the name of the host's own runner,
-which needs no table. Home-scoped. Parsed and validated only: no runner is
-dialed, listed or chosen until the runner steps land.
+`ssh <strict options> -- <ssh> plak runner connect --stdio` (chapter 04 §2.9).
+`<name>` matches `[a-z][a-z0-9-]{0,31}` and is never `local`, the name of the
+host's own runner, which needs no table. Home-scoped. `plak runner pair <name>`
+and `plak runner ps <name>` dial it; no session is placed on a runner yet.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
 | `ssh` | string | `(required)` | 1 to 255 visible ASCII bytes, no whitespace, not starting with `-` | The ssh destination: a `~/.ssh/config` alias or `[user@]host`. |
 
-Any other key is a load error. The runner's own roots, copies directory, PATH
-and HOME live in its `runner.toml` on that machine, not here.
+Any other key is a load error. The runner's own roots, PATH and HOME live in
+its `runner.toml` on that machine, not here (§3.7).
+
+### 3.7 `runner.toml`
+
+The runner home's configuration on a runner machine, `<home>/runner/runner.toml`
+(chapter 02 §2.1). It is read when the daemon starts, again at every host bind
+for `hosts`, and by `plak runner allow`, which edits `hosts` in place and keeps
+the rest of the file as written. A missing file is the empty configuration,
+with which `plak runner serve` refuses to start. Any other key is a load error.
+
+| key | type | default | constraint | meaning |
+| --- | --- | --- | --- | --- |
+| `roots` | array of strings | `[]` | absolute paths; at least one to serve; none inside or around the product home | The workspace roots a host may name. A requested workspace, the first root's default one included, is served only when it resolves under one of them and neither lies inside nor contains the runner machine's product home (`PLAK_HOME`, with the runner home and every secret and credential in it); `plak runner serve` refuses to start with a root inside or around it. Consent, not containment (chapter 04 §2.9). |
+| `path` | string | `(unset)` | | The `PATH` the daemon and its processes start with. Unset, a login shell (`$SHELL -l`) is asked once, bounded at 5 s, when `connect` starts the daemon. |
+| `home` | string | `(unset)` | | The `HOME` the daemon and its processes start with. Unset, the user's. |
+| `hosts` | array of strings | `[]` | lowercase uuids | The host identities that may bind (`plak runner allow`). |
+| `idle_exit_seconds` | integer | `300` | | How long the daemon stays up with no connection, job, orphan, service or unacknowledged answer before it exits. |
 
 ## 4. `agents/<name>.toml`
 

@@ -1,6 +1,6 @@
 //! `[runners.<name>]`: the machines a host may run a node's tools on, each
-//! reached as `ssh <alias>` (spec 07 §3.6). Parsed and validated only; no
-//! runner is dialed before the runner steps land.
+//! reached as `ssh <alias>` (spec 07 §3.6). `plak runner pair` and `ps`
+//! dial them; no session runs on one yet.
 
 use std::collections::BTreeMap;
 
@@ -54,6 +54,24 @@ pub(in crate::product_config) fn parse(
         parsed.insert(name.clone(), RunnerConfig { ssh });
     }
     Ok(parsed)
+}
+
+/// Checks a runner name a command names, as a `[runners.<name>]` table
+/// must be named.
+///
+/// # Errors
+/// Refuses anything else, and the host's own `local` runner.
+pub fn validate_runner_name(name: &str) -> Result<(), String> {
+    if name == LOCAL_RUNNER_NAME {
+        return Err("`local` is the host's own runner; name a [runners.<name>] table".to_owned());
+    }
+    if is_runner_name(name) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{name:?} is not a valid runner name; a name matches [a-z][a-z0-9-]{{0,31}}"
+        ))
+    }
 }
 
 fn is_runner_name(name: &str) -> bool {

@@ -483,6 +483,11 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             return carry::import_and_resume(&services, &path, handoff.as_deref());
         }
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
+        // The runner bridge owns raw stdin and stdout, so it runs before the
+        // process takes their locks.
+        Command::Runner(command) => {
+            return commands::runner::run(services.paths()?, command, &mut io::stdout());
+        }
         command => command,
     };
 
@@ -1056,6 +1061,7 @@ fn execute_command(
         Command::Mcp(command) => {
             commands::mcp::run(services.paths()?, command, stdin, stdout, stderr, login_ui)
         }
+        Command::Runner(_) => unreachable!("runner commands dispatch before the stdio locks"),
         Command::StatusAll => dispatch::execute_status_all(services, backend, stdout),
         Command::SessionList => dispatch::execute_session_list(services, stdout),
         Command::SessionShow { id } => show_session_read_only(services.paths()?, &id, stdout),

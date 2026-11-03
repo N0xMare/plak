@@ -14,7 +14,7 @@ mod templates;
 mod toml_file;
 mod tool_sections;
 
-pub use tool_sections::runners::{LOCAL_RUNNER_NAME, RunnerConfig};
+pub use tool_sections::runners::{LOCAL_RUNNER_NAME, RunnerConfig, validate_runner_name};
 pub use tool_sections::{
     DEFAULT_FETCH_URL_MAX_BYTES, DEFAULT_FETCH_URL_TIMEOUT_SECONDS, DEFAULT_MCP_CALL_SECONDS,
     DEFAULT_MCP_STARTUP_SECONDS, DEFAULT_WEB_SEARCH_MAX_USES, FetchUrlOptions, McpOAuthClient,

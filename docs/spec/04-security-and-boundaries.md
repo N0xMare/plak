@@ -601,6 +601,66 @@ The result is data, not instruction: it starts with the untrusted-data line.
 The policy does not stop a model from placing workspace content in the URL it
 requests; that exfiltration path is residual risk (section 9).
 
+### 2.9 Runners
+
+A runner runs a host's tools on another machine, as the runner machine's user
+(chapter 01 §8.4). Its authority is that user's, and nothing about the link
+widens it.
+
+- **The host dials; nothing dials in.** A host reaches a runner only as `ssh
+  -T -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o
+  ForwardAgent=no -o GSSAPIDelegateCredentials=no -o ForwardX11=no -o
+  ForwardX11Trusted=no -o Tunnel=no -o ClearAllForwardings=yes -o SendEnv=-*
+  -o PermitLocalCommand=no -o RemoteCommand=none -o RequestTTY=no -o
+  ControlMaster=no -o ControlPath=none -o ServerAliveInterval=5 -o
+  ServerAliveCountMax=3 -o ConnectTimeout=10 -- <destination> plak runner
+  connect --stdio`: a host key already known and never rewritten, no agent,
+  credential, X11, port or tunnel forwarding, no environment sent, no local
+  command, no shared master connection, no tty and no prompt. Options given on
+  the command line win over the user's ssh config, so it cannot weaken them.
+  The destination comes only from `[runners.<name>] ssh` and can never be read
+  as an option; the host identity in the remote `plak runner allow` line is
+  checked to be a uuid first. A host never listens for a runner, and a runner
+  never connects to a host.
+- **The socket is the runner user's.** The daemon listens on a socket of mode
+  0600 in `<home>/runner/run/`, a 0700 directory inside `<home>/runner/`, which
+  is forced to 0700 too; its log `serve.log` is 0600. A connection whose peer
+  is another user is closed before the daemon's hello. `connect --stdio` is
+  only a byte bridge to that socket, so ssh login as the runner user is the
+  authority that reaches it. The daemon holds an exclusive lock on the
+  socket's lock file for its life, taken before it touches the socket, so a
+  second daemon never unlinks or rebinds a live one's socket.
+- **Pairing pins identities.** A host binds only when its identity is on
+  `runner.toml` `hosts`; an unpaired host is refused (`NotPaired`) before any
+  request, and the host fails every waiting and later call on that link at
+  once, of no effect. A host records the runner's identity when it pairs. A
+  build that does not know its source revision pairs with no remote runner,
+  since an exact version triple is the binding rule. An inspecting connection
+  reads the line table and pings, and nothing else; it sees every host's lines
+  only under the runner machine's own host identity (a local `plak runner
+  ps`), and otherwise only its own host's, with job commands and output
+  cleared.
+- **Roots are consent, not containment.** A runner serves only a workspace
+  under one of its `roots`, and never one inside or around the runner
+  machine's product home (`PLAK_HOME`, which holds the runner home, its
+  secrets and every credential the home stores): the daemon refuses to start
+  with a root in or around it, and its default workspace passes the same check
+  as every other. A workspace probe answers only about an absolute path
+  without `..` that lies under a root and outside the product home, resolved
+  as far as it exists. A shell there still
+  has the runner user's whole authority (section 1.1).
+- **Fresh authority.** The daemon's `PATH` and `HOME` come from `runner.toml`
+  or the user's login shell when `connect` starts it, with every other
+  variable cleared; its processes start from those (chapter 01 §8.5).
+- **Secrets never cross.** No credential or secret value travels to a runner:
+  a service whose environment holds a secret is refused before it is sent,
+  and the wire has no field for one.
+- **Owners are fenced on the runner too.** A runner refuses work from an
+  owner of a line older than the newest it accepted, and records that floor
+  before accepting it, so a restart does not reopen the line to an older
+  owner. The host's leases and commit fencing remain the authority; the
+  runner only reduces late effects.
+
 ## 3. Credentials
 
 Claude OAuth account UUIDs come only from the authenticated token grant or the

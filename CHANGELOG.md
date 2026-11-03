@@ -115,6 +115,17 @@ an export.
   exit cannot be proven (another machine sharing the home) is released only by
   `plak tree release --force <tree-id>`, which refuses a holder still running
   on this machine.
+- `plak runner`: a persistent runner daemon per machine user (`serve`,
+  `connect --stdio`, which a host runs over ssh with fixed strict options and
+  which starts the daemon when none answers), host pairing through an
+  allowlist in `<home>/runner/runner.toml` (`allow`, `pair <name>`), and
+  `ps` for the lines and jobs a runner holds, orphaned ones marked. Runners
+  keep each line's newest owner across restarts, journal a host's keyed calls
+  so a returning host replays them, and let the same host re-adopt its lines
+  after a lost link. The ssh link requires a known host key
+  (`StrictHostKeyChecking=yes`), a runner refuses roots in or around its
+  product home, and a host's `ps <name>` sees only its own lines. No session
+  is placed on a runner yet.
 - Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
   accepts image input. Codex Direct adds `view_image` for one workspace image.
   Other packs stay text. A model that cannot accept the image is refused with

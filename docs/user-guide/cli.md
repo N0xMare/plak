@@ -294,6 +294,44 @@ plak mcp remove github
 
 ---
 
+### `plak runner serve|connect|allow|ps|pair`
+
+Runners run tools on another machine you can ssh to. No session runs on a
+runner yet; these commands set one up and show what it holds.
+
+On the runner machine, write `~/.plak/runner/runner.toml` with the workspace
+roots a host may use (never `~/.plak` itself or anything inside it, which
+`serve` refuses):
+
+```toml
+roots = ["/home/me/src"]
+```
+
+On the host, name the machine in `config.toml` and pair with it:
+
+```toml
+[runners.build]
+ssh = "build-box"          # a ~/.ssh/config alias or [user@]host
+```
+
+```sh
+plak runner pair build     # adds this host to the runner's allowlist over ssh
+plak runner ps build       # the lines and jobs it holds for this host
+```
+
+Pairing needs a build that knows its source revision (a release or
+maintainer install). The host always dials, with fixed strict ssh options,
+`BatchMode` and `StrictHostKeyChecking=yes`, so the ssh key must work without a
+prompt and the runner's host key must already be in `known_hosts` (connect
+once with plain `ssh` to accept it). On the runner machine,
+`plak runner connect --stdio` (what ssh runs) starts the daemon when none is
+running, `plak runner serve` runs it in the foreground, `plak runner allow
+<host-id>` pairs a host by hand and `plak runner ps` lists every host's lines,
+`held` or `orphaned`; a host's `plak runner ps <name>` sees only its own. The daemon exits after `idle_exit_seconds` (default
+300) with nothing to keep.
+
+---
+
 ### Subscription compatibility review deadlines
 
 The first time you use a subscription account — `plak login`, `plak refresh`,

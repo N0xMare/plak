@@ -17,5 +17,7 @@ mod product_config_fixtures;
 mod product_doctor_contract;
 #[cfg(feature = "maintainer")]
 mod reload_rehearsal;
+#[cfg(unix)]
+mod runner_contract;
 #[cfg(feature = "test-support")]
 mod telemetry_contract;

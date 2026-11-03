@@ -270,6 +270,7 @@ fn is_known_command(name: &str) -> bool {
             | "key"
             | "secret"
             | "mcp"
+            | "runner"
             | "run"
             | "agent"
             | "resume"
@@ -373,6 +374,11 @@ enum TopCommand {
     Mcp {
         #[command(subcommand)]
         action: Option<McpAction>,
+    },
+    /// This machine's runner daemon, and this host's runners.
+    Runner {
+        #[command(subcommand)]
+        action: Option<RunnerAction>,
     },
     #[cfg(feature = "maintainer")]
     Compatibility {
@@ -543,6 +549,60 @@ impl KeyAction {
                 Ok(Command::KeyStatus { account })
             }
         }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum RunnerAction {
+    Serve,
+    Connect {
+        /// Bridge standard input and output to the daemon (what a host's
+        /// ssh runs).
+        #[arg(long, action = ArgAction::SetTrue)]
+        stdio: bool,
+    },
+    Allow {
+        host_id: Option<String>,
+    },
+    Ps {
+        name: Option<String>,
+    },
+    Pair {
+        name: Option<String>,
+    },
+}
+
+impl RunnerAction {
+    fn into_command(self) -> Result<Command, String> {
+        use crate::commands::runner::RunnerCommand;
+        let help = || {
+            Ok(Command::CommandHelp {
+                command: "runner".to_owned(),
+            })
+        };
+        Ok(Command::Runner(match self {
+            Self::Serve => RunnerCommand::Serve,
+            Self::Connect { stdio: true } => RunnerCommand::Connect,
+            // A bare leaf routes to the parent group's help.
+            Self::Connect { stdio: false }
+            | Self::Allow { host_id: None }
+            | Self::Pair { name: None } => {
+                return help();
+            }
+            Self::Allow {
+                host_id: Some(host_id),
+            } => RunnerCommand::Allow { host_id },
+            Self::Ps { name } => {
+                if let Some(name) = &name {
+                    crate::product_config::validate_runner_name(name)?;
+                }
+                RunnerCommand::Ps { name }
+            }
+            Self::Pair { name: Some(name) } => {
+                crate::product_config::validate_runner_name(&name)?;
+                RunnerCommand::Pair { name }
+            }
+        }))
     }
 }
 

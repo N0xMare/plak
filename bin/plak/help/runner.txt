@@ -1,0 +1,23 @@
+plak runner — run tools on other machines
+
+USAGE:
+  plak runner serve
+  plak runner connect --stdio
+  plak runner allow <host-id>
+  plak runner ps [<name>]
+  plak runner pair <name>
+
+  On a runner machine, serve runs the runner daemon in the foreground, and
+  connect --stdio bridges standard input and output to it, starting it
+  detached when none answers; a host runs that over ssh. allow pairs a host by
+  adding its id to <home>/runner/runner.toml. ps lists the lines and jobs the
+  daemon holds, for every host, with orphaned lines marked.
+
+  On a host, pair <name> pairs this host with [runners.<name>] in config.toml:
+  it runs plak runner allow there over ssh with strict options, binds to prove
+  it, and records the runner's identity. ps <name> lists what that runner
+  holds for this host. A runner never dials a host.
+
+  runner.toml keys: roots (the workspace roots a host may name, outside the
+  plak home; required), path and home (the PATH and HOME its processes start
+  with), hosts (the paired host ids), idle_exit_seconds (default 300).

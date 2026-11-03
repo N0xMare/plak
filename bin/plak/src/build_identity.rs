@@ -22,6 +22,14 @@ pub(crate) const FLAVOR: &str = match (cfg!(feature = "maintainer"), cfg!(debug_
     (false, false) => "release",
 };
 
+/// The source revision this build was made from, as the build recipe set
+/// `PLAK_SOURCE_REVISION`; `unknown` otherwise. A runner binds only a host of
+/// the same revision, and an `unknown` build pairs with no remote runner.
+pub(crate) const SOURCE_REVISION: &str = match option_env!("PLAK_SOURCE_REVISION") {
+    Some(revision) => revision,
+    None => "unknown",
+};
+
 /// How this process was invoked and which file it is running, recorded once at
 /// startup so a later rebuild cannot change the answer.
 struct Launch {
