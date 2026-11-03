@@ -61,7 +61,7 @@ mod wait;
 
 pub use cancel::{LiveCancelFailure, LiveCancelOutcome};
 pub use controller::{ChildController, ChildServices};
-pub use driver::{HostShutdown, TreeDriver};
+pub use driver::{HeldEffects, HostShutdown, TreeDriver};
 pub use mail::{MailDeliveryAck, MailDeliveryFailure, MailDeliveryRequest};
 pub use registrations::{
     TopologyHostPorts, invoke_granted_topology_tool_on, topology_tool_registrations,
@@ -71,6 +71,10 @@ pub use spawn::{SpawnBindError, SpawnBound, SpawnStart};
 
 use driver::driver_for_tree;
 use jobs::{admit_awaited_jobs, await_job_rows, named_job_settled};
+
+/// A call's whole answer, returned early from inside a tree writer. Boxed so
+/// the early exit's size does not follow [`ToolOutcome`]'s.
+type Answered = Box<Result<ToolOutcome, ToolRuntimeError>>;
 use mail::{MailConsumer, MailConsumerGuard, settle_followup_refusal};
 use wait::leave_wait_facts;
 

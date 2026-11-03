@@ -144,7 +144,7 @@ impl TopologyTool {
                 .map_err(|_| poisoned_tree())?
         };
         if let Err(done) = admitted {
-            return done;
+            return *done;
         }
         let waiting = MailConsumerGuard::new(
             self.driver.clone(),
@@ -177,43 +177,45 @@ impl TopologyTool {
         request: &AwaitRequest,
         presented: &R,
         jobs: Option<&plakous::tools::JoinedSessionsPort>,
-    ) -> Result<(), Result<ToolOutcome, ToolRuntimeError>> {
+    ) -> Result<(), Answered> {
         if tree
             .operations()
             .get(operation_id)
             .is_some_and(|receipt| receipt.caller_agent_id != caller)
         {
-            return Err(Self::topology_failure(&TopologyError::new(
+            return Err(Box::new(Self::topology_failure(&TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
                 "retry caller conflicts with the wait receipt",
-            )));
+            ))));
         }
         if tree.operations().contains_key(operation_id)
             && let Some(response) = tree
                 .prepare_operation(operation_id, caller, AWAIT_RECEIPT_KIND, presented)
                 .map_err(|error| {
-                    Err(ToolRuntimeError::new(
+                    Box::new(Err(ToolRuntimeError::new(
                         ToolRuntimeErrorKind::Execution,
                         error.message,
-                    ))
+                    )))
                 })?
         {
             let receipt: crate::tree::WaitReceipt =
                 serde_json::from_str(&response).map_err(|_| {
-                    Err(ToolRuntimeError::new(
+                    Box::new(Err(ToolRuntimeError::new(
                         ToolRuntimeErrorKind::Execution,
                         "wait receipt could not be reconstructed",
-                    ))
+                    )))
                 })?;
-            return Err(ToolOutcome::success_text(receipt.output.to_string()));
+            return Err(Box::new(ToolOutcome::success_text(
+                receipt.output.to_string(),
+            )));
         }
         if let Err(error) = admit_awaited_jobs(jobs, request) {
-            return Err(Self::topology_failure(&error));
+            return Err(Box::new(Self::topology_failure(&error)));
         }
         // An empty or cancelled wait has no durable receipt.
         let targets = match tree.wait_target_ids(caller, &request.agents) {
             Ok(targets) => targets,
-            Err(error) => return Err(Self::topology_failure(&error)),
+            Err(error) => return Err(Box::new(Self::topology_failure(&error))),
         };
         tree.parked_waits
             .insert((caller.to_owned(), operation_id.to_owned()), targets);

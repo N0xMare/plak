@@ -191,10 +191,10 @@ impl TopologyTool {
                                     crate::call_facts::TopologyCallFacts::Adopted { files_changed },
                                 );
                             }
-                            return Err(ToolOutcome::success_text(prior));
+                            return Err(Box::new(ToolOutcome::success_text(prior)));
                         }
                         Ok(None) => {}
-                        Err(error) => return Err(Self::topology_failure(&error)),
+                        Err(error) => return Err(Box::new(Self::topology_failure(&error))),
                     }
                     if let Err(error) = driver
                         .fold_and_commit_guarded(tree, |tree| tree.begin_adopt(&caller, &request))
@@ -210,17 +210,17 @@ impl TopologyTool {
                             )
                             .and_then(|()| driver.save_guarded(tree))
                         {
-                            return Err(Self::topology_failure(&persist));
+                            return Err(Box::new(Self::topology_failure(&persist)));
                         }
-                        return Err(Self::topology_failure(&error));
+                        return Err(Box::new(Self::topology_failure(&error)));
                     }
-                    Ok(tree.take_effects())
+                    Ok::<_, Answered>(tree.take_effects())
                 })
                 .await
                 .map_err(|_| lock_poisoned())?;
             match prepared {
                 Ok(effects) => effects,
-                Err(done) => return done,
+                Err(done) => return *done,
             }
         };
         let landed = match self.driver.settle(effects).await {

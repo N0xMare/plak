@@ -4439,7 +4439,11 @@ holds until the tree is next opened.
 Effects never depend on their caller staying: a mutation whose caller is
 gone before its effects reach it hands them to a release owner, and a settle
 or a hub mutation that publishes and settles runs as a release owner the
-caller awaits.
+caller awaits. A caller that awaits other work between taking effects and
+settling them holds them so that an early return or an abort hands them to a
+release owner; dormant-copy reclamation instead runs its job stop and the
+dispatch it gates as one release owner, since its refused job stop abandons
+the dispatch to recovery.
 A mutation retains the store-acknowledged revision from its explicit publish;
 settling an empty effect batch does not itself publish a mutation. Every queued
 effect is drained after the tree mutex is released, including when the initial

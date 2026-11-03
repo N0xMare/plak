@@ -838,6 +838,9 @@ pub(in crate::agent) async fn end_spent_attempt(
         })
         .await
         .map_err(|error| error.message)?;
+    // Held across the retirements: an early return or an abort leaves the
+    // closed copies' seals to a release owner.
+    let effects = driver.hold_effects(effects);
     let closed = closed.map_err(|error| error.message)?;
     for child in &closed {
         crate::topology_runtime::retire_live(driver, &runtime.live, child, None, true)
@@ -850,10 +853,7 @@ pub(in crate::agent) async fn end_spent_attempt(
         .stop_agent_jobs(&owners)
         .await
         .map_err(|error| error.message)?;
-    driver
-        .settle(effects)
-        .await
-        .map_err(|error| error.message)?;
+    effects.settle().await.map_err(|error| error.message)?;
     finalize_child_turn(
         driver,
         agent_id,
@@ -918,10 +918,12 @@ pub(in crate::agent) async fn end_attempt_work(
             })
             .await
             .map_err(|error| error.message)?;
+        // Held across the retirements and the job stop; see end_spent_attempt.
+        let effects = driver.hold_effects(effects);
         let (closed, mut failure, ended) = result.map_err(|error| error.message)?;
         if !ended {
-            return driver
-                .settle(effects)
+            return effects
+                .settle()
                 .await
                 .map(|_| ())
                 .map_err(|error| error.message);
@@ -950,7 +952,7 @@ pub(in crate::agent) async fn end_attempt_work(
         if let Err(error) = driver.stop_agent_jobs(&owners).await {
             failure.get_or_insert(error.message);
         }
-        if let Err(error) = driver.settle(effects).await {
+        if let Err(error) = effects.settle().await {
             failure.get_or_insert(error.message);
         }
         failure.map_or(Ok::<_, String>(()), Err)

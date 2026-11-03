@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+mod abort;
 mod budget;
 mod cancel;
 mod driver;

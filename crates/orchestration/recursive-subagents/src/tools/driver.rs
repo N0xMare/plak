@@ -285,6 +285,18 @@ impl TreeDriver {
         })
         .await
         .map_err(|_| Self::lock_poisoned())??;
+        // A release owner: the job stop and the dispatch it gates run to
+        // their end, or to the deliberate abandon, whether the caller stays.
+        let owner = self.clone();
+        self.owned(async move { owner.reclaim_measured(now, sizes).await })
+            .await
+    }
+
+    async fn reclaim_measured(
+        &self,
+        now: u64,
+        sizes: std::collections::BTreeMap<String, u64>,
+    ) -> Result<(), TopologyError> {
         let driver = self.clone();
         let (owners, effects) = self
             .mutate(move |tree| {
@@ -303,16 +315,18 @@ impl TreeDriver {
                 }
             })
             .await?;
+        let effects = self.hold_effects(effects);
         let owners = owners?;
         if let Err(error) = self.stop_agent_jobs(&owners).await {
             // No VCS effect was dispatched. Release only process-local
             // claims so the acknowledged intent survives for recovery.
+            effects.abandon();
             let _ = self
                 .mutate(ProductAgentTree::abandon_reclamation_dispatch)
                 .await;
             return Err(error);
         }
-        let settled = self.settle(effects).await?;
+        let settled = effects.settle().await?;
         if let Some(error) = settled.cleanup_failures.into_iter().next() {
             return Err(error);
         }
@@ -968,13 +982,29 @@ impl TreeDriver {
         if effects.is_empty() {
             return;
         }
+        if tokio::runtime::Handle::try_current().is_err() {
+            // Nothing can run them here; their tickets reopen as recovery.
+            tracing::error!(target: "plak.topology",
+                "effects of a departed caller could not be settled: no runtime");
+            return;
+        }
         let driver = self.clone();
         drop(self.spawn_release_owner(async move {
-            if let Err(error) = driver.settle(effects).await {
+            if let Err(error) = driver.settle_here(effects).await {
                 tracing::error!(target: "plak.topology", code = ?error.code,
                     "effects settled for a departed caller were refused");
             }
         }));
+    }
+
+    /// Holds `effects` for a caller that awaits other work before settling
+    /// them: dropped unsettled, by an early return or an abort, they are
+    /// settled by a release owner.
+    pub fn hold_effects(&self, effects: Effects) -> HeldEffects {
+        HeldEffects {
+            driver: self.clone(),
+            effects: Some(effects),
+        }
     }
 
     /// One mutation, settled: applies `work`, then runs everything it queued
@@ -1503,6 +1533,49 @@ pub(super) fn driver_for_tree(
 
 #[cfg(any(test, feature = "test-support"))]
 mod test_support;
+
+/// Effects a caller holds across other awaits; see
+/// [`TreeDriver::hold_effects`].
+#[must_use = "dropped unsettled, the effects go to a release owner"]
+pub struct HeldEffects {
+    driver: TreeDriver,
+    effects: Option<Effects>,
+}
+
+impl HeldEffects {
+    /// Settles the held effects as [`TreeDriver::settle`] does.
+    ///
+    /// # Errors
+    ///
+    /// As [`TreeDriver::settle`].
+    pub async fn settle(mut self) -> Result<Settled, TopologyError> {
+        let effects = self.effects.take().unwrap_or_default();
+        self.driver.settle(effects).await
+    }
+
+    /// Gives the effects up unrun, for a caller that deliberately leaves
+    /// their tickets to recovery.
+    pub fn abandon(mut self) {
+        drop(self.effects.take());
+    }
+}
+
+impl Drop for HeldEffects {
+    fn drop(&mut self) {
+        if let Some(effects) = self.effects.take() {
+            self.driver.settle_detached(effects);
+        }
+    }
+}
+
+impl std::fmt::Debug for HeldEffects {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HeldEffects")
+            .field("effects", &self.effects)
+            .finish_non_exhaustive()
+    }
+}
 
 /// A writer's result on its way to its caller. Dropped unread, it hands the
 /// result to the writer's undo as the tree's next writer.
