@@ -129,6 +129,28 @@ impl Fixture {
         }
     }
 
+    /// Blocks until a process of this build has recorded its executable's
+    /// identity in the home's cache. A reload asks the installed build for its
+    /// state key and identity through a bounded probe; this test build has no
+    /// install manifest, so a probe without the cache hashes the whole debug
+    /// executable, which a loaded machine does not finish inside the probe's
+    /// budget, and the reload falls back to an unverified resume. The running
+    /// terminal records the identity in the background soon after it starts.
+    fn wait_for_identity_cache(&self) {
+        let cache = self.home().join("binary-ids");
+        let deadline = Instant::now() + WAIT;
+        loop {
+            if std::fs::read(&cache).is_ok_and(|bytes| !bytes.is_empty()) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no process recorded this build's identity in the home's cache"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Forgets the evidence rows an earlier process wrote, so the next
     /// dispatch wait is for the next process.
     fn reset_evidence(&self) {
@@ -2350,6 +2372,7 @@ fn rebind_and_epoch_reload_preserve_committed_named_state() {
                 &config.replace("[orchestration]", "[orchestration]\nmax_children = 31"),
             );
         }
+        fixture.wait_for_identity_cache();
         terminal.send(if epoch_reload {
             b"/reload\r"
         } else {
@@ -2410,6 +2433,7 @@ fn a_reload_whose_binding_changed_carries_in_one_step_naming_the_change() {
     let mut script = tool_then_answer("the answer after the new adapter");
     script["adapter_profile"] = json!("offline-loopback-adapter-v2");
     fixture.write_script(&script);
+    fixture.wait_for_identity_cache();
     terminal.send(b"/reload\r");
     terminal.wait_screen("carried forward from");
     let screen = terminal.wait_screen("offline-loopback-adapter-v2");
@@ -2449,10 +2473,18 @@ fn a_reload_whose_binding_changed_is_refused_while_a_turn_runs() {
     assert!(terminal.is_alive());
     assert_eq!(fixture.session_ids().len(), 1);
     assert!(!fixture.home().join("carry").exists());
-    terminal.send(b"\x11");
-    terminal.wait_screen("Quit plak?");
+    // Stop the turn and wait for it to settle before quitting: a quit over a
+    // turn whose cancel has not settled within the quit bound escalates
+    // (exit 130), which a loaded machine reaches.
+    terminal.send(b"\x1b");
+    terminal.wait_screen("Stop this turn?");
     terminal.send(b"\r");
-    assert!(terminal.finish().success());
+    terminal.wait_where("the turn settled", |frame| {
+        !frame.contains("Stop this turn?")
+            && !frame.contains("cancelling…")
+            && !frame.contains("waiting for model")
+    });
+    terminal.quit();
 }
 
 /// Turns sub-agents on in the fixture home, so sessions bind a tree.
@@ -2553,6 +2585,7 @@ fn a_binding_carry_counts_the_finished_sub_agents_it_does_not_restore() {
     let earlier = fixture.session_ids();
     script["adapter_profile"] = json!("offline-loopback-adapter-v2");
     fixture.write_script(&script);
+    fixture.wait_for_identity_cache();
     terminal.send(b"/reload\r");
     terminal.wait_screen("carried forward from");
     // The note can wrap; compare its words.
@@ -2627,6 +2660,7 @@ fn running_binary_id(fixture: &Fixture) -> String {
 /// Asks until the host has announced itself (on its installed-build check,
 /// every 5 s), then returns the outcome file the request names.
 fn ask_reload_until_announced(fixture: &Fixture, session: &str, binary: &str) -> PathBuf {
+    fixture.wait_for_identity_cache();
     let deadline = Instant::now() + WAIT;
     let accepted = loop {
         let output = ask_reload(fixture, session, binary);

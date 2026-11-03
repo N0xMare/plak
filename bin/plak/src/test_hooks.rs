@@ -179,6 +179,9 @@ fn prepare_scripted_tree(
         tree = ProductAgentTree::reopen(persisted);
         tree.set_vcs(Arc::clone(&vcs));
     }
+    let attached = (!detached)
+        .then(|| plakous_hosted::topology_runtime::lookup(tree_id))
+        .flatten();
     let runtime = if detached {
         Arc::new(
             plakous_hosted::topology_runtime::ProductTopologyRuntime::new(
@@ -188,6 +191,12 @@ fn prepare_scripted_tree(
                 None,
             ),
         )
+    } else if let Some(runtime) = attached {
+        // An earlier runtime this process built for the session attached the
+        // tree already. Share it: publishing a reloaded copy here would leave
+        // the hub's handle a revision behind the store, and its next save
+        // would be refused as stale.
+        runtime
     } else {
         let revision = store.save(&tree).map_err(|error| {
             format!("offline scripted tree could not be saved: {}", error.detail)
