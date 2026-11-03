@@ -85,6 +85,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
     }
 }
 
+/// Defers an urgent `item` behind the urgent actions already deferred and
+/// ahead of everything else: the urgent lane still outranks queued work, and
+/// urgent actions keep their arrival order among themselves.
+fn defer_urgent<T>(deferred: &mut VecDeque<T>, item: T, urgent: impl Fn(&T) -> bool) {
+    let at = deferred.iter().take_while(|queued| urgent(queued)).count();
+    deferred.insert(at, item);
+}
+
 /// A borrowed handle threaded through one long host operation.
 ///
 /// `Copy`, so it passes into nested handlers without borrow gymnastics.
@@ -145,7 +153,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
                     let mut state = self.state.borrow_mut();
                     match IntentClass::of(&*delivery).disposition(DispatchPhase::Workflow) {
                         Disposition::ObserveInterrupt if self.defer_urgent => {
-                            state.deferred.push_front(delivery);
+                            defer_urgent(&mut state.deferred, delivery, |queued| {
+                                IntentClass::of(&**queued) == IntentClass::Urgent
+                            });
                         }
                         Disposition::ObserveInterrupt => state.interrupted = true,
                         _ => state.deferred.push_back(delivery),

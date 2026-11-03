@@ -1,7 +1,10 @@
 use crate::runtime::test_kit::TestExtension;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
-use super::{CancelRefusal, CancelSettlement, InterruptWatch, InterruptWatchState, settle_cancel};
+use super::{
+    CancelRefusal, CancelSettlement, InterruptWatch, InterruptWatchState, defer_urgent,
+    settle_cancel,
+};
 use crate::surface_protocol::user_action_channel;
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -174,4 +177,57 @@ fn begin_clears_a_previous_observation() {
     assert!(watch.interrupted());
     watch.begin();
     assert!(!watch.interrupted());
+}
+
+/// Urgent actions a deferring watch drains keep their arrival order among
+/// themselves and stay ahead of the ordinary work deferred before them.
+#[test]
+fn deferred_urgent_actions_keep_their_arrival_order() {
+    let mut deferred = std::collections::VecDeque::from(["first ordinary"]);
+    let urgent = |item: &&str| item.starts_with("urgent");
+    defer_urgent(&mut deferred, "urgent one", urgent);
+    deferred.push_back("second ordinary");
+    defer_urgent(&mut deferred, "urgent two", urgent);
+    assert_eq!(
+        deferred,
+        [
+            "urgent one",
+            "urgent two",
+            "first ordinary",
+            "second ordinary"
+        ]
+    );
+}
+
+/// Through the mailbox: two interrupts drained around a prompt by the
+/// deferring watch are both left for the idle dispatcher, ahead of the prompt.
+#[test]
+fn a_deferring_watch_leaves_two_interrupts_ahead_of_queued_work() {
+    let (actions_tx, actions_rx) = user_action_channel::<TestExtension>();
+    let state = RefCell::new(InterruptWatchState::default());
+    let watch = InterruptWatch::deferring(&actions_rx, &state);
+    actions_tx.send(UserAction::Interrupt).unwrap();
+    watch.poll();
+    actions_tx
+        .send(UserAction::Prompt("queued".into()))
+        .unwrap();
+    watch.poll();
+    actions_tx.send(UserAction::Interrupt).unwrap();
+    watch.poll();
+    assert!(
+        !watch.interrupted(),
+        "a deferring watch consumes no interrupt"
+    );
+    let mut taken = Vec::new();
+    while let Some(delivery) = state.borrow_mut().take_deferred() {
+        taken.push(delivery.into_parts().0);
+    }
+    assert_eq!(
+        taken,
+        [
+            UserAction::Interrupt,
+            UserAction::Interrupt,
+            UserAction::Prompt("queued".into())
+        ]
+    );
 }
