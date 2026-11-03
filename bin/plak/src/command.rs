@@ -137,6 +137,11 @@ pub(crate) enum Command {
         path: PathBuf,
     },
     ExportVersion,
+    /// `plak tree release --force <tree-id>`: the custody break-glass.
+    TreeRelease {
+        tree_id: String,
+        force: bool,
+    },
     StatePruneLegacy {
         yes: bool,
         forget_missing_launches: bool,
@@ -320,6 +325,7 @@ impl Command {
             #[cfg(feature = "maintainer")]
             Self::SessionRehearse { .. } => "session",
             Self::StatePruneLegacy { .. } => "state",
+            Self::TreeRelease { .. } => "tree",
             Self::TelemetryStatus { .. }
             | Self::TelemetrySql { .. }
             | Self::TelemetryPrune { .. } => "telemetry",

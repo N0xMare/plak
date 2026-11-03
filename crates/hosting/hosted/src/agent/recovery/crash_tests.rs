@@ -1037,6 +1037,17 @@ fn recover_agent_waits_for_a_still_held_child_lease() {
     let root = tempfile::tempdir().unwrap();
     let mut owner = spawn_owner(root.path(), "mid");
     let id = await_owner(&mut owner, "held lease");
+    // The live owner process still holds the tree's custody, so no other
+    // process may materialize the tree (spec 03 §14). Release it the way the
+    // operator's break-glass does: the owner keeps the child session's
+    // lease, which is what recovery here must wait on, and any tree write it
+    // still offered would be refused.
+    let broken = crate::agent_tree::TreeCustody::break_custody(
+        &SqliteTreeStore::open(&root.path().join("tree.sqlite3")).unwrap(),
+        "child-sigkill-mid",
+    )
+    .unwrap();
+    assert!(broken.is_some_and(|record| !record.released));
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Fixture::new(root.path(), "mid", None, true);
         fixture

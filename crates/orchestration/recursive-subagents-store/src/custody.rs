@@ -209,4 +209,12 @@ impl TreeCustody for SqliteTreeStore {
         let current = self.custody(&claim.tree_id)?;
         CustodyRecord::prove(current.as_ref(), claim).map(|_| ())
     }
+
+    fn break_custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, CustodyError> {
+        self.custody_step(tree_id, |current| {
+            let broken = CustodyRecord::broken(current);
+            let held = broken.as_ref().and_then(|_| current.cloned());
+            Ok((broken, held))
+        })
+    }
 }

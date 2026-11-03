@@ -872,6 +872,18 @@ status: `active`, `adopting`, `adopted`, `discarding`, `clean_removed`, `discard
 the child's copy intact. See
 [agents and orchestration](agents-and-orchestration.md#candidates-and-adoption).
 
+## `tree_hosted_elsewhere (<build>): agent tree … is hosted by …`
+
+Another running `plak` holds this session's agent tree: only one process
+works a tree at a time. `plak run` and `plak agent` exit 7 (`plak agent`'s
+error line carries `code: "tree_hosted_elsewhere"`), and the TUI stays
+detached with the same message. Quit the other `plak`, then open the session
+again. If that `plak` crashed on this machine, the next open takes the tree
+over by itself. If it ran on another machine sharing this home, or is gone
+in a way that cannot be proven, release it explicitly with
+`plak tree release --force <tree-id>` (see the CLI reference), then open the
+session again.
+
 ## The TUI will not start
 
 `plak` needs an interactive terminal and refuses a pipe. If it starts but feels

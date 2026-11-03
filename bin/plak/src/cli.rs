@@ -275,6 +275,7 @@ fn is_known_command(name: &str) -> bool {
             | "resume"
             | "session"
             | "state"
+            | "tree"
             | "usage"
             | "doctor"
             | "config"
@@ -459,6 +460,10 @@ enum TopCommand {
     State {
         #[command(subcommand)]
         action: Option<StateAction>,
+    },
+    Tree {
+        #[command(subcommand)]
+        action: Option<TreeAction>,
     },
     Usage {
         #[arg(long, conflicts_with = "session_id")]
@@ -686,6 +691,16 @@ enum StateAction {
         /// Delete orphaned session references, which may be the only surviving exports.
         #[arg(long)]
         prune_orphaned_references: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TreeAction {
+    /// Release an agent tree's custody without its holder (break-glass).
+    Release {
+        tree_id: Option<String>,
+        #[arg(long)]
+        force: bool,
     },
 }
 

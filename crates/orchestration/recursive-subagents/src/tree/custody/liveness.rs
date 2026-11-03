@@ -199,6 +199,16 @@ fn free_lock(path: &Path) -> Option<File> {
     still_named(&file, path).then_some(file)
 }
 
+/// Whether the lock of `instance` in `directory` is proven held by a live
+/// process: the file is there and cannot be locked. A missing file is not
+/// proof either way.
+pub(super) fn lock_held(directory: &Path, instance: HostInstance) -> bool {
+    let path = lock_path(directory, instance);
+    std::fs::symlink_metadata(&path).is_ok_and(|named| named.is_file())
+        && File::open(&path)
+            .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
+}
+
 /// Liveness over one custody directory, as `own` sees it.
 pub(super) struct DirectoryLiveness<'a> {
     pub(super) directory: &'a Path,

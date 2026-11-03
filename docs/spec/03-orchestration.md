@@ -3325,7 +3325,13 @@ nothing, since it may have been removed under a live holder: such a holder
 waits for the break-glass. With that
 `HolderGone` the take supersedes the holder under the next fence. A holder on
 another machine, or one that cannot be proven gone, is never taken over by a
-clock: there is no time-based expiry.
+clock: there is no time-based expiry. The operator's break-glass,
+`plak tree release --force <tree-id>` (chapter 02), releases such a record with
+a warning: `break_custody` marks it released, keeping its fence and holder, so
+the next take supersedes that holder and every write it still offers is
+refused. It never releases a holder proven to be running on this machine (its
+lock is held); a holder on this machine whose lock is missing is unknown, not
+proven running, and is released with the warning.
 
 **The hub holds custody.** Only the custody holder materializes a tree's
 nodes. A process's hub entry for a tree exists while that process holds the

@@ -871,6 +871,21 @@ opened, read or parsed, or state-root enumeration or metadata inspection fails
 other than ENOENT, one warning says the unowned list may be incomplete or
 overstated and ownership must be verified before manual removal.
 
+`plak tree release --force <tree-id>` is the agent tree custody break-glass
+(chapter 03 §14). It reads the tree's custody record in the current state's
+`subagents.sqlite3`: none, or an already released one, prints that there is
+nothing to release and exits 0. A holder proven to be running on this machine
+(this process, or one whose `custody-hosts` lock is held) is refused with the
+typed `tree_hosted_elsewhere (<binary id>)` refusal and exit 7: quitting it is
+the remedy. Otherwise (a holder on another machine, or one whose lock cannot
+prove it gone) it prints a `plak: warning:` naming the holder's host, machine,
+instance and build, releases the record keeping its fence and holder, and
+prints the released fence; the next attach takes the tree under the next
+fence, and every tree write the old holder still offers is refused. A holder
+on this machine that has exited needs no break-glass: the next attach proves it
+gone and takes the tree over. Without `--force` the command changes nothing and
+exits 2; a bare `plak tree` or `plak tree release` prints its help.
+
 `plak state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` removes non-current directories and
 regular files under `state/` after confirmation that lists their paths and
 sizes and names non-current state (older or newer builds). Non-terminal

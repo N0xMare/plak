@@ -483,7 +483,7 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # files under `bin/plak/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plak", "src/cli/render.rs"): ("include_str",) * 24,
+    ("plak", "src/cli/render.rs"): ("include_str",) * 25,
     # Each route owns its four bundled role files; the common multi-provider
     # profile remains in profiles.rs. The total stays sixteen documents.
     ("plak", "src/profiles.rs"): ("include_str",) * 4,

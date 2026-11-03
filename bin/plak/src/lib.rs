@@ -597,6 +597,16 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             &mut stdout,
         ),
         Command::Doctor => run_doctor(&services, &mut stdout),
+        Command::TreeRelease { tree_id, force } => {
+            if !force {
+                return Err(CliFailure::classified(
+                    CliFailureKind::Usage,
+                    "plak tree release releases another process's custody without it; pass --force to confirm",
+                ));
+            }
+            commands::tree::release(services.paths()?, &tree_id, &mut stdout, &mut stderr)?;
+            Ok(ProcessOutcome::Success)
+        }
         Command::StatePruneLegacy {
             yes,
             forget_missing_launches,
@@ -1168,6 +1178,7 @@ fn execute_command(
         | Command::Version
         | Command::ConfigEdit
         | Command::StatePruneLegacy { .. }
+        | Command::TreeRelease { .. }
         | Command::StateKey
         | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe

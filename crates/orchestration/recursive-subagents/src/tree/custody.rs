@@ -18,7 +18,7 @@ use super::TreeStoreError;
 mod custodian;
 mod liveness;
 pub use custodian::{
-    CustodyHold, acquire_custody, bind_custody_host, custody_host, machine_name,
+    CustodyHold, acquire_custody, bind_custody_host, custody_host, holder_runs_here, machine_name,
     release_custody_hold, with_custody,
 };
 
@@ -330,6 +330,16 @@ pub trait TreeCustody: Send + Sync {
     ///
     /// Refuses a claim that does not hold the tree.
     fn prove_custody(&self, claim: &CustodyClaim) -> Result<(), CustodyError>;
+
+    /// The operator's break-glass: releases the record whoever holds it,
+    /// keeping its fence and holder, so the next take supersedes that holder
+    /// and every write it still offers is refused. Returns the record as it
+    /// was held, or `None` when no take ran or it is already released.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an unreachable store.
+    fn break_custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, CustodyError>;
 }
 
 /// What a take does to the stored record.
@@ -440,6 +450,18 @@ impl CustodyRecord {
         let mut released = Self::prove(current, claim)?.clone();
         released.released = true;
         Ok(Some(released))
+    }
+
+    /// The record after an operator break-glass release of `current`, or
+    /// `None` when there is nothing held to release.
+    #[must_use]
+    pub fn broken(current: Option<&Self>) -> Option<Self> {
+        current
+            .filter(|record| !record.released)
+            .map(|record| Self {
+                released: true,
+                ..record.clone()
+            })
     }
 
     /// The held record `claim` proves against `current`.

@@ -28,6 +28,7 @@ The binary ID identifies the executable in `/reload` and handoffs.
 | 4 | Interrupted before completion, or stopped by `SIGTERM`/`SIGHUP` |
 | 5 | Agent/runtime failure, an answer truncated at its output limit (`turn_failed:output-limit`; the answer is still printed), or explicit recovery required |
 | 6 | Run reached `--max-turns` or `--timeout` |
+| 7 | `tree_hosted_elsewhere`: another running `plak` holds the session's agent tree (see `plak tree release`) |
 | 130 | Quit escalated because the turn's terminal did not join and the host abandoned by lease only; clean idle or terminal-joined quit remains 0 |
 
 Every subscription failure ends with what to do about it, for example:
@@ -594,6 +595,19 @@ a `usable` row runs; it lists its compositions and what `plakous-default`
 picks. Every other row ends in `reason=…` instead. `efforts` is that model's
 own ladder, `window` the working window, `full_window` the model's full input
 window and `max_output` its output bound.
+
+### `plak tree release --force <tree-id>`
+
+Each session's agent tree is held by one running `plak` at a time. A second
+`plak` that opens the same session is refused with
+`tree_hosted_elsewhere (<build>)` and exits 7; quit the other one first. When
+the holding `plak` on this machine has exited (even by a crash), the next open
+takes the tree over by itself. Use this command only when the holder ran on
+another machine sharing this home, or its exit cannot be proven: it prints a
+warning naming the holder and releases the tree so the next open takes it. If
+that `plak` is in fact still running, every change it then makes to the tree is
+refused. A holder still running on this machine is never released: quit it.
+Without `--force` nothing changes.
 
 ### `plak state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]`
 

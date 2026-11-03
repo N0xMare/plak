@@ -712,6 +712,11 @@ fn a_removed_liveness_lock_never_proves_a_holder_gone() {
     holder.kill().unwrap();
     holder.wait().unwrap();
     refused("it is gone, but nothing proves it");
+
+    assert_eq!(store.break_custody(TREE).unwrap().unwrap().fence, 1);
+    let taken = acquire_custody(&store, TREE).unwrap();
+    assert_eq!(taken.claim().fence, 2);
+    release_custody_hold(&store, taken).unwrap();
 }
 
 /// The holding process of the takeover law: takes custody, says so, waits to

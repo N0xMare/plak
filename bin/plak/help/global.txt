@@ -23,6 +23,7 @@ COMMANDS:
   usage       Subscription limits and context-status availability
   session     List/show/log sessions (agent-readable events)
   state       Prune unused legacy state (inspect with doctor)
+  tree        Agent tree custody break-glass (release --force)
   telemetry   Local analytics store (status, SQL, prune)
   models      List account catalog or enrolled API models (read-only)
   version     Print version

@@ -24,6 +24,7 @@ pub(crate) mod run;
 pub mod secret;
 pub mod session;
 pub mod support;
+pub(crate) mod tree;
 pub mod usage;
 
 mod exchange_capture;

@@ -648,7 +648,7 @@ pub(super) fn attach_repair_notice(failure: &HostFailure, original_account: &str
             R::LoginThenAttach { account },
         ),
         A::TreeHostedElsewhere => (
-            "another plak process holds this session's agent tree; quit that plak, then retry attachment here",
+            "another plak process holds this session's agent tree; quit that plak, then retry attachment here; if it ran on another machine or is gone, `plak tree release --force <tree-id>` releases it",
             R::RepairThenAttach {},
         ),
         A::Other => (

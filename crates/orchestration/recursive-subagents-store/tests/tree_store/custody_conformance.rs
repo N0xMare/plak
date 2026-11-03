@@ -194,6 +194,19 @@ fn law(store: &dyn Store, root: &Path) {
     let third = store.take_custody(id, &one, None).unwrap();
     assert_eq!(third.fence, 3);
 
+    // The operator's break-glass releases the record whoever holds it,
+    // keeping fence and holder: the holder's claim writes nothing after it and
+    // the next take supersedes it. Breaking a released record does nothing.
+    let broken = store.break_custody(id).unwrap().unwrap();
+    assert_eq!(
+        (broken.fence, &broken.holding.host, broken.released),
+        (3, &one, false)
+    );
+    assert!(store.break_custody(id).unwrap().is_none());
+    assert_eq!(write_kind(&store.save(&later, &third)), "NotInCustody");
+    let third = store.take_custody(id, &one, None).unwrap();
+    assert_eq!(third.fence, 4);
+
     // A stale revision under a held claim is still the revision refusal.
     let mut behind = rows.clone();
     behind.revision += 5;
@@ -271,116 +284,152 @@ fn state(store: &dyn Store) -> Vec<String> {
         .collect()
 }
 
+/// One walk over both stores: the claims each host was ever handed (stale
+/// ones included) and each tree's last acknowledged revision.
+struct Comparison<'a> {
+    root: &'a Path,
+    memory: &'a MemoryTreeStore,
+    stores: [&'a dyn Store; 2],
+    claims: Vec<CustodyClaim>,
+    acknowledged: [u64; 2],
+}
+
+impl Comparison<'_> {
+    fn each(&self, step: impl Fn(&dyn Store) -> String) -> Vec<String> {
+        self.stores.iter().map(|store| step(*store)).collect()
+    }
+
+    /// Mostly one of the latest claims, which may still hold; sometimes any
+    /// claim ever handed out, which is mostly stale.
+    fn pick_claim(&self, walk: &mut Walk) -> Option<CustodyClaim> {
+        let len = self.claims.len() as u64;
+        (len > 0).then(|| {
+            let back = if walk.below(4) == 0 {
+                walk.below(len)
+            } else {
+                walk.below(len.min(3))
+            };
+            self.claims[usize::try_from(len - 1 - back).unwrap()].clone()
+        })
+    }
+
+    /// A proof for the holder the record names, at its fence or a stale one.
+    fn takeover(&self, walk: &mut Walk, tree_id: &str, host: &CustodyHost) -> Vec<String> {
+        let proven = self
+            .memory
+            .custody(tree_id)
+            .unwrap()
+            .map(|record| CustodyClaim {
+                tree_id: tree_id.to_owned(),
+                host: record.holding.host,
+                fence: record.fence + u64::from(walk.below(4) == 0),
+            });
+        let proof = proven.map(ProductAgentTree::holder_gone_for_test);
+        self.each(|store| custody_kind(&store.take_custody(tree_id, host, proof.as_ref())))
+    }
+
+    /// The revision a write offers: mostly the acknowledged one, sometimes
+    /// one the stores do not hold.
+    fn offered(&self, walk: &mut Walk, claim: &CustodyClaim) -> (usize, u64) {
+        let index = TREES.iter().position(|id| *id == claim.tree_id).unwrap();
+        (
+            index,
+            self.acknowledged[index] + u64::from(walk.below(5) == 0),
+        )
+    }
+
+    fn save(&mut self, walk: &mut Walk, claim: &CustodyClaim) -> Vec<String> {
+        let (index, stored) = self.offered(walk, claim);
+        let mut rows = tree(self.root, &claim.tree_id);
+        rows.stored_revision = stored;
+        rows.revision = stored + 1;
+        let answers = self.each(|store| write_kind(&store.save(&rows, claim)));
+        if answers[0] == "ok" {
+            self.acknowledged[index] = rows.revision;
+        }
+        answers
+    }
+
+    fn delete(&mut self, walk: &mut Walk, claim: &CustodyClaim) -> Vec<String> {
+        let (index, expected) = self.offered(walk, claim);
+        let answers =
+            self.each(|store| write_kind(&store.delete_fenced(&claim.tree_id, expected, claim)));
+        if answers[0] == "ok" {
+            self.acknowledged[index] = 0;
+        }
+        answers
+    }
+
+    fn broken(&self, tree_id: &str) -> Vec<String> {
+        self.each(|store| match store.break_custody(tree_id) {
+            Ok(Some(record)) => format!("ok {} {}", record.holding.host.instance, record.fence),
+            Ok(None) => "nothing".to_owned(),
+            Err(error) => format!("error {error}"),
+        })
+    }
+
+    /// One random step: its name and both stores' answers, or `None` when the
+    /// draw needs a claim and none was handed out yet.
+    fn step(
+        &mut self,
+        walk: &mut Walk,
+        tree_id: &str,
+        host: &CustodyHost,
+    ) -> Option<(&'static str, Vec<String>)> {
+        let claim = self.pick_claim(walk);
+        Some(match (walk.below(9), claim) {
+            (0 | 1, _) => (
+                "take",
+                self.each(|store| custody_kind(&store.take_custody(tree_id, host, None))),
+            ),
+            (2, _) => ("takeover", self.takeover(walk, tree_id, host)),
+            (3, Some(claim)) => (
+                "renew",
+                self.each(|store| unit_kind(store.renew_custody(&claim))),
+            ),
+            (4, Some(claim)) => (
+                "release",
+                self.each(|store| unit_kind(store.release_custody(&claim))),
+            ),
+            (5, Some(claim)) => (
+                "prove",
+                self.each(|store| unit_kind(store.prove_custody(&claim))),
+            ),
+            (6, Some(claim)) => ("save", self.save(walk, &claim)),
+            (7, Some(claim)) => ("delete", self.delete(walk, &claim)),
+            // The break-glass is rare: an operator's last resort.
+            (8, _) if walk.below(4) == 0 => ("break", self.broken(tree_id)),
+            _ => return None,
+        })
+    }
+}
+
 /// 4,000 random steps over three hosts and two trees, the claims each host
 /// was ever handed (stale ones included) and every integrated transition:
 /// take, takeover with a proof for the recorded or a stale holder, renew,
-/// release, prove, fenced save at the current or a stale revision, and fenced
-/// delete. Both stores must answer every step alike and hold the same state
-/// after it.
+/// release, prove, fenced save at the current or a stale revision, fenced
+/// delete and the operator's break-glass release. Both stores must answer
+/// every step alike and hold the same state after it.
 #[test]
 fn the_memory_and_sqlite_stores_agree_on_a_random_custody_walk() {
     let root = tempfile::tempdir().unwrap();
     let memory = MemoryTreeStore::new();
     let sqlite = SqliteTreeStore::open(&root.path().join("subagents.sqlite3")).unwrap();
-    let stores: [&dyn Store; 2] = [&memory, &sqlite];
+    let mut comparison = Comparison {
+        root: root.path(),
+        memory: &memory,
+        stores: [&memory, &sqlite],
+        claims: Vec::new(),
+        acknowledged: [0; 2],
+    };
     let hosts = [host(1), host(2), host(3)];
-    let mut claims: Vec<CustodyClaim> = Vec::new();
-    let mut acknowledged = [0_u64; 2];
     let mut walk = Walk(0x00c0_ffee_d00d_f00d);
     let mut kinds = std::collections::BTreeMap::<&str, usize>::new();
     for step in 0..4_000 {
-        let tree_index = usize::try_from(walk.below(2)).unwrap();
-        let tree_id = TREES[tree_index];
+        let tree_id = TREES[usize::try_from(walk.below(2)).unwrap()];
         let host = &hosts[usize::try_from(walk.below(3)).unwrap()];
-        let claim = (!claims.is_empty())
-            .then(|| claims[usize::try_from(walk.below(claims.len() as u64)).unwrap()].clone());
-        let (name, answers): (&str, Vec<String>) = match (walk.below(8), claim) {
-            (0 | 1, _) => (
-                "take",
-                stores
-                    .iter()
-                    .map(|store| custody_kind(&store.take_custody(tree_id, host, None)))
-                    .collect(),
-            ),
-            (2, _) => {
-                // A proof for the holder the record names, or for a stale one.
-                let record = memory.custody(tree_id).unwrap();
-                let proven = record.map(|record| CustodyClaim {
-                    tree_id: tree_id.to_owned(),
-                    host: record.holding.host,
-                    fence: if walk.below(4) == 0 {
-                        record.fence + 1
-                    } else {
-                        record.fence
-                    },
-                });
-                let proof = proven.map(ProductAgentTree::holder_gone_for_test);
-                (
-                    "takeover",
-                    stores
-                        .iter()
-                        .map(|store| {
-                            custody_kind(&store.take_custody(tree_id, host, proof.as_ref()))
-                        })
-                        .collect(),
-                )
-            }
-            (3, Some(claim)) => (
-                "renew",
-                stores
-                    .iter()
-                    .map(|store| unit_kind(store.renew_custody(&claim)))
-                    .collect(),
-            ),
-            (4, Some(claim)) => (
-                "release",
-                stores
-                    .iter()
-                    .map(|store| unit_kind(store.release_custody(&claim)))
-                    .collect(),
-            ),
-            (5, Some(claim)) => (
-                "prove",
-                stores
-                    .iter()
-                    .map(|store| unit_kind(store.prove_custody(&claim)))
-                    .collect(),
-            ),
-            (6, Some(claim)) => {
-                let mut rows = tree(root.path(), &claim.tree_id);
-                let index = TREES.iter().position(|id| *id == claim.tree_id).unwrap();
-                rows.stored_revision = if walk.below(5) == 0 {
-                    acknowledged[index] + 1
-                } else {
-                    acknowledged[index]
-                };
-                rows.revision = rows.stored_revision + 1;
-                let answers = stores
-                    .iter()
-                    .map(|store| write_kind(&store.save(&rows, &claim)))
-                    .collect::<Vec<_>>();
-                if answers[0] == "ok" {
-                    acknowledged[index] = rows.revision;
-                }
-                ("save", answers)
-            }
-            (7, Some(claim)) => {
-                let index = TREES.iter().position(|id| *id == claim.tree_id).unwrap();
-                let expected = if walk.below(5) == 0 {
-                    acknowledged[index] + 1
-                } else {
-                    acknowledged[index]
-                };
-                let answers = stores
-                    .iter()
-                    .map(|store| write_kind(&store.delete_fenced(&claim.tree_id, expected, &claim)))
-                    .collect::<Vec<_>>();
-                if answers[0] == "ok" {
-                    acknowledged[index] = 0;
-                }
-                ("delete", answers)
-            }
-            _ => continue,
+        let Some((name, answers)) = comparison.step(&mut walk, tree_id, host) else {
+            continue;
         };
         assert_eq!(
             answers[0], answers[1],
@@ -391,7 +440,7 @@ fn the_memory_and_sqlite_stores_agree_on_a_random_custody_walk() {
             .filter(|_| matches!(name, "take" | "takeover"))
         {
             let fence = fresh.rsplit(' ').next().unwrap().parse().unwrap();
-            claims.push(CustodyClaim {
+            comparison.claims.push(CustodyClaim {
                 tree_id: tree_id.to_owned(),
                 host: host.clone(),
                 fence,
@@ -412,7 +461,7 @@ fn the_memory_and_sqlite_stores_agree_on_a_random_custody_walk() {
     }
     // The walk reached every transition, both granted and refused.
     for kind in [
-        "take", "takeover", "renew", "release", "prove", "save", "delete", "refused",
+        "take", "takeover", "renew", "release", "prove", "save", "delete", "break", "refused",
     ] {
         assert!(kinds.get(kind).copied().unwrap_or(0) > 10, "{kinds:?}");
     }

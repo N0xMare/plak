@@ -1,0 +1,11 @@
+plak tree — agent tree custody
+
+USAGE:
+  plak tree release --force <tree-id>
+
+Break-glass: release the custody record of an agent tree whose holding plak
+process runs on another machine or cannot be proven gone, so this machine can
+attach it. A holder on this machine that has exited is taken over without this
+command. A holder still running here is never released: quit it instead.
+Prints a warning; if the old holder is in fact still running, every agent tree
+write it makes afterwards is refused. Without --force it changes nothing.

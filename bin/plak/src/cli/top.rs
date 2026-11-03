@@ -1,5 +1,5 @@
 use super::{
-    Command, NativeLoginMode, RunPrompt, StateAction, TopCommand, finish_agent,
+    Command, NativeLoginMode, RunPrompt, StateAction, TopCommand, TreeAction, finish_agent,
     finish_continue_session, finish_run, parse_oauth_account,
 };
 
@@ -252,6 +252,19 @@ impl TopCommand {
                 forget_missing_launches,
                 prune_orphaned_references,
             }),
+            Self::Tree { action: None }
+            | Self::Tree {
+                action: Some(TreeAction::Release { tree_id: None, .. }),
+            } => Ok(Command::CommandHelp {
+                command: "tree".to_owned(),
+            }),
+            Self::Tree {
+                action:
+                    Some(TreeAction::Release {
+                        tree_id: Some(tree_id),
+                        force,
+                    }),
+            } => Ok(Command::TreeRelease { tree_id, force }),
             Self::Usage {
                 account,
                 session_id,

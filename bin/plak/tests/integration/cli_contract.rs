@@ -185,6 +185,7 @@ fn publication_user_refusals_are_usage() {
         vec!["key", "status", "codex"],
         vec!["config", "set", "tui.mouse", "maybe"],
         vec!["state", "prune-legacy"],
+        vec!["tree", "release", "some-tree"],
     ] {
         let root = tempfile::tempdir().unwrap();
         let out = publication_command(root.path(), &args).output().unwrap();
@@ -867,6 +868,7 @@ fn help_output_is_the_shipped_page_files_byte_for_byte() {
         ("usage", include_str!("../../help/usage.txt")),
         ("session", include_str!("../../help/session.txt")),
         ("state", include_str!("../../help/state.txt")),
+        ("tree", include_str!("../../help/tree.txt")),
         ("telemetry", include_str!("../../help/telemetry.txt")),
     ];
     if cfg!(feature = "maintainer") {
@@ -907,6 +909,8 @@ fn bare_product_commands_print_their_help_and_exit_zero() {
         (&["config", "set"], "config"),
         (&["session"], "session"),
         (&["state"], "state"),
+        (&["tree"], "tree"),
+        (&["tree", "release"], "tree"),
         (&["session", "show"], "session"),
         (&["session", "log"], "session"),
         (&["telemetry"], "telemetry"),

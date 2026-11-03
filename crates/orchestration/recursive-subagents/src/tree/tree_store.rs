@@ -657,4 +657,15 @@ impl TreeCustody for MemoryTreeStore {
             CustodyRecord::prove(custody.get(&claim.tree_id), claim).map(|_| ())
         })
     }
+
+    fn break_custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, CustodyError> {
+        self.with_custody(|custody| {
+            let held = custody.get(tree_id).cloned();
+            let Some(broken) = CustodyRecord::broken(held.as_ref()) else {
+                return Ok(None);
+            };
+            custody.insert(tree_id.to_owned(), broken);
+            Ok(held)
+        })
+    }
 }

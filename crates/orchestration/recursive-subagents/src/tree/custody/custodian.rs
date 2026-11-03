@@ -217,6 +217,23 @@ fn take(store: &dyn TreeCustody, tree_id: &str) -> Result<CustodyClaim, CustodyE
     }
 }
 
+/// Whether `holder` is proven to be running: this process, or a process on
+/// this machine whose liveness lock in `store`'s directory is held. A holder
+/// on another machine, or one whose lock is free or missing, is not proven
+/// running, which leaves it unknown rather than gone: a missing lock may have
+/// been removed under a live holder.
+#[must_use]
+pub fn holder_runs_here(store: &dyn TreeCustody, holder: &CustodyHost) -> bool {
+    let own = custody_host();
+    if holder == own {
+        return true;
+    }
+    holder.host_name == own.host_name
+        && store
+            .liveness_dir()
+            .is_some_and(|directory| super::liveness::lock_held(&directory, holder.instance))
+}
+
 /// Gives up one holder's share; the last share releases the record.
 ///
 /// # Errors
