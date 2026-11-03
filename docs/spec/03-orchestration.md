@@ -3260,8 +3260,7 @@ machine and its fence, unless it presents a `HolderGone` for exactly that
 holder at exactly that fence; it then takes over under the next fence.
 `HolderGone` is minted only through the sealed `CustodyLiveness` interface, so
 no crate outside the tree can forge one (a negative compile pin holds this,
-chapter 05); the host-start custody liveness lock that implements it lands with
-the hub integration. Renew, release and prove succeed only for the stored
+chapter 05). Renew, release and prove succeed only for the stored
 holder at the stored fence while the record is held, so a superseded claim can
 never act again. A release keeps the fence and the last holder; repeating the
 last holder's release succeeds, and any other claim, including a stale
@@ -3301,6 +3300,31 @@ the live process, which its next take joins. Every share ends in a release,
 or is forgotten when its record went with the tree's rows; a last share
 dropped otherwise would keep the record held until the process exits, and
 debug builds refuse it.
+
+**Liveness.** Custody's holder-gone proof is its own, not the runtime lease's:
+a custody holder can hold a dormant tree with no lease. Before its first take
+in a store, a host process takes an exclusive, close-on-exec advisory lock on
+`<instance>.lock` in the store's `custody-hosts` directory (beside
+`subagents.sqlite3`, created 0700) and holds it for the rest of its life; the
+kernel releases it when the process ends, however it ends. The instance is the
+typed `<pid>-<16 hex nonce>` drawn at process start, never free text, and the
+process's host is fixed at its first take (Plak names the local host, this
+machine's node name and its binary id when that is known without hashing the
+image, from the install manifest or the identity cache; otherwise none).
+Taking the lock sweeps the free locks
+of other instances that no held custody record names; it takes those locks
+before it reads the records, so an instance it sweeps has ended and can claim
+nothing more, and a crashed holder's free lock stays until its record is
+taken over or released. When a take finds another instance holding the tree,
+the process asks the sealed liveness module, which proves that holder gone
+only when it ran on this machine and this process can take its lock, and only
+while the path still names the file it locked (the inode check after the
+lock); a link is never read as a lock. A missing lock file or directory proves
+nothing, since it may have been removed under a live holder: such a holder
+waits for the break-glass. With that
+`HolderGone` the take supersedes the holder under the next fence. A holder on
+another machine, or one that cannot be proven gone, is never taken over by a
+clock: there is no time-based expiry.
 
 **There is no migration.** A schema change moves the product's state directory
 (chapter 02 §2.5); an older store stays in its own directory and is never read. The store fails closed on a **DDL

@@ -61,15 +61,30 @@ pub fn bind_custody_host(
     }
 }
 
-/// The host this process takes custody as. Unbound, it is the local host
-/// with no build id, on a machine named `localhost`.
+/// The host this process takes custody as. Unbound, it is the local host on
+/// this machine, with no build id.
 pub fn custody_host() -> &'static CustodyHost {
     HOST.get_or_init(|| CustodyHost {
         host_id: "local".to_owned(),
         instance: HostInstance::generate(),
         binary: None,
-        host_name: "localhost".to_owned(),
+        host_name: machine_name(),
     })
+}
+
+/// This machine's node name, which liveness compares: a holder on another
+/// machine is never proven gone here.
+#[must_use]
+pub fn machine_name() -> String {
+    let name = rustix::system::uname()
+        .nodename()
+        .to_string_lossy()
+        .into_owned();
+    if name.is_empty() {
+        "localhost".to_owned()
+    } else {
+        name
+    }
 }
 
 /// One holder's share of this process's claim on one tree in one store.
@@ -146,7 +161,7 @@ pub fn acquire_custody(
 ) -> Result<CustodyHold, CustodyError> {
     let key = (store.custody_scope(), tree_id.to_owned());
     let mut holds = holds().lock().unwrap_or_else(PoisonError::into_inner);
-    let claim = store.take_custody(tree_id, custody_host(), None)?;
+    let claim = take(store, tree_id)?;
     match holds.get_mut(&key) {
         Some(held) => {
             held.claim = claim.clone();
@@ -166,6 +181,40 @@ pub fn acquire_custody(
         key: Some(key),
         claim,
     })
+}
+
+/// One take for this process: its liveness lock in the store's directory
+/// first, so that no take of its own can be proven gone, then the take, and a
+/// takeover of a holder this process proves gone.
+fn take(store: &dyn TreeCustody, tree_id: &str) -> Result<CustodyClaim, CustodyError> {
+    let host = custody_host();
+    let directory = store.liveness_dir();
+    if let Some(directory) = &directory {
+        super::liveness::hold_own_lock(directory, host.instance, store).map_err(|error| {
+            CustodyError::Store(super::TreeStoreError::unavailable(format!(
+                "could not take this host's custody liveness lock: {error}"
+            )))
+        })?;
+    }
+    match store.take_custody(tree_id, host, None) {
+        Err(CustodyError::HostedElsewhere(refusal)) => {
+            let liveness =
+                directory
+                    .as_deref()
+                    .map(|directory| super::liveness::DirectoryLiveness {
+                        directory,
+                        own: host,
+                    });
+            let proof = liveness
+                .as_ref()
+                .and_then(|liveness| super::HolderGone::prove(refusal.holder_claim(), liveness));
+            match proof {
+                Some(gone) => store.take_custody(tree_id, host, Some(&gone)),
+                None => Err(CustodyError::HostedElsewhere(refusal)),
+            }
+        }
+        taken => taken,
+    }
 }
 
 /// Gives up one holder's share; the last share releases the record.

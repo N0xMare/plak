@@ -8,6 +8,8 @@ use plakous_recursive_subagents::tree::{
     CustodyClaim, CustodyError, CustodyHolding, CustodyHost, CustodyRecord, CustodyTake,
     HolderGone, HostInstance, TreeCustody, TreeStoreError,
 };
+use std::collections::BTreeSet;
+
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::store::{SqliteTreeStore, sqlite_unavailable, sqlite_write_error};
@@ -144,12 +146,32 @@ impl TreeCustody for SqliteTreeStore {
         format!("sqlite:{}", self.custody_path().display())
     }
 
+    fn liveness_dir(&self) -> Option<std::path::PathBuf> {
+        self.custody_path()
+            .parent()
+            .map(|directory| directory.join("custody-hosts"))
+    }
+
     fn custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, TreeStoreError> {
         self.with_connection(|connection| {
             let tx = connection.transaction().map_err(|error| {
                 sqlite_unavailable("could not begin agent tree custody", &error)
             })?;
             read(&tx, tree_id)
+        })
+    }
+
+    fn held_custody_instances(&self) -> Result<BTreeSet<HostInstance>, TreeStoreError> {
+        self.with_connection(|connection| {
+            let invalid = || TreeStoreError::corrupt("agent tree custody row is invalid");
+            let mut statement = connection
+                .prepare("SELECT DISTINCT host_instance FROM agent_tree_custody WHERE released=0")
+                .map_err(|error| sqlite_unavailable("could not read agent tree custody", &error))?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| sqlite_unavailable("could not read agent tree custody", &error))?;
+            rows.map(|row| HostInstance::parse(&row.map_err(|_| invalid())?).map_err(|_| invalid()))
+                .collect()
         })
     }
 

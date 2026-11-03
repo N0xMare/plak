@@ -29,6 +29,7 @@ futures-util = { workspace = true, features = ["std"] }
 plakous.workspace = true
 plakous-host-protocol.workspace = true
 plakous-workspace.workspace = true
+rustix = { workspace = true, features = ["system"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tempfile = { workspace = true, optional = true }

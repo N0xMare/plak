@@ -16,9 +16,10 @@ use std::hash::{BuildHasher as _, Hasher as _};
 use super::TreeStoreError;
 
 mod custodian;
+mod liveness;
 pub use custodian::{
-    CustodyHold, acquire_custody, bind_custody_host, custody_host, release_custody_hold,
-    with_custody,
+    CustodyHold, acquire_custody, bind_custody_host, custody_host, machine_name,
+    release_custody_hold, with_custody,
 };
 
 /// One host process image: its process id and a nonce drawn at start, so a
@@ -268,12 +269,29 @@ pub trait TreeCustody: Send + Sync {
     /// handles of one store answer the same scope, two stores never do.
     fn custody_scope(&self) -> String;
 
+    /// The directory the store's host processes keep their liveness locks
+    /// in (`custody-hosts` beside the database), or `None` for a store only
+    /// one process can reach, where no holder can be proven gone.
+    fn liveness_dir(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
     /// The stored custody of `tree_id`, or `None` when no take ever ran.
     ///
     /// # Errors
     ///
     /// Refuses an unreachable store and a record that does not decode.
     fn custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, TreeStoreError>;
+
+    /// The host instances that hold at least one record that is not
+    /// released, which liveness sweeps never remove the lock of.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an unreachable store and a record that does not decode.
+    fn held_custody_instances(
+        &self,
+    ) -> Result<std::collections::BTreeSet<HostInstance>, TreeStoreError>;
 
     /// Takes custody for `host`: a new or released record is claimed under
     /// the next fence; a record `host` already holds is returned as is; a

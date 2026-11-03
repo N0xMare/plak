@@ -833,7 +833,8 @@ pub use commands::{AgentCommand, AgentCommandKind, CommandFact, MAX_TREE_COMMAND
 pub use custody::{
     CustodyClaim, CustodyError, CustodyHold, CustodyHolding, CustodyHost, CustodyLiveness,
     CustodyRecord, CustodyTake, HolderGone, HostInstance, TreeCustody, TreeHostedElsewhere,
-    acquire_custody, bind_custody_host, custody_host, release_custody_hold, with_custody,
+    acquire_custody, bind_custody_host, custody_host, machine_name, release_custody_hold,
+    with_custody,
 };
 pub use feed::TreeFeed;
 pub use intents::{

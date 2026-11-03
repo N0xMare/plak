@@ -1340,6 +1340,7 @@ dependencies = [
  "plakous",
  "plakous-host-protocol",
  "plakous-workspace",
+ "rustix",
  "serde",
  "serde_json",
  "tokio",

@@ -16,8 +16,24 @@ use plakous_recursive_subagents_store::SqliteTreeStore;
 use crate::home::paths::PlakPaths;
 use plakous_hosted::{CliFailure, CliResult};
 
+/// Names this process's custody host before its first take: the local
+/// per-user host on this machine, with this binary's build id when it is
+/// known without hashing the image (an install manifest or the home's
+/// identity cache names it), so opening the tree store never pays for a hash.
+fn bind_custody_host() {
+    static BOUND: std::sync::Once = std::sync::Once::new();
+    BOUND.call_once(|| {
+        let _ = plakous_recursive_subagents::tree::bind_custody_host(
+            "local",
+            plakous_recursive_subagents::tree::machine_name(),
+            crate::build_identity::known_binary_id().filter(|binary| !binary.is_empty()),
+        );
+    });
+}
+
 /// The tree store for this home, opened on its own file.
 pub fn open_tree_store(paths: &PlakPaths) -> Result<SqliteTreeStore, String> {
+    bind_custody_host();
     paths.ensure_layout()?;
     SqliteTreeStore::open(&paths.subagents_database()).map_err(|error| error.message().to_owned())
 }

@@ -19,12 +19,14 @@ use plakous_recursive_subagents::tree::{
     HostInstance, NodeLineId, NodePlacement, NodeWorkspace, OperationRecord, PersistedTree,
     ProductAgentTree, TerminalRefusalIntent, TreeCustody, TreeEpochs, TreeStore,
     TreeStoreErrorKind, VcsExpectedOutcome, VcsStageClass, VcsStageIntent, VcsStageKind,
+    acquire_custody, custody_host, release_custody_hold,
 };
 use plakous_recursive_subagents_store::SqliteTreeStore;
 
 const TREE: &str = "schema-ten";
 const LINE: &str = "0190c3a1-5b7e-7c2d-9f00-0123456789ab";
 const CONTENDER_ENV: &str = "PLAK_TREE_CUSTODY_CONTENDER";
+const HOLDER_ENV: &str = "PLAK_TREE_CUSTODY_HOLDER";
 
 fn spawned(root: &Path) -> (ProductAgentTree, String) {
     let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
@@ -621,4 +623,107 @@ fn custody_contender() {
         ),
         Err(error) => panic!("{error}"),
     }
+}
+
+/// Starts a process that takes custody of [`TREE`] in the store at `path`
+/// through the host's liveness lock, and returns once it holds it.
+fn spawn_holder(root: &Path, path: &Path) -> std::process::Child {
+    let ready = root.join("holder.ready");
+    let holder = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "schema_ten::custody_holder",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(
+            HOLDER_ENV,
+            format!("{}|{}", path.display(), ready.display()),
+        )
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !ready.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the holder never took custody"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    holder
+}
+
+/// A process that took custody through the host's liveness lock keeps the
+/// tree from every other process while it lives; once it is gone, the next
+/// process proves it gone and takes the tree over under the next fence. No
+/// clock is involved.
+#[test]
+fn a_dead_holder_process_is_taken_over_and_a_live_one_is_not() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("subagents.sqlite3");
+    let store = SqliteTreeStore::open(&path).unwrap();
+    let mut holder = spawn_holder(root.path(), &path);
+    let held = store.custody(TREE).unwrap().unwrap();
+    assert_eq!(held.fence, 1);
+    let Err(CustodyError::HostedElsewhere(refusal)) = acquire_custody(&store, TREE) else {
+        panic!("a live holder keeps the tree");
+    };
+    assert_eq!(refusal.holder, held.holding.host);
+
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    let taken = acquire_custody(&store, TREE).unwrap();
+    assert_eq!(taken.claim().fence, 2, "the takeover mints the next fence");
+    assert_eq!(&taken.claim().host, custody_host());
+    let Err(CustodyError::HostedElsewhere(_)) = store.prove_custody(&CustodyClaim {
+        tree_id: TREE.to_owned(),
+        host: held.holding.host,
+        fence: 1,
+    }) else {
+        panic!("the dead holder's claim is superseded");
+    };
+    release_custody_hold(&store, taken).unwrap();
+}
+
+/// Removing a live holder's liveness lock file, or the whole liveness
+/// directory, proves nothing: the holder keeps the tree while it lives and
+/// after it is gone, until the operator's break-glass releases the record.
+#[test]
+fn a_removed_liveness_lock_never_proves_a_holder_gone() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("subagents.sqlite3");
+    let store = SqliteTreeStore::open(&path).unwrap();
+    let mut holder = spawn_holder(root.path(), &path);
+    let held = store.custody(TREE).unwrap().unwrap();
+    let directory = store.liveness_dir().unwrap();
+    let refused = |why: &str| {
+        let Err(CustodyError::HostedElsewhere(refusal)) = acquire_custody(&store, TREE) else {
+            panic!("{why}: the holder keeps the tree");
+        };
+        assert_eq!(refusal.holder, held.holding.host, "{why}");
+        assert_eq!(refusal.fence, 1, "{why}");
+    };
+    std::fs::remove_file(directory.join(format!("{}.lock", held.holding.host.instance))).unwrap();
+    refused("its lock file was removed");
+    std::fs::remove_dir_all(&directory).unwrap();
+    refused("the liveness directory was removed");
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    refused("it is gone, but nothing proves it");
+}
+
+/// The holding process of the takeover law: takes custody, says so, waits to
+/// be killed.
+#[test]
+fn custody_holder() {
+    let Ok(spec) = std::env::var(HOLDER_ENV) else {
+        return;
+    };
+    let (path, ready) = spec.split_once('|').unwrap();
+    let store = SqliteTreeStore::open(Path::new(path)).unwrap();
+    let hold = acquire_custody(&store, TREE).unwrap();
+    std::fs::write(ready, hold.claim().fence.to_string()).unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(120));
 }

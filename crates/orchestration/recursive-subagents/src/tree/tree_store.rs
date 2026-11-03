@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use plakous_host_protocol::topology::CandidateId;
 
 use super::{
-    CustodyClaim, CustodyError, CustodyHost, CustodyRecord, CustodyTake, HolderGone,
+    CustodyClaim, CustodyError, CustodyHost, CustodyRecord, CustodyTake, HolderGone, HostInstance,
     ProductAgentTree, TopologyError, TopologyErrorCode, TreeCustody, TreeHostedElsewhere,
 };
 
@@ -592,6 +592,20 @@ impl TreeCustody for MemoryTreeStore {
             .lock()
             .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
         Ok(custody.get(tree_id).cloned())
+    }
+
+    fn held_custody_instances(
+        &self,
+    ) -> Result<std::collections::BTreeSet<HostInstance>, TreeStoreError> {
+        let custody = self
+            .custody
+            .lock()
+            .map_err(|_| TreeStoreError::unavailable("memory tree store is poisoned"))?;
+        Ok(custody
+            .values()
+            .filter(|record| !record.released)
+            .map(|record| record.holding.host.instance)
+            .collect())
     }
 
     fn take_custody(

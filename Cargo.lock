@@ -4310,6 +4310,7 @@ dependencies = [
  "plakous-offline-crash-harness",
  "plakous-workspace",
  "proptest",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

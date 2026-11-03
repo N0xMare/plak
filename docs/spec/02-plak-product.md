@@ -277,6 +277,7 @@ launch directory — the cwd of the process, resolved once.
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 35
       product.sqlite3             Plak intents and feed-derived views, schema 36
       subagents.sqlite3           the agent tree, schema 10
+      custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
