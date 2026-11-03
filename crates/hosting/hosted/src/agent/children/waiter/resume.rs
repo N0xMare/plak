@@ -119,7 +119,7 @@ pub(super) async fn try_transient_resume(
                 },
                 error.message(),
                 spent,
-                tree.epoch_of(agent_id)?.transient_resumes,
+                transient_resume_bound(tree, agent_id)?,
             )
         })
         .ok()
@@ -220,4 +220,13 @@ pub(super) async fn try_transient_resume(
         }
         Some(Err(()))
     }
+}
+
+/// The transient-resume bound of `agent_id`'s own epoch: a child keeps the
+/// bound of the profile it was spawned under.
+pub(in crate::agent) fn transient_resume_bound(
+    tree: &crate::agent_tree::ProductAgentTree,
+    agent_id: &str,
+) -> Option<u8> {
+    Some(tree.epoch_of(agent_id)?.transient_resumes)
 }

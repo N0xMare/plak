@@ -346,6 +346,36 @@ async fn child_off_menu_spawn_refuses_before_the_binder_runs() {
     assert_eq!(binder.admits.load(Ordering::SeqCst), 0);
 }
 
+/// The tool's menu check, inside the writer turn, reads the caller's own
+/// epoch: a supervisor still on epoch 0 names `review`, which the current
+/// epoch dropped, and reaches the binder.
+#[tokio::test]
+async fn a_caller_on_an_older_epoch_passes_the_menu_check_on_its_own_roster() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, mut tree) = persist_fixture(&root);
+    let supervisor = supervisor_on_an_older_epoch(&mut tree);
+    let driver = driver_on(tree, Arc::clone(&store));
+    let binder = Arc::new(MenuProbeBinder {
+        admits: AtomicUsize::new(0),
+    });
+    let tool = spawn_tool(
+        driver,
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
+    );
+    *tool.caller_id.lock().unwrap() = supervisor;
+    let outcome = tool
+        .spawn_with(
+            "op-older-epoch".into(),
+            &serde_json::to_value(spawn_request()).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    // The binder's own refusal: the tool's menu check let it through.
+    assert_eq!(outcome_json(&outcome)["code"], "schema_mismatch");
+    assert_eq!(binder.admits.load(Ordering::SeqCst), 1);
+}
+
 #[tokio::test]
 async fn spawn_binder_binds_locator_and_skips_replay() {
     let root = tempfile::tempdir().unwrap();

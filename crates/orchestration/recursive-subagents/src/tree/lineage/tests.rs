@@ -5,7 +5,10 @@ use std::sync::Arc;
 use plakous_host_protocol::selection::CompositionSelection;
 
 use super::{ForkedFrom, NodeLineId, NodePlacement, NodeWorkspace, TreeEpochs};
-use crate::tree::test_support::{spawn_req, tree};
+use crate::tree::test_support::{
+    adopt_req, candidate_of, close_req, fake_tree, mint_req, spawn_req, tree, tree_at,
+};
+use crate::tree::vcs_fixtures::git_repo;
 use crate::tree::{
     MemoryTreeStore, ProductAgentTree, TopologyErrorCode, TreeAdmissionState, TreeStore,
 };
@@ -154,7 +157,7 @@ fn every_accessor_reads_the_header_on_epoch_zero() {
         .spawn_agent("root", &spawn_req(), None)
         .unwrap()
         .agent_id;
-    let header = tree.header_snapshot();
+    let header = tree.epoch_snapshot(0).unwrap();
     assert!(std::ptr::eq(tree.current_epoch(), header));
     for id in ["root", child.as_str()] {
         assert!(std::ptr::eq(tree.epoch_of(id).unwrap(), header));
@@ -208,7 +211,7 @@ fn an_append_moves_the_root_and_keeps_live_children_on_their_epoch() {
     assert_eq!(tree.caller_epoch("root").unwrap(), &successor);
     // The live child keeps epoch 0: its card is still there for its reopen.
     assert_eq!(tree.node(&child).unwrap().epoch_no, 0);
-    let header = tree.header_snapshot();
+    let header = tree.epoch_snapshot(0).unwrap();
     assert!(std::ptr::eq(tree.epoch_of(&child).unwrap(), header));
     assert!(
         tree.epoch_of(&child)
@@ -298,7 +301,9 @@ fn an_append_folds_epochs_no_node_references() {
 }
 
 /// At most eight epochs are referenced at once: the current one and every
-/// epoch a child was spawned under.
+/// epoch a child was spawned under. A closed child still counts, because a
+/// followup can revive it on its own epoch, so the refusal points at a new
+/// session rather than at closing agents.
 #[test]
 fn an_append_past_eight_referenced_epochs_is_refused() {
     let (_root, mut tree) = tree();
@@ -308,6 +313,9 @@ fn an_append_past_eight_referenced_epochs_is_refused() {
             .unwrap()
             .agent_id;
         assert_eq!(tree.node(&child).unwrap().epoch_no, epoch);
+        tree.close_agent("root", &close_req(&child), None).unwrap();
+        tree.settle_for_test();
+        assert!(tree.node(&child).unwrap().status.is_finished());
         let successor = successor_of(&tree, |snapshot| {
             snapshot.root_tuple = format!("tuple-{epoch}");
         });
@@ -315,7 +323,10 @@ fn an_append_past_eight_referenced_epochs_is_refused() {
         if epoch + 1 < super::MAX_REFERENCED_EPOCHS as u64 {
             assert_eq!(appended.unwrap(), epoch + 1);
         } else {
-            assert_eq!(appended.unwrap_err().code, TopologyErrorCode::BoundExceeded);
+            let refused = appended.unwrap_err();
+            assert_eq!(refused.code, TopologyErrorCode::BoundExceeded);
+            assert!(refused.message.contains("until retention removes it"));
+            assert!(!refused.message.contains("close"), "{}", refused.message);
         }
     }
     assert_eq!(tree.epochs().current, 7);
@@ -385,4 +396,158 @@ fn a_fork_genesis_is_an_independent_tree_seeded_with_the_source_epoch() {
     let source_again = ProductAgentTree::reopen(store.load("tree1").unwrap().unwrap());
     assert!(source_again.forked_from().is_none());
     assert!(source_again.node(&child.agent_id).is_ok());
+}
+
+/// `orchestrate`, read-only by default, as a forked mutating lead.
+fn lead_req() -> crate::protocol::SpawnAgentRequest {
+    let mut request = crate::protocol::SpawnAgentRequest::test_orchestrate();
+    request.tier = crate::protocol::Tier::Mutate;
+    request.workspace = crate::protocol::SpawnWorkspace::Fork;
+    request
+}
+
+/// A non-root caller still on an older epoch spawns from its own epoch's
+/// roster after an append changed every value it depends on: the card it
+/// binds, the epoch its child is stamped with, its own tool names, its
+/// child's delegation authority, and its cell budget.
+#[test]
+fn a_caller_on_an_older_epoch_spawns_from_its_own_roster() {
+    let (_root, mut tree) = tree();
+    let mut genesis = tree.current_epoch().clone();
+    genesis.max_depth = 3;
+    genesis.max_agents_per_cell = 2;
+    genesis.roster.get_mut(&template("explore")).unwrap().spawns = vec![template("review")];
+    genesis.digest = genesis.compute_digest();
+    tree.install_snapshot(genesis);
+    let lead = tree
+        .spawn_agent(
+            "root",
+            &crate::protocol::SpawnAgentRequest::test_orchestrate(),
+            None,
+        )
+        .unwrap()
+        .agent_id;
+    let successor = successor_of(&tree, |epoch| {
+        epoch.working_set.remove(&template("review"));
+        epoch.roster.remove(&template("review"));
+        for name in ["orchestrate", "explore"] {
+            epoch
+                .roster
+                .get_mut(&template(name))
+                .unwrap()
+                .spawns
+                .clear();
+        }
+        epoch.max_agents_per_cell = 5;
+    });
+    assert_eq!(tree.append_epoch(successor).unwrap(), 1);
+
+    // Its tool names come from its own epoch's menu.
+    assert!(
+        tree.compiled_tool_names(&lead)
+            .unwrap()
+            .contains(&"spawn_agent")
+    );
+    // It binds a card the current epoch no longer carries, and its child is
+    // stamped with the lead's epoch.
+    let reviewer = tree
+        .spawn_agent(&lead, &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    assert_eq!(tree.node(&reviewer).unwrap().epoch_no, 0);
+    // The child's delegation authority is its template's menu in that epoch.
+    let explore = crate::protocol::SpawnAgentRequest::test_named(
+        "explore",
+        crate::protocol::Tier::ReadOnly,
+        "scout",
+        "look",
+    );
+    let scout = tree.spawn_agent(&lead, &explore, None).unwrap().agent_id;
+    assert_eq!(tree.node(&scout).unwrap().epoch_no, 0);
+    assert!(tree.grants()[&scout].may_spawn);
+    // Its cells spend its epoch's budget; the root's follow the current one.
+    assert_eq!(tree.cell_budget(&lead).unwrap().budget(), 2);
+    assert_eq!(tree.cell_budget("root").unwrap().budget(), 5);
+    // The root itself spawns from the current epoch.
+    assert_eq!(
+        tree.spawn_agent("root", &spawn_req(), None)
+            .unwrap_err()
+            .code,
+        TopologyErrorCode::TemplateUnknown
+    );
+}
+
+/// A child spawned under a successor epoch keeps that epoch across a further
+/// append: its turn ceiling, its mint hook and its cell budget.
+#[test]
+fn a_child_on_a_successor_epoch_keeps_it_across_a_further_append() {
+    let (_root, _vcs, mut tree) = fake_tree();
+    let first = successor_of(&tree, |epoch| {
+        let card = epoch.roster.get_mut(&template("implement")).unwrap();
+        card.max_turns = Some(3);
+        card.on_mint = Some("echo one".to_owned());
+        epoch.max_agents_per_cell = 2;
+    });
+    assert_eq!(tree.append_epoch(first).unwrap(), 1);
+    let child = tree
+        .spawn_agent("root", &mint_req(), None)
+        .unwrap()
+        .agent_id;
+    assert_eq!(tree.node(&child).unwrap().epoch_no, 1);
+    let budget = tree.cell_budget(&child).unwrap();
+    let second = successor_of(&tree, |epoch| {
+        let card = epoch.roster.get_mut(&template("implement")).unwrap();
+        card.max_turns = Some(5);
+        card.on_mint = Some("echo two".to_owned());
+        epoch.max_agents_per_cell = 4;
+    });
+    assert_eq!(tree.append_epoch(second).unwrap(), 2);
+
+    assert_eq!(tree.attempt_turn_ceiling(&child), Some(3));
+    let caller_path = tree.node("root").unwrap().path.clone();
+    let hook = tree
+        .mint_hook(&child, "root", &caller_path, &mint_req(), None)
+        .unwrap();
+    assert_eq!(hook.command, "echo one");
+    assert!(Arc::ptr_eq(&tree.cell_budget(&child).unwrap(), &budget));
+    assert_eq!(budget.budget(), 2);
+    assert_eq!(tree.cell_budget("root").unwrap().budget(), 4);
+}
+
+/// An adopter spawned under a successor epoch that requires review evidence
+/// is held to it after a further append that does not.
+#[test]
+fn an_adopter_on_a_successor_epoch_keeps_its_review_evidence_rule() {
+    let repo = git_repo();
+    let mut tree = tree_at(
+        repo.path().to_path_buf(),
+        crate::protocol::WriterMode::SingleLease,
+    );
+    let first = successor_of(&tree, |epoch| {
+        epoch.require_review_evidence = true;
+        epoch.max_depth = 2;
+        epoch
+            .roster
+            .get_mut(&template("orchestrate"))
+            .unwrap()
+            .max_tier = crate::protocol::Tier::Mutate;
+    });
+    assert_eq!(tree.append_epoch(first).unwrap(), 1);
+    let lead = tree
+        .spawn_agent("root", &lead_req(), None)
+        .unwrap()
+        .agent_id;
+    let second = successor_of(&tree, |epoch| epoch.require_review_evidence = false);
+    assert_eq!(tree.append_epoch(second).unwrap(), 2);
+    let worker = tree.spawn_agent(&lead, &mint_req(), None).unwrap().agent_id;
+    assert_eq!(tree.node(&worker).unwrap().epoch_no, 1);
+    std::fs::write(tree.node(&worker).unwrap().path.join("W.txt"), "worker\n").unwrap();
+    tree.record_turn_completed(&worker).unwrap();
+    tree.settle_for_test();
+    let candidate = candidate_of(&tree, &worker);
+
+    let refused = tree
+        .adopt_candidate(&lead, &adopt_req(&candidate), None)
+        .unwrap_err();
+    assert_eq!(refused.code, TopologyErrorCode::EvidenceMismatch);
 }

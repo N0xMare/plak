@@ -446,7 +446,7 @@ impl Model {
                     .insert(format!("session-{slot}"), u64::from(seed));
             }
             9 => {
-                let mut snapshot = templates.tree.header_snapshot().clone();
+                let mut snapshot = templates.tree.current_epoch().clone();
                 snapshot.transient_resumes = (seed % 3) as u8;
                 snapshot.digest = snapshot.compute_digest();
                 self.epochs.insert(1 + u64::from(slot), snapshot);
@@ -589,7 +589,7 @@ impl Model {
             WriterMode::SingleLease,
             self.selected_tuple.clone(),
             templates.tree.launch_checkout.clone(),
-            templates.tree.header_snapshot().clone(),
+            templates.tree.current_epoch().clone(),
             self.nodes.clone(),
             self.grants.clone(),
             self.attempts.clone(),

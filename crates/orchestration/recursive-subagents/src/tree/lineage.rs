@@ -167,7 +167,9 @@ pub(super) struct TreeLineage {
 }
 
 /// Epochs one tree may reference at once: the current epoch plus every
-/// epoch a non-root node was spawned under. An append past it is refused.
+/// epoch a non-root node row was spawned under, finished or not (a followup
+/// may revive a closed child on its own epoch). An append past it is
+/// refused.
 pub const MAX_REFERENCED_EPOCHS: usize = 8;
 
 impl ProductAgentTree {
@@ -179,16 +181,18 @@ impl ProductAgentTree {
 
     /// The snapshot of epoch `epoch_no`, when this tree holds it.
     #[must_use]
-    pub fn epoch_snapshot(&self, epoch_no: u64) -> Option<&OrchestrationSnapshot> {
+    pub(crate) fn epoch_snapshot(&self, epoch_no: u64) -> Option<&OrchestrationSnapshot> {
         if epoch_no == 0 {
             return Some(&self.snapshot);
         }
         self.lineage.epochs.successors.get(&epoch_no)
     }
 
-    /// Epoch 0, the snapshot the tree row itself carries. Only a store
-    /// writing that row reads it; every other reader names whose epoch it
-    /// wants.
+    /// Epoch 0, the snapshot the `agent_trees` row itself carries, for a
+    /// store writing or rebuilding that row. Every other reader names whose
+    /// epoch it wants ([`Self::current_epoch`], [`Self::epoch_of`],
+    /// [`Self::caller_epoch`]).
+    #[doc(hidden)]
     #[must_use]
     pub fn header_snapshot(&self) -> &OrchestrationSnapshot {
         &self.snapshot
@@ -240,7 +244,9 @@ impl ProductAgentTree {
     }
 
     /// Every epoch the tree holds, header first.
-    pub fn retained_epochs(&self) -> impl Iterator<Item = (u64, &OrchestrationSnapshot)> + '_ {
+    pub(crate) fn retained_epochs(
+        &self,
+    ) -> impl Iterator<Item = (u64, &OrchestrationSnapshot)> + '_ {
         std::iter::once((0, &self.snapshot)).chain(
             self.lineage
                 .epochs
@@ -323,8 +329,9 @@ impl ProductAgentTree {
             return Err(TopologyError::new(
                 TopologyErrorCode::BoundExceeded,
                 format!(
-                    "this tree already references {MAX_REFERENCED_EPOCHS} epochs; close agents \
-                     spawned under older profiles before switching again"
+                    "this tree already references {MAX_REFERENCED_EPOCHS} profile epochs: every \
+                     agent keeps the epoch it was spawned under, even once finished, until \
+                     retention removes it; start a new session to use another profile now"
                 ),
             ));
         }

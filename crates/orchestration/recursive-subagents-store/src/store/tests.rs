@@ -228,7 +228,7 @@ mod images {
             tree.writer_mode,
             tree.selected_tuple.clone(),
             tree.launch_checkout.clone(),
-            tree.header_snapshot().clone(),
+            tree.current_epoch().clone(),
             tree.nodes().clone(),
             grants,
             tree.attempts().clone(),

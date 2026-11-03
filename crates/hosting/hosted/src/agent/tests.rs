@@ -4613,3 +4613,106 @@ fn child_spawn_parent_inputs_are_profile_independent_apart_from_composition() {
     assert_ne!(before_composition, after_composition);
     assert_eq!(after_composition, CompositionSelection::JsPtc);
 }
+
+/// A hub tree whose `orchestrate` child was spawned under epoch 0, then one
+/// append that changes everything that child's own epoch says: `review` and
+/// `orchestrate` are gone from the current epoch, the frozen tool tables and
+/// the transient-resume bound differ. Returns the child's id.
+async fn hub_tree_with_a_child_on_an_older_epoch(tree_id: &str, root: &Path) -> String {
+    use crate::agent_tree_protocol::TemplateName;
+    let name = |raw: &str| TemplateName::parse(raw).unwrap();
+    let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+        tree_id,
+        "root",
+        "owner",
+        root.to_path_buf(),
+        "selected-tuple",
+        crate::agent_tree_protocol::WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut genesis = tree.current_epoch().clone();
+    genesis.transient_resumes = 2;
+    genesis.tool_sections = std::collections::BTreeMap::from([(
+        "tools.lint".to_owned(),
+        "command = \"lint\"".to_owned(),
+    )]);
+    genesis.roster.get_mut(&name("review")).unwrap().account = "codex".to_owned();
+    let lead = genesis.roster.get_mut(&name("orchestrate")).unwrap();
+    lead.composition = Some(plakous_host_protocol::selection::CompositionSelection::JsPtc);
+    lead.processing_tier = ProcessingTierDisposition::ProviderNamed(
+        plakous::model::ProviderServiceTierId::new("priority").unwrap(),
+    );
+    genesis.digest = genesis.compute_digest();
+    tree.install_snapshot(genesis);
+    let child = tree
+        .spawn_agent(
+            "root",
+            &crate::agent_tree_protocol::SpawnAgentRequest::test_orchestrate(),
+            None,
+        )
+        .unwrap()
+        .agent_id;
+    let mut successor = tree.current_epoch().clone();
+    for template in ["review", "orchestrate"] {
+        successor.working_set.remove(&name(template));
+        successor.roster.remove(&name(template));
+    }
+    successor.transient_resumes = 0;
+    successor.tool_sections.clear();
+    successor.digest = successor.compute_digest();
+    assert_eq!(tree.append_epoch(successor).unwrap(), 1);
+    crate::topology_runtime::insert_root(tree_id.to_owned(), tree, None)
+        .await
+        .unwrap();
+    child
+}
+
+/// A child on an older epoch binds, reopens and resumes from its own epoch,
+/// not the current one: the product's spawn admission for its spawns, its
+/// frozen tool tables, its processing tier and composition, and its
+/// transient-resume bound.
+#[tokio::test]
+async fn a_child_on_an_older_epoch_binds_from_its_own_epoch() {
+    let tree_id = crate::topology_runtime::test_support::unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let child = hub_tree_with_a_child_on_an_older_epoch(&tree_id, root.path()).await;
+
+    let mut parent = openrouter_test_parent();
+    parent.topology_tree_id = Some(tree_id.clone());
+    let binder = ProductChildSessionBinder {
+        parent: SpawnParent::Api(parent),
+    };
+    let review = crate::agent_tree_protocol::SpawnAgentRequest::test_review();
+    let admitted = binder.admit_spawn(&child, &review);
+    let refused_for_root = binder.admit_spawn("root", &review);
+
+    let selection = frozen_child_tool_selection(&tree_id, &child);
+    let tier = spawn_roster_processing_tier(&tree_id, &child);
+    let composition = spawn_roster_composition(&tree_id, &child);
+    let bound = crate::topology_runtime::lookup(&tree_id)
+        .unwrap()
+        .read(|tree| children::transient_resume_bound(tree, &child))
+        .unwrap();
+    crate::topology_runtime::force_release(&tree_id).await;
+
+    admitted.unwrap();
+    assert_eq!(
+        refused_for_root.unwrap_err().code,
+        crate::agent_tree_protocol::TopologyErrorCode::TemplateUnknown
+    );
+    assert_eq!(
+        selection.unwrap().tool_sections,
+        std::collections::BTreeMap::from([(
+            "tools.lint".to_owned(),
+            "command = \"lint\"".to_owned(),
+        )])
+    );
+    assert_eq!(
+        tier,
+        ProcessingTierDisposition::ProviderNamed(
+            plakous::model::ProviderServiceTierId::new("priority").unwrap(),
+        )
+    );
+    assert_eq!(composition, Some(CompositionSelection::JsPtc));
+    assert_eq!(bound, Some(2));
+}

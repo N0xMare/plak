@@ -80,7 +80,7 @@ pub(super) use waiter::{
     read_finalize_terminal, spawn_topology_turn_waiter, wait_resume_gate,
 };
 #[cfg(test)]
-pub(super) use waiter::{child_turn_was_cancelled, start_instruction_turn};
+pub(super) use waiter::{child_turn_was_cancelled, start_instruction_turn, transient_resume_bound};
 
 use bind::{SPAWN_MATERIALIZE_TIMEOUT, StartupCaller};
 use deliver::mail_command_id;

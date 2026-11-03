@@ -651,7 +651,7 @@ fn assert_multi_child_cascade(kind: usize, choices: usize) {
         WriterMode::SingleLease,
     )
     .unwrap();
-    let mut snapshot = base.header_snapshot().clone();
+    let mut snapshot = base.current_epoch().clone();
     snapshot.max_depth = 2;
     base.install_snapshot(snapshot);
     let parent = base

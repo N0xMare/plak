@@ -249,10 +249,14 @@ match, keeps the admission state (it is not a resume and does not lift a stop),
 and first folds successor epochs no non-root node references; epoch 0 stays as
 the header. At most eight epochs are referenced at once (the new current one
 and every non-root node's), and an append past that is refused
-`bound_exceeded`. Every tree stays on epoch 0 today: nothing appends an epoch,
-a successor epoch that installs on a quiescent tree replaces the current
-(header) snapshot in place, and no successor rows or parent compositions are
-written. A template card may carry a `runner` name
+`bound_exceeded`. Finished and closed agents count: a node keeps the epoch it
+was spawned under for as long as its row exists, because a followup can revive
+it on that epoch's card, so its epoch is released only when retention removes
+the row (§6.7). The refusal says so and points at a new session; it never asks
+the operator to close agents. Every tree stays on epoch 0 today: nothing
+appends an epoch, a successor epoch that installs on a quiescent tree replaces
+the current (header) snapshot in place, and no successor rows or parent
+compositions are written. A template card may carry a `runner` name
 that places a child on that runner rather than its parent's. The field is
 frozen on the card inside the snapshot JSON and its digest only when set, so a
 card without one keeps its encoding and digest. No template file sets it yet,

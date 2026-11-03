@@ -17,6 +17,8 @@ use super::{
 mod diagnostics;
 mod resume;
 
+#[cfg(test)]
+pub(in crate::agent) use resume::transient_resume_bound;
 pub(in crate::agent) use resume::wait_resume_gate;
 #[cfg(test)]
 pub(super) use resume::wait_transient_gate;

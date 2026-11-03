@@ -91,6 +91,50 @@ fn spawn_cards_exclude_the_callers_own_template() {
     }
 }
 
+/// A supervisor still on epoch 0 compiles its registrations from that
+/// epoch: its spawn cards and menu name `review`, which the current epoch
+/// dropped, and its cells spend that epoch's agent budget.
+#[test]
+fn a_caller_on_an_older_epoch_registers_from_its_own_epoch() {
+    let root = tempfile::tempdir().unwrap();
+    let mut tree = bootstrap_tree("tree1", root.path());
+    let supervisor = supervisor_on_an_older_epoch(&mut tree);
+    let surface = super::super::registrations::caller_surface(&tree, &supervisor).unwrap();
+    assert!(surface.compiled.contains(&"spawn_agent"));
+    assert!(
+        surface
+            .spawn_description
+            .as_ref()
+            .unwrap()
+            .cards
+            .contains("- review:")
+    );
+    assert!(
+        surface
+            .spawnable_templates
+            .iter()
+            .any(|name| name == "review")
+    );
+    assert!(Arc::ptr_eq(
+        &surface.cell_budget,
+        &tree.cell_budget(&supervisor).unwrap()
+    ));
+    assert_eq!(surface.cell_budget.budget(), 2);
+    let root_surface = super::super::registrations::caller_surface(&tree, "root").unwrap();
+    assert_eq!(root_surface.cell_budget.budget(), 5);
+    assert!(
+        !root_surface
+            .spawnable_templates
+            .iter()
+            .any(|name| name == "review")
+    );
+
+    let registry = registry_for(Arc::new(Mutex::new(tree)), supervisor);
+    let name = ToolName::new("spawn_agent").unwrap();
+    let description = registry.definition(&name).unwrap().description();
+    assert!(description.contains("- review:"), "{description}");
+}
+
 #[test]
 fn spawn_tool_description_includes_template_cards_not_accounts() {
     let root = tempfile::tempdir().unwrap();

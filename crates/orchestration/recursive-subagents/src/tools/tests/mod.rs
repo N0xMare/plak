@@ -87,6 +87,35 @@ fn reload(store: &Arc<dyn TreeStore>, tree_id: &str) -> ProductAgentTree {
     ProductAgentTree::reopen(store.load(tree_id).unwrap().unwrap())
 }
 
+/// A supervisor spawned under epoch 0 of `tree`, then one append that drops
+/// `review`, empties every menu and raises the cell budget: everything the
+/// supervisor's own epoch says differs from the current one.
+fn supervisor_on_an_older_epoch(tree: &mut ProductAgentTree) -> String {
+    let name = |raw: &str| TemplateName::parse(raw).unwrap();
+    let mut genesis = tree.current_epoch().clone();
+    genesis.max_depth = 3;
+    genesis.max_agents_per_cell = 2;
+    genesis.digest = genesis.compute_digest();
+    tree.install_snapshot(genesis);
+    let supervisor = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
+        .unwrap()
+        .agent_id;
+    let mut successor = tree.current_epoch().clone();
+    successor.working_set.remove(&name("review"));
+    successor.roster.remove(&name("review"));
+    successor
+        .roster
+        .get_mut(&name("orchestrate"))
+        .unwrap()
+        .spawns
+        .clear();
+    successor.max_agents_per_cell = 5;
+    successor.digest = successor.compute_digest();
+    assert_eq!(tree.append_epoch(successor).unwrap(), 1);
+    supervisor
+}
+
 /// The driver a tool runs on: the tree, `store`, and the tree's own port.
 fn driver_on(tree: ProductAgentTree, store: Arc<dyn TreeStore>) -> TreeDriver {
     let vcs = tree.vcs_port();

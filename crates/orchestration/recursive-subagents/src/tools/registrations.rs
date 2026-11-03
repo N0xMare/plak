@@ -208,7 +208,7 @@ pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Valu
 }
 
 /// The caller-specific parts of the `spawn_agent` description.
-struct SpawnDescription {
+pub(super) struct SpawnDescription {
     pub(super) nodes: usize,
     pub(super) children: usize,
     pub(super) cards: String,
@@ -372,53 +372,17 @@ pub fn topology_tool_registrations_on(
         vocabulary,
     } = ports;
     let caller_id = caller_id.into();
-    let (compiled, spawn_description, spawnable_templates, cell_budget) = {
+    let CallerSurface {
+        compiled,
+        spawn_description,
+        spawnable_templates,
+        cell_budget,
+    } = {
         let tree = driver
             .tree
             .lock()
             .map_err(|_| TreeRuntimeError::new("topology tree lock is poisoned"))?;
-        let compiled = tree
-            .compiled_tool_names(&caller_id)
-            .map_err(|error| TreeRuntimeError::new(error.message))?;
-        // The caller's epoch is its spawn authority: its cards, its menu and
-        // its cells' agent budget.
-        let epoch = tree
-            .caller_epoch(&caller_id)
-            .map_err(|error| TreeRuntimeError::new(error.message))?;
-        let cell_budget = tree
-            .cell_budget(&caller_id)
-            .map_err(|error| TreeRuntimeError::new(error.message))?;
-        let caller_template = tree
-            .node(&caller_id)
-            .map_err(|error| TreeRuntimeError::new(error.message))?
-            .template
-            .as_ref()
-            .map(|template| template.as_str().to_owned());
-        let spawn_description = if compiled
-            .iter()
-            .any(|name| *name == TopologyKind::Spawn.name())
-        {
-            let grant = tree
-                .grant(&caller_id)
-                .map_err(|error| TreeRuntimeError::new(error.message))?;
-            Some(SpawnDescription {
-                nodes: MAX_TREE_NODES.min(usize::from(grant.max_nodes)),
-                children: MAX_DIRECT_CHILDREN.min(usize::from(grant.max_children)),
-                cards: epoch.template_cards(caller_template.as_deref()),
-            })
-        } else {
-            None
-        };
-        let spawnable_templates: Vec<String> = epoch
-            .spawnable_template_names(caller_template.as_deref())
-            .map(|name| name.as_str().to_owned())
-            .collect();
-        (
-            compiled,
-            spawn_description,
-            spawnable_templates,
-            cell_budget,
-        )
+        caller_surface(&tree, &caller_id)?
     };
     let caller_id = Arc::new(Mutex::new(caller_id));
     let mut registrations = Vec::new();
@@ -439,6 +403,64 @@ pub fn topology_tool_registrations_on(
         )?);
     }
     Ok(registrations)
+}
+
+/// What `caller_id`'s registrations compile from: its granted tool names,
+/// the `spawn_agent` cards and menu of its own epoch, and that epoch's
+/// per-cell agent budget.
+pub(super) struct CallerSurface {
+    pub(super) compiled: Vec<&'static str>,
+    pub(super) spawn_description: Option<SpawnDescription>,
+    pub(super) spawnable_templates: Vec<String>,
+    pub(super) cell_budget: Arc<CellAgentBudget>,
+}
+
+pub(super) fn caller_surface(
+    tree: &ProductAgentTree,
+    caller_id: &str,
+) -> TreeRuntimeResult<CallerSurface> {
+    let compiled = tree
+        .compiled_tool_names(caller_id)
+        .map_err(|error| TreeRuntimeError::new(error.message))?;
+    // The caller's epoch is its spawn authority: its cards, its menu and
+    // its cells' agent budget.
+    let epoch = tree
+        .caller_epoch(caller_id)
+        .map_err(|error| TreeRuntimeError::new(error.message))?;
+    let cell_budget = tree
+        .cell_budget(caller_id)
+        .map_err(|error| TreeRuntimeError::new(error.message))?;
+    let caller_template = tree
+        .node(caller_id)
+        .map_err(|error| TreeRuntimeError::new(error.message))?
+        .template
+        .as_ref()
+        .map(|template| template.as_str().to_owned());
+    let spawn_description = if compiled
+        .iter()
+        .any(|name| *name == TopologyKind::Spawn.name())
+    {
+        let grant = tree
+            .grant(caller_id)
+            .map_err(|error| TreeRuntimeError::new(error.message))?;
+        Some(SpawnDescription {
+            nodes: MAX_TREE_NODES.min(usize::from(grant.max_nodes)),
+            children: MAX_DIRECT_CHILDREN.min(usize::from(grant.max_children)),
+            cards: epoch.template_cards(caller_template.as_deref()),
+        })
+    } else {
+        None
+    };
+    let spawnable_templates: Vec<String> = epoch
+        .spawnable_template_names(caller_template.as_deref())
+        .map(|name| name.as_str().to_owned())
+        .collect();
+    Ok(CallerSurface {
+        compiled,
+        spawn_description,
+        spawnable_templates,
+        cell_budget,
+    })
 }
 
 /// Idle host / JSONL `invoke_tool`: same TopologyTool executor as a model
