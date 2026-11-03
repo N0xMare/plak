@@ -350,7 +350,7 @@ async fn project_to_tail_controlled(
                     continue;
                 }
                 for request in &intents.workflow_requests {
-                    if request.kind != crate::sessions::SessionWorkflowKind::Clear
+                    if request.kind != crate::sessions::SessionWorkflowKind::New
                         || intents
                             .workflow_consumed(&request.operation_id, views.state.retained_from)
                         || views.state.workflows.contains_key(&request.operation_id)
@@ -395,7 +395,7 @@ async fn project_to_tail_controlled(
                     }
                     let target_views =
                         Box::pin(project_to_tail(sessions, store, &target_id, locator)).await?;
-                    if let Some(completion) = crate::sessions::projector::clear_completion(
+                    if let Some(completion) = crate::sessions::projector::new_session_completion(
                         request,
                         &target,
                         &target_views.state,
@@ -539,7 +539,7 @@ fn rejoin_clear_source(
     };
     let intents = store.load_intents(source_id)?;
     let Some(completion) = intents.workflow_request(operation).and_then(|request| {
-        crate::sessions::projector::clear_completion(request, &target, &views.state)
+        crate::sessions::projector::new_session_completion(request, &target, &views.state)
     }) else {
         return Ok(ProjectionCommit::Applied);
     };

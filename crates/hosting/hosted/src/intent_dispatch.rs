@@ -61,7 +61,7 @@ impl IntentClass {
         match action {
             UserAction::Interrupt => Self::Urgent,
             UserAction::Quit => Self::Quit,
-            UserAction::ClearSession => Self::IdleOnly {
+            UserAction::NewSession => Self::IdleOnly {
                 noun: "new session",
             },
             UserAction::Compact => Self::IdleOnly { noun: "compact" },

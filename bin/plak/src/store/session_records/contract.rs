@@ -584,7 +584,7 @@ fn live_workflow_discard_is_cas_guarded_and_preserves_recorded_requests_and_bind
                     &WorkflowRequest {
                         operation_id: "plak:compact:unadmitted".into(),
                         source_locator: locator(),
-                        kind: SessionWorkflowKind::Clear,
+                        kind: SessionWorkflowKind::New,
                     }
                 )
                 .is_err()
@@ -603,7 +603,7 @@ fn workflow_withdrawal_is_atomic_once_and_preserves_admitted_requests() {
         store.save(&mut session).unwrap();
         for (id, kind) in [
             ("plak:fork:withdraw", SessionWorkflowKind::Fork),
-            ("plak:clear:withdraw", SessionWorkflowKind::Clear),
+            ("plak:new:withdraw", SessionWorkflowKind::New),
             (
                 "plak:compact:admitted",
                 SessionWorkflowKind::Compact(ProductCompactReason::Manual),
@@ -726,7 +726,7 @@ fn inherited_submissions_read_only_same_runtime_ancestry_and_stop_at_import() {
             ))
             .unwrap();
         cleared.source_product_session_id = Some(source.id.clone());
-        cleared.source_workflow_operation_id = Some("plak:clear:ancestry".into());
+        cleared.source_workflow_operation_id = Some("plak:new:ancestry".into());
         store.save(&mut cleared).unwrap();
         assert_eq!(
             store.load_inherited_submissions(&cleared.id).unwrap(),
@@ -780,9 +780,9 @@ fn deleted_clear_reservation_does_not_block_open_or_one_shot() {
         let store = SqliteSessionStore::new(paths.clone());
         store.save(&mut source).unwrap();
         let request = WorkflowRequest {
-            operation_id: "plak:clear:deleted-reservation".into(),
+            operation_id: "plak:new:deleted-reservation".into(),
             source_locator: locator,
-            kind: SessionWorkflowKind::Clear,
+            kind: SessionWorkflowKind::New,
         };
         store
             .submit_workflow_request(&mut source, &request)
@@ -832,9 +832,9 @@ fn clear_withdrawal_refuses_a_successor_with_views_without_losing_its_intent() {
         session.bind_plakous_locator(locator()).unwrap();
         store.save(&mut session).unwrap();
         let request = WorkflowRequest {
-            operation_id: "plak:clear:observed-reservation".into(),
+            operation_id: "plak:new:observed-reservation".into(),
             source_locator: locator(),
-            kind: SessionWorkflowKind::Clear,
+            kind: SessionWorkflowKind::New,
         };
         store
             .submit_workflow_request(&mut session, &request)

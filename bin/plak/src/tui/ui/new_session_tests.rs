@@ -40,7 +40,7 @@ fn type_new(app: &mut App) -> Option<UserAction> {
 #[test]
 fn new_with_nothing_live_starts_the_session_at_once() {
     let mut app = App::new(launch_basic(), true);
-    assert_eq!(type_new(&mut app), Some(UserAction::ClearSession));
+    assert_eq!(type_new(&mut app), Some(UserAction::NewSession));
     assert!(app.destructive_confirm.is_none());
 }
 
@@ -71,7 +71,7 @@ fn new_over_a_running_agent_names_it_and_starts_only_when_confirmed() {
     // No process runs, so the switch's release interrupts the agent.
     assert_eq!(
         app.handle_key(key(KeyCode::Enter)),
-        Some(UserAction::ClearSession)
+        Some(UserAction::NewSession)
     );
     assert!(app.new_after_stop.is_none());
 }
@@ -116,7 +116,7 @@ fn new_over_a_running_process_stops_it_then_starts_once_none_runs() {
     app.apply_process_snapshot(process(ProcessStatus::Stopped));
     assert_eq!(
         app.new_session_after_stop(now),
-        Some(UserAction::ClearSession)
+        Some(UserAction::NewSession)
     );
     assert!(app.new_after_stop.is_none());
     assert_eq!(app.new_session_after_stop(now), None, "it fires once");
@@ -161,6 +161,6 @@ fn a_busy_root_leaves_the_refusal_to_the_host() {
     let mut app = App::new(launch_basic(), true);
     with_running_agent(&mut app);
     app.apply_host_event(HostEvent::SetBusy(true));
-    assert_eq!(type_new(&mut app), Some(UserAction::ClearSession));
+    assert_eq!(type_new(&mut app), Some(UserAction::NewSession));
     assert!(app.destructive_confirm.is_none());
 }

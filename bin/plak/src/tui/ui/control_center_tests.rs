@@ -625,7 +625,7 @@ fn new_slash_produces_clear_session_action() {
     app.session_id = Some("source-session".into());
     app.input = "/new".into();
     let action = app.handle_key(key(KeyCode::Enter));
-    assert_eq!(action, Some(UserAction::ClearSession));
+    assert_eq!(action, Some(UserAction::NewSession));
     assert!(!blocks_contain(&app, "session cleared"));
     commit_sent_action(&mut app, action.as_ref().unwrap());
     assert!(blocks_contain(&app, "preserve me"));
@@ -653,7 +653,7 @@ fn slash_tab_completes_without_submitting() {
     assert_eq!(app.input, "/new");
     assert_eq!(
         app.handle_key(key(KeyCode::Enter)),
-        Some(UserAction::ClearSession)
+        Some(UserAction::NewSession)
     );
 }
 

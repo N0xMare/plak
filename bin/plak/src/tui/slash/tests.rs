@@ -37,7 +37,7 @@ fn resolve_core_actions() {
     };
     assert_eq!(
         resolve(&parse_slash("/new").unwrap(), &ctx),
-        SlashEffect::Action(UserAction::ClearSession)
+        SlashEffect::Action(UserAction::NewSession)
     );
     assert_eq!(
         resolve(&parse_slash("/compact").unwrap(), &ctx),

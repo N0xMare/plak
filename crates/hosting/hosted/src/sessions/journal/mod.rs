@@ -123,7 +123,9 @@ impl SwitchSelection {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionWorkflowKind {
     Compact(ProductCompactReason),
-    Clear,
+    /// `/new`: a new session (a new node, tree and line) on the current
+    /// binding; the source is left as it is.
+    New,
     Fork,
     Rebind(Box<RebindSelection>),
     /// Decoded today; live succession writes it.
@@ -135,7 +137,7 @@ impl SessionWorkflowKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Compact(_) => "compact",
-            Self::Clear => "clear",
+            Self::New => "new",
             Self::Fork => "fork",
             Self::Rebind(_) => "rebind",
             Self::Switch(_) => "switch",

@@ -31,7 +31,7 @@ fn irreversible(action: &UserAction) -> bool {
             | UserAction::ResumeQueueDrain
             | UserAction::ResolveApproval { .. }
             | UserAction::Quit
-            | UserAction::ClearSession
+            | UserAction::NewSession
             | UserAction::Compact
             | UserAction::ForkSession { .. }
             | UserAction::ResumeSession { .. }

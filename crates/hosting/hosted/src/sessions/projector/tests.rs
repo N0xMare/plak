@@ -996,10 +996,10 @@ proptest! {
             &feed.reads,
         ).unwrap().views;
         if source_clear_join {
-            let clear = "plak:clear:source-joined".to_owned();
+            let clear = "plak:new:source-joined".to_owned();
             feed.intents.workflow_requests.push(WorkflowRequest {
                 operation_id: clear.clone(), source_locator: source,
-                kind: SessionWorkflowKind::Clear,
+                kind: SessionWorkflowKind::New,
             });
             source_prefix.state.workflows.insert(clear, WorkflowCompletion {
                 admitted_at: Some(1), settled: Some(WorkflowSettlement::Published {

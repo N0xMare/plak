@@ -221,7 +221,7 @@ fn failed_clear_keeps_source_view_and_binding() {
         .blocks
         .push(ScrollBlock::Assistant("source transcript".into()));
     app.session_id = Some("source-session".into());
-    commit_sent_action(&mut app, &UserAction::ClearSession);
+    commit_sent_action(&mut app, &UserAction::NewSession);
 
     app.apply_host_event(HostEvent::Row(
         plakous_host_protocol::views::transcript::TranscriptRow::info(

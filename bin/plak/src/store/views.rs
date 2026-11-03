@@ -307,8 +307,8 @@ impl ProductStore {
             None,
         )?;
         let next = workflow_intent_cas(&tx, session)?;
-        if request.kind == plakous_hosted::sessions::SessionWorkflowKind::Clear {
-            let target = session.clear_successor_from_request(request)?;
+        if request.kind == plakous_hosted::sessions::SessionWorkflowKind::New {
+            let target = session.new_session_from_request(request)?;
             let exists: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1)",
@@ -406,7 +406,7 @@ impl ProductStore {
         let mut rows = Vec::new();
         for (id, notice) in withdrawals {
             if let Some(request) = intents.workflow_request(&id)
-                && request.kind == plakous_hosted::sessions::SessionWorkflowKind::Clear
+                && request.kind == plakous_hosted::sessions::SessionWorkflowKind::New
             {
                 let target_id = request.successor_product_id();
                 let target =
@@ -587,7 +587,7 @@ impl ProductStore {
         let mut joined = views.clone();
         let intents = intents_of(&tx, &mut self.verified_submissions, session_id)?;
         for request in &intents.workflow_requests {
-            if request.kind != plakous_hosted::sessions::SessionWorkflowKind::Clear
+            if request.kind != plakous_hosted::sessions::SessionWorkflowKind::New
                 || intents.workflow_consumed(&request.operation_id, views.retained_from)
                 || views
                     .workflows
@@ -599,11 +599,13 @@ impl ProductStore {
             let target_id = request.successor_product_id();
             if let Some(target_views) = views_of(&tx, &target_id)? {
                 let target = super::load_record(&tx, &mut self.verified_submissions, &target_id)?;
-                if let Some(completion) = plakous_hosted::sessions::projector::clear_completion(
-                    request,
-                    &target,
-                    &target_views.state,
-                ) {
+                if let Some(completion) =
+                    plakous_hosted::sessions::projector::new_session_completion(
+                        request,
+                        &target,
+                        &target_views.state,
+                    )
+                {
                     joined
                         .workflows
                         .insert(request.operation_id.clone(), completion);
@@ -627,7 +629,9 @@ impl ProductStore {
             ) {
                 let intents = intents_of(&tx, &mut self.verified_submissions, source_id)?;
                 if let Some(completion) = intents.workflow_request(operation).and_then(|request| {
-                    plakous_hosted::sessions::projector::clear_completion(request, &target, views)
+                    plakous_hosted::sessions::projector::new_session_completion(
+                        request, &target, views,
+                    )
                 }) {
                     let previous = views_of(&tx, source_id)?.unwrap_or_else(SessionViews::empty);
                     let mut source_views = previous.clone();

@@ -86,7 +86,7 @@ fn recovery_blocked_policy_refuses_binding_workflow_and_queue_mutations() {
         },
     ];
     assert!(blocked.iter().all(recovery_blocked_action));
-    assert!(!recovery_blocked_action(&UserAction::ClearSession));
+    assert!(!recovery_blocked_action(&UserAction::NewSession));
     assert!(!recovery_blocked_action(&UserAction::Extension(
         ProbeIntent::InspectUsage
     )));

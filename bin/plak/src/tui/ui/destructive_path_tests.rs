@@ -460,7 +460,7 @@ fn two_letters_and_enter_in_the_palette_run_a_destructive_command() {
                     | UserAction::DropQueued
                     | UserAction::DeleteQueued { .. }
                     | UserAction::ForkSession { .. }
-                    | UserAction::ClearSession
+                    | UserAction::NewSession
                     | UserAction::ResumeSession { .. }
                     | UserAction::Recover
             )
@@ -772,7 +772,7 @@ fn irreversible_palette_commands_run_only_from_their_full_name() {
     pass_time(&mut app, 0);
     let mut steps = typed_at("/new", 90);
     steps.push((90, KeyCode::Enter));
-    assert_eq!(run(&mut app, &steps), vec![UserAction::ClearSession]);
+    assert_eq!(run(&mut app, &steps), vec![UserAction::NewSession]);
     let mut app = App::new(launch_basic(), true);
     pass_time(&mut app, 0);
     let mut steps = typed_at("/sett", 90);

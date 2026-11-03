@@ -442,7 +442,7 @@ fn retained_successor_laws(is_rebind: bool) {
         .unwrap()
         .workflow_requests
         .iter()
-        .find(|r| matches!(r.kind, plakous_hosted::sessions::SessionWorkflowKind::Clear))
+        .find(|r| matches!(r.kind, plakous_hosted::sessions::SessionWorkflowKind::New))
         .unwrap()
         .successor_product_id();
     let ids = [source, successor, clear];

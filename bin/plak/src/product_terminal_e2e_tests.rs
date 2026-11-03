@@ -1136,7 +1136,7 @@ fn injected_real_pty_long_work_transitions_remain_ordered_and_reopen_quiescent()
         let request = intents
             .workflow_requests
             .iter()
-            .find(|request| request.kind == product_sessions::SessionWorkflowKind::Clear)
+            .find(|request| request.kind == product_sessions::SessionWorkflowKind::New)
             .ok_or("clear omitted its immutable workflow request")?;
         assert_eq!(request.successor_product_id(), cleared.id);
         assert_eq!(

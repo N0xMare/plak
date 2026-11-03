@@ -25,7 +25,7 @@ fn switch_action(
         "failed-resume" => Some(UserAction::ResumeSession {
             id: Some("missing-session".into()),
         }),
-        "clear" => Some(UserAction::ClearSession),
+        "clear" => Some(UserAction::NewSession),
         "fork" => Some(UserAction::ForkSession {
             account: None,
             compact: false,

@@ -143,9 +143,9 @@ fn clear_intent_projection(admit: bool, fork_source: bool) {
             .unwrap();
     }
     let request = sessions::projector::WorkflowRequest {
-        operation_id: "plak:clear:crash-after-intent".into(),
+        operation_id: "plak:new:crash-after-intent".into(),
         source_locator: opened.locator(),
-        kind: sessions::SessionWorkflowKind::Clear,
+        kind: sessions::SessionWorkflowKind::New,
     };
     config
         .store
@@ -154,7 +154,8 @@ fn clear_intent_projection(admit: bool, fork_source: bool) {
     let target_id = request.successor_product_id();
     assert!(config.store.load(&target_id).unwrap().transcript.is_empty());
     if admit {
-        let create_operation = sessions::clear_create_operation_id(&request.operation_id).unwrap();
+        let create_operation =
+            sessions::new_session_create_operation_id(&request.operation_id).unwrap();
         let (created, _) = executor
             .block_on(build_clear_candidate(
                 &mut config,

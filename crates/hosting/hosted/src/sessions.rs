@@ -56,10 +56,10 @@ pub const MAX_TOOL_ACTIVITY_DETAIL_BYTES: usize = 2 * 1024;
 /// thought block, never model-facing history.
 pub const MAX_THINKING_ACTIVITY_BYTES: usize = 64 * 1024;
 
-pub fn clear_create_operation_id(workflow_operation_id: &str) -> Result<String, String> {
-    validate_portable_identity(workflow_operation_id, "clear workflow operation")?;
+pub fn new_session_create_operation_id(workflow_operation_id: &str) -> Result<String, String> {
+    validate_portable_identity(workflow_operation_id, "new session workflow operation")?;
     let operation = format!("{workflow_operation_id}:create");
-    validate_portable_identity(&operation, "clear create operation")?;
+    validate_portable_identity(&operation, "new session create operation")?;
     Ok(operation)
 }
 
@@ -690,7 +690,7 @@ pub fn digest_parts(parts: &[&str]) -> String {
 pub fn encode_workflow_kind(kind: &SessionWorkflowKind) -> (Option<&str>, Option<String>) {
     match kind {
         SessionWorkflowKind::Compact(reason) => (Some(reason.as_str()), None),
-        SessionWorkflowKind::Clear => (None, None),
+        SessionWorkflowKind::New => (None, None),
         SessionWorkflowKind::Fork => (None, None),
         SessionWorkflowKind::Rebind(v) => (None, serde_json::to_string(v).ok()),
         SessionWorkflowKind::Switch(v) => (None, v.encode().ok()),

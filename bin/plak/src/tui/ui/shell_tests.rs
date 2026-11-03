@@ -308,7 +308,7 @@ fn local_echo_labels() {
     assert_eq!(local_echo_line(&UserAction::Steer("c".into()), true), None);
     assert_eq!(local_echo_line(&UserAction::Interrupt, false), None);
     assert_eq!(local_echo_line(&UserAction::DropQueued, false), None);
-    assert_eq!(local_echo_line(&UserAction::ClearSession, false), None);
+    assert_eq!(local_echo_line(&UserAction::NewSession, false), None);
 }
 
 #[test]

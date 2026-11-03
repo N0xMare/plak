@@ -971,8 +971,8 @@ mod memory {
                     .insert(request.operation_id.clone(), anchor);
                 intents.workflow_requests.push(request.clone());
             }
-            if request.kind == SessionWorkflowKind::Clear {
-                let mut target = candidate.clear_successor_from_request(request)?;
+            if request.kind == SessionWorkflowKind::New {
+                let mut target = candidate.new_session_from_request(request)?;
                 if let Some(existing) = next.records.get(&target.id) {
                     if existing.create_operation_id != target.create_operation_id
                         || existing.source_product_session_id != target.source_product_session_id
@@ -1068,7 +1068,7 @@ mod memory {
             let mut rows = Vec::new();
             for (id, notice) in withdrawals {
                 if let Some(request) = intents.workflow_request(&id)
-                    && request.kind == SessionWorkflowKind::Clear
+                    && request.kind == SessionWorkflowKind::New
                 {
                     let target_id = request.successor_product_id();
                     if let Some(target) = next.records.get(&target_id) {
@@ -1230,14 +1230,14 @@ mod memory {
                 .unwrap_or_default()
                 .workflow_requests
             {
-                if request.kind != SessionWorkflowKind::Clear {
+                if request.kind != SessionWorkflowKind::New {
                     continue;
                 }
                 let target_id = request.successor_product_id();
                 if let (Some(target), Some(target_views)) =
                     (next.records.get(&target_id), next.views.get(&target_id))
                 {
-                    if let Some(completion) = crate::sessions::projector::clear_completion(
+                    if let Some(completion) = crate::sessions::projector::new_session_completion(
                         &request,
                         target,
                         &target_views.state,
@@ -1262,7 +1262,11 @@ mod memory {
             ) {
                 let intents = next.intents.get(source_id).cloned().unwrap_or_default();
                 if let Some(completion) = intents.workflow_request(operation).and_then(|request| {
-                    crate::sessions::projector::clear_completion(request, &source, &views.state)
+                    crate::sessions::projector::new_session_completion(
+                        request,
+                        &source,
+                        &views.state,
+                    )
                 }) {
                     let source_views = next
                         .views

@@ -535,7 +535,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         }
                     }
                 }
-                Ok(UserAction::ClearSession) => {
+                Ok(UserAction::NewSession) => {
                     self.idle_entry_pass_due = true;
                     // A switch closes the agent view before its ClearView.
                     self.last_tree_revision.child_live.close_agent_view();

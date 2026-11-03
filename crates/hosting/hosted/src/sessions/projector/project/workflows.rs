@@ -43,7 +43,7 @@ impl Applier<'_> {
         let seed = if can_seed {
             let mut inherited = self.views.clone();
             for request in &self.intents.workflow_requests {
-                if request.kind == crate::sessions::SessionWorkflowKind::Clear {
+                if request.kind == crate::sessions::SessionWorkflowKind::New {
                     inherited.state.workflows.remove(&request.operation_id);
                 }
             }

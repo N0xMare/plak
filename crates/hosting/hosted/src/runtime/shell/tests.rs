@@ -29,7 +29,7 @@ fn detached_clear_publishes_binding_before_clear_view_and_target_transcript() {
     );
     let source_id = fixture.config.session.id.clone();
     let (actions, input) = crate::surface_protocol::user_action_channel::<TestExtension>();
-    actions.send(UserAction::ClearSession).unwrap();
+    actions.send(UserAction::NewSession).unwrap();
     drop(actions);
     let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     run_shell_host_loop(fixture.config, input, Sender::over(tx), None);

@@ -48,8 +48,8 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         ));
     }
     let request = sessions::projector::WorkflowRequest {
-        operation_id: format!("plak:clear:{}", uuid::Uuid::new_v4()),
-        kind: sessions::SessionWorkflowKind::Clear,
+        operation_id: format!("plak:new:{}", uuid::Uuid::new_v4()),
+        kind: sessions::SessionWorkflowKind::New,
         source_locator: attached_locator,
     };
     config
@@ -58,8 +58,8 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         .map_err(CliFailure::new)?;
     let target_product_id = request.successor_product_id();
     freeze_reserved_profile(config, &target_product_id)?;
-    let create_operation =
-        sessions::clear_create_operation_id(&request.operation_id).map_err(CliFailure::new)?;
+    let create_operation = sessions::new_session_create_operation_id(&request.operation_id)
+        .map_err(CliFailure::new)?;
     let runtime_sessions = config.state_roots.runtime_sessions()?;
     let (new_session, fresh_resolved) = build_clear_candidate(
         config,

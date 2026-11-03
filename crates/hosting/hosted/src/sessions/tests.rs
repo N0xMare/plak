@@ -909,17 +909,17 @@ fn clear_workflow_reuses_exact_create_identity_and_never_copies_source_history()
     source.composition = ProductCompositionSelection::Direct;
     source.append_transcript(TranscriptRow::user("source-only"));
     source.record_prompt("source-only".into());
-    let operation = "plak:clear:exact-operation";
+    let operation = "plak:new:exact-operation";
     let request = projector::WorkflowRequest {
         operation_id: operation.to_owned(),
-        kind: SessionWorkflowKind::Clear,
+        kind: SessionWorkflowKind::New,
         source_locator: locator(3),
     };
-    let target = source.clear_successor_from_request(&request).unwrap();
+    let target = source.new_session_from_request(&request).unwrap();
     assert_eq!(target.id, request.successor_product_id());
     assert_eq!(
         target.create_operation_id,
-        "plak:clear:exact-operation:create"
+        "plak:new:exact-operation:create"
     );
     assert_eq!(
         target.plakous_locator,
@@ -1045,9 +1045,9 @@ fn each_successor_records_the_node_of_the_tree_it_compiles_against() {
     );
     assert_eq!(stayed.node, source.node);
     let clear = source
-        .clear_successor_from_request(&projector::WorkflowRequest {
-            operation_id: "plak:clear:node".into(),
-            kind: SessionWorkflowKind::Clear,
+        .new_session_from_request(&projector::WorkflowRequest {
+            operation_id: "plak:new:node".into(),
+            kind: SessionWorkflowKind::New,
             source_locator: locator(3),
         })
         .unwrap();

@@ -803,7 +803,7 @@ fn in_place_resume_keeps_a_recorded_pause_row_single() {
             1
         );
         let paused = host.config.session.id.clone();
-        actions.send(UserAction::ClearSession).unwrap();
+        actions.send(UserAction::NewSession).unwrap();
         let _ = host
             .block(async |host| host.next_prompt(None).await)
             .unwrap();
@@ -887,7 +887,7 @@ fn clear_then_resume_back(
         .block(async |host| host.next_prompt(None).await)
         .unwrap();
     let source = host.config.session.id.clone();
-    actions.send(UserAction::ClearSession).unwrap();
+    actions.send(UserAction::NewSession).unwrap();
     let _ = host
         .block(async |host| host.next_prompt(None).await)
         .unwrap();

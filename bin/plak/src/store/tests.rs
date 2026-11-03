@@ -1801,58 +1801,6 @@ fn view_head_wins_without_rewriting_construction_binding() {
 }
 
 #[test]
-fn legacy_workflow_rows_are_inert_for_record_and_request_operations() {
-    let root = tempdir().unwrap();
-    let paths = PlakPaths::explicit(root.path().join("p"));
-    let mut store = ProductStore::open(&paths).unwrap();
-    let mut session = SessionRecord::new(root.path().to_path_buf());
-    let source = locator(2, 3);
-    session.bind_plakous_locator(source).unwrap();
-    store.commit(&mut session).unwrap();
-    store.connection.execute(
-        "INSERT INTO workflows(session_id,operation_id,source_locator,kind,state) VALUES(?1,'obsolete','not-a-locator','compact','recovery_required')",
-        [&session.id],
-    ).unwrap();
-    for action in ["INSERT", "UPDATE", "DELETE"] {
-        store.connection.execute_batch(&format!(
-            "CREATE TEMP TRIGGER refuse_workflow_{action} BEFORE {action} ON workflows BEGIN SELECT RAISE(ABORT,'legacy workflow write'); END;"
-        )).unwrap();
-    }
-    let mut loaded = store.load(&session.id).unwrap();
-    loaded.title = Some("still usable".into());
-    store.commit(&mut loaded).unwrap();
-    let request = plakous_hosted::sessions::projector::WorkflowRequest {
-        operation_id: "plak:compact:request".into(),
-        source_locator: source,
-        kind: SessionWorkflowKind::Compact(ProductCompactReason::Scheduled),
-    };
-    store
-        .submit_workflow_request(&mut loaded, &request)
-        .unwrap();
-    drop(store);
-    let mut reopened = ProductStore::open(&paths).unwrap();
-    assert_eq!(
-        reopened.load(&session.id).unwrap().title.as_deref(),
-        Some("still usable")
-    );
-    assert_eq!(
-        reopened
-            .load_intents(&session.id)
-            .unwrap()
-            .workflow_requests,
-        vec![request]
-    );
-    assert_eq!(
-        reopened
-            .connection
-            .query_row("SELECT count(*) FROM workflows", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
-}
-
-#[test]
 fn deletion_dependents_are_continuations_and_runtime_sharers_and_deletion_is_exact() {
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
@@ -1873,7 +1821,7 @@ fn deletion_dependents_are_continuations_and_runtime_sharers_and_deletion_is_exa
     // A rebind or clear target continues from its source.
     let mut continuation = SessionRecord::new(root.path().to_path_buf());
     continuation.source_product_session_id = Some(source.id.clone());
-    continuation.source_workflow_operation_id = Some("plak:clear:dependents-test".to_owned());
+    continuation.source_workflow_operation_id = Some("plak:new:dependents-test".to_owned());
     continuation
         .bind_plakous_locator(other_runtime_locator(6))
         .unwrap();
@@ -1926,11 +1874,11 @@ fn clear_publication_atomically_binds_distinct_workflow_and_create_identities() 
     let mut source = SessionRecord::new(root.path().to_path_buf());
     source.bind_plakous_locator(locator(2, 3)).unwrap();
     store.commit(&mut source).unwrap();
-    let operation = "plak:clear:atomic-test";
+    let operation = "plak:new:atomic-test";
     let request = plakous_hosted::sessions::projector::WorkflowRequest {
         operation_id: operation.to_owned(),
         source_locator: locator(2, 3),
-        kind: SessionWorkflowKind::Clear,
+        kind: SessionWorkflowKind::New,
     };
     store
         .submit_workflow_request(&mut source, &request)

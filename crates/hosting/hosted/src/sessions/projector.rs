@@ -23,7 +23,7 @@ pub use intents::{
     RootStopAnchor, Submission, SubmissionKind, WorkflowRequest,
 };
 pub use join::{
-    ProductTreeJoin, clear_completion, pending_command_ids, pending_workflow_operation_ids,
+    ProductTreeJoin, new_session_completion, pending_command_ids, pending_workflow_operation_ids,
     workflow_withdrawals,
 };
 pub use project::{

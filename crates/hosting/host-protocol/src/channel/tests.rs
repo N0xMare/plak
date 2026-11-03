@@ -297,7 +297,7 @@ fn saturated_action_queue_typed_refusals_preserve_user_actions() {
 #[test]
 fn nonrepeatable_session_mutations_are_refused_until_host_acknowledgement() {
     for action in [
-        SessionIntent::ClearSession,
+        SessionIntent::NewSession,
         SessionIntent::Compact,
         SessionIntent::ForkSession {
             account: None,

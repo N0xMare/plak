@@ -17,7 +17,6 @@ const NON_VIEWS: &[&str] = &[
     "sessions",
     "submissions",
     "workflow_requests",
-    "workflows",
 ];
 
 pub(super) const VIEW_TABLES: &[&str] = &[

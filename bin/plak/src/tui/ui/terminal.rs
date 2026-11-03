@@ -947,7 +947,7 @@ pub(super) fn request_terminal_handoff(
 }
 
 pub(super) fn commit_sent_action(app: &mut App, action: &UserAction) {
-    if action == &UserAction::ClearSession {
+    if action == &UserAction::NewSession {
         app.clear_pending = true;
         app.phase = HostPhase::Clear;
         app.status_detail =

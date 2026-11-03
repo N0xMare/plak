@@ -206,7 +206,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
                 detail: Some(HostStatusDetail::QueueDeliveryNeedsAttachment),
             });
         }
-        UserAction::ClearSession => {
+        UserAction::NewSession => {
             if let Err(error) = commit_detached_clear(&mut config.session, |candidate| {
                 config.store.save(candidate).map_err(String::from)
             }) {

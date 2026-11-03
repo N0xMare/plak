@@ -947,14 +947,14 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
     let clear = intents
         .workflow_requests
         .iter()
-        .find(|request| request.kind == sessions::SessionWorkflowKind::Clear)
+        .find(|request| request.kind == sessions::SessionWorkflowKind::New)
         .unwrap();
     assert_eq!(durable_target.id, clear.successor_product_id());
     let views = store.load_views(&old_id).unwrap().unwrap();
     assert!(views.state.workflows[&clear.operation_id].settled.is_some());
     assert_eq!(
         durable_target.create_operation_id,
-        sessions::clear_create_operation_id(&clear.operation_id).unwrap()
+        sessions::new_session_create_operation_id(&clear.operation_id).unwrap()
     );
     assert_eq!(
         config.session.source_product_session_id.as_deref(),

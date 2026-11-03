@@ -187,9 +187,9 @@ fn historical_clear_and_submissions_are_consumed_without_withdrawal_after_retent
     source.bind_plakous_locator(locator).unwrap();
     store.commit(&mut source).unwrap();
     let request = WorkflowRequest {
-        operation_id: "plak:clear:retained".into(),
+        operation_id: "plak:new:retained".into(),
         source_locator: locator,
-        kind: SessionWorkflowKind::Clear,
+        kind: SessionWorkflowKind::New,
     };
     store
         .submit_workflow_request(&mut source, &request)
@@ -310,9 +310,9 @@ fn clear_intent_and_genesis_successor_are_one_atomic_cas_write() {
     source.bind_plakous_locator(locator).unwrap();
     store.commit(&mut source).unwrap();
     let request = WorkflowRequest {
-        operation_id: "plak:clear:atomic-intent".into(),
+        operation_id: "plak:new:atomic-intent".into(),
         source_locator: locator,
-        kind: SessionWorkflowKind::Clear,
+        kind: SessionWorkflowKind::New,
     };
     let target_id = request.successor_product_id();
     store.connection.execute_batch(&format!(
@@ -368,9 +368,9 @@ fn clear_withdrawal_rolls_back_reservation_deletion_and_keeps_identity_bindings(
     source.bind_plakous_locator(locator).unwrap();
     store.commit(&mut source).unwrap();
     let request = WorkflowRequest {
-        operation_id: "plak:clear:withdrawal-cut".into(),
+        operation_id: "plak:new:withdrawal-cut".into(),
         source_locator: locator,
-        kind: SessionWorkflowKind::Clear,
+        kind: SessionWorkflowKind::New,
     };
     store
         .submit_workflow_request(&mut source, &request)
@@ -425,9 +425,9 @@ fn clear_creation_join_is_atomic_rebuildable_and_survives_same_cursor_writers() 
     source.bind_plakous_locator(locator).unwrap();
     store.commit(&mut source).unwrap();
     let request = WorkflowRequest {
-        operation_id: "plak:clear:atomic-join".into(),
+        operation_id: "plak:new:atomic-join".into(),
         source_locator: locator,
-        kind: SessionWorkflowKind::Clear,
+        kind: SessionWorkflowKind::New,
     };
     store
         .submit_workflow_request(&mut source, &request)

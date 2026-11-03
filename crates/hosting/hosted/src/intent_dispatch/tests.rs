@@ -13,7 +13,7 @@ fn expected_class(action: &UserAction) -> IntentClass {
     match action {
         UserAction::Interrupt => IntentClass::Urgent,
         UserAction::Quit => IntentClass::Quit,
-        UserAction::ClearSession => IntentClass::IdleOnly {
+        UserAction::NewSession => IntentClass::IdleOnly {
             noun: "new session",
         },
         UserAction::Compact => IntentClass::IdleOnly { noun: "compact" },
@@ -93,7 +93,7 @@ fn every_intent() -> Vec<UserAction> {
             choice: plakous_host_protocol::ApprovalChoice::Allow,
         },
         UserAction::Quit,
-        UserAction::ClearSession,
+        UserAction::NewSession,
         UserAction::Compact,
         UserAction::ResumeSession { id: None },
         UserAction::ResumeSessionHandoff { id: id() },

@@ -369,7 +369,7 @@ pub mod control {
             | UserAction::ResumeQueueDrain
             | UserAction::ResolveApproval { .. }
             | UserAction::Quit
-            | UserAction::ClearSession
+            | UserAction::NewSession
             | UserAction::Compact
             | UserAction::ResumeSession { .. }
             | UserAction::ResumeSessionHandoff { .. }

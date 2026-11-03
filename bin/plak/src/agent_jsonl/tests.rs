@@ -299,7 +299,7 @@ fn closed_kinds_round_trip_to_user_actions() {
         ),
         (
             r#"{"v":1,"kind":"clear","id":"cl"}"#,
-            UserAction::ClearSession,
+            UserAction::NewSession,
         ),
         (r#"{"v":1,"kind":"quit","id":"q"}"#, UserAction::Quit),
         (

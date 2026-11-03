@@ -92,19 +92,19 @@ pub fn workflow_withdrawals(
 /// Joins a successor's creation fact to its source's immutable clear request.
 /// The store applies this consequence in the target projector transaction.
 #[must_use]
-pub fn clear_completion(
+pub fn new_session_completion(
     request: &super::WorkflowRequest,
     target: &crate::sessions::SessionRecord,
     views: &super::SessionViewState,
 ) -> Option<super::WorkflowCompletion> {
-    if request.kind != crate::sessions::SessionWorkflowKind::Clear
+    if request.kind != crate::sessions::SessionWorkflowKind::New
         || target.id != request.successor_product_id()
         || target.source_workflow_operation_id.as_deref() != Some(&request.operation_id)
         || views.created_operation_id.as_deref() != Some(&target.create_operation_id)
     {
         return None;
     }
-    let create = crate::sessions::clear_create_operation_id(&request.operation_id).ok()?;
+    let create = crate::sessions::new_session_create_operation_id(&request.operation_id).ok()?;
     if target.create_operation_id != create {
         return None;
     }

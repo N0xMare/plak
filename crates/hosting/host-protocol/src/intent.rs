@@ -134,7 +134,7 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// Leave the TUI.
     Quit,
     /// Clear / new in-process session (host drops conversation attachment).
-    ClearSession,
+    NewSession,
     /// Trigger product compaction.
     Compact,
     /// Resume a session by uuid, or list cwd sessions when `id` is `None`.
@@ -270,7 +270,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::ResumeQueueDrain => "ResumeQueueDrain",
             Self::ResolveApproval { .. } => "ResolveApproval(..)",
             Self::Quit => "Quit",
-            Self::ClearSession => "ClearSession",
+            Self::NewSession => "NewSession",
             Self::Compact => "Compact",
             Self::ResumeSession { .. } => "ResumeSession(..)",
             Self::ResumeSessionHandoff { .. } => "ResumeSessionHandoff(..)",

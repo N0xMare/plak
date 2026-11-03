@@ -1777,7 +1777,7 @@ fn parity_clear_then_turn() {
         || {
             vec![
                 prompt_step("run the loopback"),
-                step(UserAction::ClearSession, {
+                step(UserAction::NewSession, {
                     let cleared = std::cell::Cell::new(false);
                     move |event| match event {
                         HostEvent::ClearView => {

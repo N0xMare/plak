@@ -226,7 +226,7 @@ fn composite_fork_and_clear_both_sides_obey_all_three_sqlite_laws() {
         .find(|request| {
             matches!(
                 request.kind,
-                plakous_hosted::sessions::SessionWorkflowKind::Clear
+                plakous_hosted::sessions::SessionWorkflowKind::New
             )
         })
         .unwrap()

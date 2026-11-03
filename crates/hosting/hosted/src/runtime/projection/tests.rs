@@ -123,7 +123,7 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
             config
         };
         run_prompts(config, &["historical root"]);
-        let events = run_attached_actions(reopen(), vec![UserAction::ClearSession]);
+        let events = run_attached_actions(reopen(), vec![UserAction::NewSession]);
         assert!(
             events
                 .iter()

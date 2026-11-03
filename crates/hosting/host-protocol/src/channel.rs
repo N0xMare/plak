@@ -4,7 +4,7 @@
 //! Intents ([`intent_channel`]): a bounded FIFO with a coalescing urgent lane
 //! for `Interrupt`, an independently coalesced `Quit` observed only after
 //! accepted ordinary work, and one-in-flight admission for the non-repeatable
-//! session mutations (`ClearSession`, `Compact`, `ForkSession`) released by an
+//! session mutations (`NewSession`, `Compact`, `ForkSession`) released by an
 //! RAII acknowledgement. An async consumer waits on [`IntentReceiver::ready`].
 //!
 //! Observations ([`observation_channel`]): a bounded queue that never blocks
@@ -168,13 +168,13 @@ struct NonrepeatableAdmission {
 
 const URGENT_INTERRUPT: u8 = 1;
 const PENDING_QUIT: u8 = 1 << 1;
-const NONREPEATABLE_CLEAR: u8 = 1;
+const NONREPEATABLE_NEW: u8 = 1;
 const NONREPEATABLE_COMPACT: u8 = 1 << 1;
 const NONREPEATABLE_FORK: u8 = 1 << 2;
 
 const fn nonrepeatable_bit<P: ProtocolExtension>(action: &SessionIntent<P>) -> Option<u8> {
     match action {
-        SessionIntent::ClearSession => Some(NONREPEATABLE_CLEAR),
+        SessionIntent::NewSession => Some(NONREPEATABLE_NEW),
         SessionIntent::Compact => Some(NONREPEATABLE_COMPACT),
         SessionIntent::ForkSession { .. } => Some(NONREPEATABLE_FORK),
         _ => None,

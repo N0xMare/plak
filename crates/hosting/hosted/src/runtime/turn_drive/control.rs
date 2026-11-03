@@ -109,7 +109,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 // The table refused these above; were one reclassified, a
                 // running turn still has no handler for it and refuses it.
                 Ok(
-                    action @ (UserAction::ClearSession
+                    action @ (UserAction::NewSession
                     | UserAction::Compact
                     | UserAction::ResumeSession { .. }
                     | UserAction::ResumeSessionHandoff { .. }

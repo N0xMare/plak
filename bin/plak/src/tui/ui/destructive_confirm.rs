@@ -677,7 +677,7 @@ impl App {
     /// otherwise stop every process and start it once none runs.
     fn stop_work_then_new_session(&mut self) -> UserAction {
         if self.background_processes == 0 {
-            return UserAction::ClearSession;
+            return UserAction::NewSession;
         }
         self.new_after_stop = Some(Instant::now() + NEW_AFTER_STOP_DEADLINE);
         UserAction::StopProcesses {
@@ -692,7 +692,7 @@ impl App {
         let deadline = self.new_after_stop?;
         if self.background_processes == 0 && !self.busy {
             self.new_after_stop = None;
-            return Some(UserAction::ClearSession);
+            return Some(UserAction::NewSession);
         }
         if now < deadline {
             return None;
@@ -725,7 +725,7 @@ impl App {
                 UserAction::Prompt(_)
                     | UserAction::FollowUp(_)
                     | UserAction::Steer(_)
-                    | UserAction::ClearSession
+                    | UserAction::NewSession
                     | UserAction::Compact
                     | UserAction::ResumeSession { .. }
                     | UserAction::ResumeSessionHandoff { .. }

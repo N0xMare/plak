@@ -72,7 +72,7 @@ mod tests {
             reason: "detached fixture".into(),
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
         });
-        actions.send(UserAction::ClearSession).unwrap();
+        actions.send(UserAction::NewSession).unwrap();
         actions.send(UserAction::Quit).unwrap();
         worker.join().unwrap().unwrap();
 

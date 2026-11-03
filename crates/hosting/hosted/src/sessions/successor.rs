@@ -1,7 +1,7 @@
 //! Successor construction from immutable workflow requests and feed facts.
 
 use super::SessionWorkflowKind;
-use crate::sessions::{QueueDrainState, SessionRecord, clear_create_operation_id};
+use crate::sessions::{QueueDrainState, SessionRecord, new_session_create_operation_id};
 use plakous::sessions::SessionLocator;
 
 impl SessionRecord {
@@ -62,18 +62,18 @@ impl SessionRecord {
     }
 
     /// Builds the empty successor reserved by an immutable clear intent.
-    pub fn clear_successor_from_request(
+    pub fn new_session_from_request(
         &self,
         request: &crate::sessions::projector::WorkflowRequest,
     ) -> Result<Self, String> {
-        if request.kind != SessionWorkflowKind::Clear
+        if request.kind != SessionWorkflowKind::New
             || self.plakous_locator != Some(request.source_locator)
         {
             return Err("clear request does not match its source".to_owned());
         }
-        let operation = plakous::sessions::SessionOperationId::new(clear_create_operation_id(
-            &request.operation_id,
-        )?)
+        let operation = plakous::sessions::SessionOperationId::new(
+            new_session_create_operation_id(&request.operation_id)?,
+        )
         .map_err(|error| error.to_string())?;
         let locator = plakous::sessions::AgentSessions::genesis_locator_for(&operation)
             .map_err(|error| error.to_string())?;

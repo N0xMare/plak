@@ -10,9 +10,9 @@ fn a_deleted_clear_reservation_still_withdraws_once_in_memory() {
     source.bind_plakous_locator(locator).unwrap();
     store.save(&mut source).unwrap();
     let request = WorkflowRequest {
-        operation_id: "plak:clear:deleted-reservation".into(),
+        operation_id: "plak:new:deleted-reservation".into(),
         source_locator: locator,
-        kind: SessionWorkflowKind::Clear,
+        kind: SessionWorkflowKind::New,
     };
     store
         .submit_workflow_request(&mut source, &request)

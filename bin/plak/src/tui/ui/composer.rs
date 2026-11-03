@@ -299,7 +299,7 @@ impl App {
     /// root goes to the host, which answers that `/new` waits for idle.
     fn request_new_session(&mut self) -> Option<UserAction> {
         if self.busy || (self.tree_live_descendants == 0 && self.background_processes == 0) {
-            return Some(UserAction::ClearSession);
+            return Some(UserAction::NewSession);
         }
         self.slash_open = false;
         self.clear_input();
@@ -361,7 +361,7 @@ impl App {
                 }
                 None
             }
-            SlashEffect::Action(UserAction::ClearSession) => self.request_new_session(),
+            SlashEffect::Action(UserAction::NewSession) => self.request_new_session(),
             SlashEffect::Action(UserAction::DropQueued) => self.queue_drop_last(),
             SlashEffect::Action(UserAction::OpenTopologyNavigator) => {
                 self.activity_tab = Some(super::processes::ActivityTab::Agents);

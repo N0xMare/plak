@@ -178,7 +178,7 @@ impl AgentCommand {
             }
             Self::CloseNode { agent_id, .. } => Some(UserAction::CloseTopologyNode { agent_id }),
             Self::StopAll { .. } => Some(UserAction::StopAllTopology),
-            Self::Clear { .. } => Some(UserAction::ClearSession),
+            Self::Clear { .. } => Some(UserAction::NewSession),
             Self::Quit { .. } => Some(UserAction::Quit),
             Self::InvokeTool {
                 id,

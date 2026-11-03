@@ -138,7 +138,7 @@ impl WorkflowRequest {
             SessionWorkflowKind::Fork => "fork did not start; request a fork again explicitly",
             SessionWorkflowKind::Rebind(_) => "model change did not start; choose the model again",
             SessionWorkflowKind::Switch(_) => "profile switch did not start; choose it again",
-            SessionWorkflowKind::Clear => {
+            SessionWorkflowKind::New => {
                 "new session did not start; request a new session again explicitly"
             }
         }
@@ -153,7 +153,7 @@ impl WorkflowRequest {
             SessionWorkflowKind::Fork => NoticeRemedy::RetryFork {},
             SessionWorkflowKind::Rebind(_) => NoticeRemedy::Rebind {},
             SessionWorkflowKind::Switch(_) => NoticeRemedy::ChooseProfile {},
-            SessionWorkflowKind::Clear => NoticeRemedy::StartFresh {},
+            SessionWorkflowKind::New => NoticeRemedy::StartFresh {},
         }
     }
 

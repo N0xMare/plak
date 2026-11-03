@@ -1302,7 +1302,7 @@ fn decode_workflow_kind(
             ProductCompactReason::parse(reason.as_deref().unwrap_or(""))
                 .ok_or(rusqlite::Error::InvalidQuery)?,
         )),
-        "clear" => Ok(SessionWorkflowKind::Clear),
+        "new" => Ok(SessionWorkflowKind::New),
         "fork" => Ok(SessionWorkflowKind::Fork),
         "rebind" => Ok(SessionWorkflowKind::Rebind(Box::new(
             serde_json::from_str(&selection.ok_or(rusqlite::Error::InvalidQuery)?)
@@ -1348,14 +1348,6 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
         "CREATE TABLE queue_attachments(item_id TEXT NOT NULL REFERENCES queue_items(item_id) ON DELETE CASCADE,ordinal INTEGER NOT NULL CHECK(ordinal>=0),name TEXT NOT NULL,media_type TEXT NOT NULL,bytes BLOB NOT NULL,PRIMARY KEY(item_id,ordinal))",
     ),
     (
-        "workflows",
-        "CREATE TABLE workflows(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,operation_id TEXT PRIMARY KEY,source_locator TEXT NOT NULL,target_session_id TEXT,target_locator TEXT,kind TEXT NOT NULL CHECK(kind IN('compact','clear','fork','rebind')),compact_reason TEXT,rebind_selection TEXT,state TEXT NOT NULL CHECK(state IN('prepared','runtime_published','recovery_required','product_committed','terminal_no_change')))",
-    ),
-    (
-        "workflows_session",
-        "CREATE INDEX workflows_session ON workflows(session_id)",
-    ),
-    (
         "prompt_history",
         "CREATE TABLE prompt_history(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,position INTEGER NOT NULL CHECK(position>=0),prompt TEXT NOT NULL,PRIMARY KEY(session_id,position))",
     ),
@@ -1369,7 +1361,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "workflow_requests",
-        "CREATE TABLE workflow_requests(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,operation_id TEXT PRIMARY KEY,source_locator TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('compact','clear','fork','rebind','switch')),compact_reason TEXT,selection TEXT,anchor INTEGER NOT NULL CHECK(anchor>=0))",
+        "CREATE TABLE workflow_requests(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,operation_id TEXT PRIMARY KEY,source_locator TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('compact','new','fork','rebind','switch')),compact_reason TEXT,selection TEXT,anchor INTEGER NOT NULL CHECK(anchor>=0))",
     ),
     (
         "workflow_requests_session",

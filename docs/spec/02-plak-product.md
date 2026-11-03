@@ -506,8 +506,8 @@ state. Only the projector's commit writes these view tables; deleting all of
 them for a session is the rebuild. All keyed views cascade with the session.
 
 Workflow requests and feed-derived workflow completions are the only workflow
-model. Session records carry no workflow journal or two-phase workflow states;
-the legacy `workflows` table remains inert until its DDL is removed. Recovery
+model. Session records carry no workflow journal or two-phase workflow states,
+and product schema 36 has no legacy `workflows` table. Recovery
 blocking reads the runtime's context disposition, not a product journal flag.
 
 `session show` reports the projected tool-call counter alongside transcript size.
@@ -1515,15 +1515,15 @@ view, and nothing is both.
 | Transcript rows | view, intent or live-only, per field | the row provenance table below | each field has exactly one source |
 | Imported transcript | intent | the import's create operation id; anchor 0, lane 1 | written once by import (§2.5.1); a seeded `Created` record derives no rows |
 | Operator notices: product-authored rows no feed fact implies (settings and configuration notes, plan notes, carry replay-stripping notices, unrecorded refusals, withdrawn requests, `queued prompt already ran`, and the retry, milestone and tree rows the provenance table names) | intent | notice id; anchor | written with its anchor (below) |
-| Workflow requests: compact (with reason), fork, rebind (with selection), clear, switch (with its selection: the rebind selection, the profile name, its root template and working set, the frozen roster's digest and, for a root whose tree has no rows, the frozen pending snapshot's exact bytes, which must decode as a snapshot under that digest; decoded today, written from live succession) | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (§4.2 step 3) |
-| Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for clear, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
+| Workflow requests: compact (with reason), fork, rebind (with selection), new (`/new`; recorded as `clear` before product 36), switch (with its selection: the rebind selection, the profile name, its root template and working set, the frozen roster's digest and, for a root whose tree has no rows, the frozen pending snapshot's exact bytes, which must decode as a snapshot under that digest; decoded today, written from live succession) | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (§4.2 step 3) |
+| Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for new, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
 | Pause causes | intent-backed view | the facts that pause (a context-capacity or `RecoveryRequired` `TurnTerminal`, a session-wide `CommandRejected`, a `WorkflowSettled` of a scheduled pass that did not compact) and `pause_cause` intents the host writes for causes no fact carries (an unrecorded session-wide refusal, a failed wake preflight); a workflow fact joins its request by the request's operation id, never by the derived workflow identity | the newest applied cause, by anchor, for the restored note; drain itself is process-local and never stored |
 | Counters: root turns, tool calls, compactions | view | root `CommandAccepted`; the distinct call ids of effect `OperationAdvanced` facts and of the tool results `HistoryAppended` commits (so a call rejected before preparation counts once); each `WorkflowSettled { Compacted }` once, whatever its reason (endpoint or turn fence) | monotonic over the applied records; a successor starts from its source's values at the `Branched` record; after a `BehindRetention` rebuild they restart from zero |
 | Child-wake suppression | intent-backed view | `wake_suppression` intents the host writes on an idle interrupt and on a failed or discarded wake; the cancel of a running `HostWake` turn (`CommandAccepted` of a cancel naming it) and a context-capacity `TurnTerminal` of a `HostWake` root | suppressed from the newest such intent or fact until a `CommandAccepted` of a `UserPrompt` root anchored after it |
 | Agent attention acknowledgements | intent | `(tree, agent, attempt, attention)` | operator-authored presentation bookkeeping |
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
-| Node: `node_tree_id`, `node_agent_id`, the agent node the session is | intent | `plak:create:<id>` | written once with the record and never rewritten (a save that moved it is refused): a created, cleared or imported session and a carry's successor are the root of a tree named after their own id, whose root agent id is that id too (the genesis tree's own naming); a rebind successor takes the node of the tree it compiled against, recorded in its request (`own_tree`): the root of the tree named after its id when it has a tree of its own (sub-agents on) or is a py-sdk root, otherwise its source's node; a fork successor shares its source's tree today and copies its node; a switch continues its source's node. Readers keep resolving the tree through the lineage until the node becomes authority |
+| Node: `node_tree_id`, `node_agent_id`, the agent node the session is | intent | `plak:create:<id>` | written once with the record and never rewritten (a save that moved it is refused): a created, new (`/new`) or imported session and a carry's successor are the root of a tree named after their own id, whose root agent id is that id too (the genesis tree's own naming); a rebind successor takes the node of the tree it compiled against, recorded in its request (`own_tree`): the root of the tree named after its id when it has a tree of its own (sub-agents on) or is a py-sdk root, otherwise its source's node; a fork successor shares its source's tree today and copies its node; a switch continues its source's node. Readers keep resolving the tree through the lineage until the node becomes authority |
 | Root profile (`root_profile`: the root template and working set) | intent | `plak:create:<id>` | the profile the record's genesis froze, which is the session's profile while its tree has no rows (a virtual tree of one; a tree with rows records its own epochs, §5.5): what the roster source answers for the root bind, the same answer a tree genesis freezes. Written once, at genesis, and never moved: by the first runtime create of a created, imported or carried session (an import or carry successor takes its source's profile when it still resolves, else the home default it binds), into a `/new` reservation before its runtime create, from a rebind request onto a tree of its own (the profile it was frozen on), copied by a rebind that stays on its source's tree and by a fork, and from a switch request's profile. A record has none only before its first runtime create, or while it has no bound tuple |
 | Runner display copy (`runner_display`: runner name and id, workspace root and working directory on it) | intent | `plak:create:<id>` | a display copy of the runner and workspace the root's binding names, never authority; NULL is the host's own local runner at the record's workspace root, which every session is today; successors copy it; no reader yet |
 | Frozen MCP placement: each frozen MCP tool record's `placement` (`host` or `runner`) | intent | `plak:create:<id>` | frozen with the record's MCP tool records (above); every record freezes `host` today; one server never freezes two placements; no reader yet |
@@ -1736,7 +1736,7 @@ A permanent create-identity claim with no session record means that a previously
 materialized successor was deleted: source replay settles the request but never
 resurrects that successor. This rule is identical in SQLite and memory.
 
-A clear request writes its empty successor record and derived product and
+A `new` request (`/new`, called a clear below) writes its empty successor record and derived product and
 runtime genesis identities in the same revision-CAS transaction as the source
 intent, before runtime create. Clear copies no conversation or notices. The
 successor projector joins its `SessionCreated` fact to the source clear request
@@ -3664,8 +3664,10 @@ argument-taking commands keep their grammar below.
 
 `/new` starts a new session in the same TUI: a new runtime session and agent
 tree with empty history, on the current binding, composition and frozen root
-tools. It runs the session workflow §2.6 records as `clear`; that persisted
-kind, the JSONL `clear` command and the `clear` host phase keep the name. The
+tools. It runs the session workflow §2.6 records as `new` (its operation ids
+are `plak:new:<uuid>`), submitted by the host intent `NewSession`; the JSONL
+`clear` command and the `clear` host phase, which are wire vocabulary, keep
+the name. The
 previous session is not changed and stays resumable with `/resume`. One TUI
 hosts one session, so `/new` while this session has running agents or
 background processes does not switch. A confirmation names that work (`N

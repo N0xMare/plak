@@ -249,7 +249,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         // 2.1: `/status` opens the Session tab, never an unscrollable
         // floating text overlay.
         "status" => SlashEffect::OpenSession,
-        "new" => SlashEffect::Action(UserAction::ClearSession),
+        "new" => SlashEffect::Action(UserAction::NewSession),
         "compact" => SlashEffect::Action(UserAction::Compact),
         "config" => SlashEffect::Action(UserAction::Extension(SurfaceIntent::OpenConfigFile)),
         "settings" => SlashEffect::OpenSettings,
