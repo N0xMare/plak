@@ -50,6 +50,17 @@ one cross-build carrier (a build imports its own and the previous version).
 - A full observation mailbox keeps a credential wait's park and clear notices;
   it drops streaming text or transcript content that the next resnapshot
   repairs instead.
+- A root turn that loses its owner mid-tool now recovers in place as soon as
+  the session is idle: the pill reads `needs recovery · reopening`, the
+  interrupted tool is named once in the transcript (also after a crash during
+  the reopen), and no `/recover` or prompt is needed first. A quit sent during
+  the reopen is answered after it. Sub-agents keep their existing recovery.
+- `/reload` onto a build without an install manifest (a development or
+  cargo-installed build) no longer falls back to an unverified resume on a
+  busy machine; the reload probe answers without hashing the build.
+- An orchestration workspace path that cannot be inspected (permission or I/O
+  error) now refuses the spawn, adopt, reclaim or restore instead of being
+  treated as absent.
 - Telemetry records content-free measurement facts: each child's template,
   salted per-session digests of read, search and list targets with the page
   returned, a program label for shell calls (credential-shaped words become
@@ -92,6 +103,14 @@ one cross-build carrier (a build imports its own and the previous version).
   `AgentBuilder::image_normalizer` installs the image decoder tool reads use.
 - Tool measurement uses typed execution values and the new `WaitFact` only,
   and does no work when telemetry is disabled.
+
+- The attached root runs as one async node actor (biased urgent-first idle
+  wait, workflows awaited inline with urgent-only observation, the session's
+  task set closed on release); root tree passes run only at the four points
+  spec 03 §4.4 names.
+- The orchestration VCS port (`occupancy_vcs::VcsOps`) is async, and the tree
+  asks it every workspace question before a writer turn; settle and spawn
+  mints run as their own release-owned tasks.
 
 ### Security
 
