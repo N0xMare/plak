@@ -89,9 +89,9 @@ mod usage;
 /// supported `plakous-agent` compatibility inventory.
 pub mod internal {
     /// Runs `builder`'s agent on the runner behind `backend` instead of the
-    /// local runner (spec 01 §8.5): its environment's operations go to that
-    /// runner, its process sessions refuse every start, and a checkpoint of
-    /// another runner does not reopen on it. Unsupported: only a test route
+    /// local runner (spec 01 §8.5): its environment's operations and process
+    /// sessions go to that runner, and a checkpoint of another runner does
+    /// not reopen on it. Unsupported: only a test route
     /// selects a runner until runner pairing exists.
     #[must_use]
     pub fn select_runner_backend(

@@ -827,12 +827,12 @@ fn failing_command_script(answer: &str) -> Value {
 }
 
 /// A session on the test-only loopback runner (spec 01 §8.5): its shell
-/// refuses with no effect, since process sessions on a runner are not carried
-/// yet, and the turn still answers.
+/// runs on the runner, and the tool record reads as it would locally.
 #[test]
-fn a_session_on_the_loopback_runner_refuses_its_shell_with_no_effect() {
-    let mut script = failing_command_script("the shell is elsewhere");
-    script["steps"][0]["output"]["tool"]["arguments"]["command"] = json!("printf ran > ran.txt");
+fn a_session_on_the_loopback_runner_runs_its_shell_there() {
+    let mut script = failing_command_script("the shell ran elsewhere");
+    script["steps"][0]["output"]["tool"]["arguments"]["command"] =
+        json!("printf ran > ran.txt; exit 3");
     script["loopback_runner"] = json!(true);
     let fixture = Fixture::new(&script);
     let mut agent = AgentProcess::start(&fixture, &[]);
@@ -846,20 +846,23 @@ fn a_session_on_the_loopback_runner_refuses_its_shell_with_no_effect() {
     assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
     assert_eq!(
         outcome.assistant_text(),
-        vec!["the shell is elsewhere".to_owned()]
+        vec!["the shell ran elsewhere".to_owned()]
     );
     let terminal = outcome
         .records()
         .into_iter()
         .rfind(|record| record["kind"] == "tool" && record["name"] == "process_session_start")
         .expect("the command's tool record");
-    let state = terminal["state"].as_str().unwrap_or_default();
-    assert!(
-        state.starts_with("failed") && state != "failed:exit 0",
+    assert_eq!(
+        terminal["state"],
+        "failed:exit 3",
         "stream:\n{}",
         outcome.lines.join("\n")
     );
-    assert!(!fixture.workspace().join("ran.txt").exists());
+    assert_eq!(
+        std::fs::read(fixture.workspace().join("ran.txt")).unwrap(),
+        b"ran"
+    );
 }
 
 /// The tool call succeeded, the command it ran did not. The `tool`

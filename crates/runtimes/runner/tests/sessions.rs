@@ -445,44 +445,89 @@ async fn a_service_streams_through_the_loopback_as_direct() {
     assert!(refused.proven_no_effect());
 }
 
+/// Waits up to ten seconds for `ready`.
+async fn eventually(mut ready: impl FnMut() -> bool, what: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready() {
+        assert!(Instant::now() < deadline, "{what}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// The process-session service of a session on the runner: the same
+/// surface the shell tool and the agent use, over the runner's processes,
+/// with job reads and terminal notices following the runner's job events.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_runner_port_mirrors_the_lines_jobs_and_stops_them_on_the_runner() {
+async fn a_runner_sessions_service_runs_jobs_and_reports_them_from_job_events() {
     let root = tempfile::tempdir().unwrap();
     let (loopback, environment) = loopback(root.path(), RunnerLimits::default()).await;
-    let sessions = std::sync::Arc::new(RunnerSessions::new(
-        &loopback.backend(),
+    let environment = environment.with_line_owner(owner(1, 1));
+    let sessions = plakous_tools::internal::runner::adopt_runner_process_sessions(
         &environment,
-        owner(1, 1),
-    ));
-    let port = plakous_tools::JoinedSessionsPort::runner(
-        std::sync::Arc::clone(&sessions),
-        tokio::runtime::Handle::current(),
+        &tokio::runtime::Handle::current(),
+    )
+    .unwrap();
+    let port = plakous_tools::JoinedSessionsPort::runner(sessions.clone());
+    assert!(port.as_local().is_some());
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = std::sync::Arc::clone(&observed);
+    port.observe_jobs(
+        move |view| {
+            seen.lock().unwrap().push(view.status);
+            true
+        },
+        || true,
     );
-    assert!(port.as_local().is_none());
-    let id = sessions
-        .start(literal("sleep 30", false), effect(1))
-        .await
+
+    // A foreground command through the service's own surface.
+    let echo = sessions
+        .start(literal("printf hello", false), effect(1))
         .unwrap();
-    sessions.promote(id).await.unwrap();
-    assert!(!port.has_jobs(), "the mirror holds what the last read saw");
-    sessions.jobs().await.unwrap();
-    assert_eq!(port.running_job_count(), 1);
-    assert_eq!(port.session_for_number(port.jobs()[0].number), Some(id));
+    let mut changes = plakous_tools::internal::process_session_changes(&sessions, echo).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while sessions.joined_terminal_status(echo).is_none() {
+        assert!(Instant::now() < deadline, "the command did not end");
+        let _ = tokio::time::timeout(Duration::from_millis(500), changes.changed()).await;
+        let _ = sessions.poll_from(echo, JoinedProcessOutputCursor::new(0), 1 << 16, 64);
+    }
+    let polled = sessions
+        .poll_from(echo, JoinedProcessOutputCursor::new(0), 1 << 16, 64)
+        .unwrap();
+    assert_eq!(&polled.records()[0].bytes()[..], b"hello");
+    assert_eq!(polled.status(), JoinedProcessStatus::Exited(Some(0)));
+
+    // A job: promoted on the runner, reported by its events.
+    let job = sessions
+        .start(literal("sleep 30", false), effect(2))
+        .unwrap();
+    plakous_tools::internal::promote(&sessions, job).unwrap();
+    assert!(sessions.is_promoted(job));
+    eventually(
+        || port.running_job_count() == 1,
+        "the job is not reported running",
+    )
+    .await;
+    assert_eq!(port.session_for_number(port.jobs()[0].number), Some(job));
     let generation = port.job_terminal_generation();
-    // The port's effects wait on a thread of their own, from any caller.
     port.stop_jobs(JobStopReason::Model, Duration::from_millis(200))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while sessions
-        .jobs()
-        .await
-        .unwrap()
-        .iter()
-        .any(|job| job.status == JobStatus::Running)
-    {
-        assert!(Instant::now() < deadline, "the job did not stop");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert_eq!(port.running_job_count(), 0);
+    eventually(
+        || port.has_unreported_terminal_job(),
+        "the job's end is not reported",
+    )
+    .await;
+    let number = port.jobs()[0].number;
+    assert_eq!(
+        port.terminal_jobs_since(generation),
+        vec![format!("p{number}")]
+    );
     assert!(port.job_terminal_generation() > generation);
+    {
+        let statuses = observed.lock().unwrap();
+        assert_eq!(statuses.first(), Some(&JobStatus::Running));
+        assert!(statuses.iter().any(|status| *status != JobStatus::Running));
+    }
+    plakous_tools::internal::consume_jobs(&sessions, &[number]);
+    assert!(!port.has_unreported_terminal_job());
+    drop(loopback);
 }

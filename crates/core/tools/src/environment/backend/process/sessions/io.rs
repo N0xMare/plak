@@ -14,6 +14,9 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<crate::internal::ProcessSessionProjectionState, ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return Ok(arm.projection_state(id));
+        }
         let session = self.session(id)?;
         Ok((
             Arc::clone(&session.consumer_cursor),
@@ -37,6 +40,9 @@ impl JoinedProcessSessions {
         request: JoinedProcessStartRequest,
         control: OperationContext,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.start(request, control);
+        }
         control.check_cancelled()?;
         let Some(process) = self.inner.process.clone() else {
             return Err(backend_error(
@@ -149,6 +155,9 @@ impl JoinedProcessSessions {
         bytes: &[u8],
         disposition: JoinedProcessInputDisposition,
     ) -> Result<(), ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.write_stdin(id, bytes, disposition);
+        }
         if bytes.len() > MAX_JOINED_PROCESS_SESSION_WRITE_BYTES {
             return Err(resource_error(
                 "joined process stdin write exceeds its bound",
@@ -190,6 +199,9 @@ impl JoinedProcessSessions {
         max_bytes: usize,
         max_records: usize,
     ) -> Result<JoinedProcessPollResult, ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.poll(id, max_bytes, max_records);
+        }
         if max_bytes == 0
             || u64::try_from(max_bytes).unwrap_or(u64::MAX)
                 > self.inner.limits.max_combined_output_bytes()
@@ -269,6 +281,9 @@ impl JoinedProcessSessions {
         max_bytes: usize,
         max_records: usize,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.poll_from(id, cursor, max_bytes, max_records);
+        }
         if max_bytes == 0
             || u64::try_from(max_bytes).unwrap_or(u64::MAX)
                 > self.inner.limits.max_combined_output_bytes()
@@ -343,6 +358,9 @@ impl JoinedProcessSessions {
         max_bytes: usize,
         max_records: usize,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.poll_tail(id, max_bytes, max_records);
+        }
         if max_bytes == 0
             || u64::try_from(max_bytes).unwrap_or(u64::MAX)
                 > self.inner.limits.max_combined_output_bytes()

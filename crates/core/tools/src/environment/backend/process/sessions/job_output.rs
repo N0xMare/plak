@@ -10,6 +10,9 @@ impl JoinedProcessSessions {
     /// nothing, so a caller dropped after it leaves no job behind. A
     /// promotion the service would refuse now walks nothing and fits nothing.
     pub(crate) fn reserve_job_output(&self, id: JoinedProcessSessionId) -> bool {
+        if self.runner_arm().is_some() {
+            return false;
+        }
         if self.job_output_file(Self::job_number(id)).is_some() {
             return false;
         }
@@ -40,6 +43,9 @@ impl JoinedProcessSessions {
 
     /// Drops snapshots only after their terminal observation has committed.
     pub(crate) fn consume_jobs(&self, numbers: &[u32]) {
+        if let Some(arm) = self.runner_arm() {
+            arm.consume(numbers);
+        }
         let _ = self.terminal_jobs_since(0);
         {
             let mut released = Vec::new();

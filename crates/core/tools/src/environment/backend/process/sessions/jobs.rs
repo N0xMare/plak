@@ -78,6 +78,9 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<tokio::sync::watch::Receiver<u64>, ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return Ok(arm.session_changes(id));
+        }
         Ok(lock(&self.session(id)?.shared).changes.subscribe())
     }
 
@@ -183,6 +186,9 @@ impl JoinedProcessSessions {
     /// Whether this process is session-owned rather than turn-owned.
     #[must_use]
     pub fn is_promoted(&self, id: JoinedProcessSessionId) -> bool {
+        if let Some(arm) = self.runner_arm() {
+            return arm.is_promoted(id);
+        }
         self.session(id)
             .is_ok_and(|session| session.promoted.load(Ordering::Acquire) == PROMOTED)
     }
@@ -202,6 +208,9 @@ impl JoinedProcessSessions {
     /// # Errors
     /// Returns an error if a supervisor cannot finish relinquishing ownership.
     pub fn disown_leftovers(&self) -> Result<(), ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.disown_leftovers();
+        }
         let deadline = Instant::now() + self.inner.limits.cleanup_duration();
         let sessions = lock(&self.inner.state)
             .active
@@ -251,6 +260,11 @@ impl JoinedProcessSessions {
     /// Whether an exact active session or terminal snapshot is still retained.
     #[must_use]
     pub fn retains_session(&self, id: JoinedProcessSessionId) -> bool {
+        if let Some(arm) = self.runner_arm()
+            && arm.knows(id)
+        {
+            return true;
+        }
         self.session(id).is_ok()
     }
 
@@ -261,6 +275,9 @@ impl JoinedProcessSessions {
     /// # Errors
     /// Rejects a foreign session or an exhausted bounded notice ledger.
     pub(crate) fn promote(&self, id: JoinedProcessSessionId) -> Result<(), ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.promote(id);
+        }
         let fits = self.reserve_job_output(id);
         self.promote_reserved(id, fits)
     }
@@ -323,6 +340,9 @@ impl JoinedProcessSessions {
         id: JoinedProcessSessionId,
         fits: bool,
     ) -> Result<(), ExecutionBackendError> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.promote(id);
+        }
         let session = self.session(id)?;
         // The monitor waits for `published`; dropping it unsent ends the
         // monitor without touching the foreground session.
@@ -406,6 +426,11 @@ impl JoinedProcessSessions {
     /// Whether the service retains any promoted running or unconsumed job.
     #[must_use]
     pub fn has_jobs(&self) -> bool {
+        if let Some(arm) = self.runner_arm()
+            && !arm.jobs().is_empty()
+        {
+            return true;
+        }
         let state = lock(&self.inner.state);
         state
             .active
@@ -417,6 +442,10 @@ impl JoinedProcessSessions {
     /// Counts promoted running jobs without copying retained output.
     #[must_use]
     pub fn running_job_count(&self) -> usize {
+        let runner = self.runner_arm().map_or(0, |arm| arm.running_job_count());
+        if runner != 0 {
+            return runner;
+        }
         lock(&self.inner.state)
             .active
             .values()
@@ -433,6 +462,11 @@ impl JoinedProcessSessions {
     /// terminal status alone does not mean unreported.
     #[must_use]
     pub fn has_unreported_terminal_job(&self) -> bool {
+        if let Some(arm) = self.runner_arm()
+            && arm.has_unreported_terminal_job()
+        {
+            return true;
+        }
         let state = lock(&self.inner.state);
         state
             .active
@@ -449,13 +483,18 @@ impl JoinedProcessSessions {
     #[must_use]
     pub fn jobs(&self) -> Vec<crate::JobView> {
         let state = lock(&self.inner.state);
-        state
+        let mut jobs: Vec<crate::JobView> = state
             .active
             .iter()
             .chain(&state.finished)
             .filter(|(_, session)| session.promoted.load(Ordering::Acquire) == PROMOTED)
             .map(|(id, session)| self.job_view(*id, session))
-            .collect()
+            .collect();
+        drop(state);
+        if let Some(arm) = self.runner_arm() {
+            jobs.extend(arm.jobs());
+        }
+        jobs
     }
 
     pub(super) fn job_view(
@@ -501,6 +540,11 @@ impl JoinedProcessSessions {
     /// Resolves a vendor handle only within this service's live/snapshot namespace.
     #[must_use]
     pub fn session_for_number(&self, number: u32) -> Option<JoinedProcessSessionId> {
+        if let Some(arm) = self.runner_arm()
+            && let Some(id) = arm.session_for_number(number)
+        {
+            return Some(id);
+        }
         let state = lock(&self.inner.state);
         state
             .active

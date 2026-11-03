@@ -18,8 +18,8 @@ use plakous_runner_protocol::{
 use plakous_tools::internal::runner::{
     RunnerExtension, RunnerVerb, RunnerVerbFamily, ServeFailure, ServeFuture, decode_preempt,
     environment_failure, job_capacity, line_sessions, requested_workspace, runner_descriptor,
-    serve, serve_failure, serve_probe, serve_service_spawn, serve_service_terminate,
-    serve_sessions, service_spawned, terminated_service,
+    serve, serve_failure, serve_jobs_watch, serve_probe, serve_service_spawn,
+    serve_service_terminate, serve_sessions, service_spawned, terminated_service,
 };
 use plakous_tools::{
     ExecutionEnvironment, ExecutionEnvironmentError, JoinedProcessHostCapacity,
@@ -420,6 +420,10 @@ impl RunnerService {
                 Some(extension) => extension.serve(verb, payload),
                 None => Box::pin(std::future::ready(Err(ServeFailure::Unsupported))),
             },
+            RunnerVerbFamily::Sessions if verb == RunnerVerb::JobsWatch => {
+                let line = request.owner.map(|owner| owner.line).unwrap_or_default();
+                self.watch_jobs(&host, connection, &line, &payload)
+            }
             RunnerVerbFamily::Sessions => {
                 let line = request.owner.map(|owner| owner.line).unwrap_or_default();
                 self.sessions(&host, &line, verb, payload, control)
@@ -464,21 +468,7 @@ impl RunnerService {
         payload: Value,
         control: OperationContext,
     ) -> ServeFuture {
-        let sessions = {
-            let mut lines = lock(&self.inner.lines);
-            match lines.get(&(host.to_owned(), line.to_owned())) {
-                Some(found) => Ok(found.clone()),
-                None => self.environment_for(&payload).and_then(|environment| {
-                    line_sessions(&environment, &self.inner.capacity)
-                        .map(|sessions| {
-                            let found = (sessions, environment);
-                            lines.insert((host.to_owned(), line.to_owned()), found.clone());
-                            found
-                        })
-                        .map_err(|error| serve_failure(&error))
-                }),
-            }
-        };
+        let sessions = self.line(host, line, &payload);
         match sessions {
             Ok((sessions, environment)) => serve_sessions(
                 &environment,
@@ -490,6 +480,46 @@ impl RunnerService {
             ),
             Err(failure) => Box::pin(std::future::ready(Err(failure))),
         }
+    }
+
+    /// The line's sessions and their environment, made on first use from the
+    /// workspace the request names.
+    fn line(
+        &self,
+        host: &str,
+        line: &str,
+        payload: &Value,
+    ) -> Result<(JoinedProcessSessions, ExecutionEnvironment), ServeFailure> {
+        let mut lines = lock(&self.inner.lines);
+        if let Some(found) = lines.get(&(host.to_owned(), line.to_owned())) {
+            return Ok(found.clone());
+        }
+        let environment = self.environment_for(payload)?;
+        let sessions = line_sessions(&environment, &self.inner.capacity)
+            .map_err(|error| serve_failure(&error))?;
+        let found = (sessions, environment);
+        lines.insert((host.to_owned(), line.to_owned()), found.clone());
+        Ok(found)
+    }
+
+    /// Opens the line's job event stream on this connection. Nothing is sent
+    /// on it until the host grants credit.
+    fn watch_jobs(&self, host: &str, connection: u64, line: &str, payload: &Value) -> ServeFuture {
+        let (sessions, _) = match self.line(host, line, payload) {
+            Ok(found) => found,
+            Err(failure) => return Box::pin(std::future::ready(Err(failure))),
+        };
+        let events = serve_jobs_watch(&sessions, &self.inner.hello.instance);
+        let stream = self.inner.next_stream.fetch_add(1, Ordering::Relaxed);
+        self.carry(
+            host,
+            connection,
+            stream,
+            Box::pin(tokio::io::sink()),
+            events,
+            None,
+        );
+        Box::pin(std::future::ready(Ok(service_spawned(stream))))
     }
 
     /// The environment answering a request: the default one, or the one
@@ -534,18 +564,32 @@ impl RunnerService {
         Box::pin(async move {
             let process = spawned.await?;
             let stream = service.inner.next_stream.fetch_add(1, Ordering::Relaxed);
-            service.carry(&host, connection, stream, process);
+            service.carry_service(&host, connection, stream, process);
             Ok(service_spawned(stream))
         })
     }
 
-    fn carry(&self, host: &str, connection: u64, stream: u64, process: ServiceProcess) {
+    fn carry_service(&self, host: &str, connection: u64, stream: u64, process: ServiceProcess) {
         let ServiceProcess {
             stdin,
             stdout,
             handle,
             ..
         } = process;
+        self.carry(host, connection, stream, stdin, stdout, Some(handle));
+    }
+
+    /// Carries `input` and `output` as `stream` of `connection`, ending
+    /// `handle` with it.
+    fn carry(
+        &self,
+        host: &str,
+        connection: u64,
+        stream: u64,
+        stdin: std::pin::Pin<Box<dyn AsyncWrite + Send>>,
+        stdout: std::pin::Pin<Box<dyn AsyncRead + Send>>,
+        handle: Option<ServiceHandle>,
+    ) {
         let sender = lock(&self.inner.hosts)
             .get(host)
             .filter(|current| current.id == connection)
@@ -553,7 +597,7 @@ impl RunnerService {
         // The spawning connection ended while the service started: nothing
         // could carry its stdio, so it ends now.
         let Some(sender) = sender else {
-            terminate_later(Some(handle));
+            terminate_later(handle);
             return;
         };
         let out = Outbound::new(stream, move |frame: StreamFrame| {
@@ -572,7 +616,7 @@ impl RunnerService {
                 .is_some_and(|current| current.id == connection);
             if !current {
                 drop(services);
-                terminate_later(Some(handle));
+                terminate_later(handle);
                 return;
             }
             services.insert(
@@ -584,7 +628,7 @@ impl RunnerService {
                         Arc::clone(&window),
                         Arc::clone(&out),
                     ),
-                    handle: Some(handle),
+                    handle,
                     connection,
                 },
             );

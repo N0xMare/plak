@@ -5570,9 +5570,12 @@ conformance.
   alone and is never recorded. The operations are `workspace.read`,
   `repository.query`, `workspace.mutate` and `process.execute`; the
   process-session verbs `process.start`, `process.write`, `process.poll`,
-  `process.stop`, `process.promote`, `jobs.snapshot`, `jobs.stop` and
-  `jobs.disown`, which act on the owner's line; and `service.spawn` and
-  `service.terminate`. Their payloads and errors are the execution
+  `process.stop`, `process.promote`, `jobs.snapshot`, `jobs.watch`,
+  `jobs.stop` and `jobs.disown`, which act on the owner's line; and
+  `service.spawn` and `service.terminate`. `jobs.watch` is an unkeyed read
+  whose result opens a stream of the line's job events: a JSON line with the
+  runner instance and the line's jobs at once, and another whenever they
+  change. Their payloads and errors are the execution
   environment's own schema (the runner seam of §8.5); the protocol frames,
   keys and orders them without interpreting them, except that a result which
   opens a stream names it in its `stream` field. Control frames are `Cancel`,
@@ -6091,8 +6094,9 @@ digest (descriptor digest format 5) and the descriptor wire encoding carries
 process's platform rather than the descriptor's own operating system, so a
 descriptor written for another platform does not decode here; deriving the
 expected containment from the wire's operating system is required before a
-descriptor crosses a process boundary. Joined process sessions require the local
-runner's direct backend.
+descriptor crosses a process boundary. The in-process joined process service
+requires the local runner's direct backend; a runner environment's service is
+its runner arm (below).
 
 The runner seam, `plakous_tools::internal::runner` (unsupported and hidden), is
 the host end of runner execution. `RunnerBackend` is a sealed execution backend
@@ -6113,14 +6117,26 @@ sessions on a runner: start, stdin writes, polls that wait for output or a
 yield, stops, promotion, the line's jobs, stopping them and disowning
 leftovers, each sent under the handle's owner (`RunnerSessions::transfer_to`
 hands the line to a newer head). It mirrors the jobs it has seen, so a
-runner restart reports them as of unknown outcome. The runner side answers
-these from one `JoinedProcessSessions` per line (`line_sessions`,
-`serve_sessions`), counted against one shared bound (`job_capacity`).
-`JoinedSessionsPort::runner` holds a line's `RunnerSessions`: its reads answer
-from the mirror the last job read left, its stops and disowns wait for the
-runner on a thread of their own, and capacity and job outputs are the
-runner's own. Nothing attaches one yet: the agent's job restore and the shell
-tool use the in-process service. Backend errors cross with their kind, message, no-effect
+runner restart reports them as of unknown outcome. `RunnerSessions::watch`
+follows the line's job events (`jobs.watch`) into the same mirror. The runner
+side answers these from one `JoinedProcessSessions` per line (`line_sessions`,
+`serve_sessions`, and `serve_jobs_watch` for the event stream), counted
+against one shared bound (`job_capacity`).
+A runner environment's `joined_process_sessions` is a `JoinedProcessSessions`
+with a runner arm over the line's `RunnerSessions`
+(`adopt_runner_process_sessions`), so the shell tool, the agent and the job
+host call the same service on either runner; the local service has no arm and
+is unchanged. The arm's process operations go to the runner and wait for its
+answer on a thread of their own; its job reads, counts, terminal generation
+and its change watch, `terminal_jobs_since` and `observe_jobs` answer from the
+job events, which a task on the runner runtime follows for as long as the
+service lives, reopening the stream after a lost link. Durable restore stays
+host-side: seeded counters, consumed numbers and restored terminal rows are
+this process's bookkeeping. The agent attaches it as `JoinedSessionsPort::runner`
+and makes its job restore (`seed_job_counter`, `consume_jobs`,
+`restore_job_terminals`) and the environment's adoption (`adopt_into`) through
+the port, as it does with a local port; capacity and job outputs are the
+runner's own. Backend errors cross with their kind, message, no-effect
 proof and conflict path. A link failure becomes `Io`, proven to have had no
 effect, when the call was never sent; `RecoveryRequired` when its outcome is
 unknown; the stale-owner `IdentityMismatch` when the runner refused its owner;
@@ -6137,9 +6153,9 @@ runner's backend (`plakous::agent::select_runner_backend`), so the run's
 environment is a runner environment: its reads, queries, mutations, literal
 processes and services go to the runner, and its descriptor names the runner,
 so its sessions do not reopen on another runner or on the local one. Its
-in-process process-session service refuses every start, `Unsupported` with no
-effect, so the shell tool fails closed on a runner session until process
-sessions move onto `JoinedSessionsPort`. No production configuration can name
+process sessions are the runner's, through the runner arm above; a runner
+environment with no selected runner runtime or no line owner refuses every
+start, `Unsupported` with no effect. No production configuration can name
 a runner. The facade reaches the seam only through the hidden
 `plakous::tools::runner` and `plakous::agent::select_runner_backend`.
 
@@ -10209,19 +10225,22 @@ A registry holds, returns and transfers each line's service as a
 with a remote runner can stand behind the same handle. A port is attached for
 one `JobOwner` and found again by that owner's line (`JobHost::service`) or by
 the session and branch of the head that owns it (`JobHost::service_at`). Every
-port today is the in-process `JoinedProcessSessions` (`JoinedSessionsPort::local`,
-`as_local`) with that service's exact operation semantics; the agent adopts
-only an in-process service into its environment and refuses construction if
-`attach` returns another. A remote service becomes a second variant of the
-handle, not a caller-implemented trait: its read accessors (`jobs`, the counts
-and flags, the terminal generation and its change watch, `terminal_jobs_since`,
-`session_for_number`, `leftover`) are served from a host-side mirror kept
-current by the runner's job events, which also feed `observe_jobs`; the
-effects (`stop_with_grace`, `stop_jobs`, `stop_foreground`,
-`disown_leftovers`) are forwarded and become async, and the capacity and
-output-root bindings are forwarded once at attach. Until then the in-process
-port's stops block, and every caller runs them on a thread of its own or a
-blocking worker (§8.5).
+port is an in-process `JoinedProcessSessions` (`JoinedSessionsPort::local`,
+`as_local`) with that service's exact operation semantics; a runner port
+(`JoinedSessionsPort::runner`, unsupported) holds one whose runner arm sends
+its processes to a runner and answers its job reads from that runner's job
+events (§8.5), and binds no host capacity. The agent restores its jobs and
+adopts its service through the port, and refuses construction if `attach`
+returns a port with no service to adopt. The remote service is a second variant
+of the handle, not a caller-implemented trait: its read accessors (`jobs`, the
+counts and flags, the terminal generation and its change watch,
+`terminal_jobs_since`, `session_for_number`) are served from the host-side
+mirror the runner's job events keep current, which also feed `observe_jobs`,
+and `leftover` reports none;
+its effects (`stop_with_grace`, `stop_jobs`, `stop_foreground`,
+`disown_leftovers`) are forwarded and wait for the runner. Both variants' stops
+block, and every caller runs them on a thread of its own or a blocking worker
+(§8.5).
 After committing a terminal notice's consumption and immediately before
 removing its process snapshot, the driver calls `JobHost::observe_terminal`
 with the exact owner and terminal `JobView` rows. The default is a no-op.
@@ -10347,7 +10366,8 @@ The runner seam is the unsupported `plakous_tools::internal::runner` and
 `plakous_agent::internal::select_runner_backend`, reached by hosted and the
 orchestration tree through the hidden `plakous::tools::runner` and
 `plakous::agent::select_runner_backend` bridges (§8.5). The hidden
-`JoinedSessionsPort::runner` constructor is part of the same seam.
+`JoinedSessionsPort::runner` constructor and its restore and adoption
+methods are part of the same seam.
 It is display minimization, not credential authority (chapter 04 §5).
 
 ### 12.1 Feature closures

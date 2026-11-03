@@ -28,7 +28,7 @@ pub use service::{
     ServeServiceFuture, serve_service_spawn, serve_service_terminate, service_spawned,
     terminated_service,
 };
-pub use sessions::{RunnerSessions, job_capacity, line_sessions, serve_sessions};
+pub use sessions::{RunnerSessions, job_capacity, line_sessions, serve_jobs_watch, serve_sessions};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::{
@@ -73,6 +73,8 @@ pub enum RunnerVerb {
     JobsStop,
     /// [`crate::JoinedProcessSessions::disown_leftovers`].
     JobsDisown,
+    /// A stream of the line's job views, one line of JSON per change.
+    JobsWatch,
     /// [`ExecutionEnvironment::spawn_service`], with its stdio as a stream.
     ServiceSpawn,
     /// [`crate::ServiceHandle::terminate`] of a spawned service.
@@ -101,7 +103,7 @@ pub enum RunnerVerbFamily {
 
 impl RunnerVerb {
     /// Every verb.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::ReadWorkspace,
         Self::QueryRepository,
         Self::MutateWorkspace,
@@ -114,6 +116,7 @@ impl RunnerVerb {
         Self::JobsSnapshot,
         Self::JobsStop,
         Self::JobsDisown,
+        Self::JobsWatch,
         Self::ServiceSpawn,
         Self::ServiceTerminate,
         Self::ProbeWorkspace,
@@ -136,6 +139,7 @@ impl RunnerVerb {
             Self::JobsSnapshot => "jobs.snapshot",
             Self::JobsStop => "jobs.stop",
             Self::JobsDisown => "jobs.disown",
+            Self::JobsWatch => "jobs.watch",
             Self::ServiceSpawn => "service.spawn",
             Self::ServiceTerminate => "service.terminate",
             Self::ProbeWorkspace => "probe.workspace",
@@ -167,7 +171,8 @@ impl RunnerVerb {
             | Self::ProcessPromote
             | Self::JobsSnapshot
             | Self::JobsStop
-            | Self::JobsDisown => RunnerVerbFamily::Sessions,
+            | Self::JobsDisown
+            | Self::JobsWatch => RunnerVerbFamily::Sessions,
         }
     }
 
@@ -624,8 +629,12 @@ pub fn runner_environment(
     config: ExecutionEnvironmentConfig,
     backend: Arc<RunnerBackend>,
 ) -> Result<ExecutionEnvironment, ExecutionEnvironmentError> {
+    let link = backend.link();
     let backend: Arc<dyn ExecutionBackend> = backend;
-    ExecutionEnvironment::with_operation_backend(scope, root, cwd, config, backend)
+    let mut environment =
+        ExecutionEnvironment::with_operation_backend(scope, root, cwd, config, backend)?;
+    environment.runner_link = Some(link);
+    Ok(environment)
 }
 
 /// The descriptor a runner presents for `environment`'s backend under the
@@ -732,6 +741,32 @@ pub fn serve(
 #[must_use]
 pub fn requested_workspace(payload: &Value) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
     wire::envelope_workspace(payload)
+}
+
+/// Waits for `effect` on a thread of its own, so a synchronous caller on
+/// any thread, async worker or not, gets the runner's answer.
+pub(crate) fn wait_on<T: Send>(
+    runtime: &tokio::runtime::Handle,
+    effect: impl Future<Output = T> + Send,
+) -> Result<T, ExecutionBackendError> {
+    std::thread::scope(|scope| scope.spawn(|| runtime.block_on(effect)).join())
+        .map_err(|_| waiter_failed())
+}
+
+/// `environment`'s process-session service on its runner, whose link runs
+/// on `runtime`, adopted as the environment's service: what the agent
+/// attaches for a session on another runner.
+///
+/// # Errors
+///
+/// The service could not be allocated.
+pub fn adopt_runner_process_sessions(
+    environment: &ExecutionEnvironment,
+    runtime: &tokio::runtime::Handle,
+) -> Result<crate::JoinedProcessSessions, ExecutionBackendError> {
+    let sessions = environment.runner_process_sessions(runtime)?;
+    environment.adopt_joined_process_sessions(&sessions);
+    Ok(sessions)
 }
 
 /// The error of a runner effect whose waiting thread failed: it may have run.

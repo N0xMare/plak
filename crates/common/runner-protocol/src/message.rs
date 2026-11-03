@@ -31,6 +31,9 @@ pub mod verbs {
     pub const JOBS_STOP: &str = "jobs.stop";
     /// Disown the line's leftover processes.
     pub const JOBS_DISOWN: &str = "jobs.disown";
+    /// Follow the line's job events; the result names the stream that
+    /// carries them, one JSON line per change.
+    pub const JOBS_WATCH: &str = "jobs.watch";
     /// Spawn a service whose stdio is a stream; the result names the stream
     /// in its `stream` field.
     pub const SERVICE_SPAWN: &str = "service.spawn";

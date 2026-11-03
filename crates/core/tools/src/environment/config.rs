@@ -670,6 +670,9 @@ pub struct ExecutionEnvironment {
     /// The line head this environment's operations run for. Process-local
     /// and absent from the descriptor digest: a reopen owns under a new fence.
     pub(super) line_owner: Option<LineOwner>,
+    /// The link to the runner this environment's operations run on, when it
+    /// is not the local runner. Process-local, like the line owner.
+    pub(super) runner_link: Option<Arc<dyn crate::environment::runner::RunnerLink>>,
 }
 
 impl ExecutionEnvironment {
@@ -839,6 +842,7 @@ impl ExecutionEnvironment {
             read_observations: Arc::default(),
             visual_read: None,
             line_owner: None,
+            runner_link: None,
         })
     }
 

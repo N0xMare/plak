@@ -3,6 +3,7 @@
 mod io;
 mod job_output;
 mod jobs;
+mod runner_arm;
 mod stop;
 
 use crate::environment::backend::job_output::{JobOutputAdmission, JobOutputWriter, JobOutputs};
@@ -453,6 +454,9 @@ pub(super) struct JoinedProcessServiceInner {
     pub(super) host_capacity: Mutex<Option<JoinedProcessHostCapacity>>,
     pub(super) job_observer: Mutex<Option<JobObserver>>,
     pub(super) outputs: Mutex<Option<JobOutputs>>,
+    /// Set once for the service of an environment on another runner: every
+    /// process operation goes there.
+    pub(super) runner: std::sync::OnceLock<Arc<runner_arm::RunnerArm>>,
 }
 
 #[derive(Default)]
@@ -616,6 +620,7 @@ impl JoinedProcessSessions {
                 host_capacity: Mutex::new(None),
                 job_observer: Mutex::new(None),
                 outputs: Mutex::new(None),
+                runner: std::sync::OnceLock::new(),
                 terminal_changes: tokio::sync::watch::channel(0).0,
                 notice_delivery_available: AtomicBool::new(true),
                 unread_mail_pending: AtomicBool::new(false),
@@ -647,6 +652,9 @@ impl JoinedProcessSessions {
     /// The joined process sessions this environment still holds.
     #[must_use]
     pub fn active_session_ids(&self) -> Vec<JoinedProcessSessionId> {
+        if let Some(arm) = self.runner_arm() {
+            return arm.active_session_ids();
+        }
         lock(&self.inner.state).active.keys().copied().collect()
     }
 
@@ -665,6 +673,11 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Option<JoinedProcessStatus> {
+        if let Some(arm) = self.runner_arm()
+            && arm.knows(id)
+        {
+            return arm.joined_terminal_status(id);
+        }
         if id.0[..8] != self.inner.owner {
             return None;
         }
@@ -720,6 +733,9 @@ impl JoinedProcessSessions {
     /// Reports whether no started or starting session remains.
     #[must_use]
     pub fn is_drained(&self) -> bool {
+        if let Some(arm) = self.runner_arm() {
+            return arm.active_session_ids().is_empty();
+        }
         let state = lock(&self.inner.state);
         state.active.is_empty() && state.starting == 0
     }
@@ -847,6 +863,32 @@ impl ExecutionEnvironment {
         *lock(&self.joined_process_sessions.service) = Some(Arc::clone(&sessions.inner));
     }
 
+    /// The process-session service of an environment on another runner,
+    /// whose link runs on `runtime`: the line's sessions on that runner. An
+    /// environment without a runner link or a line owner refuses every
+    /// start instead. Unsupported; see spec 01 §8.5.
+    ///
+    /// # Errors
+    ///
+    /// The service could not be allocated.
+    pub(crate) fn runner_process_sessions(
+        &self,
+        runtime: &tokio::runtime::Handle,
+    ) -> Result<JoinedProcessSessions, ExecutionBackendError> {
+        match (&self.runner_link, self.line_owner) {
+            (Some(link), Some(owner)) => JoinedProcessSessions::runner(
+                self,
+                crate::environment::runner::RunnerSessions::from_link(
+                    Arc::clone(link),
+                    self,
+                    owner,
+                ),
+                runtime,
+            ),
+            _ => JoinedProcessSessions::refusing(self),
+        }
+    }
+
     /// Returns the already-bound service without allocating a new owner.
     #[must_use]
     pub fn existing_joined_process_sessions(&self) -> Option<JoinedProcessSessions> {
@@ -867,11 +909,15 @@ impl ExecutionEnvironment {
             return Ok(JoinedProcessSessions { inner });
         }
         // An environment whose operations run on another runner holds a
-        // service that refuses every start: its shell runs nowhere.
+        // service whose processes run there, on the selected runner's
+        // runtime; without a line owner or a runtime it refuses every start.
         let created = if self.backend().kind() == ExecutionBackendKind::Runner
             && !self.backend().runner_id().is_some_and(RunnerId::is_local)
         {
-            JoinedProcessSessions::refusing(self)?
+            match crate::environment::runner::process_runner() {
+                Some(runner) => self.runner_process_sessions(runner.runtime())?,
+                None => JoinedProcessSessions::refusing(self)?,
+            }
         } else {
             JoinedProcessSessions::new(self)?
         };

@@ -1160,32 +1160,32 @@ fn attach_job_environment(
     let fresh_sessions = environment
         .joined_process_sessions()
         .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
-    plakous_tools::internal::seed_job_counter(&fresh_sessions, builder.job_counter_seed);
-    let inspection = bootstrap.is_some_and(|bootstrap| bootstrap.inspection);
-    let job_sessions = if let Some(host) = builder.job_host.as_ref().filter(|_| !inspection) {
-        let port = host
-            .attach(
-                job_owner,
-                plakous_tools::JoinedSessionsPort::local(fresh_sessions),
-            )
-            .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
-        port.as_local().cloned().ok_or_else(|| {
-            AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "job host returned a process service this environment cannot adopt",
-            )
-        })?
+    // A session on another runner holds the runner port: its processes and
+    // job events are that runner's.
+    let fresh = if builder.runner_backend.is_some() {
+        plakous_tools::JoinedSessionsPort::runner(fresh_sessions)
     } else {
-        fresh_sessions
+        plakous_tools::JoinedSessionsPort::local(fresh_sessions)
     };
+    fresh.seed_job_counter(builder.job_counter_seed);
+    let inspection = bootstrap.is_some_and(|bootstrap| bootstrap.inspection);
+    let port = if let Some(host) = builder.job_host.as_ref().filter(|_| !inspection) {
+        host.attach(job_owner, fresh)
+            .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?
+    } else {
+        fresh
+    };
+    let job_sessions = port.as_local().cloned().ok_or_else(|| {
+        AgentError::new(
+            AgentErrorKind::InvalidInput,
+            "job host returned a process service this environment cannot adopt",
+        )
+    })?;
     plakous_tools::internal::set_job_owner(&job_sessions, agent_id.to_string());
     if let Some(bootstrap) = bootstrap {
-        plakous_tools::internal::seed_job_counter(
-            &job_sessions,
-            bootstrap.checkpoint.manifest().jobs().next_id(),
-        );
+        port.seed_job_counter(bootstrap.checkpoint.manifest().jobs().next_id());
         let rows = bootstrap.checkpoint.manifest().jobs().rows();
-        let unmatched = job_sessions
+        let unmatched = port
             .jobs()
             .iter()
             .filter(|view| {
@@ -1198,7 +1198,7 @@ fn attach_job_environment(
             })
             .map(|view| view.number)
             .collect::<Vec<_>>();
-        plakous_tools::internal::consume_jobs(&job_sessions, &unmatched);
+        port.consume_jobs(&unmatched);
         // Recorded line terminals answer polls before the first commit
         // folds them into the ledger.
         let jobs = bootstrap
@@ -1207,8 +1207,7 @@ fn attach_job_environment(
             .jobs()
             .with_line_terminals(&bootstrap.line_terminals)
             .map_err(runtime_manifest_error)?;
-        plakous_tools::internal::restore_job_terminals(
-            &job_sessions,
+        port.restore_job_terminals(
             &jobs
                 .rows()
                 .iter()
@@ -1216,7 +1215,7 @@ fn attach_job_environment(
                 .collect::<Vec<_>>(),
         );
     }
-    environment.adopt_joined_process_sessions(&job_sessions);
+    port.adopt_into(&environment);
     Ok((environment, job_sessions))
 }
 

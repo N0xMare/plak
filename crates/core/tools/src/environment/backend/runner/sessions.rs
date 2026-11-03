@@ -29,6 +29,8 @@ use crate::{ExecutionEnvironment, JobStatus, JobStopReason, JobView, ToolPreempt
 
 /// How often a waiting poll looks for output.
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
+/// How often a job event stream looks for a change no terminal announces.
+const WATCH_TICK: Duration = Duration::from_millis(100);
 
 /// A host handle on one agent line's process sessions on a runner. Every
 /// call names the handle's owner, so the runner fences it and keeps the
@@ -106,6 +108,62 @@ impl RunnerSessions {
             mirror: Mutex::default(),
             terminal_changes: tokio::sync::watch::channel(0).0,
         }
+    }
+
+    /// The sessions of `owner`'s line on the runner behind `link`, over
+    /// `environment`'s workspace.
+    #[must_use]
+    pub fn from_link(
+        link: Arc<dyn RunnerLink>,
+        environment: &ExecutionEnvironment,
+        owner: LineOwner,
+    ) -> Self {
+        Self {
+            link,
+            workspace: ExecutionWorkspace::from_environment(environment),
+            owner: Mutex::new(owner),
+            mirror: Mutex::default(),
+            terminal_changes: tokio::sync::watch::channel(0).0,
+        }
+    }
+
+    /// Follows the line's job events until the stream ends: each report
+    /// updates the mirror, and `on_jobs` receives the jobs it now holds.
+    ///
+    /// # Errors
+    ///
+    /// The stream could not be opened.
+    pub async fn watch(
+        &self,
+        on_jobs: impl Fn(Vec<JobView>) + Send,
+    ) -> Result<(), ExecutionBackendError> {
+        use tokio::io::AsyncBufReadExt as _;
+        // The envelope names the line's workspace, should this open the
+        // line's sessions on the runner.
+        let payload = wire::envelope(&self.workspace, json!({}))?;
+        let call = RunnerCall::new(RunnerVerb::JobsWatch, payload, &self.controlled())
+            .with_class(RunnerClass::Unkeyed);
+        let (_, streams) = self.link.open(call).await.map_err(failure_error)?;
+        let mut lines = tokio::io::BufReader::new(streams.output).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(snapshot) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Ok((instance, jobs)) = decode_snapshot(snapshot) else {
+                continue;
+            };
+            let jobs = {
+                let mut mirror = lock(&self.mirror);
+                let current = mirror.observe(&instance);
+                current.clear();
+                for job in jobs {
+                    current.insert(job.number, job);
+                }
+                mirror.jobs()
+            };
+            on_jobs(jobs);
+        }
+        Ok(())
     }
 
     /// The line head this handle acts for.
@@ -268,7 +326,7 @@ impl RunnerSessions {
         let snapshot = self
             .send(
                 RunnerVerb::JobsSnapshot,
-                json!({}),
+                wire::envelope(&self.workspace, json!({}))?,
                 &self.controlled(),
                 Some(RunnerClass::Unkeyed),
             )
@@ -392,6 +450,42 @@ pub fn line_sessions(
     Ok(sessions)
 }
 
+/// The line's job events as the runner side of [`RunnerVerb::JobsWatch`]
+/// sends them: one line of JSON with the instance and the jobs at once, and
+/// another whenever they change. The stream ends when its reader goes.
+#[must_use]
+pub fn serve_jobs_watch(
+    sessions: &JoinedProcessSessions,
+    instance: &str,
+) -> std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>> {
+    use tokio::io::AsyncWriteExt as _;
+    let (reader, mut writer) = tokio::io::duplex(64 * 1024);
+    let sessions = sessions.clone();
+    let instance = instance.to_owned();
+    tokio::spawn(async move {
+        let mut last = None;
+        let mut changes = sessions.job_terminal_changes();
+        loop {
+            let Ok(mut line) =
+                encode_snapshot(&instance, &sessions.jobs()).map(|snapshot| snapshot.to_string())
+            else {
+                return;
+            };
+            if last.as_ref() != Some(&line) {
+                last = Some(line.clone());
+                line.push('\n');
+                if writer.write_all(line.as_bytes()).await.is_err() {
+                    return;
+                }
+            }
+            // A terminal change wakes the report at once; a promotion is
+            // seen at the next tick.
+            let _ = tokio::time::timeout(WATCH_TICK, changes.changed()).await;
+        }
+    });
+    Box::pin(reader)
+}
+
 /// Answers one session verb from a line's `sessions`, as the runner side of
 /// a link; `instance` names this runner process in starts and snapshots. A
 /// verb of another family is [`ServeFailure::Unsupported`].
@@ -403,9 +497,10 @@ pub fn serve_sessions(
     payload: Value,
     control: OperationContext,
 ) -> ServeFuture {
-    let Some(verb) =
-        RunnerVerb::parse(verb).filter(|verb| verb.family() == RunnerVerbFamily::Sessions)
-    else {
+    // The job event stream is a stream the runner opens itself.
+    let Some(verb) = RunnerVerb::parse(verb).filter(|verb| {
+        verb.family() == RunnerVerbFamily::Sessions && *verb != RunnerVerb::JobsWatch
+    }) else {
         return Box::pin(std::future::ready(Err(ServeFailure::Unsupported)));
     };
     let environment = environment.clone();
@@ -475,10 +570,14 @@ fn effect(
             sessions.promote(decode_session(&session.session)?)?;
             Ok(json!({}))
         }
-        _ => {
+        RunnerVerb::JobsDisown => {
             sessions.disown_leftovers()?;
             Ok(json!({}))
         }
+        _ => Err(super::super::backend_error(
+            super::super::ExecutionBackendErrorKind::Unsupported,
+            "the verb is not a process-session effect",
+        )),
     }
 }
 
