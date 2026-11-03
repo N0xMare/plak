@@ -931,6 +931,11 @@ async fn a_key_spent_under_another_host_instance_is_of_unknown_outcome() {
         .execute_literal_process(shell("echo x >> log"), effect(owner(1, 1), 1))
         .await
         .unwrap();
+    // The host acknowledges the answer as it takes it; one more round trip
+    // on the connection has the runner see that acknowledgement first.
+    let _ = before
+        .execute_literal_process(shell("true"), unkeyed())
+        .await;
     drop(first);
     // The successor host process sends the same key again after the first
     // acknowledged it: the call ran, so its outcome is unknown, not refused.
