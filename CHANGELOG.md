@@ -7,14 +7,95 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+### Format cut
+
+This release changes every persisted store at once (the 0.0.4 format cut), so
+a 0.0.4 build opens no 0.0.3 state; 0.0.3 sessions cross through `/reload` or
+an export.
+
+- State key `r27.e35.p36.t10` (runtime SQLite schema 27, runtime format epoch
+  35, product schema 36, agent tree schema 10; 0.0.3 used `r26.e34.p35.t9`).
+- Runtime schema 27 records agent lines: each line's head, every branch's line
+  membership and `line_job_terminals`. Epoch 35 adds line membership and
+  generation to the checkpoint topology, line-head job owners and the line
+  feed facts; the execution-environment digest moves to format 5 and the
+  run-stable workspace facts to `workspace-environment-v2`, so every
+  environment descriptor and plan digest changes.
+- Product schema 36 adds the write-ahead `carry_intent` of a same-store carry,
+  the session's node, the virtual root's profile, the runner display copy,
+  frozen MCP placement (`host` today), the `switch` workflow kind and the root
+  interrupt cause and continuation decision intents. The clear workflow kind is
+  now `new` with `plak:new:` operation ids, and the legacy `workflows` table is
+  gone.
+- Agent tree schema 10 adds the node's line, epoch and runner placement,
+  successor epochs, fork provenance, runner ancestors and the tree custody
+  record (one live `plak` process holds a tree; see Plak below).
+- Holder claims are `plak-holder-v3`: one lock per process and one record per
+  grant, with no 128-claim cap.
+- Session export version 12 adds the session's runner (today always the local
+  runner) and its profile (root template and working set). It imports versions
+  12 and 11 and refuses 10; `plak session --help` names those versions from the
+  build's own constants.
+- Telemetry store schema 21 (`telemetry-v21.sqlite3`, disposable).
+- Upgrading from 0.0.3: a 0.0.3 session carries forward through `/reload` from
+  a running 0.0.3 TUI, or through `plak session export` and `plak session
+  import`. Version 11 documents import onto the local runner under the home
+  default profile with one notice and an identical conversation. Agent trees
+  never cross a state-key change. A 0.0.3 build refuses a `config.toml` that
+  sets any of the new keys below.
+- `/new` is stored under its own name: the session workflow it records is
+  `new` (it was `clear`) with `plak:new:` operation ids. The JSONL `clear`
+  command and the `clear` host phase keep their names.
+- Configuration compatibility: `config.toml` accepts `[host]
+  resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
+  placement` (`host` or `runner`, default `host`) and `[runners.<name>]`,
+  validated and inert until node recovery and runner placement land. `plak`
+  writes them only when you set them, and `plak doctor` warns `config uses
+  0.0.4-only keys` while one is set.
+- Plakous embedder break: the per-construction `AgentId` is renamed
+  `DriverInstanceId`.
+- Plakous embedder break: every branch belongs to an agent line. A
+  head-advancing rebind's source becomes read-only (`NotLineHead`);
+  `RebindSessionRequest::starting_line` forks onto a new line instead. A fork
+  or new-line rebind copies no running job rows.
+- Plakous embedder break: `JobOwner` is `{ line, generation, session_id,
+  branch_id, fence }`; `JobHost::service` takes a `LineId` (`service_at` takes
+  a session and branch), and `JobView::owner` names the line for a durable
+  row. A head-advancing rebind or carry whose source has running jobs is
+  refused without a target `JobHost` (`RebindRefused::RunningJobsWithoutJobHost`,
+  `UnsettledProcesses`), and `OpenedSession::release_for_transfer` without one
+  stops the jobs.
+- Plakous embedder break: a same-store carry
+  (`CreateSessionRequest::continuing_line`) takes the source head's lease, so
+  it is refused as `Ownership` while the source is held and as `NotQuiescent`
+  while its head has an unfinished turn. History pruning keeps a line's
+  predecessors (`PruneHistoryOutcome::Superseded`, `LineEnded`).
+- Plakous embedder break: `ExecutionOperationControl` is `OperationContext`
+  (adding `owner`, `class` and `budget`) and `operation_control` is
+  `operation_context`; `RetrievalPort::retrieve` and `ImageGenPort::generate`
+  take an `OperationContext`.
+- Plakous embedder break: `ExecutionBackendKind::Host` is gone. The in-process
+  backend reports `ExecutionBackendKind::Runner` on `RunnerId::local()`,
+  `ExecutionBackendDescriptor::current_host` is `local_runner`, and the
+  descriptor's wire encoding and `Debug` output gain `runner_id`. A rebind or
+  fork whose target names another runner is refused (`InvalidInput`,
+  `BindingChange::Runner`).
+
 ### Plak
 
-- Configuration compatibility: `config.toml` accepts `[host]
-  resume_after_loss`, `[mcp_servers.<id>] placement` and `[runners.<name>]`,
-  validated and inert until node recovery and runner placement land. A 0.0.3
-  build refuses a `config.toml` that sets any of them, so `plak` writes them
-  only when you set them and `plak doctor` warns `config uses 0.0.4-only keys`
-  while one is set.
+- `/fork` makes a new node in an agent tree of its own. The fork's tree starts
+  from the source tree's current epoch and carries none of its children, mail,
+  workspaces or candidates. A fork is refused while the source's tree has a
+  live sub-agent or a spawn in progress (`cannot fork while this session's
+  sub-agents run`).
+- Agent tree custody: one live `plak` process holds a tree, and every tree
+  write proves that claim. An attach, or a later tree write, while another live
+  process holds the tree is refused with `tree_hosted_elsewhere (<build>)`
+  naming that process's host, machine and instance: exit code 7, and in `plak
+  agent` a JSONL `error` with `code: "tree_hosted_elsewhere"`. A holder whose
+  exit cannot be proven (another machine sharing the home) is released only by
+  `plak tree release --force <tree-id>`, which refuses a holder still running
+  on this machine.
 - Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
   accepts image input. Codex Direct adds `view_image` for one workspace image.
   Other packs stay text. A model that cannot accept the image is refused with
@@ -45,13 +126,6 @@ one cross-build carrier (a build imports its own and the previous version).
   `list_dir` names a missing path.
 - Existing sessions on routes whose tools changed (Grok, Codex, Claude, pi,
   Python cells and the typed SDK) carry on their next reopen.
-- `plak session --help` names the export versions it writes (12) and imports
-  (12 and 11); a test pins that text to the build's export constants.
-- Session export version 12 names the session's runner (today always the local
-  runner) and its profile (root template and working set), and an imported
-  session keeps that profile. Version 11 documents from the 0.0.3 release import onto the
-  local runner under the home default profile with one notice and an identical
-  conversation; version 10 is refused.
 - Text and thinking streamed by a model request that is retried, refused, cut
   by the output limit or folded for context are dimmed or dropped from the live
   transcript back to the start of that request. Earlier requests of the same
@@ -104,16 +178,6 @@ one cross-build carrier (a build imports its own and the previous version).
   services through `JoinedSessionsPort`; answers distinguish unavailable from
   absent and discovery fails closed. `JobHost`, `discover_instruction_sources`,
   `discover_skills`, `discover_skill_roots` and `Skill::load` signatures change.
-- The execution backend descriptor names its runner
-  (`ExecutionBackendKind::Runner` with a `RunnerId`; the in-process backend is
-  the reserved local runner `local`), and a rebind or fork onto another runner
-  is refused with `BindingChange::Runner`. `ExecutionBackendKind::Host` and
-  `ExecutionBackendDescriptor::current_host` are gone (`local_runner`), and the
-  descriptor's `Debug` output gains `runner_id`. `ExecutionOperationControl`
-  becomes `OperationContext`, which also carries the line owner, the request
-  class and key, and the caller's deadline; `operation_control` becomes
-  `operation_context`, and `RetrievalPort::retrieve` and
-  `ImageGenPort::generate` take an `OperationContext`.
 - Hosted and orchestration tasks have explicit owners: a session's tasks are
   aborted and joined at release, a tree's at its last root lease, and tasks
   that own a child's session or runtime authority run until they return.
@@ -140,11 +204,6 @@ one cross-build carrier (a build imports its own and the previous version).
 - The build audit also waives RUSTSEC-2026-0429 for zip 8.6.0. Like
   RUSTSEC-2026-0367, -0368 and -0369 it concerns only `ZipArchive::extract`,
   which the Monty type checker's in-memory typeshed reader never calls.
-
-### Persisted formats
-
-- Telemetry store schema 21 (`telemetry-v21.sqlite3`, disposable). The state
-  key (`r26.e34.p35.t9`) and the export document (v11) are unchanged.
 
 ### Development
 
