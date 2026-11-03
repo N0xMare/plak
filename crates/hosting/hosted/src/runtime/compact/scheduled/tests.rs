@@ -149,18 +149,19 @@ fn scheduled_length_failure_uses_live_paid_flag_after_a_real_placeholder_commit(
     let (_actions, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let interrupt_state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
-    let admitted = super::run_scheduled_compaction_until_fits(
-        &executor,
-        watch,
-        &mut config,
-        &opened,
-        &mut Vec::new(),
-        &events,
-        None,
-        &pending,
-        None,
-    )
-    .unwrap();
+    let admitted = executor
+        .block_on(super::run_scheduled_compaction_until_fits(
+            watch,
+            &mut config,
+            &opened,
+            &mut Vec::new(),
+            &events,
+            None,
+            &pending,
+            None,
+        ))
+        .unwrap()
+        .unwrap();
     assert_ne!(opened.locator(), source, "the unpaid successor must commit");
     assert!(opened.paid_fold_failed_since_last_round());
     assert_eq!(
@@ -168,12 +169,13 @@ fn scheduled_length_failure_uses_live_paid_flag_after_a_real_placeholder_commit(
         1,
         "no second paid dispatch at this fence"
     );
-    let after = crate::runtime::usage::query_context(
-        &executor,
-        &opened,
-        ContextQuery::WithPendingUserInput(pending),
-    )
-    .unwrap();
+    let after = executor
+        .block_on(crate::runtime::usage::query_context(
+            &opened,
+            ContextQuery::WithPendingUserInput(pending),
+        ))
+        .unwrap()
+        .unwrap();
     assert!(after.compaction_verdict().is_due());
     assert!(
         after.compaction_verdict().observation_headroom()
@@ -269,14 +271,15 @@ fn a_scheduled_pass_with_nothing_eligible_sends_the_prompt() {
             &events,
             0,
             false,
-            |config| {
+            async |config| {
                 passes += 1;
                 config.session.queue_drain_state =
                     scheduled_compact_queue_drain_state(&CompactPass::NothingEligible);
                 Ok(CompactPass::NothingEligible)
             },
-            |_| Ok(projection),
+            async |_| Ok(projection),
         )
+        .block_here()
         .unwrap();
         let over_window = projection.disposition() != ContextDisposition::Fits;
         assert_eq!(
@@ -358,7 +361,7 @@ fn a_definite_scheduled_failure_sends_a_fitting_prompt_and_parks_one_that_does_n
             &events,
             0,
             false,
-            |config| {
+            async |config| {
                 passes += 1;
                 let pass = CompactPass::Failed {
                     note: COMPACT_FAILED_DETAIL.to_owned(),
@@ -366,8 +369,9 @@ fn a_definite_scheduled_failure_sends_a_fitting_prompt_and_parks_one_that_does_n
                 config.session.queue_drain_state = scheduled_compact_queue_drain_state(&pass);
                 Ok(pass)
             },
-            |_| Ok(projection),
+            async |_| Ok(projection),
         )
+        .block_here()
         .unwrap();
         assert_eq!(outcome, expected, "{:?}", projection.disposition());
         assert_eq!(passes, 1, "a definite failure never follows on");
@@ -431,7 +435,7 @@ fn run_scripted_scheduled_loop(
         &events,
         0,
         bare.is_some(),
-        |config| {
+        async |config| {
             ran += 1;
             let pass = scripted.next().expect("an unscripted follow-on pass");
             // "Already fits" returns Unchanged before any dispatch, so it
@@ -441,8 +445,9 @@ fn run_scripted_scheduled_loop(
             }
             Ok(pass)
         },
-        |is_bare| Ok(if is_bare { bare.unwrap() } else { with_mail }),
+        async |is_bare| Ok(if is_bare { bare.unwrap() } else { with_mail }),
     )
+    .block_here()
     .unwrap();
     let notes = rx
         .try_iter()
@@ -684,33 +689,35 @@ fn scheduled_compaction_admits_a_fitting_successor_above_the_occupancy_trigger()
     let mut compacts = 0;
     // Run a real committed scheduled fold; pin the post-fold control policy
     // with a Fits projection whose occupancy independently meets the trigger.
-    let admitted = run_scheduled_compaction_until_fits_with(
-        watch,
-        &mut config,
-        &events,
-        last_enrolled_source_bytes(&opened),
-        false,
-        |config| {
-            compacts += 1;
-            assert_eq!(
-                compacts, 1,
-                "a fitting successor must not start a follow-on fold"
-            );
-            handle_compact(
-                &executor,
-                watch,
-                config,
-                &opened,
-                &mut Vec::new(),
-                &events,
-                None,
-                sessions::ProductCompactReason::Scheduled,
-                Some(&UserInput::from(user_text.clone())),
-            )
-        },
-        |_| Ok(after),
-    )
-    .unwrap();
+    let admitted = executor
+        .block_on(run_scheduled_compaction_until_fits_with(
+            watch,
+            &mut config,
+            &events,
+            last_enrolled_source_bytes(&opened),
+            false,
+            async |config| {
+                compacts += 1;
+                assert_eq!(
+                    compacts, 1,
+                    "a fitting successor must not start a follow-on fold"
+                );
+                handle_compact(
+                    watch,
+                    config,
+                    &opened,
+                    &mut Vec::new(),
+                    &events,
+                    None,
+                    sessions::ProductCompactReason::Scheduled,
+                    Some(&UserInput::from(user_text.clone())),
+                )
+                .await
+            },
+            async |_| Ok(after),
+        ))
+        .unwrap()
+        .unwrap();
     assert_eq!(
         admitted,
         ScheduledPrompt::Send {

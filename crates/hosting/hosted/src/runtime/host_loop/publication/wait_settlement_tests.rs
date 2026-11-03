@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 use crate::runtime::test_kit::BlockOn as _;
 
-use super::{HostLoop, TerminalErrorPresentation, TurnHostOutcome};
+use super::{NodeActor, TerminalErrorPresentation, TurnHostOutcome};
 use crate::agent::TerminalExchange;
 use crate::agent_tree::{MailDurableState, ProductAgentTree};
 use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
@@ -16,7 +16,7 @@ use std::time::Instant;
 
 /// One host over a tree whose root holds one unread Result envelope.
 pub(super) fn with_unread_result(
-    test: impl FnOnce(&mut HostLoop<'_, TestExtension>, &Arc<ProductTopologyRuntime>),
+    test: impl FnOnce(&mut NodeActor<'_, TestExtension>, &Arc<ProductTopologyRuntime>),
 ) {
     let dir = tempfile::tempdir().unwrap();
     let (config, _) = fresh_injected_attached_host(dir.path());
@@ -48,7 +48,7 @@ pub(super) fn with_unread_result(
         .unwrap();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -56,13 +56,13 @@ pub(super) fn with_unread_result(
     )
     .unwrap();
     test(&mut host, &runtime);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 /// A bare wait under a fresh call id, which canonical history never
 /// holds: it acknowledges the unread envelope and keeps one receipt.
 pub(super) fn wait_outside_history(
-    host: &HostLoop<'_, TestExtension>,
+    host: &NodeActor<'_, TestExtension>,
     runtime: &Arc<ProductTopologyRuntime>,
 ) {
     let tree_id = runtime.read(|tree| tree.tree_id.clone()).unwrap();
@@ -101,27 +101,33 @@ pub(super) fn receipts_and_unread(runtime: &Arc<ProductTopologyRuntime>) -> (usi
 fn a_failure_without_a_committed_exchange_returns_wait_mail_to_unread() {
     with_unread_result(|host, runtime| {
         wait_outside_history(host, runtime);
-        host.publish_terminal(
-            Ok(TurnHostOutcome::Failed {
-                transient: None,
-                error: "contained panic".into(),
-                exchange: TerminalExchange::Unclosed,
-                remedy: None,
-            }),
-            Instant::now(),
-            TerminalErrorPresentation::Events,
-        );
+        host.block(async |host| {
+            host.publish_terminal(
+                Ok(TurnHostOutcome::Failed {
+                    transient: None,
+                    error: "contained panic".into(),
+                    exchange: TerminalExchange::Unclosed,
+                    remedy: None,
+                }),
+                Instant::now(),
+                TerminalErrorPresentation::Events,
+            )
+            .await
+        });
         assert_eq!(receipts_and_unread(runtime), (0, 1));
 
         wait_outside_history(host, runtime);
-        host.publish_terminal(
-            Ok(TurnHostOutcome::Interrupted {
-                assistant: String::new(),
-                exchange: TerminalExchange::Unresolved,
-            }),
-            Instant::now(),
-            TerminalErrorPresentation::Events,
-        );
+        host.block(async |host| {
+            host.publish_terminal(
+                Ok(TurnHostOutcome::Interrupted {
+                    assistant: String::new(),
+                    exchange: TerminalExchange::Unresolved,
+                }),
+                Instant::now(),
+                TerminalErrorPresentation::Events,
+            )
+            .await
+        });
         assert_eq!(receipts_and_unread(runtime), (1, 0));
         let message_id = runtime
             .read(|tree| tree.messages().keys().next().cloned().unwrap())
@@ -130,8 +136,11 @@ fn a_failure_without_a_committed_exchange_returns_wait_mail_to_unread() {
             .unwrap();
         host.config.session.record_prompt(item.text.clone());
         host.config.store.save(&mut host.config.session).unwrap();
-        host.run_prompt(item.text.clone(), Some(item), false, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(item.text.clone(), Some(item), false, None)
+                .await
+        })
+        .unwrap();
         assert_eq!(receipts_and_unread(runtime).0, 0);
         assert!(
             host.config
@@ -183,14 +192,17 @@ let seq = tree.feed_cursor(&session.to_string()) + 1;
             tree.project_feed("root", &session.to_string(), &[record], &crate::agent_tree::TreeFeedReads::default())
                 .map(|_| ()).map_err(|error| error.to_string())
 }).block().unwrap();
-        host.publish_terminal(
-            Ok(TurnHostOutcome::Interrupted {
-                assistant: String::new(),
-                exchange: TerminalExchange::Closed,
-            }),
-            Instant::now(),
-            TerminalErrorPresentation::Events,
-        );
+        host.block(async |host| {
+            host.publish_terminal(
+                Ok(TurnHostOutcome::Interrupted {
+                    assistant: String::new(),
+                    exchange: TerminalExchange::Closed,
+                }),
+                Instant::now(),
+                TerminalErrorPresentation::Events,
+            )
+            .await
+        });
         assert_eq!(receipts_and_unread(runtime), (0, 0));
         host.executor
             .block_on(host.opened.detach())
@@ -202,7 +214,8 @@ let seq = tree.feed_cursor(&session.to_string()) + 1;
         config.store = host.config.store.clone();
         config.session = config.store.load(&host.config.session.id).unwrap();
         config.runtime_factory = host.config.runtime_factory.clone();
-        let mut reopened = HostLoop::open(config, host.actions, host.events.clone(), None).unwrap();
+        let mut reopened =
+            NodeActor::open_blocking(config, host.actions, host.events.clone(), None).unwrap();
         assert_eq!(receipts_and_unread(runtime), (0, 0));
         assert!(
             runtime

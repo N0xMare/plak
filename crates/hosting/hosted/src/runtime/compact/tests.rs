@@ -447,18 +447,19 @@ fn compact_binding_failure_leaves_no_workflow_request() {
     let (_actions, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&rx, &state);
-    let error = handle_compact(
-        &executor,
-        watch,
-        &mut config,
-        &opened,
-        &mut Vec::new(),
-        &events,
-        None,
-        sessions::ProductCompactReason::Manual,
-        None,
-    )
-    .unwrap_err();
+    let error = executor
+        .block_on(handle_compact(
+            watch,
+            &mut config,
+            &opened,
+            &mut Vec::new(),
+            &events,
+            None,
+            sessions::ProductCompactReason::Manual,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .unwrap_err();
     assert!(
         error.message().contains("compact binding unavailable"),
         "{}",
@@ -487,18 +488,20 @@ fn interrupt_refuses_compact_before_its_single_dispatch() {
     let interrupt_state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
 
-    let error = handle_compact(
-        &ApplicationExecutor::new().unwrap(),
-        watch,
-        &mut config,
-        &opened,
-        &mut Vec::new(),
-        &events,
-        None,
-        sessions::ProductCompactReason::Manual,
-        None,
-    )
-    .expect_err("an interrupted compact must not dispatch");
+    let error = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_compact(
+            watch,
+            &mut config,
+            &opened,
+            &mut Vec::new(),
+            &events,
+            None,
+            sessions::ProductCompactReason::Manual,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .expect_err("an interrupted compact must not dispatch");
 
     assert!(
         error.message().contains("interrupted"),

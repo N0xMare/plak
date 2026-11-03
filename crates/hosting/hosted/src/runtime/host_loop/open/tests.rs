@@ -91,7 +91,7 @@ fn unpublished_control_fixture(
     let gate = root.join("control-release");
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     let store = host.config.store.clone();
     let id = host.config.session.id.clone();
     let item =
@@ -257,7 +257,7 @@ fn control_cut_publication(cut: RootControlCut) {
     config.session = store.load(&id).unwrap();
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let reopened = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut reopened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     let published = store.load(&id).unwrap();
     assert_eq!(published.plakous_locator, Some(head));
     assert_eq!(
@@ -265,18 +265,22 @@ fn control_cut_publication(cut: RootControlCut) {
         [] as [sessions::queue::QueueItem; 0]
     );
     let rows = published.transcript.len();
-    reopened.release().unwrap();
+    reopened
+        .block(async |reopened| reopened.release().await)
+        .unwrap();
     let mut config = control_cut_host(root.path(), cut);
     config.store = store.clone();
     config.session = store.load(&id).unwrap();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let reopened = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut reopened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     assert_eq!(
         store.load(&id).unwrap().transcript.len(),
         rows,
         "no second terminal"
     );
-    reopened.release().unwrap();
+    reopened
+        .block(async |reopened| reopened.release().await)
+        .unwrap();
 }
 
 #[test]
@@ -302,13 +306,13 @@ fn terminal_projection_survives_attachment_save_failure_and_repeated_open() {
         config.store = fail.clone();
         fail.faults.fail.store(failing, Ordering::SeqCst);
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let opened = HostLoop::open(config, &rx, Sender::over(tx), None);
+        let opened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None);
         if failing {
             assert!(opened.is_err());
         } else {
-            let opened = opened.unwrap();
+            let mut opened = opened.unwrap();
             assert_eq!(opened.config.session.plakous_locator, Some(head));
-            opened.release().unwrap();
+            opened.block(async |opened| opened.release().await).unwrap();
         }
         let projected = store.load(&id).unwrap();
         assert_eq!(projected.root_turn_count, 1);
@@ -342,7 +346,7 @@ fn unrecorded_wake_submission_reopens_without_a_legacy_delivery_receipt() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
     let store = host.config.store.clone();
     let id = host.config.session.id.clone();
     let item = sessions::queue::enqueue(
@@ -369,12 +373,13 @@ fn unrecorded_wake_submission_reopens_without_a_legacy_delivery_receipt() {
             .submissions,
         vec![submission.clone()]
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.store = store.clone();
     config.session = store.load(&id).unwrap();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let reopened = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+    let mut reopened =
+        NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
     assert_eq!(
         reopened.config.session.pending_queue,
         [] as [sessions::queue::QueueItem; 0]
@@ -384,7 +389,9 @@ fn unrecorded_wake_submission_reopens_without_a_legacy_delivery_receipt() {
         [] as [sessions::projector::Submission; 0]
     );
     assert_eq!(reopened.config.session.root_turn_count, 0);
-    reopened.release().unwrap();
+    reopened
+        .block(async |reopened| reopened.release().await)
+        .unwrap();
 }
 
 #[test]
@@ -397,7 +404,8 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(config, &action_rx, Sender::over(event_tx), None).unwrap();
+        let mut host =
+            NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
         let store = host.config.store.clone();
         let id = host.config.session.id.clone();
         let target = host
@@ -434,13 +442,13 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
         store
             .save_submission(&mut host.config.session, &intent)
             .unwrap();
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
         config.store = store.clone();
         config.session = store.load(&id).unwrap();
         let (event_tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut reopened =
-            HostLoop::open(config, &action_rx, Sender::over(event_tx), None).unwrap();
+            NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
         assert_eq!(reopened.config.session.pending_queue, vec![item.clone()]);
         assert_eq!(
             reopened.config.session.queue_drain_state,
@@ -463,12 +471,18 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
             text,
             queued_delivery,
             user_echoed,
-        } = reopened.next_prompt(None).unwrap()
+        } = reopened
+            .block(async |reopened| reopened.next_prompt(None).await)
+            .unwrap()
         else {
             panic!("explicit resubmission")
         };
         reopened
-            .run_prompt(text, queued_delivery, user_echoed, None)
+            .block(async |reopened| {
+                reopened
+                    .run_prompt(text, queued_delivery, user_echoed, None)
+                    .await
+            })
             .unwrap();
         let views = store.load_views(&id).unwrap().unwrap();
         if steer {
@@ -508,7 +522,9 @@ fn pending_commands_reopen_paused_and_resubmit_their_stored_kind_bytes_and_targe
             assert_eq!(reopened.config.session.root_turn_count, count + 1);
         }
         assert_eq!(store.load_intents(&id).unwrap().submissions, vec![intent]);
-        reopened.release().unwrap();
+        reopened
+            .block(async |reopened| reopened.release().await)
+            .unwrap();
     }
 }
 
@@ -520,7 +536,8 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &action_rx, Sender::over(event_tx), None).unwrap();
+    let mut host =
+        NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
     let store = host.config.store.clone();
     let id = host.config.session.id.clone();
     let item =
@@ -568,13 +585,16 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
     config.store = store.clone();
     config.session = store.load(&id).unwrap();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut reopened = HostLoop::open(config, &action_rx, Sender::over(event_tx), None).unwrap();
+    let mut reopened =
+        NodeActor::open_blocking(config, &action_rx, Sender::over(event_tx), None).unwrap();
     assert_eq!(reopened.config.session.root_turn_count, 0);
     actions
         .send(crate::surface_protocol::UserAction::ResumeQueueDrain)
         .unwrap();
     assert!(matches!(
-        reopened.next_prompt(None).unwrap(),
+        reopened
+            .block(async |reopened| reopened.next_prompt(None).await)
+            .unwrap(),
         super::super::HostStep::Continue
     ));
     assert_eq!(reopened.config.session.root_turn_count, 0);
@@ -603,5 +623,7 @@ fn submission_anchored_below_retention_is_consumed_silently_without_counting_a_t
             .count(),
         0
     );
-    reopened.release().unwrap();
+    reopened
+        .block(async |reopened| reopened.release().await)
+        .unwrap();
 }

@@ -2,7 +2,6 @@
 
 use std::time::{Duration, Instant};
 
-use plakous::application::ApplicationExecutor;
 use plakous::model::{ModelId, ProcessingTierDisposition, ProviderServiceTierId};
 use plakous::sessions::{
     AgentSessionsErrorKind, RebindSessionOutcome, SessionOperationId, SessionRuntimeBinding,
@@ -14,7 +13,7 @@ use crate::agent::{
     selected_coding_provider_configuration_with_processing_tier,
 };
 use crate::binding::TargetSelection;
-use crate::interrupt::{InterruptWatch, run_watched};
+use crate::interrupt::{InterruptWatch, watched};
 use crate::sessions::{self, SessionRecord};
 use crate::{CliFailure, CliResult};
 
@@ -39,15 +38,13 @@ mod complete;
 
 pub(super) use complete::complete_rebind;
 
-fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
     opened: &AttachedCodingSession,
     events: &Sender<P>,
     config: &HostConfig<P>,
 ) {
     events.remember_request_tools(&[]);
     if let Err(error) = report_context(
-        executor,
         opened,
         events,
         "after rebind",
@@ -56,7 +53,9 @@ fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
             .native_provider()
             .is_some_and(native_compact_facet),
         config.session.context_counters(),
-    ) {
+    )
+    .await
+    {
         emit_unavailable_context(events);
         let _ = events.notice(
             TranscriptRow::error(NoticeScope::Settings, error.message().to_owned())
@@ -65,30 +64,26 @@ fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
     }
 }
 
-pub(super) fn restore_detached_source<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn restore_detached_source<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     opened: &mut AttachedCodingSession,
     locator: plakous::sessions::SessionLocator,
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<()> {
     stderr_buf.clear();
-    let replacement = executor
-        .block_on(open_session_for_host(
-            config,
-            &config.session,
-            locator,
-            stderr_buf,
-            RuntimeRole::Primary,
-        ))
-        .map_err(|_| CliFailure::new("application execution failed while restoring source"))?
-        .map_err(|error| *error.failure)?;
+    let replacement = open_session_for_host(
+        config,
+        &config.session,
+        locator,
+        stderr_buf,
+        RuntimeRole::Primary,
+    )
+    .await
+    .map_err(|error| *error.failure)?;
     let previous = std::mem::replace(opened, replacement);
-    executor
-        .block_on(previous.release())
-        .map_err(|_| {
-            CliFailure::new("application execution failed while releasing detached source")
-        })?
+    previous
+        .release()
+        .await
         .map_err(|error| CliFailure::new(format!("detached source release failed: {error}")))?;
     Ok(())
 }
@@ -145,14 +140,11 @@ pub(super) async fn native_rebind_runtime<P: plakous_host_protocol::ProtocolExte
 /// Drops the lease a profile fork's runtime build took on the tree it
 /// attached. Callers pass only an id this path acquired. The opened branch
 /// holds its own lease; a build that took none is not released here.
-pub(super) fn release_profile_build_lease<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn release_profile_build_lease<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     tree_id: &str,
 ) -> CliResult<()> {
-    let released = executor
-        .block_on(crate::topology_runtime::release_root_lease(tree_id))
-        .map_err(|_| CliFailure::new("application execution failed"))?;
+    let released = crate::topology_runtime::release_root_lease(tree_id).await;
     if let Err(error) = released {
         let _ = events.notice(TranscriptRow::error(
             NoticeScope::Settings,
@@ -166,8 +158,7 @@ pub(super) fn release_profile_build_lease<P: plakous_host_protocol::ProtocolExte
     clippy::too_many_arguments,
     reason = "Native rebind resolution names the source authority, target tuple, plan namespace, and selected topology explicitly."
 )]
-pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &HostConfig<P>,
     account: &str,
@@ -207,15 +198,8 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
         .target
         .native_subscriptions()
         .ok_or_else(|| CliFailure::new("subscription authority is missing"))?;
-    let (reasoning_efforts, service_tiers, native_tool_mode) = rebind_model_capabilities(
-        executor,
-        watch,
-        config,
-        subscriptions,
-        provider,
-        account,
-        model,
-    )?;
+    let (reasoning_efforts, service_tiers, native_tool_mode) =
+        rebind_model_capabilities(watch, config, subscriptions, provider, account, model).await?;
     admit_rebind_effort(&reasoning_efforts, explicit, parsed_effort)?;
     let target_effort = explicit.then_some(parsed_effort);
     let processing_tier = rebind_processing_tier(target_selection, provider, &service_tiers)?;
@@ -229,16 +213,17 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
     )?;
     let limits = crate::agent::product_subscription_request_limits()
         .map_err(|_| CliFailure::new("rebind subscription gate is invalid"))?;
-    let resolved = run_watched(
-        executor,
+    let resolved = watched(
         watch,
-        bounded_rebind_lookup(subscriptions.resolve_turn_scoped_provider(
-            selected,
-            limits,
-            plakous::model::SessionLineage::Root,
+        Box::pin(bounded_rebind_lookup(
+            subscriptions.resolve_turn_scoped_provider(
+                selected,
+                limits,
+                plakous::model::SessionLineage::Root,
+            ),
         )),
     )
-    .map_err(|_| CliFailure::new("application execution failed"))?
+    .await
     .map_err(|()| CliFailure::new("rebind target resolution timed out; source unchanged"))?
     .map_err(|error| {
         CliFailure::new(format!("rebind target resolution failed: {}", error.kind()))
@@ -359,8 +344,7 @@ pub(super) fn interrupted_before_dispatch(operation: &str) -> CliFailure {
     ))
 }
 
-pub(super) fn abandon_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn abandon_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     operation: &str,
 ) -> CliResult<()> {
@@ -369,14 +353,8 @@ pub(super) fn abandon_prepared_rebind<P: plakous_host_protocol::ProtocolExtensio
         .session
         .plakous_locator
         .ok_or_else(|| CliFailure::new("rebind source locator is missing"))?;
-    executor
-        .block_on(super::projection::project_to_tail(
-            &sessions,
-            &config.store,
-            &config.session.id,
-            source,
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    super::projection::project_to_tail(&sessions, &config.store, &config.session.id, source)
+        .await
         .map_err(CliFailure::new)?;
     config
         .store
@@ -430,8 +408,7 @@ enum ProfileTarget {
     clippy::too_many_arguments,
     reason = "Profile rebinding receives the attached source, interrupt watch, target tuple, and frozen roster as distinct authorities."
 )]
-pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,
@@ -445,7 +422,7 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     protocol: Option<crate::binding::ProtocolSelection>,
     roster: &crate::orchestration::RosterInput,
 ) -> CliResult<Rebound> {
-    let rebound = (|| -> CliResult<Rebound> {
+    let rebound: CliResult<Rebound> = Box::pin(async {
         super::jobs_transition_guard(config, opened)?;
         watch.begin();
         let started = Instant::now();
@@ -485,12 +462,11 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         // A rebind or switch keeps canonical tool authority: its successor
         // inherits whether the source's skills are on, whatever tuple it
         // moves to, and never takes the live setting (spec 02 §6.1.1).
-        let inherited = source_skills_on(executor, opened)?;
+        let inherited = source_skills_on(opened).await?;
         config.state_roots.set_inherited_skills(inherited);
         let (operation, target_product_id, own_tree, topology_tree_id) =
             stage_profile_fork(config, opened, &account, model, composition, roster)?;
         let target = resolve_profile_target(
-            executor,
             watch,
             config,
             ProfileTargetInput {
@@ -504,7 +480,8 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 operation: &operation,
                 topology_tree_id: &topology_tree_id,
             },
-        )?;
+        )
+        .await?;
         observe_phase(
             events,
             HostLifecyclePhase::RebindResolveTarget,
@@ -514,7 +491,6 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         let instructions_before = instruction_sources(opened);
         let mut attached_tree = None;
         let branched = attach_profile_branch(
-            executor,
             watch,
             config,
             opened,
@@ -533,15 +509,17 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 target_selection,
                 operation: &operation,
             },
-        );
+        )
+        .await;
         if let Some(tree_id) = attached_tree {
-            release_profile_build_lease(executor, events, &tree_id)?;
+            release_profile_build_lease(events, &tree_id).await?;
         }
         if matches!(branched, Ok(Rebound::Switched)) {
             note_reread_instructions(events, instructions_before, opened);
         }
         branched
-    })();
+    })
+    .await;
     config.state_roots.set_inherited_skills(None);
     rebound
 }
@@ -549,16 +527,8 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
 /// Whether the attached source session has its skills on, from its sealed
 /// registry. `None` when it has no sealed checkpoint to inherit from: the
 /// rebind's or fork's own load of the source then refuses it.
-pub(super) fn source_skills_on(
-    executor: &ApplicationExecutor,
-    opened: &AttachedCodingSession,
-) -> CliResult<Option<bool>> {
-    let read = executor
-        .block_on(crate::skills::frozen_skills(
-            opened.sessions(),
-            opened.locator(),
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))?;
+pub(super) async fn source_skills_on(opened: &AttachedCodingSession) -> CliResult<Option<bool>> {
+    let read = crate::skills::frozen_skills(opened.sessions(), opened.locator()).await;
     match read {
         Ok(frozen) => Ok(Some(frozen.on)),
         Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => Ok(None),
@@ -683,8 +653,7 @@ fn stage_profile_fork<P: plakous_host_protocol::ProtocolExtension>(
     Ok((operation, target_product_id, own_tree, topology_tree_id))
 }
 
-fn resolve_profile_target<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn resolve_profile_target<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &HostConfig<P>,
     input: ProfileTargetInput<'_>,
@@ -714,24 +683,25 @@ fn resolve_profile_target<P: plakous_host_protocol::ProtocolExtension>(
         record.validate_for_store().map_err(CliFailure::new)?;
         ProfileTarget::Api(Box::new(record))
     } else {
-        ProfileTarget::Native(Box::new(resolve_rebind_target(
-            executor,
-            watch,
-            config,
-            account,
-            model,
-            effort_label.as_deref(),
-            target_product_id,
-            composition,
-            target_selection,
-            topology_tree_id,
-        )?))
+        ProfileTarget::Native(Box::new(
+            resolve_rebind_target(
+                watch,
+                config,
+                account,
+                model,
+                effort_label.as_deref(),
+                target_product_id,
+                composition,
+                target_selection,
+                topology_tree_id,
+            )
+            .await?,
+        ))
     };
     Ok(target)
 }
 
-fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,
@@ -753,7 +723,6 @@ fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         operation,
     } = input;
     let (runtime, target) = prepare_profile_runtime(
-        executor,
         watch,
         config,
         stderr_buf,
@@ -764,7 +733,8 @@ fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
             effort_label: effort_label.as_deref(),
         },
         attached_tree,
-    )?;
+    )
+    .await?;
     observe_phase(
         events,
         HostLifecyclePhase::RebindPrepareRuntime,
@@ -785,7 +755,6 @@ fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         target_selection,
     )?;
     let attached_locator = publish_rebind_intent(
-        executor,
         watch,
         config,
         opened,
@@ -795,18 +764,18 @@ fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
             workflow_kind,
             started,
         },
-    )?;
+    )
+    .await?;
     let source_locator = detach_prepared_rebind(
-        executor,
         watch,
         config,
         opened,
         stderr_buf,
         operation,
         attached_locator,
-    )?;
-    complete_rebind(
-        executor,
+    )
+    .await?;
+    Box::pin(complete_rebind(
         watch,
         config,
         opened,
@@ -817,12 +786,12 @@ fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         target,
         runtime,
         started,
-    )
+    ))
+    .await
     .map(|()| Rebound::Switched)
 }
 
-fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &HostConfig<P>,
     subscriptions: &plakous::subscriptions::NativeSubscriptions,
@@ -855,12 +824,11 @@ fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
             candidate.native_tool_mode,
         )
     } else {
-        let catalog = run_watched(
-            executor,
+        let catalog = watched(
             watch,
             bounded_rebind_lookup(subscriptions.model_catalog(provider)),
         )
-        .map_err(|_| CliFailure::new("application execution failed"))?
+        .await
         .map_err(|()| CliFailure::new("rebind catalog refresh timed out; source unchanged"))?
         .map_err(rebind_catalog_failure)?;
         let catalog_entry = catalog
@@ -942,8 +910,7 @@ struct ProfileRuntimeInput<'a> {
     effort_label: Option<&'a str>,
 }
 
-fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &HostConfig<P>,
     stderr_buf: &mut Vec<u8>,
@@ -962,12 +929,11 @@ fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
     // took is dropped below.
     let (runtime, mut target) = match target {
         ProfileTarget::Native(target) => {
-            let (runtime, tree) = run_watched(
-                executor,
+            let (runtime, tree) = watched(
                 watch,
                 native_rebind_runtime(config, &target.route, own_tree, stderr_buf),
             )
-            .map_err(|_| CliFailure::new("application execution failed"))?;
+            .await;
             *attached_tree = tree;
             (runtime?, *target)
         }
@@ -978,8 +944,7 @@ fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
                 crate::topology_runtime::TopologyHubAttach::LookupOnly
             };
             let mut tree = None;
-            let runtime = run_watched(
-                executor,
+            let runtime = watched(
                 watch,
                 api_runtime_for_record(
                     config,
@@ -990,7 +955,7 @@ fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
                     &mut tree,
                 ),
             )
-            .map_err(|_| CliFailure::new("application execution failed"))?;
+            .await;
             *attached_tree = tree;
             let runtime = runtime?;
             let (effort, effort_explicit) = effort_from_config(effort_label);
@@ -1051,8 +1016,7 @@ struct RebindIntent<'a> {
     started: Instant,
 }
 
-fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
@@ -1076,8 +1040,7 @@ fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
             .save(&mut config.session)
             .map_err(CliFailure::new)?;
     }
-    run_watched(
-        executor,
+    watched(
         watch,
         super::projection::project_to_tail_interruptible(
             opened.sessions(),
@@ -1088,7 +1051,7 @@ fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
             |_, _| {},
         ),
     )
-    .map_err(|_| CliFailure::new("application execution failed"))?
+    .await
     .map_err(|error| {
         if watch.interrupted() {
             interrupted_before_dispatch("rebind")
@@ -1141,8 +1104,7 @@ fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
     Ok(attached_locator)
 }
 
-fn detach_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn detach_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,
@@ -1150,23 +1112,19 @@ fn detach_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
     operation: &str,
     attached_locator: plakous::sessions::SessionLocator,
 ) -> CliResult<plakous::sessions::SessionLocator> {
-    let source_locator = match run_watched(executor, watch, opened.detach()) {
-        Ok(Ok(locator)) => locator,
-        Ok(Err(error)) => {
-            abandon_prepared_rebind(executor, config, operation)?;
+    let source_locator = match watched(watch, opened.detach()).await {
+        Ok(locator) => locator,
+        Err(error) => {
+            abandon_prepared_rebind(config, operation).await?;
             return Err(CliFailure::new(format!(
                 "rebind source release failed after durable preparation ({:?}): {error}",
                 error.kind()
             )));
         }
-        Err(_) => {
-            abandon_prepared_rebind(executor, config, operation)?;
-            return Err(CliFailure::new("application execution failed"));
-        }
     };
     if source_locator != attached_locator {
-        restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-        abandon_prepared_rebind(executor, config, operation)?;
+        restore_detached_source(config, opened, source_locator, stderr_buf).await?;
+        abandon_prepared_rebind(config, operation).await?;
         return Err(CliFailure::new(
             "rebind source advanced after durable preparation; exact reconciliation is required",
         ));
@@ -1200,8 +1158,7 @@ pub(super) fn note_reread_instructions<P: plakous_host_protocol::ProtocolExtensi
 
 /// The same note for a branch that was saved but not attached, read from its
 /// stored plan. A note that cannot be read is omitted.
-pub(super) fn note_reread_instructions_at<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn note_reread_instructions_at<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     events: &Sender<P>,
     before: Option<Vec<plakous::agent::ResolvedContextSourceFact>>,
@@ -1211,7 +1168,7 @@ pub(super) fn note_reread_instructions_at<P: plakous_host_protocol::ProtocolExte
     let Ok(sessions) = config.state_roots.runtime_sessions() else {
         return;
     };
-    if let Ok(Ok(after)) = executor.block_on(sessions.created_instruction_sources(target))
+    if let Ok(after) = sessions.created_instruction_sources(target).await
         && let Some(note) = reread_instructions_note(&before, &after)
     {
         let _ = events.notice(TranscriptRow::info(NoticeScope::Settings, note));

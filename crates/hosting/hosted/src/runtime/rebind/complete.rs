@@ -1,14 +1,14 @@
 //! Canonical rebind dispatch, successor projection, open and activation.
 
 use super::{
-    AgentSessionsErrorKind, ApplicationExecutor, AttachedCodingSession, CliFailure, CliResult,
-    HostBoundary, HostConfig, HostLifecyclePhase, HostTargetAuthority, HostWorkflow, Instant,
-    InterruptWatch, NoticeScope, RebindBefore, RebindRoute, RebindSessionOutcome,
-    ResolvedRebindTarget, Sender, SessionOperationId, SessionRecord, SessionRuntimeBinding,
-    TranscriptRow, abandon_prepared_rebind, durable_tree_id, emit_queue_snapshot,
-    interrupted_before_dispatch, observe_boundary, observe_phase, rebind_note,
-    release_source_attachment, report_rebind_context, restore_detached_source, run_watched,
-    send_binding, send_last_user_prompt_at, sessions, topology_state,
+    AgentSessionsErrorKind, AttachedCodingSession, CliFailure, CliResult, HostBoundary, HostConfig,
+    HostLifecyclePhase, HostTargetAuthority, HostWorkflow, Instant, InterruptWatch, NoticeScope,
+    RebindBefore, RebindRoute, RebindSessionOutcome, ResolvedRebindTarget, Sender,
+    SessionOperationId, SessionRecord, SessionRuntimeBinding, TranscriptRow,
+    abandon_prepared_rebind, durable_tree_id, emit_queue_snapshot, interrupted_before_dispatch,
+    observe_boundary, observe_phase, rebind_note, release_source_attachment, report_rebind_context,
+    restore_detached_source, send_binding, send_last_user_prompt_at, sessions, topology_state,
+    watched,
 };
 
 use crate::binding::TargetSelection;
@@ -17,8 +17,7 @@ use crate::binding::TargetSelection;
     clippy::too_many_arguments,
     reason = "durable source/target adoption requires complete host authority"
 )]
-pub(in crate::runtime) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(in crate::runtime) async fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,
@@ -38,7 +37,6 @@ pub(in crate::runtime) fn complete_rebind<P: plakous_host_protocol::ProtocolExte
     let previous_model = config.model_id.clone();
     let previous_effort = config.effort;
     let mut transition = RebindTransition {
-        executor,
         watch,
         config,
         opened,
@@ -48,11 +46,15 @@ pub(in crate::runtime) fn complete_rebind<P: plakous_host_protocol::ProtocolExte
         source_locator,
         started,
     };
-    let target_locator = transition.dispatch(source_was_detached, &target, runtime)?;
-    let target_record = transition.project_target(target_locator)?;
+    let target_locator = transition
+        .dispatch(source_was_detached, &target, runtime)
+        .await?;
+    let target_record = transition.project_target(target_locator).await?;
     let (target_record, replacement, target_model) =
-        transition.open_target(target_record, &target)?;
-    transition.activate_target(target_record, replacement, target_model, target)?;
+        transition.open_target(target_record, &target).await?;
+    transition
+        .activate_target(target_record, replacement, target_model, target)
+        .await?;
     // A profile fork onto the same root changes only the cards; the product
     // reports that itself, and "effort changed" would be false.
     let same_root = previous_account == config.session.account
@@ -79,7 +81,6 @@ pub(in crate::runtime) fn complete_rebind<P: plakous_host_protocol::ProtocolExte
 }
 
 struct RebindTransition<'a, 'interrupt, P: plakous_host_protocol::ProtocolExtension> {
-    executor: &'a ApplicationExecutor,
     watch: InterruptWatch<'interrupt, P>,
     config: &'a mut HostConfig<P>,
     opened: &'a mut AttachedCodingSession,
@@ -95,13 +96,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         clippy::too_many_lines,
         reason = "Canonical rebind dispatch distinguishes published, unchanged, refused, and uncertain outcomes while preserving source restoration."
     )]
-    fn dispatch(
+    async fn dispatch(
         &mut self,
         source_was_detached: bool,
         target: &ResolvedRebindTarget,
         runtime: SessionRuntimeBinding,
     ) -> CliResult<plakous::sessions::SessionLocator> {
-        let executor = self.executor;
         let watch = self.watch;
         let config = &mut *self.config;
         let opened = &mut *self.opened;
@@ -113,21 +113,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
 
         let Ok(operation_id) = SessionOperationId::new(operation) else {
             if source_was_detached {
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
             }
             return Err(CliFailure::new("rebind operation identity is invalid"));
         };
-        let released_source = executor
-            .block_on(opened.detach())
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(|error| {
-                CliFailure::new(format!(
-                    "rebind source release failed ({:?}): {error}",
-                    error.kind()
-                ))
-            })?;
+        let released_source = opened.detach().await.map_err(|error| {
+            CliFailure::new(format!(
+                "rebind source release failed ({:?}): {error}",
+                error.kind()
+            ))
+        })?;
         if released_source != source_locator {
-            restore_detached_source(executor, config, opened, released_source, stderr_buf)?;
+            restore_detached_source(config, opened, released_source, stderr_buf).await?;
             return Err(CliFailure::new(
                 "rebind source advanced while entering its safe boundary; retry from the current head",
             ));
@@ -136,23 +133,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         // the prepared workflow back and reattaches the exact source. No branch is
         // created and no receipt is claimed.
         if watch.observe_now() {
-            let abandoned = abandon_prepared_rebind(executor, config, operation);
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+            let abandoned = abandon_prepared_rebind(config, operation).await;
+            restore_detached_source(config, opened, source_locator, stderr_buf).await?;
             abandoned?;
             return Err(interrupted_before_dispatch("rebind"));
         }
-        let rebind_result = match run_watched(
-            executor,
+        let rebind_result = match watched(
             watch,
-            opened.rebind_from(
+            Box::pin(opened.rebind_from(
                 operation_id,
                 source_locator,
                 target.binding.clone(),
                 runtime,
-            ),
-        ) {
-            Ok(Ok(outcome)) => Ok(outcome),
-            Ok(Err(error))
+            )),
+        )
+        .await
+        {
+            Ok(outcome) => Ok(outcome),
+            Err(error)
                 if matches!(
                     error.kind(),
                     AgentSessionsErrorKind::InvalidInput
@@ -160,8 +158,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                         | AgentSessionsErrorKind::Revalidation
                 ) =>
             {
-                let workflow_finish = abandon_prepared_rebind(executor, config, operation);
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                let workflow_finish = abandon_prepared_rebind(config, operation).await;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 workflow_finish?;
                 if let Some(refusal) = rebind_refusal(error.kind(), &error.to_string()) {
                     return Err(CliFailure::new(refusal).with_remedy(
@@ -170,13 +168,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 }
                 return Err(CliFailure::new(format!("canonical rebind failed: {error}")));
             }
-            Ok(Err(error)) => Err(CliFailure::new(format!("canonical rebind failed: {error}"))),
-            Err(_) => Err(CliFailure::new("application execution failed")),
+            Err(error) => Err(CliFailure::new(format!("canonical rebind failed: {error}"))),
         };
         let outcome = match rebind_result {
             Ok(outcome) => outcome,
             Err(error) => {
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 return Err(error);
             }
         };
@@ -211,26 +208,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             RebindSessionOutcome::RecoveryRequired { recovery, .. }
                 if recovery.locator() == source_locator =>
             {
-                let recovery_save = abandon_prepared_rebind(executor, config, operation);
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                let recovery_save = abandon_prepared_rebind(config, operation).await;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 recovery_save?;
                 return Err(CliFailure::new(
                     "the session has an interrupted turn, so the model change was not started; the next prompt or explicit recovery recovers it, then retry the change",
                 ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
             }
             _ => {
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 return Err(CliFailure::new("canonical rebind receipt is inconsistent"));
             }
         };
         Ok(target_locator)
     }
 
-    fn project_target(
+    async fn project_target(
         &mut self,
         target_locator: plakous::sessions::SessionLocator,
     ) -> CliResult<SessionRecord> {
-        let executor = self.executor;
         let watch = self.watch;
         let config = &mut *self.config;
         let opened = &mut *self.opened;
@@ -238,11 +234,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         let operation = self.operation;
         let source_locator = self.source_locator;
 
-        let target_record_result = (|| -> CliResult<SessionRecord> {
+        let target_record_result: CliResult<SessionRecord> = async {
             // Publish the successor and settle the canonical receipt before an
             // interrupt can stop catch-up on the saved, resumable target.
-            run_watched(
-                executor,
+            watched(
                 watch,
                 crate::runtime::projection::project_to_tail(
                     opened.sessions(),
@@ -251,7 +246,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                     source_locator,
                 ),
             )
-            .map_err(|_| CliFailure::new("application execution failed"))?
+            .await
             .map_err(CliFailure::new)?;
             let request = config
                 .store
@@ -260,8 +255,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 .workflow_request(operation)
                 .cloned()
                 .ok_or_else(|| CliFailure::new("rebind request is missing"))?;
-            run_watched(
-                executor,
+            watched(
                 watch,
                 crate::runtime::projection::project_to_tail_interruptible(
                     opened.sessions(),
@@ -272,7 +266,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                     |_, _| {},
                 ),
             )
-            .map_err(|_| CliFailure::new("application execution failed"))?
+            .await
             .map_err(CliFailure::new)?;
             let record = config
                 .store
@@ -284,11 +278,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 ));
             }
             Ok(record)
-        })();
+        }
+        .await;
         let target_record = match target_record_result {
             Ok(record) => record,
             Err(error) => {
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 let target_id = config
                     .store
                     .load_intents(&config.session.id)
@@ -318,12 +313,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         Ok(target_record)
     }
 
-    fn open_target(
+    async fn open_target(
         &mut self,
         target_record: SessionRecord,
         target: &ResolvedRebindTarget,
     ) -> CliResult<(SessionRecord, AttachedCodingSession, String)> {
-        let executor = self.executor;
         let config = &mut *self.config;
         let opened = &mut *self.opened;
         let stderr_buf = &mut *self.stderr_buf;
@@ -332,7 +326,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         let started = self.started;
 
         let Some(resume_locator) = target_record.plakous_locator else {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+            restore_detached_source(config, opened, source_locator, stderr_buf).await?;
             return Err(CliFailure::new("rebind target product binding is missing"));
         };
         let target_model = target_record
@@ -342,7 +336,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         let target_model = match target_model {
             Ok(model) => model,
             Err(error) => {
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 return Err(error);
             }
         };
@@ -351,20 +345,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             RebindRoute::Native { spec, .. } => spec.as_deref(),
             RebindRoute::Api(_) => None,
         };
-        let replacement_result = match executor.block_on(config.runtime_factory.open_rebind_target(
-            config,
-            &target_record,
-            spec,
-            resume_locator,
-            stderr_buf,
-        )) {
-            Ok(result) => result.map_err(|error| *error.failure),
-            Err(_) => Err(CliFailure::new("application execution failed")),
+        let replacement_result = match config
+            .runtime_factory
+            .open_rebind_target(config, &target_record, spec, resume_locator, stderr_buf)
+            .await
+        {
+            Ok(replacement) => Ok(replacement),
+            Err(error) => Err(*error.failure),
         };
         let replacement = match replacement_result {
             Ok(replacement) => replacement,
             Err(error) => {
-                restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+                restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 return Err(error);
             }
         };
@@ -377,14 +369,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         Ok((target_record, replacement, target_model))
     }
 
-    fn activate_target(
+    async fn activate_target(
         &mut self,
         target_record: SessionRecord,
         replacement: AttachedCodingSession,
         target_model: String,
         target: ResolvedRebindTarget,
     ) -> CliResult<()> {
-        let executor = self.executor;
         let config = &mut *self.config;
         let opened = &mut *self.opened;
         let events = self.events;
@@ -467,14 +458,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             &config.session,
         ));
         send_last_user_prompt_at(events, config, opened);
-        report_rebind_context(executor, opened, events, config);
-        install_rebind_epoch(executor, config)?;
+        report_rebind_context(opened, events, config).await;
+        install_rebind_epoch(config).await?;
         Ok(())
     }
 }
 
-fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
 ) -> CliResult<()> {
     let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
@@ -492,15 +482,14 @@ fn install_rebind_epoch<P: plakous_host_protocol::ProtocolExtension>(
                 config.session.effort.as_deref(),
             )?,
         );
-        executor
-            .block_on(topology_state::install_successor_epoch(
-                &config.topology_rows(),
-                snapshot,
-                &tree_id,
-                &|observation| config.state_roots.emit_product(observation),
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+        topology_state::install_successor_epoch(
+            &config.topology_rows(),
+            snapshot,
+            &tree_id,
+            &|observation| config.state_roots.emit_product(observation),
+        )
+        .await
+        .map_err(CliFailure::new)?;
         if let (Some(session_id), Some(tree_id_text)) = (
             crate::product_observation::session_id_from_text(&tree_id),
             crate::product_observation::BoundedText64::new(&tree_id),

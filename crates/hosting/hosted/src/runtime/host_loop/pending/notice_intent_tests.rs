@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::tests::{pause_rows, pause_tree, reopen, snapshots, spawn_child, with_configured_tree};
 use super::{AUTO_CONTINUE_PAUSE_TEXT, TREE_PAUSE_TEXT};
-use crate::runtime::host_loop::HostLoop;
+use crate::runtime::host_loop::NodeActor;
 use crate::runtime::test_kit::TestExtension;
 use crate::session_store::{MemoryStore, SessionRecordStore as _};
 use crate::sessions::TranscriptRow;
@@ -49,7 +49,7 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
         move |config| config.store = memory,
         |host, runtime, actions, observed| {
             let id = host.config.session.id.clone();
-            let observe_tree = |host: &mut HostLoop<'_, TestExtension>| {
+            let observe_tree = |host: &mut NodeActor<'_, TestExtension>| {
                 crate::runtime::tree::emit_tree_snapshot_if_revision_advanced(
                     &crate::runtime::HostRows::new(
                         &host.config.state_roots,
@@ -68,7 +68,8 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
             observe_tree(host);
             actions.send(UserAction::Interrupt).unwrap();
             assert!(matches!(
-                host.next_prompt(None).unwrap(),
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
                 crate::runtime::host_loop::HostStep::Continue
             ));
             pause_tree(runtime);

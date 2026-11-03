@@ -38,7 +38,7 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
     let store = config.store.clone();
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(wire), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
     let id = host.config.session.id.clone();
     let mut folded = TranscriptState::default();
     for event in events.try_iter() {
@@ -54,13 +54,18 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt");
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
-    host.publish_projected_transcript(true);
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
+    host.block(async |host| host.publish_projected_transcript(true).await);
     let mut patches = 0;
     for event in events.try_iter() {
         match event {
@@ -84,7 +89,7 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
             .map(|item| (item.key, item.row))
             .collect()
     );
-    host.publish_projected_transcript(true);
+    host.block(async |host| host.publish_projected_transcript(true).await);
     let quiet: Vec<_> = events
         .try_iter()
         .filter_map(|event| match event {
@@ -96,13 +101,14 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
     assert_eq!(quiet.len(), 1);
     assert!(quiet[0].upserts.is_empty() && quiet[0].deletes.is_empty());
     folded.apply(quiet.into_iter().next().unwrap()).unwrap();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session = store.load(&id).unwrap();
     config.store = store;
     let (wire, restored) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let reopened = HostLoop::open(config, &actions, Sender::over(wire), None).unwrap();
+    let mut reopened =
+        NodeActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
     let snapshot = restored
         .try_iter()
         .find_map(|event| match event {
@@ -118,7 +124,9 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
             .map(|item| (item.key, item.row))
             .collect()
     );
-    reopened.release().unwrap();
+    reopened
+        .block(async |reopened| reopened.release().await)
+        .unwrap();
 }
 
 fn assert_hosted_calls_projected(defer_projection: bool) {
@@ -137,7 +145,7 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &actions, crate::runtime::Sender::over(tx), None).unwrap();
+        NodeActor::open_blocking(config, &actions, crate::runtime::Sender::over(tx), None).unwrap();
     let store = host.config.store.clone();
     if defer_projection {
         host.live.take();
@@ -156,19 +164,24 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt")
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     if defer_projection {
         assert_eq!(host.config.session.tool_call_count, 0);
     }
     host.config.store = store;
     // Interactive publication can leave projection debt at its bounded
     // pass; this fixture asserts the settled view, not that wall clock.
-    host.publish_projected_transcript(true);
+    host.block(async |host| host.publish_projected_transcript(true).await);
     assert_eq!(host.config.session.tool_call_count, 1);
     let stored = host.config.store.load(&host.config.session.id).unwrap();
     assert_eq!(host.config.session.tool_call_count, stored.tool_call_count);
@@ -181,7 +194,7 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
         HostEvent::Row(TranscriptRow::Tool(tool)) => tool.name == "hosted_interpreter",
         _ => false,
     }));
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 use super::*;
@@ -199,7 +212,7 @@ fn awaiting_native_same_account_login_reopens_in_place_before_the_next_prompt() 
     let (config, _) = fresh_injected_attached_host(root.path());
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(wire), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(wire), None).unwrap();
     let session = host.config.session.id.clone();
     let locator = host.config.session.plakous_locator.unwrap();
     let old = native_refresh_tests::binding(1);
@@ -219,7 +232,8 @@ fn awaiting_native_same_account_login_reopens_in_place_before_the_next_prompt() 
         .unwrap()
         .unwrap();
     assert!(changed);
-    host.reopen_after_native_authority_refresh(changed).unwrap();
+    host.block(async |host| host.reopen_after_native_authority_refresh(changed).await)
+        .unwrap();
     assert_eq!(host.config.session.id, session);
     assert_eq!(
         host.config.session.plakous_locator.unwrap().branch_id(),
@@ -233,19 +247,24 @@ fn awaiting_native_same_account_login_reopens_in_place_before_the_next_prompt() 
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt should proceed in this process");
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(
         events
             .try_iter()
             .any(|event| matches!(event, HostEvent::TurnLifecycle(turn)
         if turn.phase == plakous_host_protocol::TurnPhase::Completed))
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 struct CapacityProbe(Arc<Mutex<crate::session_store::StorageAdmission>>);
@@ -274,7 +293,7 @@ fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry()
     let (config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -297,14 +316,19 @@ fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry()
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt");
     };
     let _ = events.try_iter().collect::<Vec<_>>();
     host.transient_resumes_used = 2;
-    host.run_prompt(text.clone(), queued_delivery.clone(), false, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text.clone(), queued_delivery.clone(), false, None)
+            .await
+    })
+    .unwrap();
     assert_eq!(host.config.session.pending_queue.len(), 1);
     assert_eq!(
         host.config.session.queue_drain_state,
@@ -323,11 +347,14 @@ fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry()
         HostEvent::PromptStarted(_) | HostEvent::TurnLifecycle(_)
     )));
     *capacity.lock().unwrap() = StorageAdmission::Available;
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(events.try_iter().any(|event| matches!(event,
         HostEvent::TurnLifecycle(lifecycle) if lifecycle.phase == plakous_host_protocol::TurnPhase::Admitted)));
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 struct SubmissionFailure {
@@ -375,11 +402,11 @@ fn an_unstored_attachment_never_reads_views_before_its_first_prompt() {
     config.store = store.clone();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sender, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &receiver, Sender::over(sender), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &receiver, Sender::over(sender), None).unwrap();
     assert_eq!(host.config.session.store_revision, 0);
     assert_eq!(store.view_read_count(), 0);
     for _ in 0..3 {
-        host.project();
+        host.block(async |host| host.project().await);
         host.executor
             .block_on(host.live.as_mut().unwrap().drain_ticks())
             .unwrap();
@@ -397,15 +424,20 @@ fn an_unstored_attachment_never_reads_views_before_its_first_prompt() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("first prompt must be queued");
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(host.config.session.store_revision > 0);
     assert_eq!(store.view_read_count(), 1);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -927,7 +959,7 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(
+        let mut host = NodeActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -943,7 +975,9 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
             text,
             queued_delivery,
             user_echoed,
-        } = host.next_prompt(None).unwrap()
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
         else {
             panic!("prompt")
         };
@@ -979,8 +1013,11 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
             operation.clone(),
             actual_ingress_backpressure(),
         );
-        host.run_prompt(text, queued_delivery.clone(), user_echoed, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery.clone(), user_echoed, None)
+                .await
+        })
+        .unwrap();
         assert_eq!(
             host.config
                 .store
@@ -1012,7 +1049,7 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
                 .try_iter()
                 .any(|event| matches!(event, HostEvent::DraftRejected(_)))
         );
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -1026,7 +1063,7 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(
+        let mut host = NodeActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -1040,7 +1077,9 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
             text,
             queued_delivery,
             user_echoed,
-        } = host.next_prompt(None).unwrap()
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
         else {
             panic!("prompt")
         };
@@ -1059,8 +1098,11 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
                 kind,
             );
         }
-        host.run_prompt(text, queued_delivery, user_echoed, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
         assert!(!host.recovery_blocked);
         assert!(!host.config.session.queue_commands.has_pending());
         // Withdrawal releases the pending row, not its permanent content binding.
@@ -1097,22 +1139,30 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
             text,
             queued_delivery,
             user_echoed,
-        } = host.next_prompt(None).unwrap()
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
         else {
             panic!("second prompt")
         };
         assert_eq!(text, "second");
-        host.run_prompt(text, queued_delivery, user_echoed, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
         assert!(!host.recovery_blocked);
         assert_eq!(host.config.session.root_turn_count, 1);
         assert!(!host.config.session.queue_commands.has_pending());
         // The remaining first prompt may now drain, but was never copied to a draft.
         let first = host.pending_start.take().unwrap();
-        host.run_prompt(first.text.clone(), Some(first), false, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(first.text.clone(), Some(first), false, None)
+                .await
+        })
+        .unwrap();
         assert_eq!(host.config.session.root_turn_count, 2);
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -1127,7 +1177,7 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(
+        let mut host = NodeActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -1143,7 +1193,9 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
             text,
             queued_delivery,
             user_echoed,
-        } = host.next_prompt(None).unwrap()
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
         else {
             panic!("prompt")
         };
@@ -1160,8 +1212,11 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
                 .unwrap()
                 .unwrap();
         }
-        host.run_prompt(text, queued_delivery, user_echoed, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
         assert!(host.recovery_blocked);
         assert!(host.config.session.queue_commands.has_pending());
         assert_eq!(host.config.session.root_turn_count, 0);
@@ -1170,7 +1225,7 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
                 .try_iter()
                 .any(|event| matches!(event, HostEvent::DraftRejected(_)))
         );
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -1182,7 +1237,7 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(
+        let mut host = NodeActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -1211,7 +1266,9 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
             text,
             queued_delivery,
             user_echoed,
-        } = host.next_prompt(None).unwrap()
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
         else {
             panic!("prompt");
         };
@@ -1222,20 +1279,29 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
             CommandAckDisposition::Rejected,
             kind,
         );
-        host.run_prompt(text.clone(), queued_delivery.clone(), user_echoed, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text.clone(), queued_delivery.clone(), user_echoed, None)
+                .await
+        })
+        .unwrap();
         assert!(host.recovery_blocked);
         assert!(host.config.session.queue_commands.has_pending());
         host.config.store = durable_store;
-        host.recover_session(super::super::recover::RecoveryTrigger::Explicit)
-            .unwrap();
+        host.block(async |host| {
+            host.recover_session(super::super::recover::RecoveryTrigger::Explicit)
+                .await
+        })
+        .unwrap();
         crate::runtime::turn_drive::stub_start_refusal(
             operation,
             CommandAckDisposition::Duplicate,
             kind,
         );
-        host.run_prompt(text.clone(), queued_delivery.clone(), true, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text.clone(), queued_delivery.clone(), true, None)
+                .await
+        })
+        .unwrap();
         assert!(!host.recovery_blocked);
         assert_eq!(host.config.session.pending_queue.len(), 1);
         assert_eq!(host.config.session.root_turn_count, 0);
@@ -1255,7 +1321,7 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
         );
         assert!(!host.config.session.queue_commands.has_pending());
         assert!(!host.config.session.queue_commands.has_pending());
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -1270,7 +1336,7 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(
+        let mut host = NodeActor::open_blocking(
             config,
             &action_rx,
             crate::runtime::Sender::over(event_tx),
@@ -1286,7 +1352,9 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
             text,
             queued_delivery,
             user_echoed,
-        } = host.next_prompt(None).unwrap()
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
         else {
             panic!("prompt");
         };
@@ -1298,23 +1366,29 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
             disposition,
             ControlErrorKind::Reclaimed,
         );
-        host.run_prompt(text, queued_delivery, user_echoed, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
         assert!(!host.recovery_blocked);
         assert_eq!(host.config.session.root_turn_count, 0);
         assert_eq!(host.config.session.pending_queue.len(), 1);
         assert_eq!(host.pending_start.as_ref().unwrap().text, "next item");
         assert_eq!(event_rx.try_iter().filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "queued prompt already ran; its result is no longer kept")).count(), 1);
         let next = host.pending_start.take().unwrap();
-        host.run_prompt(next.text.clone(), Some(next), false, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(next.text.clone(), Some(next), false, None)
+                .await
+        })
+        .unwrap();
         assert_eq!(
             host.config.session.pending_queue,
             [] as [queue::QueueItem; 0]
         );
         assert_eq!(host.config.session.root_turn_count, 1);
         assert!(!host.recovery_blocked);
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -1324,7 +1398,7 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1355,12 +1429,17 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt");
     };
-    host.run_prompt(text.clone(), queued_delivery.clone(), user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text.clone(), queued_delivery.clone(), user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(host.recovery_blocked);
     assert_eq!(host.config.session.pending_queue.len(), 1);
     assert!(host.config.session.queue_commands.has_pending());
@@ -1380,10 +1459,14 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
         .execute_batch("DROP TRIGGER reject_admission;")
         .unwrap();
     host.config.store = durable_store;
-    host.recover_session(super::super::recover::RecoveryTrigger::Explicit)
-        .unwrap();
+    host.block(async |host| {
+        host.recover_session(super::super::recover::RecoveryTrigger::Explicit)
+            .await
+    })
+    .unwrap();
     let submitted_at_ms = queued_delivery.as_ref().unwrap().submitted_at_ms;
-    host.run_prompt(text, queued_delivery, true, None).unwrap();
+    host.block(async |host| host.run_prompt(text, queued_delivery, true, None).await)
+        .unwrap();
     assert!(!host.recovery_blocked);
     assert_eq!(
         host.config.session.pending_queue,
@@ -1404,7 +1487,7 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
             .count(),
         1
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -1413,7 +1496,7 @@ fn lost_acknowledgement_keeps_fenced_recovery_and_never_restores_as_a_refusal() 
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1429,7 +1512,9 @@ fn lost_acknowledgement_keeps_fenced_recovery_and_never_restores_as_a_refusal() 
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt");
     };
@@ -1439,8 +1524,11 @@ fn lost_acknowledgement_keeps_fenced_recovery_and_never_restores_as_a_refusal() 
         plakous::agent::CommandAckDisposition::Rejected,
         plakous::agent::ControlErrorKind::OutcomeUnknown,
     );
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(host.recovery_blocked);
     assert_eq!(host.config.session.pending_queue.len(), 1);
     assert_eq!(host.config.session.root_turn_count, 0);
@@ -1455,7 +1543,7 @@ fn lost_acknowledgement_keeps_fenced_recovery_and_never_restores_as_a_refusal() 
         HostEvent::DraftRejected(_) | HostEvent::DraftRestored(_)
     )));
     assert!(events.iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == super::super::publication::RECOVERY_PENDING_NOTE)));
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 /// Spec 02 §5.4: a terminal turn error has one owner. The projection
@@ -1494,7 +1582,7 @@ fn unverified_context_capacity_source_publishes_protected_recovery_without_compa
     let (config, _) = fresh_injected_attached_host(root.path());
     let (_, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1503,15 +1591,18 @@ fn unverified_context_capacity_source_publishes_protected_recovery_without_compa
     .unwrap();
     let source = plakous::model::CheckpointId::try_from(uuid::Uuid::new_v4()).unwrap();
     assert_ne!(source, host.opened.locator().checkpoint_id());
-    host.publish_terminal(
-        Ok(TurnHostOutcome::ContextCapacity {
-            source_checkpoint: source,
-            recovery: plakous_host_protocol::ContextCapacityRecovery::Compactable,
-            error: "injected overflow".into(),
-        }),
-        Instant::now(),
-        super::super::publication::TerminalErrorPresentation::Events,
-    );
+    host.block(async |host| {
+        host.publish_terminal(
+            Ok(TurnHostOutcome::ContextCapacity {
+                source_checkpoint: source,
+                recovery: plakous_host_protocol::ContextCapacityRecovery::Compactable,
+                error: "injected overflow".into(),
+            }),
+            Instant::now(),
+            super::super::publication::TerminalErrorPresentation::Events,
+        )
+        .await
+    });
     let events = event_rx.try_iter().collect::<Vec<_>>();
     assert!(events.iter().any(|event| matches!(
         event,
@@ -1525,7 +1616,7 @@ fn unverified_context_capacity_source_publishes_protected_recovery_without_compa
             plakous_host_protocol::ContextCapacityRecovery::Compactable
         ))
     )));
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -1560,7 +1651,7 @@ fn context_capacity_restores_the_admitted_draft_without_a_rejection_receipt() {
     });
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1576,12 +1667,17 @@ fn context_capacity_restores_the_admitted_draft_without_a_rejection_receipt() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt");
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     let events = event_rx.try_iter().collect::<Vec<_>>();
     assert_eq!(
         events
@@ -1598,7 +1694,7 @@ fn context_capacity_restores_the_admitted_draft_without_a_rejection_receipt() {
             .any(|event| matches!(event, HostEvent::DraftRejected(_)))
     );
     assert!(!host.recovery_blocked);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -1607,7 +1703,7 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1635,7 +1731,9 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt");
     };
@@ -1645,8 +1743,11 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
     )
     .unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(!host.recovery_blocked);
     assert!(host.pending_start.is_none());
     assert_eq!(host.config.session.pending_queue.len(), 2);
@@ -1680,7 +1781,7 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
             [checkpoints],
         )
         .unwrap();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -1690,7 +1791,8 @@ fn rejected_root_fact_binds_only_with_its_projector_page() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
+        let mut host =
+            NodeActor::open_blocking(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
         let store = host.config.store.clone();
         let id = host.config.session.id.clone();
         let item = queue::enqueue(&mut host.config.session.pending_queue, "queued item").unwrap();
@@ -1736,8 +1838,11 @@ fn rejected_root_fact_binds_only_with_its_projector_page() {
                 },
             ));
         }
-        host.run_prompt(item.text.clone(), Some(item), true, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(item.text.clone(), Some(item), true, None)
+                .await
+        })
+        .unwrap();
         let head = host.opened.locator();
         assert_ne!(source, head, "rejection receipt must have committed");
         assert!(
@@ -1757,18 +1862,21 @@ fn rejected_root_fact_binds_only_with_its_projector_page() {
             .count();
         assert!(notices > 0);
         host.config.store = store.clone();
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
         config.store = store.clone();
         config.session = store.load(&id).unwrap();
         let (tx, reopened_events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let reopened = HostLoop::open(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
+        let mut reopened =
+            NodeActor::open_blocking(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
         assert_eq!(
             reopened.config.session.plakous_locator,
             Some(reopened.opened.locator())
         );
         assert!(!reopened_events.try_iter().any(|event| matches!(event, HostEvent::Row(row) if row.text().is_some_and(|text| text.contains("prompt text must") || text.contains("agent is shutting down")))));
-        reopened.release().unwrap();
+        reopened
+            .block(async |reopened| reopened.release().await)
+            .unwrap();
     }
 }
 
@@ -1779,7 +1887,7 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
     let database = root.path().join("home/runtime.sqlite3");
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &action_rx,
         crate::runtime::Sender::over(event_tx),
@@ -1803,13 +1911,18 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt must enter the product queue");
     };
     let head = host.opened.locator();
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(!host.recovery_blocked);
     assert_eq!(host.opened.locator(), head);
     assert_eq!(
@@ -1850,7 +1963,9 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("host must accept a new prompt after definite rejection");
     };
@@ -1866,8 +1981,11 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
             .try_iter()
             .any(|event| matches!(event, HostEvent::PromptAdmitted(_)))
     );
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(!host.recovery_blocked);
     assert!(
         host.pending_start.is_none(),
@@ -1875,7 +1993,7 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
     );
     assert_eq!(host.config.session.pending_queue.len(), 1);
     assert_eq!(host.config.session.pending_queue[0].text, "keep my text");
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -1893,7 +2011,7 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
                 crate::surface_protocol::user_action_channel::<TestExtension>();
             let (event_tx, event_rx) =
                 crate::surface_protocol::host_event_channel::<TestExtension>();
-            let mut host = HostLoop::open(
+            let mut host = NodeActor::open_blocking(
                 config,
                 &action_rx,
                 crate::runtime::Sender::over(event_tx),
@@ -1923,7 +2041,9 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
                 text,
                 queued_delivery,
                 user_echoed,
-            } = host.next_prompt(None).unwrap()
+            } = host
+                .block(async |host| host.next_prompt(None).await)
+                .unwrap()
             else {
                 panic!("queue admission must succeed before the injected delivery failure");
             };
@@ -1936,7 +2056,9 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
                     .any(|event| matches!(event, HostEvent::PromptAdmitted(_)))
             );
             assert!(matches!(
-                host.run_prompt(text, queued_delivery, user_echoed, None)
+                host.block(async |host| host
+                    .run_prompt(text, queued_delivery, user_echoed, None)
+                    .await)
                     .unwrap(),
                 HostStep::Continue
             ));
@@ -1987,7 +2109,7 @@ fn root_delivery_prepare_and_ack_failures_log_actual_revision_without_inventing_
                     1
                 );
             }
-            host.release().unwrap();
+            host.block(async |host| host.release().await).unwrap();
         }
     }
 }

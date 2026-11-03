@@ -798,33 +798,35 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
         let watch = InterruptWatch::new(&receiver, &state);
         let (events, _events_rx) = crate::runtime::test_support::host_event_sink();
         let error = if rebind {
-            crate::runtime::rebind::handle_rebind(
-                &executor,
-                watch,
-                &mut config,
-                &mut opened,
-                &mut Vec::new(),
-                &events,
-                "codex",
-                "offline-loopback-v2",
-                Some("medium"),
-                None,
-                None,
-                None,
-                &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-            )
-            .unwrap_err()
+            executor
+                .block_on(crate::runtime::rebind::handle_rebind(
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    "codex",
+                    "offline-loopback-v2",
+                    Some("medium"),
+                    None,
+                    None,
+                    None,
+                    &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                ))
+                .expect("the executor drives the call")
+                .unwrap_err()
         } else {
-            crate::runtime::fork::handle_fork(
-                &executor,
-                watch,
-                &mut config,
-                &mut opened,
-                &mut Vec::new(),
-                &events,
-                None,
-            )
-            .unwrap_err()
+            executor
+                .block_on(crate::runtime::fork::handle_fork(
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    None,
+                ))
+                .expect("the executor drives the call")
+                .unwrap_err()
         };
         assert!(watch.interrupted(), "rebind={rebind}: {error:?}");
         assert!(

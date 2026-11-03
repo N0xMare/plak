@@ -499,22 +499,23 @@ fn closing_an_agent_without_a_hub_retires_its_cached_notice_scope() {
         directory.path().join("home"),
         directory.path().join("state"),
     );
-    let executor = ApplicationExecutor::new().unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
     let session = SessionRecord::new(directory.path().to_path_buf());
     let (wire, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(wire);
     assert!(events.replace_transcript(logging::project_session_snapshot(&session)));
     child_live::send_agent_transcript(&events, "c1", Err("no agent tree".into()));
     let _ = receiver.try_iter().count();
-    dispatch_topology_navigator_sync(
-        &executor,
-        &rows,
-        &roots,
-        &session,
-        &events,
-        &UserAction::CloseAgentTranscript,
-        &mut TreeSnapshotPush::default(),
-    );
+    executor
+        .block_on(dispatch_topology_navigator(
+            &rows,
+            &roots,
+            &session,
+            &events,
+            &UserAction::CloseAgentTranscript,
+            &mut TreeSnapshotPush::default(),
+        ))
+        .expect("the executor drives the call");
     assert!(!events.resync_transcript(&TranscriptScope::Agent("c1".into())));
     assert!(events.resync_transcript(&TranscriptScope::Root));
 }

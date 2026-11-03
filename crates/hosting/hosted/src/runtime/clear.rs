@@ -4,7 +4,6 @@ use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::time::Instant;
 
-use plakous::application::ApplicationExecutor;
 use plakous::sessions::SessionOperationId;
 use plakous::subscriptions::ResolvedProvider;
 
@@ -32,8 +31,7 @@ use crate::sessions::{NoticeScope, TranscriptRow};
     clippy::too_many_lines,
     reason = "Clear rebuilds the candidate before detaching the source and preserves rollback at every publication boundary."
 )]
-pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,
     stderr_buf: &mut Vec<u8>,
@@ -63,7 +61,6 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         sessions::clear_create_operation_id(&request.operation_id).map_err(CliFailure::new)?;
     let runtime_sessions = config.state_roots.runtime_sessions()?;
     let (new_session, fresh_resolved) = build_clear_candidate(
-        executor,
         config,
         opened,
         &target_product_id,
@@ -71,30 +68,30 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         stderr_buf,
         events,
         started,
-    )?;
+    )
+    .await?;
     observe_phase(
         events,
         HostLifecyclePhase::ClearBuildCandidate,
         started,
         config.session.pending_queue.len(),
     );
-    let publication = executor
-        .block_on(super::projection::project_to_tail(
-            &runtime_sessions,
-            &config.store,
-            &target_product_id,
-            new_session.locator(),
-        ))
-        .map_err(|_| "application execution failed".to_owned())
-        .and_then(|result| result.map_err(String::from))
-        .and_then(|_| config.store.load(&target_product_id));
+    let publication = super::projection::project_to_tail(
+        &runtime_sessions,
+        &config.store,
+        &target_product_id,
+        new_session.locator(),
+    )
+    .await
+    .map_err(String::from)
+    .and_then(|_| config.store.load(&target_product_id));
     let next = match publication {
         Ok(next) => next,
         Err(error) => {
-            let release = executor
-                .block_on(new_session.release())
-                .map_err(|_| "clear target release join failed".to_owned())
-                .and_then(|result| result.map_err(|error| error.to_string()));
+            let release = new_session
+                .release()
+                .await
+                .map_err(|error| error.to_string());
             return Err(CliFailure::new(format!(
                 "clear projection failed: {error}{}",
                 release
@@ -139,7 +136,6 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     let _ = events.replace_transcript(project_session_snapshot(&config.session));
     send_last_user_prompt_at(events, config, opened);
     if let Err(error) = report_context(
-        executor,
         opened,
         events,
         "after clear",
@@ -148,7 +144,9 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
             .native_provider()
             .is_some_and(native_compact_facet),
         config.session.context_counters(),
-    ) {
+    )
+    .await
+    {
         emit_unavailable_context(events);
         // An unreadable context is state every switch re-announces.
         let _ = events.send(ContentEvent::Row(
@@ -275,19 +273,18 @@ pub(super) async fn production_build_clear_candidate<
     Ok((session, None))
 }
 
-pub(super) fn delete_unpublished_runtime(
-    executor: &ApplicationExecutor,
+pub(super) async fn delete_unpublished_runtime(
     state_roots: &crate::agent::ProductStateRoots,
     locator: plakous::sessions::SessionLocator,
 ) -> CliResult<()> {
     let sessions = state_roots.runtime_sessions()?;
-    let archived = executor
-        .block_on(sessions.archive(locator))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    let archived = sessions
+        .archive(locator)
+        .await
         .map_err(|error| CliFailure::new(format!("unpublished runtime archive failed: {error}")))?;
-    executor
-        .block_on(sessions.delete(archived.session_id(), archived.archived_revision()))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    sessions
+        .delete(archived.session_id(), archived.archived_revision())
+        .await
         .map_err(|error| {
             CliFailure::new(format!("unpublished runtime deletion failed: {error}"))
         })?;
@@ -298,8 +295,7 @@ pub(super) fn delete_unpublished_runtime(
 ///
 /// Refuses when the saved session is bound to a different account than this
 /// host process (cross-account resume needs a fresh `plak resume <uuid>` launch).
-pub(super) fn resume_session_switch<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn resume_session_switch<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,
     stderr_buf: &mut Vec<u8>,
@@ -308,15 +304,8 @@ pub(super) fn resume_session_switch<P: plakous_host_protocol::ProtocolExtension>
 ) -> CliResult<()> {
     super::jobs_transition_guard(config, opened)?;
     let mut waited = false;
-    let switched = switch_onto_session(
-        executor,
-        config,
-        opened,
-        stderr_buf,
-        events,
-        session_id,
-        &mut waited,
-    );
+    let switched =
+        switch_onto_session(config, opened, stderr_buf, events, session_id, &mut waited).await;
     if switched.is_err() && waited {
         let _ = events.send(ContentEvent::SetBusy(false));
         let _ = events.send(ContentEvent::Status {
@@ -332,8 +321,7 @@ pub(super) fn resume_session_switch<P: plakous_host_protocol::ProtocolExtension>
 }
 
 /// Wait for this host's old attachment, then load and project before opening.
-fn load_settled_source<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn load_settled_source<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     events: &Sender<P>,
     session_id: &str,
@@ -356,13 +344,8 @@ fn load_settled_source<P: plakous_host_protocol::ProtocolExtension>(
     }
     let mut record = config.store.load(session_id).map_err(CliFailure::new)?;
     let sessions = config.state_roots.runtime_sessions()?;
-    if let Some(head) = executor
-        .block_on(super::projection::project_before_open(
-            &sessions,
-            &config.store,
-            &record,
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    if let Some(head) = super::projection::project_before_open(&sessions, &config.store, &record)
+        .await
         .map_err(CliFailure::new)?
     {
         record = config.store.load(session_id).map_err(CliFailure::new)?;
@@ -371,8 +354,7 @@ fn load_settled_source<P: plakous_host_protocol::ProtocolExtension>(
     Ok(record)
 }
 
-fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+async fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,
     stderr_buf: &mut Vec<u8>,
@@ -382,7 +364,7 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
 ) -> CliResult<()> {
     // A source this host left (a clear, fork or rebind) may still be
     // releasing its attachment; read its record only after the join.
-    let next = load_settled_source(executor, config, events, session_id, waited)?;
+    let next = load_settled_source(config, events, session_id, waited).await?;
     let probe: &dyn plakous::tools::WorkspaceProbe = &plakous::tools::LocalWorkspaceProbe;
     let unavailable = crate::process_environment::probe_unavailable;
     let requested = probe
@@ -404,16 +386,10 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
         .plakous_locator
         .ok_or_else(|| CliFailure::new("session has no canonical Plakous locator"))?;
     stderr_buf.clear();
-    let replacement = executor
-        .block_on(open_session_for_host(
-            config,
-            &next,
-            locator,
-            stderr_buf,
-            RuntimeRole::Primary,
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| *error.failure)?;
+    let replacement =
+        open_session_for_host(config, &next, locator, stderr_buf, RuntimeRole::Primary)
+            .await
+            .map_err(|error| *error.failure)?;
     let source = config.session.clone();
     let previous = std::mem::replace(opened, replacement);
     config.session = next;
@@ -432,7 +408,6 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     }
     send_last_user_prompt_at(events, config, opened);
     if let Err(error) = report_context(
-        executor,
         opened,
         events,
         "after session switch",
@@ -441,7 +416,9 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
             .native_provider()
             .is_some_and(native_compact_facet),
         config.session.context_counters(),
-    ) {
+    )
+    .await
+    {
         emit_unavailable_context(events);
         // An unreadable context is state every switch re-announces.
         let _ = events.send(ContentEvent::Row(
@@ -499,8 +476,7 @@ pub(super) fn exact_resume_target_matches(
     clippy::too_many_arguments,
     reason = "Clear candidate construction forwards the explicit runtime factory inputs without replacing the source authority."
 )]
-pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
     target_product_session_id: &str,
@@ -513,8 +489,8 @@ pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>
     Option<std::sync::Arc<ResolvedProvider>>,
 )> {
     let factory = config.runtime_factory.clone();
-    executor
-        .block_on(factory.clear(
+    factory
+        .clear(
             config,
             opened,
             target_product_session_id,
@@ -522,8 +498,8 @@ pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>
             stderr_buf,
             events,
             started,
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+        )
+        .await
 }
 
 #[cfg(test)]

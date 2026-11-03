@@ -2,9 +2,11 @@ use super::*;
 use crate::surface_protocol::UserAction;
 use plakous_host_protocol::status::HostPhase;
 
-fn next_non_idle_step(host: &mut HostLoop<'_, TestExtension>) -> HostStep {
+fn next_non_idle_step(host: &mut NodeActor<'_, TestExtension>) -> HostStep {
     loop {
-        let step = host.next_prompt(None).unwrap();
+        let step = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         if !matches!(step, HostStep::Continue) {
             return step;
         }
@@ -42,7 +44,8 @@ pub(super) fn stopped_preparation(
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     actions
         .send(UserAction::Prompt("keep exact input".into()))
         .unwrap();
@@ -50,7 +53,9 @@ pub(super) fn stopped_preparation(
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt");
     };
@@ -111,12 +116,15 @@ pub(super) fn stopped_preparation(
         run: None,
     };
     host.prep_hooks.called.clear();
-    host.run_prompt(
-        text.clone(),
-        queued_delivery.clone(),
-        user_echoed,
-        one_shot.then_some(&mut invocation),
-    )
+    host.block(async |host| {
+        host.run_prompt(
+            text.clone(),
+            queued_delivery.clone(),
+            user_echoed,
+            one_shot.then_some(&mut invocation),
+        )
+        .await
+    })
     .unwrap();
     control.join().unwrap();
     let skipped = match stage {
@@ -190,10 +198,15 @@ pub(super) fn stopped_preparation(
             }
         );
     } else if quit {
-        assert!(matches!(host.next_prompt(None).unwrap(), HostStep::Quit));
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Quit
+        ));
     } else {
         // The next explicit retry uses the same delivery and a clean watch.
-        host.run_prompt(text, queued_delivery, true, None).unwrap();
+        host.block(async |host| host.run_prompt(text, queued_delivery, true, None).await)
+            .unwrap();
         assert_eq!(host.config.session.root_turn_count, 1);
         assert_eq!(
             host.config.session.pending_queue,
@@ -202,7 +215,7 @@ pub(super) fn stopped_preparation(
         assert!(!host.recovery_blocked);
     }
     drop(actions_held);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     observed
 }
 
@@ -213,7 +226,8 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     actions
         .send(UserAction::Prompt("source input".into()))
         .unwrap();
@@ -221,12 +235,17 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt")
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert!(host.opened.last_operator_input_unix_ms().is_some());
     let source = host.config.session.id.clone();
     drop(events.try_iter().collect::<Vec<_>>());
@@ -249,13 +268,14 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
     assert!(host.opened.last_operator_input_unix_ms().is_some());
     let fork = host.config.session.id.clone();
     let store = host.config.store.clone();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session = store.load(&fork).unwrap();
     config.store = store.clone();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     assert!(
         events
             .try_iter()
@@ -268,12 +288,17 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt")
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     let committed_at = host.opened.last_operator_input_unix_ms().unwrap();
     drop(events.try_iter().collect::<Vec<_>>());
     crate::runtime::info::send_last_user_prompt_at(&host.events, &host.config, &host.opened);
@@ -284,7 +309,7 @@ fn fork_clock_excludes_source_prompts_and_keeps_its_own_prompt_across_attach() {
     );
     let stored = host.config.store.load(&host.config.session.id).unwrap();
     assert_eq!(stored.prompt_history, ["fork input"]);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -298,7 +323,8 @@ fn an_idle_queue_edit_has_exactly_one_receipt() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     actions
         .send(UserAction::EditQueued {
             id: item.id.clone(),
@@ -315,5 +341,5 @@ fn an_idle_queue_edit_has_exactly_one_receipt() {
             .count(),
         1
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }

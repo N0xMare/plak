@@ -8,7 +8,6 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
-use plakous::application::ApplicationExecutor;
 use plakous::sessions::ContextQuery;
 
 use crate::context::{ContextDisposition, scheduled_compaction_disabled_note};
@@ -47,8 +46,8 @@ use super::resume::handle_resume_picker;
 use super::startup::build_session_from_config;
 use super::surface;
 use super::tree::{
-    dispatch_invoke_tool_sync, dispatch_topology_navigator_sync,
-    emit_tree_snapshot_if_revision_advanced, record_emitted_tree_revision,
+    dispatch_invoke_tool, dispatch_topology_navigator, emit_tree_snapshot_if_revision_advanced,
+    record_emitted_tree_revision,
 };
 use super::turn::host_outcome_blocks_continuation;
 use super::usage::{
@@ -72,6 +71,10 @@ pub(super) fn run_host_loop<P: plakous_host_protocol::ProtocolExtension>(
     run(config, actions, events, startup, None)
 }
 
+/// Runs the attached root as one async actor: the single future of one
+/// `block_on` on the attachment's thread, from open through release. Nothing
+/// it awaits blocks on an executor of its own. The actor is dropped outside
+/// the executor, before the session executor that ends its tasks.
 pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(
     config: HostConfig<P>,
     actions: &crate::surface_protocol::UserActionReceiver<P>,
@@ -79,11 +82,59 @@ pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(
     startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
     one_shot: Option<&mut super::oneshot::OneShotState>,
 ) -> CliResult<()> {
-    HostLoop::open(config, actions, events, startup)?.run(one_shot)
+    let executor = std::rc::Rc::new(
+        session_executor::SessionExecutor::new()
+            .map_err(|_| CliFailure::new("application executor construction failed"))?,
+    );
+    let (result, actor) = executor
+        .block_on(async {
+            match NodeActor::open(
+                config,
+                actions,
+                events,
+                startup,
+                std::rc::Rc::clone(&executor),
+            )
+            .await
+            {
+                Ok(mut actor) => (actor.run(one_shot).await, Some(actor)),
+                Err(error) => (Err(error), None),
+            }
+        })
+        .map_err(|_| CliFailure::new("application execution failed"))?;
+    drop(actor);
+    result
 }
 
-/// Sole owner of the attachment, durable session record, queue, and publication.
-struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
+/// What one node's actor is for, as a value its single driver consults
+/// rather than a second driver (design §3.2): which projections it runs and
+/// what follows a turn that ends recovery-required. Only the root runs as an
+/// actor so far.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct RolePolicy {
+    /// The product projector plus the root's tree passes (spec 03 §4.4).
+    pub(super) tree_passes: bool,
+    pub(super) recovery: RecoveryPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RecoveryPolicy {
+    /// The session recovers in place when the next action needs it.
+    OnNextAction,
+}
+
+impl RolePolicy {
+    /// The attached root's policy.
+    pub(super) const ROOT: Self = Self {
+        tree_passes: true,
+        recovery: RecoveryPolicy::OnNextAction,
+    };
+}
+
+/// The root node's actor: sole owner of the attachment, durable session
+/// record, queue, interrupt and deferred state, and publication.
+struct NodeActor<'a, P: plakous_host_protocol::ProtocolExtension> {
+    role: RolePolicy,
     _storage_notices: Option<super::storage::StorageNotices>,
     config: HostConfig<P>,
     actions: &'a crate::surface_protocol::UserActionReceiver<P>,
@@ -92,7 +143,9 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     quit_started_at: Option<Instant>,
     quit_abandoned_turn: bool,
     quit_job_stops: Option<crate::TaskHandle<Result<(), String>>>,
-    executor: session_executor::SessionExecutor,
+    /// The attachment's executor, shared with the thread that drives the
+    /// actor; the actor spawns only onto its task set.
+    executor: std::rc::Rc<session_executor::SessionExecutor>,
     log: Option<SessionLog>,
     stderr_buf: Vec<u8>,
     interrupt_state: RefCell<InterruptWatchState<P>>,
@@ -145,7 +198,7 @@ mod session_executor;
 pub(in crate::runtime) mod transient;
 pub(in crate::runtime) mod wake;
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// What the live projector follows now: the attached session's feed.
     fn live_target(&self) -> super::projection::live::LiveTarget {
         let rows = self.config.topology_rows();
@@ -175,7 +228,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// A session the product has not stored yet still gets its task: the
     /// first prompt stores it mid-turn. No pass is requested before that:
     /// an unstored view read cannot warm the attachment's persistent cache.
-    fn project(&mut self) {
+    async fn project(&mut self) {
         if self.config.store.storage_unavailable() {
             self.storage_interrupted |= self.config.store.storage_wait_cancelled();
             if self.storage_interrupted {
@@ -193,12 +246,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.live = None;
         }
         if self.live.is_none() {
-            self.live = self
-                .executor
-                .block_on(async {
-                    super::projection::live::LiveProjector::spawn(self.executor.tasks())
-                })
-                .ok();
+            self.live = Some(super::projection::live::LiveProjector::spawn(
+                self.executor.tasks(),
+            ));
         }
         if self.config.session.store_revision != 0
             && let Some(live) = self.live.as_mut()
@@ -208,8 +258,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 self.log_projector_debt(&error);
             }
         }
-        if self.config.session.store_revision != 0
-            && let Ok(Err(error)) = self.executor.block_on(target.tree_pass())
+        if self.role.tree_passes
+            && self.config.session.store_revision != 0
+            && let Err(error) = target.tree_pass().await
         {
             self.log_projector_debt(&error);
         }
@@ -247,19 +298,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 
     /// A projector pass to the tail that the caller waits for: a reopen's
     /// step 2, whose rows the next step reads.
-    fn project_now(&mut self) {
+    async fn project_now(&mut self) {
         if self.config.session.store_revision == 0 {
             return;
         }
         let target = self.live_target();
-        let passed = self.executor.block_on(async {
+        let passed = async {
             target.pass().await?;
             target.tree_pass().await
-        });
-        if matches!(&passed, Ok(Ok(()))) {
+        }
+        .await;
+        if passed.is_ok() {
             self.config.session.queue_projection_debt = false;
         }
-        if let Ok(Err(error)) = passed {
+        if let Err(error) = passed {
             self.log_projector_debt(&error);
         }
         self.publish_projected_usage();
@@ -268,38 +320,32 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// Replace settled previews with the committed projector values before
     /// announcing idle. This also includes provider-hosted calls, which have
     /// no local ToolStarted/ToolCompleted observations.
-    fn publish_projected_transcript(&mut self, one_shot: bool) {
+    async fn publish_projected_transcript(&mut self, one_shot: bool) {
         self.commit_notice_intents();
         let target = self.live_target();
         let deadline = self.projection_deadline(one_shot);
         // The task keeps its views and the rows it has shown for the next
         // turn: no cold reload and no re-emission of settled rows.
         let live = self.live.as_mut();
-        let projected = self.executor.block_on(async {
-            let pass = async {
-                match live {
-                    Some(live) => live.settle(target.clone()).await,
-                    None => target.views(None).await.map(|projected| projected.views),
-                }
-            };
-            if let Some(deadline) = deadline {
-                tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
-                    .await
-                    .unwrap_or_else(|_| {
-                        Err("the terminal projector pass exceeded its bound".to_owned())
-                    })
-            } else {
-                pass.await
+        let pass = async {
+            match live {
+                Some(live) => live.settle(target.clone()).await,
+                None => target.views(None).await.map(|projected| projected.views),
             }
-        });
+        };
+        let projected = if let Some(deadline) = deadline {
+            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
+                .await
+                .unwrap_or_else(
+                    |_| Err("the terminal projector pass exceeded its bound".to_owned()),
+                )
+        } else {
+            pass.await
+        };
         let views = match projected {
-            Ok(Ok(views)) => views,
-            Ok(Err(error)) => {
+            Ok(views) => views,
+            Err(error) => {
                 self.log_projector_debt(&error);
-                return;
-            }
-            Err(_) => {
-                self.log_projector_debt("the terminal projector pass could not run");
                 return;
             }
         };
@@ -361,7 +407,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// and the next open catches up. The one-shot face exits only after the
     /// projector applied its turn's terminal, so it waits for the pass to
     /// complete and a refused pass fails the command.
-    fn finish_projection(&mut self, one_shot: bool) -> CliResult<()> {
+    async fn finish_projection(&mut self, one_shot: bool) -> CliResult<()> {
         self.projection_finished = true;
         if self.config.session.store_revision == 0 {
             return Ok(());
@@ -369,36 +415,28 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let target = self.live_target();
         let deadline = self.projection_deadline(one_shot);
         let live = self.live.take();
-        let finished = self.executor.block_on(async {
-            let pass = async {
-                let refused = match live {
-                    Some(live) => live.finish(target.clone(), None).await.err(),
-                    None => target.pass().await.err(),
-                };
-                (refused, target.tree_pass().await.err())
+        let pass = async {
+            let refused = match live {
+                Some(live) => live.finish(target.clone(), None).await.err(),
+                None => target.pass().await.err(),
             };
-            if let Some(deadline) = deadline {
-                tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
-                    .await
-                    .unwrap_or_else(|_| {
-                        (
-                            Some("the final projector pass exceeded its bound".to_owned()),
-                            None,
-                        )
-                    })
-            } else {
-                pass.await
-            }
-        });
-        let refused = match finished {
-            Ok((refused, tree_refused)) => {
-                if let Some(error) = tree_refused {
-                    self.log_projector_debt(&error);
-                }
-                refused
-            }
-            Err(_) => Some("the final projector pass could not run".to_owned()),
+            (refused, target.tree_pass().await.err())
         };
+        let (refused, tree_refused) = if let Some(deadline) = deadline {
+            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
+                .await
+                .unwrap_or_else(|_| {
+                    (
+                        Some("the final projector pass exceeded its bound".to_owned()),
+                        None,
+                    )
+                })
+        } else {
+            pass.await
+        };
+        if let Some(error) = tree_refused {
+            self.log_projector_debt(&error);
+        }
         self.publish_projected_usage();
         match refused {
             Some(error) if one_shot => Err(CliFailure::classified(
@@ -473,28 +511,36 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .set_processes(self.config.state_roots.job_registry().snapshot());
     }
 
-    fn run(mut self, mut one_shot: Option<&mut super::oneshot::OneShotState>) -> CliResult<()> {
-        let driven = self.drive(one_shot.as_deref_mut());
+    async fn run(
+        &mut self,
+        mut one_shot: Option<&mut super::oneshot::OneShotState>,
+    ) -> CliResult<()> {
+        let driven = self.drive(one_shot.as_deref_mut()).await;
         let disowned = if one_shot
             .as_ref()
             .and_then(|state| state.run.as_ref())
             .is_some_and(|run| run.bounds.leave_jobs_running)
         {
-            self.executor
-                .block_on(self.config.state_roots.job_registry().disown_leftovers())
-                .map_err(|_| CliFailure::new("job disown execution failed"))
-                .and_then(|result| result.map_err(CliFailure::new))
+            self.config
+                .state_roots
+                .job_registry()
+                .disown_leftovers()
+                .await
+                .map_err(CliFailure::new)
         } else {
             Ok(())
         };
-        let released = self.release().and(disowned);
+        let released = self.release().await.and(disowned);
         match (driven, released) {
             (Ok(()), result) | (result, Ok(())) => result,
             (Err(error), Err(release)) => Err(error.with_release_failure(release)),
         }
     }
 
-    fn drive(&mut self, mut one_shot: Option<&mut super::oneshot::OneShotState>) -> CliResult<()> {
+    async fn drive(
+        &mut self,
+        mut one_shot: Option<&mut super::oneshot::OneShotState>,
+    ) -> CliResult<()> {
         // A one-shot's initial prompt belongs after the recovered turn, not
         // in its busy follow-up queue. Keep its delivery/provenance intact.
         let initial_prompt = if one_shot.is_some() && self.opened.has_recovered_turn() {
@@ -503,36 +549,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         } else {
             None
         };
-        if matches!(self.drive_restored_turn()?, HostStep::Quit) {
-            return self.finish_projection(one_shot.is_some());
+        if matches!(self.drive_restored_turn().await?, HostStep::Quit) {
+            return self.finish_projection(one_shot.is_some()).await;
         }
         if let Some(delivery) = initial_prompt {
             self.interrupt_state.borrow_mut().restore_front(delivery);
         }
         let mut passive_checkpoint_scheduled = false;
-        if let Some(state) = one_shot.as_deref_mut() {
-            let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
-            let resumed = if state.resume_tree {
-                self.executor
-                    .block_on(topology_state::resume_tree(&tree_id))
-                    .map_err(|_| CliFailure::new("application execution failed"))
-                    .and_then(|resumed| resumed.map_err(CliFailure::new))
-                    .and_then(|()| {
-                        self.executor
-                            .block_on(crate::agent::rejoin_inflight_after_resume(&tree_id))
-                            .map_err(|_| CliFailure::new("application execution failed"))
-                    })
-                    .inspect(|()| self.spawn_tree_recovery())
-            } else if crate::agent::topology_tree_is_restored_paused(&tree_id) {
-                Err(CliFailure::new(crate::agent::RESTORED_PAUSED_REFUSAL)
-                    .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {}))
-            } else {
-                Ok(())
-            };
-            if let Err(error) = resumed {
-                state.result = Some(Err(error));
-                state.attempted = true;
-            }
+        if let Some(state) = one_shot.as_deref_mut()
+            && let Err(error) = self.resume_one_shot_tree(state.resume_tree).await
+        {
+            state.result = Some(Err(error));
+            state.attempted = true;
         }
 
         loop {
@@ -542,12 +570,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 self.storage_interrupted = false;
             }
             self.commit_notice_intents();
-            self.project();
+            self.project().await;
             if !passive_checkpoint_scheduled && self.actions.is_promptable() {
-                let tasks = self.executor.tasks();
-                self.executor
-                    .block_on(async { self.opened.schedule_passive_checkpoint(tasks) })
-                    .map_err(|_| CliFailure::new("application execution failed"))?;
+                self.opened
+                    .schedule_passive_checkpoint(self.executor.tasks());
                 passive_checkpoint_scheduled = true;
             }
             if let Some(state) = one_shot.as_deref_mut() {
@@ -558,9 +584,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             let next = if let Some(state) = one_shot.as_deref_mut()
                 && state.attempted
             {
-                self.next_run_prompt(state)
+                self.next_run_prompt(state).await
             } else {
-                self.next_prompt(one_shot.as_deref_mut())
+                self.next_prompt(one_shot.as_deref_mut()).await
             };
             let next = match next {
                 Ok(next) => next,
@@ -577,12 +603,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 } => (text, queued_delivery, user_echoed),
             };
             let before = self.config.session.root_turn_count;
-            let step = match self.run_prompt(
-                raw_text,
-                queued_delivery,
-                user_echoed,
-                one_shot.as_deref_mut(),
-            ) {
+            let step = match self
+                .run_prompt(
+                    raw_text,
+                    queued_delivery,
+                    user_echoed,
+                    one_shot.as_deref_mut(),
+                )
+                .await
+            {
                 Ok(step) => step,
                 Err(error) if self.retain_interrupted_storage(&error) => continue,
                 Err(error) => return Err(error),
@@ -598,7 +627,26 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
 
         self.commit_notice_intents();
-        self.finish_projection(one_shot.is_some())
+        self.finish_projection(one_shot.is_some()).await
+    }
+
+    /// A one-shot resumes a paused tree only when asked (`--resume-tree`);
+    /// otherwise a paused tree refuses the run.
+    async fn resume_one_shot_tree(&self, resume_tree: bool) -> CliResult<()> {
+        let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
+        if resume_tree {
+            topology_state::resume_tree(&tree_id)
+                .await
+                .map_err(CliFailure::new)?;
+            crate::agent::rejoin_inflight_after_resume(&tree_id).await;
+            self.spawn_tree_recovery();
+            Ok(())
+        } else if crate::agent::topology_tree_is_restored_paused(&tree_id) {
+            Err(CliFailure::new(crate::agent::RESTORED_PAUSED_REFUSAL)
+                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {}))
+        } else {
+            Ok(())
+        }
     }
 
     fn retain_interrupted_storage(&mut self, error: &CliFailure) -> bool {
@@ -613,6 +661,53 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             "storage write unavailable; retained work and queued inputs remain available",
         ));
         true
+    }
+}
+
+#[cfg(test)]
+impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
+    /// Opens the actor on an executor of its own, for synchronous tests.
+    fn open_blocking(
+        config: HostConfig<P>,
+        actions: &'a crate::surface_protocol::UserActionReceiver<P>,
+        events: Sender<P>,
+        startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+    ) -> CliResult<Self> {
+        let executor = std::rc::Rc::new(
+            session_executor::SessionExecutor::new()
+                .map_err(|_| CliFailure::new("application executor construction failed"))?,
+        );
+        executor
+            .block_on(Self::open(
+                config,
+                actions,
+                events,
+                startup,
+                std::rc::Rc::clone(&executor),
+            ))
+            .map_err(|_| CliFailure::new("application execution failed"))?
+    }
+
+    fn test_executor(&self) -> std::rc::Rc<session_executor::SessionExecutor> {
+        std::rc::Rc::clone(&self.executor)
+    }
+
+    /// Drives one of the actor's async steps to its end from a synchronous
+    /// test, on the executor the actor's own tasks run on.
+    fn block<T>(&mut self, step: impl AsyncFnOnce(&mut Self) -> T) -> T {
+        let executor = self.test_executor();
+        executor
+            .block_on(step(self))
+            .expect("the host executor drives the step")
+    }
+
+    /// Runs a synchronous step that spawns session tasks inside the actor's
+    /// executor, as the actor itself would.
+    fn in_runtime<T>(&mut self, step: impl FnOnce(&mut Self) -> T) -> T {
+        let executor = self.test_executor();
+        executor
+            .block_on(async { step(self) })
+            .expect("the host executor drives the step")
     }
 }
 

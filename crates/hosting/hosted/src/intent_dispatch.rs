@@ -2,7 +2,7 @@
 //!
 //! Three loops take intents from the control mailbox: the idle loop, the
 //! drive loop of a running turn, and a long workflow (compact, fork, rebind,
-//! pre-turn preparation) under [`crate::interrupt::run_watched`]. They share
+//! pre-turn preparation) under [`crate::interrupt::watched`]. They share
 //! one reading order and one classification:
 //!
 //! * Every pass takes at most one action: a deferred one first, in arrival

@@ -114,9 +114,19 @@ the roster and the agent templates, account admission for
 children, the agent tree's presentation and its store location, and the product
 and telemetry stores.
 
-One private hosted `HostLoop` owns the attachment, the product session's
+One private hosted `NodeActor` owns the attachment, the product session's
 intents, the session's one change-feed projector (§2.6), and canonical release
-for CLI one-shot, JSONL, and interactive use. Each admitted turn has one
+for CLI one-shot, JSONL, and interactive use. It is one async actor: the single
+future of one `block_on` on the attachment's thread, from open through
+release, and nothing it awaits blocks on an executor of its own. Its idle wait
+is a biased select that takes the control mailbox (whose urgent lane outranks
+everything queued) ahead of the idle observation deadline, and an intent wakes
+it on arrival. Its workflows (compact, fork, rebind, `/new`, resume and
+pre-turn preparation) are awaited inline while the mailbox is drained as
+intents arrive. Its background work runs on the attachment's task set, which
+release ends. What differs between node roles is a value the actor consults
+(which projections it runs, what follows a recovery-required turn), not a
+second driver; only the root runs as an actor so far. Each admitted turn has one
 private `TurnDrive` owning its control handle, observed live projection
 (including pending approvals), cancel settlement, and terminal result. Queue
 editing and intent writes belong to the session domain and share the record's

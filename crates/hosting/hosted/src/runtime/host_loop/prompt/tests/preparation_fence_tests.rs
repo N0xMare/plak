@@ -63,7 +63,7 @@ fn every_stop_stage_has_identical_tui_and_jsonl_terminal_records() {
     }
 }
 
-fn wake_delivery(host: &mut HostLoop<'_, TestExtension>) -> SessionQueueItem {
+fn wake_delivery(host: &mut NodeActor<'_, TestExtension>) -> SessionQueueItem {
     let item = host.config.session.enqueue_live("host wake").unwrap();
     host.config.session = crate::runtime::result_mail::prepare_instruction(
         &host.config.topology_rows(),
@@ -86,7 +86,8 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     let item = wake_delivery(&mut host);
     let operator = host
         .config
@@ -104,8 +105,11 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
             actions.send(UserAction::Interrupt).unwrap();
         }),
     ));
-    host.run_prompt(item.text.clone(), Some(item), true, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(item.text.clone(), Some(item), true, None)
+            .await
+    })
+    .unwrap();
     assert_eq!(
         host.config.session.pending_queue,
         std::slice::from_ref(&operator)
@@ -135,7 +139,7 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
         matches!(&intents.pause_causes.last().unwrap().value, sessions::projector::HostPauseCause::UnrecordedRefusal { reason } if reason.contains("preparation stopped"))
     );
     assert_eq!(host.config.session.root_turn_count, 0);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -146,7 +150,8 @@ fn mail_selection_and_missing_wake_context_failures_leave_a_terminal_status() {
         let (_, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host =
-            HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+            NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+                .unwrap();
         let item = if wake {
             wake_delivery(&mut host)
         } else {
@@ -154,8 +159,11 @@ fn mail_selection_and_missing_wake_context_failures_leave_a_terminal_status() {
             host.config.session.enqueue_live("operator").unwrap()
         };
         events.try_iter().for_each(drop);
-        host.run_prompt(item.text.clone(), Some(item), true, None)
-            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(item.text.clone(), Some(item), true, None)
+                .await
+        })
+        .unwrap();
         let observed: Vec<_> = events.try_iter().collect();
         assert!(
             observed
@@ -179,7 +187,7 @@ fn mail_selection_and_missing_wake_context_failures_leave_a_terminal_status() {
             1
         );
         assert_eq!(host.config.session.root_turn_count, 0);
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -200,7 +208,8 @@ fn an_admitted_prompt_emits_exactly_one_busy_false() {
         }
     });
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     actions
         .send(UserAction::Prompt("one prompt".into()))
         .unwrap();
@@ -208,13 +217,18 @@ fn an_admitted_prompt_emits_exactly_one_busy_false() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("prompt")
     };
     observed.lock().unwrap().clear();
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     let observed = std::mem::take(&mut *observed.lock().unwrap());
     assert_eq!(
         observed
@@ -223,5 +237,5 @@ fn an_admitted_prompt_emits_exactly_one_busy_false() {
             .count(),
         1
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }

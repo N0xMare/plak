@@ -116,8 +116,7 @@ pub(super) fn report_unavailable_context<P: plakous_host_protocol::ProtocolExten
 
 pub(super) const CONTEXT_QUERY_FAILED: &str = "canonical context query failed";
 
-pub(super) fn query_context(
-    executor: &ApplicationExecutor,
+pub(super) async fn query_context(
     opened: &AttachedCodingSession,
     query: ContextQuery,
 ) -> CliResult<ContextProjection> {
@@ -127,9 +126,9 @@ pub(super) fn query_context(
     if let Some(failure) = crate::error::read_faults::take(CONTEXT_QUERY_FAILED) {
         return Err(failure.into());
     }
-    let report = executor
-        .block_on(opened.context_status(operation, query))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    let report = opened
+        .context_status(operation, query)
+        .await
         .map_err(|error| CliFailure::session_read(CONTEXT_QUERY_FAILED, error))?;
     if report.locator() != opened.locator() {
         return Err(CliFailure::new(
@@ -657,15 +656,14 @@ pub(super) fn context_breakdown(
     )
 }
 
-pub(super) fn report_context<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn report_context<P: plakous_host_protocol::ProtocolExtension>(
     opened: &AttachedCodingSession,
     events: &Sender<P>,
     stage: &'static str,
     native_compact_facet: bool,
     counters: sessions::ContextCounters,
 ) -> CliResult<ContextProjection> {
-    let projection = match query_context(executor, opened, ContextQuery::Current) {
+    let projection = match query_context(opened, ContextQuery::Current).await {
         Ok(projection) => projection,
         Err(error) if error.store_refusal() == Some(crate::error::StoreRefusal::Busy) => {
             tracing::warn!(

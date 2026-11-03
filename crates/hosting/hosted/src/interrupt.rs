@@ -10,10 +10,10 @@
 //!   terminal claim, and never borrows authority from an event.
 //!
 //! * Long host operations — compact, rebind, fork — must observe an
-//!   `Interrupt` between provider round-trips. [`run_watched`] runs one
-//!   round-trip on the host executor while the control mailbox keeps being
-//!   polled, so the unresponsive window is one round-trip and not the whole
-//!   operation.
+//!   `Interrupt` between provider round-trips. [`watched`] awaits one
+//!   round-trip inline in the host's actor while the control mailbox is
+//!   drained as intents arrive, so the unresponsive window is one round-trip
+//!   and not the whole operation.
 //!
 //! Every other action, `Quit` included, is *deferred* in exact arrival order
 //! back to the host loop. Draining the mailbox to reach the urgent lane must
@@ -41,10 +41,6 @@ use std::time::Duration;
 use crate::intent_dispatch::{DispatchPhase, Disposition, IntentClass};
 use crate::surface_protocol::{UserActionDelivery, UserActionReceiver};
 use plakous::agent::{ControlError, ControlErrorKind};
-use plakous::application::{ApplicationExecutor, ApplicationExecutorError};
-
-/// How often a watched provider round-trip yields to poll the control mailbox.
-const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Mailbox observations owned by the host loop for the life of one attach.
 pub(crate) struct InterruptWatchState<P: plakous_host_protocol::ProtocolExtension> {
@@ -111,11 +107,22 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
 
     /// Drains the mailbox, recording the urgent lane and deferring the rest.
     pub(crate) fn poll(self) {
-        while let Ok(delivery) = self.actions.try_recv() {
-            let mut state = self.state.borrow_mut();
-            match IntentClass::of(&*delivery).disposition(DispatchPhase::Workflow) {
-                Disposition::ObserveInterrupt => state.interrupted = true,
-                _ => state.deferred.push_back(delivery),
+        let _ = self.drain();
+    }
+
+    /// [`Self::poll`], answering whether the mailbox can still deliver.
+    fn drain(self) -> bool {
+        loop {
+            match self.actions.try_recv() {
+                Ok(delivery) => {
+                    let mut state = self.state.borrow_mut();
+                    match IntentClass::of(&*delivery).disposition(DispatchPhase::Workflow) {
+                        Disposition::ObserveInterrupt => state.interrupted = true,
+                        _ => state.deferred.push_back(delivery),
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return false,
             }
         }
     }
@@ -156,30 +163,32 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
     }
 }
 
-/// Drives one provider round-trip while the control mailbox keeps being polled.
+/// Awaits one provider round-trip while observing the control mailbox.
 ///
 /// The round-trip itself is never cancelled: a paid canonical operation must
 /// reach its own receipt so its outcome stays lawful. Only the
 /// *next* step is skipped, by the caller, once [`InterruptWatch::interrupted`]
-/// reports the intent.
-pub(crate) fn run_watched<F, P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+/// reports the intent. The mailbox is drained as intents arrive, never on a
+/// timer: the urgent lane is recorded and everything else deferred. A
+/// mailbox whose producers are gone has nothing left to observe.
+pub(crate) async fn watched<F, P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     future: F,
-) -> Result<F::Output, ApplicationExecutorError>
+) -> F::Output
 where
     F: Future,
 {
-    executor.block_on(async move {
-        tokio::pin!(future);
-        loop {
-            tokio::select! {
-                biased;
-                output = &mut future => return output,
-                () = tokio::time::sleep(WATCH_POLL_INTERVAL) => watch.poll(),
+    tokio::pin!(future);
+    let mut observing = true;
+    loop {
+        tokio::select! {
+            biased;
+            output = &mut future => return output,
+            () = watch.actions.ready(), if observing => {
+                observing = watch.drain();
             }
         }
-    })
+    }
 }
 
 /// What the host actually observed about one cancel request.

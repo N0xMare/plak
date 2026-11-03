@@ -1,7 +1,7 @@
 //! Commit the terminal product projection before advertising completion.
 
 use super::{
-    ExceptionalTerminalProjection, HostLoop, Instant, InterruptWatch, SessionEvent,
+    ExceptionalTerminalProjection, Instant, InterruptWatch, NodeActor, SessionEvent,
     SessionQueueDrainState, TurnHostOutcome, commit_definite_failure_projection,
     commit_exceptional_terminal_projection, commit_session_update,
     context_capacity_recovery_guidance, elapsed_ms_since, emit_unavailable_context, handle_compact,
@@ -18,12 +18,12 @@ pub(super) enum TerminalErrorPresentation {
     Return,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Terminal publication joins cached outcome, durable feed catch-up, pending notices, and compaction under one publication fence."
     )]
-    pub(super) fn publish_terminal(
+    pub(super) async fn publish_terminal(
         &mut self,
         drive: Result<TurnHostOutcome, String>,
         turn_started: Instant,
@@ -41,7 +41,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             _ => None,
         };
         if let Some(exchange) = exchange {
-            self.settle_terminal_waits(exchange);
+            self.settle_terminal_waits(exchange).await;
         }
         match drive {
             Ok(TurnHostOutcome::ConsumedDelivery) => completed = true,
@@ -114,7 +114,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                         );
                         if let Err(error) = report_context(
-                            &self.executor,
                             &self.opened,
                             &self.events,
                             "after turn publication",
@@ -123,7 +122,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 .native_provider()
                                 .is_some_and(native_compact_facet),
                             self.config.session.context_counters(),
-                        ) {
+                        )
+                        .await
+                        {
                             emit_unavailable_context(&self.events);
                             let _ = self.events.notice(
                                 TranscriptRow::error(NoticeScope::Turn, error.message().to_owned())
@@ -210,7 +211,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         "this turn stopped at the context limit; compacting once for subsequent prompts. The failed turn will not be retried automatically",
                     ));
                     match handle_compact(
-                        &self.executor,
                         InterruptWatch::new(self.actions, &self.interrupt_state),
                         &mut self.config,
                         &self.opened,
@@ -219,17 +219,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         self.log.as_ref(),
                         sessions::ProductCompactReason::CapacityRecovery,
                         None,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(_) => {
                             completed = true;
                             if let Err(error) = report_context(
-                                &self.executor,
                                 &self.opened,
                                 &self.events,
                                 "after compaction",
                                 native,
                                 self.config.session.context_counters(),
-                            ) {
+                            )
+                            .await
+                            {
                                 emit_unavailable_context(&self.events);
                                 let _ = self.events.notice(
                                     TranscriptRow::error(
@@ -459,16 +462,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// Settles the root's await receipts for the terminal being published,
     /// before anything below can compact (spec 03 section 4.4). A failure
     /// leaves them for the settlement at the next admission or open.
-    fn settle_terminal_waits(&self, exchange: crate::agent::TerminalExchange) {
-        let settled = self
-            .executor
-            .block_on(super::super::result_mail::settle_terminal_waits(
-                &self.config.topology_rows(),
-                &self.config.session,
-                &self.opened,
-                exchange,
-            ))
-            .unwrap_or_else(|_| Err("application execution failed".to_owned()));
+    async fn settle_terminal_waits(&self, exchange: crate::agent::TerminalExchange) {
+        let settled = super::super::result_mail::settle_terminal_waits(
+            &self.config.topology_rows(),
+            &self.config.session,
+            &self.opened,
+            exchange,
+        )
+        .await;
         if let Err(error) = settled {
             let _ = self.events.notice(TranscriptRow::error(
                 NoticeScope::Tree,

@@ -93,7 +93,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
         });
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sender, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(sender),
@@ -103,7 +103,9 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
     actions
         .send(UserAction::Prompt("root prompt".into()))
         .unwrap();
-    let step = host.next_prompt(None).unwrap();
+    let step = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
     actions
         .send(UserAction::FollowUp("committed follow-up".into()))
         .unwrap();
@@ -136,7 +138,9 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
     actions
         .send(UserAction::Prompt("distinct next prompt".into()))
         .unwrap();
-    let step = host.next_prompt(None).unwrap();
+    let step = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
     assert!(!host.recovery_blocked, "the new prompt recovered in place");
     run_prompt_step(&mut host, step);
     seen.extend(events.try_iter());
@@ -147,7 +151,9 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
     assert_retained_queue(&durable.load(&id).unwrap(), &seen, &queued);
     assert_retained_queue(&host.config.session, &seen, &queued);
     actions.send(UserAction::ResumeQueueDrain).unwrap();
-    let step = host.next_prompt(None).unwrap();
+    let step = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
     run_prompt_step(&mut host, step);
     seen.extend(events.try_iter());
     assert_busy_follow_up_delivered(&seen, true);
@@ -155,10 +161,10 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
         durable.load(&id).unwrap().pending_queue,
         [] as [queue::QueueItem; 0]
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
-fn run_prompt_step(host: &mut HostLoop<'_, TestExtension>, step: HostStep) {
+fn run_prompt_step(host: &mut NodeActor<'_, TestExtension>, step: HostStep) {
     let HostStep::Prompt {
         text,
         queued_delivery,
@@ -167,8 +173,11 @@ fn run_prompt_step(host: &mut HostLoop<'_, TestExtension>, step: HostStep) {
     else {
         panic!("expected a prompt");
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
 }
 
 fn assert_retained_queue(

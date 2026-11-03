@@ -13,7 +13,6 @@ use crate::sessions::{NoticeScope, QueueDrainState as SessionQueueDrainState, Tr
 use crate::surface_protocol::ContentEvent;
 use crate::{CliFailure, CliResult, sessions};
 use plakous::agent::UserInput;
-use plakous::application::ApplicationExecutor;
 use plakous::sessions::ContextQuery;
 
 /// What an idle scheduled pass leaves for the prompt it ran before.
@@ -38,12 +37,11 @@ pub(in crate::runtime) enum ScheduledPrompt {
 /// Returns whether the prompt is sent or parked.
 #[allow(
     clippy::too_many_arguments,
-    reason = "Takes the host authority (executor, configuration, attached session, events, log), the interrupt watch, the stderr buffer, and the triggering prompt with its bare form."
+    reason = "Takes the host authority (configuration, attached session, events, log), the interrupt watch, the stderr buffer, and the triggering prompt with its bare form."
 )]
-pub(in crate::runtime) fn run_scheduled_compaction_until_fits<
+pub(in crate::runtime) async fn run_scheduled_compaction_until_fits<
     P: plakous_host_protocol::ProtocolExtension,
 >(
-    executor: &ApplicationExecutor,
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
@@ -59,9 +57,8 @@ pub(in crate::runtime) fn run_scheduled_compaction_until_fits<
         events,
         last_enrolled_source_bytes(opened),
         bare.is_some(),
-        |config| {
+        async |config| {
             let pass = handle_compact(
-                executor,
                 watch,
                 config,
                 opened,
@@ -70,21 +67,19 @@ pub(in crate::runtime) fn run_scheduled_compaction_until_fits<
                 log,
                 sessions::ProductCompactReason::Scheduled,
                 Some(command),
-            )?;
+            )
+            .await?;
             Ok(scheduled_paid_outcome(
                 pass,
                 opened.paid_fold_failed_since_last_round(),
             ))
         },
-        |use_bare| {
+        async |use_bare| {
             let input = bare.filter(|_| use_bare).unwrap_or(command);
-            query_context(
-                executor,
-                opened,
-                ContextQuery::WithPendingUserInput(input.clone()),
-            )
+            query_context(opened, ContextQuery::WithPendingUserInput(input.clone())).await
         },
     )
+    .await
 }
 
 /// A free commit after a paid failure must not buy a follow-on at this fence.
@@ -109,18 +104,18 @@ fn scheduled_prompt_sendable(projection: crate::context::ContextProjection) -> b
     clippy::too_many_lines,
     reason = "The scheduled-pass loop distinguishes paid dispatch, no eligible range, capacity recovery, and authoritative stop outcomes."
 )]
-fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolExtension>(
+async fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     events: &Sender<P>,
     enrolled_source_bytes: u64,
     bare_fallback: bool,
-    mut compact: impl FnMut(&mut HostConfig<P>) -> CliResult<CompactPass>,
-    mut project_pending: impl FnMut(bool) -> CliResult<crate::context::ContextProjection>,
+    mut compact: impl AsyncFnMut(&mut HostConfig<P>) -> CliResult<CompactPass>,
+    mut project_pending: impl AsyncFnMut(bool) -> CliResult<crate::context::ContextProjection>,
 ) -> CliResult<ScheduledPrompt> {
     let mut follow_ons_used = 0u32;
     loop {
-        let pass = compact(config)?;
+        let pass = compact(config).await?;
         if watch.observe_now() {
             // an interrupted scheduled compaction never follows on.
             let _ = events.notice(TranscriptRow::error(NoticeScope::Compaction,
@@ -138,7 +133,7 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
             );
             return Ok(ScheduledPrompt::Parked);
         }
-        let after = project_pending(false)?;
+        let after = project_pending(false).await?;
         emit_context_projection(
             events,
             &after,
@@ -147,9 +142,11 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
         );
         // The bare prompt, measured only once its mail-bearing command has
         // run out of folds this pass may pay for.
-        let mut bare = |admits: fn(crate::context::ContextProjection) -> bool| {
+        let mut bare = async |admits: fn(crate::context::ContextProjection) -> bool| {
             if bare_fallback {
-                project_pending(true).map(|projection| admits(projection).then_some(projection))
+                project_pending(true)
+                    .await
+                    .map(|projection| admits(projection).then_some(projection))
             } else {
                 Ok(None)
             }
@@ -165,7 +162,8 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
                 let mut over_window = after.compaction_verdict().overflow();
                 let drop_mail = over_window && bare_fallback;
                 if drop_mail {
-                    over_window = bare(|_| true)?
+                    over_window = bare(|_| true)
+                        .await?
                         .is_none_or(|projection| projection.compaction_verdict().overflow());
                 }
                 if !over_window {
@@ -188,7 +186,7 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
                     projection.disposition() == ContextDisposition::Fits
                 };
                 let drop_mail = !fits(after);
-                if !drop_mail || bare(fits)?.is_some() {
+                if !drop_mail || bare(fits).await?.is_some() {
                     let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                         NoticeScope::Compaction,
                         note,
@@ -241,7 +239,7 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
             follow_ons_used += 1;
             continue;
         }
-        if bare(scheduled_prompt_sendable)?.is_some() {
+        if bare(scheduled_prompt_sendable).await?.is_some() {
             let _ = events.notice(TranscriptRow::info(
                 NoticeScope::Compaction,
                 SCHEDULED_COMPACT_MAIL_DEFERRED_NOTE,
@@ -297,7 +295,7 @@ const SCHEDULED_COMPACT_NOTHING_ELIGIBLE_NOTE: &str =
 
 /// Whether a scheduled pass's command already fits below every trigger, so
 /// the pass reports `already fits` and pays for nothing.
-pub(super) fn scheduled_pass_already_fits<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn scheduled_pass_already_fits<P: plakous_host_protocol::ProtocolExtension>(
     run: &super::CompactRun<'_, P>,
     config: &mut HostConfig<P>,
     pending_user_input: Option<&UserInput>,
@@ -308,7 +306,7 @@ pub(super) fn scheduled_pass_already_fits<P: plakous_host_protocol::ProtocolExte
     // Manual compact is eligible-range gated. Scheduled compact
     // skips only when occupancy gauge Fits below the capacity-derived idle trigger.
     // Capacity recovery must still compact a Fits envelope.
-    if let Ok(projection) = query_context(run.executor, run.opened, qualification) {
+    if let Ok(projection) = query_context(run.opened, qualification).await {
         if projection.disposition() == ContextDisposition::Fits
             && !projection.compaction_verdict().is_due()
         {
@@ -321,7 +319,7 @@ pub(super) fn scheduled_pass_already_fits<P: plakous_host_protocol::ProtocolExte
                 Some(elapsed_ms(run.started_at)),
             );
             log_compact_finished(run.log, config, run.started_at, "not_needed");
-            emit_compact_meter(run.executor, run.opened, config, run.events);
+            emit_compact_meter(run.opened, config, run.events).await;
             return true;
         }
     }

@@ -20,7 +20,7 @@ use super::{
 };
 use crate::agent::AttachedCodingSession;
 use crate::context::ContextDisposition;
-use crate::interrupt::{InterruptWatch, run_watched};
+use crate::interrupt::{InterruptWatch, watched};
 use crate::session_log::SessionLog;
 use crate::sessions::{
     NoticeScope, QueueDrainState as SessionQueueDrainState, SessionRecord, TranscriptRow,
@@ -28,7 +28,6 @@ use crate::sessions::{
 use crate::surface_protocol::ContentEvent;
 use crate::{CliFailure, CliResult, sessions};
 use plakous::agent::UserInput;
-use plakous::application::ApplicationExecutor;
 use plakous::sessions::{
     AgentSessionsErrorKind, CompactReason, CompactSessionOutcome, ContextQuery, SessionOperationId,
 };
@@ -68,7 +67,6 @@ pub(super) enum CompactPass {
 
 /// One compact pass's fixed facts, shared by its steps.
 struct CompactRun<'a, P: plakous_host_protocol::ProtocolExtension> {
-    executor: &'a ApplicationExecutor,
     opened: &'a AttachedCodingSession,
     events: &'a Sender<P>,
     log: Option<&'a SessionLog>,
@@ -96,8 +94,7 @@ struct CompactAnswer {
     clippy::too_many_arguments,
     reason = "Manual compaction binds the attached session, durable reason, interrupt watch, and host event sink at dispatch."
 )]
-pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
@@ -111,18 +108,12 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
     let _credential_notices = if let (Some(agent), Some(account)) =
         (opened.agent().cloned(), config.session.account.clone())
     {
-        Some(
-            executor
-                .block_on(async {
-                    super::credential_wait::CredentialNotices::start(
-                        config.state_roots.session_tasks(),
-                        agent,
-                        account,
-                        events.clone(),
-                    )
-                })
-                .map_err(|_| CliFailure::new("application execution failed"))?,
-        )
+        Some(super::credential_wait::CredentialNotices::start(
+            config.state_roots.session_tasks(),
+            agent,
+            account,
+            events.clone(),
+        ))
     } else {
         None
     };
@@ -152,7 +143,6 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
         .filter(|_| reason == sessions::ProductCompactReason::Scheduled)
         .cloned();
     let run = CompactRun {
-        executor,
         opened,
         events,
         log,
@@ -162,11 +152,11 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
         started_at: compact_started_at,
     };
     if reason == sessions::ProductCompactReason::Scheduled
-        && scheduled_pass_already_fits(&run, config, pending_user_input.as_ref())
+        && scheduled_pass_already_fits(&run, config, pending_user_input.as_ref()).await
     {
         return Ok(CompactPass::Unchanged);
     }
-    let source = compact_source(&run, watch, config)?;
+    let source = compact_source(&run, watch, config).await?;
     let (outcome, occupancy_before) = dispatch_compact(
         &run,
         watch,
@@ -174,7 +164,8 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
         stderr_buf,
         source,
         pending_user_input.clone(),
-    )?;
+    )
+    .await?;
     let answer = classify_compact_answer(
         &run,
         config,
@@ -182,19 +173,19 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
         outcome,
         pending_user_input.as_ref(),
         occupancy_before,
-    )?;
-    finish_compact(&run, watch, config, answer)
+    )
+    .await?;
+    finish_compact(&run, watch, config, answer).await
 }
 
 /// The exact source a pass compacts, once no product work, workflow request
 /// or interrupt stands in its way.
-fn compact_source<P: plakous_host_protocol::ProtocolExtension>(
+async fn compact_source<P: plakous_host_protocol::ProtocolExtension>(
     run: &CompactRun<'_, P>,
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
 ) -> CliResult<plakous::sessions::SessionLocator> {
-    let (executor, opened, log, compact_started_at) =
-        (run.executor, run.opened, run.log, run.started_at);
+    let (opened, log, compact_started_at) = (run.opened, run.log, run.started_at);
     if (run.reason == sessions::ProductCompactReason::Manual
         && !config.session.pending_queue.is_empty())
         || config.session.queue_commands.has_pending()
@@ -220,14 +211,13 @@ fn compact_source<P: plakous_host_protocol::ProtocolExtension>(
             .save(&mut config.session)
             .map_err(CliFailure::new)?;
     }
-    executor
-        .block_on(super::projection::project_to_tail(
-            opened.sessions(),
-            &config.store,
-            &config.session.id,
-            opened.locator(),
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))??;
+    super::projection::project_to_tail(
+        opened.sessions(),
+        &config.store,
+        &config.session.id,
+        opened.locator(),
+    )
+    .await?;
     let intents = config
         .store
         .load_intents(&config.session.id)
@@ -277,7 +267,7 @@ fn compact_source<P: plakous_host_protocol::ProtocolExtension>(
     clippy::too_many_lines,
     reason = "Compaction dispatch preserves the ordered interrupt, source release, canonical dispatch, and reconciliation cuts."
 )]
-fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
+async fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
     run: &CompactRun<'_, P>,
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
@@ -285,30 +275,21 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
     source: plakous::sessions::SessionLocator,
     pending_user_input: Option<UserInput>,
 ) -> CliResult<(CompactSessionOutcome, Option<u64>)> {
-    let (executor, opened, events, log, reason) =
-        (run.executor, run.opened, run.events, run.log, run.reason);
+    let (opened, events, log, reason) = (run.opened, run.events, run.log, run.reason);
     let (operation, call_id, compact_started_at) = (&run.operation, &run.call_id, run.started_at);
     stderr_buf.clear();
     // A compaction keeps the session's tools: its skills follow what the
     // session froze, never the live setting (spec 02 §6.1.1).
     let sessions = config.state_roots.runtime_sessions()?;
-    let frozen = executor
-        .block_on(crate::skills::frozen_skills(&sessions, source))
-        .map_err(|_| CliFailure::new("application execution failed"))?
+    let frozen = crate::skills::frozen_skills(&sessions, source)
+        .await
         .map_err(|error| {
             CliFailure::new(format!(
                 "the session's frozen skills could not be read: {error}"
             ))
         })?;
     config.state_roots.set_frozen_skills(Some(frozen));
-    let runtime = executor
-        .block_on(host_runtime_binding(
-            config,
-            stderr_buf,
-            RuntimeRole::Compact,
-        ))
-        .map_err(|_| CliFailure::new("application execution failed"))
-        .and_then(|runtime| runtime);
+    let runtime = host_runtime_binding(config, stderr_buf, RuntimeRole::Compact).await;
     config.state_roots.set_frozen_skills(None);
     let runtime = runtime?;
     let operation_id = SessionOperationId::new(operation)
@@ -345,59 +326,36 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
         HostWorkflow::Compact,
         HostBoundary::Prepared,
     );
-    let occupancy_before = unanchored_occupancy(executor, opened);
+    let occupancy_before = unanchored_occupancy(opened).await;
     publish_compact_row(config, events, call_id, "running", None, None);
-    let outcome = match run_watched(
-        executor,
+    let outcome = match watched(
         watch,
-        opened.compact_from(
+        Box::pin(opened.compact_from(
             operation_id,
             source,
             facade_reason,
             pending_user_input,
             runtime,
-        ),
-    ) {
-        Ok(Ok(outcome)) => outcome,
-        Ok(Err(error)) => {
+        )),
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(error) => {
             let _ = refresh_compact_views(
-                executor,
                 opened,
                 config,
                 log,
                 operation,
                 call_id,
                 compact_error_is_unadmitted(error.kind()),
-            );
+            )
+            .await;
             config
                 .store
                 .save(&mut config.session)
                 .map_err(CliFailure::new)?;
             let detail = format!("canonical compact failed: {error}");
-            log_compact_finished_with_detail(
-                log,
-                config,
-                compact_started_at,
-                "failed",
-                Some(&detail),
-                false,
-            );
-            publish_compact_row(
-                config,
-                events,
-                call_id,
-                "failed",
-                Some(detail.clone()),
-                Some(elapsed_ms(compact_started_at)),
-            );
-            return Err(CliFailure::new(detail));
-        }
-        Err(error) => {
-            config
-                .store
-                .save(&mut config.session)
-                .map_err(CliFailure::new)?;
-            let detail = format!("canonical compact executor failed: {error}");
             log_compact_finished_with_detail(
                 log,
                 config,
@@ -431,7 +389,7 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
     clippy::too_many_lines,
     reason = "Each canonical compaction outcome determines its own source restoration, notice, and reconciliation action."
 )]
-fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
+async fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
     run: &CompactRun<'_, P>,
     config: &mut HostConfig<P>,
     source: plakous::sessions::SessionLocator,
@@ -439,13 +397,8 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
     pending_user_input: Option<&UserInput>,
     occupancy_before: Option<u64>,
 ) -> CliResult<CompactAnswer> {
-    let (executor, opened, log, reason, compact_started_at) = (
-        run.executor,
-        run.opened,
-        run.log,
-        run.reason,
-        run.started_at,
-    );
+    let (opened, log, reason, compact_started_at) =
+        (run.opened, run.log, run.reason, run.started_at);
     let mut size_subject = None;
     let mut remedy = None;
     let unadmitted = compact_answer_is_unadmitted(&outcome, source);
@@ -461,13 +414,14 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
                 .bind_plakous_locator(target)
                 .map_err(CliFailure::new)?;
             let successor_fits = match pending_user_input {
-                Some(command) => query_context(
-                    executor,
-                    opened,
-                    ContextQuery::WithPendingUserInput(command.clone()),
-                )
-                .is_ok_and(|projection| projection.disposition() == ContextDisposition::Fits),
-                None => exact_pending_context_fits(executor, opened, &config.session),
+                Some(command) => {
+                    query_context(opened, ContextQuery::WithPendingUserInput(command.clone()))
+                        .await
+                        .is_ok_and(|projection| {
+                            projection.disposition() == ContextDisposition::Fits
+                        })
+                }
+                None => exact_pending_context_fits(opened, &config.session).await,
             };
             let base = if reason == sessions::ProductCompactReason::Scheduled {
                 COMPACT_COMMITTED_DETAIL
@@ -487,7 +441,7 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
                 }
                 None => base.to_owned(),
             };
-            let occupancy_after = unanchored_occupancy(executor, opened);
+            let occupancy_after = unanchored_occupancy(opened).await;
             // The record's own figures first: they are what telemetry reports,
             // and both sides are unanchored so they compare like for like.
             let (before, after) = match (
@@ -556,15 +510,16 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
             // capacity. That is the one case the protected wording is still
             // true for, so the operator gets it here rather than at the
             // failed turn, where placeholders had not been tried yet.
-            let detail =
-                if query_context(executor, opened, ContextQuery::Current).is_ok_and(|projection| {
+            let detail = if query_context(opened, ContextQuery::Current)
+                .await
+                .is_ok_and(|projection| {
                     projection.disposition() == ContextDisposition::ProtectedOverflow
                 }) {
-                    remedy = Some(NoticeRemedy::LargerModelOrStartFresh {});
-                    CONTEXT_CAPACITY_PROTECTED_GUIDANCE.to_owned()
-                } else {
-                    COMPACT_NO_ELIGIBLE_RANGE_DETAIL.to_owned()
-                };
+                remedy = Some(NoticeRemedy::LargerModelOrStartFresh {});
+                CONTEXT_CAPACITY_PROTECTED_GUIDANCE.to_owned()
+            } else {
+                COMPACT_NO_ELIGIBLE_RANGE_DETAIL.to_owned()
+            };
             (
                 CompactPass::NothingEligible,
                 false,
@@ -625,20 +580,14 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
     clippy::too_many_lines,
     reason = "Compaction completion reconciles the workflow before restoring the binding, context counters, and queue snapshot."
 )]
-fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
+async fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
     run: &CompactRun<'_, P>,
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     answer: CompactAnswer,
 ) -> CliResult<CompactPass> {
-    let (executor, opened, events, log, reason, compact_started_at) = (
-        run.executor,
-        run.opened,
-        run.events,
-        run.log,
-        run.reason,
-        run.started_at,
-    );
+    let (opened, events, log, reason, compact_started_at) =
+        (run.opened, run.events, run.log, run.reason, run.started_at);
     let (operation, call_id) = (&run.operation, &run.call_id);
     let CompactAnswer {
         pass,
@@ -649,9 +598,8 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
         unadmitted,
         remedy,
     } = answer;
-    let settled_row = refresh_compact_views(
-        executor, opened, config, log, operation, call_id, unadmitted,
-    );
+    let settled_row =
+        refresh_compact_views(opened, config, log, operation, call_id, unadmitted).await;
     let compacted = pass == CompactPass::Committed;
     let resumes_queue = matches!(
         reason,
@@ -753,19 +701,19 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
     if successor_fits || !compacted {
         let _ = events.send(ContentEvent::ContextCapacityRecovery(None));
     }
-    emit_compact_meter(executor, opened, config, events);
+    emit_compact_meter(opened, config, events).await;
     Ok(pass)
 }
 
-pub(super) fn exact_pending_context_fits(
-    executor: &ApplicationExecutor,
+pub(super) async fn exact_pending_context_fits(
     opened: &AttachedCodingSession,
     session: &SessionRecord,
 ) -> bool {
     let query = queue::next_drainable(session).map_or(ContextQuery::Current, |item| {
         ContextQuery::WithPendingUserInput(item.user_input(&item.text))
     });
-    query_context(executor, opened, query)
+    query_context(opened, query)
+        .await
         .is_ok_and(|projection| projection.disposition() == ContextDisposition::Fits)
 }
 

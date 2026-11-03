@@ -76,33 +76,35 @@ fn resumed_fork_and_rebind_do_not_present_inherited_terminal_usage() {
         let state = RefCell::new(InterruptWatchState::default());
         let watch = InterruptWatch::new(&receiver, &state);
         if rebind {
-            crate::runtime::rebind::handle_rebind(
-                &executor,
-                watch,
-                &mut config,
-                &mut opened,
-                &mut Vec::new(),
-                &events,
-                "codex",
-                "offline-loopback-v2",
-                Some("medium"),
-                None,
-                None,
-                None,
-                &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-            )
-            .unwrap();
+            executor
+                .block_on(crate::runtime::rebind::handle_rebind(
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    "codex",
+                    "offline-loopback-v2",
+                    Some("medium"),
+                    None,
+                    None,
+                    None,
+                    &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                ))
+                .expect("the executor drives the call")
+                .unwrap();
         } else {
-            crate::runtime::fork::handle_fork(
-                &executor,
-                watch,
-                &mut config,
-                &mut opened,
-                &mut Vec::new(),
-                &events,
-                None,
-            )
-            .unwrap();
+            executor
+                .block_on(crate::runtime::fork::handle_fork(
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    None,
+                ))
+                .expect("the executor drives the call")
+                .unwrap();
         }
         assert_ne!(config.session.id, source);
         let sessions = config.state_roots.runtime_sessions().unwrap();

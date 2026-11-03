@@ -2,7 +2,6 @@
 
 use crate::session_log::SessionEvent;
 use crate::surface_protocol::ContentEvent;
-use plakous::application::ApplicationExecutor;
 
 use crate::sessions::SessionRecord;
 
@@ -771,8 +770,7 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
     started
 }
 
-pub(super) fn dispatch_topology_navigator_sync<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn dispatch_topology_navigator<P: plakous_host_protocol::ProtocolExtension>(
     rows: &dyn TopologyRows,
     roots: &crate::agent::ProductStateRoots,
     session: &SessionRecord,
@@ -785,40 +783,31 @@ pub(super) fn dispatch_topology_navigator_sync<P: plakous_host_protocol::Protoco
         push.child_live.close_agent_transcript(events);
         return;
     }
-    if let Err(error) = executor.block_on(async {
-        crate::topology_navigator::dispatch_topology_navigator_action(
-            rows, session, events, action,
-        )
+    crate::topology_navigator::dispatch_topology_navigator_action(rows, session, events, action)
         .await;
-        if let Some(runtime) = push.runtime(rows, session) {
-            push.child_live
-                .set_jobs(std::sync::Arc::clone(roots.job_registry()));
-            push.child_live
-                .action(
-                    roots.session_tasks(),
-                    &runtime,
-                    roots.runtime_sessions().ok(),
-                    &session.id,
-                    action,
-                    events,
-                )
-                .await;
-            emit_child_progress_on_refresh(&runtime, session, push, events, action);
-        }
-        if resumed {
-            start_child_recovery(
-                events,
+    if let Some(runtime) = push.runtime(rows, session) {
+        push.child_live
+            .set_jobs(std::sync::Arc::clone(roots.job_registry()));
+        push.child_live
+            .action(
+                roots.session_tasks(),
+                &runtime,
+                roots.runtime_sessions().ok(),
                 &session.id,
-                durable_tree_id(rows, session),
-                false,
-                None,
-            );
-        }
-    }) {
-        let _ = events.notice(TranscriptRow::error(
-            NoticeScope::Tree,
-            format!("agent tree navigator could not run: {error}"),
-        ));
+                action,
+                events,
+            )
+            .await;
+        emit_child_progress_on_refresh(&runtime, session, push, events, action);
+    }
+    if resumed {
+        start_child_recovery(
+            events,
+            &session.id,
+            durable_tree_id(rows, session),
+            false,
+            None,
+        );
     }
 }
 
@@ -826,8 +815,7 @@ pub(super) fn dispatch_topology_navigator_sync<P: plakous_host_protocol::Protoco
     clippy::too_many_arguments,
     reason = "one idle tool dispatch names its whole exact context"
 )]
-pub(super) fn dispatch_invoke_tool_sync<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn dispatch_invoke_tool<P: plakous_host_protocol::ProtocolExtension>(
     rows: &dyn TopologyRows,
     store: &dyn crate::session_store::SessionRecordStore,
     home: &crate::session_home::SessionHome,
@@ -851,10 +839,10 @@ pub(super) fn dispatch_invoke_tool_sync<P: plakous_host_protocol::ProtocolExtens
     };
     let tree_id = durable_tree_id(rows, session);
     let call_id = uuid::Uuid::new_v4().to_string();
-    match executor.block_on(crate::agent::invoke_topology_tool_on_hub(
-        &tree_id, agent_id, name, &value, &call_id,
-    )) {
-        Ok(Ok(receipt)) => {
+    match crate::agent::invoke_topology_tool_on_hub(&tree_id, agent_id, name, &value, &call_id)
+        .await
+    {
+        Ok(receipt) => {
             if let Some(command_id) = correlation_id {
                 let _ = events.send(ContentEvent::ToolInvocationOrigin {
                     call_id: receipt.call_id.clone(),
@@ -902,14 +890,8 @@ pub(super) fn dispatch_invoke_tool_sync<P: plakous_host_protocol::ProtocolExtens
                 false,
             );
         }
-        Ok(Err(message)) => {
+        Err(message) => {
             let _ = events.notice(TranscriptRow::error(NoticeScope::Tree, message));
-        }
-        Err(error) => {
-            let _ = events.notice(TranscriptRow::error(
-                NoticeScope::Tree,
-                format!("invoke_tool could not run: {error}"),
-            ));
         }
     }
 }

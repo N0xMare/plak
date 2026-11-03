@@ -22,7 +22,8 @@ fn stopped_preparation_publishes_stop_status_even_when_the_pause_write_fails() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     let item = host.config.session.enqueue_live("keep queued").unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
     host.config.store = Arc::new(FaultStore::new(
@@ -37,7 +38,10 @@ fn stopped_preparation_publishes_stop_status_even_when_the_pause_write_fails() {
         }),
     ));
     let error = host
-        .run_prompt(item.text.clone(), Some(item), true, None)
+        .block(async |host| {
+            host.run_prompt(item.text.clone(), Some(item), true, None)
+                .await
+        })
         .err()
         .expect("pause persistence must fail");
     assert!(error.message().contains("injected pause write failure"));
@@ -63,5 +67,5 @@ fn stopped_preparation_publishes_stop_status_even_when_the_pause_write_fails() {
             .iter()
             .any(|(_, detail)| matches!(detail, Some(HostStatusDetail::PromptNotAdmitted)))
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }

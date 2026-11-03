@@ -12,7 +12,7 @@ use plakous::sessions::feed::FeedSeq;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 use super::{
-    CliFailure, CliResult, ContextQuery, HostLoop, HostStep, SessionEvent,
+    CliFailure, CliResult, ContextQuery, HostStep, NodeActor, SessionEvent,
     build_session_from_config, durable_tree_id, emit_queue_snapshot, emit_restored_paused_note,
     emit_unavailable_context, log_ev, native_compact_facet, query_context, report_context,
     restored_paused_status_suffix,
@@ -34,7 +34,7 @@ pub(super) struct ReopenedTurn {
     terminal_published: bool,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// Reopens this session in place and publishes what the reopen closed.
     ///
     /// On failure the old attachment stays released and `recovery_blocked`
@@ -44,14 +44,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         clippy::too_many_lines,
         reason = "Recovery distinguishes retained approvals, abandoned turns, pending projection debt, and the exact source binding before reopening."
     )]
-    pub(super) fn recover_session(&mut self, trigger: RecoveryTrigger) -> CliResult<HostStep> {
+    pub(super) async fn recover_session(
+        &mut self,
+        trigger: RecoveryTrigger,
+    ) -> CliResult<HostStep> {
         let _ = self.events.send(ContentEvent::SetBusy(true));
         let _ = self.events.send(ContentEvent::Status {
             phase: HostPhase::Running,
             queue_len: self.config.session.pending_queue.len(),
             detail: Some(HostStatusDetail::RecoveringInterruptedTurn),
         });
-        let recovered = self.reopen_in_place();
+        let recovered = self.reopen_in_place().await;
         let restored_working = recovered.is_ok() && self.opened.has_recovered_turn();
         if !restored_working {
             let _ = self.events.send(ContentEvent::SetBusy(false));
@@ -124,7 +127,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             operations,
         });
         if let Err(error) = report_context(
-            &self.executor,
             &self.opened,
             &self.events,
             "after recovery",
@@ -133,7 +135,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .native_provider()
                 .is_some_and(native_compact_facet),
             self.config.session.context_counters(),
-        ) {
+        )
+        .await
+        {
             emit_unavailable_context(&self.events);
             let _ = self.events.send(ContentEvent::Row(
                 TranscriptRow::error(NoticeScope::Recovery, error.message().to_owned())
@@ -154,7 +158,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.interactive,
         );
         if restored_working {
-            return self.drive_restored_turn();
+            return self.drive_restored_turn().await;
         }
         let _ = self.events.send(ContentEvent::Status {
             phase: HostPhase::Idle,
@@ -174,9 +178,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
         let events = self.events.clone();
         let session_id = self.config.session.id.clone();
-        let _ = self.executor.block_on(async move {
-            super::super::tree::start_child_recovery(&events, &session_id, tree_id, false, None);
-        });
+        super::super::tree::start_child_recovery(&events, &session_id, tree_id, false, None);
     }
 
     /// An explicit `/recover` with no interrupted root turn: starts the tree's
@@ -188,18 +190,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let events = self.events.clone();
         let session_id = self.config.session.id.clone();
         let for_pass = nothing.clone();
-        let started = self
-            .executor
-            .block_on(async move {
-                super::super::tree::start_child_recovery(
-                    &events,
-                    &session_id,
-                    tree_id,
-                    true,
-                    for_pass,
-                )
-            })
-            .unwrap_or(crate::agent::RecoveryPassStart::NoTree);
+        let started =
+            super::super::tree::start_child_recovery(&events, &session_id, tree_id, true, for_pass);
         log_ev(
             self.log.as_ref(),
             &self.config,
@@ -222,18 +214,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         clippy::too_many_lines,
         reason = "In-place reopen restores the canonical session and reattaches its events without losing the existing host queue and notices."
     )]
-    pub(super) fn reopen_in_place(&mut self) -> CliResult<ReopenedTurn> {
+    pub(super) async fn reopen_in_place(&mut self) -> CliResult<ReopenedTurn> {
         let previous_cursor = self
             .config
             .store
             .load_views(&self.config.session.id)
             .map_err(CliFailure::new)?
             .map_or(FeedSeq::ZERO, |views| views.cursor);
-        match self
-            .executor
-            .block_on(self.opened.detach_for_transfer())
-            .map_err(|_| CliFailure::new("application execution failed"))?
-        {
+        match self.opened.detach_for_transfer().await {
             Ok(_) => {}
             // Another owner opened the session after this one lost its lease.
             // There is nothing of this owner's left to release; the reopen
@@ -260,24 +248,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .map_err(CliFailure::new)?;
         }
         // Transfer reopens the projected head, just like a fresh attachment.
-        let views = self
-            .executor
-            .block_on(super::super::projection::project_to_tail(
-                self.opened.sessions(),
-                &self.config.store,
-                &self.config.session.id,
-                self.opened.locator(),
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+        let views = super::super::projection::project_to_tail(
+            self.opened.sessions(),
+            &self.config.store,
+            &self.config.session.id,
+            self.opened.locator(),
+        )
+        .await
+        .map_err(CliFailure::new)?;
         self.config.session.plakous_locator = super::super::projection::head_locator(&views);
-        let mut replacement = self
-            .executor
-            .block_on(build_session_from_config(
-                &mut self.config,
-                &mut self.stderr_buf,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))??;
+        let mut replacement =
+            build_session_from_config(&mut self.config, &mut self.stderr_buf).await?;
         replacement.inherit_topology_owner(&mut self.opened);
         let report = replacement
             .agent()
@@ -285,7 +266,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .cloned();
         let previous = std::mem::replace(&mut self.opened, replacement);
         // Spec 02 §4.2 step 2: apply what the reopen committed.
-        self.project_now();
+        self.project_now().await;
         let applied_cursor = self
             .config
             .store
@@ -294,35 +275,32 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .map_or(previous_cursor, |views| views.cursor);
         let locator = self.opened.locator();
         let terminal_published = report.is_none()
-            && self
-                .executor
-                .block_on(crate::driver::reopen::terminal_published_between(
-                    self.opened.sessions(),
-                    locator,
-                    previous_cursor,
-                    applied_cursor,
-                ))
-                .map_err(|_| CliFailure::new("application execution failed"))?
-                .map_err(|error| CliFailure::new(error.to_string()))?;
-        let released = match self.executor.block_on(previous.release()) {
-            Ok(Ok(_)) => None,
-            Ok(Err(error)) => Some(error.to_string()),
-            Err(_) => Some("application execution failed".to_owned()),
-        };
+            && crate::driver::reopen::terminal_published_between(
+                self.opened.sessions(),
+                locator,
+                previous_cursor,
+                applied_cursor,
+            )
+            .await
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        let released = previous
+            .release()
+            .await
+            .err()
+            .map(|error| error.to_string());
         if let Some(error) = released {
             let _ = self.events.notice(TranscriptRow::error(
                 NoticeScope::Recovery,
                 format!("the stopped session's attachment did not release cleanly: {error}"),
             ));
         }
-        self.executor
-            .block_on(super::super::result_mail::settle_waits(
-                &self.config.topology_rows(),
-                &self.config.session,
-                &self.opened,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+        super::super::result_mail::settle_waits(
+            &self.config.topology_rows(),
+            &self.config.session,
+            &self.opened,
+        )
+        .await
+        .map_err(CliFailure::new)?;
         self.config
             .session
             .bind_plakous_locator(self.opened.locator())
@@ -332,9 +310,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .store
             .save(&mut self.config.session)
             .map_err(CliFailure::new)?;
-        if query_context(&self.executor, &self.opened, ContextQuery::Current).is_ok_and(
-            |projection| projection.disposition() == ContextDisposition::RecoveryRequired,
-        ) {
+        if query_context(&self.opened, ContextQuery::Current)
+            .await
+            .is_ok_and(|projection| {
+                projection.disposition() == ContextDisposition::RecoveryRequired
+            })
+        {
             return Err(CliFailure::new(
                 "the reopened session still has an unfinished operation this release cannot close",
             ));

@@ -1,6 +1,6 @@
 //! Root transient continuation owns no turn while waiting.
 
-use super::{CliFailure, CliResult, HostLoop, HostStep, InterruptWatch};
+use super::{CliFailure, CliResult, HostStep, InterruptWatch, NodeActor};
 use crate::driver::transient::{self, ResumeGate, ResumeOwner, ResumePlan};
 use crate::runtime::TransientFailure;
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -57,7 +57,7 @@ impl Drop for PendingResume {
     }
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     pub(super) fn schedule_transient_resume(
         &mut self,
         failure: TransientFailure,
@@ -104,11 +104,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         };
         let session_id = self.config.session.id.clone();
         let probe = self.opened.reachability_probe();
-        let Ok(pending) = self.executor.block_on(async {
-            PendingResume::spawn(self.executor.tasks(), session_id, plan, probe)
-        }) else {
-            return false;
-        };
+        let pending = PendingResume::spawn(self.executor.tasks(), session_id, plan, probe);
         self.pending_resume = Some(pending);
         self.transient_resumes_used = round;
         let _ = self.events.notice(TranscriptRow::info(
@@ -130,7 +126,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
     }
 
-    pub(super) fn transient_resume_prompt(&mut self) -> CliResult<HostStep> {
+    pub(super) async fn transient_resume_prompt(&mut self) -> CliResult<HostStep> {
         let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
         watch.defer_input();
         if watch.interrupted() || self.interrupt_state.borrow().has_deferred() {
@@ -158,25 +154,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let item = candidate
             .enqueue_live(text.clone())
             .map_err(|_| CliFailure::new("transient continuation queue admission was refused"))?;
-        self.config.session = self
-            .executor
-            .block_on(super::super::result_mail::prepare_with_command(
-                &self.config.topology_rows(),
-                self.config.store.as_ref(),
-                &candidate,
-                &item,
-                &text,
-                None,
-                command.as_str(),
-                crate::driver::ledger::CommandKind::Resume,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::from)
-            .inspect_err(|error| {
-                if error.store_refusal() == Some(crate::error::StoreRefusal::StorageFull) {
-                    self.cancel_transient_resume();
-                }
-            })?;
+        self.config.session = super::super::result_mail::prepare_with_command(
+            &self.config.topology_rows(),
+            self.config.store.as_ref(),
+            &candidate,
+            &item,
+            &text,
+            None,
+            command.as_str(),
+            crate::driver::ledger::CommandKind::Resume,
+        )
+        .await
+        .map_err(CliFailure::from)
+        .inspect_err(|error| {
+            if error.store_refusal() == Some(crate::error::StoreRefusal::StorageFull) {
+                self.cancel_transient_resume();
+            }
+        })?;
         self.pending_resume = None;
         Ok(HostStep::Prompt {
             text,

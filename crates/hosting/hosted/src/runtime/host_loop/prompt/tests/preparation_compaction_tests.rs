@@ -69,7 +69,8 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     seed_compactable_history(&host);
     let source = host.opened.locator();
     let item = host
@@ -100,8 +101,11 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
             std::thread::park_timeout(Duration::from_millis(5));
         }
     });
-    host.run_prompt(item.text.clone(), Some(item.clone()), true, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(item.text.clone(), Some(item.clone()), true, None)
+            .await
+    })
+    .unwrap();
     control.join().unwrap();
     assert_ne!(
         host.opened.locator(),
@@ -137,10 +141,10 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
             .count(),
         1
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
-fn seed_compactable_history(host: &HostLoop<'_, TestExtension>) {
+fn seed_compactable_history(host: &NodeActor<'_, TestExtension>) {
     for text in ["older intent", "latest intent"] {
         host.executor
             .block_on(async {
@@ -165,7 +169,8 @@ fn context_stop_skips_a_due_paid_compaction_and_preserves_the_locator() {
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     seed_compactable_history(&host);
     let source = host.opened.locator();
     let item = host
@@ -181,8 +186,11 @@ fn context_stop_skips_a_due_paid_compaction_and_preserves_the_locator() {
             actions.send(UserAction::Interrupt).unwrap();
         }),
     ));
-    host.run_prompt(item.text.clone(), Some(item), true, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(item.text.clone(), Some(item), true, None)
+            .await
+    })
+    .unwrap();
     {
         let calls = &host.prep_hooks.called;
         assert!(calls.contains(&preparation::Stage::Context));
@@ -205,7 +213,7 @@ fn context_stop_skips_a_due_paid_compaction_and_preserves_the_locator() {
         2,
         "only the two seeded turns may dispatch; no scheduled fold"
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -232,7 +240,8 @@ fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
     });
     let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+        NodeActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
+            .unwrap();
     seed_compactable_history(&host);
     let item = host
         .config
@@ -246,8 +255,11 @@ fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
         result: None,
         run: None,
     };
-    host.run_prompt(item.text.clone(), Some(item), true, Some(&mut invocation))
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(item.text.clone(), Some(item), true, Some(&mut invocation))
+            .await
+    })
+    .unwrap();
     let error = invocation
         .result
         .unwrap()
@@ -261,8 +273,12 @@ fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
     assert!(matches!(&intents.pause_causes.last().unwrap().value,
         sessions::projector::HostPauseCause::UnrecordedRefusal {reason} if reason.contains("injected compaction failure")));
     assert!(
-        matches!(host.next_prompt(None).unwrap(), HostStep::Quit),
+        matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Quit
+        ),
         "idle still observes the deferred quit"
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }

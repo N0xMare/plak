@@ -496,6 +496,21 @@ impl AttachedCodingSession {
         }
     }
 
+    /// Moves this attachment out for its release, leaving an inert copy in
+    /// its place that owns no driver, lease or recovered turn.
+    pub(crate) fn take_for_release(&mut self) -> Self {
+        let inert = Self {
+            output_bound_rederived: None,
+            reachability_probe: None,
+            sessions: Arc::clone(&self.sessions),
+            opened: None,
+            recovered_turn: None,
+            locator: self.locator,
+            topology_owner: None,
+        };
+        std::mem::replace(self, inert)
+    }
+
     pub(crate) async fn detach_for_transfer(
         &mut self,
     ) -> Result<SessionLocator, AgentSessionsError> {

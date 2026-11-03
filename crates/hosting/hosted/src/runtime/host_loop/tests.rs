@@ -6,7 +6,7 @@ type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
 use super::*;
 
-use crate::interrupt::{InterruptWatch, InterruptWatchState, run_watched};
+use crate::interrupt::{InterruptWatch, InterruptWatchState, watched};
 use crate::runtime::test_support::*;
 use plakous::application::ApplicationExecutor;
 use std::cell::RefCell;
@@ -47,7 +47,7 @@ fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
         .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sender, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &receiver, Sender::over(sender), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &receiver, Sender::over(sender), None).unwrap();
     send_attached_action(
         &actions,
         UserAction::Prompt("one shot with a busy tree".into()),
@@ -77,7 +77,8 @@ fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
             host.config.store.clone(),
             ReleaseAfterGate(Mutex::new(Some(release))),
         ));
-        host.drive(Some(&mut state)).unwrap();
+        host.block(async |host| host.drive(Some(&mut state)).await)
+            .unwrap();
         holder.join().unwrap();
     });
     assert!(
@@ -88,7 +89,7 @@ fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
         "a busy live tree is not restored-paused: {:?}",
         state.result
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -124,7 +125,7 @@ fn a_deferred_action_is_visible_before_the_queue_opens_a_turn() {
 }
 
 #[test]
-fn run_watched_observes_an_interrupt_within_one_round_trip() {
+fn watched_observes_an_interrupt_within_one_round_trip() {
     let executor = ApplicationExecutor::new().unwrap();
     let (actions_tx, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let interrupt_state = RefCell::new(InterruptWatchState::default());
@@ -139,7 +140,7 @@ fn run_watched_observes_an_interrupt_within_one_round_trip() {
         tokio::time::sleep(Duration::from_millis(200)).await;
         "receipt"
     };
-    let receipt = run_watched(&executor, watch, round_trip).unwrap();
+    let receipt = executor.block_on(watched(watch, round_trip)).unwrap();
 
     // The round-trip still reached its own receipt; only the next step is
     // skipped by the caller.
@@ -152,6 +153,43 @@ fn run_watched_observes_an_interrupt_within_one_round_trip() {
         deferred.map(|delivery| delivery.into_parts().0),
         Some(UserAction::Prompt("deferred".into()))
     );
+}
+
+/// A watched round-trip is woken by its own completion and by intents, never
+/// by a timer: with an empty mailbox, or one whose producers are gone, it is
+/// not polled again until the round-trip ends.
+#[test]
+fn watched_does_not_poll_a_quiet_or_closed_mailbox() {
+    let executor = ApplicationExecutor::new().unwrap();
+    for producers_gone in [false, true] {
+        let (actions_tx, actions_rx) =
+            crate::surface_protocol::user_action_channel::<TestExtension>();
+        let interrupt_state = RefCell::new(InterruptWatchState::default());
+        let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
+        let _producer = (!producers_gone).then_some(actions_tx);
+        let polls = std::cell::Cell::new(0_u32);
+        executor
+            .block_on(async {
+                let round_trip = watched(watch, tokio::time::sleep(Duration::from_millis(300)));
+                tokio::pin!(round_trip);
+                std::future::poll_fn(|context| {
+                    polls.set(polls.get() + 1);
+                    round_trip.as_mut().poll(context)
+                })
+                .await;
+            })
+            .unwrap();
+        assert!(
+            polls.get() <= 3,
+            "a round-trip with {} mailbox was polled {} times",
+            if producers_gone {
+                "a closed"
+            } else {
+                "a quiet"
+            },
+            polls.get()
+        );
+    }
 }
 
 #[test]

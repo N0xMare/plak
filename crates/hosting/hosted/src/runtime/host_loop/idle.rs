@@ -2,11 +2,11 @@
 
 use super::recover::RecoveryTrigger;
 use super::{
-    APPROVAL_REFUSED_NOTE, CliFailure, CliResult, ContextQuery, HostLoop, HostStep,
-    IDLE_OBSERVE_POLL_INTERVAL, Instant, InterruptWatch, Rebound, RecvTimeoutError,
+    APPROVAL_REFUSED_NOTE, CliFailure, CliResult, ContextQuery, HostStep,
+    IDLE_OBSERVE_POLL_INTERVAL, Instant, InterruptWatch, NodeActor, Rebound, RecvTimeoutError,
     SessionQueueDrainState, TREE_OBSERVE_INTERVAL, UserAction, admit_idle_immediate_prompt,
     clear_session_rebuild, commit_session_update, compact_may_resume_queue,
-    compact_reason_for_disposition, dispatch_invoke_tool_sync, dispatch_topology_navigator_sync,
+    compact_reason_for_disposition, dispatch_invoke_tool, dispatch_topology_navigator,
     drop_last_mutable, edit_mutable, emit_queue_snapshot, emit_tree_snapshot_if_revision_advanced,
     emit_unavailable_context, handle_compact, handle_fork, handle_rebind, handle_resume_picker,
     move_mutable, native_compact_facet, observe_compact, query_context, queue, queue_edit_applied,
@@ -21,12 +21,37 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+    /// The next intent, or the end of one idle observation `window` without
+    /// one: a biased select that takes the mailbox, whose urgent lane
+    /// outranks everything queued, ahead of the window's deadline. An intent
+    /// wakes it on arrival.
+    pub(super) async fn receive(
+        &self,
+        window: std::time::Duration,
+    ) -> Result<crate::surface_protocol::UserActionDelivery<P>, RecvTimeoutError> {
+        let deadline = tokio::time::Instant::now() + window;
+        loop {
+            match self.actions.try_recv() {
+                Ok(delivery) => return Ok(delivery),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    return Err(RecvTimeoutError::Disconnected);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+            tokio::select! {
+                biased;
+                () = self.actions.ready() => {}
+                () = tokio::time::sleep_until(deadline) => return Err(RecvTimeoutError::Timeout),
+            }
+        }
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "The idle owner arbitrates operator intents, queued work, child wakes, transient retries, and shutdown without a second dispatcher."
     )]
-    pub(super) fn next_prompt(
+    pub(super) async fn next_prompt(
         &mut self,
         mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
@@ -70,25 +95,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 && !(self.storage_interrupted && self.config.store.storage_unavailable())
             {
                 self.last_tree_observed_at = Instant::now();
-                let _ = self.executor.block_on(async {
-                    emit_tree_snapshot_if_revision_advanced(
-                        &crate::runtime::HostRows::new(
-                            &self.config.state_roots,
-                            self.config.store.as_ref(),
-                        ),
-                        &*self.config.store,
-                        &self.config.home,
-                        &mut self.config.session,
-                        &mut self.last_tree_revision,
-                        &self.events,
-                        false,
-                    );
-                });
+                emit_tree_snapshot_if_revision_advanced(
+                    &crate::runtime::HostRows::new(
+                        &self.config.state_roots,
+                        self.config.store.as_ref(),
+                    ),
+                    &*self.config.store,
+                    &self.config.home,
+                    &mut self.config.session,
+                    &mut self.last_tree_revision,
+                    &self.events,
+                    false,
+                );
             }
             let mut acknowledgement = None;
-            let received = crate::intent_dispatch::take_next(&self.interrupt_state, || {
-                self.actions.recv_timeout(IDLE_OBSERVE_POLL_INTERVAL)
-            })
+            let deferred = self.interrupt_state.borrow_mut().take_deferred();
+            let received = match deferred {
+                Some(delivery) => Ok(delivery),
+                None => self.receive(IDLE_OBSERVE_POLL_INTERVAL).await,
+            }
             .map(|delivery| {
                 if let Some(started) = delivery.started() {
                     let _ = self.events.send(started);
@@ -107,7 +132,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             // needs it, which then proceeds as though nothing had happened.
             let received = match received {
                 Ok(action) if self.recovery_blocked && recovery_blocked_action(&action) => {
-                    match self.recover_session(RecoveryTrigger::Action) {
+                    match self.recover_session(RecoveryTrigger::Action).await {
                         Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                         Ok(_) => {
                             // The recovery reported on this session; store
@@ -146,7 +171,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 }
                 Ok(UserAction::Recover) => {
                     if self.recovery_blocked {
-                        match self.recover_session(RecoveryTrigger::Explicit) {
+                        match self.recover_session(RecoveryTrigger::Explicit).await {
                             Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                             Ok(_) => {}
                             Err(failure) => {
@@ -476,13 +501,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         detail: Some(HostStatusDetail::CreatingFreshConversation),
                     });
                     match clear_session_rebuild(
-                        &self.executor,
                         &mut self.config,
                         &mut self.opened,
                         &mut self.stderr_buf,
                         &self.events,
                         self.log.as_ref(),
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(()) => {
                             self.recovery_blocked = false;
                         }
@@ -510,8 +536,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     None
                 }
                 Ok(UserAction::Compact) => {
-                    let current =
-                        query_context(&self.executor, &self.opened, ContextQuery::Current);
+                    let current = query_context(&self.opened, ContextQuery::Current).await;
                     // Every typed disposition asks for a compact now, so there
                     // is no disposition left to refuse up front. A
                     // protected-only tail reaches the placeholder rung, and
@@ -534,7 +559,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         reason == sessions::ProductCompactReason::CapacityRecovery;
                     observe_compact(&self.events, self.config.session.pending_queue.len(), true);
                     let compacted = handle_compact(
-                        &self.executor,
                         InterruptWatch::new(self.actions, &self.interrupt_state),
                         &mut self.config,
                         &self.opened,
@@ -543,7 +567,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         self.log.as_ref(),
                         reason,
                         None,
-                    );
+                    )
+                    .await;
                     observe_compact(&self.events, self.config.session.pending_queue.len(), false);
                     if let Err(error) = compacted {
                         let _ = self.events.notice(
@@ -581,20 +606,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     ) {
                         // Only enters the runtime to spawn the read; the answer
                         // arrives as its own observation.
-                        let tasks = self.executor.tasks();
-                        if let Err(error) = self
-                            .executor
-                            .block_on(async move { request.spawn(tasks, sessions, events) })
-                        {
-                            let _ = self.events.send(ContentEvent::CallDetail(
-                                crate::call_detail::unavailable(
-                                    call_id,
-                                    agent_id,
-                                    self.config.session.id.clone(),
-                                    format!("call detail could not run: {error}"),
-                                ),
-                            ));
-                        }
+                        request.spawn(self.executor.tasks(), sessions, events);
                     }
                     None
                 }
@@ -613,15 +625,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 Ok(UserAction::ResumeSession { id: Some(id) }) => {
                     self.last_tree_revision.child_live.close_agent_view();
                     match resume_session_switch(
-                        &self.executor,
                         &mut self.config,
                         &mut self.opened,
                         &mut self.stderr_buf,
                         &self.events,
                         &id,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(()) => {
-                            if matches!(self.drive_restored_turn()?, HostStep::Quit) {
+                            if matches!(self.drive_restored_turn().await?, HostStep::Quit) {
                                 return Ok(HostStep::Quit);
                             }
                             None
@@ -653,15 +666,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         queue_len: self.config.session.pending_queue.len(),
                         detail: Some(HostStatusDetail::ForkingSession),
                     });
-                    let forked = handle_fork(
-                        &self.executor,
+                    let forked = Box::pin(handle_fork(
                         InterruptWatch::new(self.actions, &self.interrupt_state),
                         &mut self.config,
                         &mut self.opened,
                         &mut self.stderr_buf,
                         &self.events,
                         account.as_deref(),
-                    );
+                    ))
+                    .await;
                     let _ = self.events.send(ContentEvent::SetBusy(false));
                     let _ = self.events.send(ContentEvent::Status {
                         phase: HostPhase::Idle,
@@ -670,8 +683,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     });
                     match forked {
                         Ok(()) if compact => {
-                            let current =
-                                query_context(&self.executor, &self.opened, ContextQuery::Current);
+                            let current = query_context(&self.opened, ContextQuery::Current).await;
                             let reason = match current
                                 .as_ref()
                                 .map(|projection| projection.disposition())
@@ -695,7 +707,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 true,
                             );
                             let compacted = handle_compact(
-                                &self.executor,
                                 InterruptWatch::new(self.actions, &self.interrupt_state),
                                 &mut self.config,
                                 &self.opened,
@@ -704,7 +715,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 self.log.as_ref(),
                                 reason,
                                 None,
-                            );
+                            )
+                            .await;
                             observe_compact(
                                 &self.events,
                                 self.config.session.pending_queue.len(),
@@ -741,7 +753,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 Ok(UserAction::Extension(intent)) => {
                     if surface::needs_usage(self.config.surface.as_deref(), &intent) {
                         if let Err(error) = report_context(
-                            &self.executor,
                             &self.opened,
                             &self.events,
                             "on idle refresh",
@@ -750,7 +761,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 .native_provider()
                                 .is_some_and(native_compact_facet),
                             self.config.session.context_counters(),
-                        ) {
+                        )
+                        .await
+                        {
                             emit_unavailable_context(&self.events);
                             let _ = self.events.notice(
                                 TranscriptRow::error(
@@ -803,8 +816,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 model: fork.model.clone(),
                             }),
                         });
-                        let result = handle_rebind(
-                            &self.executor,
+                        let result = Box::pin(handle_rebind(
                             InterruptWatch::new(self.actions, &self.interrupt_state),
                             &mut self.config,
                             &mut self.opened,
@@ -817,7 +829,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             fork.composition,
                             fork.protocol,
                             &fork.roster,
-                        );
+                        ))
+                        .await;
                         let _ = self.events.send(ContentEvent::SetBusy(false));
                         let _ = self.events.send(ContentEvent::Status {
                             phase: HostPhase::Idle,
@@ -863,15 +876,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     | UserAction::StopAllTopology
                     | UserAction::RecoverTopologyNode { .. }),
                 ) => {
-                    dispatch_topology_navigator_sync(
-                        &self.executor,
+                    dispatch_topology_navigator(
                         &self.config.topology_rows(),
                         &self.config.state_roots,
                         &self.config.session,
                         &self.events,
                         &action,
                         &mut self.last_tree_revision,
-                    );
+                    )
+                    .await;
                     record_emitted_tree_revision(
                         &self.config.topology_rows(),
                         &self.config.session,
@@ -885,8 +898,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     arguments,
                     agent_id,
                 }) => {
-                    dispatch_invoke_tool_sync(
-                        &self.executor,
+                    dispatch_invoke_tool(
                         &crate::runtime::HostRows::new(
                             &self.config.state_roots,
                             self.config.store.as_ref(),
@@ -900,18 +912,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         agent_id.as_deref(),
                         correlation_id.as_deref(),
                         &mut self.last_tree_revision,
-                    );
+                    )
+                    .await;
                     None
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     if self.pending_resume.is_some() {
-                        return self.transient_resume_prompt();
+                        return self.transient_resume_prompt().await;
                     }
                     if one_shot.is_none() && self.config.continuation.is_some() {
-                        return self.continuation_prompt();
+                        return self.continuation_prompt().await;
                     }
                     if one_shot.is_none() && observed_tree {
-                        return self.child_wake_prompt(Instant::now());
+                        return self.child_wake_prompt(Instant::now()).await;
                     }
                     return Ok(HostStep::Continue);
                 }

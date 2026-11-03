@@ -1,6 +1,6 @@
 //! Idle interactive continuation uses ordinary root admission and its journal.
 
-use super::{CliFailure, CliResult, HostLoop, HostStep, Instant, SessionQueueItem};
+use super::{CliFailure, CliResult, HostStep, Instant, NodeActor, SessionQueueItem};
 use crate::driver::wake::{WakeCoalescer, WakeDecision, WakeSources};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
@@ -103,7 +103,7 @@ pub(in crate::runtime) fn is_wake_delivery(
         })
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     pub(super) fn suppress_child_wake(&mut self, reason: Option<String>) -> CliResult<()> {
         self.config.session.child_wake_suppressed = true;
         self.child_wake.suppression_pending = true;
@@ -173,7 +173,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         Ok(())
     }
 
-    pub(super) fn child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
+    pub(super) async fn child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
         if self.config.interactive
             && let Some(surface) = self.config.surface.as_deref()
             && let Some(enabled) = surface.child_wake_enabled()
@@ -191,7 +191,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             return self.wake_deferred();
         }
         let suppressed = self.config.session.child_wake_suppressed;
-        let step = match self.try_child_wake_prompt(now) {
+        let step = match self.try_child_wake_prompt(now).await {
             Ok(step) => {
                 self.child_wake.retry = None;
                 Ok(step)
@@ -232,7 +232,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// Posts the host-authored continuation this host was started with, as a
     /// root host wake: the same journaled submission, crash and reopen rules
     /// as an idle wake. It waits while another submission is unresolved.
-    pub(super) fn continuation_prompt(&mut self) -> CliResult<HostStep> {
+    pub(super) async fn continuation_prompt(&mut self) -> CliResult<HostStep> {
         if self.recovery_blocked
             || self.pending_start.is_some()
             || self.config.session.queue_commands.has_pending()
@@ -244,7 +244,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         };
         // The same context preflight a wake runs, which a host-authored
         // prompt's admission reads back.
-        match self.fit_child_wake(&text) {
+        match self.fit_child_wake(&text).await {
             Ok(WakeFit::Fits) => {}
             Ok(WakeFit::Stopped(_)) => {
                 self.config.continuation = Some(text);
@@ -263,19 +263,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let item = candidate
             .enqueue_live(text.as_str())
             .map_err(|_| CliFailure::new("the continuation was refused by the queue"))?;
-        self.config.session = self
-            .executor
-            .block_on(super::super::result_mail::prepare_instruction(
-                &self.config.topology_rows(),
-                self.config.store.as_ref(),
-                &candidate,
-                &item,
-                &text,
-                None,
-                &["host-continuation".to_owned()],
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::from)?;
+        self.config.session = super::super::result_mail::prepare_instruction(
+            &self.config.topology_rows(),
+            self.config.store.as_ref(),
+            &candidate,
+            &item,
+            &text,
+            None,
+            &["host-continuation".to_owned()],
+        )
+        .await
+        .map_err(CliFailure::from)?;
         Ok(HostStep::Prompt {
             text: item.text.clone(),
             queued_delivery: Some(item),
@@ -320,19 +318,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
     }
 
-    fn try_child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
+    async fn try_child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
         let jobs = self
             .opened
             .agent()
             .map_or_else(Vec::new, plakous::agent::Agent::jobs);
-        self.try_child_wake_with_jobs(now, jobs)
+        self.try_child_wake_with_jobs(now, jobs).await
     }
 
     #[allow(
         clippy::too_many_lines,
         reason = "Child wake admission reconciles unread mail, joined jobs, suppression, and durable wake preparation before dispatch."
     )]
-    fn try_child_wake_with_jobs(
+    async fn try_child_wake_with_jobs(
         &mut self,
         now: Instant,
         jobs: Vec<plakous::tools::JobView>,
@@ -370,14 +368,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
         let rows = self.config.topology_rows();
         let runtime = self.last_tree_revision.runtime(&rows, session);
-        self.executor
-            .block_on(super::super::projection::project_tree(
-                self.opened.sessions(),
-                &rows,
-                &super::durable_tree_id(&rows, session),
-                self.opened.locator().session_id(),
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))??;
+        super::super::projection::project_tree(
+            self.opened.sessions(),
+            &rows,
+            &super::durable_tree_id(&rows, session),
+            self.opened.locator().session_id(),
+        )
+        .await?;
         let mails = if let Some(runtime) = runtime {
             runtime
                 .read(|tree| {
@@ -435,7 +432,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
         // Compaction requires an idle journal; budget the complete mail batch
         // before preparing its immutable delivery receipt.
-        if !self.preflight_child_wake(&command)? {
+        if !self.preflight_child_wake(&command).await? {
             return Ok(HostStep::Continue);
         }
         let watch = super::InterruptWatch::new(self.actions, &self.interrupt_state);
@@ -449,19 +446,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .map_err(|_| CliFailure::new("child wake queue admission was refused"))?;
         // Queue identity and the exact instruction batch publish atomically;
         // an unresolved wake cannot be edited or exported as a user prompt.
-        self.config.session = self
-            .executor
-            .block_on(super::super::result_mail::prepare_instruction(
-                &self.config.topology_rows(),
-                self.config.store.as_ref(),
-                &candidate,
-                &item,
-                &command,
-                batch,
-                &ids,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::from)?;
+        self.config.session = super::super::result_mail::prepare_instruction(
+            &self.config.topology_rows(),
+            self.config.store.as_ref(),
+            &candidate,
+            &item,
+            &command,
+            batch,
+            &ids,
+        )
+        .await
+        .map_err(CliFailure::from)?;
         self.child_wake.park();
         Ok(HostStep::Prompt {
             text: item.text.clone(),
@@ -470,8 +465,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         })
     }
 
-    fn preflight_child_wake(&mut self, command: &str) -> CliResult<bool> {
-        match self.fit_child_wake(command)? {
+    async fn preflight_child_wake(&mut self, command: &str) -> CliResult<bool> {
+        match self.fit_child_wake(command).await? {
             WakeFit::Fits => return Ok(true),
             WakeFit::Stopped(stopped) => {
                 let _ = stopped;
@@ -492,19 +487,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         Ok(false)
     }
 
-    pub(super) fn fit_child_wake(&mut self, command: &str) -> CliResult<WakeFit> {
+    pub(super) async fn fit_child_wake(&mut self, command: &str) -> CliResult<WakeFit> {
         let watch = super::InterruptWatch::new(self.actions, &self.interrupt_state);
         watch.begin();
-        self.refresh_native_authority_before_prompt()?;
+        self.refresh_native_authority_before_prompt().await?;
         if let Some(stopped) = self.stop_preparation(&mut None)? {
             return Ok(WakeFit::Stopped(stopped));
         }
         let command = plakous::agent::UserInput::from(command.to_owned());
         let context = super::query_context(
-            &self.executor,
             &self.opened,
             super::ContextQuery::WithPendingUserInput(command.clone()),
-        )?;
+        )
+        .await?;
         if let Some(stopped) = self.stop_preparation(&mut None)? {
             return Ok(WakeFit::Stopped(stopped));
         }
@@ -524,7 +519,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.config.session.queue_drain_state = super::SessionQueueDrainState::LiveAutoDrain;
         super::observe_compact(&self.events, 0, true);
         let outcome = super::run_scheduled_compaction_until_fits(
-            &self.executor,
             super::InterruptWatch::new(self.actions, &self.interrupt_state),
             &mut self.config,
             &self.opened,
@@ -533,7 +527,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.log.as_ref(),
             &command,
             None,
-        );
+        )
+        .await;
         super::observe_compact(&self.events, 0, false);
         if let Some(stopped) = self.stop_preparation(&mut None)? {
             return Ok(WakeFit::Stopped(stopped));
@@ -549,11 +544,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             }
         );
         if sends {
-            self.child_wake.prepared_context = Some(super::query_context(
-                &self.executor,
-                &self.opened,
-                super::ContextQuery::WithPendingUserInput(command),
-            )?);
+            self.child_wake.prepared_context = Some(
+                super::query_context(
+                    &self.opened,
+                    super::ContextQuery::WithPendingUserInput(command),
+                )
+                .await?,
+            );
         }
         Ok(if sends {
             WakeFit::Fits

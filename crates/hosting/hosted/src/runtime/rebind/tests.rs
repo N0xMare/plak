@@ -49,7 +49,13 @@ fn live_rebind_discard_removes_only_its_request_without_a_notice() {
             .submit_workflow_request(&mut config.session, request)
             .unwrap();
     }
-    abandon_prepared_rebind(&executor, &mut config, &requests[0].operation_id).unwrap();
+    executor
+        .block_on(abandon_prepared_rebind(
+            &mut config,
+            &requests[0].operation_id,
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     let intents = config.store.load_intents(&config.session.id).unwrap();
     assert!(
         intents
@@ -144,18 +150,20 @@ fn unreadable_topology_refuses_even_an_injected_rebind_target() {
     config.topology_admission = Some(Arc::new(|| Err(CliFailure::new("named config error"))));
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    let result = resolve_rebind_target(
-        &ApplicationExecutor::new().unwrap(),
-        InterruptWatch::new(&actions, &state),
-        &config,
-        "codex",
-        "offline-loopback-v2",
-        Some("medium"),
-        "target",
-        config.session.composition,
-        &TargetSelection::Native,
-        "target",
-    );
+    let result = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(resolve_rebind_target(
+            InterruptWatch::new(&actions, &state),
+            &config,
+            "codex",
+            "offline-loopback-v2",
+            Some("medium"),
+            "target",
+            config.session.composition,
+            &TargetSelection::Native,
+            "target",
+        ))
+        .expect("the executor drives the call");
     assert!(
         result
             .err()
@@ -424,25 +432,26 @@ fn production_api_rebind_projects_complete_staging_lineage() {
     let state = RefCell::new(InterruptWatchState::default());
     let source_locator = opened.locator();
     let target_id = target.id.clone();
-    complete_rebind(
-        &executor,
-        InterruptWatch::new(&receiver, &state),
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        operation,
-        source_locator,
-        ResolvedRebindTarget {
-            route: RebindRoute::Api(Box::new(target)),
-            effort: Some(ReasoningEffort::Medium),
-            effort_explicit: true,
-            binding,
-        },
-        runtime,
-        Instant::now(),
-    )
-    .unwrap();
+    executor
+        .block_on(complete_rebind(
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            operation,
+            source_locator,
+            ResolvedRebindTarget {
+                route: RebindRoute::Api(Box::new(target)),
+                effort: Some(ReasoningEffort::Medium),
+                effort_explicit: true,
+                binding,
+            },
+            runtime,
+            Instant::now(),
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     assert_eq!(config.session.id, target_id);
     assert_eq!(
         config.session.source_product_session_id.as_deref(),
@@ -578,16 +587,17 @@ fn plain_fork_rereads_changed_agents_md_and_names_it() {
         let (events, notes_rx) = host_event_sink();
         let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let state = RefCell::new(InterruptWatchState::default());
-        handle_fork(
-            &executor,
-            InterruptWatch::new(&receiver, &state),
-            config,
-            opened,
-            &mut Vec::new(),
-            &events,
-            None,
-        )
-        .unwrap();
+        executor
+            .block_on(handle_fork(
+                InterruptWatch::new(&receiver, &state),
+                config,
+                opened,
+                &mut Vec::new(),
+                &events,
+                None,
+            ))
+            .expect("the executor drives the call")
+            .unwrap();
         assert_ne!(config.session.id, source_id);
         notes_rx
             .try_iter()
@@ -668,16 +678,17 @@ fn a_fork_rereads_skills_and_an_exact_reopen_keeps_the_frozen_listing() {
     let (events, notes_rx) = host_event_sink();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    handle_fork(
-        &executor,
-        InterruptWatch::new(&receiver, &state),
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    )
-    .unwrap();
+    executor
+        .block_on(handle_fork(
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     let notes = notes_rx
         .try_iter()
         .filter_map(|event| match event {
@@ -749,21 +760,22 @@ fn rebind_to(
     let (events, _notes) = host_event_sink();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    handle_rebind(
-        executor,
-        InterruptWatch::new(&receiver, &state),
-        config,
-        opened,
-        &mut Vec::new(),
-        &events,
-        account,
-        model,
-        Some("low"),
-        None,
-        Some(ProductComposition::Direct),
-        None,
-        &crate::orchestration::RosterInput::unpinned(model),
-    )
+    executor
+        .block_on(handle_rebind(
+            InterruptWatch::new(&receiver, &state),
+            config,
+            opened,
+            &mut Vec::new(),
+            &events,
+            account,
+            model,
+            Some("low"),
+            None,
+            Some(ProductComposition::Direct),
+            None,
+            &crate::orchestration::RosterInput::unpinned(model),
+        ))
+        .expect("the executor drives the call")
 }
 
 fn set_skills(config: &mut HostConfig<TestExtension>, enabled: bool) {
@@ -796,15 +808,16 @@ fn fork_now(
     let (events, _notes) = host_event_sink();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    fork::handle_fork(
-        executor,
-        InterruptWatch::new(&receiver, &state),
-        config,
-        opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    )
+    executor
+        .block_on(fork::handle_fork(
+            InterruptWatch::new(&receiver, &state),
+            config,
+            opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
 }
 
 /// A Claude session made before skills (or with them off) reopens exactly
@@ -1179,7 +1192,11 @@ fn a_saved_fork_names_the_agents_md_it_reread() {
         panic!("the fork did not publish: {outcome:?}");
     };
     let (events, notes_rx) = host_event_sink();
-    note_reread_instructions_at(&executor, &config, &events, before, target);
+    executor
+        .block_on(note_reread_instructions_at(
+            &config, &events, before, target,
+        ))
+        .expect("the executor drives the call");
     executor.block_on(opened.release()).unwrap().unwrap();
     assert_eq!(
         row_texts(&notes_rx),
@@ -1208,15 +1225,16 @@ fn plain_fork_after_subagents_were_turned_off_lands() {
     let (events, _notes) = host_event_sink();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    let forked = handle_fork(
-        &executor,
-        InterruptWatch::new(&receiver, &state),
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    );
+    let forked = executor
+        .block_on(handle_fork(
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call");
     let message = forked
         .as_ref()
         .err()
@@ -1243,24 +1261,25 @@ fn fork_now_onto_an_api_root_branches_onto_its_own_tree() {
     let (events, notes_rx) = host_event_sink();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    let rebound = handle_rebind(
-        &executor,
-        InterruptWatch::new(&receiver, &state),
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        "openai",
-        "gpt-5.6-sol",
-        Some("medium"),
-        None,
-        // Direct: plakous-default binds native-ptc here, whose sidecar this
-        // test does not install.
-        Some(ProductComposition::Direct),
-        None,
-        &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
-    )
-    .unwrap();
+    let rebound = executor
+        .block_on(handle_rebind(
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "openai",
+            "gpt-5.6-sol",
+            Some("medium"),
+            None,
+            // Direct: plakous-default binds native-ptc here, whose sidecar this
+            // test does not install.
+            Some(ProductComposition::Direct),
+            None,
+            &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     assert_eq!(rebound, Rebound::Switched);
     let target_id = config.session.id.clone();
     assert_ne!(target_id, source_id);
@@ -1365,22 +1384,23 @@ fn a_rebind_keeps_the_sessions_frozen_mcp_tools_without_listing_again() {
     let (events, _notes) = host_event_sink();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    let rebound = handle_rebind(
-        &executor,
-        InterruptWatch::new(&receiver, &state),
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        "openai",
-        "gpt-5.6-sol",
-        Some("medium"),
-        None,
-        Some(ProductComposition::Direct),
-        None,
-        &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
-    )
-    .unwrap();
+    let rebound = executor
+        .block_on(handle_rebind(
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "openai",
+            "gpt-5.6-sol",
+            Some("medium"),
+            None,
+            Some(ProductComposition::Direct),
+            None,
+            &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     assert_eq!(rebound, Rebound::Switched);
     let successor = config.store.load(&config.session.id).unwrap();
     assert_eq!(successor.model.as_deref(), Some("gpt-5.6-sol"));
@@ -1430,22 +1450,24 @@ fn a_rebind_to_a_route_without_a_frozen_tool_refuses_up_front() {
     let (events, _rx) = host_event_sink();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    let error = handle_rebind(
-        &ApplicationExecutor::new().unwrap(),
-        InterruptWatch::new(&receiver, &state),
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        "codex",
-        "offline-loopback-v2",
-        Some("medium"),
-        None,
-        Some(crate::binding::CompositionSelection::Direct),
-        None,
-        &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-    )
-    .unwrap_err();
+    let error = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_rebind(
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "codex",
+            "offline-loopback-v2",
+            Some("medium"),
+            None,
+            Some(crate::binding::CompositionSelection::Direct),
+            None,
+            &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+        ))
+        .expect("the executor drives the call")
+        .unwrap_err();
     assert_eq!(
         error.message(),
         "this session keeps its tools across a model change, and web_fetch is not available \
@@ -1538,7 +1560,15 @@ fn production_api_detached_source_restoration_retires_previous_root_lease() {
         &hub,
         &crate::topology_runtime::lookup(&tree_id).unwrap()
     ));
-    restore_detached_source(&executor, &config, &mut opened, locator, &mut Vec::new()).unwrap();
+    executor
+        .block_on(restore_detached_source(
+            &config,
+            &mut opened,
+            locator,
+            &mut Vec::new(),
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     assert!(Arc::ptr_eq(
         &hub,
         &crate::topology_runtime::lookup(&tree_id).unwrap()
@@ -1717,22 +1747,24 @@ fn handle_rebind_fails_closed_when_tree_epoch_has_live_descendants() {
     let (_actions_tx, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let interrupt_state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
-    let error = handle_rebind(
-        &ApplicationExecutor::new().unwrap(),
-        watch,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        "codex",
-        "offline-loopback-v2",
-        Some("medium"),
-        None,
-        None,
-        None,
-        &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-    )
-    .unwrap_err();
+    let error = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_rebind(
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "codex",
+            "offline-loopback-v2",
+            Some("medium"),
+            None,
+            None,
+            None,
+            &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+        ))
+        .expect("the executor drives the call")
+        .unwrap_err();
     assert_eq!(
         error.message(),
         crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS
@@ -1763,21 +1795,23 @@ fn a_code_mode_prefix_is_admitted_for_a_direct_target() {
     let (_actions_tx, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let interrupt_state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
-    let result = handle_rebind(
-        &ApplicationExecutor::new().unwrap(),
-        watch,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        "codex",
-        "offline-loopback-v2",
-        Some("medium"),
-        None,
-        Some(crate::binding::CompositionSelection::Direct),
-        None,
-        &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-    );
+    let result = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_rebind(
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "codex",
+            "offline-loopback-v2",
+            Some("medium"),
+            None,
+            Some(crate::binding::CompositionSelection::Direct),
+            None,
+            &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+        ))
+        .expect("the executor drives the call");
     let mut notes = Vec::new();
     if let Err(error) = &result {
         notes.push(error.message().to_owned());
@@ -1841,22 +1875,24 @@ fn interrupt_refuses_rebind_before_any_branch_is_created() {
     let interrupt_state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
 
-    let error = handle_rebind(
-        &ApplicationExecutor::new().unwrap(),
-        watch,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        "codex",
-        "offline-loopback-v2",
-        Some("medium"),
-        None,
-        None,
-        None,
-        &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-    )
-    .expect_err("an interrupted rebind must not create a branch");
+    let error = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_rebind(
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "codex",
+            "offline-loopback-v2",
+            Some("medium"),
+            None,
+            None,
+            None,
+            &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+        ))
+        .expect("the executor drives the call")
+        .expect_err("an interrupted rebind must not create a branch");
 
     assert!(
         error.message().contains("interrupted"),
@@ -1886,22 +1922,24 @@ fn handle_rebind_fails_closed_when_tree_epoch_blocks_rebind() {
     let (_actions_tx, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let interrupt_state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
-    let error = handle_rebind(
-        &ApplicationExecutor::new().unwrap(),
-        watch,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        "codex",
-        "offline-loopback-v2",
-        Some("medium"),
-        None,
-        None,
-        None,
-        &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-    )
-    .unwrap_err();
+    let error = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_rebind(
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "codex",
+            "offline-loopback-v2",
+            Some("medium"),
+            None,
+            None,
+            None,
+            &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+        ))
+        .expect("the executor drives the call")
+        .unwrap_err();
     assert_eq!(
         error.message(),
         crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_PAUSED

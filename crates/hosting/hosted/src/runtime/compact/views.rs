@@ -15,7 +15,6 @@ use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions;
 use crate::sessions::TranscriptRow;
 use crate::surface_protocol::ContentEvent;
-use plakous::application::ApplicationExecutor;
 use plakous::sessions::ContextQuery;
 use plakous_host_protocol::status::HostPhase;
 
@@ -50,8 +49,7 @@ pub(in crate::runtime) fn observe_compact<P: plakous_host_protocol::ProtocolExte
     }
 }
 
-pub(super) fn refresh_compact_views<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn refresh_compact_views<P: plakous_host_protocol::ProtocolExtension>(
     opened: &AttachedCodingSession,
     config: &mut HostConfig<P>,
     log: Option<&SessionLog>,
@@ -59,15 +57,14 @@ pub(super) fn refresh_compact_views<P: plakous_host_protocol::ProtocolExtension>
     call_id: &str,
     unadmitted: bool,
 ) -> Option<TranscriptRow> {
-    let views = executor
-        .block_on(super::super::projection::project_to_tail(
-            opened.sessions(),
-            &config.store,
-            &config.session.id,
-            opened.locator(),
-        ))
-        .unwrap_or_else(|_| Err("application execution failed".to_owned().into()))
-        .map_err(String::from);
+    let views = super::super::projection::project_to_tail(
+        opened.sessions(),
+        &config.store,
+        &config.session.id,
+        opened.locator(),
+    )
+    .await
+    .map_err(String::from);
     let settled_row = views.as_ref().ok().and_then(|views| {
         views.rows.values().find(|row| matches!(row,
             TranscriptRow::Tool(tool) if tool.call_id == call_id && tool.finished_at_ms.is_some()
@@ -169,22 +166,19 @@ pub(super) fn compact_diagnostic_is_provider_quiet(diagnostic: &str) -> bool {
     diagnostic.contains("deadline elapsed") || diagnostic.contains("no authoritative completion")
 }
 
-pub(super) fn unanchored_occupancy(
-    executor: &ApplicationExecutor,
-    opened: &AttachedCodingSession,
-) -> Option<u64> {
-    query_context(executor, opened, ContextQuery::Current)
+pub(super) async fn unanchored_occupancy(opened: &AttachedCodingSession) -> Option<u64> {
+    query_context(opened, ContextQuery::Current)
+        .await
         .ok()?
         .unanchored_occupied_tokens()
 }
 
-pub(super) fn emit_compact_meter<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn emit_compact_meter<P: plakous_host_protocol::ProtocolExtension>(
     opened: &AttachedCodingSession,
     config: &HostConfig<P>,
     events: &Sender<P>,
 ) {
-    if let Ok(projection) = query_context(executor, opened, ContextQuery::Current) {
+    if let Ok(projection) = query_context(opened, ContextQuery::Current).await {
         emit_context_projection(
             events,
             &projection,

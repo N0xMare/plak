@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 use crate::runtime::test_kit::BlockOn as _;
 
-use super::HostLoop;
+use super::NodeActor;
 use super::wait_settlement_tests::{receipts_and_unread, wait_outside_history, with_unread_result};
 use crate::agent_tree::{TreeFeed, TreeFeedReads, TreeProjectorError};
 use crate::runtime::projection::{
@@ -17,12 +17,12 @@ use crate::topology_runtime::ProductTopologyRuntime;
 use plakous::sessions::feed::{FeedFact, FeedRecord};
 use std::sync::Arc;
 
-fn root_session(host: &HostLoop<'_, TestExtension>) -> String {
+fn root_session(host: &NodeActor<'_, TestExtension>) -> String {
     host.opened.locator().session_id().to_string()
 }
 
 fn cursor_and_revision(
-    host: &HostLoop<'_, TestExtension>,
+    host: &NodeActor<'_, TestExtension>,
     runtime: &Arc<ProductTopologyRuntime>,
 ) -> (u64, u64) {
     let session = root_session(host);
@@ -40,7 +40,7 @@ fn receipt(runtime: &Arc<ProductTopologyRuntime>) -> String {
 }
 
 /// A root feed page with one record at `seq` whose history commits `call`.
-fn history_page(host: &HostLoop<'_, TestExtension>, seq: u64, call: &str) -> TreeFeed {
+fn history_page(host: &NodeActor<'_, TestExtension>, seq: u64, call: &str) -> TreeFeed {
     let locator = host.opened.locator();
     let header = serde_json::from_value(serde_json::json!({
         "session_id": locator.session_id(), "seq": seq,
@@ -65,7 +65,7 @@ fn history_page(host: &HostLoop<'_, TestExtension>, seq: u64, call: &str) -> Tre
     page(host, vec![record])
 }
 
-fn page(host: &HostLoop<'_, TestExtension>, records: Vec<FeedRecord>) -> TreeFeed {
+fn page(host: &NodeActor<'_, TestExtension>, records: Vec<FeedRecord>) -> TreeFeed {
     TreeFeed {
         session_id: root_session(host),
         retained_from: 1,

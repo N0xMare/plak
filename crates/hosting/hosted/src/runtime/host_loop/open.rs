@@ -1,30 +1,30 @@
 //! Open and reconcile one canonical attachment before accepting work.
 
 use super::{
-    ApplicationExecutor, CliFailure, CliResult, ContextDisposition, ContextQuery, Duration,
-    HeldUsage, HostConfig, HostLoop, Instant, InterruptWatchState, Ordering, RefCell, Sender,
-    SessionEvent, SessionLedger, SessionLog, SessionQueueDrainState, SessionQueueItem,
-    SubscriptionUsageRefresh, TreeSnapshotPush, build_session_from_config, elapsed_ms_since,
-    emit_agent_plan_notes, emit_prompt_history, emit_queue_snapshot, emit_restored_paused_note,
-    emit_unavailable_context, log_ev, log_host_attached, log_host_ready, log_session_ready,
-    native_compact_facet, persist, query_context, report_context, restored_paused_status_suffix,
-    send_binding, sessions, surface,
+    CliFailure, CliResult, ContextDisposition, ContextQuery, Duration, HeldUsage, HostConfig,
+    Instant, InterruptWatchState, NodeActor, Ordering, RefCell, Sender, SessionEvent,
+    SessionLedger, SessionLog, SessionQueueDrainState, SessionQueueItem, SubscriptionUsageRefresh,
+    TreeSnapshotPush, build_session_from_config, elapsed_ms_since, emit_agent_plan_notes,
+    emit_prompt_history, emit_queue_snapshot, emit_restored_paused_note, emit_unavailable_context,
+    log_ev, log_host_attached, log_host_ready, log_session_ready, native_compact_facet, persist,
+    query_context, report_context, restored_paused_status_suffix, send_binding, sessions, surface,
 };
 use crate::sessions::projector::{ProductTreeJoin as _, SubmissionKind, pending_command_ids};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
-impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
+impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Host open reconstructs projection, workflow settlements, queued submissions, and live attachments before exposing a ready session."
     )]
-    pub(super) fn open(
+    pub(super) async fn open(
         mut config: HostConfig<P>,
         actions: &'a crate::surface_protocol::UserActionReceiver<P>,
         events: Sender<P>,
         startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+        executor: std::rc::Rc<super::session_executor::SessionExecutor>,
     ) -> CliResult<Self> {
         let storage_interrupt = actions.storage_interrupt_probe();
         let shutdown = crate::agent_tree_tools::HostShutdown::new();
@@ -57,8 +57,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         config.runtime_factory.clone().configure(&mut config);
         let log = SessionLog::open(&config.home, &config.session.id).ok();
         let mut stderr_buf = Vec::new();
-        let executor = super::session_executor::SessionExecutor::new()
-            .map_err(|_| CliFailure::new("application executor construction failed"))?;
         config.state_roots = config
             .state_roots
             .clone()
@@ -78,9 +76,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         // Creation freezes the root's tools; a wildcard MCP tool left out then
         // is a pending notice the operator must see (spec 07 §3.5).
         let freezing_tools = config.session.frozen_tools.is_none();
-        let mut opened = executor
-            .block_on(build_session_from_config(&mut config, &mut stderr_buf))
-            .map_err(|_| CliFailure::new("application execution failed"))??;
+        let mut opened = build_session_from_config(&mut config, &mut stderr_buf).await?;
         // Observe owner faults before attachment hooks can retire children;
         // the face's first snapshot may be much later.
         let last_tree_revision =
@@ -105,18 +101,15 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         config.runtime_factory.attached(&config, &mut opened);
         let session_open_ms = elapsed_ms_since(session_open_started);
 
-        if let Err(error) = executor
-            .block_on(super::super::result_mail::settle_waits(
-                &config.topology_rows(),
-                &config.session,
-                &opened,
-            ))
-            .unwrap_or_else(|_| Err("application execution failed".to_owned()))
+        if let Err(error) = super::super::result_mail::settle_waits(
+            &config.topology_rows(),
+            &config.session,
+            &opened,
+        )
+        .await
         {
             let failure = CliFailure::new(error);
-            let release = executor
-                .block_on(opened.release())
-                .map_err(|_| CliFailure::new("application execution failed"))?;
+            let release = opened.release().await;
             return match release {
                 Ok(_) => Err(failure),
                 Err(error) => Err(CliFailure::new(format!(
@@ -129,11 +122,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             let intents = match config.store.load_intents(&config.session.id) {
                 Ok(intents) => intents,
                 Err(error) => {
-                    return Err(release_after_open_failure(
-                        &executor,
-                        opened,
-                        CliFailure::new(error),
-                    ));
+                    return Err(release_after_open_failure(opened, CliFailure::new(error)).await);
                 }
             };
             if intents
@@ -141,21 +130,13 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                 .iter()
                 .any(|submission| submission.kind == SubmissionKind::HostWake)
             {
-                let projected = match executor.block_on(super::super::projection::project_to_tail(
+                let projected = super::super::projection::project_to_tail(
                     opened.sessions(),
                     &config.store,
                     &config.session.id,
                     opened.locator(),
-                )) {
-                    Ok(projected) => projected,
-                    Err(_) => {
-                        return Err(release_after_open_failure(
-                            &executor,
-                            opened,
-                            CliFailure::new("application execution failed"),
-                        ));
-                    }
-                };
+                )
+                .await;
                 match projected {
                     Ok(views) => {
                         for submission in &intents.submissions {
@@ -177,10 +158,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                                     .write_host_controls(&config.session.id, true, None)
                             {
                                 return Err(release_after_open_failure(
-                                    &executor,
                                     opened,
                                     CliFailure::new(error),
-                                ));
+                                )
+                                .await);
                             }
                             config.session.child_wake_suppressed = true;
                             config.session.pending_queue.retain(|item| {
@@ -193,10 +174,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                                 None,
                             ) {
                                 return Err(release_after_open_failure(
-                                    &executor,
                                     opened,
                                     CliFailure::new(error),
-                                ));
+                                )
+                                .await);
                             }
                         }
                     }
@@ -217,9 +198,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             config.session.touch();
         }
         if config.session.store_revision != 0 && config.store.save(&mut config.session).is_err() {
-            let release = executor
-                .block_on(opened.release())
-                .map_err(|_| CliFailure::new("application execution failed"))?;
+            let release = opened.release().await;
             if let Err(error) = release {
                 return Err(CliFailure::new(format!(
                     "product binding persistence and canonical session release failed: {error}"
@@ -234,7 +213,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         // is projection debt, never a fence: the live tick applies it.
         if config.session.store_revision != 0 {
             let followed = opened.locator();
-            let projected = executor.block_on(async {
+            let projected = async {
                 let views = super::super::projection::project_to_tail(
                     opened.sessions(),
                     &config.store,
@@ -272,8 +251,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                 super::super::result_mail::RootBatchJoin::new(&rows)
                     .join_pending_root_commands(&config.session.id, &pending)
                     .await
-            });
-            if let Ok(Err(error)) = projected {
+            }
+            .await;
+            if let Err(error) = projected {
                 log_ev(
                     log.as_ref(),
                     &config,
@@ -418,7 +398,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         super::super::info::send_last_user_prompt_at(&events, &config, &opened);
         emit_queue_snapshot(&events, &config.session);
         if let Err(error) = report_context(
-            &executor,
             &opened,
             &events,
             "on open",
@@ -427,7 +406,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                 .native_provider()
                 .is_some_and(native_compact_facet),
             config.session.context_counters(),
-        ) {
+        )
+        .await
+        {
             emit_unavailable_context(&events);
             let _ = events.send(ContentEvent::Row(
                 TranscriptRow::error(NoticeScope::Recovery, error.message().to_owned())
@@ -475,8 +456,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         // Disk-loaded queues are deliberately paused until the operator resumes them.
         let pending_start: Option<SessionQueueItem> = None;
         let last_tree_observed_at = Instant::now();
-        let recovery_blocked =
-            query_context(&executor, &opened, ContextQuery::Current).is_ok_and(|projection| {
+        let recovery_blocked = query_context(&opened, ContextQuery::Current)
+            .await
+            .is_ok_and(|projection| {
                 projection.disposition() == ContextDisposition::RecoveryRequired
             });
         let held_usage = HeldUsage::default();
@@ -495,23 +477,16 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .target = Some(opened.locator().session_id());
-        let storage_notices = if let Some(agent) = opened.agent().cloned() {
-            Some(
-                executor
-                    .block_on(async {
-                        super::super::storage::StorageNotices::start(
-                            executor.tasks(),
-                            agent,
-                            config.store.clone(),
-                            events.clone(),
-                        )
-                    })
-                    .map_err(|_| CliFailure::new("application execution failed"))?,
+        let storage_notices = opened.agent().cloned().map(|agent| {
+            super::super::storage::StorageNotices::start(
+                executor.tasks(),
+                agent,
+                config.store.clone(),
+                events.clone(),
             )
-        } else {
-            None
-        };
+        });
         let mut host = Self {
+            role: super::RolePolicy::ROOT,
             _storage_notices: storage_notices,
             config,
             actions,
@@ -553,17 +528,15 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
     }
 }
 
-pub(super) fn release_after_open_failure(
-    executor: &ApplicationExecutor,
+pub(super) async fn release_after_open_failure(
     opened: crate::agent::AttachedCodingSession,
     failure: CliFailure,
 ) -> CliFailure {
-    match executor.block_on(opened.release()) {
-        Ok(Ok(_)) => failure,
-        Ok(Err(error)) => {
+    match opened.release().await {
+        Ok(_) => failure,
+        Err(error) => {
             failure.with_cleanup_failure(format!("canonical session release also failed: {error}"))
         }
-        Err(error) => failure.with_cleanup_failure(error),
     }
 }
 

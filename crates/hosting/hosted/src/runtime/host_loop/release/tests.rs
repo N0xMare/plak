@@ -27,13 +27,14 @@ fn release_aborts_and_joins_every_task_the_session_spawned() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
-    host.project();
+    host.block(async |host| host.project().await);
     let tasks = host.executor.tasks().clone();
-    let running = tasks.len();
-    assert!(running > 0, "the live projector runs as a session task");
-    // Work started through the session's roots belongs to the same set.
+    // Work started through the session's roots belongs to the same set. The
+    // live projector spawns and finishes its own tasks concurrently, so the
+    // set's size is no evidence: only the set aborting this task drops its
+    // flag.
     let dropped = Arc::new(AtomicBool::new(false));
     let flag = DropFlag(Arc::clone(&dropped));
     let roots = host.config.state_roots.clone();
@@ -45,9 +46,9 @@ fn release_aborts_and_joins_every_task_the_session_spawned() {
             });
         })
         .unwrap();
-    assert_eq!(tasks.len(), running + 1);
+    assert!(!dropped.load(Ordering::SeqCst));
 
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 
     assert!(tasks.is_closed(), "release closed the session's task set");
     assert!(tasks.is_empty(), "no session task outlives release");
@@ -63,7 +64,7 @@ fn quit_projection_stages_share_the_original_deadline() {
         let (config, _) = fresh_injected_attached_host(root.path());
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+        let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
         host.config.store.save(&mut host.config.session).unwrap();
         host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
             host.config.store.clone(),
@@ -75,9 +76,10 @@ fn quit_projection_stages_share_the_original_deadline() {
         host.quit_started_at = Instant::now().checked_sub(Duration::from_millis(900));
         let started = Instant::now();
         if publish {
-            host.publish_projected_transcript(false);
+            host.block(async |host| host.publish_projected_transcript(false).await);
         } else {
-            host.finish_projection(false).unwrap();
+            host.block(async |host| host.finish_projection(false).await)
+                .unwrap();
         }
         assert!(
             started.elapsed() < Duration::from_millis(300),
@@ -85,7 +87,8 @@ fn quit_projection_stages_share_the_original_deadline() {
             started.elapsed()
         );
         let started = Instant::now();
-        host.finish_projection(false).unwrap();
+        host.block(async |host| host.finish_projection(false).await)
+            .unwrap();
         assert!(
             started.elapsed() < Duration::from_millis(300),
             "finish stacked another bound: {:?}",
@@ -96,7 +99,7 @@ fn quit_projection_stages_share_the_original_deadline() {
         // not happen is a post-release pass started on a spent budget.
         let id = host.config.session.id.clone();
         crate::runtime::projection::probe::track(&id);
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
         assert_eq!(
             crate::runtime::projection::probe::take(&id).release,
             0,
@@ -122,7 +125,7 @@ fn terminal_committed_during_release_is_projected_before_shutdown_returns() {
     let (config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
     let store = host.config.store.clone();
     let id = host.config.session.id.clone();
@@ -143,7 +146,8 @@ fn terminal_committed_during_release_is_projected_before_shutdown_returns() {
         }).await.unwrap();
         turn
     }).unwrap();
-    host.finish_projection(false).unwrap();
+    host.block(async |host| host.finish_projection(false).await)
+        .unwrap();
     let before = store.load_views(&id).unwrap().unwrap();
     assert!(before.state.head_working);
     assert!(before.state.open_turns.contains_key(&turn.id().to_string()));
@@ -152,7 +156,7 @@ fn terminal_committed_during_release_is_projected_before_shutdown_returns() {
     let ledger = host.session_ledger.clone();
     let before_ledger = ledger.project();
     events.try_iter().for_each(drop);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     assert!(
         !events
             .try_iter()
@@ -220,11 +224,11 @@ fn failed_pre_open_projection_does_not_fence_a_current_head() {
     config.store = memory.clone();
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
     let inner = host.config.store.clone();
     let id = host.config.session.id.clone();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session = inner.load(&id).unwrap();
@@ -239,17 +243,17 @@ fn failed_pre_open_projection_does_not_fence_a_current_head() {
     memory.delete_views(&id);
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     // The recorded head is current: deterministic debt must not fence open.
-    let mut opened = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut opened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     opened.config.store = inner.clone();
-    opened.release().unwrap();
+    opened.block(async |opened| opened.release().await).unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session = inner.load(&id).unwrap();
     config.store = inner;
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    HostLoop::open(config, &rx, Sender::over(tx), None)
-        .unwrap()
-        .release()
-        .unwrap();
+    {
+        let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+        host.block(async |host| host.release().await).unwrap();
+    }
 }
 
 #[test]
@@ -260,7 +264,7 @@ fn failed_projection_with_a_stale_head_names_debt_without_recovery_loop() {
     config.store = memory.clone();
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
     let recorded = host.opened.locator();
     let inner = host.config.store.clone();
@@ -272,7 +276,7 @@ fn failed_projection_with_a_stale_head_names_debt_without_recovery_loop() {
             turn.result().await.unwrap();
         })
         .unwrap();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     memory.delete_views(&id);
     for _ in 0..2 {
         let (mut config, _) = fresh_injected_attached_host(root.path());
@@ -286,7 +290,7 @@ fn failed_projection_with_a_stale_head_names_debt_without_recovery_loop() {
             },
         ));
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let error = match HostLoop::open(config, &rx, Sender::over(tx), None) {
+        let error = match NodeActor::open_blocking(config, &rx, Sender::over(tx), None) {
             Ok(_) => panic!("a stale head opened despite failed projection"),
             Err(error) => error,
         };
@@ -321,7 +325,7 @@ fn post_release_projection_refusal_is_cleanup_and_preserves_release_failure() {
         }
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+        let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
         host.config.store.save(&mut host.config.session).unwrap();
         let inner = host.config.store.clone();
         let id = host.config.session.id.clone();
@@ -332,7 +336,7 @@ fn post_release_projection_refusal_is_cleanup_and_preserves_release_failure() {
                 refuse: true,
             },
         ));
-        let error = host.release().unwrap_err();
+        let error = host.block(async |host| host.release().await).unwrap_err();
         let failures = error.shutdown_failures().unwrap();
         assert!(
             failures
@@ -357,10 +361,10 @@ fn post_release_projection_refusal_is_cleanup_and_preserves_release_failure() {
         config.store = inner.clone();
         config.session = inner.load(&id).unwrap();
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        HostLoop::open(config, &rx, Sender::over(tx), None)
-            .unwrap()
-            .release()
-            .unwrap();
+        {
+            let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+            host.block(async |host| host.release().await).unwrap();
+        }
     }
 }
 
@@ -377,7 +381,7 @@ fn child_retirement_failure_releases_without_a_product_save() {
         .unwrap();
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     // A stale cache cannot select abandonment instead of the clean receipt.
     host.quit_abandoned_turn = true;
     host.config.store.save(&mut host.config.session).unwrap();
@@ -389,7 +393,7 @@ fn child_retirement_failure_releases_without_a_product_save() {
             fail: AtomicBool::new(true),
         },
     ));
-    let error = host.release().unwrap_err();
+    let error = host.block(async |host| host.release().await).unwrap_err();
     let failures = error.shutdown_failures().unwrap();
     assert!(failures.cleanup.is_none());
     assert!(
@@ -404,10 +408,10 @@ fn child_retirement_failure_releases_without_a_product_save() {
     config.store = store.clone();
     config.session = store.load(&id).unwrap();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    HostLoop::open(config, &rx, Sender::over(tx), None)
-        .unwrap()
-        .release()
-        .unwrap();
+    {
+        let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+        host.block(async |host| host.release().await).unwrap();
+    }
 }
 
 #[test]
@@ -416,7 +420,7 @@ fn release_without_a_product_save_fences_a_retained_agent_and_reopens() {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
     let old_agent = host.opened.agent().unwrap().clone();
     let (mut contender, _) = fresh_injected_attached_host(root.path());
@@ -437,13 +441,13 @@ fn release_without_a_product_save_fences_a_retained_agent_and_reopens() {
     ));
     host.config.store = store.clone();
     let id = host.config.session.id.clone();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     store.faults.fail.store(false, Ordering::SeqCst);
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.store = store.inner.clone();
     config.session = config.store.load(&id).unwrap();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let reopened = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    let mut reopened = NodeActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
     assert!(
         reopened
             .executor
@@ -452,5 +456,7 @@ fn release_without_a_product_save_fences_a_retained_agent_and_reopens() {
             .is_err()
     );
     drop(actions);
-    reopened.release().unwrap();
+    reopened
+        .block(async |reopened| reopened.release().await)
+        .unwrap();
 }

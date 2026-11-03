@@ -1,17 +1,20 @@
 //! Non-interactive waiting owns no turn; continuations use ordinary admission.
 
-use super::{CliFailure, CliResult, HostLoop, HostStep, InterruptWatch};
+use super::{CliFailure, CliResult, HostStep, InterruptWatch, NodeActor};
 use crate::runtime::oneshot::{OneShotOutcome, OneShotState};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     #[allow(
         clippy::too_many_lines,
         reason = "Run-until-idle selection preserves queue priority, child wake readiness, turn bounds, and terminal shutdown conditions."
     )]
-    pub(super) fn next_run_prompt(&mut self, state: &mut OneShotState) -> CliResult<HostStep> {
+    pub(super) async fn next_run_prompt(
+        &mut self,
+        state: &mut OneShotState,
+    ) -> CliResult<HostStep> {
         let mut waiting_noted = false;
         loop {
             let storage_unavailable =
@@ -121,31 +124,31 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     .collect::<Vec<_>>();
                 let mut failures = Vec::new();
                 if run.bounds.leave_jobs_running {
-                    match self
-                        .executor
-                        .block_on(self.config.state_roots.job_registry().disown_leftovers())
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => failures.push(error),
-                        Err(_) => failures.push("job disown execution failed".to_owned()),
-                    }
-                }
-                match self.executor.block_on(
-                    self.config
+                    if let Err(error) = self
+                        .config
                         .state_roots
                         .job_registry()
-                        .stop_all(Duration::from_millis(200)),
-                ) {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => failures.push(error),
-                    Err(_) => failures.push("job stop execution failed".to_owned()),
+                        .disown_leftovers()
+                        .await
+                    {
+                        failures.push(error);
+                    }
+                }
+                if let Err(error) = self
+                    .config
+                    .state_roots
+                    .job_registry()
+                    .stop_all(Duration::from_millis(200))
+                    .await
+                {
+                    failures.push(error);
                 }
                 let root = self.opened.agent().cloned();
                 let runtime = crate::topology_runtime::lookup(&tree_id);
                 // Transfer retirement closes child control ingress. Record
                 // quiescent terminals while their drivers still own authority;
                 // working children carry the evidence in cancellation commits.
-                match self.executor.block_on(async {
+                let errors = async {
                     let mut owners = Vec::new();
                     if let Some(runtime) = runtime {
                         let live = runtime.live.lock().await;
@@ -164,16 +167,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         }
                     }
                     errors
-                }) {
-                    Ok(errors) => failures.extend(errors),
-                    Err(_) => failures.push("job terminal recording execution failed".to_owned()),
                 }
-                match self.executor.block_on(
-                    super::super::topology_state::mark_root_interrupted_for_run(&tree_id),
-                ) {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(error)) => failures.push(error),
-                    Err(error) => failures.push(error.to_string()),
+                .await;
+                failures.extend(errors);
+                if let Err(error) =
+                    super::super::topology_state::mark_root_interrupted_for_run(&tree_id).await
+                {
+                    failures.push(error);
                 }
                 if storage_unavailable {
                     let _ = self.events.notice(TranscriptRow::info(
@@ -241,7 +241,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 };
             }
             if resuming {
-                match self.transient_resume_prompt()? {
+                match self.transient_resume_prompt().await? {
                     HostStep::Continue => {
                         std::thread::sleep(Duration::from_millis(20));
                         continue;
@@ -256,7 +256,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     super::wake::WAKE_PROMPT,
                 )
                 .map_err(CliFailure::new)?;
-                if !matches!(self.fit_child_wake(&command)?, super::wake::WakeFit::Fits) {
+                if !matches!(
+                    self.fit_child_wake(&command).await?,
+                    super::wake::WakeFit::Fits
+                ) {
                     if let Some(Ok(
                         OneShotOutcome::Completed { assistant }
                         | OneShotOutcome::Truncated { assistant },
@@ -275,19 +278,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 let item = candidate
                     .enqueue_live(super::wake::WAKE_PROMPT)
                     .map_err(|_| CliFailure::new("run continuation queue admission was refused"))?;
-                self.config.session = self
-                    .executor
-                    .block_on(super::super::result_mail::prepare_instruction(
-                        &self.config.topology_rows(),
-                        self.config.store.as_ref(),
-                        &candidate,
-                        &item,
-                        &command,
-                        batch,
-                        &trigger_ids,
-                    ))
-                    .map_err(|_| CliFailure::new("application execution failed"))?
-                    .map_err(CliFailure::from)?;
+                self.config.session = super::super::result_mail::prepare_instruction(
+                    &self.config.topology_rows(),
+                    self.config.store.as_ref(),
+                    &candidate,
+                    &item,
+                    &command,
+                    batch,
+                    &trigger_ids,
+                )
+                .await
+                .map_err(CliFailure::from)?;
                 let triggers = notices
                     .iter()
                     .map(|job| format!("p{} {}", job.number, job_status(job.status)))

@@ -27,16 +27,18 @@ fn unreadable_topology_refuses_even_an_injected_clear_candidate() {
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.topology_admission = Some(Arc::new(|| Err(CliFailure::new("named config error"))));
     let (events, _) = host_event_sink();
-    let result = build_clear_candidate(
-        &ApplicationExecutor::new().unwrap(),
-        &mut config,
-        &memory_attached_stub(),
-        "target",
-        "create-target",
-        &mut Vec::new(),
-        &events,
-        Instant::now(),
-    );
+    let result = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(build_clear_candidate(
+            &mut config,
+            &memory_attached_stub(),
+            "target",
+            "create-target",
+            &mut Vec::new(),
+            &events,
+            Instant::now(),
+        ))
+        .expect("the executor drives the call");
     assert!(
         result
             .err()
@@ -128,16 +130,17 @@ fn clear_intent_projection(admit: bool, fork_source: bool) {
         let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let interrupt_state = RefCell::new(InterruptWatchState::default());
         let watch = InterruptWatch::new(&receiver, &interrupt_state);
-        fork::handle_fork(
-            &executor,
-            watch,
-            &mut config,
-            &mut opened,
-            &mut Vec::new(),
-            &Sender::over(crate::surface_protocol::host_event_channel::<TestExtension>().0),
-            None,
-        )
-        .unwrap();
+        executor
+            .block_on(fork::handle_fork(
+                watch,
+                &mut config,
+                &mut opened,
+                &mut Vec::new(),
+                &Sender::over(crate::surface_protocol::host_event_channel::<TestExtension>().0),
+                None,
+            ))
+            .expect("the executor drives the call")
+            .unwrap();
     }
     let request = sessions::projector::WorkflowRequest {
         operation_id: "plak:clear:crash-after-intent".into(),
@@ -152,17 +155,18 @@ fn clear_intent_projection(admit: bool, fork_source: bool) {
     assert!(config.store.load(&target_id).unwrap().transcript.is_empty());
     if admit {
         let create_operation = sessions::clear_create_operation_id(&request.operation_id).unwrap();
-        let (created, _) = build_clear_candidate(
-            &executor,
-            &mut config,
-            &opened,
-            &target_id,
-            &create_operation,
-            &mut Vec::new(),
-            &Sender::over(crate::surface_protocol::host_event_channel::<TestExtension>().0),
-            Instant::now(),
-        )
-        .unwrap();
+        let (created, _) = executor
+            .block_on(build_clear_candidate(
+                &mut config,
+                &opened,
+                &target_id,
+                &create_operation,
+                &mut Vec::new(),
+                &Sender::over(crate::surface_protocol::host_event_channel::<TestExtension>().0),
+                Instant::now(),
+            ))
+            .expect("the executor drives the call")
+            .unwrap();
         assert_eq!(
             config.store.load(&target_id).unwrap().plakous_locator,
             Some(created.locator())

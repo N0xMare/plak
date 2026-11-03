@@ -18,7 +18,7 @@ use crate::surface_protocol::{HostEventReceiver, UserAction, UserActionSender};
 use std::sync::Arc;
 
 fn submissions<P: plakous_host_protocol::ProtocolExtension>(
-    host: &HostLoop<'_, P>,
+    host: &NodeActor<'_, P>,
 ) -> Vec<crate::sessions::projector::Submission> {
     host.config
         .store
@@ -28,7 +28,7 @@ fn submissions<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 fn root_batch<P: plakous_host_protocol::ProtocolExtension>(
-    host: &HostLoop<'_, P>,
+    host: &NodeActor<'_, P>,
     submission: &crate::sessions::projector::Submission,
 ) -> Option<crate::agent_tree::AgentCommand> {
     let rows = host.config.topology_rows();
@@ -41,7 +41,7 @@ fn root_batch<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 fn accepted<P: plakous_host_protocol::ProtocolExtension>(
-    host: &HostLoop<'_, P>,
+    host: &NodeActor<'_, P>,
     submission: &crate::sessions::projector::Submission,
 ) -> bool {
     host.config
@@ -62,7 +62,8 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
-        HostLoop::open(config, &actions, crate::runtime::Sender::over(events), None).unwrap();
+        NodeActor::open_blocking(config, &actions, crate::runtime::Sender::over(events), None)
+            .unwrap();
     let job = plakous::tools::JobView {
         number: 3,
         status: plakous::tools::JobStatus::Exited(Some(0)),
@@ -77,7 +78,7 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
     let now = Instant::now();
     host.config.auto_continue = false;
     assert!(matches!(
-        host.try_child_wake_with_jobs(now, vec![job.clone()])
+        host.block(async |host| host.try_child_wake_with_jobs(now, vec![job.clone()]).await)
             .unwrap(),
         HostStep::Continue
     ));
@@ -88,7 +89,7 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
     host.config.auto_continue = true;
     host.config.session.child_wake_suppressed = true;
     assert!(matches!(
-        host.try_child_wake_with_jobs(now, vec![job.clone()])
+        host.block(async |host| host.try_child_wake_with_jobs(now, vec![job.clone()]).await)
             .unwrap(),
         HostStep::Continue
     ));
@@ -100,13 +101,18 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
     let mut second = job.clone();
     second.number = 4;
     assert!(matches!(
-        host.try_child_wake_with_jobs(now, vec![job.clone(), second.clone()])
+        host.block(async |host| host
+            .try_child_wake_with_jobs(now, vec![job.clone(), second.clone()])
+            .await)
             .unwrap(),
         HostStep::Continue
     ));
     let (text, _, _) = take_prompt(
-        host.try_child_wake_with_jobs(now + QUIET_WINDOW, vec![job, second])
-            .unwrap(),
+        host.block(async |host| {
+            host.try_child_wake_with_jobs(now + QUIET_WINDOW, vec![job, second])
+                .await
+        })
+        .unwrap(),
     );
     assert_eq!(
         text,
@@ -121,7 +127,7 @@ fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
     assert!(intent.command_id.contains("p3"));
     assert!(intent.command_id.contains("p4"));
     assert!(!intent.canonical_command.contains("private notice tail"));
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -129,22 +135,28 @@ fn idle_escape_suppresses_wake_until_user_prompt() {
     with_host(1, |host, _, actions, _| {
         actions.send(UserAction::Interrupt).unwrap();
         assert!(matches!(
-            host.next_prompt(None).unwrap(),
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(host.config.session.child_wake_suppressed);
         let now = Instant::now();
         for at in [now, now + QUIET_WINDOW] {
             assert!(matches!(
-                host.child_wake_prompt(at).unwrap(),
+                host.block(async |host| host.child_wake_prompt(at).await)
+                    .unwrap(),
                 HostStep::Continue
             ));
         }
         actions
             .send(UserAction::Prompt("resume work".into()))
             .unwrap();
-        let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-        host.run_prompt(text, item, echoed, None).unwrap();
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+        );
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert!(!host.config.session.child_wake_suppressed);
     });
 }
@@ -160,7 +172,11 @@ fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
                 controls.send(UserAction::Interrupt).unwrap();
             }),
         ));
-        assert!(!host.preflight_child_wake("host wake").unwrap());
+        assert!(
+            !host
+                .block(async |host| host.preflight_child_wake("host wake").await)
+                .unwrap()
+        );
         let intents = host
             .config
             .store
@@ -218,7 +234,8 @@ fn completed_final_run_is_not_bounded_and_drain_is_process_local() {
             .store(true, std::sync::atomic::Ordering::Relaxed);
         controls.send(UserAction::Interrupt).unwrap();
         assert!(matches!(
-            host.next_run_prompt(&mut state).unwrap(),
+            host.block(async |host| host.next_run_prompt(&mut state).await)
+                .unwrap(),
             HostStep::Quit
         ));
         assert!(matches!(
@@ -240,10 +257,15 @@ fn run_continuation_ignores_auto_continue_and_admits_its_own_terminal() {
         host.config.auto_continue = false;
         host.config.interactive = false;
         let mut state = completed_run(100);
-        let (text, delivery, echoed) = take_prompt(host.next_run_prompt(&mut state).unwrap());
+        let (text, delivery, echoed) = take_prompt(
+            host.block(async |host| host.next_run_prompt(&mut state).await)
+                .unwrap(),
+        );
         assert!(observed.try_iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "plak: continuing (turn 2: c1 result)")));
         assert!(matches!(
-            host.run_prompt(text, delivery, echoed, Some(&mut state))
+            host.block(async |host| host
+                .run_prompt(text, delivery, echoed, Some(&mut state))
+                .await)
                 .unwrap(),
             HostStep::Continue
         ));
@@ -253,7 +275,8 @@ fn run_continuation_ignores_auto_continue_and_admits_its_own_terminal() {
         ));
         assert_eq!(host.config.session.root_turn_count, 1);
         assert!(matches!(
-            host.next_run_prompt(&mut state).unwrap(),
+            host.block(async |host| host.next_run_prompt(&mut state).await)
+                .unwrap(),
             HostStep::Quit
         ));
     });
@@ -297,8 +320,12 @@ fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
         |config, _| jobs.configure(config, &[2, 0]),
         |host, runtime, actions, observed| {
             actions.send(UserAction::Prompt("start".into())).unwrap();
-            let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-            host.run_prompt(text, item, echoed, None).unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
+            );
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             jobs.complete(host, 1);
             assert_eq!(host.opened.agent().unwrap().jobs().len(), 2);
             runtime
@@ -319,7 +346,8 @@ fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
             let before = submissions(host);
             let mut state = completed_run(100);
             state.run.as_mut().unwrap().deadline = Some(Instant::now() + Duration::from_secs(5));
-            host.drive(Some(&mut state)).unwrap();
+            host.block(async |host| host.drive(Some(&mut state)).await)
+                .unwrap();
             assert!(matches!(
                 state.result,
                 Some(Ok(crate::runtime::OneShotOutcome::Interrupted { .. }))
@@ -383,7 +411,8 @@ fn run_max_turns_stops_before_admitting_a_continuation() {
     with_host(1, |host, _, _, observed| {
         let mut state = completed_run(1);
         assert!(matches!(
-            host.next_run_prompt(&mut state).unwrap(),
+            host.block(async |host| host.next_run_prompt(&mut state).await)
+                .unwrap(),
             HostStep::Quit
         ));
         assert!(matches!(
@@ -412,7 +441,8 @@ fn run_waits_without_a_turn_and_timeout_interrupts_resumable_children() {
         let mut state = completed_run(25);
         state.run.as_mut().unwrap().deadline = Some(Instant::now() + Duration::from_millis(40));
         assert!(matches!(
-            host.next_run_prompt(&mut state).unwrap(),
+            host.block(async |host| host.next_run_prompt(&mut state).await)
+                .unwrap(),
             HostStep::Quit
         ));
         let notes = observed
@@ -456,7 +486,8 @@ fn run_sigint_while_waiting_keeps_the_last_answer_and_interrupts() {
         let mut state = completed_run(25);
         actions.send(UserAction::Interrupt).unwrap();
         assert!(matches!(
-            host.next_run_prompt(&mut state).unwrap(),
+            host.block(async |host| host.next_run_prompt(&mut state).await)
+                .unwrap(),
             HostStep::Quit
         ));
         assert_eq!(
@@ -603,7 +634,8 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                     controls.send(UserAction::Interrupt).unwrap();
                 }
                 assert!(matches!(
-                    host.next_run_prompt(&mut state).unwrap(),
+                    host.block(async |host| host.next_run_prompt(&mut state).await)
+                        .unwrap(),
                     HostStep::Quit
                 ));
                 assert!(
@@ -668,7 +700,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
 fn with_host(
     results: usize,
     test: impl FnOnce(
-        &mut HostLoop<'_, TestExtension>,
+        &mut NodeActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -681,7 +713,7 @@ fn with_fixture(
     results: usize,
     overflow: bool,
     test: impl FnOnce(
-        &mut HostLoop<'_, TestExtension>,
+        &mut NodeActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -698,7 +730,7 @@ fn with_configured_fixture(
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
     ),
     test: impl FnOnce(
-        &mut HostLoop<'_, TestExtension>,
+        &mut NodeActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -744,7 +776,7 @@ fn with_configured_fixture(
     configure(&mut config, &runtime);
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -753,7 +785,7 @@ fn with_configured_fixture(
     .unwrap();
     observed.try_iter().for_each(drop);
     test(&mut host, &runtime, &actions, &observed);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 fn take_prompt(step: HostStep) -> (String, Option<SessionQueueItem>, bool) {
@@ -946,8 +978,12 @@ fn a_fanout_wait_keeps_its_wait_facts_live_and_restored() {
             actions
                 .send(UserAction::Prompt("wait for every child".into()))
                 .unwrap();
-            let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-            host.run_prompt(text, item, echoed, None).unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
+            );
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             // The committed root turn retired its await receipt.
             assert_eq!(
                 runtime
@@ -968,7 +1004,7 @@ fn a_fanout_wait_keeps_its_wait_facts_live_and_restored() {
             assert!(live.woke_by.is_some(), "{live:?}");
             assert!(live.settled_agent.is_some(), "{live:?}");
             assert!(live.timeout_ms.is_some(), "{live:?}");
-            host.project_now();
+            host.block(async |host| host.project_now().await);
             let restored = host.config.store.load(&host.config.session.id).unwrap();
             let persisted = restored
                 .transcript
@@ -1018,7 +1054,7 @@ fn a_fanout_wait_keeps_its_wait_facts_live_and_restored() {
 }
 
 fn assert_wait_is_unread(
-    host: &HostLoop<'_, TestExtension>,
+    host: &NodeActor<'_, TestExtension>,
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
 ) {
     let report = host.opened.agent().unwrap().abandoned_turn().unwrap();
@@ -1133,7 +1169,10 @@ fn abandoned_uncommitted_wait_returns_its_acknowledged_mail_to_unread() {
                     .execute_batch("DROP TRIGGER cut_wait_publication")
                     .unwrap();
                 if in_place {
-                    host.reopen_in_place().unwrap().abandoned.unwrap();
+                    host.block(async |host| host.reopen_in_place().await)
+                        .unwrap()
+                        .abandoned
+                        .unwrap();
                     assert_wait_is_unread(host, runtime);
                 } else {
                     host.config
@@ -1255,10 +1294,11 @@ fn a_withheld_over_window_prompt_leaves_child_mail_unread() {
 
             // Prompts reach a turn through the queue, which is what a
             // scheduled pass measures.
-            let send = |host: &mut HostLoop<'_, TestExtension>, text: String| {
+            let send = |host: &mut NodeActor<'_, TestExtension>, text: String| {
                 let item = host.config.session.enqueue_live(text.clone()).unwrap();
                 host.config.store.save(&mut host.config.session).unwrap();
-                host.run_prompt(text, Some(item), false, None).unwrap();
+                host.block(async |host| host.run_prompt(text, Some(item), false, None).await)
+                    .unwrap();
             };
             send(host, "p".repeat(30_000));
             let events: Vec<_> = observed.try_iter().collect();
@@ -1294,7 +1334,7 @@ fn with_scripted_mail_fixture(
     results: usize,
     script: serde_json::Value,
     test: impl FnOnce(
-        &mut HostLoop<'_, TestExtension>,
+        &mut NodeActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -1352,10 +1392,11 @@ fn with_scripted_mail_fixture(
 }
 
 /// Queues a user prompt and runs it, as the drain does.
-fn send_queued(host: &mut HostLoop<'_, TestExtension>, text: String) {
+fn send_queued(host: &mut NodeActor<'_, TestExtension>, text: String) {
     let item = host.config.session.enqueue_live(text.clone()).unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
-    host.run_prompt(text, Some(item), false, None).unwrap();
+    host.block(async |host| host.run_prompt(text, Some(item), false, None).await)
+        .unwrap();
 }
 
 fn notice_texts(observed: &HostEventReceiver<TestExtension>) -> Vec<String> {
@@ -1373,7 +1414,7 @@ fn notice_texts(observed: &HostEventReceiver<TestExtension>) -> Vec<String> {
 /// A user prompt that fits, with five child findings that only together
 /// with it overflow the window, and the bare prompt's text.
 fn prompt_whose_mail_alone_overflows(
-    host: &HostLoop<'_, TestExtension>,
+    host: &NodeActor<'_, TestExtension>,
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
 ) -> String {
     let child = runtime
@@ -1408,12 +1449,13 @@ fn prompt_whose_mail_alone_overflows(
             .unwrap();
     }
     let project = |text: &str| {
-        super::super::query_context(
-            &host.executor,
-            &host.opened,
-            super::super::ContextQuery::WithPendingUserInput(text.to_owned().into()),
-        )
-        .unwrap()
+        host.executor
+            .block_on(super::super::query_context(
+                &host.opened,
+                super::super::ContextQuery::WithPendingUserInput(text.to_owned().into()),
+            ))
+            .expect("the executor drives the call")
+            .unwrap()
     };
     let fits = |text: &str| project(text).disposition() == crate::context::ContextDisposition::Fits;
     // The longest bare prompt that fits.
@@ -1576,7 +1618,7 @@ fn a_withheld_prompt_returns_its_acknowledged_child_mail_once() {
                     .unwrap()
             );
             // Reconciling the withheld admission leaves it unread.
-            host.project_now();
+            host.block(async |host| host.project_now().await);
             assert_eq!(pending(), 1);
 
             send_queued(host, "carry on again".to_owned());
@@ -1627,17 +1669,23 @@ fn a_withheld_wake_returns_its_acknowledged_child_mail() {
             };
             assert_eq!(pending(), 1);
             let now = Instant::now();
-            host.child_wake_prompt(now).unwrap();
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap();
             let HostStep::Prompt {
                 text,
                 queued_delivery,
                 user_echoed,
-            } = host.child_wake_prompt(now + QUIET_WINDOW).unwrap()
+            } = host
+                .block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap()
             else {
                 panic!("the result wakes the root");
             };
-            host.run_prompt(text, queued_delivery, user_echoed, None)
-                .unwrap();
+            host.block(async |host| {
+                host.run_prompt(text, queued_delivery, user_echoed, None)
+                    .await
+            })
+            .unwrap();
             let wake = submissions(host).last().unwrap().clone();
             assert!(root_batch(host, &wake).is_some());
             assert_eq!(pending(), 1, "the withheld wake's mail is unread again");
@@ -1679,17 +1727,23 @@ fn a_withheld_wake_does_not_wake_again_on_its_returned_batch() {
             let mut now = Instant::now();
             let mut wakes = 0;
             for _ in 0..4 {
-                host.child_wake_prompt(now).unwrap();
+                host.block(async |host| host.child_wake_prompt(now).await)
+                    .unwrap();
                 now += QUIET_WINDOW;
                 if let HostStep::Prompt {
                     text,
                     queued_delivery,
                     user_echoed,
-                } = host.child_wake_prompt(now).unwrap()
+                } = host
+                    .block(async |host| host.child_wake_prompt(now).await)
+                    .unwrap()
                 {
                     wakes += 1;
-                    host.run_prompt(text, queued_delivery, user_echoed, None)
-                        .unwrap();
+                    host.block(async |host| {
+                        host.run_prompt(text, queued_delivery, user_echoed, None)
+                            .await
+                    })
+                    .unwrap();
                     assert_eq!(pending(), 1, "the withheld wake's mail is unread again");
                 }
                 now += QUIET_WINDOW;
@@ -1736,20 +1790,27 @@ fn idle_results_coalesce_and_admit_one_harness_turn_with_exact_journal() {
     with_host(2, |host, runtime, _, observed| {
         let now = Instant::now();
         assert!(matches!(
-            host.child_wake_prompt(now).unwrap(),
-            HostStep::Continue
-        ));
-        assert!(matches!(
-            host.child_wake_prompt(now + Duration::from_millis(1999))
+            host.block(async |host| host.child_wake_prompt(now).await)
                 .unwrap(),
             HostStep::Continue
         ));
-        let (text, item, echoed) = take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
+        assert!(matches!(
+            host.block(async |host| host
+                .child_wake_prompt(now + Duration::from_millis(1999))
+                .await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
+        );
         assert!(is_wake_delivery(
             &host.config.session,
             item.as_ref().unwrap()
         ));
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         let published = observed.try_iter().collect::<Vec<_>>();
         // A wake leaves no transcript row: neither published nor persisted.
         assert!(
@@ -1812,11 +1873,13 @@ fn idle_results_coalesce_and_admit_one_harness_turn_with_exact_journal() {
         host.config.session = host.config.store.load(&host.config.session.id).unwrap();
         host.child_wake = RootWake::default();
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW * 2).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 2).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW * 3).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 3).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(
@@ -1849,8 +1912,12 @@ fn a_withheld_wake_reconciled_as_a_duplicate_on_open_returns_its_mail() {
         }),
         |host, runtime, _, _| {
             let now = Instant::now();
-            host.child_wake_prompt(now).unwrap();
-            let _ = take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap();
+            let _ = take_prompt(
+                host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                    .unwrap(),
+            );
             let intent = submissions(host)[0].clone();
             host.executor
                 .block_on(async {
@@ -1890,8 +1957,8 @@ fn a_withheld_wake_reconciled_as_a_duplicate_on_open_returns_its_mail() {
 }
 
 fn reopen_at_cut(
-    host: &mut HostLoop<'_, TestExtension>,
-    test: impl FnOnce(&mut HostLoop<'_, TestExtension>),
+    host: &mut NodeActor<'_, TestExtension>,
+    test: impl FnOnce(&mut NodeActor<'_, TestExtension>),
 ) {
     host.executor
         .block_on(host.opened.detach())
@@ -1903,7 +1970,8 @@ fn reopen_at_cut(
     config.store = host.config.store.clone();
     config.session = config.store.load(&host.config.session.id).unwrap();
     config.runtime_factory = host.config.runtime_factory.clone();
-    let mut reopened = HostLoop::open(config, host.actions, host.events.clone(), None).unwrap();
+    let mut reopened =
+        NodeActor::open_blocking(config, host.actions, host.events.clone(), None).unwrap();
     test(&mut reopened);
     // Keep the fixture's old host at the same released head and CAS revision.
     reopened
@@ -1919,8 +1987,12 @@ fn reopen_at_cut(
 fn accepted_wake_reopens_with_duplicate_instruction_and_acknowledges_once() {
     with_host(1, |host, runtime, _, _| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
-        let _ = take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
+        let _ = take_prompt(
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
+        );
         let intent = submissions(host)[0].clone();
         host.executor
             .block_on(async {
@@ -1962,7 +2034,7 @@ fn accepted_wake_reopens_with_duplicate_instruction_and_acknowledges_once() {
                     .unwrap()
             );
             let revision = runtime.read(|tree| tree.revision).unwrap();
-            reopened.project_now();
+            reopened.block(async |reopened| reopened.project_now().await);
             assert_eq!(runtime.read(|tree| tree.revision).unwrap(), revision);
         });
     });
@@ -1972,8 +2044,12 @@ fn accepted_wake_reopens_with_duplicate_instruction_and_acknowledges_once() {
 fn prepared_wake_reopen_discards_the_delivery_and_user_prompt_carries_unread_mail() {
     with_host(1, |host, runtime, actions, _| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
-        let _ = take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
+        let _ = take_prompt(
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
+        );
         let command_id = submissions(host)[0].command_id.clone();
         reopen_at_cut(host, |reopened| {
             assert!(
@@ -2007,9 +2083,15 @@ fn prepared_wake_reopen_discards_the_delivery_and_user_prompt_carries_unread_mai
             actions
                 .send(UserAction::Prompt("human next".into()))
                 .unwrap();
-            let (text, item, echoed) = take_prompt(reopened.next_prompt(None).unwrap());
+            let (text, item, echoed) = take_prompt(
+                reopened
+                    .block(async |reopened| reopened.next_prompt(None).await)
+                    .unwrap(),
+            );
             assert_eq!(text, "human next");
-            reopened.run_prompt(text, item, echoed, None).unwrap();
+            reopened
+                .block(async |reopened| reopened.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             assert_eq!(reopened.config.session.root_turn_count, 1);
             assert_eq!(submissions(reopened).len(), 1);
             assert_eq!(
@@ -2032,10 +2114,15 @@ fn prepared_wake_reopen_discards_the_delivery_and_user_prompt_carries_unread_mai
 fn pre_admission_wake_failure_is_disposable_without_pausing_user_work() {
     with_host(1, |host, runtime, actions, observed| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
-        let (text, item, echoed) = take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
+        );
         host.child_wake.prepared_context = None;
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(
             submissions(host),
             [] as [crate::sessions::projector::Submission; 0]
@@ -2067,8 +2154,12 @@ fn pre_admission_wake_failure_is_disposable_without_pausing_user_work() {
         actions
             .send(UserAction::Prompt("human after failure".into()))
             .unwrap();
-        let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-        host.run_prompt(text, item, echoed, None).unwrap();
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+        );
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(host.config.session.root_turn_count, 1);
         assert!(
             runtime
@@ -2082,13 +2173,15 @@ fn pre_admission_wake_failure_is_disposable_without_pausing_user_work() {
 fn wake_store_failure_emits_error_and_stays_attached_even_when_suppression_save_fails() {
     with_host(1, |host, runtime, actions, observed| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         let store = host.config.store.clone();
         host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::refusing(
             "injected store busy",
         ));
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(host.config.session.child_wake_suppressed);
@@ -2111,12 +2204,14 @@ fn wake_store_failure_emits_error_and_stays_attached_even_when_suppression_save_
         );
         assert_eq!(observed.try_iter().filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note.contains("injected store busy"))).count(), 1);
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW * 2).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 2).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(observed.try_iter().next().is_none());
         host.config.store = store;
-        host.child_wake_prompt(now + QUIET_WINDOW * 3).unwrap();
+        host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 3).await)
+            .unwrap();
         assert!(
             host.config
                 .store
@@ -2125,7 +2220,11 @@ fn wake_store_failure_emits_error_and_stays_attached_even_when_suppression_save_
                 .child_wake_suppressed
         );
         actions.send(UserAction::Quit).unwrap();
-        assert!(matches!(host.next_prompt(None).unwrap(), HostStep::Quit));
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Quit
+        ));
     });
 }
 
@@ -2136,9 +2235,12 @@ fn transient_wake_refusal_discards_queue_and_intent_without_consuming_mail() {
     for kind in [ControlErrorKind::Backpressure, ControlErrorKind::QueueFull] {
         with_host(1, |host, runtime, actions, _| {
             let now = Instant::now();
-            host.child_wake_prompt(now).unwrap();
-            let (text, item, echoed) =
-                take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                    .unwrap(),
+            );
             crate::runtime::turn_drive::stub_start_refusal(
                 format!(
                     "plak:deliver:{}:{}",
@@ -2148,7 +2250,8 @@ fn transient_wake_refusal_discards_queue_and_intent_without_consuming_mail() {
                 CommandAckDisposition::Rejected,
                 kind,
             );
-            host.run_prompt(text, item, echoed, None).unwrap();
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
 
             assert!(host.config.session.pending_queue.is_empty(), "{kind:?}");
             assert_eq!(
@@ -2184,8 +2287,12 @@ fn transient_wake_refusal_discards_queue_and_intent_without_consuming_mail() {
             actions
                 .send(UserAction::Prompt("human after refusal".into()))
                 .unwrap();
-            let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-            host.run_prompt(text, item, echoed, None).unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
+            );
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             assert_eq!(host.config.session.root_turn_count, 1);
             assert!(
                 runtime
@@ -2239,7 +2346,7 @@ impl tracing::Subscriber for WakeWarnings {
 fn with_wake_warnings(
     results: usize,
     test: impl FnOnce(
-        &mut HostLoop<'_, TestExtension>,
+        &mut NodeActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &HostEventReceiver<TestExtension>,
         &WakeWarnings,
@@ -2265,15 +2372,17 @@ fn busy_context_meter_refresh_is_quiet_and_unavailable() {
             Some(StoreRefusal::Busy),
             1,
         );
-        let result = super::super::report_context(
-            &host.executor,
-            &host.opened,
-            &host.events,
-            "after turn publication",
-            false,
-            host.config.session.context_counters(),
-        )
-        .unwrap();
+        let result = host
+            .executor
+            .block_on(super::super::report_context(
+                &host.opened,
+                &host.events,
+                "after turn publication",
+                false,
+                host.config.session.context_counters(),
+            ))
+            .expect("the executor drives the call")
+            .unwrap();
         assert_eq!(
             result.disposition(),
             crate::context::ContextDisposition::Unavailable
@@ -2305,15 +2414,17 @@ fn nontransient_context_meter_failure_keeps_a_stage_specific_error() {
     use crate::error::read_faults;
     with_host(1, |host, _, _, _| {
         read_faults::inject(super::super::super::usage::CONTEXT_QUERY_FAILED, None, 1);
-        let error = super::super::report_context(
-            &host.executor,
-            &host.opened,
-            &host.events,
-            "after recovery",
-            false,
-            host.config.session.context_counters(),
-        )
-        .unwrap_err();
+        let error = host
+            .executor
+            .block_on(super::super::report_context(
+                &host.opened,
+                &host.events,
+                "after recovery",
+                false,
+                host.config.session.context_counters(),
+            ))
+            .expect("the executor drives the call")
+            .unwrap_err();
         assert!(error.message().contains("context meter after recovery:"));
     });
 }
@@ -2325,11 +2436,13 @@ fn a_transient_tree_feed_refusal_retries_and_wakes_exactly_once() {
     for refusal in [StoreRefusal::Busy, StoreRefusal::Unavailable] {
         with_wake_warnings(1, |host, runtime, observed, warnings| {
             let now = Instant::now();
-            host.child_wake_prompt(now).unwrap();
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap();
             read_faults::inject(crate::agent::TREE_FEED_READ_FAILED, Some(refusal), 1);
             let ready = now + QUIET_WINDOW;
             assert!(matches!(
-                host.child_wake_prompt(ready).unwrap(),
+                host.block(async |host| host.child_wake_prompt(ready).await)
+                    .unwrap(),
                 HostStep::Continue
             ));
             assert!(!host.config.session.child_wake_suppressed);
@@ -2349,16 +2462,21 @@ fn a_transient_tree_feed_refusal_retries_and_wakes_exactly_once() {
 
             // The backoff holds the next attempt; a retry then wakes once.
             assert!(matches!(
-                host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY / 2)
+                host.block(async |host| host
+                    .child_wake_prompt(ready + TRANSIENT_FIRST_DELAY / 2)
+                    .await)
                     .unwrap(),
                 HostStep::Continue
             ));
             let (text, item, echoed) = take_prompt(
-                host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY)
-                    .unwrap(),
+                host.block(async |host| {
+                    host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY).await
+                })
+                .unwrap(),
             );
             assert_eq!(submissions(host).len(), 1);
-            host.run_prompt(text, item, echoed, None).unwrap();
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             assert!(accepted(host, &submissions(host)[0]));
             assert!(
                 runtime
@@ -2368,7 +2486,8 @@ fn a_transient_tree_feed_refusal_retries_and_wakes_exactly_once() {
             let later = ready + TRANSIENT_REARM;
             for at in [later, later + QUIET_WINDOW] {
                 assert!(matches!(
-                    host.child_wake_prompt(at).unwrap(),
+                    host.block(async |host| host.child_wake_prompt(at).await)
+                        .unwrap(),
                     HostStep::Continue
                 ));
             }
@@ -2403,7 +2522,8 @@ fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
         ));
         let now = Instant::now();
         assert!(matches!(
-            host.child_wake_prompt(now).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(!host.config.session.child_wake_suppressed);
@@ -2412,7 +2532,8 @@ fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
             [] as [crate::sessions::projector::Submission; 0]
         );
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert_eq!(
@@ -2425,13 +2546,19 @@ fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
         host.config.store = durable;
         let retry = now + QUIET_WINDOW + TRANSIENT_FIRST_DELAY;
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW + TRANSIENT_FIRST_DELAY / 2)
+            host.block(async |host| host
+                .child_wake_prompt(now + QUIET_WINDOW + TRANSIENT_FIRST_DELAY / 2)
+                .await)
                 .unwrap(),
             HostStep::Continue
         ));
-        let (text, item, echoed) = take_prompt(host.child_wake_prompt(retry).unwrap());
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.child_wake_prompt(retry).await)
+                .unwrap(),
+        );
         assert!(!host.config.session.child_wake_suppressed);
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(submissions(host).len(), 1);
         assert!(accepted(host, &submissions(host)[0]));
     });
@@ -2470,14 +2597,16 @@ impl crate::runtime::fault_store::StoreFaults for BusySubmissions {
 fn a_busy_product_store_submission_retries_and_wakes_exactly_once() {
     with_wake_warnings(1, |host, runtime, observed, warnings| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
             host.config.store.clone(),
             BusySubmissions(std::sync::atomic::AtomicUsize::new(1)),
         ));
         let ready = now + QUIET_WINDOW;
         assert!(matches!(
-            host.child_wake_prompt(ready).unwrap(),
+            host.block(async |host| host.child_wake_prompt(ready).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(!host.config.session.child_wake_suppressed);
@@ -2504,11 +2633,12 @@ fn a_busy_product_store_submission_retries_and_wakes_exactly_once() {
         assert_eq!((unresolved, unread), (0, 1));
 
         let (text, item, echoed) = take_prompt(
-            host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY)
+            host.block(async |host| host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY).await)
                 .unwrap(),
         );
         assert_eq!(submissions(host).len(), 1);
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert!(accepted(host, &submissions(host)[0]));
         assert!(
             runtime
@@ -2518,7 +2648,8 @@ fn a_busy_product_store_submission_retries_and_wakes_exactly_once() {
         let later = ready + TRANSIENT_REARM;
         for at in [later, later + QUIET_WINDOW] {
             assert!(matches!(
-                host.child_wake_prompt(at).unwrap(),
+                host.block(async |host| host.child_wake_prompt(at).await)
+                    .unwrap(),
                 HostStep::Continue
             ));
         }
@@ -2533,7 +2664,8 @@ fn spent_transient_retries_pause_with_a_rearm_that_later_wakes() {
 
     with_wake_warnings(1, |host, runtime, observed, warnings| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         let site = super::super::super::usage::CONTEXT_QUERY_FAILED;
         let attempts = TRANSIENT_RETRIES + 2;
         read_faults::inject(
@@ -2544,7 +2676,8 @@ fn spent_transient_retries_pause_with_a_rearm_that_later_wakes() {
         let mut at = now + QUIET_WINDOW;
         for attempt in 1..=attempts {
             assert!(matches!(
-                host.child_wake_prompt(at).unwrap(),
+                host.block(async |host| host.child_wake_prompt(at).await)
+                    .unwrap(),
                 HostStep::Continue
             ));
             let notices = notice_texts(observed);
@@ -2567,7 +2700,9 @@ fn spent_transient_retries_pause_with_a_rearm_that_later_wakes() {
             };
             // Nothing retries before the delay is over.
             assert!(matches!(
-                host.child_wake_prompt(at + delay.saturating_sub(Duration::from_millis(1)))
+                host.block(async |host| host
+                    .child_wake_prompt(at + delay.saturating_sub(Duration::from_millis(1)))
+                    .await)
                     .unwrap(),
                 HostStep::Continue
             ));
@@ -2580,8 +2715,12 @@ fn spent_transient_retries_pause_with_a_rearm_that_later_wakes() {
         );
 
         // The re-arm finds the store answering again and wakes once.
-        let (text, item, echoed) = take_prompt(host.child_wake_prompt(at).unwrap());
-        host.run_prompt(text, item, echoed, None).unwrap();
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.child_wake_prompt(at).await)
+                .unwrap(),
+        );
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(submissions(host).len(), 1);
         assert!(
             runtime
@@ -2597,10 +2736,12 @@ fn a_permanent_read_refusal_still_pauses_until_the_next_prompt() {
 
     with_wake_warnings(1, |host, runtime, observed, warnings| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         read_faults::inject(crate::agent::TREE_FEED_READ_FAILED, None, 1);
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(host.config.session.child_wake_suppressed);
@@ -2617,7 +2758,8 @@ fn a_permanent_read_refusal_still_pauses_until_the_next_prompt() {
         assert!(logged[0].contains("cause=\"refused\""), "{logged:?}");
         for at in [now + TRANSIENT_REARM, now + TRANSIENT_REARM * 2] {
             assert!(matches!(
-                host.child_wake_prompt(at).unwrap(),
+                host.block(async |host| host.child_wake_prompt(at).await)
+                    .unwrap(),
                 HostStep::Continue
             ));
         }
@@ -2676,9 +2818,11 @@ fn runtime_shutdown_during_wake_compaction_parks_instead_of_deferring() {
             runtime(role)
         });
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(observed_stop.load(std::sync::atomic::Ordering::Acquire));
@@ -2700,9 +2844,11 @@ fn runtime_shutdown_during_wake_compaction_parks_instead_of_deferring() {
 fn wake_preflight_attempts_compaction_before_preparing_delivery() {
     with_fixture(1, true, |host, runtime, _, observed| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert_eq!(
@@ -2744,7 +2890,8 @@ fn wake_preflight_attempts_compaction_before_preparing_delivery() {
             1
         );
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW * 4).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 4).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(!observed.try_iter().any(|event| matches!(
@@ -2787,7 +2934,7 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
         .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events.clone()),
@@ -2800,7 +2947,11 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
     host.config.session.touch();
     store.save(&mut host.config.session).unwrap();
     actions.send(UserAction::Quit).unwrap();
-    assert!(matches!(host.next_prompt(None).unwrap(), HostStep::Quit));
+    assert!(matches!(
+        host.block(async |host| host.next_prompt(None).await)
+            .unwrap(),
+        HostStep::Quit
+    ));
     assert_eq!(
         host.config.session.pending_queue,
         [] as [crate::sessions::queue::QueueItem; 0]
@@ -2809,14 +2960,14 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
         host.config.session.queue_drain_state,
         QueueDrainState::RestoredPaused
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     observed.try_iter().for_each(drop);
 
     let (mut config, _) = fresh_injected_attached_host(dir.path());
     config.store = store.clone();
     config.state_roots = roots.clone();
     config.session = store.load(&id).unwrap();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events.clone()),
@@ -2825,21 +2976,26 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
     .unwrap();
     let now = Instant::now();
     assert!(matches!(
-        host.child_wake_prompt(now).unwrap(),
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap(),
         HostStep::Continue
     ));
-    let (text, item, echoed) = take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
-    host.run_prompt(text, item, echoed, None).unwrap();
+    let (text, item, echoed) = take_prompt(
+        host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+            .unwrap(),
+    );
+    host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+        .unwrap();
     assert_eq!(host.config.session.root_turn_count, 1);
     let journal = submissions(&host)[0].clone();
     assert!(accepted(&host, &journal));
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 
     let (mut config, _) = fresh_injected_attached_host(dir.path());
     config.store = store.clone();
     config.state_roots = roots;
     config.session = store.load(&id).unwrap();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -2847,11 +3003,13 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
     )
     .unwrap();
     assert!(matches!(
-        host.child_wake_prompt(now + QUIET_WINDOW * 2).unwrap(),
+        host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 2).await)
+            .unwrap(),
         HostStep::Continue
     ));
     assert!(matches!(
-        host.child_wake_prompt(now + QUIET_WINDOW * 3).unwrap(),
+        host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 3).await)
+            .unwrap(),
         HostStep::Continue
     ));
     assert_eq!(host.config.session.root_turn_count, 1);
@@ -2862,7 +3020,7 @@ fn reopen_with_unread_result_admits_once_and_keeps_the_delivery_journal() {
             .read(|tree| tree.pending_mail("root").is_empty())
             .unwrap()
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -2900,11 +3058,13 @@ fn finding_does_not_wake_but_question_does_and_resets_quiet_window() {
             .unwrap();
         let now = Instant::now();
         assert!(matches!(
-            host.child_wake_prompt(now).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
         runtime
@@ -2922,12 +3082,16 @@ fn finding_does_not_wake_but_question_does_and_resets_quiet_window() {
             .block()
             .unwrap();
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
-        let (text, item, echoed) =
-            take_prompt(host.child_wake_prompt(now + QUIET_WINDOW * 2).unwrap());
-        host.run_prompt(text, item, echoed, None).unwrap();
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 2).await)
+                .unwrap(),
+        );
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(
             root_batch(host, &submissions(host)[0])
                 .unwrap()
@@ -2974,7 +3138,8 @@ fn a_noninteractive_face_never_reenables_wakes_from_home_configuration() {
         assert!(!host.config.prompt_host_facts().host_wakes);
         for at in [now, now + QUIET_WINDOW] {
             assert!(matches!(
-                host.child_wake_prompt(at).unwrap(),
+                host.block(async |host| host.child_wake_prompt(at).await)
+                    .unwrap(),
                 HostStep::Continue
             ));
         }
@@ -2984,11 +3149,13 @@ fn a_noninteractive_face_never_reenables_wakes_from_home_configuration() {
             [] as [crate::sessions::projector::Submission; 0]
         );
         host.config.interactive = true;
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         assert!(host.config.auto_continue);
         assert!(host.config.prompt_host_facts().host_wakes);
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Prompt { .. }
         ));
     });
@@ -3000,7 +3167,8 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
         let now = Instant::now();
         host.config.auto_continue = false;
         assert!(matches!(
-            host.child_wake_prompt(now).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap(),
             HostStep::Continue
         ));
         host.config.auto_continue = true;
@@ -3009,17 +3177,23 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
         host.config.session = store.load(&host.config.session.id).unwrap();
         assert!(host.config.session.child_wake_suppressed);
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
         actions
             .send(UserAction::Prompt("reset suppression".into()))
             .unwrap();
-        let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-        host.run_prompt(text, item, echoed, None).unwrap();
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+        );
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         host.recovery_blocked = true;
         assert!(matches!(
-            host.child_wake_prompt(now).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap(),
             HostStep::Continue
         ));
         host.recovery_blocked = false;
@@ -3029,25 +3203,32 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
             .pending_queue
             .push(SessionQueueItem::new("restored prompt"));
         assert!(matches!(
-            host.child_wake_prompt(now).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap(),
             HostStep::Continue
         ));
         host.config.session.pending_queue.clear();
         host.config.session.queue_drain_state = QueueDrainState::LiveAutoDrain;
         assert!(matches!(
-            host.child_wake_prompt(now).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap(),
             HostStep::Continue
         ));
         actions
             .send(UserAction::Prompt("human prompt".into()))
             .unwrap();
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
-        let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+        );
         assert_eq!(text, "human prompt");
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(host.config.session.root_turn_count, 2);
         assert!(
             !submissions(host)
@@ -3106,7 +3287,7 @@ impl plakous::tools::ToolExecutor for WakeJobFixture {
 }
 
 impl WakeJobFixture {
-    fn complete(&self, host: &HostLoop<'_, TestExtension>, number: u32) {
+    fn complete(&self, host: &NodeActor<'_, TestExtension>, number: u32) {
         let sessions = self.0.lock().unwrap().clone().unwrap();
         let id = sessions.session_for_number(number).unwrap();
         sessions
@@ -3250,10 +3431,13 @@ fn thirty_consecutive_wakes_admit_fresh_completions_without_a_user_prompt() {
                 assert_eq!(mail_ids.len(), 1);
                 let now = Instant::now();
                 assert!(matches!(
-                    host.child_wake_prompt(now).unwrap(),
+                    host.block(async |host| host.child_wake_prompt(now).await)
+                        .unwrap(),
                     HostStep::Continue
                 ));
-                let step = host.child_wake_prompt(now + QUIET_WINDOW).unwrap();
+                let step = host
+                    .block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                    .unwrap();
                 assert!(
                     matches!(step, HostStep::Prompt { .. }),
                     "wake cycle {cycle} was refused"
@@ -3285,8 +3469,9 @@ fn thirty_consecutive_wakes_admit_fresh_completions_without_a_user_prompt() {
                     format!("p{}", cycle - 1)
                 };
                 assert_eq!(intent.command_id.rsplit(':').next().unwrap(), notice_ids);
-                host.run_prompt(text, item, echoed, None).unwrap();
-                host.project_now();
+                host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                    .unwrap();
+                host.block(async |host| host.project_now().await);
                 assert!(
                     runtime
                         .read(|tree| tree.pending_mail("root").is_empty())
@@ -3327,10 +3512,14 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                     .block()
                     .unwrap();
                 let now = Instant::now();
-                host.child_wake_prompt(now).unwrap();
-                let (text, item, echoed) =
-                    take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
-                host.run_prompt(text, item, echoed, None).unwrap();
+                host.block(async |host| host.child_wake_prompt(now).await)
+                    .unwrap();
+                let (text, item, echoed) = take_prompt(
+                    host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                        .unwrap(),
+                );
+                host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                    .unwrap();
                 assert!(accepted(host, submissions(host).last().unwrap()));
                 assert_eq!(host.opened.agent().unwrap().jobs().len(), 2);
                 assert!(
@@ -3343,12 +3532,17 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                 for (number, at) in [(1, first), (2, second)] {
                     jobs.complete(host, number);
                     assert!(matches!(
-                        host.child_wake_prompt(at).unwrap(),
+                        host.block(async |host| host.child_wake_prompt(at).await)
+                            .unwrap(),
                         HostStep::Continue
                     ));
                     if !coalesce || number == 1 {
-                        let (text, item, echoed) =
-                            take_prompt(host.child_wake_prompt(at + QUIET_WINDOW).unwrap());
+                        let (text, item, echoed) = take_prompt(
+                            host.block(async |host| {
+                                host.child_wake_prompt(at + QUIET_WINDOW).await
+                            })
+                            .unwrap(),
+                        );
                         assert_eq!(
                             submissions(host)
                                 .last()
@@ -3359,7 +3553,8 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                                 .unwrap(),
                             format!("p{number}")
                         );
-                        host.run_prompt(text, item, echoed, None).unwrap();
+                        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                            .unwrap();
                     }
                 }
                 let arrived = second + Duration::from_secs(1);
@@ -3391,18 +3586,23 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                     })
                     .unwrap();
                 assert!(matches!(
-                    host.child_wake_prompt(arrived).unwrap(),
+                    host.block(async |host| host.child_wake_prompt(arrived).await)
+                        .unwrap(),
                     HostStep::Continue
                 ));
                 assert!(matches!(
-                    host.child_wake_prompt(
-                        arrived + QUIET_WINDOW.checked_sub(Duration::from_millis(1)).unwrap()
-                    )
-                    .unwrap(),
+                    host.block(async |host| host
+                        .child_wake_prompt(
+                            arrived + QUIET_WINDOW.checked_sub(Duration::from_millis(1)).unwrap()
+                        )
+                        .await)
+                        .unwrap(),
                     HostStep::Continue
                 ));
-                let (text, item, echoed) =
-                    take_prompt(host.child_wake_prompt(arrived + QUIET_WINDOW).unwrap());
+                let (text, item, echoed) = take_prompt(
+                    host.block(async |host| host.child_wake_prompt(arrived + QUIET_WINDOW).await)
+                        .unwrap(),
+                );
                 let intents = host
                     .config
                     .store
@@ -3423,7 +3623,8 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                     intent.command_id.rsplit(':').next().unwrap(),
                     if coalesce { "p2" } else { "" }
                 );
-                host.run_prompt(text, item, echoed, None).unwrap();
+                host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                    .unwrap();
                 assert_eq!(
                     host.opened.agent().unwrap().jobs(),
                     [] as [plakous_tools::JobView; 0]
@@ -3434,7 +3635,10 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                         .unwrap()
                 );
                 assert!(matches!(
-                    host.child_wake_prompt(arrived + QUIET_WINDOW * 2).unwrap(),
+                    host.block(async |host| host
+                        .child_wake_prompt(arrived + QUIET_WINDOW * 2)
+                        .await)
+                        .unwrap(),
                     HostStep::Continue
                 ));
                 let item = host
@@ -3443,8 +3647,11 @@ fn post_terminal_jobs_and_child_result_wake_beyond_twenty_four_turns() {
                     .enqueue_live("next user prompt")
                     .unwrap();
                 host.config.store.save(&mut host.config.session).unwrap();
-                host.run_prompt(item.text.clone(), Some(item), false, None)
-                    .unwrap();
+                host.block(async |host| {
+                    host.run_prompt(item.text.clone(), Some(item), false, None)
+                        .await
+                })
+                .unwrap();
                 assert!(root_batch(host, submissions(host).last().unwrap()).is_none());
                 assert_eq!(
                     host.opened.agent().unwrap().jobs(),
@@ -3464,8 +3671,12 @@ fn process_exit_raises_the_pending_indicator_and_a_wake_clears_it() {
         |config, _| jobs.configure(config, &[1, 0]),
         |host, _, actions, observed| {
             actions.send(UserAction::Prompt("start".into())).unwrap();
-            let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-            host.run_prompt(text, item, echoed, None).unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
+            );
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             let _ = observed.try_iter().count();
             jobs.complete(host, 1);
             host.publish_pending_continuation();
@@ -3479,10 +3690,14 @@ fn process_exit_raises_the_pending_indicator_and_a_wake_clears_it() {
                 }
             )));
             let now = Instant::now();
-            host.child_wake_prompt(now).unwrap();
-            let (text, item, echoed) =
-                take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
-            host.run_prompt(text, item, echoed, None).unwrap();
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                    .unwrap(),
+            );
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             assert!(observed.try_iter().any(|event| matches!(
                 event,
                 HostEvent::PendingContinuation {
@@ -3503,8 +3718,12 @@ fn a_terminal_unseen_process_exit_survives_reopen_in_the_indicator() {
         |config, _| jobs.configure(config, &[1, 0]),
         |host, _, actions, observed| {
             actions.send(UserAction::Prompt("start".into())).unwrap();
-            let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-            host.run_prompt(text, item, echoed, None).unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
+            );
+            host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             jobs.complete(host, 1);
             let _ = observed.try_iter().count();
             reopen_at_cut(host, |_| {
@@ -3524,7 +3743,8 @@ fn a_terminal_unseen_process_exit_survives_reopen_in_the_indicator() {
 fn queued_user_prompt_and_shutdown_outrank_a_ready_wake() {
     with_host(1, |host, _, _, _| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         let item = host
             .config
             .session
@@ -3533,12 +3753,17 @@ fn queued_user_prompt_and_shutdown_outrank_a_ready_wake() {
         host.config.store.save(&mut host.config.session).unwrap();
         host.pending_start = Some(item);
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
-        let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+        );
         assert_eq!(text, "queued user prompt");
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(
             root_batch(host, &submissions(host)[0])
                 .unwrap()
@@ -3549,13 +3774,19 @@ fn queued_user_prompt_and_shutdown_outrank_a_ready_wake() {
     });
     with_host(1, |host, _, actions, _| {
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         actions.send(UserAction::Quit).unwrap();
         assert!(matches!(
-            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
             HostStep::Continue
         ));
-        assert!(matches!(host.next_prompt(None).unwrap(), HostStep::Quit));
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Quit
+        ));
         assert_eq!(host.config.session.root_turn_count, 0);
     });
 }

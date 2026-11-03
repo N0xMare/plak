@@ -1,9 +1,8 @@
 //! Pre-dispatch checkpoints: finish the current receipt, never start a turn after stop.
 //! The checkpoint is the fence; watching only drains the mailbox for latency.
 
-use super::{CliResult, ContentEvent, HostLoop, InterruptWatch};
-use crate::interrupt::run_watched;
-use plakous::application::{ApplicationExecutor, ApplicationExecutorError};
+use super::{CliResult, ContentEvent, InterruptWatch, NodeActor};
+use crate::interrupt::watched;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::future::Future;
 
@@ -28,13 +27,12 @@ pub(super) enum End {
     Refused,
 }
 
-pub(super) fn run_step<F: Future, P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
+pub(super) async fn run_step<F: Future, P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     hooks: &mut Hooks,
     stage: Stage,
     future: F,
-) -> Result<F::Output, ApplicationExecutorError> {
+) -> F::Output {
     #[cfg(test)]
     let future = {
         let hook = hooks
@@ -51,7 +49,7 @@ pub(super) fn run_step<F: Future, P: plakous_host_protocol::ProtocolExtension>(
     };
     #[cfg(not(test))]
     let _ = (hooks, stage);
-    run_watched(executor, watch, future)
+    watched(watch, future).await
 }
 
 /// Production preparation has no test seams.
@@ -65,7 +63,7 @@ impl Hooks {
     }
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     pub(in crate::runtime::host_loop) fn stop_preparation(
         &mut self,
         one_shot: &mut Option<&mut crate::runtime::oneshot::OneShotState>,

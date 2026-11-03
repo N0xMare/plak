@@ -1,4 +1,4 @@
-use super::super::HostLoop;
+use super::super::NodeActor;
 use super::{AUTO_CONTINUE_PAUSE_TEXT, PendingContinuation, TREE_PAUSE_TEXT};
 use crate::agent_tree::ProductAgentTree;
 use crate::agent_tree_protocol::{
@@ -57,7 +57,7 @@ pub(super) fn pause_rows(session: &crate::sessions::SessionRecord, text: &str) -
 fn with_tree(
     results: usize,
     test: impl FnOnce(
-        &mut HostLoop<'_, TestExtension>,
+        &mut NodeActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -70,7 +70,7 @@ pub(super) fn with_configured_tree(
     results: usize,
     configure: impl FnOnce(&mut crate::runtime::HostConfig<TestExtension>),
     test: impl FnOnce(
-        &mut HostLoop<'_, TestExtension>,
+        &mut NodeActor<'_, TestExtension>,
         &Arc<crate::topology_runtime::ProductTopologyRuntime>,
         &UserActionSender<TestExtension>,
         &HostEventReceiver<TestExtension>,
@@ -109,7 +109,7 @@ pub(super) fn with_configured_tree(
         .unwrap();
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -117,12 +117,12 @@ pub(super) fn with_configured_tree(
     )
     .unwrap();
     test(&mut host, &runtime, &actions, &observed);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 pub(super) fn reopen(
-    host: &mut HostLoop<'_, TestExtension>,
-    test: impl FnOnce(&mut HostLoop<'_, TestExtension>),
+    host: &mut NodeActor<'_, TestExtension>,
+    test: impl FnOnce(&mut NodeActor<'_, TestExtension>),
 ) {
     host.config.store.save(&mut host.config.session).unwrap();
     host.executor
@@ -136,7 +136,8 @@ pub(super) fn reopen(
     config.session = config.store.load(&host.config.session.id).unwrap();
     config.runtime_factory = host.config.runtime_factory.clone();
     config.interactive = host.config.interactive;
-    let mut restored = HostLoop::open(config, host.actions, host.events.clone(), None).unwrap();
+    let mut restored =
+        NodeActor::open_blocking(config, host.actions, host.events.clone(), None).unwrap();
     test(&mut restored);
     restored
         .executor
@@ -218,8 +219,12 @@ fn reopen_restores_the_stored_time_of_the_last_operator_prompt() {
     with_tree(0, |host, _, actions, observed| {
         assert_eq!(last_prompt_times(observed), [None], "no prompt yet");
         actions.send(UserAction::Prompt("hello".into())).unwrap();
-        let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
-        host.run_prompt(text, item, echoed, None).unwrap();
+        let (text, item, echoed) = take_prompt(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+        );
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         let _ = last_prompt_times(observed);
         reopen(host, |_| {
             assert_eq!(last_prompt_times(observed), [Some(FIXTURE_CLOCK_MS)]);
@@ -234,13 +239,15 @@ fn a_wake_turn_restores_no_prompt_time() {
     with_tree(1, |host, _, _, observed| {
         assert_eq!(last_prompt_times(observed), [None]);
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         let (text, item, echoed) = take_prompt(
-            host.child_wake_prompt(now + Duration::from_secs(2))
+            host.block(async |host| host.child_wake_prompt(now + Duration::from_secs(2)).await)
                 .unwrap(),
         );
         assert!(item.is_some(), "the wake is a host-authored delivery");
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         assert_eq!(host.config.session.root_turn_count, 1, "the wake ran");
         reopen(host, |_| {
             assert_eq!(last_prompt_times(observed), [None]);
@@ -257,13 +264,21 @@ fn unread_results_raise_the_indicator_clear_after_the_turn_and_restore() {
             let again = snapshots(observed);
             assert_eq!(again.last().map(|pending| pending.results), Some(1));
             let now = Instant::now();
-            restored.child_wake_prompt(now).unwrap();
+            restored
+                .block(async |restored| restored.child_wake_prompt(now).await)
+                .unwrap();
             let (text, item, echoed) = take_prompt(
                 restored
-                    .child_wake_prompt(now + Duration::from_secs(2))
+                    .block(async |restored| {
+                        restored
+                            .child_wake_prompt(now + Duration::from_secs(2))
+                            .await
+                    })
                     .unwrap(),
             );
-            restored.run_prompt(text, item, echoed, None).unwrap();
+            restored
+                .block(async |restored| restored.run_prompt(text, item, echoed, None).await)
+                .unwrap();
             let cleared = snapshots(observed);
             assert!(
                 cleared.iter().any(|pending| pending.results == 0),
@@ -305,7 +320,7 @@ fn pending_store_observations_refresh_acknowledged_results() {
     config.topology_rows().save_tree(&mut tree).unwrap();
     let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -330,7 +345,7 @@ fn pending_store_observations_refresh_acknowledged_results() {
         snapshots(&observed).last().map(|pending| pending.results),
         Some(0)
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -389,16 +404,20 @@ fn pending_wake_and_run_prompt_stays_clear_across_idle_iterations() {
     with_tree(1, |host, _, actions, observed| {
         assert_eq!(snapshots(observed).last().unwrap().results, 1);
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         let (text, item, echoed) = take_prompt(
-            host.child_wake_prompt(now + Duration::from_secs(2))
+            host.block(async |host| host.child_wake_prompt(now + Duration::from_secs(2)).await)
                 .unwrap(),
         );
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         let mut seen = snapshots(observed);
         for _ in 0..10 {
             actions.send(UserAction::Interrupt).unwrap();
-            let _ = host.next_prompt(None).unwrap();
+            let _ = host
+                .block(async |host| host.next_prompt(None).await)
+                .unwrap();
             seen.extend(snapshots(observed));
             assert_eq!(host.pending_track.last.unwrap().results, 0);
         }
@@ -444,12 +463,14 @@ fn unread_questions_raise_and_clear_the_indicator() {
         let raised = snapshots(observed);
         assert_eq!(raised.last().map(|pending| pending.questions), Some(1));
         let now = Instant::now();
-        host.child_wake_prompt(now).unwrap();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
         let (text, item, echoed) = take_prompt(
-            host.child_wake_prompt(now + Duration::from_secs(2))
+            host.block(async |host| host.child_wake_prompt(now + Duration::from_secs(2)).await)
                 .unwrap(),
         );
-        host.run_prompt(text, item, echoed, None).unwrap();
+        host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+            .unwrap();
         let cleared = snapshots(observed);
         assert!(
             cleared.iter().any(|pending| pending.questions == 0),
@@ -465,7 +486,8 @@ fn auto_continue_pause_raises_a_notice_and_restores_the_same_row() {
         let _ = snapshots(observed);
         actions.send(UserAction::Interrupt).unwrap();
         assert!(matches!(
-            host.next_prompt(None).unwrap(),
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
             super::super::HostStep::Continue
         ));
         let raised = snapshots(observed);
@@ -660,7 +682,9 @@ fn a_jsonl_face_keeps_the_open_note_and_writes_no_pause_rows() {
         |host, runtime, actions, observed| {
             spawn_child(runtime);
             actions.send(UserAction::Interrupt).unwrap();
-            let _ = host.next_prompt(None).unwrap();
+            let _ = host
+                .block(async |host| host.next_prompt(None).await)
+                .unwrap();
             pause_tree(runtime);
             host.publish_pending_continuation();
             reopen(host, |restored| {
@@ -691,7 +715,9 @@ fn interrupt_with_nothing_that_could_wake_shows_no_pause() {
     with_tree(0, |host, _, actions, observed| {
         let before = host.config.session.clone();
         actions.send(UserAction::Interrupt).unwrap();
-        let _ = host.next_prompt(None).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         assert!(!host.config.session.child_wake_suppressed);
         assert_eq!(host.config.session, before);
         assert!(
@@ -711,7 +737,9 @@ fn a_new_suppression_after_an_admitted_prompt_is_a_new_pause_line() {
     with_tree(0, |host, runtime, actions, _| {
         spawn_child(runtime);
         actions.send(UserAction::Interrupt).unwrap();
-        let _ = host.next_prompt(None).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         assert_eq!(
             pause_rows(&host.config.session, AUTO_CONTINUE_PAUSE_TEXT),
             1
@@ -767,29 +795,39 @@ fn in_place_resume_keeps_a_recorded_pause_row_single() {
     with_configured_tree(0, slow_release, |host, runtime, actions, _| {
         spawn_child(runtime);
         actions.send(UserAction::Interrupt).unwrap();
-        let _ = host.next_prompt(None).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         assert_eq!(
             pause_rows(&host.config.session, AUTO_CONTINUE_PAUSE_TEXT),
             1
         );
         let paused = host.config.session.id.clone();
         actions.send(UserAction::ClearSession).unwrap();
-        let _ = host.next_prompt(None).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         assert_ne!(host.config.session.id, paused, "clear did not switch");
-        let _ = host.next_prompt(None).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         actions
             .send(UserAction::ResumeSession {
                 id: Some(paused.clone()),
             })
             .unwrap();
-        let _ = host.next_prompt(None).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         assert_eq!(host.config.session.id, paused, "resume did not switch");
         assert_eq!(
             host.config.session.plakous_locator,
             Some(host.opened.locator())
         );
         assert!(host.config.session.child_wake_suppressed);
-        let _ = host.next_prompt(None).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         assert_eq!(
             pause_rows(&host.config.session, AUTO_CONTINUE_PAUSE_TEXT),
             1,
@@ -839,25 +877,31 @@ fn first_release_hook(
 /// Clears off the paused session, then resumes back onto it in place.
 /// Returns the source id and how long the resume step held the host.
 fn clear_then_resume_back(
-    host: &mut HostLoop<'_, TestExtension>,
+    host: &mut NodeActor<'_, TestExtension>,
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
     actions: &UserActionSender<TestExtension>,
 ) -> (String, Duration) {
     spawn_child(runtime);
     actions.send(UserAction::Interrupt).unwrap();
-    let _ = host.next_prompt(None).unwrap();
+    let _ = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
     let source = host.config.session.id.clone();
     actions.send(UserAction::ClearSession).unwrap();
-    let _ = host.next_prompt(None).unwrap();
+    let _ = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
     assert_ne!(host.config.session.id, source, "clear did not switch");
-    let _ = host.next_prompt(None).unwrap();
+    let _ = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
     let started = Instant::now();
     resume(host, actions, &source);
     (source, started.elapsed())
 }
 
 fn resume(
-    host: &mut HostLoop<'_, TestExtension>,
+    host: &mut NodeActor<'_, TestExtension>,
     actions: &UserActionSender<TestExtension>,
     id: &str,
 ) {
@@ -866,7 +910,9 @@ fn resume(
             id: Some(id.to_owned()),
         })
         .unwrap();
-    let _ = host.next_prompt(None).unwrap();
+    let _ = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
 }
 
 fn error_rows(observed: &HostEventReceiver<TestExtension>) -> Vec<String> {
@@ -881,7 +927,7 @@ fn error_rows(observed: &HostEventReceiver<TestExtension>) -> Vec<String> {
         .collect()
 }
 
-fn assert_attached_resolved(host: &HostLoop<'_, TestExtension>, source: &str, errors: &[String]) {
+fn assert_attached_resolved(host: &NodeActor<'_, TestExtension>, source: &str, errors: &[String]) {
     assert_eq!(
         host.config.session.id, source,
         "resume did not switch back onto the source: {errors:?}"
@@ -992,7 +1038,7 @@ fn interrupt_without_auto_continue_shows_no_pause() {
     config.auto_continue = false;
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(
+    let mut host = NodeActor::open_blocking(
         config,
         &receiver,
         crate::runtime::Sender::over(events),
@@ -1001,10 +1047,12 @@ fn interrupt_without_auto_continue_shows_no_pause() {
     .unwrap();
     assert!(!host.config.prompt_host_facts().host_wakes);
     actions.send(UserAction::Interrupt).unwrap();
-    let _ = host.next_prompt(None).unwrap();
+    let _ = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
     let seen = snapshots(&observed);
     let rows = pause_rows(&host.config.session, AUTO_CONTINUE_PAUSE_TEXT);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     assert!(
         !seen.iter().any(|pending| pending.auto_continue_paused) && rows == 0,
         "auto-continue disabled, yet indicator {seen:?} and {rows} pause rows"

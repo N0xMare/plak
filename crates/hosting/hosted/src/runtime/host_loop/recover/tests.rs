@@ -37,7 +37,7 @@ fn retained_approval_after_owner_loss(switch: bool) {
     let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut emitter = super::super::Sender::over(sent);
     emitter.recorded = Some(recorded.clone());
-    let mut host = HostLoop::open(config, &actions, emitter.clone(), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, emitter.clone(), None).unwrap();
     let turn_id = host
         .executor
         .block_on(async {
@@ -77,7 +77,7 @@ fn retained_approval_after_owner_loss(switch: bool) {
         let (mut source, _) = scripted_host_with(root.path(), script);
         source.store = host.config.store.clone();
         source.runtime_factory = host.config.runtime_factory.clone();
-        host = HostLoop::open(source, &actions, emitter, None).unwrap();
+        host = NodeActor::open_blocking(source, &actions, emitter, None).unwrap();
     }
     observed.try_iter().for_each(drop);
     recorded.lock().unwrap().clear();
@@ -106,17 +106,18 @@ fn retained_approval_after_owner_loss(switch: bool) {
     });
     host.recovery_blocked = true;
     let outcome = if switch {
-        crate::runtime::clear::resume_session_switch(
-            &host.executor,
-            &mut host.config,
-            &mut host.opened,
-            &mut host.stderr_buf,
-            &host.events,
-            &target,
-        )
-        .and_then(|()| host.drive_restored_turn())
+        host.executor
+            .block_on(crate::runtime::clear::resume_session_switch(
+                &mut host.config,
+                &mut host.opened,
+                &mut host.stderr_buf,
+                &host.events,
+                &target,
+            ))
+            .expect("the executor drives the call")
+            .and_then(|()| host.block(async |host| host.drive_restored_turn().await))
     } else {
-        host.recover_session(RecoveryTrigger::Explicit)
+        host.block(async |host| host.recover_session(RecoveryTrigger::Explicit).await)
     };
     let pending = host.opened.has_recovered_turn();
     let feed = host
@@ -128,7 +129,7 @@ fn retained_approval_after_owner_loss(switch: bool) {
         ))
         .unwrap()
         .unwrap();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     let (offered, observed, before_offer) = approval_worker.join().unwrap();
     let published = recorded.lock().unwrap();
     let offer = published
@@ -215,7 +216,8 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
         );
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(config, &rx, super::super::Sender::over(tx), None).unwrap();
+        let mut host =
+            NodeActor::open_blocking(config, &rx, super::super::Sender::over(tx), None).unwrap();
         if with_submission {
             let item = sessions::QueueItem::new("interrupted prompt");
             host.config.session.pending_queue.push(item.clone());
@@ -257,7 +259,8 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
             plakous::agent::TurnResultOutcome::RecoveryRequired(_)
         ));
         observed.try_iter().for_each(drop);
-        host.recover_session(RecoveryTrigger::Explicit).unwrap();
+        host.block(async |host| host.recover_session(RecoveryTrigger::Explicit).await)
+            .unwrap();
         let events: Vec<_> = observed.try_iter().collect();
         assert_one_jsonl_recovery_note(&events, with_submission);
         assert_eq!(events.iter().filter(|event| matches!(event,
@@ -291,6 +294,6 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
             })
             .count();
         assert_eq!(dispatches, 1, "recover must not redispatch the request");
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }

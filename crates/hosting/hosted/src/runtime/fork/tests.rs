@@ -68,16 +68,17 @@ fn interrupt_at_canonical_return_saves_resumable_fork_and_allows_another_fork() 
     let state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&receiver, &state);
     let (events, _rx) = host_event_sink();
-    let error = handle_fork(
-        &executor,
-        watch,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    )
-    .unwrap_err();
+    let error = executor
+        .block_on(handle_fork(
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .unwrap_err();
     assert!(
         error.message().contains("fork stopped; saved as session"),
         "{error:?}"
@@ -98,16 +99,17 @@ fn interrupt_at_canonical_return_saves_resumable_fork_and_allows_another_fork() 
             .is_some()
     );
     let target = config.store.load(&request.successor_product_id()).unwrap();
-    handle_fork(
-        &executor,
-        watch,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    )
-    .unwrap();
+    executor
+        .block_on(handle_fork(
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     assert_ne!(config.session.id, source_id);
     executor.block_on(opened.release()).unwrap().unwrap();
     config.session = target;
@@ -164,33 +166,35 @@ fn interrupted_source_projection_is_pre_dispatch_for_fork_and_rebind() {
         let (events, _rx) = host_event_sink();
         let watch = InterruptWatch::new(&receiver, &state);
         let error = if rebind {
-            super::super::rebind::handle_rebind(
-                &executor,
-                watch,
-                &mut config,
-                &mut opened,
-                &mut Vec::new(),
-                &events,
-                "codex",
-                "offline-loopback-v2",
-                Some("medium"),
-                None,
-                None,
-                None,
-                &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
-            )
-            .unwrap_err()
+            executor
+                .block_on(super::super::rebind::handle_rebind(
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    "codex",
+                    "offline-loopback-v2",
+                    Some("medium"),
+                    None,
+                    None,
+                    None,
+                    &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                ))
+                .expect("the executor drives the call")
+                .unwrap_err()
         } else {
-            handle_fork(
-                &executor,
-                watch,
-                &mut config,
-                &mut opened,
-                &mut Vec::new(),
-                &events,
-                None,
-            )
-            .unwrap_err()
+            executor
+                .block_on(handle_fork(
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    None,
+                ))
+                .expect("the executor drives the call")
+                .unwrap_err()
         };
         assert!(
             error.message().contains("before its canonical dispatch"),
@@ -238,16 +242,17 @@ fn live_fork_refuses_without_withdrawing_another_pending_request() {
     let (events, rx) = host_event_sink();
     let (_actions, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
-    let error = handle_fork(
-        &executor,
-        InterruptWatch::new(&actions_rx, &state),
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    )
-    .unwrap_err();
+    let error = executor
+        .block_on(handle_fork(
+            InterruptWatch::new(&actions_rx, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .unwrap_err();
     assert!(error.message().contains("unresolved product work"));
     assert!(
         config
@@ -420,16 +425,18 @@ fn interrupt_refuses_fork_before_any_durable_work() {
     let interrupt_state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
 
-    let error = handle_fork(
-        &ApplicationExecutor::new().unwrap(),
-        watch,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    )
-    .expect_err("an interrupted fork must not commit");
+    let error = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(handle_fork(
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .expect_err("an interrupted fork must not commit");
 
     assert!(
         error.message().contains("interrupted"),

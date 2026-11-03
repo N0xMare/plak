@@ -1,7 +1,7 @@
 //! Root prompt preflight, dispatch, terminal publication and queue disposition.
 
 use super::{
-    CliFailure, CliResult, ContextQuery, HostLoop, HostStep, Instant, InterruptWatch,
+    CliFailure, CliResult, ContextQuery, HostStep, Instant, InterruptWatch, NodeActor,
     ScheduledPrompt, SessionEvent, SessionLog, SessionQueueDrainState, SessionQueueItem,
     TerminalPhase, TurnHostOutcome, commit_session_update, drive_one_turn, durable_tree_id,
     emit_context_projection, emit_queue_snapshot, emit_terminal_status, emit_unavailable_context,
@@ -38,8 +38,8 @@ struct PromptMail {
     replayed_mail: bool,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
-    pub(super) fn run_prompt(
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+    pub(super) async fn run_prompt(
         &mut self,
         raw_text: String,
         queued_delivery: Option<SessionQueueItem>,
@@ -88,7 +88,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let before_recovery = self.recovery_blocked;
         let before_drain = self.config.session.queue_drain_state;
         let _ = self.events.send(ContentEvent::SetBusy(true));
-        let outcome = self.run_prompt_inner(raw_text, queued_delivery, user_echoed, one_shot);
+        let outcome = self
+            .run_prompt_inner(raw_text, queued_delivery, user_echoed, one_shot)
+            .await;
         let stopped = match &outcome {
             Ok(PromptOutcome::Stopped(stopped)) => Some(*stopped),
             _ => None,
@@ -108,8 +110,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             let _ = self.events.send(ContentEvent::SetBusy(false));
         }
         if let Some(intent) = &wake
-            && let Err(error) =
-                self.discard_undispatched_wake(intent, before_recovery, before_drain, stopped)
+            && let Err(error) = self
+                .discard_undispatched_wake(intent, before_recovery, before_drain, stopped)
+                .await
         {
             self.suppress_child_wake(None)?;
             let _ = self.events.notice(
@@ -134,7 +137,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         })
     }
 
-    fn discard_undispatched_wake(
+    async fn discard_undispatched_wake(
         &mut self,
         intent: &sessions::projector::Submission,
         before_recovery: bool,
@@ -160,16 +163,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             emit_queue_snapshot(&self.events, &self.config.session);
             return Ok(());
         }
-        let views = self
-            .executor
-            .block_on(super::super::projection::project_to_tail(
-                self.opened.sessions(),
-                &self.config.store,
-                &self.config.session.id,
-                self.opened.locator(),
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+        let views = super::super::projection::project_to_tail(
+            self.opened.sessions(),
+            &self.config.store,
+            &self.config.session.id,
+            self.opened.locator(),
+        )
+        .await
+        .map_err(CliFailure::new)?;
         if !matches!(
             views.state.deliveries.get(&intent.command_id),
             Some(sessions::projector::Delivery::Accepted)
@@ -201,7 +202,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         clippy::too_many_lines,
         reason = "One prompt admission owns preparation, interrupt handling, dispatch, and terminal publication as an ordered host transition."
     )]
-    fn run_prompt_inner(
+    async fn run_prompt_inner(
         &mut self,
         raw_text: String,
         queued_delivery: Option<SessionQueueItem>,
@@ -254,7 +255,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             queue_len: self.config.session.pending_queue.len(),
             detail: None,
         });
-        match self.prepare_prompt_authority(host_authored, transient_resume, &mut one_shot)? {
+        match self
+            .prepare_prompt_authority(host_authored, transient_resume, &mut one_shot)
+            .await?
+        {
             std::ops::ControlFlow::Break(preparation::End::Stopped(stopped)) => {
                 return Ok(PromptOutcome::Stopped(stopped));
             }
@@ -265,18 +269,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
         let rows = self.config.topology_rows();
         preparation::run_step(
-            &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
             &mut self.prep_hooks,
             preparation::Stage::Tree,
-            super::super::projection::project_tree(
+            Box::pin(super::super::projection::project_tree(
                 self.opened.sessions(),
                 &rows,
                 &durable_tree_id(&rows, &self.config.session),
                 self.opened.locator().session_id(),
-            ),
+            )),
         )
-        .map_err(|_| CliFailure::new("application execution failed"))?
+        .await
         .map_err(CliFailure::new)?;
         if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
             return Ok(PromptOutcome::Stopped(stopped));
@@ -330,16 +333,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             },
             one_shot,
         )
+        .await
     }
 
-    fn prepare_prompt_authority(
+    async fn prepare_prompt_authority(
         &mut self,
         host_authored: bool,
         transient_resume: bool,
         one_shot: &mut Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<std::ops::ControlFlow<preparation::End>> {
         if (!host_authored || transient_resume)
-            && let Err(error) = self.refresh_native_authority_before_prompt()
+            && let Err(error) = self.refresh_native_authority_before_prompt().await
         {
             self.recovery_blocked |= self.opened.agent().is_none();
             if let Some(state) = one_shot.as_deref_mut() {
@@ -366,17 +370,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         // anything is dispatched, and before mail selection so restored mail
         // rides this command (spec 03 section 4.4).
         if let Err(error) = preparation::run_step(
-            &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
             &mut self.prep_hooks,
             preparation::Stage::Settle,
-            super::super::result_mail::settle_waits(
+            Box::pin(super::super::result_mail::settle_waits(
                 &self.config.topology_rows(),
                 &self.config.session,
                 &self.opened,
-            ),
+            )),
         )
-        .unwrap_or_else(|_| Err("application execution failed".to_owned()))
+        .await
         {
             if let Some(state) = one_shot.as_deref_mut() {
                 state.result = Some(Err(CliFailure::new(error.clone())));
@@ -400,7 +403,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         clippy::too_many_lines,
         reason = "Prompt preflight reconciles queue identity, product pressure, recovery, and scheduled compaction before admitting inference."
     )]
-    fn preflight_prompt(
+    async fn preflight_prompt(
         &mut self,
         input: PromptInput,
         mail: PromptMail,
@@ -431,10 +434,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             #[cfg(test)]
             self.prep_hooks.called.push(preparation::Stage::Query);
             query_context(
-                &self.executor,
                 &self.opened,
                 ContextQuery::WithPendingUserInput(pending_input(&canonical_command)),
             )
+            .await
         };
         let mut pending_context = match queried {
             Ok(projection) => projection,
@@ -485,13 +488,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             enrolled_source_bytes,
         );
         preparation::run_step(
-            &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
             &mut self.prep_hooks,
             preparation::Stage::Context,
             std::future::ready(()),
         )
-        .map_err(|_| CliFailure::new("application execution failed"))?;
+        .await;
         if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
             return Ok(PromptOutcome::Stopped(stopped));
         }
@@ -504,7 +506,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 #[cfg(test)]
                 self.prep_hooks.called.push(preparation::Stage::Compact);
                 let compacted = run_scheduled_compaction_until_fits(
-                    &self.executor,
                     InterruptWatch::new(self.actions, &self.interrupt_state),
                     &mut self.config,
                     &self.opened,
@@ -516,7 +517,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         .is_some()
                         .then(|| pending_input(&user_text))
                         .as_ref(),
-                );
+                )
+                .await;
                 if compacted.is_ok()
                     && let Some(stopped) = self.stop_preparation(&mut one_shot)?
                 {
@@ -585,13 +587,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     }
                 }
             } else if pending_context.compaction_verdict().overflow()
-                && !self.send_bare_without_mail(
-                    &mut canonical_command,
-                    &mut selected_mail,
-                    &user_text,
-                    &images,
-                    &mut pending_context,
-                )
+                && !self
+                    .send_bare_without_mail(
+                        &mut canonical_command,
+                        &mut selected_mail,
+                        &user_text,
+                        &images,
+                        &mut pending_context,
+                    )
+                    .await
             {
                 if let Some(state) = one_shot.as_deref_mut() {
                     state.result = Some(Err(CliFailure::classified(
@@ -613,13 +617,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
 
         preparation::run_step(
-            &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
             &mut self.prep_hooks,
             preparation::Stage::Dispatch,
             std::future::ready(()),
         )
-        .map_err(|_| CliFailure::new("application execution failed"))?;
+        .await;
         if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
             return Ok(PromptOutcome::Stopped(stopped));
         }
@@ -641,6 +644,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             enrolled_source_bytes,
             one_shot,
         )
+        .await
         .map(PromptOutcome::Dispatched)
     }
 
@@ -648,7 +652,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         clippy::too_many_lines,
         reason = "Prompt dispatch records delivery and reconciles definite refusal versus admitted canonical work before returning to the host loop."
     )]
-    fn dispatch_prompt(
+    async fn dispatch_prompt(
         &mut self,
         input: PromptInput,
         mail: PromptMail,
@@ -677,12 +681,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         });
 
         let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);
-        let marked = self
-            .executor
-            .block_on(topology_state::mark_root_live_for_prompt(&tree_id))
-            .map_err(|_| "application execution failed".to_owned())
-            .and_then(std::convert::identity);
-        if let Err(error) = marked {
+        if let Err(error) = topology_state::mark_root_live_for_prompt(&tree_id).await {
             let _ = self.events.notice(TranscriptRow::error(
                 NoticeScope::Tree,
                 format!("tree admission restore failed: {error}"),
@@ -696,54 +695,52 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let subscription_service = self.config.target.native_subscriptions().cloned();
         let turn_started = Instant::now();
         let live_target = self.live_target();
-        let driven = self
-            .executor
-            .block_on(drive_one_turn(
-                agent,
-                self.opened.sessions(),
-                user_text.clone(),
-                super::super::TurnHost {
-                    job_agent: agent,
-                    host_wakes: self.config.prompt_host_facts().host_wakes
-                        && !self.config.session.child_wake_suppressed,
-                    quit_started_at: &mut self.quit_started_at,
-                    quit_job_stops: &mut self.quit_job_stops,
-                    actions: self.actions,
-                    deferred: &self.interrupt_state,
-                    events: &self.events,
-                    rows: &super::super::HostRows::new(
-                        &self.config.state_roots,
-                        self.config.store.as_ref(),
-                    ),
-                    roots: &self.config.state_roots,
-                    store: &*self.config.store,
-                    projection_store: &self.config.store,
-                    live_projector: self.live.as_mut(),
-                    live_target,
-                    home: &self.config.home,
-                    session: &mut self.config.session,
-                    context_projection: pending_context,
-                    enrolled_source_bytes,
-                    root_template: &mut self.config.root_template,
-                    attached_one_shot: self.config.attached_one_shot,
-                    ready_catalog: &self.config.ready_catalog.accounts,
-                    surface: &self.config.surface,
-                    log: self.log.as_ref(),
-                    subscription_service,
-                    subscription_usage_refresh: &self.subscription_usage_refresh,
-                    held_usage: &self.held_usage,
-                    ledger: &self.session_ledger,
-                    last_tree_revision: &mut self.last_tree_revision,
-                    job_events: &mut self.job_events,
-                    runtime_factory: self.config.runtime_factory.as_ref(),
-                },
-                queued_delivery
-                    .as_ref()
-                    .ok_or_else(|| CliFailure::new("root start requires a queued delivery"))?,
-                user_echoed,
-                (canonical_command, selected_mail),
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?;
+        let driven = Box::pin(drive_one_turn(
+            agent,
+            self.opened.sessions(),
+            user_text.clone(),
+            super::super::TurnHost {
+                job_agent: agent,
+                host_wakes: self.config.prompt_host_facts().host_wakes
+                    && !self.config.session.child_wake_suppressed,
+                quit_started_at: &mut self.quit_started_at,
+                quit_job_stops: &mut self.quit_job_stops,
+                actions: self.actions,
+                deferred: &self.interrupt_state,
+                events: &self.events,
+                rows: &super::super::HostRows::new(
+                    &self.config.state_roots,
+                    self.config.store.as_ref(),
+                ),
+                roots: &self.config.state_roots,
+                store: &*self.config.store,
+                projection_store: &self.config.store,
+                live_projector: self.live.as_mut(),
+                live_target,
+                home: &self.config.home,
+                session: &mut self.config.session,
+                context_projection: pending_context,
+                enrolled_source_bytes,
+                root_template: &mut self.config.root_template,
+                attached_one_shot: self.config.attached_one_shot,
+                ready_catalog: &self.config.ready_catalog.accounts,
+                surface: &self.config.surface,
+                log: self.log.as_ref(),
+                subscription_service,
+                subscription_usage_refresh: &self.subscription_usage_refresh,
+                held_usage: &self.held_usage,
+                ledger: &self.session_ledger,
+                last_tree_revision: &mut self.last_tree_revision,
+                job_events: &mut self.job_events,
+                runtime_factory: self.config.runtime_factory.as_ref(),
+            },
+            queued_delivery
+                .as_ref()
+                .ok_or_else(|| CliFailure::new("root start requires a queued delivery"))?,
+            user_echoed,
+            (canonical_command, selected_mail),
+        ))
+        .await;
         self.session_ledger.record_dispatch(turn_started.elapsed());
         if self.actions.abandon_and_release_requested() && driven.is_err() {
             return Ok(HostStep::Quit);
@@ -776,13 +773,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             quit_after_terminal,
             one_shot,
         )
+        .await
     }
 
     #[allow(
         clippy::too_many_lines,
         reason = "Prompt completion publishes the canonical terminal before deciding queue continuation, transient retry, and child-wake suppression."
     )]
-    fn finish_prompt(
+    async fn finish_prompt(
         &mut self,
         input: PromptInput,
         drive: Result<TurnHostOutcome, String>,
@@ -867,8 +865,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         {
             *transient = None;
         }
-        let completed = self.publish_terminal(drive, turn_started, error_presentation);
-        self.publish_projected_transcript(one_shot.is_some());
+        let completed = self
+            .publish_terminal(drive, turn_started, error_presentation)
+            .await;
+        self.publish_projected_transcript(one_shot.is_some()).await;
         self.update_background_process_count();
         self.publish_pending_continuation();
         let _ = self.events.send(ContentEvent::SetBusy(false));
@@ -994,7 +994,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// With compaction disabled, a prompt whose fresh child-mail batch alone
     /// overflows is sent bare when the bare prompt does not park; the batch
     /// stays unread. Returns whether the prompt is sent.
-    fn send_bare_without_mail(
+    async fn send_bare_without_mail(
         &self,
         canonical_command: &mut String,
         selected_mail: &mut Option<sessions::ResultMailBatch>,
@@ -1006,10 +1006,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             return false;
         }
         let Ok(bare) = query_context(
-            &self.executor,
             &self.opened,
             ContextQuery::WithPendingUserInput(queue::user_input(user_text, images)),
-        ) else {
+        )
+        .await
+        else {
             return false;
         };
         if bare.compaction_verdict().overflow() {
@@ -1045,21 +1046,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// Rebuild stale native dispatch authority before context/compaction or
     /// admission. Exact reopen owns the semantic comparison and historical
     /// obligations; ordinary rebind would publish a new branch/tree epoch.
-    pub(super) fn refresh_native_authority_before_prompt(&mut self) -> CliResult<()> {
+    pub(super) async fn refresh_native_authority_before_prompt(&mut self) -> CliResult<()> {
         let changed = preparation::run_step(
-            &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
             &mut self.prep_hooks,
             preparation::Stage::Refresh,
             super::super::startup::refresh_native_target(&mut self.config),
         )
-        .map_err(|_| CliFailure::new("application execution failed"))??;
-        self.reopen_after_native_authority_refresh(changed)
+        .await?;
+        self.reopen_after_native_authority_refresh(changed).await
     }
 
-    fn reopen_after_native_authority_refresh(&mut self, changed: bool) -> CliResult<()> {
+    async fn reopen_after_native_authority_refresh(&mut self, changed: bool) -> CliResult<()> {
         if changed {
-            if let Err(error) = self.reopen_in_place() {
+            if let Err(error) = self.reopen_in_place().await {
                 self.recovery_blocked = true;
                 return Err(error);
             }

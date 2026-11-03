@@ -26,6 +26,13 @@ impl SessionExecutor {
         })
     }
 
+    /// Ends the session's tasks from inside the actor at release: aborts each
+    /// and waits for them within the join bound. Dropping the executor does
+    /// the same for an actor that never reached release.
+    pub(in crate::runtime) async fn end_tasks(&self) {
+        let _ = self.tasks.close(SESSION_TASKS_JOIN_BOUND).await;
+    }
+
     /// The session's task set; every clone names the same set.
     pub(in crate::runtime) fn tasks(&self) -> &crate::TaskSet {
         &self.tasks

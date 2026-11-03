@@ -128,16 +128,14 @@ fn root_transient_ready_enqueues_one_instruction_without_user_history_or_mail() 
     config.store.save(&mut config.session).unwrap();
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
     let before = host.config.session.prompt_history.clone();
-    assert!(
-        host.schedule_transient_resume(
-            failure(ResumeGate::Network),
-            "temporary connection failure"
-        )
-    );
+    assert!(host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "temporary connection failure")
+    }));
     assert!(matches!(
-        host.transient_resume_prompt().unwrap(),
+        host.block(async |host| host.transient_resume_prompt().await)
+            .unwrap(),
         HostStep::Continue
     ));
     host.pending_resume
@@ -149,7 +147,9 @@ fn root_transient_ready_enqueues_one_instruction_without_user_history_or_mail() 
         text,
         queued_delivery: Some(item),
         user_echoed: true,
-    } = host.transient_resume_prompt().unwrap()
+    } = host
+        .block(async |host| host.transient_resume_prompt().await)
+        .unwrap()
     else {
         panic!("one host instruction");
     };
@@ -189,13 +189,17 @@ fn root_transient_ready_enqueues_one_instruction_without_user_history_or_mail() 
     assert_eq!(host.config.session.prompt_history, before);
     assert!(host.pending_resume.is_none());
     assert!(matches!(
-        host.transient_resume_prompt().unwrap(),
+        host.block(async |host| host.transient_resume_prompt().await)
+            .unwrap(),
         HostStep::Continue
     ));
-    host.run_prompt(text, Some(item), true, None).unwrap();
+    host.block(async |host| host.run_prompt(text, Some(item), true, None).await)
+        .unwrap();
     assert_eq!(host.transient_resumes_used, 1);
-    assert!(!host.schedule_transient_resume(failure(ResumeGate::Network), "still unavailable"));
-    host.release().unwrap();
+    assert!(!host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "still unavailable")
+    }));
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -212,11 +216,12 @@ fn root_transient_user_input_cancels_without_swallowing_prompt_steer_escape_or_q
         config.store.save(&mut config.session).unwrap();
         let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
-        assert!(host.schedule_transient_resume(
+        let mut host =
+            NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+        assert!(host.in_runtime(|host| host.schedule_transient_resume(
             failure(ResumeGate::Network),
             "temporary connection failure"
-        ));
+        )));
         host.pending_resume
             .as_ref()
             .unwrap()
@@ -226,19 +231,22 @@ fn root_transient_user_input_cancels_without_swallowing_prompt_steer_escape_or_q
         let quit = matches!(action, UserAction::Quit);
         sender.send(action).unwrap();
         assert!(matches!(
-            host.transient_resume_prompt().unwrap(),
+            host.block(async |host| host.transient_resume_prompt().await)
+                .unwrap(),
             HostStep::Continue
         ));
         assert!(host.pending_resume.is_none());
         assert!(host.interrupt_state.borrow().has_deferred());
-        let step = host.next_prompt(None).unwrap();
+        let step = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         assert_eq!(matches!(step, HostStep::Prompt { .. }), prompt);
         assert_eq!(matches!(step, HostStep::Quit), quit);
         if prompt {
             assert!(matches!(step, HostStep::Prompt { text, .. } if text == "new prompt"));
         }
         assert!(observations.try_iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(row)) if row.text == "automatic continuation cancelled")));
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -249,13 +257,15 @@ fn root_transient_idle_escape_without_pending_work_is_a_noop() {
     config.store.save(&mut config.session).unwrap();
     let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
-    host.next_prompt(None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+    host.block(async |host| host.next_prompt(None).await)
+        .unwrap();
     let before = host.config.session.clone();
     let _ = observations.try_iter().collect::<Vec<_>>();
     sender.send(UserAction::Interrupt).unwrap();
     assert!(matches!(
-        host.next_prompt(None).unwrap(),
+        host.block(async |host| host.next_prompt(None).await)
+            .unwrap(),
         HostStep::Continue
     ));
     assert_eq!(host.config.session, before);
@@ -264,7 +274,7 @@ fn root_transient_idle_escape_without_pending_work_is_a_noop() {
             .try_iter()
             .any(|event| matches!(event, HostEvent::Status { .. } | HostEvent::Row(_)))
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -274,45 +284,35 @@ fn root_transient_budget_resets_on_user_prompt_and_reload_drops_wait() {
     config.store.save(&mut config.session).unwrap();
     let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
-    assert!(
-        host.schedule_transient_resume(
-            failure(ResumeGate::Network),
-            "temporary connection failure"
-        )
-    );
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+    assert!(host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "temporary connection failure")
+    }));
     host.pending_resume = None;
-    assert!(!host.schedule_transient_resume(failure(ResumeGate::Network), "still unavailable"));
+    assert!(!host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "still unavailable")
+    }));
     sender
         .send(UserAction::Prompt("new user task".into()))
         .unwrap();
-    let HostStep::Prompt {
-        text,
-        queued_delivery,
-        user_echoed,
-    } = host.next_prompt(None).unwrap()
-    else {
-        panic!("user prompt");
-    };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    run_next_prompt(&mut host);
     assert_eq!(host.transient_resumes_used, 0);
-    assert!(
-        host.schedule_transient_resume(
-            failure(ResumeGate::Network),
-            "temporary connection failure"
-        )
-    );
+    assert!(host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "temporary connection failure")
+    }));
     let store = host.config.store.clone();
     let id = host.config.session.id.clone();
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session = store.load(&id).unwrap();
     config.store = store;
     let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let reopened = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+    let mut reopened =
+        NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
     assert!(reopened.pending_resume.is_none());
-    reopened.release().unwrap();
+    reopened
+        .block(async |reopened| reopened.release().await)
+        .unwrap();
 }
 
 #[test]
@@ -322,26 +322,30 @@ fn root_transient_failure_announces_automatic_continue() {
     config.store.save(&mut config.session).unwrap();
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
     let _ = observations.try_iter().collect::<Vec<_>>();
-    host.publish_terminal(
-        Ok(TurnHostOutcome::Failed {
-            transient: Some(TransientFailure {
-                failed_turn: plakous::model::TurnId::try_from(uuid::Uuid::from_u128(1)).unwrap(),
-                gate: ResumeGate::Network,
+    host.block(async |host| {
+        host.publish_terminal(
+            Ok(TurnHostOutcome::Failed {
+                transient: Some(TransientFailure {
+                    failed_turn: plakous::model::TurnId::try_from(uuid::Uuid::from_u128(1))
+                        .unwrap(),
+                    gate: ResumeGate::Network,
+                }),
+                error: "connection temporarily unavailable".into(),
+                exchange: crate::agent::TerminalExchange::Closed,
+                remedy: None,
             }),
-            error: "connection temporarily unavailable".into(),
-            exchange: crate::agent::TerminalExchange::Closed,
-            remedy: None,
-        }),
-        Instant::now(),
-        publication::TerminalErrorPresentation::Events,
-    );
+            Instant::now(),
+            publication::TerminalErrorPresentation::Events,
+        )
+        .await
+    });
     assert!(observations.try_iter().any(|event| matches!(event,
         HostEvent::Row(TranscriptRow::Notice(row))
             if row.text.contains("will continue automatically")
     )));
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -380,8 +384,10 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
     ));
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
-    assert!(host.schedule_transient_resume(failure(ResumeGate::Network), "temporary failure"));
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+    assert!(host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "temporary failure")
+    }));
     host.pending_resume
         .as_ref()
         .unwrap()
@@ -403,7 +409,8 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
             timed_out: Arc::new(AtomicBool::new(false)),
         }),
     };
-    host.drive(Some(&mut state)).unwrap();
+    host.block(async |host| host.drive(Some(&mut state)).await)
+        .unwrap();
     assert!(!matches!(
         state.result,
         Some(Ok(OneShotOutcome::Bounded { .. }))
@@ -416,7 +423,8 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
     assert!(!host.config.session.queue_commands.has_pending());
     assert_eq!(records.load_intents(&id).unwrap().submissions, []);
     assert!(matches!(
-        host.transient_resume_prompt().unwrap(),
+        host.block(async |host| host.transient_resume_prompt().await)
+            .unwrap(),
         HostStep::Continue
     ));
     let notices: Vec<_> = observations
@@ -442,7 +450,7 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
             .count(),
         1
     );
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
 }
 
 #[test]
@@ -455,11 +463,12 @@ fn root_transient_run_bounds_cancel_the_pending_wait() {
         config.store.save(&mut config.session).unwrap();
         let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
-        assert!(host.schedule_transient_resume(
+        let mut host =
+            NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+        assert!(host.in_runtime(|host| host.schedule_transient_resume(
             failure(ResumeGate::Network),
             "temporary connection failure"
-        ));
+        )));
         let deadline = timeout.then(Instant::now);
         let mut state = OneShotState {
             attempted: true,
@@ -477,14 +486,15 @@ fn root_transient_run_bounds_cancel_the_pending_wait() {
             }),
         };
         assert!(matches!(
-            host.next_run_prompt(&mut state).unwrap(),
+            host.block(async |host| host.next_run_prompt(&mut state).await)
+                .unwrap(),
             HostStep::Quit
         ));
         assert!(host.pending_resume.is_none());
         assert!(
             matches!(state.result, Some(Ok(OneShotOutcome::Bounded { bound, .. })) if bound == if timeout { "timeout" } else { "max-turns 1" })
         );
-        host.release().unwrap();
+        host.block(async |host| host.release().await).unwrap();
     }
 }
 
@@ -534,7 +544,7 @@ fn root_transient_canonical_failure_continues_in_a_new_turn() {
     });
     let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
-    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+    let mut host = NodeActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
     sender
         .send(UserAction::Prompt("continue my task".into()))
         .unwrap();
@@ -542,12 +552,17 @@ fn root_transient_canonical_failure_continues_in_a_new_turn() {
         text,
         queued_delivery,
         user_echoed,
-    } = host.next_prompt(None).unwrap()
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
     else {
         panic!("user prompt");
     };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
     assert_eq!(host.config.session.root_turn_count, 1);
     let pending = host
         .pending_resume
@@ -561,16 +576,7 @@ fn root_transient_canonical_failure_continues_in_a_new_turn() {
         .unwrap()
         .to_owned();
     pending.ready.store(true, Ordering::Release);
-    let HostStep::Prompt {
-        text,
-        queued_delivery,
-        user_echoed,
-    } = host.next_prompt(None).unwrap()
-    else {
-        panic!("root continuation");
-    };
-    host.run_prompt(text, queued_delivery, user_echoed, None)
-        .unwrap();
+    run_next_prompt(&mut host);
     assert_eq!(host.config.session.root_turn_count, 2);
     assert_eq!(host.config.session.prompt_history, vec!["continue my task"]);
     let lifecycle = observations
@@ -586,5 +592,24 @@ fn root_transient_canonical_failure_continues_in_a_new_turn() {
         && value.phase == plakous_host_protocol::TurnPhase::Completed));
     assert!(host.pending_resume.is_none());
     assert_eq!(host.transient_resumes_used, 1);
-    host.release().unwrap();
+    host.block(async |host| host.release().await).unwrap();
+}
+
+/// Takes the next prompt the idle loop selects and runs it.
+fn run_next_prompt(host: &mut NodeActor<'_, TestExtension>) {
+    let HostStep::Prompt {
+        text,
+        queued_delivery,
+        user_echoed,
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
+    else {
+        panic!("the idle loop selects a prompt");
+    };
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
 }

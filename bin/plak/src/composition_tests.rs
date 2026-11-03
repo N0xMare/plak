@@ -902,15 +902,16 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
     };
     let (event_tx, _event_rx) = surface_protocol::host_event_channel();
     let events = Sender::over(event_tx);
-    clear_session_rebuild(
-        &executor,
-        &mut config,
-        &mut opened,
-        &mut Vec::new(),
-        &events,
-        None,
-    )
-    .unwrap();
+    executor
+        .block_on(clear_session_rebuild(
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        ))
+        .expect("the executor drives the call")
+        .unwrap();
     assert_ne!(config.session.id, old_id);
     assert_eq!(resolutions.load(Ordering::SeqCst), 1);
     assert_eq!(

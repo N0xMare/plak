@@ -12,7 +12,7 @@
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::PendingContinuation;
 
-use super::{HostLoop, Instant, TREE_OBSERVE_INTERVAL, commit_session_update};
+use super::{Instant, NodeActor, TREE_OBSERVE_INTERVAL, commit_session_update};
 use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -96,7 +96,7 @@ pub(super) struct PendingTrack {
     baseline: bool,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     pub(super) fn has_automatic_continue_work(&mut self) -> bool {
         if !self.config.prompt_host_facts().host_wakes {
             return false;

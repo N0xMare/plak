@@ -1,13 +1,21 @@
 //! Release canonical ownership; the feed projector owns the head view.
 
-use super::{CliFailure, CliResult, HostLoop, delete_unpublished_runtime};
+use super::{CliFailure, CliResult, NodeActor, delete_unpublished_runtime};
 
-impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+    /// Releases the attachment, then ends every task the session started:
+    /// no session task outlives release.
+    pub(super) async fn release(&mut self) -> CliResult<()> {
+        let released = self.release_attachment().await;
+        self.executor.end_tasks().await;
+        released
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "Host release drains terminal publication and pending cancellations before dropping runtime and topology ownership."
     )]
-    pub(super) fn release(mut self) -> CliResult<()> {
+    async fn release_attachment(&mut self) -> CliResult<()> {
         self.pending_resume = None;
         self.quit_abandoned_turn =
             self.events.quit_receipt.outcome() == super::super::HostQuitOutcome::Escalated;
@@ -15,7 +23,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.opened.close_admission();
         let published = self.config.session.store_revision != 0;
         if !self.projection_finished {
-            self.finish_projection(false)?;
+            self.finish_projection(false).await?;
         }
         if abandon && let Some(agent) = self.opened.agent() {
             agent.begin_abandon();
@@ -34,62 +42,62 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             let tree_id =
                 super::durable_tree_id(&self.config.topology_rows(), &self.config.session);
             let root = self.opened.agent().cloned();
-            self.executor
-                .block_on(async {
-                    let mut agents = crate::topology_runtime::abandon_live_agents(&tree_id).await;
-                    agents.extend(root);
-                    for agent in &agents {
-                        agent.begin_abandon();
+            async {
+                let mut agents = crate::topology_runtime::abandon_live_agents(&tree_id).await;
+                agents.extend(root);
+                for agent in &agents {
+                    agent.begin_abandon();
+                }
+                let owners = agents
+                    .iter()
+                    .map(|agent| agent.id().to_string())
+                    .collect::<Vec<_>>();
+                let stops = async {
+                    if let Some(pending) = pending {
+                        pending
+                            .await
+                            .map_err(|_| "background process stop task failed".to_owned())?
+                    } else {
+                        registry
+                            .stop_all_except(std::time::Duration::from_millis(200), &owners)
+                            .await
                     }
-                    let owners = agents
-                        .iter()
-                        .map(|agent| agent.id().to_string())
-                        .collect::<Vec<_>>();
-                    let stops = async {
-                        if let Some(pending) = pending {
-                            pending
-                                .await
-                                .map_err(|_| "background process stop task failed".to_owned())?
-                        } else {
-                            registry
-                                .stop_all_except(std::time::Duration::from_millis(200), &owners)
-                                .await
-                        }
-                    };
-                    tokio::time::timeout(job_budget(), stops)
-                        .await
-                        .map_err(|_| "background process stop deadline exceeded".to_owned())?
-                })
-                .map_err(|_| "application execution failed".to_owned())
-                .and_then(std::convert::identity)
-                .err()
-        } else {
-            self.executor
-                .block_on(async {
-                    tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        registry.stop_all(std::time::Duration::from_millis(200)),
-                    )
+                };
+                tokio::time::timeout(job_budget(), stops)
                     .await
                     .map_err(|_| "background process stop deadline exceeded".to_owned())?
-                })
-                .map_err(|_| "application execution failed".to_owned())
-                .and_then(std::convert::identity)
-                .err()
+            }
+            .await
+            .err()
+        } else {
+            async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    registry.stop_all(std::time::Duration::from_millis(200)),
+                )
+                .await
+                .map_err(|_| "background process stop deadline exceeded".to_owned())?
+            }
+            .await
+            .err()
         };
         self.update_background_process_count();
         let runtime_session = self.opened.locator().session_id();
         let released = if abandon {
-            self.executor
-                .block_on(self.opened.abandon_and_release(job_budget()))
-                .map_err(|_| CliFailure::new("application execution failed"))
+            Ok(self
+                .opened
+                .take_for_release()
+                .abandon_and_release(job_budget())
+                .await)
         } else {
-            self.executor.block_on(async {
-                tokio::time::timeout(super::super::HOST_RELEASE_DEADLINE, self.opened.release()).await
-            }).map_err(|_| CliFailure::new("application execution failed"))
-                .and_then(|release| release.map_err(|_| CliFailure::new(
+            tokio::time::timeout(
+                super::super::HOST_RELEASE_DEADLINE,
+                self.opened.take_for_release().release(),
+            )
+                .await
+                .map_err(|_| CliFailure::new(
                     "session release exceeded its shutdown deadline; cleanup is incomplete and recovery may be required",
-                )))
+                ))
         };
         let (locator, release_failure) = match released {
             Ok(Ok(locator)) => (Some(locator), None),
@@ -112,7 +120,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .quit_started_at
                 .map(|started| started + std::time::Duration::from_secs(1))
                 .unwrap_or_else(|| super::Instant::now() + super::FINAL_PROJECTION_BOUND);
-            let projected = self.executor.block_on(async {
+            let projected = async {
                 let sessions = self.config.state_roots.runtime_sessions()?;
                 let pass = super::super::projection::project_to_tail(
                     &sessions,
@@ -145,10 +153,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     );
                     Ok(())
                 }
-            });
+            }
+            .await;
             match projected {
-                Ok(Ok(())) => None,
-                Ok(Err(error))
+                Ok(()) => None,
+                Err(error)
                     if self.quit_started_at.is_some()
                         && error.store_refusal()
                             == Some(crate::error::StoreRefusal::StorageFull) =>
@@ -161,13 +170,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     );
                     None
                 }
-                Ok(Err(error)) => Some(error),
-                Err(_) => Some(CliFailure::new(
-                    "the post-release projector pass could not run",
-                )),
+                Err(error) => Some(error),
             }
         } else {
-            delete_unpublished_runtime(&self.executor, &self.config.state_roots, locator).err()
+            delete_unpublished_runtime(&self.config.state_roots, locator)
+                .await
+                .err()
         };
         for terminal in super::take_pending_usage(&self.pending_usage, runtime_session) {
             super::super::usage::log_projected_turn_usage(
