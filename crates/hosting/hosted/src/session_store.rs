@@ -278,6 +278,14 @@ pub trait SessionRecordStore: Send + Sync {
     /// Emits one batch of disposable usage observations after the winning commit.
     /// A crash between commit and emission loses the observation, never authority.
     fn emit_projected_turn_usages(&self, usages: &[crate::sessions::projector::ProjectedTurnUsage]);
+
+    /// Fenced-turn abandonments of a winning projector commit, for the
+    /// attached host to report. A store with no host emits nothing.
+    fn emit_projected_abandonments(
+        &self,
+        _abandonments: &[crate::sessions::projector::ProjectedAbandonment],
+    ) {
+    }
 }
 
 #[cfg(any(test, feature = "test-support"))]

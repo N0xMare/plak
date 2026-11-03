@@ -5,6 +5,7 @@
 //! same session, whose open abandons the unfinished turn exactly once (spec 01
 //! §13.1). This does the same thing without quitting: the one reopen path the
 //! crash matrix already covers, taken in place.
+use super::RootRecovery;
 
 use crate::surface_protocol::ContentEvent;
 use plakous::agent::AbandonedTurnReport;
@@ -27,6 +28,8 @@ pub(super) enum RecoveryTrigger {
     Action,
     /// The explicit control: `/recover`, JSONL `recover`.
     Explicit,
+    /// The actor itself, at idle entry after the fence (design §6.0).
+    Eager,
 }
 
 pub(super) struct ReopenedTurn {
@@ -37,7 +40,7 @@ pub(super) struct ReopenedTurn {
 impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// Reopens this session in place and publishes what the reopen closed.
     ///
-    /// On failure the old attachment stays released and `recovery_blocked`
+    /// On failure the old attachment stays released and the recovery overlay
     /// stays set, so the next action tries again; nothing is lost and nothing
     /// ends in `/new`.
     #[allow(
@@ -81,7 +84,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 )).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
             }
         };
-        self.recovery_blocked = false;
+        self.recovery = RootRecovery::Clear;
         let (claim, cause, operations) =
             report.as_ref().map_or((None, None, Vec::new()), |report| {
                 (
@@ -95,6 +98,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             match trigger {
                 RecoveryTrigger::Action => "action",
                 RecoveryTrigger::Explicit => "explicit",
+                RecoveryTrigger::Eager => "eager",
             },
         );
         if let Some(report) = &report {
@@ -104,7 +108,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         }
         log_ev(self.log.as_ref(), &self.config, record);
         if let Some(report) = &report {
-            log_abandoned_report(self.log.as_ref(), &self.config, report);
             if !terminal_published {
                 let _ = self.events.send(ContentEvent::Row(TranscriptRow::info(
                     NoticeScope::Recovery,
@@ -260,13 +263,31 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let mut replacement =
             build_session_from_config(&mut self.config, &mut self.stderr_buf).await?;
         replacement.inherit_topology_owner(&mut self.opened);
-        let report = replacement
+        let mut report = replacement
             .agent()
             .and_then(plakous::agent::Agent::abandoned_turn)
             .cloned();
+        // Spec 02 §4.2: the claim is logged before the projector applies the
+        // closure, so no crash between them loses it; the next open then
+        // derives the notice and may log it a second time.
+        if let Some(report) = &report {
+            log_abandoned_report(self.log.as_ref(), &self.config, report);
+        }
         let previous = std::mem::replace(&mut self.opened, replacement);
         // Spec 02 §4.2 step 2: apply what the reopen committed.
         self.project_now().await;
+        // A closure an earlier, failed reopen committed is applied here and
+        // reported now; one this reopen committed was reported above.
+        let projected = super::take_projected_abandonments(
+            &self.pending_usage,
+            self.opened.locator().session_id(),
+        );
+        if report.is_none()
+            && let Some(abandonment) = projected.into_iter().next()
+        {
+            log_abandoned_report(self.log.as_ref(), &self.config, &abandonment.report);
+            report = Some(abandonment.report);
+        }
         let applied_cursor = self
             .config
             .store

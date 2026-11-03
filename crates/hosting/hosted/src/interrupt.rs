@@ -76,6 +76,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
     pub(crate) fn has_deferred(&self) -> bool {
         !self.deferred.is_empty()
     }
+
+    /// Whether a deferred `Quit` is waiting to be handled.
+    pub(crate) fn has_deferred_quit(&self) -> bool {
+        self.deferred
+            .iter()
+            .any(|delivery| IntentClass::of(&**delivery) == IntentClass::Quit)
+    }
 }
 
 /// A borrowed handle threaded through one long host operation.
@@ -85,6 +92,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
 pub(crate) struct InterruptWatch<'a, P: plakous_host_protocol::ProtocolExtension> {
     actions: &'a UserActionReceiver<P>,
     state: &'a RefCell<InterruptWatchState<P>>,
+    /// Idle-entry work has no next step an interrupt could skip: the urgent
+    /// lane is deferred too, ahead of the rest, for the idle dispatcher.
+    defer_urgent: bool,
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> Copy for InterruptWatch<'_, P> {}
@@ -94,7 +104,24 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
         actions: &'a UserActionReceiver<P>,
         state: &'a RefCell<InterruptWatchState<P>>,
     ) -> Self {
-        Self { actions, state }
+        Self {
+            actions,
+            state,
+            defer_urgent: false,
+        }
+    }
+
+    /// A watch for idle-entry work: every action it drains, the urgent lane
+    /// included, is left for the idle dispatcher.
+    pub(crate) const fn deferring(
+        actions: &'a UserActionReceiver<P>,
+        state: &'a RefCell<InterruptWatchState<P>>,
+    ) -> Self {
+        Self {
+            actions,
+            state,
+            defer_urgent: true,
+        }
     }
 
     /// Clears the interrupt an earlier operation observed.
@@ -117,6 +144,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
                 Ok(delivery) => {
                     let mut state = self.state.borrow_mut();
                     match IntentClass::of(&*delivery).disposition(DispatchPhase::Workflow) {
+                        Disposition::ObserveInterrupt if self.defer_urgent => {
+                            state.deferred.push_front(delivery);
+                        }
                         Disposition::ObserveInterrupt => state.interrupted = true,
                         _ => state.deferred.push_back(delivery),
                     }

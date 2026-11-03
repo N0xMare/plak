@@ -1,4 +1,5 @@
 //! Root prompt preflight, dispatch, terminal publication and queue disposition.
+use super::RootRecovery;
 
 use super::{
     CliFailure, CliResult, ContextQuery, HostStep, Instant, InterruptWatch, NodeActor,
@@ -85,7 +86,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 return Ok(HostStep::Continue);
             }
         }
-        let before_recovery = self.recovery_blocked;
+        let before_recovery = self.recovery;
         let before_drain = self.config.session.queue_drain_state;
         let _ = self.events.send(ContentEvent::SetBusy(true));
         let outcome = self
@@ -98,7 +99,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         if !matches!(outcome, Ok(PromptOutcome::Dispatched(_))) && !self.events.root_boundary().1 {
             emit_terminal_status(
                 &self.events,
-                if self.recovery_blocked {
+                if self.recovery.blocked() {
                     TerminalPhase::RecoveryPending
                 } else {
                     TerminalPhase::AdmissionRejected
@@ -140,7 +141,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     async fn discard_undispatched_wake(
         &mut self,
         intent: &sessions::projector::Submission,
-        before_recovery: bool,
+        before_recovery: RootRecovery,
         before_drain: SessionQueueDrainState,
         stopped: Option<preparation::Stopped>,
     ) -> CliResult<()> {
@@ -159,7 +160,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             .any(|submission| submission.command_id == intent.command_id)
         {
             self.config.session.queue_drain_state = restored_drain;
-            self.recovery_blocked = before_recovery || self.opened.agent().is_none();
+            self.recovery = if self.opened.agent().is_none() && !before_recovery.blocked() {
+                RootRecovery::Due
+            } else {
+                before_recovery
+            };
             emit_queue_snapshot(&self.events, &self.config.session);
             return Ok(());
         }
@@ -182,7 +187,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             if stopped.is_none() {
                 self.suppress_child_wake(None)?;
             }
-            self.recovery_blocked = before_recovery || self.opened.agent().is_none();
+            self.recovery = if self.opened.agent().is_none() && !before_recovery.blocked() {
+                RootRecovery::Due
+            } else {
+                before_recovery
+            };
             if let Err(error) = self.config.store.discard_submission(
                 &mut self.config.session,
                 &intent.command_id,
@@ -346,7 +355,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         if (!host_authored || transient_resume)
             && let Err(error) = self.refresh_native_authority_before_prompt().await
         {
-            self.recovery_blocked |= self.opened.agent().is_none();
+            if self.opened.agent().is_none() {
+                self.recovery = RootRecovery::Due;
+            }
             if let Some(state) = one_shot.as_deref_mut() {
                 state.result = Some(Err(error.clone()));
             }
@@ -824,7 +835,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 );
             }
         }
-        self.recovery_blocked |= host_outcome_blocks_continuation(&drive);
+        if host_outcome_blocks_continuation(&drive) {
+            self.recovery = RootRecovery::Due;
+        }
         observe_boundary(
             self.config.runtime_factory.as_ref(),
             HostWorkflow::RootDelivery,
@@ -875,7 +888,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let _ = self.events.send(ContentEvent::SetBusy(false));
         emit_terminal_status(
             &self.events,
-            if self.recovery_blocked {
+            if self.recovery.blocked() {
                 TerminalPhase::RecoveryPending
             } else if interrupted {
                 TerminalPhase::Interrupted
@@ -889,7 +902,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
 
         if let (Some(state), Some(terminal)) = (one_shot, one_shot_terminal) {
             state.result = Some(
-                if (self.recovery_blocked && terminal.is_ok())
+                if (self.recovery.blocked() && terminal.is_ok())
                     || (!completed
                         && matches!(
                             &terminal,
@@ -1061,7 +1074,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     async fn reopen_after_native_authority_refresh(&mut self, changed: bool) -> CliResult<()> {
         if changed {
             if let Err(error) = self.reopen_in_place().await {
-                self.recovery_blocked = true;
+                self.recovery = RootRecovery::Due;
                 return Err(error);
             }
         }

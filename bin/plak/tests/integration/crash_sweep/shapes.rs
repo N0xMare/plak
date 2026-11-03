@@ -109,6 +109,15 @@ impl Shape {
         }
     }
 
+    /// The claim the live host's in-place recovery reports for the shape's
+    /// own fenced root turn; only a shape whose pilot fences one has it.
+    pub(super) fn fenced_claim(&self) -> Option<&'static str> {
+        match self.name {
+            "uncertain_mcp_tool" => Some("running_tool"),
+            _ => None,
+        }
+    }
+
     pub(super) fn followup(&self) -> Value {
         let mut script = (self.script)();
         script.as_object_mut().unwrap().remove("credential_ready");

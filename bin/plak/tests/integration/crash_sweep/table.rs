@@ -27,7 +27,7 @@ impl Table {
     pub fn write(&self, rows: &[Value]) {
         let mut jsonl = std::fs::File::create(self.directory.join("sweep.jsonl.tmp")).unwrap();
         let mut table = String::from(
-            "# Crash-Point Sweep\n\nTargets are exact per-store indexed ordinals; cross-store global order is informational.\n\nClasses: COMPLETED_ONCE (one published expected terminal: answer or capacity denial); ABANDONED{claim} (one honest interruption notice); REQUEUED (prompt restored to paused queue); REFUSED{name} (typed exit 5, named signature); NOT_ADMITTED (no durable prompt, clean reopen and exactly one follow-up dispatch).\n",
+            "# Crash-Point Sweep\n\nTargets are exact per-store indexed ordinals; cross-store global order is informational.\n\nClasses: COMPLETED_ONCE (one published expected terminal: answer or capacity denial); ABANDONED{claim} (one honest interruption notice); REQUEUED (prompt restored to paused queue); FENCED (the shape's own root turn fenced once, closed in place before the cut, and its claim surfaced once); REFUSED{name} (typed exit 5, named signature); NOT_ADMITTED (no durable prompt, clean reopen and exactly one follow-up dispatch).\n",
         );
         class_counts(&mut table, rows);
         refusal_tags(&mut table, rows);
@@ -73,10 +73,11 @@ fn class_counts(table: &mut String, rows: &[Value]) {
         "REQUEUED",
         "REFUSED",
         "NOT_ADMITTED",
+        "FENCED",
         "UNCLASSIFIED",
         "DIVERGENT",
     ];
-    let mut counts = std::collections::BTreeMap::<(String, u64), [usize; 7]>::new();
+    let mut counts = std::collections::BTreeMap::<(String, u64), [usize; 8]>::new();
     for row in rows {
         let outcome = row["outcome"].as_str().unwrap().split('{').next().unwrap();
         let index = classes.iter().position(|class| *class == outcome).unwrap();
@@ -87,7 +88,7 @@ fn class_counts(table: &mut String, rows: &[Value]) {
             ))
             .or_default()[index] += 1;
     }
-    table.push_str("\n## Class Counts\n\n| Shape | Repeat | COMPLETED_ONCE | ABANDONED | REQUEUED | REFUSED | NOT_ADMITTED | UNCLASSIFIED | DIVERGENT |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    table.push_str("\n## Class Counts\n\n| Shape | Repeat | COMPLETED_ONCE | ABANDONED | REQUEUED | REFUSED | NOT_ADMITTED | FENCED | UNCLASSIFIED | DIVERGENT |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for ((shape, repeat), counts) in counts {
         write!(table, "| {shape} | {repeat} |").unwrap();
         for count in counts {

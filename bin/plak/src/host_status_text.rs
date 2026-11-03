@@ -112,7 +112,7 @@ pub(crate) fn status_detail(
         D::ReattachPending => "reattach pending".into(),
         D::RecoveringInterruptedTurn => "recovering the interrupted turn".into(),
         D::RecoveryIncomplete => "recovery did not complete; the next prompt retries it".into(),
-        D::RecoveryPending => "needs recovery · next prompt recovers".into(),
+        D::RecoveryPending => "needs recovery · reopening".into(),
         D::ReleasingPreviousAttachment => "releasing the previous session attachment".into(),
         D::TurnComplete => "turn complete".into(),
         D::Ready { model_id, pause } => with_pause(format!("ready · {model_id}"), *pause),

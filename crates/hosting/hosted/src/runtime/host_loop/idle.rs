@@ -1,4 +1,5 @@
 //! Idle control dispatch and FIFO prompt selection.
+use super::RootRecovery;
 
 use super::recover::RecoveryTrigger;
 use super::{
@@ -22,6 +23,37 @@ use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
+    /// Reopens a fenced session in place as soon as the actor is idle, with
+    /// no action needed. A failed reopen is reported and left to the next
+    /// action that needs the session, or to an explicit recovery. The reopen
+    /// is watched: what the operator sends meanwhile, an interrupt or a quit
+    /// included, is left for the idle dispatcher to answer after it.
+    async fn recover_eagerly(&mut self) -> Result<HostStep, ()> {
+        let state = std::rc::Rc::clone(&self.interrupt_state);
+        let watch = InterruptWatch::deferring(self.actions, &state);
+        let recovered = crate::interrupt::watched(
+            watch,
+            Box::pin(self.recover_session(RecoveryTrigger::Eager)),
+        )
+        .await;
+        match recovered {
+            Ok(step) => {
+                // The recovery reported on this session; store that before an
+                // action can switch to another.
+                self.commit_notice_intents();
+                Ok(step)
+            }
+            Err(failure) => {
+                self.recovery = RootRecovery::Retrying;
+                let _ = self.events.notice(
+                    TranscriptRow::error(NoticeScope::Session, failure.message().to_owned())
+                        .with_optional_remedy(failure.remedy()),
+                );
+                Err(())
+            }
+        }
+    }
+
     /// The next intent, or the end of one idle observation `window` without
     /// one: a biased select that takes the mailbox, whose urgent lane
     /// outranks everything queued, ahead of the window's deadline. An intent
@@ -55,6 +87,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         &mut self,
         mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
+        // A quit the operator already sent is answered first; the next open
+        // recovers the fenced turn.
+        if self.role.recovery == super::RecoveryPolicy::EagerInPlace
+            && self.recovery == RootRecovery::Due
+            && !self.interrupt_state.borrow().has_deferred_quit()
+            && !self.actions.abandon_and_release_requested()
+        {
+            match self.recover_eagerly().await {
+                Ok(HostStep::Quit) => return Ok(HostStep::Quit),
+                Ok(_) | Err(()) => {}
+            }
+        }
         crate::call_detail::note_attached(&self.config.session.id);
         self.last_tree_revision
             .child_live
@@ -128,10 +172,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             if cancels_resume {
                 self.cancel_transient_resume();
             }
-            // A session a fenced turn stopped recovers on the next action that
-            // needs it, which then proceeds as though nothing had happened.
+            // A session whose eager reopen failed recovers on the next action
+            // that needs it, which then proceeds as though nothing had happened.
             let received = match received {
-                Ok(action) if self.recovery_blocked && recovery_blocked_action(&action) => {
+                Ok(action) if self.recovery.blocked() && recovery_blocked_action(&action) => {
                     match self.recover_session(RecoveryTrigger::Action).await {
                         Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                         Ok(_) => {
@@ -170,7 +214,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::Recover) => {
-                    if self.recovery_blocked {
+                    if self.recovery.blocked() {
                         match self.recover_session(RecoveryTrigger::Explicit).await {
                             Ok(HostStep::Quit) => return Ok(HostStep::Quit),
                             Ok(_) => {}
@@ -511,7 +555,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     .await
                     {
                         Ok(()) => {
-                            self.recovery_blocked = false;
+                            self.recovery = RootRecovery::Clear;
                         }
                         Err(err) => {
                             let _ = self.events.notice(

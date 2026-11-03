@@ -1187,6 +1187,29 @@ fn classify_expected(
     };
     let outcome = if published == 1 {
         "COMPLETED_ONCE".to_owned()
+    } else if before.runtime_verdict == "OpensQuiescent"
+        && before.fenced_turns.len() > baseline.fenced_turns.len()
+    {
+        // The turn's one terminal is `RecoveryRequired`, and the live host
+        // already closed it by recovering in place before the cut: the
+        // reopen has nothing left to close. Its claim is durable across the
+        // cut: the reopen surfaces it when the live host could not.
+        assert!(!before.durable_answer, "lost durable answer via a fence");
+        let fenced = &before.fenced_turns[baseline.fenced_turns.len()..];
+        assert_eq!(
+            fenced,
+            own_root_turns(before, baseline),
+            "exactly one new fenced turn, the shape's own root turn"
+        );
+        let claim = expected
+            .fenced_claim()
+            .unwrap_or_else(|| panic!("{} has no fenced root turn", expected.name));
+        assert_eq!(
+            recovered.abandonment_claims,
+            [claim],
+            "the fenced turn's claim, once"
+        );
+        "FENCED".to_owned()
     } else if let Some(claim) = recovered.abandonment_claims.first() {
         assert!(
             !before.durable_answer,
@@ -1269,6 +1292,61 @@ fn capacity_denial_missing_publication_after_runtime_finalization_is_a_finding()
     })
     .expect_err("missing capacity publication must fail");
     assert!(super::panic_text(&error).contains("finalized capacity terminal was not published"));
+}
+
+/// FENCED is the shape's own root turn, fenced once, with its claim
+/// surfaced exactly once; a lost claim, a second fence or another turn's
+/// fence is a finding.
+#[test]
+fn fenced_requires_the_own_root_turn_and_its_claim_once() {
+    let baseline = summary::Summary {
+        ledger: json!([]),
+        ..summary::Summary::default()
+    };
+    let before = summary::Summary {
+        runtime_verdict: "OpensQuiescent".to_owned(),
+        submissions: vec![json!({"command": "original", "kind": "root_start"})],
+        root_lifecycles: vec![json!({"command": "original", "turn": "t1"})],
+        fenced_turns: vec!["t1".to_owned()],
+        ..summary::Summary::default()
+    };
+    let recovered = summary::Summary {
+        abandonment_claims: vec!["running_tool".to_owned()],
+        ..before.clone()
+    };
+    let rehearsal = json!({"verdict": "OpensQuiescent"});
+    let shape = shapes::get("uncertain_mcp_tool");
+    assert_eq!(
+        classify_expected(&before, &recovered, &baseline, &rehearsal, shape),
+        "FENCED"
+    );
+    let lost = summary::Summary {
+        abandonment_claims: Vec::new(),
+        ..recovered.clone()
+    };
+    let twice = summary::Summary {
+        abandonment_claims: vec!["running_tool".to_owned(); 2],
+        ..recovered.clone()
+    };
+    let other = summary::Summary {
+        fenced_turns: vec!["t2".to_owned()],
+        ..before.clone()
+    };
+    let second = summary::Summary {
+        fenced_turns: vec!["t1".to_owned(), "t1".to_owned()],
+        ..before.clone()
+    };
+    for (before, recovered) in [
+        (&before, &lost),
+        (&before, &twice),
+        (&other, &recovered),
+        (&second, &recovered),
+    ] {
+        std::panic::catch_unwind(|| {
+            classify_expected(before, recovered, &baseline, &rehearsal, shape)
+        })
+        .expect_err("a FENCED finding");
+    }
 }
 
 #[test]
@@ -1405,6 +1483,29 @@ struct OriginalFacts {
     command: bool,
     submission: bool,
     queued: bool,
+}
+
+/// The root turns of the prompts this run submitted, absent from the seed.
+fn own_root_turns(state: &summary::Summary, baseline: &summary::Summary) -> Vec<String> {
+    state
+        .submissions
+        .iter()
+        .filter(|submission| {
+            submission["kind"] == "root_start"
+                && !baseline
+                    .submissions
+                    .iter()
+                    .any(|old| old["command"] == submission["command"])
+        })
+        .filter_map(|submission| {
+            state
+                .root_lifecycles
+                .iter()
+                .find(|lifecycle| lifecycle["command"] == submission["command"])
+                .and_then(|lifecycle| lifecycle["turn"].as_str())
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 fn original_facts(state: &summary::Summary, baseline: &summary::Summary) -> OriginalFacts {

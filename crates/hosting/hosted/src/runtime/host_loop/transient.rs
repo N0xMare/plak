@@ -65,7 +65,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     ) -> bool {
         let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
         watch.defer_input();
-        if self.recovery_blocked
+        if self.recovery.blocked()
             || self.quit_started_at.is_some()
             || watch.interrupted()
             || self.interrupt_state.borrow().has_deferred()
@@ -137,7 +137,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             return Ok(HostStep::Continue);
         };
         if pending.session_id != self.config.session.id
-            || self.recovery_blocked
+            || self.recovery.blocked()
             || self.pending_start.is_some()
             || !self.config.session.pending_queue.is_empty()
             || self.config.session.queue_commands.has_pending()

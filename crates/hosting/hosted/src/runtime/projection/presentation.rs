@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use crate::session_store::SessionRecordStore;
 use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
-    ProductIntents, ProjectedTurnUsage, ProjectionCommit, SessionViews, Submission, ViewWrites,
+    ProductIntents, ProjectedAbandonment, ProjectedTurnUsage, ProjectionCommit, SessionViews,
+    Submission, ViewWrites,
 };
 use plakous::model::{SessionId, TurnId};
 
@@ -15,6 +16,16 @@ pub(crate) struct ProcessUsage {
     pub(crate) target: Option<SessionId>,
     seen: std::collections::HashSet<TurnId>,
     pub(crate) pending: Vec<ProjectedTurnUsage>,
+    abandoned: std::collections::HashSet<TurnId>,
+    abandonments: Vec<ProjectedAbandonment>,
+}
+
+impl ProcessUsage {
+    /// The fenced-turn abandonments this process's projector applied since
+    /// the last call, each turn once.
+    pub(crate) fn take_abandonments(&mut self) -> Vec<ProjectedAbandonment> {
+        std::mem::take(&mut self.abandonments)
+    }
 }
 
 pub(crate) struct PresentingStore {
@@ -153,6 +164,21 @@ impl SessionRecordStore for PresentingStore {
         for terminal in terminals {
             if usage.target == Some(terminal.session_id) && usage.seen.insert(terminal.turn_id) {
                 usage.pending.push(*terminal);
+            }
+        }
+    }
+
+    fn emit_projected_abandonments(&self, abandonments: &[ProjectedAbandonment]) {
+        self.inner.emit_projected_abandonments(abandonments);
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for abandonment in abandonments {
+            if usage.target == Some(abandonment.session_id)
+                && usage.abandoned.insert(abandonment.turn_id)
+            {
+                usage.abandonments.push(abandonment.clone());
             }
         }
     }

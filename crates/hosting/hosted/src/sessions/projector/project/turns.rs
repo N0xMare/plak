@@ -1,6 +1,7 @@
 use super::{
-    Anchored, Applier, FeedCancelCause, FeedTurnOutcome, NoticeScope, PauseCause, ProjectError,
-    ReadRequest, ReadValue, RowKey, TerminalRead, TranscriptRow, abandoned_turn_operator_detail,
+    Anchored, Applier, FeedCancelCause, FeedFact, FeedTurnOutcome, NoticeScope, PauseCause,
+    ProjectError, ProjectedAbandonment, ReadRequest, ReadValue, RowKey, TerminalRead,
+    TranscriptRow, abandoned_turn_operator_detail, abandoned_turn_operator_line,
     completed_tool_state, record_checkpoint,
 };
 
@@ -111,6 +112,62 @@ impl Applier<'_> {
                 NoticeScope::Recovery,
                 crate::runtime::RECOVERED_COMPLETED_STEERING_NOTICE,
             ));
+        }
+        Ok(())
+    }
+
+    /// Spec 02 §4.2: the commit that closes a fenced root turn carries no
+    /// fact of its own. The turn's recovery-required pause names it, and the
+    /// closure's note on that turn's history marks the record; the notice is
+    /// derived from the abandonment its terminal record now carries. The
+    /// runtime appends that note once per turn, so the notice is derived once.
+    pub(super) fn fenced_abandonment(&mut self) -> Result<(), ProjectError> {
+        let Some(Anchored {
+            value: Some(PauseCause::RecoveryRequired { turn_id: fenced }),
+            ..
+        }) = &self.views.state.pause
+        else {
+            return Ok(());
+        };
+        let facts = self.record.facts();
+        if facts
+            .iter()
+            .any(|fact| matches!(fact, FeedFact::TurnTerminal { .. }))
+        {
+            return Ok(());
+        }
+        let Some(turn_id) = facts.iter().find_map(|fact| match fact {
+            FeedFact::HistoryAppended {
+                turn_id: Some(turn),
+                ..
+            } if turn.to_string() == *fenced => Some(*turn),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+        let Some(checkpoint) = record_checkpoint(self.record) else {
+            return Ok(());
+        };
+        let header = *self.record.header();
+        let ReadValue::Abandoned(Some(report)) = self.read(ReadRequest::Abandoned {
+            branch: header.branch_id,
+            checkpoint,
+            turn_id,
+        })?
+        else {
+            return Ok(());
+        };
+        let report = report.clone();
+        self.push(TranscriptRow::warning(
+            NoticeScope::Recovery,
+            abandoned_turn_operator_line(&report),
+        ));
+        if self.views.state.branch() == Some(header.branch_id) {
+            self.abandonments.push(ProjectedAbandonment {
+                session_id: header.session_id,
+                turn_id,
+                report,
+            });
         }
         Ok(())
     }

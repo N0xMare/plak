@@ -310,7 +310,7 @@ async fn project_to_tail_controlled(
             _ => return Err("the projector read an unknown feed page".to_owned().into()),
         };
         progress(views.cursor, tail);
-        let (mut next, writes, terminal_usages) = match page {
+        let (mut next, writes, terminal_usages, abandonments) = match page {
             FeedPage::Records {
                 records,
                 retained_from,
@@ -424,6 +424,7 @@ async fn project_to_tail_controlled(
                     projection.views,
                     projection.writes,
                     projection.terminal_usages,
+                    projection.abandonments,
                 )
             }
             FeedPage::BehindRetention {
@@ -450,7 +451,7 @@ async fn project_to_tail_controlled(
                     rebuilt.state.created_operation_id = Some(session.create_operation_id);
                 }
                 let writes = full_writes(&views, &rebuilt);
-                (rebuilt, writes, Vec::new())
+                (rebuilt, writes, Vec::new(), Vec::new())
             }
             _ => return Err("the projector read an unknown feed page".to_owned().into()),
         };
@@ -464,6 +465,7 @@ async fn project_to_tail_controlled(
             let outcome = store.commit_projection_views(id, &writes, &next.state)?;
             if outcome == ProjectionCommit::Applied {
                 store.emit_projected_turn_usages(&observations);
+                store.emit_projected_abandonments(&abandonments);
             }
             Ok((outcome, next))
         })

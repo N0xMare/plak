@@ -1953,10 +1953,6 @@ fn fenced_then_answering() -> Value {
     })
 }
 
-fn recover_frame() -> Value {
-    json!({"v": 1, "kind": "recover", "id": "r1"})
-}
-
 /// Every terminal `turn_lifecycle` record, by turn, so a test can require one
 /// per turn across a whole run.
 fn terminal_lifecycles(outcome: &AgentOutcome) -> Vec<(String, String)> {
@@ -1991,11 +1987,12 @@ fn assert_one_terminal_per_turn(outcome: &AgentOutcome) {
     );
 }
 
-/// JSONL `recover` reopens a session a live turn fenced, emits one
-/// must-not-drop `recovered` record naming the claim and the cause, and the
-/// next prompt answers. Nothing is replayed and nothing asks for `/new`.
+/// A session a live turn fenced reopens in place on its own: one
+/// must-not-drop `recovered` record naming the claim and the cause, with no
+/// command to correlate, and the next prompt answers. Nothing is replayed and
+/// nothing asks for `/new`.
 #[test]
-fn a_jsonl_recover_command_recovers_a_fenced_session_in_place() {
+fn a_jsonl_fenced_session_recovers_in_place_on_its_own() {
     let fixture = Fixture::new(&fenced_then_answering());
     let mut agent = AgentProcess::start(&fixture, &[]);
     agent.wait_for("ready", |record| record["kind"] == "ready");
@@ -2003,13 +2000,12 @@ fn a_jsonl_recover_command_recovers_a_fenced_session_in_place() {
     agent.wait_for("the fenced terminal", |record| {
         record["kind"] == "turn_lifecycle" && record["phase"] == "recovery_required"
     });
-    agent.send(&recover_frame());
     let recovered = agent.wait_for("recovered", |record| record["kind"] == "recovered");
     assert_eq!(recovered["claim"], "model_request", "{recovered}");
     assert_eq!(recovered["cause"], "interrupted", "{recovered}");
-    assert_eq!(
-        recovered["id"], "r1",
-        "correlated with the command: {recovered}"
+    assert!(
+        recovered["id"].is_null(),
+        "no command triggered it: {recovered}"
     );
     agent.send(&prompt_frame("carry on"));
     agent.wait_for("assistant_done", |record| {
@@ -2048,14 +2044,14 @@ fn a_jsonl_recover_command_recovers_a_fenced_session_in_place() {
                     .is_some_and(|detail| detail.contains(RECOVERY_NOTE)))
             .count(),
         1,
-        "recover emits exactly one operator recovery note"
+        "the recovery emits exactly one operator recovery note"
     );
 }
 
-/// A prompt sent straight after the fence recovers first and then answers; the
-/// `recovered` record is correlated with that prompt.
+/// A prompt sent after the fence answers on the session the host already
+/// reopened in place; the `recovered` record precedes it.
 #[test]
-fn a_jsonl_prompt_after_a_fence_recovers_first_and_then_answers() {
+fn a_jsonl_prompt_after_a_fence_answers_on_the_reopened_session() {
     let fixture = Fixture::new(&fenced_then_answering());
     let mut agent = AgentProcess::start(&fixture, &[]);
     agent.wait_for("ready", |record| record["kind"] == "ready");
@@ -2063,9 +2059,9 @@ fn a_jsonl_prompt_after_a_fence_recovers_first_and_then_answers() {
     agent.wait_for("the fenced terminal", |record| {
         record["kind"] == "turn_lifecycle" && record["phase"] == "recovery_required"
     });
-    agent.send(&json!({"v": 1, "kind": "prompt", "id": "p2", "text": "carry on"}));
     let recovered = agent.wait_for("recovered", |record| record["kind"] == "recovered");
-    assert_eq!(recovered["id"], "p2", "{recovered}");
+    assert!(recovered["id"].is_null(), "{recovered}");
+    agent.send(&json!({"v": 1, "kind": "prompt", "id": "p2", "text": "carry on"}));
     agent.wait_for("assistant_done", |record| {
         record["kind"] == "assistant_done"
     });

@@ -233,7 +233,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
     /// root host wake: the same journaled submission, crash and reopen rules
     /// as an idle wake. It waits while another submission is unresolved.
     pub(super) async fn continuation_prompt(&mut self) -> CliResult<HostStep> {
-        if self.recovery_blocked
+        if self.recovery.blocked()
             || self.pending_start.is_some()
             || self.config.session.queue_commands.has_pending()
         {
@@ -357,7 +357,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             .retain(|item| !self.config.session.queue_commands.is_consumed(item));
         let session = &self.config.session;
         if !self.config.prompt_host_facts().host_wakes
-            || self.recovery_blocked
+            || self.recovery.blocked()
             || session.child_wake_suppressed
             || self.pending_start.is_some()
             || !session.pending_queue.is_empty()

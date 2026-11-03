@@ -1,4 +1,5 @@
 //! Commit the terminal product projection before advertising completion.
+use super::RootRecovery;
 
 use super::{
     ExceptionalTerminalProjection, Instant, InterruptWatch, NodeActor, SessionEvent,
@@ -135,7 +136,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     Ok(false) => unreachable!("completion update always changes the candidate"),
                     Err(_) => {
                         completed = false;
-                        self.recovery_blocked = true;
+                        self.recovery = RootRecovery::Due;
                         let _ = commit_session_update(
                             &*self.config.store,
                             &self.config.home,
@@ -147,7 +148,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                             },
                         );
                         let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                            "turn completed but its product transcript could not be committed; the next prompt or explicit recovery reopens the session and continues"
+                            "turn completed but its product transcript could not be committed; the session reopens in place and continues"
                                 ,
                         ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                     }
@@ -199,7 +200,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     },
                 );
                 if saved.is_err() {
-                    self.recovery_blocked = true;
+                    self.recovery = RootRecovery::Due;
                     self.config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
                         "context-capacity stop could not be committed; queue drain remains fail-closed",
@@ -352,15 +353,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         ));
                     }
                 } else {
-                    self.recovery_blocked = true;
+                    self.recovery = RootRecovery::Due;
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "definite turn failure could not be saved; the next prompt or explicit recovery reopens the session and continues"
+                        "definite turn failure could not be saved; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
             Ok(TurnHostOutcome::RecoveryRequired { error, remedy }) => {
-                self.recovery_blocked = true;
+                self.recovery = RootRecovery::Due;
                 let saved = commit_exceptional_terminal_projection(
                     &mut self.config.session,
                     ExceptionalTerminalProjection::RecoveryRequired(&error),
@@ -390,7 +391,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     );
                 } else {
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "recovery-required terminal projection could not be committed; the next prompt or explicit recovery reopens the session and continues"
+                        "recovery-required terminal projection could not be committed; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
@@ -412,15 +413,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         .events
                         .send(ContentEvent::Row(TranscriptRow::Interrupted));
                 } else {
-                    self.recovery_blocked = true;
+                    self.recovery = RootRecovery::Due;
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "interrupted terminal projection could not be committed; the next prompt or explicit recovery reopens the session and continues"
+                        "interrupted terminal projection could not be committed; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
             }
             Err(msg) => {
-                self.recovery_blocked = true;
+                self.recovery = RootRecovery::Due;
                 let saved = commit_exceptional_terminal_projection(
                     &mut self.config.session,
                     ExceptionalTerminalProjection::UnresolvedError(&msg),
@@ -450,7 +451,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     );
                 } else {
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
-                        "failed terminal projection could not be committed; the next prompt or explicit recovery reopens the session and continues"
+                        "failed terminal projection could not be committed; the session reopens in place and continues"
                             ,
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
                 }
@@ -483,7 +484,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
 /// What the operator is told when a turn's outcome could not be observed. The
 /// session is not lost: the next action reopens it and records the uncertainty
 /// once, and nothing the turn started is retried.
-pub(crate) const RECOVERY_PENDING_NOTE: &str = "the turn's outcome is uncertain; the next prompt or explicit recovery records that and continues";
+pub(crate) const RECOVERY_PENDING_NOTE: &str =
+    "the turn's outcome is uncertain; reopening the session records that and continues";
 
 #[cfg(test)]
 mod tests;

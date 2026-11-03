@@ -145,7 +145,7 @@ fn every_unit_status_detail_keeps_its_jsonl_spelling() {
         ),
         (
             HostStatusDetail::RecoveryPending,
-            "needs recovery · next prompt recovers",
+            "needs recovery · reopening",
         ),
         (
             HostStatusDetail::ReleasingPreviousAttachment,

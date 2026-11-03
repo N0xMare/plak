@@ -288,7 +288,7 @@ working while the store is full, because they write into the reserve.
 Do not delete state files or change stored counters by hand, and do not use
 export/import as a repair for an unresolved turn.
 
-## `needs recovery · next prompt recovers`
+## `needs recovery · reopening`
 
 After a crash, a completed answer can be recovered even with queued steering.
 One notice tells you if that steering was not applied; it is not automatically
@@ -303,9 +303,10 @@ answer.
 A turn whose outcome Plak could not observe ends *recovery required*: a stream
 that broke where a provider-hosted action was possible, a process it could not
 prove had stopped, a checkpoint it could not confirm, a lease it lost. The
-session is not lost and you do not need `/new`. The next thing you do that
-needs the session — a prompt, `/compact`, a model change — first reopens it in
-place and then runs. `/recover` in the TUI, `{"v":1,"kind":"recover","id":"r1"}`
+session is not lost and you do not need `/new`. The host reopens it in place
+at once, with no action from you. If that reopen fails (for example while you
+are offline), the next thing you do that needs the session — a prompt,
+`/compact`, a model change — first reopens it in place and then runs. `/recover` in the TUI, `{"v":1,"kind":"recover","id":"r1"}`
 in `plak agent`, or `plak session recover SESSION_ID` does the same on its own.
 `plak run` exits 5 for such a turn, and the next `plak run --session` recovers
 it.

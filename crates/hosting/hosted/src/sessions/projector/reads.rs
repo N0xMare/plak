@@ -61,6 +61,17 @@ pub enum ReadRequest {
         /// The root turn.
         turn_id: TurnId,
     },
+    /// The abandonment report of a fenced root turn's terminal, through
+    /// `feed_terminal`. No record names it: the projector asks for it, from
+    /// the views, when it applies the commit that closed the fenced turn.
+    Abandoned {
+        /// The record's branch.
+        branch: BranchId,
+        /// The record's checkpoint.
+        checkpoint: CheckpointId,
+        /// The fenced root turn.
+        turn_id: TurnId,
+    },
 }
 
 /// Who wrote an item.
@@ -200,6 +211,9 @@ pub enum ReadValue {
     Call(CallRead),
     /// A terminal.
     Terminal(TerminalRead),
+    /// A fenced turn's abandonment report, or `None` when its terminal
+    /// carries none or is not retained.
+    Abandoned(Option<plakous::agent::AbandonedTurnReport>),
 }
 
 /// The reads a projector run may look up.
@@ -458,10 +472,31 @@ pub async fn load_reads(
                     _ => TerminalRead::NotRetained,
                 },
             ),
+            ReadRequest::Abandoned {
+                branch,
+                checkpoint,
+                turn_id,
+            } => ReadValue::Abandoned(abandoned_read(
+                sessions
+                    .feed_terminal(FeedTerminalRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        turn_id,
+                    })
+                    .await?,
+            )),
         };
         cache.insert(request, value);
     }
     Ok(())
+}
+
+fn abandoned_read(outcome: FeedTerminalOutcome) -> Option<plakous::agent::AbandonedTurnReport> {
+    match outcome {
+        FeedTerminalOutcome::Terminal(terminal) => terminal.abandoned_turn().cloned(),
+        _ => None,
+    }
 }
 
 fn terminal_read(result: &plakous::agent::TurnResult) -> TerminalRead {
@@ -563,6 +598,19 @@ pub fn load_reads_sqlite(
                     _ => TerminalRead::NotRetained,
                 },
             ),
+            ReadRequest::Abandoned {
+                branch,
+                checkpoint,
+                turn_id,
+            } => ReadValue::Abandoned(abandoned_read(AgentSessions::inspect_feed_terminal_sqlite(
+                path,
+                &FeedTerminalRequest {
+                    session,
+                    branch,
+                    checkpoint,
+                    turn_id,
+                },
+            )?)),
         };
         cache.insert(request, value);
     }

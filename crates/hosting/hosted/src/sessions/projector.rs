@@ -26,8 +26,8 @@ pub use join::{
     workflow_withdrawals,
 };
 pub use project::{
-    NOT_RETAINED_ROW, ProjectError, ProjectedTurnUsage, Projection, Successor, ViewWrites, project,
-    rebuild_behind_retention,
+    NOT_RETAINED_ROW, ProjectError, ProjectedAbandonment, ProjectedTurnUsage, Projection,
+    Successor, ViewWrites, project, rebuild_behind_retention,
 };
 pub use reads::{
     CallRead, CallTarget, JobEnd, ProjectorReads, ReadActor, ReadCache, ReadItem, ReadPart,
@@ -124,5 +124,51 @@ pub async fn run(
             .await
             .map_err(RunError::Read)?;
     }
-    project(views, intents, records, &cache).map_err(RunError::Project)
+    // A read the views ask for (a fenced turn's abandonment) is loaded on
+    // demand and the page applied again from the same views.
+    let mut retry = asks_reads(&views, records).then(|| Box::new(views.clone()));
+    let mut views = views;
+    loop {
+        match project(views, intents, records, &cache) {
+            Err(ProjectError::MissingRead(request)) if cache.read(&request).is_none() => {
+                let (Some(again), Some(record)) = (retry.take(), records.first()) else {
+                    return Err(RunError::Project(ProjectError::MissingRead(request)));
+                };
+                Box::pin(load_reads(
+                    sessions,
+                    record.header().session_id,
+                    [request],
+                    &mut cache,
+                ))
+                .await
+                .map_err(RunError::Read)?;
+                retry = Some(again.clone());
+                views = *again;
+            }
+            outcome => return outcome.map_err(RunError::Project),
+        }
+    }
+}
+
+/// Whether applying `records` to `views` may ask for a read no record
+/// names: a fenced turn is pending, or the page fences one.
+#[must_use]
+pub fn asks_reads(views: &SessionViews, records: &[FeedRecord]) -> bool {
+    matches!(
+        views.state.pause,
+        Some(Anchored {
+            value: Some(PauseCause::RecoveryRequired { .. }),
+            ..
+        })
+    ) || records.iter().any(|record| {
+        record.facts().iter().any(|fact| {
+            matches!(
+                fact,
+                plakous::sessions::feed::FeedFact::TurnTerminal {
+                    outcome: plakous::sessions::feed::FeedTurnOutcome::RecoveryRequired,
+                    ..
+                }
+            )
+        })
+    })
 }

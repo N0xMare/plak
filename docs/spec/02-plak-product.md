@@ -766,8 +766,8 @@ An abandoned turn appends `turn.abandoned` with its `claim`
 (`running_tool`, `model_request`, `compaction_not_applied`, `nothing_started` or
 `tool_round_completed`),
 its `cause` (`process_lost` or `interrupted`) and the operation identities; an
-in-place recovery also appends `session.recovered` (with the trigger, `action`
-or `explicit`) or, when the reopen failed, `session.recover_failed`; an owner
+in-place recovery also appends `session.recovered` (with the trigger, `eager`,
+`action` or `explicit`) or, when the reopen failed, `session.recover_failed`; an owner
 that finds on recovery that another `plak` took the session over appends
 `session.lease_taken_over`.
 For `nothing_started` after process loss, the notice says exact evidence proves
@@ -1713,7 +1713,7 @@ start and finish timestamps rather than time spent qualifying the operation.
 | process | subject | (b) the starting call's command through `feed_call`, redacted and bounded as a tool subject |
 | retry | every field | (d) a notice intent: a transport retry is not a commit |
 | milestone | every field | (d) a notice intent derived from durable tree attempts, questions and root adoption receipts; an `adopted` milestone's file count and identity come from the successful tree operation receipt, and an `adopt conflict` milestone's paths (not in the result) from the call's tool-boundary facts |
-| notice, recovery and turn scope | the line and its tone | (a) the `TurnTerminal` (claim, cause, whether a model round and a tool round completed, steering clause) and (b) the terminal record through `feed_terminal`; a recovered turn that completed uses the live completion wording. Abandoning a root whose `RecoveryRequired` terminal was already committed derives no further notice: that `TurnTerminal` already derived its row |
+| notice, recovery and turn scope | the line and its tone | (a) the `TurnTerminal` (claim, cause, whether a model round and a tool round completed, steering clause) and (b) the terminal record through `feed_terminal`; a recovered turn that completed uses the live completion wording. Abandoning a root whose `RecoveryRequired` terminal was already committed commits no fact of its own: the projector derives the recovery line from (b) the abandonment report its terminal record now carries, read through `feed_terminal` at the closing record, which it identifies from the views (the `RecoveryRequired` pause naming the turn) and the record (that turn's history note and no `TurnTerminal`). The closure appends its note once per turn, so the line is derived once; its session-log record is at least once (§4.2) |
 | error row of a failed turn | the rendered text | (b) the failure kind and message of the terminal record through `feed_terminal`, rendered by a pure function whose only classifier is the typed model error kind; a message without a kind, or with a kind the renderer does not frame, is shown raw and its words are never read for a category |
 | notice, compaction scope | the not-applied and outcome lines | (a) `WorkflowSettled` |
 | notice, queue scope (recorded rejection) | the line | (a) `CommandRejected` |
@@ -2843,8 +2843,25 @@ that applies nothing new emits nothing. A crash after the
 transaction and before the emission loses the observation; projection is not an
 exactly-once telemetry outbox.
 
-In-process recovery (the next prompt or `/recover`) is the same reopen against a
-replacement attachment. When the projector applied a terminal during it,
+A fenced turn's abandonment claim is durable: the closure that abandons a root
+whose `RecoveryRequired` terminal already committed records the claim in that
+terminal record, and the projector derives the turn's single recovery line from
+it when it applies the closing record (§2.6), whichever process does. A crash
+after the closure commits and before its projection therefore loses neither the
+line nor the claim: the next open applies the record and reports both. The
+in-process recovery that closes the turn writes its session-log
+`turn.abandoned` record before its projector applies the closure, so that
+record is at least once: a crash between the two writes it again at the next
+open. An open writes it after its projection, from the runtime's report or
+from the closure its projector applied, and a crash between them loses it as
+above. The transcript carries one line either way, because the line is a
+projection of the record, not of the log.
+
+In-process recovery (eager at idle, or the next action or `/recover` after a
+failed reopen) is the same reopen against a
+replacement attachment. The eager reopen is skipped while a quit is already
+deferred (the next open recovers the turn), and what the operator sends while
+it runs, an interrupt or a quit included, is answered after it. When the projector applied a terminal during it,
 recovery reports that saved result, not "left nothing outstanding". A failed
 reopen releases the replacement owner and leaves the cursor where it was for
 retry. Jobs on the reopened head follow the ordinary open rule: one live at the
@@ -2997,18 +3014,27 @@ capacity-recovery compact: that action is a new operation. `Compacted` and
 Scheduled and CapacityRecovery requests, the queue-drain remeasurement through
 the same projection path live and on reopen.
 
-**No fenced session ends in `/new`.** When a turn ends recovery-required, the
-host marks the session as needing recovery and says that the next prompt (or
-`/recover`) records the uncertainty and continues. Projection debt alone is not
-a fence: the next action applies it first. The next action that needs the session — a prompt,
-a follow-up, `/compact`, `/fork`, a model, account or effort change, a queue action, a tool invocation — first **recovers in place**:
-the host releases the stopped attachment and runs the reopen above (the
-runtime closes what it can, the projector derives what that open committed —
-one operator line, a `Recovered` observation, a `turn.abandoned` record — and
-unadmitted workflow requests are withdrawn), and then performs the action. Nothing
-is replayed. If the reopen fails — offline, a quarantined credential — the
-action is refused with the reason, the draft is handed back, and the next action
-tries again. The shared hosted exact-reopen helpers also serve children
+**No fenced session ends in `/new`.** When a turn ends recovery-required, or an
+attached open finds the head still recovery-required, the root **recovers in
+place eagerly**: as soon as the host is idle, with no action needed, it releases
+the stopped attachment and runs the reopen above (the runtime closes what it
+can, the projector derives what that open committed — one operator line, a
+`Recovered` observation, a `turn.abandoned` record — and unadmitted workflow
+requests are withdrawn). Nothing is replayed and no durable cause is written:
+the fence is a process-local state, and a host that dies before the reopen
+leaves the same unfinished turn for the next open to close. One that dies after
+the reopen's closure commits leaves the claim in the turn's terminal record,
+and the next open derives the line from it (§4.2). Projection debt
+alone is not a fence: the next action applies it first. If the eager reopen
+fails — offline, a quarantined credential — the host says so, and the next
+action that needs the session — a prompt, a follow-up, `/compact`, `/fork`, a
+model, account or effort change, a queue action, a tool invocation — first
+**recovers in place** the same way and then performs the action; if that
+reopen fails too, the action is refused with the reason, the draft is handed
+back, and the next action tries again. `/recover` retries at once. A one-shot
+`plak run` does not reopen in place: it exits 5 and the next `run --session`
+recovers at open. Children and the agent tree keep their own recovery (chapter
+03 §14.1). The shared hosted exact-reopen helpers also serve children
 (chapter 03 §14.1); it runs at startup and on `run --session` after a
 crash. A queue paused by the fence stays paused until it is resumed: what was
 queued was written behind a turn whose outcome nobody saw. The recovery
@@ -3340,7 +3366,7 @@ closes. This does not change the v1 command or event encoding.
 | `queue` | `drain` ∈ `live_auto_drain` \| `restored_paused`, and `items[]` of `{id, revision, text, rejected}` |
 | `turn` | terminal usage: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cached_input_tokens`, `cache_write_tokens` |
 | `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status` |
-| `recovered` | `operations[]`, and when the reopen closed an unfinished turn its `claim` ∈ `running_tool` \| `model_request` \| `compaction_not_applied` \| `nothing_started` \| `tool_round_completed` and `cause` ∈ `process_lost` \| `interrupted`; correlated with the `prompt` or `recover` that triggered it, or emitted after `ready` when the attach itself recovered a crash |
+| `recovered` | `operations[]`, and when the reopen closed an unfinished turn its `claim` ∈ `running_tool` \| `model_request` \| `compaction_not_applied` \| `nothing_started` \| `tool_round_completed` and `cause` ∈ `process_lost` \| `interrupted`; correlated with the `prompt` or `recover` that triggered it, or emitted on its own when the host recovered a fenced turn in place at idle, or after `ready` when the attach itself recovered a crash |
 | `tree` | `tree_id`, `revision`, `state`, `restored_paused`, `nodes[]` |
 | `error` | `message` |
 | `bye` | — |
@@ -5085,9 +5111,10 @@ the `bytes÷4` estimate of what was added since; each new request of the turn
 keeps that count as its anchor rather than the older one the turn started
 from. Within a turn the reading never falls: only a provider count or a
 committed compaction may state a lower figure. Recovery
-attention stays red (`error: needs recovery · next prompt recovers`);
-`/recover` recovers at once, and in a detached shell `/attach` reopens the
-session, which recovers it.
+attention shows red (`error: needs recovery · reopening`) until the host's
+eager reopen settles; if that reopen fails, `/recover` or the next prompt
+retries it, and in a detached shell `/attach` reopens the session, which
+recovers it.
 
 One-shot admission rejection and consumed delivery both return non-zero
 classified failures; consumption says `queued prompt already ran; its result

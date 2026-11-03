@@ -24,8 +24,8 @@ use super::views::{
 };
 use super::{compaction_call_id, intents};
 use crate::runtime::events::{
-    abandoned_turn_operator_detail, compact_terminal_subject, completed_tool_state,
-    compose_counts_subject, host_owns_subject, projected_tool_subject,
+    abandoned_turn_operator_detail, abandoned_turn_operator_line, compact_terminal_subject,
+    completed_tool_state, compose_counts_subject, host_owns_subject, projected_tool_subject,
 };
 use crate::runtime::{Derived, item_rows, projected_tool_row as tool_row, settle_tool_row};
 use crate::sessions::{
@@ -54,7 +54,8 @@ pub const NOT_RETAINED_ROW: &str = "earlier output not retained";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectError {
     /// A read the record names was not performed; run [`super::plan_reads`]
-    /// and load it first.
+    /// and load it first. A read the views ask for (an abandonment) is
+    /// reported here too: load it and apply the page again.
     MissingRead(ReadRequest),
     /// A record of another runtime session.
     ForeignSession,
@@ -100,6 +101,21 @@ pub struct Projection {
     pub writes: ViewWrites,
     /// Terminal usage observations, emitted only after this run wins its CAS.
     pub terminal_usages: Vec<ProjectedTurnUsage>,
+    /// Fenced turns whose abandonment this run applied, emitted only after
+    /// it wins its CAS.
+    pub abandonments: Vec<ProjectedAbandonment>,
+}
+
+/// The abandonment of a fenced root turn, from its terminal record: the
+/// commit that closed it carries no fact of its own.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectedAbandonment {
+    /// Runtime session named by the closing record.
+    pub session_id: plakous::model::SessionId,
+    /// The fenced turn.
+    pub turn_id: plakous::model::TurnId,
+    /// What the closure abandoned.
+    pub report: plakous::agent::AbandonedTurnReport,
 }
 
 /// A terminal's exact usage and stable feed identity, independent of live results.
@@ -139,6 +155,7 @@ pub fn project(
     let mut touched = BTreeMap::new();
     let mut successors = Vec::new();
     let mut terminal_usages = Vec::new();
+    let mut abandonments = Vec::new();
     for record in records {
         let header = record.header();
         if header.seq <= next.cursor {
@@ -159,6 +176,7 @@ pub fn project(
             ordinal: 0,
             touched: &mut touched,
             terminal_usages: &mut terminal_usages,
+            abandonments: &mut abandonments,
             resolved_calls: Vec::new(),
         };
         if let Some(successor) = applier.apply()? {
@@ -210,6 +228,7 @@ pub fn project(
         views: next,
         writes,
         terminal_usages,
+        abandonments,
     })
 }
 
@@ -262,6 +281,7 @@ struct Applier<'a> {
     // Whether each touched key existed before this page's first mutation.
     touched: &'a mut BTreeMap<RowKey, bool>,
     terminal_usages: &'a mut Vec<ProjectedTurnUsage>,
+    abandonments: &'a mut Vec<ProjectedAbandonment>,
     resolved_calls: Vec<String>,
 }
 
@@ -331,7 +351,7 @@ impl Applier<'_> {
         for fact in self.record.facts() {
             self.apply_fact(fact)?;
         }
-        Ok(())
+        self.fenced_abandonment()
     }
 
     fn read(&self, request: ReadRequest) -> Result<&ReadValue, ProjectError> {
@@ -542,6 +562,7 @@ pub(super) fn project_cloned(
     let mut touched = BTreeMap::new();
     let mut successors = Vec::new();
     let mut terminal_usages = Vec::new();
+    let mut abandonments = Vec::new();
     for record in records {
         let header = record.header();
         if header.seq <= next.cursor {
@@ -562,6 +583,7 @@ pub(super) fn project_cloned(
             ordinal: 0,
             touched: &mut touched,
             terminal_usages: &mut terminal_usages,
+            abandonments: &mut abandonments,
             resolved_calls: Vec::new(),
         };
         if let Some(successor) = applier.apply()? {
@@ -614,6 +636,7 @@ pub(super) fn project_cloned(
         views: next,
         writes,
         terminal_usages,
+        abandonments,
     })
 }
 

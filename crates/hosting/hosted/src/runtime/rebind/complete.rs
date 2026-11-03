@@ -212,7 +212,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 restore_detached_source(config, opened, source_locator, stderr_buf).await?;
                 recovery_save?;
                 return Err(CliFailure::new(
-                    "the session has an interrupted turn, so the model change was not started; the next prompt or explicit recovery recovers it, then retry the change",
+                    "the session has an interrupted turn, so the model change was not started; recover the session, then retry the change",
                 ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {}));
             }
             _ => {

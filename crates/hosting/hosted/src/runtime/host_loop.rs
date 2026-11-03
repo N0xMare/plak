@@ -119,15 +119,38 @@ pub(super) struct RolePolicy {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RecoveryPolicy {
-    /// The session recovers in place when the next action needs it.
-    OnNextAction,
+    /// The node reopens itself in place as soon as it is idle (design §6.0).
+    EagerInPlace,
+}
+
+/// Where the root stands after a turn that ended recovery-required, or an
+/// open that found one (design §6.2's process-local `recovering` overlay).
+/// Nothing durable records it: the runtime's own state is the authority, and
+/// a restarted host finds the same unfinished turn at open.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum RootRecovery {
+    /// Nothing to recover.
+    #[default]
+    Clear,
+    /// The actor recovers in place at its next idle entry.
+    Due,
+    /// The eager reopen failed; the next action that needs the session, or
+    /// an explicit recovery, retries it.
+    Retrying,
+}
+
+impl RootRecovery {
+    /// Whether actions that need the session must recover it first.
+    pub(super) const fn blocked(self) -> bool {
+        !matches!(self, Self::Clear)
+    }
 }
 
 impl RolePolicy {
     /// The attached root's policy.
     pub(super) const ROOT: Self = Self {
         tree_passes: true,
-        recovery: RecoveryPolicy::OnNextAction,
+        recovery: RecoveryPolicy::EagerInPlace,
     };
 }
 
@@ -148,7 +171,9 @@ struct NodeActor<'a, P: plakous_host_protocol::ProtocolExtension> {
     executor: std::rc::Rc<session_executor::SessionExecutor>,
     log: Option<SessionLog>,
     stderr_buf: Vec<u8>,
-    interrupt_state: RefCell<InterruptWatchState<P>>,
+    /// Shared, so a watched step can observe the mailbox while it borrows the
+    /// actor.
+    interrupt_state: std::rc::Rc<RefCell<InterruptWatchState<P>>>,
     pending_start: Option<SessionQueueItem>,
     /// The idle prompt's one capacity sample, shared by echo and admission.
     pending_storage_admission: Option<crate::session_store::StorageAdmission>,
@@ -160,7 +185,8 @@ struct NodeActor<'a, P: plakous_host_protocol::ProtocolExtension> {
     child_wake: wake::RootWake,
     storage_interrupted: bool,
     pending_track: pending::PendingTrack,
-    recovery_blocked: bool,
+    /// The root's process-local recovery overlay; never durable.
+    recovery: RootRecovery,
     /// This attachment's own open closed an unfinished turn and said so.
     recovered_at_open: bool,
     held_usage: HeldUsage,
@@ -299,7 +325,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     emit_queue_snapshot(&self.events, &self.config.session);
                 }
                 if self.pending_start.is_none()
-                    && !self.recovery_blocked
+                    && !self.recovery.blocked()
                     && self.config.session.queue_drain_state
                         == SessionQueueDrainState::LiveAutoDrain
                 {
@@ -735,6 +761,21 @@ fn take_pending_usage(
     std::mem::take(&mut usage.pending)
         .into_iter()
         .filter(|terminal| terminal.session_id == session)
+        .collect()
+}
+
+/// The fenced-turn abandonments this process's projector applied for
+/// `session` since the last call (spec 02 §4.2).
+fn take_projected_abandonments(
+    pending: &std::sync::Mutex<super::projection::presentation::ProcessUsage>,
+    session: plakous::model::SessionId,
+) -> Vec<sessions::projector::ProjectedAbandonment> {
+    pending
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take_abandonments()
+        .into_iter()
+        .filter(|abandonment| abandonment.session_id == session)
         .collect()
 }
 

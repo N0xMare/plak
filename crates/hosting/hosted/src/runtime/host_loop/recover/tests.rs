@@ -104,7 +104,7 @@ fn retained_approval_after_owner_loss(switch: bool) {
         }
         (offered, observed, before_offer)
     });
-    host.recovery_blocked = true;
+    host.recovery = RootRecovery::Due;
     let outcome = if switch {
         host.executor
             .block_on(crate::runtime::clear::resume_session_switch(
@@ -282,8 +282,8 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
                     .text()
                     .is_some_and(|text| text.contains("recovered an interrupted turn")))
                 .count(),
-            0,
-            "the recovery-required terminal derived its row; abandoning it derives none (with submission: {with_submission})"
+            1,
+            "the projector derives the fenced turn's recovery line once from its closure (with submission: {with_submission})"
         );
         let dispatches = plakous_offline_crash_harness::evidence::read_evidence(&evidence)
             .unwrap()
@@ -296,4 +296,190 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
         assert_eq!(dispatches, 1, "recover must not redispatch the request");
         host.block(async |host| host.release().await).unwrap();
     }
+}
+
+/// Refuses only the views read the in-place reopen starts with.
+struct RefuseViews;
+
+impl crate::runtime::fault_store::StoreFaults for RefuseViews {
+    fn before(
+        &self,
+        call: crate::runtime::fault_store::StoreCall,
+        _: Option<&sessions::SessionRecord>,
+    ) -> Result<(), String> {
+        if matches!(call, crate::runtime::fault_store::StoreCall::LoadViews) {
+            Err("injected unreadable views".to_owned())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// A fenced root reopens itself at idle entry with no action. When that
+/// eager reopen fails it is reported and left retrying, and the next action
+/// that needs the session reopens it first and then runs.
+#[test]
+fn a_failed_eager_reopen_is_retried_by_the_next_action() {
+    use crate::runtime::host_loop::RootRecovery;
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(
+        root.path(),
+        script(serde_json::json!([{"output": {"text": "after the retry"}}])),
+    );
+    let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        NodeActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
+    host.config.store.save(&mut host.config.session).unwrap();
+    let durable = std::sync::Arc::clone(&host.config.store);
+    host.config.store = std::sync::Arc::new(crate::runtime::fault_store::FaultStore::new(
+        std::sync::Arc::clone(&durable),
+        RefuseViews,
+    ));
+    host.recovery = RootRecovery::Due;
+    observed.try_iter().for_each(drop);
+
+    assert!(matches!(
+        host.block(async |host| host.next_prompt(None).await)
+            .unwrap(),
+        HostStep::Continue
+    ));
+    assert_eq!(host.recovery, RootRecovery::Retrying);
+    let failed = observed.try_iter().collect::<Vec<_>>();
+    assert!(
+        failed.iter().any(|event| matches!(event,
+            HostEvent::Row(TranscriptRow::Notice(notice))
+                if notice.text.contains("could not be reopened"))),
+        "{failed:#?}"
+    );
+    assert!(
+        !failed
+            .iter()
+            .any(|event| matches!(event, HostEvent::Recovered { .. }))
+    );
+
+    host.config.store = durable;
+    controls
+        .send(crate::surface_protocol::UserAction::Prompt(
+            "after the retry".into(),
+        ))
+        .unwrap();
+    let step = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
+    assert!(
+        matches!(step, HostStep::Prompt { .. }),
+        "the prompt still runs"
+    );
+    assert_eq!(host.recovery, RootRecovery::Clear);
+    assert!(
+        observed
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::Recovered { .. })),
+        "the action reopened the session first"
+    );
+    host.block(async |host| host.release().await).unwrap();
+}
+
+/// A quit already deferred when the root enters idle fenced is answered
+/// first: the actor quits without the eager reopen, which the next open does.
+#[test]
+fn a_deferred_quit_skips_the_eager_reopen() {
+    use crate::runtime::host_loop::RootRecovery;
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        NodeActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
+    host.config.store.save(&mut host.config.session).unwrap();
+    host.recovery = RootRecovery::Due;
+    // The fenced turn's own watch drained the quit.
+    controls
+        .send(crate::surface_protocol::UserAction::Quit)
+        .unwrap();
+    crate::interrupt::InterruptWatch::new(&actions, &host.interrupt_state).poll();
+    assert!(host.interrupt_state.borrow().has_deferred_quit());
+    observed.try_iter().for_each(drop);
+
+    let step = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
+
+    assert!(matches!(step, HostStep::Quit));
+    assert_eq!(host.recovery, RootRecovery::Due, "no eager reopen ran");
+    assert!(
+        !observed
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::Recovered { .. }))
+    );
+    host.block(async |host| host.release().await).unwrap();
+}
+
+/// Sends an interrupt and a quit once, while the in-place reopen reads the
+/// views it starts with.
+struct SendDuringReopen(
+    std::sync::Mutex<Option<crate::surface_protocol::UserActionSender<TestExtension>>>,
+);
+
+impl crate::runtime::fault_store::StoreFaults for SendDuringReopen {
+    fn before(
+        &self,
+        call: crate::runtime::fault_store::StoreCall,
+        _: Option<&sessions::SessionRecord>,
+    ) -> Result<(), String> {
+        if matches!(call, crate::runtime::fault_store::StoreCall::LoadViews)
+            && let Some(controls) = self.0.lock().unwrap().take()
+        {
+            controls
+                .send(crate::surface_protocol::UserAction::Quit)
+                .unwrap();
+            controls
+                .send(crate::surface_protocol::UserAction::Interrupt)
+                .unwrap();
+        }
+        Ok(())
+    }
+}
+
+/// The eager reopen is watched: an interrupt and a quit sent while it runs
+/// are drained and left for the idle dispatcher, which answers them after the
+/// reopen, the urgent interrupt first.
+#[test]
+fn an_interrupt_and_quit_sent_during_the_eager_reopen_are_answered_after_it() {
+    use crate::runtime::host_loop::RootRecovery;
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        NodeActor::open_blocking(config, &actions, super::super::Sender::over(sent), None).unwrap();
+    host.config.store.save(&mut host.config.session).unwrap();
+    let durable = std::sync::Arc::clone(&host.config.store);
+    host.config.store = std::sync::Arc::new(crate::runtime::fault_store::FaultStore::new(
+        std::sync::Arc::clone(&durable),
+        SendDuringReopen(std::sync::Mutex::new(Some(controls))),
+    ));
+    host.recovery = RootRecovery::Due;
+    observed.try_iter().for_each(drop);
+
+    let step = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
+
+    assert_eq!(host.recovery, RootRecovery::Clear, "the reopen ran");
+    assert!(
+        observed
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::Recovered { .. }))
+    );
+    // The interrupt was answered at idle; the quit waits, drained, behind it.
+    assert!(matches!(step, HostStep::Continue));
+    assert!(host.interrupt_state.borrow().has_deferred_quit());
+    let step = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
+    assert!(matches!(step, HostStep::Quit));
+    host.config.store = durable;
+    host.block(async |host| host.release().await).unwrap();
 }

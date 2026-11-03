@@ -114,6 +114,12 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
     fn emit_projected_turn_usages(&self, usages: &[sessions::projector::ProjectedTurnUsage]) {
         self.inner.emit_projected_turn_usages(usages);
     }
+    fn emit_projected_abandonments(
+        &self,
+        abandonments: &[sessions::projector::ProjectedAbandonment],
+    ) {
+        self.inner.emit_projected_abandonments(abandonments);
+    }
     fn write_host_controls(
         &self,
         id: &str,

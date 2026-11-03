@@ -115,7 +115,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
         "outage spans terminal publication"
     );
     assert!(
-        host.recovery_blocked,
+        host.recovery.blocked(),
         "the refused projection fences admission"
     );
     assert!(refused.load(Ordering::SeqCst) > 0);
@@ -141,7 +141,10 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
     let step = host
         .block(async |host| host.next_prompt(None).await)
         .unwrap();
-    assert!(!host.recovery_blocked, "the new prompt recovered in place");
+    assert!(
+        !host.recovery.blocked(),
+        "the new prompt recovered in place"
+    );
     run_prompt_step(&mut host, step);
     seen.extend(events.try_iter());
     assert!(

@@ -167,7 +167,7 @@ pub(super) fn stopped_preparation(
     assert_eq!(host.config.session.root_turn_count, 0);
     assert_eq!(host.opened.locator(), locator);
     assert!(host.opened.agent().is_some());
-    assert!(!host.recovery_blocked && !host.quit_abandoned_turn);
+    assert!(!host.recovery.blocked() && !host.quit_abandoned_turn);
     let observed: Vec<_> = events.try_iter().collect();
     assert!(!observed.iter().any(|event| matches!(
         event,
@@ -212,7 +212,7 @@ pub(super) fn stopped_preparation(
             host.config.session.pending_queue,
             [] as [SessionQueueItem; 0]
         );
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
     }
     drop(actions_held);
     host.block(async |host| host.release().await).unwrap();

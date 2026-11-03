@@ -43,6 +43,9 @@ pub(super) struct Summary {
     pub unapplied_steering_notices: usize,
     pub followup_answers: usize,
     pub abandonment_claims: Vec<String>,
+    /// Root turns whose committed terminal is `RecoveryRequired`, from the
+    /// runtime's feed.
+    pub fenced_turns: Vec<String>,
     pub root_turn_count: i64,
     pub tool_call_count: i64,
     pub tree_nodes: Vec<Value>,
@@ -58,7 +61,7 @@ pub(super) fn outcome_allows_verdict(outcome: &str, verdict: &str) -> bool {
                 | "RecoversCommit"
                 | "OpensQuiescent"
         ),
-        "NOT_ADMITTED" | "REQUEUED" => verdict == "OpensQuiescent",
+        "NOT_ADMITTED" | "REQUEUED" | "FENCED" => verdict == "OpensQuiescent",
         "REFUSED" => verdict == "Refused",
         _ => false,
     }
@@ -154,6 +157,7 @@ fn outcome_verdict_table_rejects_every_mismatch() {
         ),
         ("NOT_ADMITTED", &["OpensQuiescent"]),
         ("REQUEUED", &["OpensQuiescent"]),
+        ("FENCED", &["OpensQuiescent"]),
         ("REFUSED{scope}", &["Refused"]),
         ("unknown", &[]),
     ];
@@ -230,6 +234,40 @@ struct RuntimeFacts {
     family_artifact: Option<Value>,
     jobs: Vec<Value>,
     job_notices: Vec<u32>,
+}
+
+fn fenced_turns(database: &Path, locator: SessionLocator) -> Vec<String> {
+    use plakous::sessions::feed::{
+        FeedCursor, FeedFact, FeedPage, FeedPageRequest, FeedSeq, FeedTurnOutcome,
+    };
+    let mut turns = Vec::new();
+    let mut after = FeedSeq::new(0);
+    loop {
+        let page = AgentSessions::inspect_feed_sqlite(
+            database,
+            FeedPageRequest::after(FeedCursor::new(locator.session_id(), after)),
+        )
+        .expect("read-only feed page");
+        let FeedPage::Records { records, .. } = page else {
+            panic!("the sweep's root feed stays retained")
+        };
+        let Some(last) = records.last() else {
+            return turns;
+        };
+        after = last.header().seq;
+        for record in &records {
+            for fact in record.facts() {
+                if let FeedFact::TurnTerminal {
+                    turn_id,
+                    outcome: FeedTurnOutcome::RecoveryRequired,
+                    ..
+                } = fact
+                {
+                    turns.push(turn_id.to_string());
+                }
+            }
+        }
+    }
 }
 
 fn runtime_facts(database: &Path, locator: SessionLocator) -> RuntimeFacts {
@@ -401,6 +439,7 @@ pub(super) fn read(fixture: &Fixture) -> Summary {
         })
         .collect();
     let tree_nodes = read_tree_nodes(&paths);
+    let fenced_turns = fenced_turns(&paths.runtime_database(), locator);
     Summary {
         head,
         revision,
@@ -438,6 +477,7 @@ pub(super) fn read(fixture: &Fixture) -> Summary {
             .count(),
         followup_answers,
         abandonment_claims,
+        fenced_turns,
         root_turn_count,
         tool_call_count,
         tree_nodes,

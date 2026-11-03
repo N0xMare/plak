@@ -1170,11 +1170,11 @@ fn a_terminal_killed_mid_turn_relaunches_with_one_recovery_note_and_answers() {
     reopened.quit();
 }
 
-/// A turn a live process fenced shows the pending-recovery pill, never a
-/// `/new` dead end; `/recover` reopens the session in place with one
-/// operator line, and the next prompt answers.
+/// A turn a live process fenced recovers in place on its own, never a `/new`
+/// dead end: one operator line, no action needed, and the next prompt
+/// answers.
 #[test]
-fn a_fenced_turn_shows_the_recovery_pill_and_slash_recover_continues() {
+fn a_fenced_turn_recovers_in_place_without_an_action() {
     let fixture = Fixture::new(&json!({
         "version": 1,
         "steps": [
@@ -1184,18 +1184,15 @@ fn a_fenced_turn_shows_the_recovery_pill_and_slash_recover_continues() {
     }));
     let mut terminal = Terminal::spawn_ready(&fixture);
     terminal.send(b"fence this turn\r");
-    let fenced = terminal.wait_screen("needs recovery");
-    assert!(
-        fenced.contains("next prompt recovers"),
-        "the pill says how to continue:\n{fenced}"
-    );
-    assert!(!fenced.contains("/new"), "no /new dead end:\n{fenced}");
-    terminal.send(b"/recover\r");
     let recovered = terminal.wait_screen("recovered an interrupted turn");
     assert_eq!(
         recovered.matches("recovered an interrupted turn").count(),
         1,
         "one operator line:\n{recovered}"
+    );
+    assert!(
+        !recovered.contains("/new"),
+        "no /new dead end:\n{recovered}"
     );
     terminal.send(b"carry on\r");
     let answered = terminal.wait_screen("answered after recovery");

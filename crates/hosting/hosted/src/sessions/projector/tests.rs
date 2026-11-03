@@ -1645,6 +1645,82 @@ fn an_abandoned_turn_derives_the_live_recovery_line() {
     )));
 }
 
+/// The commit that closes a fenced turn carries no fact of its own: the
+/// projector asks for the abandonment the turn's terminal record carries,
+/// derives the recovery line once and reports the abandonment. A replay
+/// derives nothing more, and a rebuild of the whole feed the same one line.
+#[test]
+fn a_fenced_turns_closure_derives_its_recovery_line_once() {
+    let (mut feed, fenced) = single_turn(End::RecoveryRequired, true, false);
+    let Some(PauseCause::RecoveryRequired { turn_id }) = fenced.pause_cause(&feed.intents) else {
+        panic!("the terminal fences the turn");
+    };
+    let turn_id: TurnId = turn_id.parse().unwrap();
+    let report: plakous::agent::AbandonedTurnReport = serde_json::from_value(serde_json::json!({
+        "model_round_completed": false,
+        "tool_round_completed": false,
+        "operations": [7],
+        "effects": [],
+        "uncommitted_tool_calls": [],
+        "claim": "RunningTool",
+        "cause": "Interrupted",
+    }))
+    .unwrap();
+    let mut note = text_item(ReadActor::User, "the closure's note");
+    note.harness_authored = true;
+    let (fact, items) = feed.history(
+        Some(turn_id),
+        HistorySegmentKind::Conversation,
+        vec![note],
+        Vec::new(),
+    );
+    feed.advance(
+        vec![fact],
+        Reads {
+            items: vec![(0, items)],
+            ..Reads::default()
+        },
+    );
+    let closure = std::slice::from_ref(feed.records.last().unwrap());
+    let request = ReadRequest::Abandoned {
+        branch: feed.branch,
+        checkpoint: record_checkpoint(&closure[0]).unwrap(),
+        turn_id,
+    };
+    assert_eq!(
+        project(fenced.clone(), &feed.intents, closure, &feed.reads),
+        Err(ProjectError::MissingRead(request)),
+        "no record names the read: the views ask for it"
+    );
+    feed.reads
+        .insert(request, ReadValue::Abandoned(Some(report.clone())));
+    let lines = |views: &SessionViews| {
+        rows(views)
+            .iter()
+            .filter(|row| {
+                matches!(row, TranscriptRow::Notice(notice)
+                    if notice.scope == NoticeScope::Recovery
+                        && notice.text.starts_with("plak: recovered an interrupted turn"))
+            })
+            .count()
+    };
+
+    let applied = project(fenced, &feed.intents, closure, &feed.reads).unwrap();
+    assert_eq!(lines(&applied.views), 1);
+    assert_eq!(
+        applied.abandonments,
+        [ProjectedAbandonment {
+            session_id: feed.session,
+            turn_id,
+            report,
+        }]
+    );
+    let replay = project(applied.views.clone(), &feed.intents, closure, &feed.reads).unwrap();
+    assert_eq!(lines(&replay.views), 1);
+    assert_eq!(replay.abandonments, []);
+    assert_eq!(lines(&project_all(&feed).views), 1);
+}
+
 #[test]
 fn a_recovery_required_terminal_pauses_until_the_next_user_prompt() {
     let (feed, views) = single_turn(End::RecoveryRequired, true, false);

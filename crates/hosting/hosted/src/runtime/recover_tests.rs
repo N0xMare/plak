@@ -242,17 +242,32 @@ fn turn_failed(event: &HostEvent) -> bool {
     matches!(event, HostEvent::TurnLifecycle(lifecycle) if format!("{lifecycle:?}").contains("Failed"))
 }
 
-/// The next prompt after a fence recovers the session and then runs: one
-/// `Recovered` observation with the model-request claim, the operator line
-/// once, and no dead end that asks for `/new`.
+/// A fenced root recovers in place at once, with no action: one `Recovered`
+/// observation with the model-request claim, the operator line once, no
+/// dead end that asks for `/new`, and the next prompt runs. The projector
+/// derives the line into the saved transcript once, and the session log
+/// carries the claim once.
 #[test]
-fn the_next_prompt_after_a_fence_recovers_in_place_and_runs() {
+fn a_fence_recovers_in_place_at_once_and_the_next_prompt_runs() {
     let root = tempfile::tempdir().unwrap();
     let (config, evidence) = scripted_host(root.path());
+    let session = config.session.id.clone();
+    let home = config.home.clone();
+    let store = Arc::clone(&config.store);
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
     send_attached_action(&actions, UserAction::Prompt("first".into()));
     wait_for(&events, &mut seen, "the fenced terminal", recovery_required);
+    wait_for(&events, &mut seen, "the eager recovery", |event| {
+        matches!(event, HostEvent::Recovered { .. })
+    });
+    let recovered =
+        crate::session_log::read_tail_for_kind(&home, &session, 8, Some("session.recovered"))
+            .unwrap();
+    assert!(
+        recovered.iter().any(|line| line.contains("eager")),
+        "{recovered:?}"
+    );
     send_attached_action(&actions, UserAction::Prompt("second".into()));
     wait_for(&events, &mut seen, "the next turn", turn_completed);
     send_attached_action(&actions, UserAction::Quit);
@@ -293,6 +308,23 @@ fn the_next_prompt_after_a_fence_recovers_in_place_and_runs() {
         "the fenced turn has exactly one terminal result"
     );
     assert_eq!(dispatches(&evidence), 2, "nothing was replayed");
+    let views = store.load_views(&session).unwrap().unwrap();
+    assert_eq!(
+        views
+            .rows
+            .values()
+            .filter(|row| matches!(row,
+                plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice)
+                    if notice.text.starts_with("plak: recovered an interrupted turn; its model request")))
+            .count(),
+        1,
+        "the saved transcript derives the line once: {:#?}",
+        views.rows
+    );
+    let claims =
+        crate::session_log::read_tail_for_kind(&home, &session, 8, Some("turn.abandoned")).unwrap();
+    assert_eq!(claims.len(), 1, "{claims:?}");
+    assert!(claims[0].contains("model_request"), "{claims:?}");
 }
 
 /// The live OpenRouter Messages failure sequence is deterministic here: an
@@ -392,8 +424,8 @@ fn transport_uncertainty_then_context_limit_needs_another_explicit_prompt() {
     );
 }
 
-/// `/recover` is the explicit control: it recovers at once, and says so when
-/// there is nothing to recover.
+/// `/recover` is the explicit control; after the eager reopen it says there
+/// is nothing to recover.
 #[test]
 fn the_explicit_recover_control_recovers_once_and_then_has_nothing_to_do() {
     let root = tempfile::tempdir().unwrap();
@@ -402,8 +434,7 @@ fn the_explicit_recover_control_recovers_once_and_then_has_nothing_to_do() {
     let mut seen = Vec::new();
     send_attached_action(&actions, UserAction::Prompt("first".into()));
     wait_for(&events, &mut seen, "the fenced terminal", recovery_required);
-    send_attached_action(&actions, UserAction::Recover);
-    wait_for(&events, &mut seen, "the recovery", |event| {
+    wait_for(&events, &mut seen, "the eager recovery", |event| {
         matches!(event, HostEvent::Recovered { .. })
     });
     send_attached_action(&actions, UserAction::Recover);

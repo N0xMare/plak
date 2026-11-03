@@ -239,7 +239,7 @@ fn awaiting_native_same_account_login_reopens_in_place_before_the_next_prompt() 
         host.config.session.plakous_locator.unwrap().branch_id(),
         locator.branch_id()
     );
-    assert!(!host.recovery_blocked);
+    assert!(!host.recovery.blocked());
     action_tx
         .send(UserAction::Prompt("continue after renewing login".into()))
         .unwrap();
@@ -1027,7 +1027,7 @@ fn ingress_backpressure_keeps_previously_submitted_command_locked() {
             intents
         );
         assert!(host.pending_start.is_none());
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
         assert!(queue::queue_item_is_delivery_locked(
             &host.config.session,
             &item.id
@@ -1103,7 +1103,7 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
         assert!(!host.config.session.queue_commands.has_pending());
         // Withdrawal releases the pending row, not its permanent content binding.
         let command = format!("plak.queue.{}.{}", first_item.id, first_item.revision);
@@ -1151,7 +1151,7 @@ fn transient_refusal_leaves_only_the_queue_and_allows_a_second_prompt() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
         assert_eq!(host.config.session.root_turn_count, 1);
         assert!(!host.config.session.queue_commands.has_pending());
         // The remaining first prompt may now drain, but was never copied to a draft.
@@ -1217,7 +1217,7 @@ fn stopped_or_recovery_gated_actor_fences_instead_of_rejecting_a_draft() {
                 .await
         })
         .unwrap();
-        assert!(host.recovery_blocked);
+        assert!(host.recovery.blocked());
         assert!(host.config.session.queue_commands.has_pending());
         assert_eq!(host.config.session.root_turn_count, 0);
         assert!(
@@ -1284,7 +1284,7 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
                 .await
         })
         .unwrap();
-        assert!(host.recovery_blocked);
+        assert!(host.recovery.blocked());
         assert!(host.config.session.queue_commands.has_pending());
         host.config.store = durable_store;
         host.block(async |host| {
@@ -1302,7 +1302,7 @@ fn duplicate_refusals_after_save_failure_never_consume_unrun_text() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
         assert_eq!(host.config.session.pending_queue.len(), 1);
         assert_eq!(host.config.session.root_turn_count, 0);
         assert_eq!(
@@ -1371,7 +1371,7 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
                 .await
         })
         .unwrap();
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
         assert_eq!(host.config.session.root_turn_count, 0);
         assert_eq!(host.config.session.pending_queue.len(), 1);
         assert_eq!(host.pending_start.as_ref().unwrap().text, "next item");
@@ -1387,7 +1387,7 @@ fn reclaimed_refusals_consume_once_and_continue_the_live_drain() {
             [] as [queue::QueueItem; 0]
         );
         assert_eq!(host.config.session.root_turn_count, 1);
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
         host.block(async |host| host.release().await).unwrap();
     }
 }
@@ -1440,7 +1440,7 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
             .await
     })
     .unwrap();
-    assert!(host.recovery_blocked);
+    assert!(host.recovery.blocked());
     assert_eq!(host.config.session.pending_queue.len(), 1);
     assert!(host.config.session.queue_commands.has_pending());
     assert_eq!(host.config.session.root_turn_count, 0);
@@ -1467,7 +1467,7 @@ fn rejection_projection_save_failure_keeps_the_item_retryable() {
     let submitted_at_ms = queued_delivery.as_ref().unwrap().submitted_at_ms;
     host.block(async |host| host.run_prompt(text, queued_delivery, true, None).await)
         .unwrap();
-    assert!(!host.recovery_blocked);
+    assert!(!host.recovery.blocked());
     assert_eq!(
         host.config.session.pending_queue,
         [] as [queue::QueueItem; 0]
@@ -1529,7 +1529,7 @@ fn lost_acknowledgement_keeps_fenced_recovery_and_never_restores_as_a_refusal() 
             .await
     })
     .unwrap();
-    assert!(host.recovery_blocked);
+    assert!(host.recovery.blocked());
     assert_eq!(host.config.session.pending_queue.len(), 1);
     assert_eq!(host.config.session.root_turn_count, 0);
     assert!(host.config.session.queue_commands.has_pending());
@@ -1693,7 +1693,7 @@ fn context_capacity_restores_the_admitted_draft_without_a_rejection_receipt() {
             .iter()
             .any(|event| matches!(event, HostEvent::DraftRejected(_)))
     );
-    assert!(!host.recovery_blocked);
+    assert!(!host.recovery.blocked());
     host.block(async |host| host.release().await).unwrap();
 }
 
@@ -1748,7 +1748,7 @@ fn logical_pressure_root_refusal_keeps_remedies_and_non_admission_copy() {
             .await
     })
     .unwrap();
-    assert!(!host.recovery_blocked);
+    assert!(!host.recovery.blocked());
     assert!(host.pending_start.is_none());
     assert_eq!(host.config.session.pending_queue.len(), 2);
     assert!(!host.config.session.queue_commands.has_pending());
@@ -1923,7 +1923,7 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
             .await
     })
     .unwrap();
-    assert!(!host.recovery_blocked);
+    assert!(!host.recovery.blocked());
     assert_eq!(host.opened.locator(), head);
     assert_eq!(
         host.config.session.queue_drain_state,
@@ -1986,7 +1986,7 @@ fn definite_admission_rejection_keeps_text_queue_and_host_available() {
             .await
     })
     .unwrap();
-    assert!(!host.recovery_blocked);
+    assert!(!host.recovery.blocked());
     assert!(
         host.pending_start.is_none(),
         "a rejected delivery is not automatically retried"

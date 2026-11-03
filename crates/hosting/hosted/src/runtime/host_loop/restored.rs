@@ -1,4 +1,5 @@
 //! Rejoin an admitted turn after attachment, without admitting another command.
+use super::RootRecovery;
 
 use super::super::usage::last_enrolled_source_bytes;
 use super::{
@@ -104,7 +105,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         if interrupted {
             self.suppress_child_wake(None)?;
         }
-        self.recovery_blocked |= host_outcome_blocks_continuation(&outcome);
+        if host_outcome_blocks_continuation(&outcome) {
+            self.recovery = RootRecovery::Due;
+        }
         self.publish_terminal(
             outcome,
             started,
@@ -118,7 +121,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         let _ = self.events.send(ContentEvent::SetBusy(false));
         emit_terminal_status(
             &self.events,
-            if self.recovery_blocked {
+            if self.recovery.blocked() {
                 TerminalPhase::RecoveryPending
             } else if interrupted {
                 TerminalPhase::Interrupted

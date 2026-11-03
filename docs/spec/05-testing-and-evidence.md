@@ -2022,7 +2022,10 @@ on reopen. Every indexed startup, admission, escalation and release commit is
 cut, with the same outcome/verdict table and convergence checks. A prompt cut
 before admission resumes normally from its restored queue, then completes once.
 The opt-in `uncertain_mcp_tool` shape drives the fake MCP server's escaped
-result into an uncertain tool outcome, then exercises recovery and a follow-up
+result into an uncertain tool outcome; its pilot's host recovers the fenced
+root in place before quit, so its cuts cover that reopen's commits, including
+the window after the closure commits and before it is projected, whose claim
+the next open must surface. Every cut then exercises recovery and a follow-up
 on exact reopen. It participates in the complete SQLite view-rebuild and plain
 reopen laws and in the strict indexed sweep.
 Cross-store interleaving is free. Every per-store indexed commit, including
@@ -2072,16 +2075,21 @@ Refused relaunches must preserve the entire decoded summary, including revision;
 checkpoint representation is not an authority change. Fixture PID files reap
 orphans.
 
-The table has five classes: `COMPLETED_ONCE` (exactly one expected terminal
+The table has six classes: `COMPLETED_ONCE` (exactly one expected terminal
 publication: an answer proved by the original root command's completed terminal
 and matching published assistant row, independent of fixture text, or, for
 `capacity_overflow`, a capacity denial; shape markers remain content proofs),
 `ABANDONED{claim}` (one honest typed interruption notice, never over a durable
 answer), `REQUEUED` (the prompt is restored to a paused queue, its submission
 pending with no feed fact), `REFUSED{name}` (typed exit 5 and a signature-keyed
-allowlist name, with durable authority unchanged), and `NOT_ADMITTED` (no
+allowlist name, with durable authority unchanged), `NOT_ADMITTED` (no
 submission and no runtime root command for the prompt, no answer, clean reopen,
-exactly one follow-up dispatch). `UNCLASSIFIED`, invariant violations and
+exactly one follow-up dispatch), and `FENCED` (the root turn's one terminal is
+`RecoveryRequired` and the live host's eager in-place recovery closed it before
+the cut, so the reopen is quiescent; exactly one turn is newly fenced, it is
+the shape's own root turn, and after recovery the session log holds exactly
+the shape's expected claim for it once, whether the live host or the reopen
+surfaced it). `UNCLASSIFIED`, invariant violations and
 divergent traces are findings and fail the run.
 
 **Product and tree cuts always converge.** A cut at any `product:<k>` or
@@ -2406,7 +2414,12 @@ feed-derived views; it does not read a delivery journal or workflow state
 machine. Its classifier checks a closed outcome-to-runtime-verdict table beside
 rehearsal parity; rehearsal and inspection share the runtime's pure predicate,
 so parity alone is not a closure oracle. Abandonment requires
-`RecoversAbandonedTurn`; completion permits `RecoversSavedTerminal`,
+`RecoversAbandonedTurn`. A cut after the live host recovered its fenced root
+in place (the turn's one terminal is `RecoveryRequired` and nothing is left to
+close) is `FENCED` and requires `OpensQuiescent`, exactly one new fenced turn,
+that turn being the shape's own root turn, and recovered abandonment claims
+equal to exactly the shape's expected claim (`running_tool` for
+`uncertain_mcp_tool`). Completion permits `RecoversSavedTerminal`,
 `ResolvesCompactionWorkflow`, `RecoversCommit` or `OpensQuiescent`;
 not-admitted and requeued prompts require `OpensQuiescent`, and refusals require
 the rehearsal's typed `Refused`. If the head belongs to a later root, a distinct

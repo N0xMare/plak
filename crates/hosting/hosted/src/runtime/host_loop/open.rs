@@ -66,7 +66,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
         // their provider round-trips. Ordinary actions drained while reaching the
         // urgent lane are deferred back to this loop in exact arrival order, so
         // looking for an interrupt never consumes product work.
-        let interrupt_state = RefCell::new(InterruptWatchState::default());
+        let interrupt_state = std::rc::Rc::new(RefCell::new(InterruptWatchState::default()));
 
         let session_open_started = Instant::now();
         // The open below blocks this thread for seconds on a cold session. Tell
@@ -96,6 +96,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
             .agent()
             .and_then(plakous::agent::Agent::abandoned_turn)
             .cloned();
+        let runtime_session = opened.locator().session_id();
         // Read before `opened` is consumed below; reported near `session.resumed`.
         let output_bound_rederived = opened.output_bound_rederived;
         config.runtime_factory.attached(&config, &mut opened);
@@ -322,7 +323,16 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
 
         // A session whose turn was left unfinished is only back because this
         // reopen abandoned what that turn left outstanding. The operator has to
-        // be told, once, the one thing that is true of it.
+        // be told, once, the one thing that is true of it. A fenced turn a
+        // previous process closed but did not project is reported by the
+        // projector that applied the closure here (spec 02 §4.2).
+        let projected = super::take_projected_abandonments(&pending_usage, runtime_session);
+        let abandoned_turn = abandoned_turn.or_else(|| {
+            projected
+                .into_iter()
+                .next()
+                .map(|abandonment| abandonment.report)
+        });
         if let Some(report) = &abandoned_turn {
             super::recover::log_abandoned_report(log.as_ref(), &config, report);
             if !root_published {
@@ -457,7 +467,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
         // Disk-loaded queues are deliberately paused until the operator resumes them.
         let pending_start: Option<SessionQueueItem> = None;
         let last_tree_observed_at = Instant::now();
-        let recovery_blocked = query_context(&opened, ContextQuery::Current)
+        let recovery_required = query_context(&opened, ContextQuery::Current)
             .await
             .is_ok_and(|projection| {
                 projection.disposition() == ContextDisposition::RecoveryRequired
@@ -510,7 +520,11 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
             child_wake: super::wake::RootWake::default(),
             storage_interrupted: false,
             pending_track: super::pending::PendingTrack::default(),
-            recovery_blocked,
+            recovery: if recovery_required {
+                super::RootRecovery::Due
+            } else {
+                super::RootRecovery::Clear
+            },
             recovered_at_open: abandoned_turn.is_some(),
             held_usage,
             session_ledger,

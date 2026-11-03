@@ -66,7 +66,7 @@ fn capacity_commit_failure_requires_recovery_and_pauses_live_drain() {
         }));
         // Storage returning must not rearm the drain before result replay.
         store.faults.fail.store(false, Ordering::SeqCst);
-        assert!(host.recovery_blocked);
+        assert!(host.recovery.blocked());
         assert_eq!(
             host.config.session.queue_drain_state,
             SessionQueueDrainState::RestoredPaused

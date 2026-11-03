@@ -2131,7 +2131,7 @@ fn pre_admission_wake_failure_is_disposable_without_pausing_user_work() {
             host.config.session.pending_queue,
             [] as [crate::sessions::queue::QueueItem; 0]
         );
-        assert!(!host.recovery_blocked);
+        assert!(!host.recovery.blocked());
         assert_eq!(
             host.config.session.queue_drain_state,
             QueueDrainState::LiveAutoDrain
@@ -2259,7 +2259,7 @@ fn transient_wake_refusal_discards_queue_and_intent_without_consuming_mail() {
                 [] as [crate::sessions::projector::Submission; 0]
             );
             assert!(host.config.session.child_wake_suppressed);
-            assert!(!host.recovery_blocked);
+            assert!(!host.recovery.blocked());
             assert_eq!(
                 host.config.session.queue_drain_state,
                 QueueDrainState::LiveAutoDrain
@@ -3190,13 +3190,13 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
         );
         host.block(async |host| host.run_prompt(text, item, echoed, None).await)
             .unwrap();
-        host.recovery_blocked = true;
+        host.recovery = crate::runtime::host_loop::RootRecovery::Due;
         assert!(matches!(
             host.block(async |host| host.child_wake_prompt(now).await)
                 .unwrap(),
             HostStep::Continue
         ));
-        host.recovery_blocked = false;
+        host.recovery = crate::runtime::host_loop::RootRecovery::Clear;
         host.config.session.queue_drain_state = QueueDrainState::RestoredPaused;
         host.config
             .session

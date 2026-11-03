@@ -342,9 +342,24 @@ fn dry_run(
             )
             .map_err(CliFailure::from)?;
         }
-        views = projector::project(views, intents, page, &reads)
-            .map_err(|_| CliFailure::new("projector integrity"))?
-            .views;
+        // A read the views ask for (a fenced turn's abandonment) is loaded
+        // on demand and the page applied again from the same views.
+        let retry = projector::asks_reads(&views, page).then(|| views.clone());
+        views = match (projector::project(views, intents, page, &reads), retry) {
+            (Err(projector::ProjectError::MissingRead(request)), Some(views)) => {
+                projector::load_reads_sqlite(
+                    &paths.runtime_database(),
+                    followed.session_id(),
+                    [request],
+                    &mut reads,
+                )
+                .map_err(CliFailure::from)?;
+                projector::project(views, intents, page, &reads)
+            }
+            (projected, _) => projected,
+        }
+        .map_err(|_| CliFailure::new("projector integrity"))?
+        .views;
     }
     let pending = projector::pending_command_ids(&views, intents);
     laws &= pending.iter().all(|id| {
