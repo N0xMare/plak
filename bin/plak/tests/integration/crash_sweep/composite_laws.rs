@@ -444,6 +444,7 @@ fn composite_rebind_both_sides_obey_all_three_sqlite_laws() {
             )
             .unwrap(),
             account_binding: serde_json::to_string(&binding.account_binding()).unwrap(),
+            own_tree: Some(plakous_hosted::sessions::RootProfile::default()),
         })),
     };
     store

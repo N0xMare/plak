@@ -279,6 +279,7 @@ fn resume_identity(
 ) {
     *note = note.replace(&record.id, &intent.id);
     record.id.clone_from(&intent.id);
+    record.node.clone_from(&intent.node);
     record
         .create_operation_id
         .clone_from(&intent.create_operation_id);

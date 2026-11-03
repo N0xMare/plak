@@ -22,7 +22,50 @@ use crate::tool_plan::{NodeToolSelection, TemplateToolSelection};
 pub struct FrozenRootTools {
     template: Option<RootTemplateFact>,
     /// `Some` once the selection's MCP servers were listed at creation.
-    mcp_tools: Option<Vec<McpToolRecord>>,
+    mcp_tools: Option<Vec<FrozenMcpTool>>,
+}
+
+/// Where an MCP server's process runs: on the host beside the agent, or on
+/// the node's runner. Frozen per tool record; every server runs on the host
+/// today.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpPlacement {
+    /// The host that runs the agent.
+    #[default]
+    Host,
+    /// The runner that hosts the node's workspace.
+    Runner,
+}
+
+impl McpPlacement {
+    /// The spelling config and the frozen record use.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            Self::Runner => "runner",
+        }
+    }
+
+    /// Parses [`Self::as_str`]'s spelling.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "host" => Some(Self::Host),
+            "runner" => Some(Self::Runner),
+            _ => None,
+        }
+    }
+}
+
+/// One MCP tool record frozen with the root's tools, and where its server
+/// ran when it was listed.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct FrozenMcpTool {
+    record: McpToolRecord,
+    placement: McpPlacement,
 }
 
 impl FrozenRootTools {
@@ -50,11 +93,30 @@ impl FrozenRootTools {
         }))
     }
 
-    /// The same freeze with the MCP tools listed at creation.
+    /// The same freeze with the MCP tools listed at creation, each frozen
+    /// with its server's placement: the host, where every server runs today.
     #[must_use]
     pub fn with_mcp_tools(mut self, records: Vec<McpToolRecord>) -> Self {
-        self.mcp_tools = Some(records);
+        self.mcp_tools = Some(
+            records
+                .into_iter()
+                .map(|record| FrozenMcpTool {
+                    record,
+                    placement: McpPlacement::Host,
+                })
+                .collect(),
+        );
         self
+    }
+
+    /// The placement each frozen MCP server ran under when it was listed.
+    #[must_use]
+    pub fn mcp_placements(&self) -> BTreeMap<&str, McpPlacement> {
+        self.mcp_tools
+            .iter()
+            .flatten()
+            .map(|tool| (tool.record.server().as_str(), tool.placement))
+            .collect()
     }
 
     /// The root's tools, whatever tuple the session runs now: a rebind
@@ -69,7 +131,10 @@ impl FrozenRootTools {
             Some(&template.account),
             Some(&template.model),
         );
-        tools.mcp_tools.clone_from(&self.mcp_tools);
+        tools.mcp_tools = self
+            .mcp_tools
+            .as_ref()
+            .map(|frozen| frozen.iter().map(|tool| tool.record.clone()).collect());
         tools
     }
 
@@ -120,6 +185,18 @@ impl FrozenRootTools {
                 })
             })
             .transpose()?;
+        let mut placements = BTreeMap::new();
+        for tool in wire.mcp_tools.iter().flatten() {
+            if *placements
+                .entry(tool.record.server().as_str())
+                .or_insert(tool.placement)
+                != tool.placement
+            {
+                return Err(
+                    "frozen root tools are invalid: one MCP server has two placements".to_owned(),
+                );
+            }
+        }
         Ok(Self {
             template,
             mcp_tools: wire.mcp_tools,
@@ -131,7 +208,7 @@ impl FrozenRootTools {
 #[serde(deny_unknown_fields)]
 struct FrozenRootToolsWire {
     template: Option<TemplateWire>,
-    mcp_tools: Option<Vec<McpToolRecord>>,
+    mcp_tools: Option<Vec<FrozenMcpTool>>,
 }
 
 #[derive(Deserialize, Serialize)]

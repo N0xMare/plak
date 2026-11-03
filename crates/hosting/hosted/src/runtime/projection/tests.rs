@@ -135,6 +135,11 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
             .find(|record| record.source_product_session_id.as_deref() == Some(&id))
             .expect("clear successor");
         assert!(store.load_views(&successor.id).unwrap().is_some());
+        // /new writes the profile its genesis froze into the new session.
+        assert_eq!(
+            successor.root_profile,
+            Some(crate::sessions::RootProfile::default())
+        );
         assert_ne!(
             store.load_intents(&id).unwrap().workflow_requests,
             [] as [crate::sessions::projector::WorkflowRequest; 0]

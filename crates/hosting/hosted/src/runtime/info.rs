@@ -132,7 +132,8 @@ fn fork_scoped_prompt_at(
                     .then_some(canonical)
                     .flatten();
             }
-            crate::sessions::SessionWorkflowKind::Rebind(_) => {
+            crate::sessions::SessionWorkflowKind::Rebind(_)
+            | crate::sessions::SessionWorkflowKind::Switch(_) => {
                 current = store.load(source).ok()?;
             }
             _ => return canonical,

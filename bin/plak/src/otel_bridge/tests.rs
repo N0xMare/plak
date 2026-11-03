@@ -298,6 +298,7 @@ fn opening_never_projected_successors_does_not_export_inherited_turn_usage() {
                         )
                         .unwrap(),
                         account_binding: serde_json::to_string(&target.account_binding()).unwrap(),
+                        own_tree: Some(plakous_hosted::sessions::RootProfile::default()),
                     }))
                 } else {
                     SessionWorkflowKind::Fork

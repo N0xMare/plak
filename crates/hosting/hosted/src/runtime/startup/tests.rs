@@ -152,6 +152,38 @@ fn creation_freezes_listed_mcp_tools_and_records_the_omission_notice() {
         .collect::<Vec<_>>();
     assert!(names.contains(&"echo".to_owned()), "{names:?}");
     assert!(!names.contains(&"tangled".to_owned()), "{names:?}");
+    // Every server runs on the host today, and each record freezes so.
+    let stored = config.session.frozen_tools.as_ref().unwrap();
+    assert_eq!(
+        stored.mcp_placements(),
+        std::collections::BTreeMap::from([("fake", crate::frozen_tools::McpPlacement::Host)])
+    );
+    let encoded: serde_json::Value = serde_json::from_str(&stored.encode().unwrap()).unwrap();
+    let records = encoded["mcp_tools"].as_array().unwrap();
+    assert_eq!(records.len(), frozen.len());
+    assert!(
+        records.iter().all(|tool| tool["placement"] == "host"),
+        "{encoded}"
+    );
+    // A record without a placement, with an unknown one, or a server frozen
+    // under two placements does not decode.
+    let decode = |value: &serde_json::Value| {
+        crate::frozen_tools::FrozenRootTools::decode(&value.to_string()).is_ok()
+    };
+    assert!(decode(&encoded));
+    let mut missing = encoded.clone();
+    missing["mcp_tools"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("placement");
+    assert!(!decode(&missing));
+    let mut unknown = encoded.clone();
+    unknown["mcp_tools"][0]["placement"] = "elsewhere".into();
+    assert!(!decode(&unknown));
+    assert!(records.len() > 1, "{encoded}");
+    let mut split = encoded.clone();
+    split["mcp_tools"][0]["placement"] = "runner".into();
+    assert!(!decode(&split));
 }
 
 /// A record that is an interrupted carry never gets an empty runtime under
@@ -190,6 +222,42 @@ fn an_interrupted_carry_record_is_never_created_empty() {
             .block_on(sessions.line_head_of(genesis))
             .unwrap()
             .is_err()
+    );
+}
+
+/// A created session freezes its genesis profile into the record: what the
+/// roster source answers for its root bind, before the runtime create.
+#[test]
+fn creation_freezes_the_genesis_profile_into_the_record() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
+    config.session.root_profile = None;
+    let expected = sessions::RootProfile::from_roster(
+        &config
+            .state_roots
+            .roster_source()
+            .roster(
+                config.session.account.as_deref().unwrap(),
+                config.session.model.as_deref().unwrap(),
+                config.session.effort.as_deref(),
+            )
+            .unwrap(),
+    );
+    let opened = executor
+        .block_on(build_session_from_config(&mut config, &mut Vec::new()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.session.root_profile, Some(expected));
+    config
+        .session
+        .bind_plakous_locator(opened.locator())
+        .unwrap();
+    config.store.save(&mut config.session).unwrap();
+    executor.block_on(opened.release()).unwrap().unwrap();
+    assert_eq!(
+        config.store.load(&config.session.id).unwrap().root_profile,
+        config.session.root_profile
     );
 }
 

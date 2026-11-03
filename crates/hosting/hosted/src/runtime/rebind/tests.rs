@@ -416,6 +416,7 @@ fn production_api_rebind_projects_complete_staging_lineage() {
         effective_configuration: serde_json::to_string(&binding.effective_provider_configuration())
             .unwrap(),
         account_binding: serde_json::to_string(&binding.account_binding()).unwrap(),
+        own_tree: Some(sessions::RootProfile::default()),
     };
     let request = sessions::projector::WorkflowRequest {
         operation_id: operation.into(),
@@ -525,6 +526,7 @@ fn reopening_with_an_unadmitted_rebind_withdraws_once_without_branching() {
             )
             .unwrap(),
             account_binding: serde_json::to_string(&binding.account_binding()).unwrap(),
+            own_tree: Some(sessions::RootProfile::default()),
         })),
     };
     config
@@ -599,6 +601,12 @@ fn plain_fork_rereads_changed_agents_md_and_names_it() {
             .expect("the executor drives the call")
             .unwrap();
         assert_ne!(config.session.id, source_id);
+        // A plain fork shares its source's tree today, so it stays its node.
+        let source_node = config.store.load(&source_id).unwrap().node;
+        assert_eq!(
+            config.store.load(&config.session.id).unwrap().node,
+            source_node
+        );
         notes_rx
             .try_iter()
             .filter_map(|event| match event {
@@ -1305,6 +1313,17 @@ fn fork_now_onto_an_api_root_branches_onto_its_own_tree() {
         durable_tree_id(&config.topology_rows(), &config.session),
         target_id
     );
+    // The stored node names the tree the branch compiled against.
+    let stored = config.store.load(&target_id).unwrap();
+    assert_eq!(stored.node, sessions::SessionNode::genesis(&target_id));
+    // It froze the profile it was forked onto.
+    assert_eq!(
+        stored.root_profile,
+        Some(sessions::RootProfile::from_roster(
+            &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol")
+        ))
+    );
+    assert_eq!(stored.runner, None);
     let names = topology_tool_names(&target_id);
     assert!(!names.is_empty(), "{names:?}");
     let notes = notes_rx

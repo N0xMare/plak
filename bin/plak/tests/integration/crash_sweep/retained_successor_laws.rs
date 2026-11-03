@@ -109,6 +109,7 @@ fn rebind(fixture: &Fixture, source: &str, script: &Value) -> (String, Value) {
             )
             .unwrap(),
             account_binding: serde_json::to_string(&binding.account_binding()).unwrap(),
+            own_tree: Some(plakous_hosted::sessions::RootProfile::default()),
         })),
     };
     store

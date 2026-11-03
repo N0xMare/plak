@@ -39,12 +39,23 @@ impl SessionRecord {
         if request.kind == SessionWorkflowKind::Fork {
             target.prompt_history.clear();
         }
-        if let SessionWorkflowKind::Rebind(selection) = &request.kind {
-            target.account = Some(selection.account.clone());
-            target.model = Some(selection.model.clone());
-            target.effort.clone_from(&selection.effort);
-            target.composition = selection.composition;
-            target.target_selection = selection.target_selection.clone();
+        // Today a fork shares its source's tree, so it stays its node and
+        // profile; a rebind takes the node and profile of the tree it
+        // compiled against; a switch continues the same node with its new
+        // profile.
+        match &request.kind {
+            SessionWorkflowKind::Rebind(selection) => {
+                if let Some(profile) = &selection.own_tree {
+                    target.node = crate::sessions::SessionNode::genesis(&target.id);
+                    target.root_profile = Some(profile.clone());
+                }
+                target.bind_selection(selection);
+            }
+            SessionWorkflowKind::Switch(switch) => {
+                target.bind_selection(&switch.rebind);
+                target.root_profile = Some(switch.root.clone());
+            }
+            _ => {}
         }
         target.validate_for_store()?;
         Ok(target)
@@ -68,6 +79,10 @@ impl SessionRecord {
             .map_err(|error| error.to_string())?;
         let mut target = self.clone();
         target.id = request.successor_product_id();
+        target.node = crate::sessions::SessionNode::genesis(&target.id);
+        // The new session's genesis freezes the home's profile; the host
+        // writes it into the reservation before the runtime create.
+        target.root_profile = None;
         target.created_at_unix = plakous::model::now_unix_secs();
         target.updated_at_unix = target.created_at_unix;
         target.create_operation_id = operation.as_str().to_owned();
@@ -89,5 +104,13 @@ impl SessionRecord {
         target.compaction_count = 0;
         target.validate_for_store()?;
         Ok(target)
+    }
+
+    fn bind_selection(&mut self, selection: &crate::sessions::RebindSelection) {
+        self.account = Some(selection.account.clone());
+        self.model = Some(selection.model.clone());
+        self.effort.clone_from(&selection.effort);
+        self.composition = selection.composition;
+        self.target_selection = selection.target_selection.clone();
     }
 }

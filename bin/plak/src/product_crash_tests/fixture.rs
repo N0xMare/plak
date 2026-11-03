@@ -649,6 +649,7 @@ async fn run_rebind(
                     &binding.effective_provider_configuration(),
                 )?,
                 account_binding: serde_json::to_string(&binding.account_binding())?,
+                own_tree: Some(plakous_hosted::sessions::RootProfile::default()),
             })),
         },
     )?;

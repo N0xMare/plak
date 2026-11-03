@@ -636,7 +636,11 @@ mod memory {
             (expected, Some(current))
                 if expected == current.store_revision
                     && session.create_operation_id == current.create_operation_id
-                    && session.created_at_unix == current.created_at_unix =>
+                    && session.created_at_unix == current.created_at_unix
+                    && session.node == current.node
+                    && (current.root_profile.is_none()
+                        || session.root_profile == current.root_profile)
+                    && session.runner == current.runner =>
             {
                 expected
                     .checked_add(1)

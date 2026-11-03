@@ -107,3 +107,27 @@ fn deleted_successor_is_not_resurrected_by_memory_projection() {
     );
     assert!(store.load_views(&target).unwrap().is_none());
 }
+
+/// The node, the virtual root profile and the runner display copy are
+/// written once, in memory as in SQLite: a save that moved one is refused.
+#[test]
+fn a_save_that_moved_the_node_profile_or_runner_is_refused_in_memory() {
+    use crate::sessions::{RootProfile, SessionNode};
+    let store = MemoryStore::new();
+    let mut session = SessionRecord::new("/tmp/plak-memory-node".into());
+    store.save(&mut session).unwrap();
+    let mut moved = store.load(&session.id).unwrap();
+    moved.node = SessionNode::genesis("elsewhere");
+    assert!(store.save(&mut moved).is_err());
+    let mut frozen = store.load(&session.id).unwrap();
+    frozen.root_profile = Some(RootProfile::default());
+    store.save(&mut frozen).unwrap();
+    let mut moved = store.load(&session.id).unwrap();
+    moved.root_profile = Some(RootProfile {
+        root_template: Some("lead".to_owned()),
+        working_set: Vec::new(),
+    });
+    assert!(store.save(&mut moved).is_err());
+    let mut kept = store.load(&session.id).unwrap();
+    store.save(&mut kept).unwrap();
+}

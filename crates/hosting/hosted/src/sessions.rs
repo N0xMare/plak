@@ -19,11 +19,15 @@ use crate::binding::{
 };
 
 mod journal;
+mod node;
 pub mod projector;
 pub(crate) mod queue;
 mod successor;
 mod transcript;
-pub use journal::{ProductCompactReason, RebindSelection, ResultMailBatch, SessionWorkflowKind};
+pub use journal::{
+    ProductCompactReason, RebindSelection, ResultMailBatch, SessionWorkflowKind, SwitchSelection,
+};
+pub use node::{RootProfile, RunnerDisplay, SessionNode};
 pub use plakous_host_protocol::views::transcript::{
     AutoContinue, NoticePlacement, NoticeScope, NoticeTone, ThinkingRow, ToolItem, TranscriptRow,
 };
@@ -154,6 +158,10 @@ pub struct SessionRecord {
     /// never rendered.
     pub store_revision: u64,
     pub id: String,
+    /// The agent node this session is, written at creation: the root of a
+    /// tree of its own, or the source's node for a successor that stays on
+    /// the source's tree (spec 02 §2.6). Never rewritten.
+    pub node: SessionNode,
     /// Stable product-owned identity reused to reconcile runtime creation.
     pub create_operation_id: String,
     pub workspace_root: PathBuf,
@@ -210,6 +218,12 @@ pub struct SessionRecord {
     /// locator, before the create, and cleared in the save that binds the
     /// locator. Reconciled on open and at startup (spec 02 §2.6).
     pub carry_intent: Option<CarryIntent>,
+    /// The profile of a root whose tree has no rows yet (a virtual tree of
+    /// one). `None` today: every session's profile is its tree's.
+    pub root_profile: Option<RootProfile>,
+    /// A display copy of the runner and workspace the root runs on; `None`
+    /// is the local runner at `workspace_root`, which is every session today.
+    pub runner: Option<RunnerDisplay>,
 }
 
 /// The write-ahead marker of a same-store carry (spec 02 §2.5.1, §2.6):
@@ -307,6 +321,7 @@ impl SessionRecord {
         Self {
             store_revision: 0,
             create_operation_id: format!("plak:create:{id}"),
+            node: SessionNode::genesis(&id),
             id,
             workspace_root,
             created_at_unix: now,
@@ -333,6 +348,8 @@ impl SessionRecord {
             tool_call_count: 0,
             compaction_count: 0,
             carry_intent: None,
+            root_profile: None,
+            runner: None,
         }
     }
 
@@ -478,6 +495,13 @@ impl SessionRecord {
 
     pub fn validate_for_store(&self) -> Result<(), String> {
         self.target_selection.validate()?;
+        self.node.validate()?;
+        if let Some(profile) = &self.root_profile {
+            profile.validate()?;
+        }
+        if let Some(runner) = &self.runner {
+            runner.validate()?;
+        }
         if self.carry_intent.is_some() && self.plakous_locator.is_some() {
             return Err("a carry intent is cleared when its locator is bound".to_owned());
         }
@@ -669,6 +693,7 @@ pub fn encode_workflow_kind(kind: &SessionWorkflowKind) -> (Option<&str>, Option
         SessionWorkflowKind::Clear => (None, None),
         SessionWorkflowKind::Fork => (None, None),
         SessionWorkflowKind::Rebind(v) => (None, serde_json::to_string(v).ok()),
+        SessionWorkflowKind::Switch(v) => (None, v.encode().ok()),
     }
 }
 

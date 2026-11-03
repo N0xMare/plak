@@ -524,6 +524,109 @@ fn frozen_root_tools_round_trip_and_are_written_once() {
     assert_eq!(reopened.load(&id).unwrap().frozen_tools, Some(frozen));
 }
 
+/// Product 36's node, virtual-tree profile and runner display copy: a new
+/// record writes today's values (its own tree's root, no profile, the local
+/// runner), they round trip through load and listing, and a malformed or
+/// rewritten value refuses.
+#[test]
+fn a_record_writes_todays_node_profile_and_runner_and_refuses_malformed_ones() {
+    use plakous_hosted::sessions::{RootProfile, RunnerDisplay, SessionNode};
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("p"));
+    let mut store = ProductStore::open(&paths).unwrap();
+    let workspace = root.path().join("workspace");
+    let mut session = SessionRecord::new(workspace.clone());
+    let id = session.id.clone();
+    store.commit(&mut session).unwrap();
+    let stored = |store: &ProductStore, id: &str| {
+        store
+            .connection
+            .query_row(
+                "SELECT node_tree_id,node_agent_id,root_profile,runner_display FROM sessions WHERE id=?1",
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .unwrap()
+    };
+    assert_eq!(stored(&store, &id), (id.clone(), id.clone(), None, None));
+    let loaded = store.load(&id).unwrap();
+    assert_eq!(loaded.node, SessionNode::genesis(&id));
+    assert_eq!((loaded.root_profile, loaded.runner), (None, None));
+
+    let mut copy = SessionRecord::new(workspace.clone());
+    copy.node = SessionNode::parse("tree-1", "c39").unwrap();
+    copy.root_profile = Some(RootProfile {
+        root_template: Some("lead".to_owned()),
+        working_set: vec!["worker".to_owned()],
+    });
+    copy.runner = Some(RunnerDisplay {
+        name: "buildbox".to_owned(),
+        runner_id: "runner-1".to_owned(),
+        workspace_root: workspace.clone(),
+        workspace_cwd: workspace.join("crate"),
+    });
+    store.commit(&mut copy).unwrap();
+    let loaded = store.load(&copy.id).unwrap();
+    assert_eq!(
+        (&loaded.node, &loaded.root_profile, &loaded.runner),
+        (&copy.node, &copy.root_profile, &copy.runner)
+    );
+    let listed = store.list_for_workspace(&workspace).unwrap();
+    let listed = listed.iter().find(|record| record.id == copy.id).unwrap();
+    assert_eq!(
+        (&listed.node, &listed.root_profile, &listed.runner),
+        (&copy.node, &copy.root_profile, &copy.runner)
+    );
+
+    // The node is written once: a save that moved it is refused.
+    let mut moved = store.load(&id).unwrap();
+    moved.node = SessionNode::genesis("elsewhere");
+    assert!(store.commit(&mut moved).is_err());
+    let mut moved = store.load(&copy.id).unwrap();
+    moved.root_profile = Some(RootProfile::default());
+    assert!(store.commit(&mut moved).is_err());
+    // A record without a profile gains it once, at its genesis.
+    let mut unfrozen = store.load(&id).unwrap();
+    unfrozen.root_profile = Some(RootProfile::default());
+    store.commit(&mut unfrozen).unwrap();
+    assert_eq!(
+        store.load(&id).unwrap().root_profile,
+        Some(RootProfile::default())
+    );
+    let mut moved = store.load(&copy.id).unwrap();
+    moved.runner = None;
+    assert!(store.commit(&mut moved).is_err());
+    let mut invalid = SessionRecord::new(workspace.clone());
+    invalid.root_profile = Some(RootProfile {
+        root_template: None,
+        working_set: vec!["worker".to_owned(), "worker".to_owned()],
+    });
+    assert!(store.commit(&mut invalid).is_err());
+
+    for corrupt in [
+        "UPDATE sessions SET node_agent_id='ro ot' WHERE id=?1",
+        "UPDATE sessions SET root_profile='{\"root_template\":null}' WHERE id=?1",
+        "UPDATE sessions SET runner_display='{\"name\":\"buildbox\"}' WHERE id=?1",
+    ] {
+        let mut scratch = SessionRecord::new(workspace.clone());
+        store.commit(&mut scratch).unwrap();
+        store.connection.execute(corrupt, [&scratch.id]).unwrap();
+        assert!(store.load(&scratch.id).is_err(), "{corrupt}");
+        store
+            .connection
+            .execute("DELETE FROM sessions WHERE id=?1", [&scratch.id])
+            .unwrap();
+    }
+    assert!(store.load(&id).is_ok());
+}
+
 /// The resume picker's summary is the session's *opening* prompt, and its
 /// age column is the record's own timestamps. A listing projects all three
 /// even though `transcript` carries the most recent prompts instead.

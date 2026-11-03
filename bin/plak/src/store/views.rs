@@ -12,8 +12,9 @@ use std::collections::{BTreeMap, HashMap};
 use plakous::sessions::SessionLocator;
 use plakous::sessions::feed::FeedSeq;
 use plakous_hosted::sessions::projector::{
-    AnchoredIntent, HostPauseCause, Lane, OperatorNotice, ProductIntents, ProjectionCommit, RowKey,
-    SessionViewState, SessionViews, Submission, SubmissionKind, ViewWrites, WorkflowRequest,
+    AnchoredIntent, HostPauseCause, Lane, OperatorNotice, ProductIntents, ProjectionCommit,
+    RootContinuation, RootInterrupt, RowKey, SessionViewState, SessionViews, Submission,
+    SubmissionKind, ViewWrites, WorkflowRequest,
 };
 use plakous_hosted::sessions::{TranscriptRow, encode_workflow_kind};
 use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, TransactionState, params};
@@ -22,6 +23,8 @@ use super::{ProductStore, decode_workflow_kind, from_i64, to_i64};
 
 const WAKE_SUPPRESSION: &str = "wake_suppression";
 const PAUSE_CAUSE: &str = "pause_cause";
+const ROOT_INTERRUPT: &str = "interrupt_cause";
+const ROOT_CONTINUATION: &str = "continuation_decision";
 /// Imported rows are notices at anchor 0 under this identity prefix.
 const IMPORTED_NOTICE_PREFIX: &str = "plak:import:";
 
@@ -237,7 +240,7 @@ impl ProductStore {
         let changed = self
             .connection
             .execute(
-                "INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,compact_reason,rebind_selection,anchor) VALUES(?1,?2,?3,?4,?5,?6,COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)) ON CONFLICT(operation_id) DO NOTHING",
+                "INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,compact_reason,selection,anchor) VALUES(?1,?2,?3,?4,?5,?6,COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)) ON CONFLICT(operation_id) DO NOTHING",
                 params![
                     session_id,
                     request.operation_id,
@@ -282,7 +285,7 @@ impl ProductStore {
             .map_err(|error| super::write_error(error, "product store write failed"))?;
         let (reason, selection) = encode_workflow_kind(&request.kind);
         let inserted = tx.execute(
-            "INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,compact_reason,rebind_selection,anchor) VALUES(?1,?2,?3,?4,?5,?6,COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)) ON CONFLICT(operation_id) DO NOTHING",
+            "INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,compact_reason,selection,anchor) VALUES(?1,?2,?3,?4,?5,?6,COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)) ON CONFLICT(operation_id) DO NOTHING",
             params![session.id, request.operation_id, request.source_locator.to_string(), request.kind.as_str(), reason, selection],
         ).map_err(|error| super::write_error(error, "product store write failed"))?;
         if inserted == 0
@@ -472,6 +475,40 @@ impl ProductStore {
         self.write_host_intent(
             session_id,
             PAUSE_CAUSE,
+            intent.anchor,
+            intent.ordinal,
+            value,
+        )
+    }
+
+    /// Writes a virtual tree's root interrupt cause. No flow writes one
+    /// before the recovery switch.
+    pub fn write_root_interrupt(
+        &mut self,
+        session_id: &str,
+        intent: &AnchoredIntent<RootInterrupt>,
+    ) -> Result<(), RecordStoreError> {
+        let value = intent.value.encode()?;
+        self.write_host_intent(
+            session_id,
+            ROOT_INTERRUPT,
+            intent.anchor,
+            intent.ordinal,
+            value,
+        )
+    }
+
+    /// Writes a virtual tree's root continuation decision. No flow writes
+    /// one before the recovery switch.
+    pub fn write_root_continuation(
+        &mut self,
+        session_id: &str,
+        intent: &AnchoredIntent<RootContinuation>,
+    ) -> Result<(), RecordStoreError> {
+        let value = intent.value.encode()?;
+        self.write_host_intent(
+            session_id,
+            ROOT_CONTINUATION,
             intent.anchor,
             intent.ordinal,
             value,
@@ -1074,7 +1111,7 @@ pub(super) fn intents_of(
         .map(|(_, submission)| submission)
         .collect();
     let mut statement = connection
-        .prepare("SELECT operation_id,source_locator,kind,compact_reason,rebind_selection FROM workflow_requests WHERE session_id=?1 ORDER BY rowid")
+        .prepare("SELECT operation_id,source_locator,kind,compact_reason,selection FROM workflow_requests WHERE session_id=?1 ORDER BY rowid")
         .map_err(unavailable)?;
     let workflow_requests = statement
         .query_map([session_id], |row| {
@@ -1148,6 +1185,16 @@ pub(super) fn intents_of(
                 ordinal,
                 value: serde_json::from_str(&value)
                     .map_err(|_| "pause cause intent is invalid".to_owned())?,
+            }),
+            ROOT_INTERRUPT => intents.root_interrupts.push(AnchoredIntent {
+                anchor,
+                ordinal,
+                value: RootInterrupt::decode(&value)?,
+            }),
+            ROOT_CONTINUATION => intents.root_continuations.push(AnchoredIntent {
+                anchor,
+                ordinal,
+                value: RootContinuation::decode(&value)?,
             }),
             _ => return Err("host intent is invalid".to_owned()),
         }

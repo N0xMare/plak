@@ -425,6 +425,7 @@ fn rebind_selection(model: &str) -> Box<RebindSelection> {
         selected_configuration: "selected-config".into(),
         effective_configuration: "effective-config".into(),
         account_binding: "account-binding".into(),
+        own_tree: Some(RootProfile::default()),
     })
 }
 
@@ -987,4 +988,112 @@ fn stored_api_binding_is_readable_without_current_model_enrollment() {
         session.model.as_deref(),
         Some("historical-model-not-in-this-build")
     );
+}
+
+fn switch_selection(pending: bool) -> Box<SwitchSelection> {
+    let snapshot = crate::orchestration::OrchestrationSnapshot::freeze(
+        crate::orchestration::RosterInput::unpinned("grok-target"),
+    );
+    Box::new(SwitchSelection {
+        rebind: *rebind_selection("grok-target"),
+        profile: "grok-default".into(),
+        root: RootProfile {
+            root_template: Some("lead".into()),
+            working_set: vec!["worker".into()],
+        },
+        roster_digest: snapshot.digest.clone(),
+        pending_snapshot: pending.then(|| serde_json::to_string(&snapshot).unwrap()),
+    })
+}
+
+/// Today a fork shares its source's tree and stays its node; a rebind takes
+/// the node of the tree it compiles against (its own, or its source's with
+/// sub-agents off); a clear compiles against a tree of its own. A switch, decoded today,
+/// continues the node and records the profile only on a virtual tree.
+#[test]
+fn each_successor_records_the_node_of_the_tree_it_compiles_against() {
+    let source = bound_session("/work/nodes");
+    assert_eq!(source.node, SessionNode::genesis(&source.id));
+    assert_eq!(
+        (source.root_profile.as_ref(), source.runner.as_ref()),
+        (None, None)
+    );
+    let fork = successor_from_fact(
+        &source,
+        "plak:fork:node",
+        locator(3),
+        SessionWorkflowKind::Fork,
+        branch_locator(8, 9),
+    );
+    assert_eq!(fork.node, source.node);
+    let rebind = successor_from_fact(
+        &source,
+        "plak:rebind:node",
+        locator(3),
+        SessionWorkflowKind::Rebind(rebind_selection("grok-target")),
+        branch_locator(10, 11),
+    );
+    assert_eq!(rebind.node, SessionNode::genesis(&rebind.id));
+    let mut staying = rebind_selection("grok-target");
+    staying.own_tree = None;
+    let stayed = successor_from_fact(
+        &source,
+        "plak:rebind:stays",
+        locator(3),
+        SessionWorkflowKind::Rebind(staying),
+        branch_locator(14, 15),
+    );
+    assert_eq!(stayed.node, source.node);
+    let clear = source
+        .clear_successor_from_request(&projector::WorkflowRequest {
+            operation_id: "plak:clear:node".into(),
+            kind: SessionWorkflowKind::Clear,
+            source_locator: locator(3),
+        })
+        .unwrap();
+    assert_eq!(clear.node, SessionNode::genesis(&clear.id));
+    for pending in [false, true] {
+        let selection = switch_selection(pending);
+        let switched = successor_from_fact(
+            &source,
+            &format!("plak:switch:node-{pending}"),
+            locator(3),
+            SessionWorkflowKind::Switch(selection.clone()),
+            branch_locator(12, 13),
+        );
+        assert_eq!(switched.node, source.node);
+        assert_eq!(switched.model.as_deref(), Some("grok-target"));
+        assert_eq!(switched.root_profile, Some(selection.root.clone()));
+    }
+}
+
+#[test]
+fn a_switch_selection_round_trips_and_refuses_bytes_outside_its_digest() {
+    for pending in [false, true] {
+        let selection = switch_selection(pending);
+        let encoded = selection.encode().unwrap();
+        assert_eq!(SwitchSelection::decode(&encoded).unwrap(), *selection);
+        let (_, stored) = encode_workflow_kind(&SessionWorkflowKind::Switch(selection));
+        assert_eq!(stored.as_deref(), Some(encoded.as_str()));
+    }
+    let mut other_digest = switch_selection(true);
+    other_digest.roster_digest = "0".repeat(64);
+    assert!(other_digest.encode().is_err());
+    let mut not_hex = switch_selection(false);
+    not_hex.roster_digest = "digest".into();
+    assert!(not_hex.encode().is_err());
+    let mut edited = switch_selection(true);
+    edited.pending_snapshot = edited.pending_snapshot.map(|bytes| {
+        bytes.replacen(
+            "\"workspace_idle_seconds\":",
+            "\"workspace_idle_seconds\":1",
+            1,
+        )
+    });
+    assert!(edited.encode().is_err());
+    let encoded = switch_selection(false).encode().unwrap();
+    let extra = encoded.replacen('{', "{\"extra\":1,", 1);
+    assert!(SwitchSelection::decode(&extra).is_err());
+    let no_profile = encoded.replacen("\"profile\":\"grok-default\",", "", 1);
+    assert!(SwitchSelection::decode(&no_profile).is_err());
 }

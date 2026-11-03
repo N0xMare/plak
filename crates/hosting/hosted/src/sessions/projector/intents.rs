@@ -137,6 +137,7 @@ impl WorkflowRequest {
             }
             SessionWorkflowKind::Fork => "fork did not start; request a fork again explicitly",
             SessionWorkflowKind::Rebind(_) => "model change did not start; choose the model again",
+            SessionWorkflowKind::Switch(_) => "profile switch did not start; choose it again",
             SessionWorkflowKind::Clear => {
                 "new session did not start; request a new session again explicitly"
             }
@@ -151,6 +152,7 @@ impl WorkflowRequest {
             SessionWorkflowKind::Compact(_) => NoticeRemedy::RetryCompaction {},
             SessionWorkflowKind::Fork => NoticeRemedy::RetryFork {},
             SessionWorkflowKind::Rebind(_) => NoticeRemedy::Rebind {},
+            SessionWorkflowKind::Switch(_) => NoticeRemedy::ChooseProfile {},
             SessionWorkflowKind::Clear => NoticeRemedy::StartFresh {},
         }
     }
@@ -215,6 +217,193 @@ pub enum HostPauseCause {
     },
 }
 
+/// What a root interrupt cause or continuation decision follows: the exact
+/// root turn that stopped, or, when no turn was admitted, the unfacted
+/// command it settles.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum RootStopAnchor {
+    /// The root turn that stopped.
+    Turn {
+        /// Its plain turn id.
+        turn_id: String,
+    },
+    /// The command that never reached a turn.
+    Command {
+        /// Its command id.
+        command_id: String,
+    },
+}
+
+impl RootStopAnchor {
+    fn is_coherent(&self) -> bool {
+        match self {
+            Self::Turn { turn_id: id } | Self::Command { command_id: id } => valid_command_id(id),
+        }
+    }
+}
+
+/// A runtime command or turn id as an intent names it: non-empty, without
+/// control characters.
+fn valid_command_id(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(char::is_control)
+}
+
+/// Why a virtual tree's root stopped short (spec 02 §2.6): the root of a tree
+/// with rows records its cause in the tree store instead.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootInterruptCause {
+    /// The operator interrupted the root.
+    Operator,
+    /// The turn's owner was lost (a crash, a fence, a lease loss).
+    OwnerLost,
+    /// A planned handoff released the root to another host.
+    Handoff,
+    /// An explicit stop.
+    Stopped,
+}
+
+/// A root interrupt cause intent. Decoded today; the recovery switch writes
+/// it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootInterrupt {
+    /// The turn or command it stopped.
+    pub anchor: RootStopAnchor,
+    /// Why.
+    pub cause: RootInterruptCause,
+}
+
+/// Why a root continuation turn may run after the root stopped short.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootContinuationCause {
+    /// A committed transient model failure.
+    Transient,
+    /// The turn's owner was lost.
+    OwnerLost,
+    /// A planned handoff to another host.
+    Handoff,
+}
+
+/// What a root continuation decision does with the stopped work.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum RootContinuationDecision {
+    /// A new host-instruction turn under `command_id`, withdrawing these
+    /// unfacted commands first.
+    NewTurn {
+        /// The continuation's runtime command id.
+        command_id: String,
+        /// Unfacted commands it replaces, possibly none.
+        withdrawn: Vec<String>,
+    },
+    /// The exact resubmission of the one unfacted command.
+    Resubmit {
+        /// The resubmitted command's id.
+        command_id: String,
+    },
+    /// No continuation: these unfacted commands are withdrawn.
+    Withdrawn {
+        /// The withdrawn command ids, at least one.
+        command_ids: Vec<String>,
+    },
+}
+
+/// One durable continuation decision for a virtual tree's root: one per
+/// cause, anchor, host generation and round. Decoded today; the recovery
+/// switch writes it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootContinuation {
+    /// The stopped turn or command this decision follows.
+    pub anchor: RootStopAnchor,
+    /// The host generation that decided, from 1.
+    pub host_generation: u64,
+    /// Why it continues.
+    pub cause: RootContinuationCause,
+    /// One-based round within this cause, anchor and generation.
+    pub round: u32,
+    /// Unix milliseconds of the decision.
+    pub decided_at_ms: u64,
+    /// What it does.
+    pub decision: RootContinuationDecision,
+}
+
+impl RootInterrupt {
+    /// The stored encoding.
+    ///
+    /// # Errors
+    /// Refuses an empty anchor.
+    pub fn encode(&self) -> Result<String, String> {
+        if !self.anchor.is_coherent() {
+            return Err("root interrupt intent is invalid".to_owned());
+        }
+        serde_json::to_string(self).map_err(|_| "root interrupt intent is invalid".to_owned())
+    }
+
+    /// Decodes [`Self::encode`]'s JSON.
+    ///
+    /// # Errors
+    /// Refuses anything this build did not write.
+    pub fn decode(text: &str) -> Result<Self, String> {
+        let intent: Self = serde_json::from_str(text)
+            .map_err(|_| "root interrupt intent is invalid".to_owned())?;
+        intent.encode()?;
+        Ok(intent)
+    }
+}
+
+impl RootContinuation {
+    fn is_coherent(&self) -> bool {
+        let distinct = |ids: &[String]| {
+            let mut sorted = ids.iter().collect::<Vec<_>>();
+            sorted.sort();
+            sorted.dedup();
+            sorted.len() == ids.len() && ids.iter().all(|id| valid_command_id(id))
+        };
+        let decision = match &self.decision {
+            RootContinuationDecision::NewTurn {
+                command_id,
+                withdrawn,
+            } => {
+                valid_command_id(command_id)
+                    && distinct(withdrawn)
+                    && !withdrawn.contains(command_id)
+            }
+            RootContinuationDecision::Resubmit { command_id } => valid_command_id(command_id),
+            RootContinuationDecision::Withdrawn { command_ids } => {
+                !command_ids.is_empty() && distinct(command_ids)
+            }
+        };
+        decision && self.round >= 1 && self.host_generation >= 1 && self.anchor.is_coherent()
+    }
+
+    /// The stored encoding.
+    ///
+    /// # Errors
+    /// Refuses round or generation 0, an empty anchor and a malformed
+    /// decision.
+    pub fn encode(&self) -> Result<String, String> {
+        if !self.is_coherent() {
+            return Err("root continuation intent is invalid".to_owned());
+        }
+        serde_json::to_string(self).map_err(|_| "root continuation intent is invalid".to_owned())
+    }
+
+    /// Decodes [`Self::encode`]'s JSON.
+    ///
+    /// # Errors
+    /// Refuses anything this build did not write.
+    pub fn decode(text: &str) -> Result<Self, String> {
+        let intent: Self = serde_json::from_str(text)
+            .map_err(|_| "root continuation intent is invalid".to_owned())?;
+        intent.encode()?;
+        Ok(intent)
+    }
+}
+
 /// Every intent of one product session the projector reads.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProductIntents {
@@ -232,6 +421,12 @@ pub struct ProductIntents {
     pub wake_suppressions: Vec<AnchoredIntent<()>>,
     /// Pause causes no fact carries.
     pub pause_causes: Vec<AnchoredIntent<HostPauseCause>>,
+    /// A virtual tree's root interrupt causes; no reader until recovery
+    /// switches.
+    pub root_interrupts: Vec<AnchoredIntent<RootInterrupt>>,
+    /// A virtual tree's root continuation decisions; no reader until
+    /// recovery switches.
+    pub root_continuations: Vec<AnchoredIntent<RootContinuation>>,
     /// An imported session's transcript, anchor 0, lane 1, in document order.
     pub imported: Vec<TranscriptRow>,
 }

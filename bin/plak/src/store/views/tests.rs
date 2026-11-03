@@ -1119,3 +1119,174 @@ fn only_the_projector_commit_writes_view_tables() {
         "view writers outside the projector commit: {offenders:?}"
     );
 }
+
+/// The root interrupt cause and continuation decision of a virtual tree are
+/// host intents that no flow writes before the recovery switch: they round
+/// trip, and a malformed row refuses the load.
+#[test]
+fn root_interrupt_and_continuation_intents_round_trip_and_refuse_malformed_rows() {
+    use plakous_hosted::sessions::projector::{
+        RootContinuation, RootContinuationCause, RootContinuationDecision, RootInterrupt,
+        RootInterruptCause, RootStopAnchor,
+    };
+    let root = tempdir().unwrap();
+    let (mut store, session) = store_with_session(root.path());
+    assert_eq!(host_intent_kinds(&store, &session), [] as [String; 0]);
+    let interrupt = AnchoredIntent {
+        anchor: 3,
+        ordinal: 0,
+        value: RootInterrupt {
+            anchor: RootStopAnchor::Turn {
+                turn_id: "turn-1".to_owned(),
+            },
+            cause: RootInterruptCause::OwnerLost,
+        },
+    };
+    let continuation = AnchoredIntent {
+        anchor: 3,
+        ordinal: 1,
+        value: RootContinuation {
+            anchor: RootStopAnchor::Turn {
+                turn_id: "turn-1".to_owned(),
+            },
+            host_generation: 2,
+            cause: RootContinuationCause::OwnerLost,
+            round: 1,
+            decided_at_ms: 1_790_000_000_000,
+            decision: RootContinuationDecision::NewTurn {
+                command_id: "plak:continue:1".to_owned(),
+                withdrawn: vec!["cmd-1".to_owned()],
+            },
+        },
+    };
+    store.write_root_interrupt(&session, &interrupt).unwrap();
+    store
+        .write_root_continuation(&session, &continuation)
+        .unwrap();
+    let intents = store.load_intents(&session).unwrap();
+    assert_eq!(intents.root_interrupts, vec![interrupt.clone()]);
+    assert_eq!(intents.root_continuations, vec![continuation.clone()]);
+    // Readers ignore them until their step: the record loads unchanged.
+    assert_eq!(
+        store.load(&session).unwrap().queue_drain_state,
+        plakous_hosted::sessions::QueueDrainState::LiveAutoDrain
+    );
+
+    let mut incoherent = continuation.clone();
+    incoherent.ordinal = 2;
+    incoherent.value.round = 0;
+    assert!(
+        store
+            .write_root_continuation(&session, &incoherent)
+            .is_err()
+    );
+    let mut repeated = continuation;
+    repeated.ordinal = 3;
+    repeated.value.decision = RootContinuationDecision::NewTurn {
+        command_id: "cmd-1".to_owned(),
+        withdrawn: vec!["cmd-1".to_owned()],
+    };
+    assert!(store.write_root_continuation(&session, &repeated).is_err());
+    let mut empty = interrupt;
+    empty.ordinal = 4;
+    empty.value.anchor = RootStopAnchor::Command {
+        command_id: String::new(),
+    };
+    assert!(store.write_root_interrupt(&session, &empty).is_err());
+
+    for (kind, value) in [
+        (
+            "interrupt_cause",
+            r#"{"anchor":{"turn":{"turn_id":"t"}},"cause":"parent"}"#,
+        ),
+        ("interrupt_cause", r#"{"anchor":{"turn":{"turn_id":"t"}}}"#),
+        (
+            "continuation_decision",
+            r#"{"anchor":{"turn":{"turn_id":"t"}},"host_generation":1,"cause":"stopped","round":1,"decided_at_ms":0,"decision":{"resubmit":{"command_id":"c"}}}"#,
+        ),
+    ] {
+        store
+            .connection
+            .execute(
+                "INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,9,0,?3)",
+                params![session, kind, value],
+            )
+            .unwrap();
+        assert!(store.load_intents(&session).is_err(), "{kind} {value}");
+        store
+            .connection
+            .execute("DELETE FROM host_intents WHERE anchor=9", [])
+            .unwrap();
+    }
+    assert!(store.load_intents(&session).is_ok());
+}
+
+fn host_intent_kinds(store: &ProductStore, session: &str) -> Vec<String> {
+    let mut statement = store
+        .connection
+        .prepare("SELECT kind FROM host_intents WHERE session_id=?1 ORDER BY kind")
+        .unwrap();
+    statement
+        .query_map([session], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+/// A switch request (decoded today; live succession writes it) round trips
+/// with its pending snapshot bytes, and a corrupt selection refuses the
+/// load.
+#[test]
+fn a_switch_request_round_trips_and_a_corrupt_selection_refuses_the_load() {
+    use plakous_hosted::sessions::{RebindSelection, RootProfile, SwitchSelection};
+    let root = tempdir().unwrap();
+    let (mut store, session) = store_with_session(root.path());
+    let snapshot = plakous_hosted::orchestration::OrchestrationSnapshot::freeze(
+        plakous_hosted::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
+    );
+    let request = WorkflowRequest {
+        operation_id: "plak:switch:one".to_owned(),
+        source_locator: SessionLocator::new(
+            uuid(1).parse().unwrap(),
+            uuid(2).parse().unwrap(),
+            uuid(3).parse().unwrap(),
+        ),
+        kind: SessionWorkflowKind::Switch(Box::new(SwitchSelection {
+            rebind: RebindSelection {
+                provider: "codex".to_owned(),
+                account: "codex".to_owned(),
+                model: "gpt-5.6-sol".to_owned(),
+                effort: Some("high".to_owned()),
+                composition: crate::product_config::ProductCompositionSelection::FollowCatalog,
+                target_selection: crate::product_config::ProductTargetSelection::Native,
+                protocol: "responses".to_owned(),
+                route: "codex:oauth:responses".to_owned(),
+                requested_model: "gpt-5.6-sol".to_owned(),
+                selected_configuration: "{}".to_owned(),
+                effective_configuration: "{}".to_owned(),
+                account_binding: "{}".to_owned(),
+                own_tree: Some(RootProfile::default()),
+            },
+            profile: "codex-default".to_owned(),
+            root: RootProfile {
+                root_template: Some("codex-default-lead".to_owned()),
+                working_set: vec!["codex-default-worker".to_owned()],
+            },
+            roster_digest: snapshot.digest.clone(),
+            pending_snapshot: Some(serde_json::to_string(&snapshot).unwrap()),
+        })),
+    };
+    store.write_workflow_request(&session, &request).unwrap();
+    assert_eq!(
+        store.load_intents(&session).unwrap().workflow_requests,
+        vec![request]
+    );
+    store
+        .connection
+        .execute(
+            "UPDATE workflow_requests SET selection=json_set(selection,'$.roster_digest',?1)",
+            ["0".repeat(64)],
+        )
+        .unwrap();
+    assert!(store.load_intents(&session).is_err());
+}

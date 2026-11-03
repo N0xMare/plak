@@ -499,6 +499,7 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
             ProfileBranchInput {
                 target,
                 own_tree,
+                profile: sessions::RootProfile::from_roster(roster),
                 topology_tree_id: &topology_tree_id,
                 effort_label: &effort_label,
                 attached_tree: &mut attached_tree,
@@ -553,6 +554,7 @@ struct ProfileTargetInput<'a> {
 struct ProfileBranchInput<'a> {
     target: ProfileTarget,
     own_tree: bool,
+    profile: sessions::RootProfile,
     topology_tree_id: &'a str,
     effort_label: &'a Option<String>,
     attached_tree: &'a mut Option<String>,
@@ -673,6 +675,7 @@ async fn resolve_profile_target<P: plakous_host_protocol::ProtocolExtension>(
     let target = if api_root {
         let mut record = SessionRecord::new(config.session.workspace_root.clone());
         record.id.clone_from(target_product_id);
+        record.node = sessions::SessionNode::genesis(target_product_id);
         record.account = Some(account.clone());
         record.model = Some(model.to_owned());
         record.effort.clone_from(effort_label);
@@ -713,6 +716,7 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
     let ProfileBranchInput {
         target,
         own_tree,
+        profile,
         topology_tree_id,
         effort_label,
         attached_tree,
@@ -747,8 +751,13 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
     if watch.observe_now() {
         return Err(interrupted_before_dispatch("rebind"));
     }
+    // The tree the branch compiles against: a profile fork's seeded tree, or
+    // a py-sdk root's own id with none, frozen on the profile's roster;
+    // otherwise the source's tree.
     let workflow_kind = rebind_workflow_kind(
         &target,
+        (own_tree || composition == crate::binding::CompositionSelection::PySdk)
+            .then(|| profile.clone()),
         account,
         model,
         effort_label.as_deref(),
@@ -976,6 +985,7 @@ async fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
 
 fn rebind_workflow_kind(
     target: &ResolvedRebindTarget,
+    own_tree: Option<sessions::RootProfile>,
     account: &str,
     model: &str,
     effort_label: Option<&str>,
@@ -1007,6 +1017,7 @@ fn rebind_workflow_kind(
             .map_err(|_| CliFailure::new("effective configuration could not be persisted"))?,
             account_binding: serde_json::to_string(&target.binding.account_binding())
                 .map_err(|_| CliFailure::new("account binding could not be persisted"))?,
+            own_tree,
         }));
     Ok(workflow_kind)
 }

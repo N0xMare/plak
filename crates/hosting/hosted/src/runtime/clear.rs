@@ -57,6 +57,7 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         .submit_workflow_request(&mut config.session, &request)
         .map_err(CliFailure::new)?;
     let target_product_id = request.successor_product_id();
+    freeze_reserved_profile(config, &target_product_id)?;
     let create_operation =
         sessions::clear_create_operation_id(&request.operation_id).map_err(CliFailure::new)?;
     let runtime_sessions = config.state_roots.runtime_sessions()?;
@@ -271,6 +272,24 @@ pub(super) async fn production_build_clear_candidate<
         .await
         .map_err(|error| *error.failure)?;
     Ok((session, None))
+}
+
+/// Writes the profile the new session's genesis freezes (the home's, for its
+/// tuple) into its reservation before the runtime create, so no created
+/// session lacks one.
+fn freeze_reserved_profile<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    target_product_id: &str,
+) -> CliResult<()> {
+    let mut target = config
+        .store
+        .load(target_product_id)
+        .map_err(CliFailure::new)?;
+    if target.root_profile.is_some() {
+        return Ok(());
+    }
+    target.root_profile = super::startup::genesis_root_profile(&config.state_roots, &target)?;
+    config.store.save(&mut target).map_err(CliFailure::new)
 }
 
 pub(super) async fn delete_unpublished_runtime(

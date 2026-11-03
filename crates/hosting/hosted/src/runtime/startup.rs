@@ -859,6 +859,26 @@ pub(super) fn root_tool_selection(session: &SessionRecord) -> crate::tool_plan::
         .unwrap_or_default()
 }
 
+/// The profile `session`'s genesis freezes (spec 02 §2.6): the root
+/// template and working set the roster source gives its root bind, the same
+/// answer a tree genesis freezes. `None` for a record with no bound tuple yet.
+///
+/// # Errors
+/// The roster cannot be read (an unreadable product policy).
+pub(super) fn genesis_root_profile(
+    roots: &crate::agent::ProductStateRoots,
+    session: &SessionRecord,
+) -> CliResult<Option<crate::sessions::RootProfile>> {
+    let (Some(account), Some(model)) = (session.account.as_deref(), session.model.as_deref())
+    else {
+        return Ok(None);
+    };
+    let roster = roots
+        .roster_source()
+        .roster(account, model, session.effort.as_deref())?;
+    Ok(Some(crate::sessions::RootProfile::from_roster(&roster)))
+}
+
 /// Freezes the root's optional tools into the record before its runtime is
 /// first created: when the session runs the `[root] agent` template's tuple,
 /// the template as configured now and the MCP tools its selection reaches,
@@ -1172,6 +1192,9 @@ async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
     stderr: &mut Vec<u8>,
 ) -> CliResult<AttachedCodingSession> {
     freeze_root_tools(config)?;
+    if config.session.root_profile.is_none() {
+        config.session.root_profile = genesis_root_profile(&config.state_roots, &config.session)?;
+    }
     let factory = config.runtime_factory.clone();
     factory.create(config, seed, stderr).await
 }

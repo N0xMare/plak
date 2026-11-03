@@ -331,6 +331,7 @@ fn projected_rebind_successors_are_atomic_idempotent_and_keep_the_source_selecti
                     selected_configuration: "selected".into(),
                     effective_configuration: "effective".into(),
                     account_binding: "binding".into(),
+                    own_tree: Some(plakous_hosted::sessions::RootProfile::default()),
                 },
             )),
         };

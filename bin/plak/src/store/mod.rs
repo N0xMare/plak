@@ -20,8 +20,8 @@ use crate::product_config::ProductCompositionSelection;
 #[cfg(test)]
 use crate::product_config::ProductTargetSelection;
 use sessions::{
-    ProductCompactReason, QueueDrainState, QueueItem, SessionRecord, SessionWorkflowKind,
-    StoreBaseline, digest_parts,
+    ProductCompactReason, QueueDrainState, QueueItem, SessionNode, SessionRecord,
+    SessionWorkflowKind, StoreBaseline, digest_parts,
 };
 
 pub(crate) const SCHEMA_VERSION: i64 = 36;
@@ -491,7 +491,7 @@ fn load_record(
 ) -> Result<SessionRecord, String> {
     let mut session = connection
             .query_row(
-                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent FROM sessions WHERE id = ?1",
+                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display FROM sessions WHERE id = ?1",
                 [id],
                 |row| {
                     let locator: Option<String> = row.get(11)?;
@@ -515,6 +515,9 @@ fn load_record(
                         tool_call_count: 0,
                         compaction_count: 0,
                         carry_intent: row.get::<_, Option<String>>(15)?.map(|value| plakous_hosted::sessions::CarryIntent::decode(&value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
+                        node: decode_node(row, 16)?,
+                        root_profile: decode_root_profile(row, 18)?,
+                        runner: decode_runner_display(row, 19)?,
                     })
                 },
             )
@@ -709,7 +712,7 @@ impl ProductStore {
             .map_err(|_| "could not start product listing read".to_owned())?;
         let mut query_count = 0usize;
         let mut statement = transaction.prepare(
-            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 ORDER BY updated_at DESC, id ASC LIMIT ?2"
+            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,sessions.runner_display FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 ORDER BY updated_at DESC, id ASC LIMIT ?2"
         ).map_err(|_| "could not query product sessions".to_owned())?;
         query_count += 1;
         let mut sessions = statement
@@ -757,6 +760,9 @@ impl ProductStore {
                                 .map_err(|_| rusqlite::Error::InvalidQuery)
                         })
                         .transpose()?,
+                    node: decode_node(row, 18)?,
+                    root_profile: decode_root_profile(row, 20)?,
+                    runner: decode_runner_display(row, 21)?,
                 })
             })
             .map_err(|_| "could not query product sessions".to_owned())?
@@ -873,8 +879,8 @@ fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordS
         .into_owned();
     let locator = s.plakous_locator.map(|value| value.to_string());
     let changed = tx.execute(
-        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
-        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?],
+        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?],
     ).map_err(|error| write_error(error, "product session identity already exists or is invalid".to_owned()))?;
     if changed != 1 {
         return Err("product session insert was not exact".to_owned().into());
@@ -933,9 +939,59 @@ fn update_session(
 ) -> Result<usize, RecordStoreError> {
     // A loaded record carries the view head, not a replacement genesis binding.
     tx.execute(
-        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18), carry_intent=?19 WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6",
-        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?],
+        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18), carry_intent=?19, root_profile=COALESCE(root_profile,?22) WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6 AND node_tree_id=?20 AND node_agent_id=?21 AND (root_profile IS NULL OR root_profile IS ?22) AND runner_display IS ?23",
+        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?],
     ).map_err(|error| write_error(error, "could not update product session".to_owned()))
+}
+
+/// The root profile, written once at genesis (a reservation may gain it
+/// before its runtime create), and the runner display copy, written with the
+/// record; a save that moved either is refused like a moved node.
+fn encoded_root_profile(s: &SessionRecord) -> Result<Option<String>, String> {
+    s.root_profile
+        .as_ref()
+        .map(plakous_hosted::sessions::RootProfile::encode)
+        .transpose()
+}
+
+fn encoded_runner_display(s: &SessionRecord) -> Result<Option<String>, String> {
+    s.runner
+        .as_ref()
+        .map(plakous_hosted::sessions::RunnerDisplay::encode)
+        .transpose()
+}
+
+/// The record's node, written once at creation (spec 02 §2.6).
+fn decode_node(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<SessionNode> {
+    SessionNode::parse(
+        &row.get::<_, String>(first)?,
+        &row.get::<_, String>(first + 1)?,
+    )
+    .map_err(|_| rusqlite::Error::InvalidQuery)
+}
+
+fn decode_root_profile(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<plakous_hosted::sessions::RootProfile>> {
+    row.get::<_, Option<String>>(index)?
+        .map(|value| {
+            plakous_hosted::sessions::RootProfile::decode(&value)
+                .map_err(|_| rusqlite::Error::InvalidQuery)
+        })
+        .transpose()
+}
+
+fn decode_runner_display(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<plakous_hosted::sessions::RunnerDisplay>> {
+    row.get::<_, Option<String>>(index)?
+        .map(|value| {
+            plakous_hosted::sessions::RunnerDisplay::decode(&value)
+                .map_err(|_| rusqlite::Error::InvalidQuery)
+        })
+        .transpose()
 }
 
 /// A carry's write-ahead intent; the save that binds its locator clears it.
@@ -1252,6 +1308,10 @@ fn decode_workflow_kind(
             serde_json::from_str(&selection.ok_or(rusqlite::Error::InvalidQuery)?)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
         ))),
+        "switch" => Ok(SessionWorkflowKind::Switch(Box::new(
+            sessions::SwitchSelection::decode(&selection.ok_or(rusqlite::Error::InvalidQuery)?)
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        ))),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
 }
@@ -1269,7 +1329,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "sessions",
-        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)), carry_intent TEXT CHECK(carry_intent IS NULL OR (json_valid(carry_intent) AND locator IS NULL)))",
+        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)), carry_intent TEXT CHECK(carry_intent IS NULL OR (json_valid(carry_intent) AND locator IS NULL)), node_tree_id TEXT NOT NULL CHECK(length(node_tree_id) BETWEEN 1 AND 128), node_agent_id TEXT NOT NULL CHECK(length(node_agent_id) BETWEEN 1 AND 128), root_profile TEXT CHECK(root_profile IS NULL OR json_valid(root_profile)), runner_display TEXT CHECK(runner_display IS NULL OR json_valid(runner_display)))",
     ),
     (
         "sessions_workspace_updated",
@@ -1309,7 +1369,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "workflow_requests",
-        "CREATE TABLE workflow_requests(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,operation_id TEXT PRIMARY KEY,source_locator TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('compact','clear','fork','rebind')),compact_reason TEXT,rebind_selection TEXT,anchor INTEGER NOT NULL CHECK(anchor>=0))",
+        "CREATE TABLE workflow_requests(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,operation_id TEXT PRIMARY KEY,source_locator TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('compact','clear','fork','rebind','switch')),compact_reason TEXT,selection TEXT,anchor INTEGER NOT NULL CHECK(anchor>=0))",
     ),
     (
         "workflow_requests_session",
@@ -1321,7 +1381,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "host_intents",
-        "CREATE TABLE host_intents(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL CHECK(kind IN('wake_suppression','pause_cause')),anchor INTEGER NOT NULL CHECK(anchor>=0),ordinal INTEGER NOT NULL CHECK(ordinal>=0),value TEXT NOT NULL CHECK(json_valid(value)),PRIMARY KEY(session_id,kind,anchor,ordinal))",
+        "CREATE TABLE host_intents(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL CHECK(kind IN('wake_suppression','pause_cause','interrupt_cause','continuation_decision')),anchor INTEGER NOT NULL CHECK(anchor>=0),ordinal INTEGER NOT NULL CHECK(ordinal>=0),value TEXT NOT NULL CHECK(json_valid(value)),PRIMARY KEY(session_id,kind,anchor,ordinal))",
     ),
     (
         "projector_cursors",
