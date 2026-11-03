@@ -100,7 +100,11 @@ fn report_pre_dispatch_rejection(stdout: &mut dyn io::Write, failure: CliFailure
     let _ = writeln!(
         stdout,
         "{}",
-        plakous_host_protocol::envelope::diagnostic_line(None, failure.message())
+        plakous_host_protocol::envelope::coded_diagnostic_line(
+            None,
+            failure.code(),
+            failure.message()
+        )
     );
     let _ = writeln!(
         stdout,
@@ -378,5 +382,28 @@ mod tests {
             "the exit code is unchanged by the stream termination"
         );
         assert_eq!(returned.message(), message);
+    }
+
+    /// A typed refusal a client keys on carries its stable code on the
+    /// terminal error line, and its own exit code.
+    #[test]
+    fn a_tree_hosted_elsewhere_rejection_carries_its_code() {
+        let mut stdout = Vec::new();
+        let message = "tree_hosted_elsewhere (0123456789ab): agent tree t is hosted by local on \
+             workstation (instance 42-00000000000000aa); use that host or stop it first";
+        let returned = report_pre_dispatch_rejection(
+            &mut stdout,
+            CliFailure::classified(CliFailureKind::HostedElsewhere, message),
+        );
+        let lines: Vec<serde_json::Value> = String::from_utf8(stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines[0]["kind"], "error");
+        assert_eq!(lines[0]["code"], "tree_hosted_elsewhere");
+        assert_eq!(lines[0]["message"], message);
+        assert_eq!(lines[1]["kind"], "bye");
+        assert_eq!(returned.exit_code(), 7);
     }
 }

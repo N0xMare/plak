@@ -291,3 +291,19 @@ fn every_transition_stage_keeps_its_cumulative_elapsed_label() {
         );
     }
 }
+
+/// The TUI's detached status shows another host's custody of the tree as the
+/// typed refusal itself, naming the holder's build and machine.
+#[test]
+fn a_tree_hosted_elsewhere_attach_shows_the_refusal() {
+    let mut failure: HostFailure =
+        "tree_hosted_elsewhere (0123456789ab): agent tree t is hosted by \
+        local on workstation (instance 42-00000000000000aa); use that host or stop it first"
+            .into();
+    failure.cause = AttachFailure::TreeHostedElsewhere;
+    let text = detached_reason(&DetachedReason::ResolveFailed(failure));
+    assert!(
+        text.starts_with("resolve_failed: tree_hosted_elsewhere (0123456789ab): agent tree t"),
+        "{text}"
+    );
+}

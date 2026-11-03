@@ -595,6 +595,15 @@ impl ProductStateRoots {
     /// Replaces the roster a genesis built from these roots freezes. A carry
     /// keeps its source's own profile this way rather than the home default.
     #[must_use]
+    /// These roots over another tree store, for a test that needs the tree
+    /// in a file another process can reach.
+    #[cfg(test)]
+    pub(crate) fn with_tree_store_factory(mut self, factory: Arc<dyn TreeStoreFactory>) -> Self {
+        self.tree_store = Arc::new(Mutex::new(None));
+        self.tree_store_factory = factory;
+        self
+    }
+
     pub fn with_roster_source(mut self, roster: Arc<dyn RosterSource>) -> Self {
         self.roster_source = roster;
         self

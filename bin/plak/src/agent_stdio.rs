@@ -46,7 +46,15 @@ pub fn run_agent_stdio(
     if let Err(failure) = &outcome
         && crate::signals::claim_terminal_record()
     {
-        let _ = writeln!(stdout, "{}", diagnostic_line(None, failure.message()));
+        let _ = writeln!(
+            stdout,
+            "{}",
+            plakous_host_protocol::envelope::coded_diagnostic_line(
+                None,
+                failure.code(),
+                failure.message()
+            )
+        );
         let _ = writeln!(stdout, "{}", bye_line(None));
         let _ = stdout.flush();
     }
@@ -541,7 +549,11 @@ fn run_agent_stdio_stopping_on(
         if let Some(error) = reason {
             let _ = write_line(
                 &mut stdout,
-                &diagnostic_line(command_id.as_deref(), error.message()),
+                &plakous_host_protocol::envelope::coded_diagnostic_line(
+                    command_id.as_deref(),
+                    error.code(),
+                    error.message(),
+                ),
             );
         } else if let Some(message) = stop_reason() {
             let _ = write_line(&mut stdout, &diagnostic_line(None, message));

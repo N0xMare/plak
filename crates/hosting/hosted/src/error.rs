@@ -26,6 +26,9 @@ pub enum CliFailureKind {
     Agent,
     /// Explicit operator recovery is required; no silent bootstrap.
     RecoveryRequired,
+    /// The agent tree is in another live host process's custody
+    /// (`tree_hosted_elsewhere`).
+    HostedElsewhere,
 }
 
 impl CliFailureKind {
@@ -37,6 +40,7 @@ impl CliFailureKind {
             Self::Usage => 2,
             Self::Auth => 3,
             Self::Agent | Self::RecoveryRequired => 5,
+            Self::HostedElsewhere => 7,
         }
     }
 }
@@ -249,9 +253,14 @@ pub(crate) struct ShutdownFailures {
 }
 
 /// The tree runtime's plumbing failures are internal product failures: no
-/// model asked for them and none carries a wire code.
+/// model asked for them and none carries a wire code. The one typed refusal
+/// among them, another host process's custody of the tree, keeps its kind.
 impl From<crate::agent_tree::TreeRuntimeError> for CliFailure {
     fn from(error: crate::agent_tree::TreeRuntimeError) -> Self {
+        if error.hosted_elsewhere_refusal().is_some() {
+            return Self::classified(CliFailureKind::HostedElsewhere, error.message())
+                .with_attach_failure(AttachFailure::TreeHostedElsewhere);
+        }
         Self::new(error.message())
     }
 }
@@ -453,6 +462,16 @@ impl CliFailure {
     #[must_use]
     pub const fn exit_code(&self) -> u8 {
         self.kind.exit_code()
+    }
+
+    /// The stable refusal code a machine reader keys on, for a failure that
+    /// has one.
+    #[must_use]
+    pub const fn code(&self) -> Option<&'static str> {
+        match self.kind {
+            CliFailureKind::HostedElsewhere => Some("tree_hosted_elsewhere"),
+            _ => None,
+        }
     }
 }
 

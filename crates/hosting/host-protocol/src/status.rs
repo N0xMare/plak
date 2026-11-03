@@ -160,6 +160,8 @@ pub enum AttachFailure {
     CredentialRejected,
     /// No usable native login is available.
     CredentialUnavailable,
+    /// Another live host process holds the agent tree's custody.
+    TreeHostedElsewhere,
     /// Another factual attach refusal, with no inferred cause.
     #[default]
     Other,

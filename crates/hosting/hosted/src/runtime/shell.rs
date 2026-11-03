@@ -647,6 +647,10 @@ pub(super) fn attach_repair_notice(failure: &HostFailure, original_account: &str
             "no usable login is available; restore credentials, then retry attachment",
             R::LoginThenAttach { account },
         ),
+        A::TreeHostedElsewhere => (
+            "another plak process holds this session's agent tree; quit that plak, then retry attachment here",
+            R::RepairThenAttach {},
+        ),
         A::Other => (
             "address the attach failure above, then retry attachment; profile selection only chooses a different profile",
             R::RepairThenAttach {},

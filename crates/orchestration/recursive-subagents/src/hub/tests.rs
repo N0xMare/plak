@@ -2501,6 +2501,56 @@ async fn a_detached_tree_ends_and_releases_custody_once_it_goes_dormant() {
     .expect("the dormant tree's hub ended and its custody was released");
 }
 
+/// Only the custody holder materializes a tree: an attach in a process that
+/// cannot prove the holder gone (here, one on another machine) is refused
+/// with the typed refusal, brings no hub up and writes nothing.
+#[tokio::test]
+async fn an_attach_while_another_host_holds_the_tree_is_refused_typed() {
+    use crate::tree::{CustodyHost, HostInstance};
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    let store = memory_store();
+    let holder = CustodyHost {
+        host_id: "local".to_owned(),
+        instance: HostInstance::parse("9-0000000000000009").unwrap(),
+        binary: Some("0123456789ab".to_owned()),
+        host_name: "another-machine".to_owned(),
+    };
+    store
+        .custody_port()
+        .take_custody(&tree_id, &holder, None)
+        .unwrap();
+    let bootstrapped = AtomicBool::new(false);
+    let error = resolve_topology_runtime(
+        &tree_id,
+        true,
+        TopologyHubAttach::AttachRoot,
+        || Ok(Arc::clone(&store)),
+        None,
+        |_| {
+            bootstrapped.store(true, Ordering::SeqCst);
+            std::future::ready(Ok(bootstrap(&tree_id, root.path().to_path_buf())))
+        },
+    )
+    .await
+    .err()
+    .expect("another host's custody refuses the attach");
+    let refusal = error.hosted_elsewhere_refusal().expect("typed refusal");
+    assert_eq!(refusal.holder, holder);
+    assert_eq!(refusal.binary(), Some("0123456789ab"));
+    assert!(
+        error
+            .message()
+            .starts_with("tree_hosted_elsewhere (0123456789ab)")
+    );
+    assert!(!bootstrapped.load(Ordering::SeqCst));
+    assert!(lookup(&tree_id).is_none());
+    assert!(
+        store.load(&tree_id).unwrap().is_none(),
+        "nothing was written"
+    );
+}
+
 /// A hub whose driver's custody take is refused does not attach it: the
 /// insert fails with the typed refusal, the hub holds no entry and nothing
 /// is written.

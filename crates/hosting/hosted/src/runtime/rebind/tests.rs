@@ -259,9 +259,37 @@ fn api_topology_host_on(
     model: &str,
     skills: crate::skills::SkillsSetting,
 ) -> (HostConfig<TestExtension>, AttachedCodingSession) {
+    let (config, parent) = api_topology_root_parent(root, frozen, provider, model, skills, None);
+    let opened = executor
+        .block_on(crate::agent::build_api_root_coding_session(
+            parent,
+            "offline-topology-root",
+            None,
+        ))
+        .unwrap()
+        .unwrap();
+    bind_api_topology_root(config, opened)
+}
+
+/// The host and root parent [`api_topology_host_on`] opens, over `trees`
+/// when given.
+fn api_topology_root_parent(
+    root: &std::path::Path,
+    frozen: Option<crate::frozen_tools::FrozenRootTools>,
+    provider: crate::binding::PlatformProvider,
+    model: &str,
+    skills: crate::skills::SkillsSetting,
+    trees: Option<Arc<dyn crate::agent::TreeStoreFactory>>,
+) -> (
+    HostConfig<TestExtension>,
+    crate::agent::build::ApiTopologyParent,
+) {
     let (mut config, _) = fresh_injected_attached_host(root);
     config.session.frozen_tools = frozen;
     config.runtime_factory = Arc::new(ProductionRuntimeFactory);
+    if let Some(trees) = trees {
+        config.state_roots = config.state_roots.with_tree_store_factory(trees);
+    }
     config.state_roots = config
         .state_roots
         .with_test_platform_credentials(Arc::new(TopologyApiCredentials))
@@ -294,20 +322,130 @@ fn api_topology_host_on(
     );
     let mut parent = parent;
     parent.tool_selection = startup::root_tool_selection(&config.session);
-    let opened = executor
-        .block_on(crate::agent::build_api_root_coding_session(
-            parent,
-            "offline-topology-root",
-            None,
-        ))
-        .unwrap()
-        .unwrap();
+    (config, parent)
+}
+
+fn bind_api_topology_root(
+    mut config: HostConfig<TestExtension>,
+    opened: AttachedCodingSession,
+) -> (HostConfig<TestExtension>, AttachedCodingSession) {
     config
         .session
         .bind_plakous_locator(opened.locator())
         .unwrap();
     config.store.save(&mut config.session).unwrap();
     (config, opened)
+}
+
+const TREE_HOLDER_ENV: &str = "PLAK_TEST_TREE_CUSTODY_HOLDER";
+
+/// The tree store in a file, so that two processes reach one custody record.
+struct SqliteTrees(PathBuf);
+
+impl crate::agent::TreeStoreFactory for SqliteTrees {
+    fn open(&self) -> CliResult<Arc<dyn crate::agent_tree::TreeStore>> {
+        let store = plakous_recursive_subagents_store::SqliteTreeStore::open(&self.0)
+            .map_err(|error| CliFailure::new(error.message()))?;
+        Ok(Arc::new(store))
+    }
+}
+
+/// Two processes, one tree: while another live process on this machine holds
+/// the custody of a session's tree, this process's attach of that session is
+/// refused with the typed refusal. It exits 7, and its terminal JSONL error
+/// line carries the stable code; it brings no hub up and writes no tree.
+#[test]
+fn a_second_process_attach_is_refused_with_exit_7_and_its_jsonl_code() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let database = root.path().join("trees").join("subagents.sqlite3");
+    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+    let (config, parent) = api_topology_root_parent(
+        root.path(),
+        None,
+        crate::binding::PlatformProvider::OpenAi,
+        "gpt-5.6-luna",
+        crate::skills::SkillsSetting::default(),
+        Some(Arc::new(SqliteTrees(database.clone()))),
+    );
+    let tree_id = config.session.id.clone();
+    let ready = root.path().join("holder.ready");
+    let mut holder = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "runtime::rebind::tests::tree_custody_holder_process",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(
+            TREE_HOLDER_ENV,
+            format!("{}|{tree_id}|{}", database.display(), ready.display()),
+        )
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !ready.exists() {
+        assert!(Instant::now() < deadline, "the holder never took custody");
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    let failure = executor
+        .block_on(crate::agent::build_api_root_coding_session(
+            parent,
+            "offline-topology-root",
+            None,
+        ))
+        .unwrap()
+        .err()
+        .expect("the attach is refused");
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    assert_eq!(failure.exit_code(), 7, "{}", failure.message());
+    assert_eq!(failure.code(), Some("tree_hosted_elsewhere"));
+    let line: serde_json::Value =
+        serde_json::from_str(&plakous_host_protocol::envelope::coded_diagnostic_line(
+            None,
+            failure.code(),
+            failure.message(),
+        ))
+        .unwrap();
+    assert_eq!(line["kind"], "error");
+    assert_eq!(line["code"], "tree_hosted_elsewhere");
+    assert!(
+        failure.message().starts_with("tree_hosted_elsewhere ("),
+        "{}",
+        failure.message()
+    );
+    assert!(crate::topology_runtime::lookup(&tree_id).is_none());
+    let store = plakous_recursive_subagents_store::SqliteTreeStore::open(&database).unwrap();
+    assert!(
+        !crate::agent_tree::TreeStore::exists(&store, &tree_id).unwrap(),
+        "nothing was written"
+    );
+}
+
+/// The holding process of the two-process attach: takes custody of one tree
+/// through the host's liveness lock, says so, and waits to be killed.
+#[test]
+fn tree_custody_holder_process() {
+    let Ok(spec) = std::env::var(TREE_HOLDER_ENV) else {
+        return;
+    };
+    let mut parts = spec.split('|');
+    let (path, tree_id, ready) = (
+        parts.next().unwrap(),
+        parts.next().unwrap(),
+        parts.next().unwrap(),
+    );
+    let store =
+        plakous_recursive_subagents_store::SqliteTreeStore::open(std::path::Path::new(path))
+            .unwrap();
+    let hold = crate::agent_tree::acquire_custody(&store, tree_id).unwrap();
+    std::fs::write(ready, hold.claim().fence.to_string()).unwrap();
+    thread::sleep(Duration::from_secs(120));
+    crate::agent_tree::release_custody_hold(&store, hold).unwrap();
 }
 
 fn retained_api_parent(tree_id: &str) -> crate::agent::build::ApiTopologyParent {

@@ -2478,6 +2478,7 @@ not have or a command that would only print help.
 | 4 | the turn was interrupted, or `SIGTERM` or `SIGHUP` stopped the process |
 | 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
 | 6 | `plak run` reached its admitted-turn or wall-clock bound |
+| 7 | `tree_hosted_elsewhere`: the session's agent tree is in another live `plak` process's custody (chapter 03 §14); nothing was attached or written |
 | 130 | quit exhausted its terminal join and selected lease-only abandonment, including when `SIGTERM`/`SIGHUP` requested the stop; an idle quit or a quit whose terminal joined still exits 0 |
 | 1 | anything else, including an invalid `config.toml` |
 
@@ -2782,7 +2783,13 @@ completed turn whose committed answer was truncated at its output limit
 recovery-required startup refusal in `plak agent --session` emits one JSONL
 `error` and one terminal `bye` and exits 5; the worker startup/join boundary
 preserves its typed failure rather than reconstructing an internal error from
-the diagnostic text. For a supported recoverable unfinished turn, the session
+the diagnostic text. An attach refused because another live `plak` process
+holds the session's agent tree (chapter 03 §14) prints the typed
+`tree_hosted_elsewhere (<binary id>)` refusal naming that process's host,
+machine and instance, exits 7, and in `plak agent` emits one JSONL `error`
+with `code: "tree_hosted_elsewhere"` and one terminal `bye`. The TUI shows the
+same refusal as its attach failure and stays detached. Before the host socket
+this refusal is the only behavior: nothing is routed to the holding process. For a supported recoverable unfinished turn, the session
 recovers automatically the next time it is used: `plak run --session` opens it, which abandons the unfinished
 turn once (Plakous §13.1) and then runs the prompt. `plak session recover
 <uuid>` does the same without running a turn and exits 0, printing the operator
@@ -3503,7 +3510,7 @@ closes. This does not change the v1 command or event encoding.
 | `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status` |
 | `recovered` | `operations[]`, and when the reopen closed an unfinished turn its `claim` ∈ `running_tool` \| `model_request` \| `compaction_not_applied` \| `nothing_started` \| `tool_round_completed` and `cause` ∈ `process_lost` \| `interrupted`; correlated with the `prompt` or `recover` that triggered it, or emitted on its own when the host recovered a fenced turn in place at idle, or after `ready` when the attach itself recovered a crash |
 | `tree` | `tree_id`, `revision`, `state`, `restored_paused`, `nodes[]` |
-| `error` | `message` |
+| `error` | `message`, and `code` for a typed refusal a client keys on (`tree_hosted_elsewhere`) |
 | `bye` | — |
 
 `hello.capabilities` is additive in v1: a sorted, duplicate-free array with

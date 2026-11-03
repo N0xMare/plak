@@ -125,3 +125,39 @@ fn recovery_required_is_distinct_from_agent_kind() {
     );
     assert!(!CliFailure::new("internal").is_recovery_required());
 }
+
+/// Another host process's custody of the tree keeps its kind through the
+/// tree runtime's failure: exit code 7, the stable `tree_hosted_elsewhere`
+/// code, the typed attach cause, and the refusal naming the holder's build.
+#[test]
+fn a_tree_hosted_elsewhere_refusal_is_typed_with_its_own_exit_code() {
+    use crate::agent_tree::{CustodyHost, HostInstance, TreeHostedElsewhere, TreeRuntimeError};
+    let refusal = TreeHostedElsewhere {
+        tree_id: "tree-1".to_owned(),
+        holder: CustodyHost {
+            host_id: "local".to_owned(),
+            instance: HostInstance::parse("42-00000000000000aa").unwrap(),
+            binary: Some("0123456789ab".to_owned()),
+            host_name: "workstation".to_owned(),
+        },
+        fence: 3,
+    };
+    let failure =
+        CliFailure::from(TreeRuntimeError::hosted_elsewhere(refusal)).with_context("attach");
+    assert_eq!(failure.kind, CliFailureKind::HostedElsewhere);
+    assert_eq!(failure.exit_code(), 7);
+    assert_eq!(failure.code(), Some("tree_hosted_elsewhere"));
+    assert_eq!(
+        failure.host_failure().cause,
+        AttachFailure::TreeHostedElsewhere
+    );
+    assert!(
+        failure
+            .message()
+            .contains("tree_hosted_elsewhere (0123456789ab): agent tree tree-1 is hosted by local on workstation"),
+        "{}",
+        failure.message()
+    );
+    let plain = CliFailure::from(TreeRuntimeError::new("hub lock is poisoned"));
+    assert_eq!((plain.exit_code(), plain.code()), (1, None));
+}

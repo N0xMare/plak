@@ -60,6 +60,22 @@ pub fn diagnostic_line(id: Option<&str>, message: &str) -> String {
     encode_object(fields)
 }
 
+/// The `error` line of a typed refusal a reader keys on: [`diagnostic_line`]
+/// with its stable `code` (for example `tree_hosted_elsewhere`).
+#[must_use]
+pub fn coded_diagnostic_line(id: Option<&str>, code: Option<&str>, message: &str) -> String {
+    let mut fields = Map::new();
+    fields.insert("kind".to_owned(), Value::from("error"));
+    if let Some(id) = id.filter(|id| !id.is_empty()) {
+        fields.insert("id".to_owned(), Value::from(id));
+    }
+    if let Some(code) = code {
+        fields.insert("code".to_owned(), Value::from(code));
+    }
+    fields.insert("message".to_owned(), Value::from(message));
+    encode_object(fields)
+}
+
 /// The `hello` line: the first outbound object of a session.
 #[must_use]
 #[expect(
