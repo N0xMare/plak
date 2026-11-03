@@ -33,7 +33,8 @@ pub use binding::{
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use injected::{
-    build_or_open_bound_session, injected_root_tool_registrations, verify_bound_session,
+    build_or_open_bound_session, create_seeded_bound_session, injected_root_tool_registrations,
+    verify_bound_session,
 };
 pub use policy::{
     NATIVE_RUN_MAX_MODEL_ROUNDS, NATIVE_RUN_MAX_MODEL_ROUNDS_CEILING, NATIVE_RUN_MAX_OUTPUT_TOKENS,

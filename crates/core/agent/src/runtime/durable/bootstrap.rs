@@ -424,7 +424,7 @@ fn genesis_jobs(
     let carried = builder
         .line_carry
         .as_ref()
-        .map(super::carry::LineCarry::line_and_jobs)
+        .map(|carry| carry.line_and_jobs())
         .transpose()?;
     let jobs = match carried {
         Some((line, generation, jobs)) => crate::manifest::JobLedger::new(

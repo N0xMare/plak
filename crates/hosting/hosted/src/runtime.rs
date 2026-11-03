@@ -904,6 +904,9 @@ pub enum HostWorkflow {
     Compact,
     /// A switched-away attachment, after its runtime release.
     SourceRelease,
+    /// A seeded create (a carry or an import): `Prepared` before its runtime
+    /// create, `RuntimeReturned` after it and before the record save.
+    SeededCreate,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

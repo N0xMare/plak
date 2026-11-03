@@ -28,7 +28,7 @@ pub(in crate::runtime) use compaction_inspection::checkpoint_can_abandon_compact
 pub(in crate::runtime) mod carry;
 pub(in crate::runtime) mod composition_recovery;
 pub(in crate::runtime) mod effect_recovery;
-pub use carry::{DurableCarryHead, DurableCarryReplay, DurableCarrySource};
+pub use carry::{DurableCarryHead, DurableCarrySource};
 mod line_head;
 pub use line_head::DurableLineHead;
 mod recovery_publication;

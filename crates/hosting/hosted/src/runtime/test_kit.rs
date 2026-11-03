@@ -951,10 +951,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
             if let Some(seed) = seed.as_mut() {
                 seed.inspect(&runtime)?;
             }
-            crate::agent::build_or_open_bound_session(
+            crate::agent::build::create_seeded_bound_session(
                 config.state_roots.runtime_sessions()?,
-                None,
-                seed.map(|s| s.history),
+                seed,
                 operation,
                 runtime,
             )

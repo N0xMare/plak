@@ -31,6 +31,7 @@ pub(crate) fn apply_on_reload(
             ORCHESTRATION_CARRY_CAUSE,
             super::rebind::ReboundMode::Orchestration,
             crate::profiles::session_selection(&paths, record),
+            None,
         )
         .map(Some)
     };

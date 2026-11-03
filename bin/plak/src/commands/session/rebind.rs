@@ -11,6 +11,7 @@ pub(crate) fn rebind_document(
     cause: &str,
     mode: crate::carry::rebind::ReboundMode,
     profile: Option<crate::profiles::SessionSelection>,
+    resume: Option<product_sessions::SessionRecord>,
 ) -> CliResult<(product_sessions::SessionRecord, String)> {
     let estimated_tokens = document.estimated_tokens();
     let messages = document.message_count();
@@ -29,7 +30,11 @@ pub(crate) fn rebind_document(
             estimated_tokens,
             messages,
             profile,
-            continues_line: true,
+            carry: Some(super::import_export::LineCarry {
+                cause: cause.to_owned(),
+                orchestration: mode == crate::carry::rebind::ReboundMode::Orchestration,
+                resume,
+            }),
         },
         (mode != crate::carry::rebind::ReboundMode::Orchestration).then_some(&config),
     )

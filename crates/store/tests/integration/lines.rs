@@ -171,6 +171,82 @@ fn successor(head: &Head, checkpoint_id: CheckpointId) -> TestResult<RuntimeChec
     )
 }
 
+/// `head`'s successor with an unfinished turn: a Working head.
+fn working_successor(head: &Head, checkpoint_id: CheckpointId) -> TestResult<RuntimeCheckpoint> {
+    use plakous_agent::internal::{
+        DurableOperationKind, DurableOperationRecord, DurableOperationState,
+        DurableOperationTransition, RecoveryAction, RecoveryHandlerSignature, RecoveryObligation,
+        RecoveryObligationKind, RuntimeComponentKind, RuntimeLifecycle, RuntimeManifest,
+        RuntimeOperationLedger, RuntimeOperationRoot, RuntimeWorkingRoot, WorkingRecoveryPhase,
+    };
+    let quiescent = successor(head, checkpoint_id)?;
+    let manifest = quiescent.manifest();
+    let turn_id = id(70_901)?;
+    let operation = DurableOperationRecord::new(
+        7,
+        DurableOperationKind::Provider {
+            root: RuntimeOperationRoot::Turn(turn_id),
+            attempt_id: id(70_902)?,
+        },
+        super::conformance::component(RuntimeComponentKind::Operation, b"provider-request-v1")?,
+        vec![DurableOperationTransition::new(
+            id(70_903)?,
+            DurableOperationState::Prepared,
+        )],
+    )?;
+    Ok(RuntimeCheckpoint::new(RuntimeManifest::new(
+        manifest.provenance().clone(),
+        manifest.topology(),
+        RuntimeLifecycle::Working {
+            root: RuntimeWorkingRoot::Turn {
+                turn_id,
+                next_round: 1,
+            },
+            recovery_phase: WorkingRecoveryPhase::DispatchEvidence,
+            obligations: vec![RecoveryObligation::new(
+                7,
+                RecoveryHandlerSignature::new(
+                    RecoveryObligationKind::ProviderAttempt,
+                    RecoveryAction::ProviderEvidenceRequired,
+                ),
+            )],
+        },
+        manifest.harness_plan_component().clone(),
+        manifest.provider_configuration().clone(),
+        manifest.canonical().clone(),
+        manifest.binding().clone(),
+        manifest.tools().clone(),
+        RuntimeOperationLedger::new(Vec::new(), vec![operation])?,
+        None,
+        None,
+        manifest.jobs().clone(),
+        manifest.named_state().clone(),
+        manifest.durability(),
+    )?)?)
+}
+
+/// Commits `next` as `head`'s successor.
+async fn commit_checkpoint(
+    store: &dyn SessionStore,
+    head: &Head,
+    next: RuntimeCheckpoint,
+) -> TestResult<Head> {
+    let next_bundle = bundle(&next, Some(&head.bundle))?;
+    let receipt = store
+        .commit(CommitCheckpoint::new(
+            head.lease.clone(),
+            head.branch,
+            next_bundle.clone(),
+        ))
+        .await?;
+    Ok(Head {
+        lease: head.lease.clone(),
+        branch: receipt.head(),
+        checkpoint: next,
+        bundle: next_bundle,
+    })
+}
+
 async fn commit(
     store: &dyn SessionStore,
     head: &Head,
@@ -590,10 +666,28 @@ async fn a_carry_continues_and_deletion_ends_the_line(
             StoreInvalidReason::GenesisCheckpointTopology
         ))
     );
+    // It never moves a head with an unfinished turn.
+    let working = commit_checkpoint(
+        store,
+        third_head,
+        working_successor(third_head, id(70_031)?)?,
+    )
+    .await?;
+    let mid_turn = LineContinuation::new(working.lease.clone(), working.branch, Vec::new());
+    assert_eq!(
+        store
+            .create(carry_request(carried, &genesis)?.continuing_line(mid_turn))
+            .await
+            .err(),
+        Some(SessionStoreError::Invalid(
+            StoreInvalidReason::CarrySourceNotQuiescent
+        ))
+    );
+    assert_eq!(store.load_line(line).await?.generation(), 3);
     // It names the exact head it read the ledger from: a commit between the
     // read and the create refuses it, with nothing moved.
-    let read_head = third_head.branch;
-    let third_head = commit(store, third_head, id(70_018)?, Vec::new()).await??;
+    let read_head = working.branch;
+    let third_head = commit(store, &working, id(70_018)?, Vec::new()).await??;
     let stale = LineContinuation::new(third_head.lease.clone(), read_head, Vec::new());
     assert_eq!(
         store

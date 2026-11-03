@@ -24,7 +24,7 @@ use sessions::{
     StoreBaseline, digest_parts,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 35;
+pub(crate) const SCHEMA_VERSION: i64 = 36;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -491,7 +491,7 @@ fn load_record(
 ) -> Result<SessionRecord, String> {
     let mut session = connection
             .query_row(
-                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools FROM sessions WHERE id = ?1",
+                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent FROM sessions WHERE id = ?1",
                 [id],
                 |row| {
                     let locator: Option<String> = row.get(11)?;
@@ -514,6 +514,7 @@ fn load_record(
                         child_wake_suppressed: false,
                         tool_call_count: 0,
                         compaction_count: 0,
+                        carry_intent: row.get::<_, Option<String>>(15)?.map(|value| plakous_hosted::sessions::CarryIntent::decode(&value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
                     })
                 },
             )
@@ -708,7 +709,7 @@ impl ProductStore {
             .map_err(|_| "could not start product listing read".to_owned())?;
         let mut query_count = 0usize;
         let mut statement = transaction.prepare(
-            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0) FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 ORDER BY updated_at DESC, id ASC LIMIT ?2"
+            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 ORDER BY updated_at DESC, id ASC LIMIT ?2"
         ).map_err(|_| "could not query product sessions".to_owned())?;
         query_count += 1;
         let mut sessions = statement
@@ -749,6 +750,13 @@ impl ProductStore {
                     child_wake_suppressed: false,
                     tool_call_count: from_i64(row.get(15)?)?,
                     compaction_count: from_i64(row.get(16)?)?,
+                    carry_intent: row
+                        .get::<_, Option<String>>(17)?
+                        .map(|value| {
+                            plakous_hosted::sessions::CarryIntent::decode(&value)
+                                .map_err(|_| rusqlite::Error::InvalidQuery)
+                        })
+                        .transpose()?,
                 })
             })
             .map_err(|_| "could not query product sessions".to_owned())?
@@ -865,8 +873,8 @@ fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordS
         .into_owned();
     let locator = s.plakous_locator.map(|value| value.to_string());
     let changed = tx.execute(
-        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
-        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?],
+        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?],
     ).map_err(|error| write_error(error, "product session identity already exists or is invalid".to_owned()))?;
     if changed != 1 {
         return Err("product session insert was not exact".to_owned().into());
@@ -925,9 +933,17 @@ fn update_session(
 ) -> Result<usize, RecordStoreError> {
     // A loaded record carries the view head, not a replacement genesis binding.
     tx.execute(
-        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18) WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6",
-        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?],
+        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18), carry_intent=?19 WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6",
+        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?],
     ).map_err(|error| write_error(error, "could not update product session".to_owned()))
+}
+
+/// A carry's write-ahead intent; the save that binds its locator clears it.
+fn encoded_carry_intent(s: &SessionRecord) -> Result<Option<String>, String> {
+    s.carry_intent
+        .as_ref()
+        .map(plakous_hosted::sessions::CarryIntent::encode)
+        .transpose()
 }
 
 /// The root's frozen tools are written once, with the first runtime
@@ -1253,7 +1269,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "sessions",
-        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)))",
+        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)), carry_intent TEXT CHECK(carry_intent IS NULL OR (json_valid(carry_intent) AND locator IS NULL)))",
     ),
     (
         "sessions_workspace_updated",

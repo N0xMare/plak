@@ -174,8 +174,8 @@ pub mod internal {
     pub use crate::runtime::{
         AbandonedTurnClaim, AbandonedTurnReport, AbandonmentCause, Agent, AgentBuilder,
         AgentConfig, AgentRequestPolicy, CheckpointRecoveryVerdict, ContextOverflowRemedy,
-        CredentialWait, DEFAULT_STORE_OPERATION_TIMEOUT, DurableCarryHead, DurableCarryReplay,
-        DurableCarrySource, DurableCodeCellAbandonmentOutcome, DurableCodeCellAbandonmentRequest,
+        CredentialWait, DEFAULT_STORE_OPERATION_TIMEOUT, DurableCarryHead, DurableCarrySource,
+        DurableCodeCellAbandonmentOutcome, DurableCodeCellAbandonmentRequest,
         DurableCompactionReceipt, DurableCompactionRecoveryOutcome,
         DurableEffectEvidenceRecoveryOutcome, DurableEffectEvidenceRecoveryRequest,
         DurableLineHead, DurableOpenVerification, DurableRuntimeBranchOutcome, DurableRuntimeOpen,

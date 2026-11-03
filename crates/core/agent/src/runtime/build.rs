@@ -165,12 +165,7 @@ impl AgentBuilder {
     }
     /// Makes the durable genesis take over a carry source's line head.
     pub(crate) fn carry_head(mut self, head: Box<super::DurableCarryHead>) -> Self {
-        self.line_carry = Some(super::durable::carry::LineCarry::Head(head));
-        self
-    }
-    /// Rebuilds an already published carry's genesis exactly.
-    pub(crate) fn replay_carry(mut self, replay: super::DurableCarryReplay) -> Self {
-        self.line_carry = Some(super::durable::carry::LineCarry::Replay(replay));
+        self.line_carry = Some(head);
         self
     }
     pub(crate) fn with_line_origin(mut self, origin: crate::session::LineOrigin) -> Self {

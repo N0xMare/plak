@@ -150,6 +150,34 @@ impl AgentSessions {
             .map_err(|error| runtime_error(&error))
     }
 
+    /// Reads the current head of the agent line `locator`'s branch belongs
+    /// to: the branch itself while it is the head, otherwise where a rebind
+    /// or carry moved the line.
+    ///
+    /// # Errors
+    /// [`AgentSessionsErrorKind::LineEnded`] once the session holding the
+    /// line's head was deleted, and typed lookup or backend failures.
+    pub async fn line_head_of(
+        &self,
+        locator: SessionLocator,
+    ) -> Result<LineHead, AgentSessionsError> {
+        let loaded = self
+            .store
+            .load_branch(locator.session_ref())
+            .await
+            .map_err(|error| super::store_error(error).for_session(locator.session_id))?;
+        let line = loaded.checkpoint().checkpoint().manifest().topology().line;
+        match self.line_head(line).await {
+            Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {
+                Err(AgentSessionsError::new(
+                    AgentSessionsErrorKind::LineEnded,
+                    "the branch's agent line ended when the session holding its head was deleted",
+                ))
+            }
+            head => head,
+        }
+    }
+
     /// Takes the lease and a fresh fence of `line`'s head without building a
     /// driver, so no route, catalog or credential is needed.
     ///
@@ -221,8 +249,9 @@ impl AgentSessions {
     }
 
     /// Resolves a same-store carry from `source`: the next head of its line
-    /// under the head's held lease, an exact replay of this operation's
-    /// published carry, or a new line when `source` is read-only history.
+    /// under the head's held lease, or a new line when `source` is read-only
+    /// history. An exact retry of a published carry is answered from its
+    /// create receipt.
     async fn carry_builder(
         &self,
         operation_id: &SessionOperationId,
@@ -231,8 +260,7 @@ impl AgentSessions {
     ) -> Result<AgentBuilder, AgentSessionsError> {
         use plakous_agent::internal::DurableCarrySource;
         use plakous_agent::internal::facade_support::{
-            agent_builder_carrying_head, agent_builder_has_job_host, agent_builder_replaying_carry,
-            agent_builder_with_line_origin,
+            agent_builder_carrying_head, agent_builder_has_job_host, agent_builder_with_line_origin,
         };
         let carried = Box::pin(
             self.runtime
@@ -252,9 +280,6 @@ impl AgentSessions {
                     ));
                 }
                 Ok(agent_builder_carrying_head(builder, head))
-            }
-            DurableCarrySource::Published(replay) => {
-                Ok(agent_builder_replaying_carry(builder, replay))
             }
             DurableCarrySource::Superseded => {
                 // A superseded source has no line to continue: its carry

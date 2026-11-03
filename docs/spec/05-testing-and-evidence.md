@@ -1974,7 +1974,7 @@ Conflict laws run the real topology tool with distinct operation ids, then
 present its terminals with reused, absent and empty display ids. Every
 operation retains one keyed conflict notice and its own whole path; conflict
 facts still cross the existing process-local tool boundary, not a new store
-encoding. Product schema 35, tree schema 9 and export v11 importing v10 stay
+encoding. Product schema 36, tree schema 9 and export v11 importing v10 stay
 unchanged by these notice corrections.
 The bounded result-mail observation law requires start and finished milestones
 before its result row even on the first read. The spawn/wait/adopt parity
@@ -4223,7 +4223,8 @@ current head checkpoint (another checkpoint is `Conflict`), a repeat records
 nothing and appends nothing, and its next commit consumes them; a head advance
 folds the pending terminals instead of waiting for them, and any other folded
 set is refused `LineTerminalsNotFolded` with the head unchanged; a same-store
-carry is refused without a continuation, when it names a head a commit has
+carry is refused without a continuation, from a Working head
+(`CarrySourceNotQuiescent`), when it names a head a commit has
 since replaced (`Conflict`), and under a lease a lease-only holder has since
 superseded, then continues the line across sessions under the holder's lease,
 folding its recorded terminal, an exact replay answers from the receipt, and
@@ -4256,17 +4257,27 @@ owners off the head, and the head's open answers the recorded stop and folds it
 once (one `LineJobTerminalRecorded`, one `LineJobTerminalsConsumed`); a
 new-line rebind keeps an exited job's pending notice; a transfer release
 without a `JobHost` stops and records its job, so the head advance that follows
-is not refused; and a head-advancing rebind whose source head has a running job
+is not refused; a carry of a running job onto a binding without a `JobHost` is
+refused `UnsettledProcesses` and releases the head for the next carry; an exact
+retry of a committed carry's operation returns the same session at the same
+genesis; a Working head opened after a lease-only holder recorded its job's
+stop answers that recorded stop; and a head-advancing rebind whose source head has a running job
 row and no `JobHost` on the target is refused `RunningJobsWithoutJobHost` with
 the job still running. The facade line test carries a released source only
 after its attached driver let go (`Ownership` before), and after the head's
 session is deleted the predecessor opens as `LineEnded` and gc answers
 `PruneHistoryOutcome::LineEnded`. The product law
-`product_carry_sigkill_cuts_leave_one_successor_at_the_line_head` (durability
-profile) SIGKILLs a product carry before it runs, right after its create
-returns and after it committed, relaunches the exact carry, and requires one
-source and one successor in the runtime store, the successor at generation 2
-as the line's head, and the source refused `NotLineHead`. A store reopened under a limit below its usage
+`product_carry_cuts_relaunch_to_one_successor_at_the_line_head` (durability
+profile) drives the real `/rebind` carry (`carry::rebind::rebind_session`) and
+the reload's orchestration carry (`carry::apply_on_reload`) in a child process
+on the offline model, and kills each (a `carry-cut` file beside the offline
+model's evidence log) before its
+runtime create and after the create returned but before the record that binds
+it is saved. A relaunch settles the workspace's write-ahead intents and opens
+the source as a TUI launch does, and must show exactly one carried record,
+bound and with no intent, at the line's head at generation 2, the source's
+open redirected to it with a `carried forward as` note, and one source and one
+successor in the runtime store. A store reopened under a limit below its usage
 prunes and then admits an ordinary commit
 (`sqlite_prune_over_the_absolute_limit_frees_ordinary_headroom`), and
 incremental vacuum returns the freed pages to the file system

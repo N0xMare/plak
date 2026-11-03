@@ -5,13 +5,14 @@
 //! read of its ledger to the create, the create names the exact head it read
 //! and the pending line job terminals it folded, and the store refuses it
 //! unless all of that still holds, so the head move and the ledger it hands
-//! over are one compare-and-swap.
+//! over are one compare-and-swap. An exact retry of a published carry is
+//! answered from its create receipt, by checkpoint id, like any create.
 
 use crate::manifest::{JobLedger, LineJobTerminal};
 use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
+use crate::runtime::durable::DurableSessionRuntime;
 use crate::runtime::durable::bootstrap::release_store_lease;
 use crate::runtime::durable::branch::{operation_run_id, validate_session_operation_id};
-use crate::runtime::durable::{DurableGenesisIdentities, DurableSessionRuntime};
 use crate::session::LineContinuation;
 use crate::{
     AcquireBranch, AgentError, AgentErrorKind, BranchHead, BranchLease, SessionRef, SessionStore,
@@ -27,9 +28,6 @@ use std::sync::Arc;
 pub enum DurableCarrySource {
     /// The source is its line's head, held under its lease.
     Head(Box<DurableCarryHead>),
-    /// This operation's carry already published: its genesis is rebuilt
-    /// exactly from the published one.
-    Published(DurableCarryReplay),
     /// The source is not its line's head (or its line ended): it is
     /// read-only history, so the carry starts a new line.
     Superseded,
@@ -81,58 +79,34 @@ impl DurableCarryHead {
     }
 }
 
-/// The published genesis of an exact carry replay.
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct DurableCarryReplay {
-    line: LineId,
-    generation: u64,
-    jobs: JobLedger,
-}
-
-/// The line a durable genesis joins, resolved before its create.
-pub(in crate::runtime) enum LineCarry {
-    Head(Box<DurableCarryHead>),
-    Replay(DurableCarryReplay),
-}
-
-impl LineCarry {
+impl DurableCarryHead {
     /// The target's line, generation and the ledger it takes over (rows not
     /// yet handed to the target).
     pub(in crate::runtime) fn line_and_jobs(
         &self,
     ) -> Result<(LineId, u64, &JobLedger), AgentError> {
-        match self {
-            Self::Head(head) => Ok((
-                head.line,
-                head.from.checked_add(1).ok_or_else(|| {
-                    AgentError::new(AgentErrorKind::Session, "line generations exhausted")
-                })?,
-                &head.jobs,
-            )),
-            Self::Replay(replay) => Ok((replay.line, replay.generation, &replay.jobs)),
-        }
+        Ok((
+            self.line,
+            self.from.checked_add(1).ok_or_else(|| {
+                AgentError::new(AgentErrorKind::Session, "line generations exhausted")
+            })?,
+            &self.jobs,
+        ))
     }
 
     /// The create's fence over the taken-over head, and the line and
     /// generation its folded terminals were recorded under.
-    pub(in crate::runtime) fn continuation(&self) -> Option<(LineContinuation, LineId, u64)> {
-        match self {
-            Self::Head(head) => Some((
-                LineContinuation::new(head.lease.clone(), head.head, head.consumed.clone()),
-                head.line,
-                head.from,
-            )),
-            Self::Replay(_) => None,
-        }
+    pub(in crate::runtime) fn continuation(&self) -> (LineContinuation, LineId, u64) {
+        (
+            LineContinuation::new(self.lease.clone(), self.head, self.consumed.clone()),
+            self.line,
+            self.from,
+        )
     }
 
     /// The held source lease, released once the create settles.
-    pub(in crate::runtime) fn held_lease(&self) -> Option<BranchLease> {
-        match self {
-            Self::Head(head) => Some(head.lease.clone()),
-            Self::Replay(_) => None,
-        }
+    pub(in crate::runtime) fn held_lease(&self) -> BranchLease {
+        self.lease.clone()
     }
 }
 
@@ -150,9 +124,6 @@ impl DurableSessionRuntime {
         source: SessionRef,
     ) -> Result<DurableCarrySource, AgentError> {
         validate_session_operation_id(operation_id)?;
-        if let Some(replay) = self.published_carry(operation_id).await? {
-            return Ok(DurableCarrySource::Published(replay));
-        }
         let loaded = self.load(source).await?;
         let topology = loaded.checkpoint().checkpoint().manifest().topology();
         let (line, from) = (topology.line, topology.line_generation);
@@ -193,38 +164,6 @@ impl DurableSessionRuntime {
                 .await;
                 result.map(|_| DurableCarrySource::Superseded)
             }
-        }
-    }
-
-    /// The genesis this operation already created, when it did.
-    async fn published_carry(
-        &self,
-        operation_id: &str,
-    ) -> Result<Option<DurableCarryReplay>, AgentError> {
-        let identities = DurableGenesisIdentities::new(operation_id)?;
-        match store_call(
-            StorePhase::LoadCheckpoint,
-            self.store_timeouts.operation,
-            self.store.load_checkpoint(identities.checkpoint_id),
-        )
-        .await
-        {
-            Ok(stored) => {
-                let manifest = stored.checkpoint().manifest();
-                let topology = manifest.topology();
-                if topology.session_id != identities.session_id
-                    || topology.branch_id != identities.branch_id
-                {
-                    return Err(AgentError::from_store(SessionStoreError::IdentityConflict));
-                }
-                Ok(Some(DurableCarryReplay {
-                    line: topology.line,
-                    generation: topology.line_generation,
-                    jobs: manifest.jobs().clone(),
-                }))
-            }
-            Err(error) if error.is(SessionStoreError::NotFound) => Ok(None),
-            Err(error) => Err(error.into_agent()),
         }
     }
 

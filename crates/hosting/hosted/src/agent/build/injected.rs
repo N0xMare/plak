@@ -78,6 +78,33 @@ pub async fn build_or_open_bound_session(
     .await
 }
 
+/// Creates one seeded session over an injected `runtime`, joining the agent
+/// line its seed names (a same-store carry) like a production create.
+///
+/// # Errors
+///
+/// Returns the create's typed refusal.
+pub async fn create_seeded_bound_session(
+    sessions: Arc<AgentSessions>,
+    seed: Option<SeededHistory>,
+    operation_id: SessionOperationId,
+    runtime: SessionRuntimeBinding,
+) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
+    Box::pin(build_or_open(
+        SessionSource::Runtime {
+            sessions,
+            runtime: Box::new(runtime),
+            topology_owner: None,
+            output_bound_rederived: None,
+            wording: &INJECTED_WORDING,
+        },
+        None::<SessionLocator>.into(),
+        seed,
+        operation_id,
+    ))
+    .await
+}
+
 /// Answers whether opening `locator` under an injected `runtime` would attach,
 /// without owning or attaching it.
 pub async fn verify_bound_session(

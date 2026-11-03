@@ -120,7 +120,7 @@ pub fn run_actual_host(
                     HostWorkflow::Fork => ActualHostWorkflow::Fork,
                     HostWorkflow::Rebind => ActualHostWorkflow::Rebind,
                     HostWorkflow::Compact => ActualHostWorkflow::Compact,
-                    HostWorkflow::SourceRelease => return,
+                    HostWorkflow::SourceRelease | HostWorkflow::SeededCreate => return,
                 },
                 match boundary {
                     HostBoundary::Prepared => ActualHostBoundary::Prepared,

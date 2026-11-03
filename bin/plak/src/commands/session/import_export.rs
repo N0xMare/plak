@@ -81,8 +81,20 @@ pub(crate) struct PreparedImport {
     /// applies.
     pub(super) profile: Option<crate::profiles::SessionSelection>,
     /// A same-store carry (binding repair or orchestration apply) continues
-    /// its source's agent line; every other import starts a new line.
-    pub(super) continues_line: bool,
+    /// its source's agent line and is written ahead of its runtime create;
+    /// every other import starts a new line.
+    pub(super) carry: Option<LineCarry>,
+}
+
+/// A same-store carry's write-ahead facts (spec 02 §2.6).
+pub(crate) struct LineCarry {
+    /// The notice the successor records.
+    pub(crate) cause: String,
+    /// The reload's orchestration carry, which has no root fallback.
+    pub(crate) orchestration: bool,
+    /// The intent record an interrupted carry left, resumed under its own
+    /// id and create operation instead of a new one.
+    pub(crate) resume: Option<product_sessions::SessionRecord>,
 }
 
 impl PreparedImport {
@@ -101,7 +113,7 @@ impl PreparedImport {
             estimated_tokens,
             messages,
             profile: None,
-            continues_line: false,
+            carry: None,
         })
     }
 }
@@ -139,7 +151,7 @@ pub(crate) fn import_reload_handoff(
             estimated_tokens,
             messages,
             profile,
-            continues_line: false,
+            carry: None,
         },
     )
 }
@@ -161,13 +173,17 @@ pub(super) fn import_prepared_with_fallback(
         estimated_tokens,
         messages,
         profile,
-        continues_line,
+        carry,
     } = prepared;
     let crate::carry::CarriedImport {
-        record,
+        mut record,
         mut history,
         mut note,
     } = carried;
+    let resumed = carry.as_ref().and_then(|carry| carry.resume.as_ref());
+    if let Some(intent) = resumed {
+        resume_identity(&mut record, &mut note, intent);
+    }
     let paths = crate::home::paths::PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
         &record.workspace_root,
@@ -184,6 +200,7 @@ pub(super) fn import_prepared_with_fallback(
         &source_key,
     )
     .map_err(CliFailure::new)?
+        && resumed.is_none_or(|intent| intent.id != existing.id)
     {
         return Err(CliFailure::new(format!(
             "session {source_id} ({source_key}) was already carried forward as {}; resume it with `plak --resume {}`",
@@ -195,7 +212,11 @@ pub(super) fn import_prepared_with_fallback(
     let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
     keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
     config.seed_history = Some(history);
-    config.seed_line = Some(seed_line(services, continues_line, &source_id, &source_key));
+    let line = seed_line(services, carry.is_some(), &source_id, &source_key);
+    if let (Some(carry), plakous_hosted::agent::SeededLine::Continue(source)) = (&carry, &line) {
+        write_ahead(&mut config, carry, *source)?;
+    }
+    config.seed_line = Some(line);
     let created = product_host::create_seeded_session_with_preflight(config, move |window| {
         let capacity =
             super::attached::carry_capacity_from_window(window, estimated_tokens, messages);
@@ -247,6 +268,44 @@ pub(super) fn import_prepared_with_fallback(
         );
     }
     Ok((record, note))
+}
+
+/// An interrupted carry finishes under its own identity, so its create
+/// replays exactly.
+fn resume_identity(
+    record: &mut product_sessions::SessionRecord,
+    note: &mut String,
+    intent: &product_sessions::SessionRecord,
+) {
+    *note = note.replace(&record.id, &intent.id);
+    record.id.clone_from(&intent.id);
+    record
+        .create_operation_id
+        .clone_from(&intent.create_operation_id);
+    record.created_at_unix = intent.created_at_unix;
+    record.store_revision = intent.store_revision;
+}
+
+/// Saves a same-store carry's successor ahead of its runtime create: a crash
+/// after the create leaves a record that names its own create operation and
+/// source, so open and startup can finish, replay or withdraw it (spec 02
+/// §2.6).
+fn write_ahead(
+    config: &mut product_host::HostConfig<crate::surface_protocol::PlakExtension>,
+    carry: &LineCarry,
+    source: plakous::sessions::SessionLocator,
+) -> CliResult<()> {
+    config.session.carry_intent = Some(plakous_hosted::sessions::CarryIntent {
+        source,
+        continues_line: true,
+        cause: carry.cause.clone(),
+        orchestration: carry.orchestration,
+    });
+    config.session.touch();
+    config
+        .store
+        .save(&mut config.session)
+        .map_err(CliFailure::new)
 }
 
 /// The agent line a carried session joins: a same-store carry continues its

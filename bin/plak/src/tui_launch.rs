@@ -572,7 +572,7 @@ fn prepare_tui_launch(
         product_sessions::SessionRecord::new(cwd.clone())
     };
     if resume {
-        crate::build_features::admit_session(&record)?;
+        record = carry::resume(services, Some(&cwd), record, &mut opening_note)?;
     }
 
     if resume
@@ -1404,7 +1404,7 @@ pub(crate) fn handle_tui_handoff(
             *reload_note = Some(reload_installed_plak(paths, store, record, target)?);
         }
         tui::TuiHandoff::ResumeSession { id } => {
-            let next = store.load(&id).map_err(CliFailure::from)?;
+            let next = carry::switch_to(services, store, &id, reload_note)?;
             let requested = resolved_workspace_path(&record.workspace_root)?;
             let recorded = resolved_workspace_path(&next.workspace_root)?;
             if requested != recorded {

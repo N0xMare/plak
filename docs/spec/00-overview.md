@@ -209,7 +209,7 @@ ownership evidence in the shared Git directory.
 Submitted intents own exact child outputs; attempt outputs are derived on load
 and submit-result replay receipts keep a digest summary. Provisional wait
 receipts retain the exact views they returned.
-Product schema 35 and export v11 retain closed notice-remedy codes and typed
+Product schema 36 and export v11 retain closed notice-remedy codes and typed
 targets. Their frontend command spelling is rendered only by Plak; v10 imports
 install no remedy and preserve their original notice text.
 
@@ -227,7 +227,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r27.e35.p35.t9`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r27.e35.p36.t9`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

@@ -72,7 +72,7 @@ pub use durable::DurableLineHead;
 pub use durable::DurableSessionRuntime;
 pub(crate) use durable::turn_recovery::recovery_verdict_refuses;
 pub use durable::turn_recovery::{CheckpointRecoveryVerdict, checkpoint_recovery_verdict};
-pub use durable::{DurableCarryHead, DurableCarryReplay, DurableCarrySource};
+pub use durable::{DurableCarryHead, DurableCarrySource};
 
 mod build;
 pub use build::compile_explicit_runtime_profile;
@@ -161,7 +161,7 @@ pub struct AgentBuilder {
     initial_named_state: crate::manifest::NamedState,
     /// The line a durable genesis continues (a same-store carry); `None`
     /// starts a new line.
-    line_carry: Option<durable::carry::LineCarry>,
+    line_carry: Option<Box<DurableCarryHead>>,
     /// Provenance recorded for a new line.
     line_origin: crate::session::LineOrigin,
     model: Arc<dyn LanguageModel>,

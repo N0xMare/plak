@@ -674,3 +674,157 @@ async fn a_transfer_release_without_a_job_host_stops_and_records_its_jobs() {
     );
     session.release().await.unwrap();
 }
+
+/// A carry of a head with a running job onto a binding without a `JobHost`
+/// is refused as `UnsettledProcesses`, and the head's lease it took is
+/// released: a carry with the `JobHost` then succeeds.
+#[tokio::test]
+async fn a_carry_of_running_jobs_without_a_job_host_is_refused_and_releases_the_head() {
+    let fixture = Fixture::new();
+    let registry = Arc::new(crate::jobs::JobRegistry::default());
+    let source = fixture
+        .create(
+            "carry-jobs:create",
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await;
+    let line = source.line();
+    start_job(&fixture, &source).await;
+    let locator = source.release_for_transfer().await.unwrap();
+    let refused = fixture
+        .carry("carry-jobs:private", locator, fixture.binding())
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind(), AgentSessionsErrorKind::UnsettledProcesses);
+    assert_eq!(
+        fixture.sessions.line_head(line).await.unwrap().generation(),
+        1
+    );
+    let carried = fixture
+        .carry(
+            "carry-jobs:hosted",
+            locator,
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(carried.agent().jobs()[0].status, JobStatus::Running);
+    registry.stop_all(Duration::from_millis(250)).await.unwrap();
+    carried.release().await.unwrap();
+}
+
+/// An exact retry of a committed carry's operation returns the same session
+/// at the same genesis; the line does not move again.
+#[tokio::test]
+async fn a_same_operation_carry_retry_returns_the_committed_successor() {
+    let fixture = Fixture::new();
+    let source = fixture
+        .create("carry-retry:create", fixture.binding())
+        .await;
+    let line = source.line();
+    let locator = source.release().await.unwrap();
+    let first = fixture
+        .carry("carry-retry:carry", locator, fixture.binding())
+        .await
+        .unwrap();
+    let genesis = first.locator();
+    first.release().await.unwrap();
+    let retried = fixture
+        .carry("carry-retry:carry", locator, fixture.binding())
+        .await
+        .unwrap();
+    assert_eq!(retried.locator(), genesis);
+    let head = fixture.sessions.line_head(line).await.unwrap();
+    assert_eq!(
+        (head.session_id(), head.branch_id(), head.generation()),
+        (genesis.session_id(), genesis.branch_id(), 2)
+    );
+    assert_eq!(fixture.sessions.line_head_of(locator).await.unwrap(), head);
+    retried.release().await.unwrap();
+}
+
+/// A Working head whose job stop a lease-only holder recorded answers that
+/// recorded stop when it is opened, before any commit folds it.
+#[tokio::test]
+async fn a_working_head_answers_its_recorded_job_terminal_on_open() {
+    let fixture = Fixture::new();
+    let registry = Arc::new(crate::jobs::JobRegistry::default());
+    let session = fixture
+        .create(
+            "working-terminal:create",
+            fixture.binding().with_job_host(registry.clone()),
+        )
+        .await;
+    let line = session.line();
+    // The first round promotes the job; the second stalls mid-turn.
+    let agent = session.agent().clone();
+    let _turn = agent.prompt("start").await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while agent.jobs().is_empty()
+            || plakous_offline_crash_harness::evidence::read_evidence(
+                fixture.path().join("evidence.jsonl"),
+            )
+            .unwrap()
+            .iter()
+            .filter(|record| {
+                record.kind
+                    == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched
+            })
+            .count()
+                < 2
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let number = agent.jobs()[0].number;
+    let working = session
+        .abandon_and_release(&[], Duration::from_millis(250))
+        .await
+        .unwrap();
+    registry.stop_all(Duration::from_millis(250)).await.unwrap();
+    let holder = fixture
+        .sessions
+        .open_lease_only(
+            &SessionOperationId::new("working-terminal:hold").unwrap(),
+            line,
+        )
+        .await
+        .unwrap();
+    assert_eq!(holder.locator(), working);
+    let recorded = holder
+        .record_job_terminals(&registry.views())
+        .await
+        .unwrap();
+    assert_eq!(recorded, [number]);
+    holder.release().await.unwrap();
+    let opened = fixture
+        .sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("working-terminal:open").unwrap(),
+            working,
+            fixture
+                .binding()
+                .with_job_host(Arc::new(crate::jobs::JobRegistry::default())),
+        ))
+        .await
+        .unwrap();
+    let session = match opened {
+        OpenSessionOutcome::Opened { session, .. }
+        | OpenSessionOutcome::RestoredWorking { session, .. } => session,
+        other => panic!("Working head did not open: {other:?}"),
+    };
+    let job = session
+        .agent()
+        .jobs()
+        .into_iter()
+        .find(|job| job.number == number)
+        .unwrap();
+    assert!(
+        matches!(job.status, JobStatus::Stopped(_)),
+        "{:?}",
+        job.status
+    );
+    let _ = session.release().await;
+}

@@ -27,6 +27,37 @@ pub(crate) fn rebind_session(
         cause,
         ReboundMode::Rebind,
         crate::profiles::session_selection(&paths, record),
+        None,
+    )
+}
+
+/// Re-runs an interrupted carry of `source` from a fresh export, under the
+/// intent record's own id and create operation (spec 02 §2.6).
+pub(crate) fn resume_carry(
+    services: &crate::shell::services::Services,
+    source: &crate::store::sessions::SessionRecord,
+    cause: &str,
+    orchestration: bool,
+    intent: crate::store::sessions::SessionRecord,
+) -> CliResult<(crate::store::sessions::SessionRecord, String)> {
+    let paths = crate::home::paths::PlakPaths::for_workspace(
+        services.paths()?.home().to_path_buf(),
+        &source.workspace_root,
+    );
+    ensure_carry_quiescence(&paths, source)?;
+    let document = export_session(&paths, source)
+        .map_err(|error| CliFailure::new(format!("cannot carry this session: {error}")))?;
+    crate::commands::session::rebind::rebind_document(
+        services,
+        document,
+        cause,
+        if orchestration {
+            ReboundMode::Orchestration
+        } else {
+            ReboundMode::Rebind
+        },
+        crate::profiles::session_selection(&paths, source),
+        Some(intent),
     )
 }
 

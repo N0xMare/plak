@@ -2454,6 +2454,9 @@ A rebind names its line transition. Two exist:
   that already have terminal evidence, under its own owner, so the notices a
   source still owed reach the target too; running rows stay with the source's
   line. The source keeps its line, stays writable and keeps its processes.
+  Until live switching (S1) lands, such an exit notice can therefore be
+  delivered on both lines: once on the source, if it continues, and once on
+  the target.
 
 **Running jobs need a `JobHost` to move.** A head advance hands running rows to
 the target, and only a host-owned `JobHost` can hand the process service with
@@ -2594,9 +2597,11 @@ notice handed over exactly once; the source lease ends once the create
 settles. The create is refused as `Ownership` while another owner, including a
 lease-only holder, holds the head, as `NotQuiescent` while the head has an
 unfinished turn or workflow, and as `UnsettledProcesses` when the head has
-running jobs and the new binding installs no `JobHost` (§5.7). An exact retry
-of a published carry's operation rebuilds the same genesis from the published
-one. A source that is already superseded, or whose line ended, has no line to
+running jobs and the new binding installs no `JobHost` (§5.7); a refusal
+releases the head's lease it took. An exact retry of a published carry's
+operation is answered from its create receipt: the same session at the same
+genesis. `AgentSessions::line_head_of(locator)` reads where the line of a
+branch's head is now (`LineEnded` once its head session was deleted). A source that is already superseded, or whose line ended, has no line to
 continue: the new session starts a new line whose provenance names the branch
 it was carried from. `CreateSessionRequest::with_line_provenance(text)`
 records 1 to 256 bytes of single-line provenance on the new line an import from
@@ -9653,7 +9658,7 @@ implementations, `TokioRuntime` and the feature-gated
 `http::NativeHttpTransport`.
 
 **Agent lines** (§5.1, §5.7, §8.5) are on the facade:
-`plakous::model::LineId`, `AgentSessions::line_head` and `LineHead`,
+`plakous::model::LineId`, `AgentSessions::line_head`, `line_head_of` and `LineHead`,
 `AgentSessions::open_lease_only` and `LeaseOnlyHead`, `OpenedSession::line`,
 `CreateSessionRequest::continuing_line` and `with_line_provenance`,
 `RebindSessionRequest::starting_line`, `RebindSessionOutcome::Refused` with

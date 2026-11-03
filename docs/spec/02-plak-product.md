@@ -272,10 +272,10 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r27.e35.p35.t9/             this build's state (§2.5)
+    r27.e35.p36.t9/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 35
-      product.sqlite3             Plak intents and feed-derived views, schema 35
+      product.sqlite3             Plak intents and feed-derived views, schema 36
       subagents.sqlite3           the agent tree, schema 9
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
@@ -486,7 +486,7 @@ Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
 
-Product schema 35 holds the intents of §2.6 in `submissions` (keyed by command id),
+Product schema 36 holds the intents of §2.6 in `submissions` (keyed by command id),
 `workflow_requests` (keyed by operation id), `operator_notices` (keyed by notice
 id, unique per `(anchor, ordinal)`; an imported transcript is written there once
 at anchor 0 in document order) and `host_intents` (the `wake_suppression` and
@@ -818,7 +818,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r27.e35.p35.t9`. The key is derived from the stores'
+schema>`, for example `r27.e35.p36.t9`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -1069,7 +1069,7 @@ accounts and invalid target UUIDs refuse the document before import. The
 version 10 reader accepts only its original notice fields and installs no
 remedy. Missing remedies retain their text verbatim; importing never infers an
 action from words or command fragments. This is a document bump, not an
-in-place database migration; the product store is schema 35.
+in-place database migration; the product store is schema 36.
 
 `plak session export <id> [--out <path>]` writes one JSON document with
 `"format": "plak-session-export", "version": 11` and prints its path. The
@@ -1250,7 +1250,9 @@ next head in its create transaction, takes the source head's process rows and
 pending notices, and the source's runtime branch becomes read-only history. The
 carry holds the source head's lease from reading its rows to that transaction,
 so it is refused while the source is open in any plak or held lease-only, and
-while its head has an unfinished turn (chapter 01 §5.10). A profile rebind
+while its head has an unfinished turn (chapter 01 §5.10). Its successor's
+record is written ahead of the runtime create and settled after a crash
+(§2.6), and an open of the superseded source resumes the successor. A profile rebind
 (Fork now) and a binding rebind instead start a new agent line, as a fork does
 (chapter 01 §5.7): the successor keeps the job numbers and the rows, with their
 pending notices, of jobs that already exited, so a notice the source still owed
@@ -1516,6 +1518,33 @@ view, and nothing is both.
 | Agent attention acknowledgements | intent | `(tree, agent, attempt, attention)` | operator-authored presentation bookkeeping |
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
+| Carry intent: the write-ahead marker of a same-store carry (`carry_intent`: the source locator, that it continues the source's line, the carry's cause and whether it is the reload's orchestration carry) | intent | the successor's `plak:create:<id>` | written with the successor's record, locator unset, before the runtime create; cleared in the save that binds the locator; settled on open and at startup (below) |
+
+**Write-ahead carries.** A same-store carry (the binding-repair `/rebind`
+carry and the `/reload` orchestration carry, §2.5.1) saves its successor's
+record, with its stable create operation id, its carried-forward link and its
+`carry_intent`, before the runtime create, and saves the locator, clearing the
+intent, only after it. A crash in between leaves a record that names exactly
+the create it was waiting for. Every TUI startup settles the workspace's
+pending intents, and every open of a record settles its own first:
+
+1. The create operation published (its genesis has a feed): the record binds
+   that genesis and the projector catches it up.
+2. It did not, and the source branch is still its line's head: the carry
+   re-runs from a fresh export of the source under the same record and create
+   operation.
+3. Otherwise the source's line moved elsewhere or ended: the intent's record
+   is deleted (its create identity stays bound, so a replay is refused) and
+   the source stays live.
+
+An open of a record whose runtime branch a carry superseded, refused by the
+runtime as `NotLineHead`, follows the carried-forward link to its successor
+(settling it first if it is still an intent) and resumes that, with the
+opening note `session <id> was carried forward as <successor>; resuming it`,
+instead of a read-only refusal. This covers TUI launch and resume and the
+in-TUI session switch. For up to one lease period after a
+crash, a re-run carry may be refused as owned (the crashed process's source
+lease has not lapsed); the next open or startup settles it.
 
 Transient store refusal classes on hosted session errors are attached only at
 read/preflight boundaries, not by the general session-error conversion. A
@@ -1902,7 +1931,7 @@ genesis identity derived from the immutable create operation. The projector
 restores that creation join, so a committed clear remains settled even when
 its source request's anchor is still retained.
 Submissions and workflow requests carry the applied cursor at their first
-durable write (schema 35's immutable `anchor` columns). Once that anchor is
+durable write (schema 36's immutable `anchor` columns). Once that anchor is
 below `feed_retained_from`, their join settles them as consumed, both on an
 incremental pass and after view deletion. No withdrawal notice, command row
 or counter is derived, and a historical clear's successor is never treated as
@@ -4370,7 +4399,7 @@ row's own start-to-finish span; a failed wait keeps its timeout and actual
 wait. The live tool line carries the same wait facts as the persisted row. The
 projector writes rows into the product transcript
 (`transcript_rows.row`, one JSON payload per row with its ordering key,
-schema 35) by the provenance rules of §2.6; the export document carries them
+schema 36) by the provenance rules of §2.6; the export document carries them
 (§2.5.1), the host emits the same row live as one `Row` observation once the
 projector wrote it, and restore reads them as the rows of the presentation
 snapshot. Live and restored rows are the same values; the renderer maps a row

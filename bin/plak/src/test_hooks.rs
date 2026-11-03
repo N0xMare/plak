@@ -79,6 +79,26 @@ pub(crate) fn assistant_done_release() -> Option<PathBuf> {
     std::env::var_os("PLAK_TEST_ASSISTANT_DONE_RELEASE").map(PathBuf::from)
 }
 
+/// A `carry-cut` file beside the evidence log naming a boundary (`prepared`
+/// or `runtime-returned`) kills the process at that boundary of a seeded
+/// create: before its runtime create, or after it returned and before the
+/// product record that binds it is saved. The carry crash law relaunches over
+/// what the kill left.
+fn seeded_create_cut(
+    cut: PathBuf,
+) -> impl Fn(product_host::HostWorkflow, product_host::HostBoundary) + Send + Sync {
+    move |workflow, boundary| {
+        let requested = match std::fs::read_to_string(&cut).as_deref().map(str::trim) {
+            Ok("prepared") => product_host::HostBoundary::Prepared,
+            Ok("runtime-returned") => product_host::HostBoundary::RuntimeReturned,
+            _ => return,
+        };
+        if workflow == product_host::HostWorkflow::SeededCreate && boundary == requested {
+            std::process::abort();
+        }
+    }
+}
+
 /// The topology registrations one scripted tree exposes as its whole registry.
 ///
 /// The binder is shared across every runtime this selection builds. A fresh
@@ -1187,7 +1207,7 @@ impl OfflineSelection {
         let injection = Arc::new(product_host::ScriptedRuntimeFactory {
             runtime,
             rebind_target: target,
-            observe: Arc::new(|_, _| {}),
+            observe: Arc::new(seeded_create_cut(self.evidence.with_file_name("carry-cut"))),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });

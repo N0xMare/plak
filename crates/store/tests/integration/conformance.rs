@@ -101,7 +101,10 @@ pub(crate) fn semantic_request(bytes: &[u8]) -> TestResult<Digest> {
     digest(DigestDomain::RequestPlan, bytes)
 }
 
-fn component(kind: RuntimeComponentKind, bytes: &[u8]) -> TestResult<ReconstructiveComponent> {
+pub(crate) fn component(
+    kind: RuntimeComponentKind,
+    bytes: &[u8],
+) -> TestResult<ReconstructiveComponent> {
     let revision = match kind {
         // The V2 tool descriptor codec revision.
         RuntimeComponentKind::ToolRegistry | RuntimeComponentKind::ToolExposure => 3,

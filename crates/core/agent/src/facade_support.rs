@@ -26,15 +26,6 @@ pub fn agent_builder_carrying_head(
     builder.carry_head(head)
 }
 
-/// Rebuilds the genesis of an already published carry exactly.
-#[must_use]
-pub fn agent_builder_replaying_carry(
-    builder: AgentBuilder,
-    replay: crate::runtime::DurableCarryReplay,
-) -> AgentBuilder {
-    builder.replay_carry(replay)
-}
-
 /// Records the provenance of the new line a durable genesis starts.
 #[must_use]
 pub fn agent_builder_with_line_origin(

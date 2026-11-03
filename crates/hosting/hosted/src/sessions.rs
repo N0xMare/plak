@@ -206,6 +206,67 @@ pub struct SessionRecord {
     pub tool_call_count: u64,
     /// Compactions that committed a successor checkpoint for this session.
     pub compaction_count: u64,
+    /// A same-store carry written ahead of its runtime create: set, with no
+    /// locator, before the create, and cleared in the save that binds the
+    /// locator. Reconciled on open and at startup (spec 02 §2.6).
+    pub carry_intent: Option<CarryIntent>,
+}
+
+/// The write-ahead marker of a same-store carry (spec 02 §2.5.1, §2.6):
+/// enough to finish, replay or withdraw the carry after a crash.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CarryIntent {
+    /// The source branch the carry continues, as its record named it.
+    pub source: SessionLocator,
+    /// Whether the carry continues the source's agent line.
+    pub continues_line: bool,
+    /// The notice the carry records on its successor.
+    pub cause: String,
+    /// The orchestration carry of a reload, which has no root fallback.
+    pub orchestration: bool,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct CarryIntentWire {
+    source: String,
+    continues_line: bool,
+    cause: String,
+    orchestration: bool,
+}
+
+impl CarryIntent {
+    /// The stored encoding.
+    ///
+    /// # Errors
+    /// Returns a message when the intent does not serialize.
+    pub fn encode(&self) -> Result<String, String> {
+        serde_json::to_string(&CarryIntentWire {
+            source: self.source.to_string(),
+            continues_line: self.continues_line,
+            cause: self.cause.clone(),
+            orchestration: self.orchestration,
+        })
+        .map_err(|_| "carry intent is not serializable".to_owned())
+    }
+
+    /// Decodes the stored encoding.
+    ///
+    /// # Errors
+    /// Returns a message for anything this build did not write.
+    pub fn decode(text: &str) -> Result<Self, String> {
+        let wire: CarryIntentWire =
+            serde_json::from_str(text).map_err(|_| "carry intent is corrupt".to_owned())?;
+        Ok(Self {
+            source: wire
+                .source
+                .parse()
+                .map_err(|_| "carry intent source is corrupt".to_owned())?,
+            continues_line: wire.continues_line,
+            cause: wire.cause,
+            orchestration: wire.orchestration,
+        })
+    }
 }
 
 /// The session counters the Context projection states beside the meter.
@@ -271,6 +332,7 @@ impl SessionRecord {
             child_wake_suppressed: false,
             tool_call_count: 0,
             compaction_count: 0,
+            carry_intent: None,
         }
     }
 
@@ -416,6 +478,9 @@ impl SessionRecord {
 
     pub fn validate_for_store(&self) -> Result<(), String> {
         self.target_selection.validate()?;
+        if self.carry_intent.is_some() && self.plakous_locator.is_some() {
+            return Err("a carry intent is cleared when its locator is bound".to_owned());
+        }
         match (&self.target_selection, self.account.as_deref()) {
             (ProductTargetSelection::OpenRouter { .. }, Some("openrouter"))
                 if self.model.as_deref().is_some_and(|model| !model.is_empty())

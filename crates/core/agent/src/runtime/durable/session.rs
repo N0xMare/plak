@@ -225,10 +225,7 @@ impl DurableSessionRuntime {
     ) -> Result<Agent, AgentError> {
         // A carry's source lease ends once its create settles: the store
         // moved the head away from it, or the carry failed.
-        let held = builder
-            .line_carry
-            .as_ref()
-            .and_then(super::carry::LineCarry::held_lease);
+        let held = builder.line_carry.as_ref().map(|carry| carry.held_lease());
         let created = Box::pin(self.create_genesis(operation_id, builder, history)).await;
         if let Some(lease) = held {
             let _unreleased =
@@ -269,7 +266,7 @@ impl DurableSessionRuntime {
         let request = match builder
             .line_carry
             .as_ref()
-            .and_then(super::carry::LineCarry::continuation)
+            .map(|carry| carry.continuation())
         {
             Some((continuation, line, generation)) => {
                 if !continuation.consumed_terminals().is_empty() {

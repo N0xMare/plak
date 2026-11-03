@@ -14,6 +14,8 @@ pub(crate) mod handoff;
 mod history;
 mod import;
 #[cfg(any(test, feature = "tui"))]
+pub(crate) mod intent;
+#[cfg(any(test, feature = "tui"))]
 mod interactive;
 #[cfg(any(test, feature = "tui"))]
 pub(crate) mod rebind;
@@ -33,6 +35,7 @@ pub(crate) use reload::{
 #[cfg(feature = "tui")]
 pub(crate) use {
     epoch::apply_on_reload,
+    intent::{resume, switch_to},
     interactive::{
         ReloadPlan, ReloadTarget, carry_foreign_session, carry_out, reload_plan,
         reload_target_for_session,

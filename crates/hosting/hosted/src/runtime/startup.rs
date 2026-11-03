@@ -313,9 +313,20 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
         .with_line(config.seed_line.take());
     let executor = ApplicationExecutor::new().map_err(|e| CliFailure::new(e.to_string()))?;
     let mut stderr_buf = Vec::new();
+    let factory = std::sync::Arc::clone(&config.runtime_factory);
+    super::factory::observe_boundary(
+        factory.as_ref(),
+        super::HostWorkflow::SeededCreate,
+        super::HostBoundary::Prepared,
+    );
     let opened = executor
         .block_on(create_session(&mut config, Some(seed), &mut stderr_buf))
         .map_err(|e| CliFailure::new(e.to_string()))??;
+    super::factory::observe_boundary(
+        factory.as_ref(),
+        super::HostWorkflow::SeededCreate,
+        super::HostBoundary::RuntimeReturned,
+    );
     record_replay_fallback(
         &config.home,
         &mut config.session,
@@ -323,6 +334,8 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
     );
     let notes = String::from_utf8_lossy(&stderr_buf).into_owned();
     let completion = (|| -> CliResult<()> {
+        // The save that binds the locator ends a carry's write-ahead intent.
+        config.session.carry_intent = None;
         config
             .session
             .bind_plakous_locator(opened.locator())
