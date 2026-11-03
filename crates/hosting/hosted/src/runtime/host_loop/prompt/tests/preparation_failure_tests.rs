@@ -30,14 +30,12 @@ fn stopped_preparation_publishes_stop_status_even_when_the_pause_write_fails() {
         PauseWriteFailure,
     ));
     events.try_iter().for_each(drop);
-    preparation::hooks::HOOK.with(|slot| {
-        *slot.borrow_mut() = Some((
-            preparation::Stage::Settle,
-            Box::pin(async move {
-                actions.send(UserAction::Interrupt).unwrap();
-            }),
-        ));
-    });
+    host.prep_hooks.hook = Some((
+        preparation::Stage::Settle,
+        Box::pin(async move {
+            actions.send(UserAction::Interrupt).unwrap();
+        }),
+    ));
     let error = host
         .run_prompt(item.text.clone(), Some(item), true, None)
         .err()

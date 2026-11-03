@@ -229,7 +229,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             accept_draft(self.host.events, action);
                             if let Some(item) = self.host.session.pending_queue.last() {
                                 #[cfg(test)]
-                                super::wake_trace::took(&item.text);
+                                super::wake_trace::took(&item.text, self.last_wake);
                                 let _ = self
                                     .host
                                     .events

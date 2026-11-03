@@ -98,14 +98,12 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
         host.config.session.queue_drain_state,
         SessionQueueDrainState::LiveAutoDrain
     );
-    preparation::hooks::HOOK.with(|slot| {
-        *slot.borrow_mut() = Some((
-            preparation::Stage::Settle,
-            Box::pin(async move {
-                actions.send(UserAction::Interrupt).unwrap();
-            }),
-        ));
-    });
+    host.prep_hooks.hook = Some((
+        preparation::Stage::Settle,
+        Box::pin(async move {
+            actions.send(UserAction::Interrupt).unwrap();
+        }),
+    ));
     host.run_prompt(item.text.clone(), Some(item), true, None)
         .unwrap();
     assert_eq!(
@@ -152,8 +150,7 @@ fn mail_selection_and_missing_wake_context_failures_leave_a_terminal_status() {
         let item = if wake {
             wake_delivery(&mut host)
         } else {
-            preparation::hooks::MAIL_ERROR
-                .with(|slot| *slot.borrow_mut() = Some("injected mail read failure".into()));
+            host.prep_hooks.mail_error = Some("injected mail read failure".into());
             host.config.session.enqueue_live("operator").unwrap()
         };
         events.try_iter().for_each(drop);

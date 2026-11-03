@@ -31,29 +31,38 @@ pub(super) enum End {
 pub(super) fn run_step<F: Future, P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     watch: InterruptWatch<'_, P>,
+    hooks: &mut Hooks,
     stage: Stage,
     future: F,
 ) -> Result<F::Output, ApplicationExecutorError> {
-    let _ = stage;
     #[cfg(test)]
-    let future = async {
-        if let Some(hook) = hooks::HOOK.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            if slot
-                .as_ref()
-                .is_some_and(|(selected, _)| *selected == stage)
-            {
-                slot.take().map(|(_, hook)| hook)
-            } else {
-                None
+    let future = {
+        let hook = hooks
+            .hook
+            .take_if(|(selected, _)| *selected == stage)
+            .map(|(_, hook)| hook);
+        hooks.called.push(stage);
+        async {
+            if let Some(hook) = hook {
+                hook.await;
             }
-        }) {
-            hook.await;
+            future.await
         }
-        hooks::CALLED.with(|calls| calls.borrow_mut().push(stage));
-        future.await
     };
+    #[cfg(not(test))]
+    let _ = (hooks, stage);
     run_watched(executor, watch, future)
+}
+
+/// Production preparation has no test seams.
+#[cfg(not(test))]
+pub(in crate::runtime::host_loop) struct Hooks;
+
+#[cfg(not(test))]
+impl Hooks {
+    pub(in crate::runtime::host_loop) const fn new() -> Self {
+        Self
+    }
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
@@ -82,4 +91,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 }
 
 #[cfg(test)]
-pub(in crate::runtime::host_loop) mod hooks;
+mod hooks;
+#[cfg(test)]
+pub(in crate::runtime::host_loop) use hooks::Hooks;

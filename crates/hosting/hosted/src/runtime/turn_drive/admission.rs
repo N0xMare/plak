@@ -673,14 +673,20 @@ struct StartRefusal {
     remedy: Option<plakous_host_protocol::notice_remedy::NoticeRemedy>,
 }
 
+/// Injected refusals, keyed by the delivery's operation id: whichever worker
+/// thread polls the admission takes the one its test stubbed.
 #[cfg(test)]
-thread_local! {
-    static TEST_START_REFUSALS: std::cell::RefCell<std::collections::HashMap<String, StartRefusal>> = std::cell::RefCell::default();
-}
+static TEST_START_REFUSALS: std::sync::Mutex<
+    Option<std::collections::HashMap<String, StartRefusal>>,
+> = std::sync::Mutex::new(None);
 
 #[cfg(test)]
 fn take_test_start_refusal(operation: &str) -> Option<StartRefusal> {
-    TEST_START_REFUSALS.with(|refusals| refusals.borrow_mut().remove(operation))
+    TEST_START_REFUSALS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_mut()
+        .and_then(|refusals| refusals.remove(operation))
 }
 
 #[cfg(test)]
@@ -689,8 +695,11 @@ pub(in crate::runtime) fn stub_start_refusal(
     disposition: CommandAckDisposition,
     kind: plakous::agent::ControlErrorKind,
 ) {
-    TEST_START_REFUSALS.with(|refusals| {
-        refusals.borrow_mut().insert(
+    TEST_START_REFUSALS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(
             operation,
             StartRefusal {
                 disposition,
@@ -705,17 +714,20 @@ pub(in crate::runtime) fn stub_start_refusal(
                 remedy: admission_rejection_remedy(kind, None),
             },
         );
-    });
 }
 
 #[cfg(test)]
-thread_local! {
-    static TEST_INGRESS_REFUSALS: std::cell::RefCell<std::collections::HashMap<String, plakous::agent::ControlError>> = std::cell::RefCell::default();
-}
+static TEST_INGRESS_REFUSALS: std::sync::Mutex<
+    Option<std::collections::HashMap<String, plakous::agent::ControlError>>,
+> = std::sync::Mutex::new(None);
 
 #[cfg(test)]
 fn take_test_ingress_refusal(operation: &str) -> Option<plakous::agent::ControlError> {
-    TEST_INGRESS_REFUSALS.with(|refusals| refusals.borrow_mut().remove(operation))
+    TEST_INGRESS_REFUSALS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_mut()
+        .and_then(|refusals| refusals.remove(operation))
 }
 
 #[cfg(test)]
@@ -723,7 +735,9 @@ pub(in crate::runtime) fn stub_ingress_backpressure(
     operation: String,
     error: plakous::agent::ControlError,
 ) {
-    TEST_INGRESS_REFUSALS.with(|refusals| {
-        refusals.borrow_mut().insert(operation, error);
-    });
+    TEST_INGRESS_REFUSALS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(operation, error);
 }

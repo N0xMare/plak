@@ -129,6 +129,9 @@ struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
     noticed_mail: Vec<String>,
     noticed_mail_checkpoint: Option<String>,
     notice_reply: Option<tokio::sync::oneshot::Receiver<Result<(), plakous::agent::ControlError>>>,
+    /// The select arm that ended the last pass (`wake_trace`).
+    #[cfg(test)]
+    last_wake: &'static str,
 }
 
 mod admission;
@@ -215,6 +218,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             noticed_mail: Vec::new(),
             noticed_mail_checkpoint: None,
             notice_reply: None,
+            #[cfg(test)]
+            last_wake: "none",
         }
     }
 
@@ -454,7 +459,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 // An intent wakes the loop at once; the next pass takes it.
                 () = actions.ready(), if takes_actions => {
                     #[cfg(test)]
-                    wake_trace::woke("intent");
+                    {
+                        self.last_wake = "intent";
+                    }
                 }
                 () = std::future::ready(()), if deferred_ready => {}
                 // Recreated every pass, so it fires only after 20 ms with no
@@ -462,7 +469,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 // host actor's job (design E1), not this loop's.
                 () = tokio::time::sleep(Duration::from_millis(20)) => {
                     #[cfg(test)]
-                    wake_trace::woke("tick");
+                    {
+                        self.last_wake = "tick";
+                    }
                     // Coalesce window: flush buffered text deltas if due, and take
                     // the one tree observation of this window. The emitter drops
                     // every non-advancing revision, so an idle tree costs a lookup

@@ -3,20 +3,11 @@
 
 use std::sync::Mutex;
 
-std::thread_local! {
-    static LAST_WAKE: std::cell::Cell<&'static str> = const { std::cell::Cell::new("none") };
-}
-
 static TAKEN: Mutex<Vec<(String, &'static str)>> = Mutex::new(Vec::new());
 
-/// The busy select ended on `arm`.
-pub(super) fn woke(arm: &'static str) {
-    LAST_WAKE.with(|last| last.set(arm));
-}
-
-/// The pass after the last wake admitted the follow-up `text`.
-pub(super) fn took(text: &str) {
-    let arm = LAST_WAKE.with(std::cell::Cell::get);
+/// The pass after the drive's last wake, on `arm`, admitted the follow-up
+/// `text`. The drive itself carries the arm, whichever thread polls it.
+pub(super) fn took(text: &str, arm: &'static str) {
     TAKEN
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

@@ -76,43 +76,41 @@ pub(super) fn stopped_preparation(
     // The hook drops its sender when the step returns. Disconnected is quit,
     // so another sender has to outlive the retry or quit branch.
     let actions_held = actions.clone();
-    preparation::hooks::HOOK.with(|slot| {
-        *slot.borrow_mut() = Some((
-            stage,
-            Box::pin(async move {
-                actions.send(stop).unwrap();
-                if stage == preparation::Stage::Refresh {
-                    use crate::runtime::startup::{
-                        native_refresh_tests::AwaitingNativeModel, refresh_native_authority,
-                    };
-                    let changed = refresh_native_authority(
-                        Arc::new(AwaitingNativeModel),
-                        "Claude",
-                        "claude",
-                        async {
-                            started.notify_one();
-                            release.notified().await;
-                            Ok(false)
-                        },
-                        async { panic!("credential wait must resolve") },
-                    )
-                    .await
-                    .unwrap();
-                    assert!(!changed);
-                } else {
-                    started.notify_one();
-                    release.notified().await;
-                }
-            }),
-        ));
-    });
+    host.prep_hooks.hook = Some((
+        stage,
+        Box::pin(async move {
+            actions.send(stop).unwrap();
+            if stage == preparation::Stage::Refresh {
+                use crate::runtime::startup::{
+                    native_refresh_tests::AwaitingNativeModel, refresh_native_authority,
+                };
+                let changed = refresh_native_authority(
+                    Arc::new(AwaitingNativeModel),
+                    "Claude",
+                    "claude",
+                    async {
+                        started.notify_one();
+                        release.notified().await;
+                        Ok(false)
+                    },
+                    async { panic!("credential wait must resolve") },
+                )
+                .await
+                .unwrap();
+                assert!(!changed);
+            } else {
+                started.notify_one();
+                release.notified().await;
+            }
+        }),
+    ));
     let mut invocation = crate::runtime::oneshot::OneShotState {
         attempted: true,
         resume_tree: false,
         result: None,
         run: None,
     };
-    preparation::hooks::CALLED.with(|calls| calls.borrow_mut().clear());
+    host.prep_hooks.called.clear();
     host.run_prompt(
         text.clone(),
         queued_delivery.clone(),
@@ -127,17 +125,22 @@ pub(super) fn stopped_preparation(
         preparation::Stage::Tree => Some(preparation::Stage::Query),
         _ => None,
     };
+    assert!(
+        host.prep_hooks.called.contains(&stage),
+        "preparation entered the stopped stage {stage:?}"
+    );
     if let Some(skipped) = skipped {
-        preparation::hooks::CALLED.with(|calls| {
+        {
+            let calls = &host.prep_hooks.called;
             assert!(
-                !calls.borrow().contains(&skipped),
+                !calls.contains(&skipped),
                 "stop at {stage:?} must skip {skipped:?}"
             );
             assert!(
-                !calls.borrow().contains(&preparation::Stage::Compact),
+                !calls.contains(&preparation::Stage::Compact),
                 "stop at {stage:?} must skip scheduled compaction"
             );
-        });
+        }
     }
     assert_eq!(host.config.session.pending_queue, before);
     assert_eq!(

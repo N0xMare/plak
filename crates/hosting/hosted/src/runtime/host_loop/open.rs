@@ -544,6 +544,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             live: None,
             projection_finished: false,
             shown_skill_notices: crate::skills::ShownSkillNotices::default(),
+            prep_hooks: super::prompt::preparation::Hooks::new(),
         };
         host.publish_pending_continuation();
         host.publish_projected_usage();

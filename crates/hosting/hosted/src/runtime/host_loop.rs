@@ -119,6 +119,7 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     live: Option<super::projection::live::LiveProjector>,
     projection_finished: bool,
     shown_skill_notices: crate::skills::ShownSkillNotices,
+    prep_hooks: prompt::preparation::Hooks,
 }
 
 enum HostStep {

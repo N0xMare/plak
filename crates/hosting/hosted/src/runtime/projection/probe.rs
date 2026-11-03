@@ -1,6 +1,5 @@
 //! Test-only entry and view-writer accounting, isolated by product session id.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -15,20 +14,32 @@ tokio::task_local! {
     pub(in crate::runtime) static CALLER: Caller;
 }
 
-thread_local! {
-    static STORE_CALL: RefCell<Option<String>> = const { RefCell::new(None) };
+/// Product ids with a projector store call in flight, and how many: a view
+/// write is legal only inside one, whichever thread runs it.
+fn store_calls() -> &'static Mutex<BTreeMap<String, usize>> {
+    static CALLS: OnceLock<Mutex<BTreeMap<String, usize>>> = OnceLock::new();
+    CALLS.get_or_init(Mutex::default)
 }
 
 pub(super) fn store_call<T>(id: &str, call: impl FnOnce() -> T) -> T {
-    struct Restore(Option<String>);
-    impl Drop for Restore {
+    struct Leave(String);
+    impl Drop for Leave {
         fn drop(&mut self) {
-            STORE_CALL.with(|current| {
-                current.replace(self.0.take());
-            });
+            let mut calls = store_calls().lock().unwrap();
+            if let Some(count) = calls.get_mut(&self.0) {
+                *count -= 1;
+                if *count == 0 {
+                    calls.remove(&self.0);
+                }
+            }
         }
     }
-    let _restore = Restore(STORE_CALL.with(|current| current.replace(Some(id.to_owned()))));
+    *store_calls()
+        .lock()
+        .unwrap()
+        .entry(id.to_owned())
+        .or_default() += 1;
+    let _leave = Leave(id.to_owned());
     call()
 }
 
@@ -102,7 +113,7 @@ pub(crate) fn view_write(id: &str) {
     let tracked = counts().lock().unwrap().contains_key(id);
     if tracked {
         assert!(
-            STORE_CALL.with(|current| current.borrow().as_deref() == Some(id)),
+            store_calls().lock().unwrap().contains_key(id),
             "view writer bypassed the common projector's store call",
         );
     }

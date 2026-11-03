@@ -267,6 +267,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         preparation::run_step(
             &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
+            &mut self.prep_hooks,
             preparation::Stage::Tree,
             super::super::projection::project_tree(
                 self.opened.sessions(),
@@ -297,9 +298,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 &user_text,
             );
             #[cfg(test)]
-            let selected = preparation::hooks::MAIL_ERROR
-                .with(|slot| slot.borrow_mut().take())
-                .map_or(selected, Err);
+            let selected = self.prep_hooks.mail_error.take().map_or(selected, Err);
             match selected {
                 Ok(selected) => selected,
                 Err(error) => {
@@ -369,6 +368,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if let Err(error) = preparation::run_step(
             &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
+            &mut self.prep_hooks,
             preparation::Stage::Settle,
             super::super::result_mail::settle_waits(
                 &self.config.topology_rows(),
@@ -429,8 +429,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .ok_or_else(|| CliFailure::new("child wake preflight is unavailable"))
         } else {
             #[cfg(test)]
-            preparation::hooks::CALLED
-                .with(|calls| calls.borrow_mut().push(preparation::Stage::Query));
+            self.prep_hooks.called.push(preparation::Stage::Query);
             query_context(
                 &self.executor,
                 &self.opened,
@@ -488,6 +487,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         preparation::run_step(
             &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
+            &mut self.prep_hooks,
             preparation::Stage::Context,
             std::future::ready(()),
         )
@@ -502,8 +502,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 // prompt is silently deferred (the 2026-09-03 "freeze").
                 observe_compact(&self.events, self.config.session.pending_queue.len(), true);
                 #[cfg(test)]
-                preparation::hooks::CALLED
-                    .with(|calls| calls.borrow_mut().push(preparation::Stage::Compact));
+                self.prep_hooks.called.push(preparation::Stage::Compact);
                 let compacted = run_scheduled_compaction_until_fits(
                     &self.executor,
                     InterruptWatch::new(self.actions, &self.interrupt_state),
@@ -616,6 +615,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         preparation::run_step(
             &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
+            &mut self.prep_hooks,
             preparation::Stage::Dispatch,
             std::future::ready(()),
         )
@@ -1049,6 +1049,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let changed = preparation::run_step(
             &self.executor,
             InterruptWatch::new(self.actions, &self.interrupt_state),
+            &mut self.prep_hooks,
             preparation::Stage::Refresh,
             super::super::startup::refresh_native_target(&mut self.config),
         )

@@ -152,16 +152,14 @@ fn idle_escape_suppresses_wake_until_user_prompt() {
 #[test]
 fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
     with_host(0, |host, _, actions, events| {
-        use super::super::prompt::preparation::{Stage, hooks};
+        use super::super::prompt::preparation::Stage;
         let controls = actions.clone();
-        hooks::HOOK.with(|slot| {
-            *slot.borrow_mut() = Some((
-                Stage::Refresh,
-                Box::pin(async move {
-                    controls.send(UserAction::Interrupt).unwrap();
-                }),
-            ));
-        });
+        host.prep_hooks.hook = Some((
+            Stage::Refresh,
+            Box::pin(async move {
+                controls.send(UserAction::Interrupt).unwrap();
+            }),
+        ));
         assert!(!host.preflight_child_wake("host wake").unwrap());
         let intents = host
             .config

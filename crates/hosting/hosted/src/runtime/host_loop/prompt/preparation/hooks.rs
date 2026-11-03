@@ -1,8 +1,21 @@
 use super::{Future, Stage};
 
 type Hook = std::pin::Pin<Box<dyn Future<Output = ()>>>;
-thread_local! {
-    pub(in crate::runtime::host_loop) static CALLED: std::cell::RefCell<Vec<Stage>> = const { std::cell::RefCell::new(Vec::new()) };
-    pub(in crate::runtime::host_loop) static HOOK: std::cell::RefCell<Option<(Stage, Hook)>> = const { std::cell::RefCell::new(None) };
-    pub(in crate::runtime::host_loop::prompt) static MAIL_ERROR: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+
+/// Test seams of one host's preparation, carried by the host itself so they
+/// hold on whichever thread polls its steps.
+#[derive(Default)]
+pub(in crate::runtime::host_loop) struct Hooks {
+    /// Every stage preparation entered, in order.
+    pub(in crate::runtime::host_loop) called: Vec<Stage>,
+    /// Runs once, before the step of its stage.
+    pub(in crate::runtime::host_loop) hook: Option<(Stage, Hook)>,
+    /// Replaces the next mail selection with this failure.
+    pub(in crate::runtime::host_loop) mail_error: Option<String>,
+}
+
+impl Hooks {
+    pub(in crate::runtime::host_loop) fn new() -> Self {
+        Self::default()
+    }
 }

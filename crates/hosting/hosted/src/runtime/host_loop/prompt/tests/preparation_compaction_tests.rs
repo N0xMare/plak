@@ -174,21 +174,23 @@ fn context_stop_skips_a_due_paid_compaction_and_preserves_the_locator() {
         .enqueue_live("p".repeat(50_000))
         .unwrap();
     host.config.store.save(&mut host.config.session).unwrap();
-    preparation::hooks::CALLED.with(|calls| calls.borrow_mut().clear());
-    preparation::hooks::HOOK.with(|slot| {
-        *slot.borrow_mut() = Some((
-            preparation::Stage::Context,
-            Box::pin(async move {
-                actions.send(UserAction::Interrupt).unwrap();
-            }),
-        ));
-    });
+    host.prep_hooks.called.clear();
+    host.prep_hooks.hook = Some((
+        preparation::Stage::Context,
+        Box::pin(async move {
+            actions.send(UserAction::Interrupt).unwrap();
+        }),
+    ));
     host.run_prompt(item.text.clone(), Some(item), true, None)
         .unwrap();
-    preparation::hooks::CALLED.with(|calls| {
-        assert!(!calls.borrow().contains(&preparation::Stage::Compact),
-            "stop before scheduled compaction must not enter the workflow, even if its own guard would refuse dispatch");
-    });
+    {
+        let calls = &host.prep_hooks.called;
+        assert!(calls.contains(&preparation::Stage::Context));
+        assert!(
+            !calls.contains(&preparation::Stage::Compact),
+            "stop before scheduled compaction must not enter the workflow, even if its own guard would refuse dispatch"
+        );
+    }
     assert_eq!(
         host.opened.locator(),
         source,
