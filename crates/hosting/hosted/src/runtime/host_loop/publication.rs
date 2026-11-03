@@ -210,6 +210,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     let _ = self.events.notice(TranscriptRow::warning(NoticeScope::Turn,
                         "this turn stopped at the context limit; compacting once for subsequent prompts. The failed turn will not be retried automatically",
                     ));
+                    self.idle_entry_pass_due = true;
                     match handle_compact(
                         InterruptWatch::new(self.actions, &self.interrupt_state),
                         &mut self.config,

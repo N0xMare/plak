@@ -272,11 +272,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
             InterruptWatch::new(self.actions, &self.interrupt_state),
             &mut self.prep_hooks,
             preparation::Stage::Tree,
-            Box::pin(super::super::projection::project_tree(
+            Box::pin(super::super::projection::root_tree_pass(
                 self.opened.sessions(),
                 &rows,
                 &durable_tree_id(&rows, &self.config.session),
                 self.opened.locator().session_id(),
+                super::super::projection::RootTreePass::Admission,
             )),
         )
         .await

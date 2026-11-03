@@ -111,12 +111,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             return;
         }
         let target = &self.host.live_target;
-        let debt = match super::super::projection::project_tree_as(
+        let debt = match super::super::projection::root_tree_pass(
             &target.sessions,
             self.host.rows,
             &target.tree_id,
             target.followed.session_id(),
-            super::super::projection::TreePass::RunningTurn { through },
+            super::super::projection::RootTreePass::Round { through },
         )
         .await
         {

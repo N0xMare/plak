@@ -228,11 +228,12 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
                     let _ = events.send(ContentEvent::Row(row));
                 }
                 let rows = config.topology_rows();
-                super::super::projection::project_tree(
+                super::super::projection::root_tree_pass(
                     opened.sessions(),
                     &rows,
                     &super::durable_tree_id(&rows, &config.session),
                     followed.session_id(),
+                    super::super::projection::RootTreePass::Settled,
                 )
                 .await?;
                 let store = config.store.clone();
@@ -520,6 +521,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
             projection_finished: false,
             shown_skill_notices: crate::skills::ShownSkillNotices::default(),
             prep_hooks: super::prompt::preparation::Hooks::new(),
+            idle_entry_pass_due: false,
         };
         host.publish_pending_continuation();
         host.publish_projected_usage();

@@ -140,3 +140,54 @@ fn write_hooks() -> &'static Mutex<BTreeMap<String, WriteHook>> {
 pub(in crate::runtime) fn after_next_write(id: String, hook: impl FnOnce() + Send + 'static) {
     write_hooks().lock().unwrap().insert(id, Box::new(hook));
 }
+
+/// Every root tree pass, keyed by tree id, in order.
+fn root_tree_passes() -> &'static Mutex<BTreeMap<String, Vec<super::RootTreePass>>> {
+    static PASSES: OnceLock<Mutex<BTreeMap<String, Vec<super::RootTreePass>>>> = OnceLock::new();
+    PASSES.get_or_init(Mutex::default)
+}
+
+/// Records the pass, and answers whether it is to be refused.
+pub(super) fn root_tree_pass(tree_id: &str, point: super::RootTreePass) -> bool {
+    root_tree_passes()
+        .lock()
+        .unwrap()
+        .entry(tree_id.to_owned())
+        .or_default()
+        .push(point);
+    let mut refusals = root_tree_refusals().lock().unwrap();
+    let Some(left) = refusals.get_mut(tree_id) else {
+        return false;
+    };
+    *left -= 1;
+    if *left == 0 {
+        refusals.remove(tree_id);
+    }
+    true
+}
+
+fn root_tree_refusals() -> &'static Mutex<BTreeMap<String, usize>> {
+    static REFUSALS: OnceLock<Mutex<BTreeMap<String, usize>>> = OnceLock::new();
+    REFUSALS.get_or_init(Mutex::default)
+}
+
+/// Refuses the next `count` root tree passes of `tree_id` after recording
+/// them.
+pub(in crate::runtime) fn refuse_root_tree_passes(tree_id: &str, count: usize) {
+    if count > 0 {
+        root_tree_refusals()
+            .lock()
+            .unwrap()
+            .insert(tree_id.to_owned(), count);
+    }
+}
+
+/// The root tree passes recorded for `tree_id` so far.
+pub(in crate::runtime) fn root_tree_passes_of(tree_id: &str) -> Vec<super::RootTreePass> {
+    root_tree_passes()
+        .lock()
+        .unwrap()
+        .get(tree_id)
+        .cloned()
+        .unwrap_or_default()
+}

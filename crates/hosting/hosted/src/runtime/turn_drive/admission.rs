@@ -408,12 +408,12 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             .and_then(|submission| submission.acknowledgement().feed_seq())
             .map(plakous::sessions::feed::FeedSeq::get)
             .unwrap_or(0);
-        if let Err(error) = super::super::projection::project_tree_as(
+        if let Err(error) = super::super::projection::root_tree_pass(
             runtime,
             rows,
             &super::super::rebind::durable_tree_id(rows, session),
             runtime_session,
-            super::super::projection::TreePass::RunningTurn { through },
+            super::super::projection::RootTreePass::Acknowledged { through },
         )
         .await
         {
@@ -505,11 +505,12 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         // A duplicate command replays a completed result; no operation of
         // this process reported a prepared input for it.
         let outcome = terminal_turn_outcome(&result);
-        super::super::projection::project_tree(
+        super::super::projection::root_tree_pass(
             runtime,
             rows,
             &super::super::rebind::durable_tree_id(rows, session),
             runtime_session,
+            super::super::projection::RootTreePass::Settled,
         )
         .await
         .map_err(String::from)?;
@@ -565,11 +566,12 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         .run(turn),
     )
     .await;
-    if let Err(error) = super::super::projection::project_tree(
+    if let Err(error) = super::super::projection::root_tree_pass(
         runtime,
         rows,
         &super::super::rebind::durable_tree_id(rows, session),
         runtime_session,
+        super::super::projection::RootTreePass::Settled,
     )
     .await
     {

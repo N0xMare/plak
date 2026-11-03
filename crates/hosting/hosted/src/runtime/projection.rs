@@ -708,36 +708,56 @@ fn full_writes(from: &SessionViews, to: &SessionViews) -> ViewWrites {
     ViewWrites::between(from, to)
 }
 
+/// The four points at which the root's tree projector runs (spec 03 §4.4).
+/// Nothing else runs it: a notification, an intent or an idle tick alone
+/// never does.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RootTreePass {
+    /// A model round started: through the committed prefix its
+    /// `ModelStarted` captured.
+    Round { through: u64 },
+    /// The command acknowledgement: through its publication sequence.
+    Acknowledged { through: u64 },
+    /// Before a root prompt (or host wake) is admitted: to the feed's tail.
+    Admission,
+    /// A settled turn, or idle entry (open, recovery, a workflow, release):
+    /// to the feed's tail.
+    Settled,
+}
+
 /// Runs the tree projector over the root session's feed past the tree's
-/// cursor for it (spec 03 §14.3), and saves the tree. A session without a
-/// tree has nothing to apply.
+/// cursor for it (spec 03 §14.3) at one of the four mandated points, and
+/// saves the tree. A session without a tree has nothing to apply.
 ///
 /// # Errors
 ///
 /// A refused feed read, a refused page or a refused tree save; the tree's
 /// cursor stays where it was and the next pass applies the same records.
-pub(crate) async fn project_tree(
+pub(crate) async fn root_tree_pass(
     sessions: &AgentSessions,
     rows: &(dyn TopologyRows + Sync),
     tree_id: &str,
     runtime_session: SessionId,
-) -> Result<(), ReadFailure> {
-    project_tree_as(
-        sessions,
-        rows,
-        tree_id,
-        runtime_session,
-        TreePass::BetweenTurns,
-    )
-    .await
-    .map(|_| ())
+    point: RootTreePass,
+) -> Result<TreePassOutcome, ReadFailure> {
+    #[cfg(test)]
+    if probe::root_tree_pass(tree_id, point) {
+        return Err("the root tree pass was refused".to_owned().into());
+    }
+    let pass = match point {
+        RootTreePass::Round { through } | RootTreePass::Acknowledged { through } => {
+            TreePass::RunningTurn { through }
+        }
+        RootTreePass::Admission | RootTreePass::Settled => TreePass::BetweenTurns,
+    };
+    project_tree_as(sessions, rows, tree_id, runtime_session, pass).await
 }
 
 /// When a tree pass runs, which decides how much work it may do.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TreePass {
-    /// Between root turns (open, wake, pre-submission, end-of-turn and the
-    /// idle tick): a page that needs a refold rereads the feed from its start.
+    /// Between root turns (admission and settled-turn or idle-entry passes):
+    /// a page that needs a refold rereads the feed from its start.
     BetweenTurns,
     /// After command acknowledgement and once per model round: only the
     /// in-process tree and records past its cursor through the captured

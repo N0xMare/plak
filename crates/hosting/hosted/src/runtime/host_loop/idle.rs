@@ -492,6 +492,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     }
                 }
                 Ok(UserAction::ClearSession) => {
+                    self.idle_entry_pass_due = true;
                     // A switch closes the agent view before its ClearView.
                     self.last_tree_revision.child_live.close_agent_view();
                     let _ = self.events.send(ContentEvent::SetBusy(true));
@@ -536,6 +537,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::Compact) => {
+                    self.idle_entry_pass_due = true;
                     let current = query_context(&self.opened, ContextQuery::Current).await;
                     // Every typed disposition asks for a compact now, so there
                     // is no disposition left to refuse up front. A
@@ -623,6 +625,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::ResumeSession { id: Some(id) }) => {
+                    self.idle_entry_pass_due = true;
                     self.last_tree_revision.child_live.close_agent_view();
                     match resume_session_switch(
                         &mut self.config,
@@ -659,6 +662,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                     None
                 }
                 Ok(UserAction::ForkSession { account, compact }) => {
+                    self.idle_entry_pass_due = true;
                     self.last_tree_revision.child_live.close_agent_view();
                     let _ = self.events.send(ContentEvent::SetBusy(true));
                     let _ = self.events.send(ContentEvent::Status {
@@ -807,6 +811,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                         self.config.root_template = saved.root_template;
                     }
                     if let Some(fork) = effect.profile_fork {
+                        self.idle_entry_pass_due = true;
                         self.last_tree_revision.child_live.close_agent_view();
                         let _ = self.events.send(ContentEvent::SetBusy(true));
                         let _ = self.events.send(ContentEvent::Status {

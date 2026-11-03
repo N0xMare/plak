@@ -60,17 +60,25 @@ impl LiveTarget {
         pass.await.map_err(String::from)
     }
 
-    /// The tree projector over the same feed. The host runs it from its
-    /// loop, not on the task: tree saves stay ordered with the tree's own
-    /// writes.
+    /// The settled-turn / idle-entry root tree pass over the same feed,
+    /// then the tree's housekeeping. The host runs it from its loop, not on
+    /// the task: tree saves stay ordered with the tree's own writes.
     pub(crate) async fn tree_pass(&self) -> Result<(), String> {
-        super::project_tree(
+        super::root_tree_pass(
             &self.sessions,
             &HostRows::new(&self.roots, &*self.store),
             &self.tree_id,
             self.followed.session_id(),
+            super::RootTreePass::Settled,
         )
         .await?;
+        self.tree_housekeeping().await
+    }
+
+    /// Reclaims dormant checkouts and collects dormant children. This is
+    /// not a pass over the root's feed, so the idle loop may run it on its
+    /// observation tick.
+    pub(crate) async fn tree_housekeeping(&self) -> Result<(), String> {
         if let Some(runtime) = crate::topology_runtime::lookup(&self.tree_id) {
             runtime
                 .driver()

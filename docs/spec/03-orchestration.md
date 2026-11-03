@@ -933,7 +933,15 @@ receipts by these rules, live and on every open alike. Live means while the
 caller's turn runs too: a child's feed is applied as its records arrive, and
 the root host applies the root's feed inline once per model round of a running
 root turn (a round starts after the previous round's tool results committed),
-besides its passes between turns. Each running pass stops at the committed
+besides its passes between turns. The root's tree projector runs at exactly
+four points, structurally, in the root's actor: per model round at the
+`ModelStarted` prefix; after the command acknowledgement; at prompt admission
+(and host-wake admission), to the tail; and when a turn settles or the actor
+enters idle without one (open, in-place recovery, an idle-only workflow,
+release), to the tail. Nothing else runs it: neither a child's notification,
+an intent, nor an idle observation tick. That tick still reclaims dormant
+checkouts and collects dormant children, which is tree housekeeping, not a
+pass over the root's feed. Each running pass stops at the committed
 prefix captured by that round's `ModelStarted` event, even when the runtime
 has advanced before the host observes it. Observation latency cannot coalesce
 later rounds into an earlier cursor publication. A prefix behind retention is
@@ -945,8 +953,8 @@ A root wait in model history therefore
 retires by the next round; a nested wait (from a Code Mode cell) and an
 operator `invoke_tool` await hold their receipts until the caller's terminal.
 That running-turn pass applies only the records past the cursor; a page that
-would need a refold is left for the end-of-turn `project_tree` pass or the
-next prompt's pre-submission pass, both of which own unbounded refolding.
+would need a refold is left for the settled-turn pass or the next prompt's
+admission pass, both of which own unbounded refolding.
 A round without a committed prefix skips the running pass and logs projection
 debt once per turn; durable product rounds assert that their prefix exists.
 The rules:

@@ -173,6 +173,9 @@ struct NodeActor<'a, P: plakous_host_protocol::ProtocolExtension> {
     projection_finished: bool,
     shown_skill_notices: crate::skills::ShownSkillNotices,
     prep_hooks: prompt::preparation::Hooks,
+    /// The actor entered idle without a settled turn's tree pass (a
+    /// workflow); the next idle pass runs the root's settled tree pass.
+    idle_entry_pass_due: bool,
 }
 
 enum HostStep {
@@ -258,11 +261,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
                 self.log_projector_debt(&error);
             }
         }
-        if self.role.tree_passes
-            && self.config.session.store_revision != 0
-            && let Err(error) = target.tree_pass().await
-        {
-            self.log_projector_debt(&error);
+        // The root's tree pass runs here only at idle entry (spec 03 §4.4):
+        // after open, a recovery or a workflow, never on a tick or an intent
+        // alone. A turn settles its own pass. The tick keeps the tree's
+        // housekeeping.
+        if self.role.tree_passes && self.config.session.store_revision != 0 {
+            let due = std::mem::take(&mut self.idle_entry_pass_due);
+            let passed = if due {
+                target.tree_pass().await
+            } else {
+                target.tree_housekeeping().await
+            };
+            if let Err(error) = passed {
+                // A refused idle-entry pass stays due: the next tick retries it.
+                self.idle_entry_pass_due = due;
+                self.log_projector_debt(&error);
+            }
         }
         if self.config.session.queue_commands.has_pending()
             || self.config.session.queue_projection_debt
@@ -730,3 +744,5 @@ pub(in crate::runtime) const FINAL_PROJECTION_BOUND: Duration = Duration::from_m
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
+#[cfg(test)]
+mod tree_points_tests;

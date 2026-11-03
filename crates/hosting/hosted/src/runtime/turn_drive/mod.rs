@@ -161,7 +161,15 @@ pub(in crate::runtime) async fn drive_recovered_turn<
     let tree_id = super::rebind::durable_tree_id(rows, host.session);
     let session_id = host.live_target.followed.session_id();
     let driven = TurnDrive::new(turn.control(), host, None).run(turn).await;
-    if let Err(error) = super::projection::project_tree(runtime, rows, &tree_id, session_id).await {
+    if let Err(error) = super::projection::root_tree_pass(
+        runtime,
+        rows,
+        &tree_id,
+        session_id,
+        super::projection::RootTreePass::Settled,
+    )
+    .await
+    {
         let _ = events.notice(sessions::TranscriptRow::error(
             sessions::NoticeScope::Tree,
             format!("child mail projector deferred: {error}"),

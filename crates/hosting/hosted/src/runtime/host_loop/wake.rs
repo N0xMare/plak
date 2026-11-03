@@ -368,41 +368,27 @@ impl<P: plakous_host_protocol::ProtocolExtension> NodeActor<'_, P> {
         }
         let rows = self.config.topology_rows();
         let runtime = self.last_tree_revision.runtime(&rows, session);
-        super::super::projection::project_tree(
-            self.opened.sessions(),
-            &rows,
-            &super::durable_tree_id(&rows, session),
-            self.opened.locator().session_id(),
-        )
-        .await?;
-        let mails = if let Some(runtime) = runtime {
-            runtime
-                .read(|tree| {
-                    tree.pending_mail(&tree.root_agent_id)
-                        .into_iter()
-                        .filter(|mail| {
-                            matches!(
-                                mail.purpose,
-                                crate::agent_tree_protocol::MessagePurpose::Result
-                                    | crate::agent_tree_protocol::MessagePurpose::Question
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .map_err(|error| CliFailure::new(error.message))?
-        } else {
-            Vec::new()
-        };
         let notices: Vec<_> = jobs
             .into_iter()
             .filter(|job| job.status != plakous::tools::JobStatus::Running)
             .collect();
-        let ids: Vec<_> = mails
-            .iter()
-            .map(|mail| mail.message_id.clone())
-            .chain(notices.iter().map(|job| format!("p{}", job.number)))
-            .collect();
-        if !self.child_wake.observe(&session.id, ids.clone(), now) {
+        let ids = wake_ids(runtime.as_deref(), &notices)?;
+        if !self.child_wake.observe(&session.id, ids, now) {
+            return Ok(HostStep::Continue);
+        }
+        // A wake is to be admitted: this is its admission pass to the tail,
+        // which also settles acknowledgements and returns the batch reads.
+        super::super::projection::root_tree_pass(
+            self.opened.sessions(),
+            &rows,
+            &super::durable_tree_id(&rows, session),
+            self.opened.locator().session_id(),
+            super::super::projection::RootTreePass::Admission,
+        )
+        .await?;
+        let ids = wake_ids(runtime.as_deref(), &notices)?;
+        if ids.is_empty() {
+            self.child_wake.park();
             return Ok(HostStep::Continue);
         }
         // Recheck ingress after observing mail: user input and shutdown outrank a wake.
@@ -568,3 +554,34 @@ pub(super) enum WakeFit {
 
 #[cfg(test)]
 mod tests;
+
+/// The unread result and question mail and the finished jobs a wake would
+/// carry.
+fn wake_ids(
+    runtime: Option<&crate::topology_runtime::ProductTopologyRuntime>,
+    notices: &[plakous::tools::JobView],
+) -> CliResult<Vec<String>> {
+    let mails = if let Some(runtime) = runtime {
+        runtime
+            .read(|tree| {
+                tree.pending_mail(&tree.root_agent_id)
+                    .into_iter()
+                    .filter(|mail| {
+                        matches!(
+                            mail.purpose,
+                            crate::agent_tree_protocol::MessagePurpose::Result
+                                | crate::agent_tree_protocol::MessagePurpose::Question
+                        )
+                    })
+                    .map(|mail| mail.message_id.clone())
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|error| CliFailure::new(error.message))?
+    } else {
+        Vec::new()
+    };
+    Ok(mails
+        .into_iter()
+        .chain(notices.iter().map(|job| format!("p{}", job.number)))
+        .collect())
+}
