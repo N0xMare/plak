@@ -21,8 +21,10 @@ async fn fresh_restart_retains_control_after_terminal_before_ack() {
     restart_control_fixture(false, false).await;
 }
 
+/// A throwaway release owner runs its actor and nothing else: it has no
+/// observation task.
 #[test]
-fn throwaway_release_owner_needs_no_entered_runtime_or_observation_task() {
+fn throwaway_release_owner_has_no_observation_task() {
     let executor = tokio::runtime::Runtime::new().unwrap();
     let root = tempfile::tempdir().unwrap();
     let (attached, turn, control) = executor.block_on(async {
@@ -65,11 +67,19 @@ fn throwaway_release_owner_needs_no_entered_runtime_or_observation_task() {
             control,
         )
     });
-    assert!(tokio::runtime::Handle::try_current().is_err());
-    let child =
-        ProductLiveChild::without_observation(&crate::TaskSet::new(), attached, turn, control);
-    assert!(child.host_observation().is_none());
-    executor.block_on(child.attached.release_opened()).unwrap();
+    executor
+        .block_on(async {
+            let child = ChildActorHandle::without_observation(
+                &crate::TaskSet::new(),
+                &crate::TaskSet::new(),
+                attached,
+                turn,
+                control,
+            );
+            assert!(child.host_observation().is_none());
+            child.into_attached().await.release_opened().await
+        })
+        .unwrap();
 }
 
 #[tokio::test]
@@ -80,6 +90,20 @@ async fn duplicate_wake_restart_below_retention_is_consumed_without_rebinding() 
 #[tokio::test]
 async fn reclaimed_wake_restart_is_consumed_without_rebinding() {
     restart_control_fixture(false, true).await;
+}
+
+/// Drives a restart until the child's actor reaches its acknowledgement,
+/// then drops it there.
+async fn abandon_at_acknowledgement<T>(
+    pending: impl Future<Output = T>,
+    acknowledging: tokio::sync::oneshot::Receiver<()>,
+    unacknowledged: &str,
+) {
+    tokio::select! {
+        biased;
+        _ = pending => panic!("{unacknowledged}"),
+        entered = acknowledging => entered.unwrap(),
+    }
 }
 
 async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
@@ -137,7 +161,8 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
     let first_turn = first.acknowledgement().turn_id().unwrap();
     let control = first.turn().unwrap().control();
     first.result().unwrap().clone().result().await.unwrap();
-    let mut child = ProductLiveChild::new(
+    let mut child = ChildActorHandle::new(
+        &crate::TaskSet::new(),
         &crate::TaskSet::new(),
         AttachedCodingSession {
             output_bound_rederived: None,
@@ -154,27 +179,19 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
     let command = CommandId::new("restart-next").unwrap();
     let previous_projection = crate::runtime::child_projection::of(&child).unwrap();
     if !below_retention && !reclaimed {
-        let entered = std::sync::atomic::AtomicBool::new(false);
-        let mut pending = Box::pin(child.restart_with_ack(
+        let (entered, acknowledging) = tokio::sync::oneshot::channel();
+        let pending = child.restart_with_ack(
             runtime.driver(),
             CommandId::new("delayed-ack-probe").unwrap(),
             "submit result".into(),
-            async {
-                entered.store(true, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                let _ = entered.send(());
                 std::future::pending::<()>().await;
             },
-        ));
-        // Poll until acknowledgement delivery, then cancel just this observer.
-        std::future::poll_fn(|cx| {
-            assert!(pending.as_mut().poll(cx).is_pending());
-            if entered.load(std::sync::atomic::Ordering::SeqCst) {
-                std::task::Poll::Ready(())
-            } else {
-                std::task::Poll::Pending
-            }
-        })
-        .await;
-        drop(pending);
+        );
+        // Wait for acknowledgement delivery, then cancel just this observer.
+        abandon_at_acknowledgement(pending, acknowledging, "the acknowledgement never settles")
+            .await;
         assert_eq!(
             child.turn_id(),
             first_turn,
@@ -194,11 +211,9 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
         replay.result().unwrap().clone().result().await.unwrap();
     }
     let result = child
-        .restart_with_ack(
-            runtime.driver(),
-            command.clone(),
-            "submit result".into(),
-            async {
+        .restart_with_ack(runtime.driver(), command.clone(), "submit result".into(), {
+            let (agent, command) = (agent.clone(), command.clone());
+            async move {
                 tokio::time::timeout(Duration::from_secs(20), async {
                     let replay = agent
                         .start_instruction(command.clone(), "submit result")
@@ -220,8 +235,8 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
                 })
                 .await
                 .unwrap();
-            },
-        )
+            }
+        })
         .await
         .unwrap();
     assert_ne!(result.turn_id(), first_turn);
@@ -236,7 +251,6 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
     if reclaimed {
         for round in 0..17 {
             child
-                .attached
                 .agent()
                 .unwrap()
                 .start_instruction(
@@ -252,8 +266,9 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
                 .await
                 .unwrap();
         }
-        let sessions = Arc::clone(&child.attached.sessions);
-        let locator = child.attached.release_opened().await.unwrap();
+        let sessions = child.sessions();
+        let (bound, control) = (child.turn_id(), child.turn_control());
+        let locator = child.into_attached().await.release_opened().await.unwrap();
         assert!(matches!(
             sessions.prune_history(locator).await.unwrap(),
             plakous::sessions::PruneHistoryOutcome::Pruned(_)
@@ -272,17 +287,22 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
         else {
             panic!("pruned session must reopen");
         };
-        child.attached = AttachedCodingSession {
-            output_bound_rederived: None,
-            reachability_probe: None,
-            sessions,
-            locator: session.locator(),
-            opened: Some(session),
-            recovered_turn: None,
-            topology_owner: None,
-        };
+        child = ChildActorHandle::new(
+            &crate::TaskSet::new(),
+            &crate::TaskSet::new(),
+            AttachedCodingSession {
+                output_bound_rederived: None,
+                reachability_probe: None,
+                sessions,
+                locator: session.locator(),
+                opened: Some(session),
+                recovered_turn: None,
+                topology_owner: None,
+            },
+            bound,
+            control,
+        );
         let submission = child
-            .attached
             .agent()
             .unwrap()
             .command(plakous::agent::TurnCommand::StartInstruction {
@@ -310,29 +330,22 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
             .unwrap();
     }
     let bound = child.turn_id();
-    let entered = std::sync::atomic::AtomicBool::new(false);
-    let mut pending = Box::pin(child.restart_with_ack(
+    let (entered, acknowledging) = tokio::sync::oneshot::channel();
+    let pending = child.restart_with_ack(
         runtime.driver(),
         command.clone(),
         "submit result".into(),
-        async {
-            entered.store(true, std::sync::atomic::Ordering::SeqCst);
+        async move {
+            let _ = entered.send(());
             std::future::pending::<()>().await;
         },
-    ));
-    std::future::poll_fn(|cx| {
-        assert!(
-            pending.as_mut().poll(cx).is_pending(),
-            "consumed/rejected checks must not bypass pending acknowledgement delivery"
-        );
-        if entered.load(std::sync::atomic::Ordering::SeqCst) {
-            std::task::Poll::Ready(())
-        } else {
-            std::task::Poll::Pending
-        }
-    })
+    );
+    abandon_at_acknowledgement(
+        pending,
+        acknowledging,
+        "consumed/rejected checks must not bypass pending acknowledgement delivery",
+    )
     .await;
-    drop(pending);
     assert_eq!(child.turn_id(), bound);
     let Err(error) = child
         .restart_with_ack(
@@ -351,16 +364,15 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
     } else {
         assert!(matches!(error, ChildRestartError::ReconciliationRequired));
     }
-    let locator = child.attached.locator();
+    let locator = child.locator();
     let cursor = child
-        .attached
-        .sessions
+        .sessions()
         .subscribe_feed(locator.session_id())
         .await
         .unwrap()
         .seen()
         .get();
-    let observed = released_with_feed(&child.attached.sessions, locator, None, cursor, false).await;
+    let observed = released_with_feed(&child.sessions(), locator, None, cursor, false).await;
     assert!(observed.failure.is_none());
     assert_eq!(
         observed.feed.unwrap().records,

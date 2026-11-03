@@ -1026,9 +1026,14 @@ async fn rejoin_turn(
     let sessions = Arc::clone(&attached.sessions);
     let session_id = attached.locator().session_id();
     let feed = super::children::ChildFeedSource::of(&attached);
-    let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
-        super::live::ProductLiveChild::new(&runtime.driver().tasks(), attached, turn, control),
-    );
+    let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
+        Box::new(super::live::ChildActorHandle::new(
+            &runtime.driver().tasks(),
+            &runtime.driver().release_owners(),
+            attached,
+            turn,
+            control,
+        ));
     match (begun, admitted) {
         (true, Ok(_)) => {}
         (false, _) => {

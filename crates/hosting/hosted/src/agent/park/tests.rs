@@ -17,7 +17,7 @@ use serde_json::json;
 
 use super::*;
 use crate::agent::AttachedCodingSession;
-use crate::agent::live::ProductLiveChild;
+use crate::agent::live::ChildActorHandle;
 use crate::agent_tree::ProductAgentTree;
 use crate::agent_tree_protocol::{
     AttemptStatus, NodeStatus, SendAgentMessageRequest, SpawnAgentRequest, SubmitResultRequest,
@@ -272,7 +272,8 @@ async fn fixture_with_probe(
     runtime
         .try_occupy_live(
             child.clone(),
-            Box::new(ProductLiveChild::new(
+            Box::new(ChildActorHandle::new(
+                &crate::TaskSet::new(),
                 &crate::TaskSet::new(),
                 attached,
                 turn,

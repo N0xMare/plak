@@ -75,7 +75,8 @@ async fn slow_follow_up_allows_list_steer_and_close_without_losing_or_duplicatin
             panic!("created session required")
         };
         let turn = session.agent().prompt("start").await.unwrap();
-        let child = ProductLiveChild::new(
+        let child = ChildActorHandle::new(
+            &crate::TaskSet::new(),
             &crate::TaskSet::new(),
             AttachedCodingSession {
                 output_bound_rederived: None,
@@ -89,7 +90,7 @@ async fn slow_follow_up_allows_list_steer_and_close_without_losing_or_duplicatin
             turn.id(),
             turn.control(),
         );
-        let queued = Arc::clone(&child.follow_ups);
+        let queued = child.follow_ups();
         let admitted = Arc::new(tokio::sync::Notify::new());
         let finish = Arc::new(tokio::sync::Notify::new());
         let command = CommandId::new("slow-mail:follow-up").unwrap();
@@ -261,7 +262,8 @@ async fn terminal_release_fixture(child: bool) {
         topology_owner: None,
     };
     let locator = if child {
-        let released = Box::new(ProductLiveChild::new(
+        let released = Box::new(ChildActorHandle::new(
+            &crate::TaskSet::new(),
             &crate::TaskSet::new(),
             attached,
             result.turn_id(),

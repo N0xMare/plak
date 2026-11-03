@@ -669,6 +669,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/driver/transient.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/turn_drive/admission.rs"): {"thread_local"},
     ("plakous-hosted", "src/interrupt.rs"): {"pin", "select"},
+    # A live child's actor serves its mailbox beside its turn watch.
+    ("plakous-hosted", "src/agent/live.rs"): {"pin", "select"},
     # The product half of the session record keeps the one-entry store cache.
     ("plak", "src/store/sessions.rs"): {"thread_local"},
     # The highlighter cache is thread-local because syntect parse/highlight

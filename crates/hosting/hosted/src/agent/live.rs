@@ -1,9 +1,10 @@
 //! The product's live child turn: `plakous-hosted`'s implementation of the tree's
 //! [`crate::topology_runtime::LiveChildHandle`].
 //!
-//! One attached child session and the turn it is running. Everything the hub
-//! asks of a live child — follow up, steer, restart, release, cancel — is a
-//! session operation, and this is the only place that says so.
+//! One attached child session and the turn it is running, owned by the
+//! child's actor. Everything the hub asks of a live child that touches the
+//! session (follow up, steer, restart, release, cancel) is a message to that
+//! actor, and this is the only place that says so.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -61,7 +62,7 @@ pub(super) async fn lock_for_transition<'a>(
 }
 
 #[derive(Debug)]
-enum ChildRestartError {
+pub(super) enum ChildRestartError {
     ReconciliationRequired,
     /// The command was recorded below the feed's retention (spec 03 §14.1).
     Consumed,
@@ -86,142 +87,230 @@ impl std::fmt::Display for ChildRestartError {
 
 impl std::error::Error for ChildRestartError {}
 
-/// One live child turn: the session it is attached to, the turn it is
-/// running, and that turn's control.
-pub struct ProductLiveChild {
-    pub attached: AttachedCodingSession,
-    pub turn_id: TurnId,
-    pub control: TurnControl,
-    /// Follow-up turns admitted behind the running turn, in admission order.
-    follow_ups: Arc<
-        std::sync::Mutex<
-            std::collections::VecDeque<(
-                TurnControl,
-                TurnResultHandle,
-                crate::runtime::child_projection::ChildTurnProjection,
-            )>,
-        >,
-    >,
+/// The turn a live child is running, as the hub reads it between messages.
+struct LiveTurn {
+    turn_id: TurnId,
+    control: TurnControl,
     observation: Option<crate::runtime::child_projection::ChildTurnProjection>,
+}
+
+type FollowUpQueue = std::sync::Mutex<
+    std::collections::VecDeque<(
+        TurnControl,
+        TurnResultHandle,
+        crate::runtime::child_projection::ChildTurnProjection,
+    )>,
+>;
+
+/// What the child's handle and its actor share: the facts the hub reads
+/// synchronously (agent, probe, feed source, the turn it runs) and the
+/// delivery barrier the hub orders terminal handoff with.
+struct ChildShared {
+    agent: Option<plakous::agent::Agent>,
+    probe: Option<plakous::model::ReachabilityProbe>,
+    sessions: Arc<plakous::sessions::AgentSessions>,
+    locator: plakous::sessions::SessionLocator,
+    turn: std::sync::Mutex<LiveTurn>,
+    /// Follow-up turns admitted behind the running turn, in admission order.
+    follow_ups: Arc<FollowUpQueue>,
     /// The tree's task set, which this child's projections run in.
     tasks: crate::TaskSet,
     delivery: Arc<tokio::sync::RwLock<()>>,
-    delivery_serial: Arc<tokio::sync::Mutex<()>>,
+    /// Orders each delivery reservation with its message, so the actor never
+    /// waits for a reservation whose message is queued behind it.
+    reserve: std::sync::Mutex<()>,
 }
 
-impl ProductLiveChild {
-    /// One live child on its running turn, with no follow-up queued.
-    #[must_use]
-    pub fn new(
-        tasks: &crate::TaskSet,
-        attached: AttachedCodingSession,
-        turn_id: TurnId,
-        control: TurnControl,
-    ) -> Self {
-        let observation = crate::runtime::child_projection::ChildTurnProjection::recovered(
-            tasks,
-            attached.agent().cloned(),
-            turn_id,
-        );
-        Self::admitted(tasks, attached, turn_id, control, observation)
+impl ChildShared {
+    fn turn(&self) -> std::sync::MutexGuard<'_, LiveTurn> {
+        self.turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
 
-    pub(crate) fn admitted(
-        tasks: &crate::TaskSet,
-        attached: AttachedCodingSession,
-        turn_id: TurnId,
-        control: TurnControl,
-        observation: crate::runtime::child_projection::ChildTurnProjection,
-    ) -> Self {
-        Self::with_observation(tasks, attached, turn_id, control, Some(observation))
-    }
+type Acknowledged = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-    /// A throwaway cancellation/release owner, without presentation or tasks.
-    pub(crate) fn without_observation(
-        tasks: &crate::TaskSet,
-        attached: AttachedCodingSession,
-        turn_id: TurnId,
-        control: TurnControl,
-    ) -> Self {
-        Self::with_observation(tasks, attached, turn_id, control, None)
-    }
+/// One request to a live child's actor, with the channel its answer goes on.
+enum ChildMessage {
+    FollowUp {
+        command_id: CommandId,
+        body: String,
+        acknowledged: Acknowledged,
+        delivery: tokio::sync::OwnedRwLockReadGuard<()>,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    Restart {
+        driver: crate::agent_tree_tools::TreeDriver,
+        command_id: CommandId,
+        prompt: String,
+        acknowledged: Acknowledged,
+        reply: tokio::sync::oneshot::Sender<Result<TurnResultHandle, ChildRestartError>>,
+    },
+    Release {
+        driver: crate::agent_tree_tools::TreeDriver,
+        reply: tokio::sync::oneshot::Sender<LiveRelease>,
+    },
+    CancelAndRelease {
+        driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
+        reply: tokio::sync::oneshot::Sender<LiveRelease>,
+    },
+    /// Hands the attached session back and stops the actor.
+    #[cfg(test)]
+    Detach {
+        reply: tokio::sync::oneshot::Sender<AttachedCodingSession>,
+    },
+}
 
-    fn with_observation(
-        tasks: &crate::TaskSet,
-        attached: AttachedCodingSession,
-        turn_id: TurnId,
-        control: TurnControl,
-        observation: Option<crate::runtime::child_projection::ChildTurnProjection>,
-    ) -> Self {
-        Self {
-            attached,
-            turn_id,
-            control,
-            follow_ups: Arc::default(),
-            observation,
-            tasks: tasks.clone(),
-            delivery: Arc::default(),
-            delivery_serial: Arc::default(),
+/// The live child's actor (design §3.1): the sole owner of its attached
+/// session. Everything the hub asks of a live child that touches the session
+/// (follow up, restart, release, cancel) is a message it answers in arrival
+/// order; an answer nobody waits for any more stops the work, as dropping
+/// the request's future did.
+struct ChildActor {
+    attached: AttachedCodingSession,
+    shared: Arc<ChildShared>,
+}
+
+impl ChildActor {
+    async fn run(self, mut mailbox: tokio::sync::mpsc::UnboundedReceiver<ChildMessage>) {
+        while let Some(message) = mailbox.recv().await {
+            match message {
+                ChildMessage::FollowUp {
+                    command_id,
+                    body,
+                    acknowledged,
+                    delivery,
+                    mut reply,
+                } => {
+                    let work = self.follow_up(command_id, body, acknowledged, delivery);
+                    tokio::select! {
+                        biased;
+                        () = reply.closed() => {}
+                        followed = work => { let _ = reply.send(followed); }
+                    }
+                }
+                ChildMessage::Restart {
+                    driver,
+                    command_id,
+                    prompt,
+                    acknowledged,
+                    mut reply,
+                } => {
+                    let work = self.restart(&driver, command_id, prompt, acknowledged);
+                    tokio::select! {
+                        biased;
+                        () = reply.closed() => {}
+                        restarted = work => { let _ = reply.send(restarted); }
+                    }
+                }
+                ChildMessage::Release { driver, mut reply } => {
+                    let delivery = self.reserve_release().await;
+                    let work = Self::release(self.attached, delivery, driver);
+                    tokio::select! {
+                        biased;
+                        () = reply.closed() => {}
+                        released = work => { let _ = reply.send(released); }
+                    }
+                    return;
+                }
+                ChildMessage::CancelAndRelease {
+                    driver,
+                    dispatched,
+                    mut reply,
+                } => {
+                    let delivery = self.reserve_release().await;
+                    let control = self.shared.turn().control.clone();
+                    let work = Self::cancel_and_release(
+                        self.attached,
+                        control,
+                        delivery,
+                        driver,
+                        dispatched,
+                    );
+                    tokio::select! {
+                        biased;
+                        () = reply.closed() => {}
+                        released = work => { let _ = reply.send(released); }
+                    }
+                    return;
+                }
+                #[cfg(test)]
+                ChildMessage::Detach { reply } => {
+                    let _ = reply.send(self.attached);
+                    return;
+                }
+            }
         }
     }
 
-    fn follow_up_with_ack(
+    /// The delivery barrier's write side, for a release. Every follow-up
+    /// reserved before the release is ahead of it in the mailbox (a
+    /// reservation and its message are sent under the one `reserve` lock),
+    /// so the actor has served it and its read side is gone; nothing
+    /// reserved after the release can reach this actor, whose handle the
+    /// release consumed. Only a transition the turn waiter is in can still
+    /// hold the barrier.
+    async fn reserve_release(&self) -> tokio::sync::OwnedRwLockWriteGuard<()> {
+        Arc::clone(&self.shared.delivery).write_owned().await
+    }
+
+    async fn follow_up(
         &self,
         command_id: CommandId,
         body: String,
-        acknowledged: impl Future<Output = ()> + Send + 'static,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
-        // Reserve synchronously under the map guard: terminal handoff must
-        // wait even if this owned operation has not been polled yet.
-        let delivery = Arc::clone(&self.delivery).try_read_owned();
-        let agent = self.attached.agent().cloned();
-        let turn_id = self.turn_id;
-        let follow_ups = Arc::clone(&self.follow_ups);
-        let serial = Arc::clone(&self.delivery_serial);
-        let tasks = self.tasks.clone();
-        Box::pin(async move {
-            let _delivery = delivery.map_err(|_| TURN_ENDED.to_owned())?;
-            let _serial = serial.lock().await;
-            let agent = agent.ok_or_else(|| "opened child has no agent".to_owned())?;
-            let submission = agent
-                .follow_up_with_id(command_id, turn_id, body)
-                .await
-                .map_err(|error| {
-                    if error.kind() == plakous::agent::ControlErrorKind::WrongPhase {
-                        TURN_ENDED.to_owned()
-                    } else {
-                        error.to_string()
-                    }
-                })?;
-            let mut submission =
-                crate::runtime::child_projection::ChildAdmission::new(&tasks, submission, &agent);
-            #[cfg(test)]
-            super::park::hooks::after_follow_up_admission(&agent.id().to_string()).await;
-            acknowledged.await;
-            // A newly admitted follow-up is the child's next turn; an exact
-            // duplicate was queued by the first delivery.
-            if let (Some(control), Some(result), Some(projection)) = (
-                submission.control.take(),
-                submission.result.take(),
-                submission.projection.take(),
-            ) {
-                follow_ups
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push_back((control, result, projection));
-            }
-            Ok(())
-        })
+        acknowledged: Acknowledged,
+        _delivery: tokio::sync::OwnedRwLockReadGuard<()>,
+    ) -> Result<(), String> {
+        let agent = self
+            .attached
+            .agent()
+            .cloned()
+            .ok_or_else(|| "opened child has no agent".to_owned())?;
+        let turn_id = self.shared.turn().turn_id;
+        let submission = agent
+            .follow_up_with_id(command_id, turn_id, body)
+            .await
+            .map_err(|error| {
+                if error.kind() == plakous::agent::ControlErrorKind::WrongPhase {
+                    TURN_ENDED.to_owned()
+                } else {
+                    error.to_string()
+                }
+            })?;
+        let mut submission = crate::runtime::child_projection::ChildAdmission::new(
+            &self.shared.tasks,
+            submission,
+            &agent,
+        );
+        #[cfg(test)]
+        super::park::hooks::after_follow_up_admission(&agent.id().to_string()).await;
+        acknowledged.await;
+        // A newly admitted follow-up is the child's next turn; an exact
+        // duplicate was queued by the first delivery.
+        if let (Some(control), Some(result), Some(projection)) = (
+            submission.control.take(),
+            submission.result.take(),
+            submission.projection.take(),
+        ) {
+            self.shared
+                .follow_ups
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push_back((control, result, projection));
+        }
+        Ok(())
     }
 
     // The offline fixture delays host acknowledgement while the admitted turn
     // completes, exercising registration independently of provider scheduling.
-    async fn restart_with_ack(
-        &mut self,
+    async fn restart(
+        &self,
         driver: &crate::agent_tree_tools::TreeDriver,
         command_id: CommandId,
         prompt: String,
-        acknowledged: impl Future<Output = ()> + Send,
+        acknowledged: Acknowledged,
     ) -> Result<TurnResultHandle, ChildRestartError> {
         let agent = self
             .attached
@@ -235,8 +324,11 @@ impl ProductLiveChild {
             })
             .await
             .map_err(|error| error.to_string())?;
-        let mut submission =
-            crate::runtime::child_projection::ChildAdmission::new(&self.tasks, submission, agent);
+        let mut submission = crate::runtime::child_projection::ChildAdmission::new(
+            &self.shared.tasks,
+            submission,
+            agent,
+        );
         acknowledged.await;
         if crate::agent::ledger::consumed_below_retention(
             driver,
@@ -283,20 +375,281 @@ impl ProductLiveChild {
             .ok_or_else(|| "submit harness start produced no result handle".to_owned())?;
         // The table must name the turn that is actually running, or a
         // later follow-up steers a turn that has already ended.
+        let mut turn = self.shared.turn();
         if let Some(projection) = submission.projection.take() {
-            self.observation = Some(projection);
-        } else if self.turn_id != turn_id {
-            self.observation = Some(
+            turn.observation = Some(projection);
+        } else if turn.turn_id != turn_id {
+            turn.observation = Some(
                 crate::runtime::child_projection::ChildTurnProjection::recovered(
-                    &self.tasks,
+                    &self.shared.tasks,
                     Some(agent.clone()),
                     turn_id,
                 ),
             );
         }
-        self.turn_id = turn_id;
-        self.control = control;
+        turn.turn_id = turn_id;
+        turn.control = control;
         Ok(result)
+    }
+
+    async fn release(
+        attached: AttachedCodingSession,
+        _delivery: tokio::sync::OwnedRwLockWriteGuard<()>,
+        driver: crate::agent_tree_tools::TreeDriver,
+    ) -> LiveRelease {
+        let sessions = Arc::clone(&attached.sessions);
+        match attached.release_opened_for_transfer().await {
+            Ok(locator) => {
+                let (cursor, recorded) = release_observation(&driver, locator);
+                released_with_feed(&sessions, locator, None, cursor, recorded).await
+            }
+            Err(error) => LiveRelease {
+                feed: None,
+                locator: None,
+                failure: Some(format!(
+                    "child session could not be released ({:?}): {error}",
+                    error.kind()
+                )),
+            },
+        }
+    }
+
+    async fn cancel_and_release(
+        attached: AttachedCodingSession,
+        control: TurnControl,
+        _delivery: tokio::sync::OwnedRwLockWriteGuard<()>,
+        driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> LiveRelease {
+        let cancel = match crate::interrupt::settle_cancel(
+            async {
+                let cancellation = control.request_cancel().await;
+                if let Some(dispatched) = dispatched {
+                    let _ = dispatched.send(());
+                }
+                let status = cancellation?;
+                control.wait_until_settled().await;
+                Ok::<_, plakous::agent::ControlError>(status)
+            },
+            plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
+        )
+        .await
+        {
+            crate::interrupt::CancelSettlement::Settled => None,
+            crate::interrupt::CancelSettlement::Unsettled(detail) => Some(detail.to_string()),
+        };
+        let sessions = Arc::clone(&attached.sessions);
+        match attached.release_opened_for_transfer().await {
+            Ok(locator) => {
+                let (cursor, recorded) = release_observation(&driver, locator);
+                released_with_feed(&sessions, locator, cancel, cursor, recorded).await
+            }
+            Err(error) => LiveRelease {
+                feed: None,
+                locator: None,
+                failure: cancel.or_else(|| {
+                    Some(format!(
+                        "child session could not be released after cancel ({:?}): {error}",
+                        error.kind()
+                    ))
+                }),
+            },
+        }
+    }
+}
+
+/// The hub's handle on one live child turn: the child's actor, which owns
+/// the attached session, and the facts the hub reads without waiting for it.
+pub struct ChildActorHandle {
+    mailbox: tokio::sync::mpsc::UnboundedSender<ChildMessage>,
+    shared: Arc<ChildShared>,
+}
+
+/// The answer of an actor that stopped before it replied: the child's
+/// session went with it.
+const ACTOR_GONE: &str = "the child's actor stopped before it answered";
+
+impl ChildActorHandle {
+    /// One live child on its running turn, with no follow-up queued. The
+    /// actor runs on `owners`; the turn's projections run on `tasks`.
+    #[must_use]
+    pub fn new(
+        tasks: &crate::TaskSet,
+        owners: &crate::TaskSet,
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+    ) -> Self {
+        let observation = crate::runtime::child_projection::ChildTurnProjection::recovered(
+            tasks,
+            attached.agent().cloned(),
+            turn_id,
+        );
+        Self::admitted(tasks, owners, attached, turn_id, control, observation)
+    }
+
+    pub(crate) fn admitted(
+        tasks: &crate::TaskSet,
+        owners: &crate::TaskSet,
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+        observation: crate::runtime::child_projection::ChildTurnProjection,
+    ) -> Self {
+        Self::with_observation(tasks, owners, attached, turn_id, control, Some(observation))
+    }
+
+    /// A throwaway cancellation/release owner, without presentation.
+    pub(crate) fn without_observation(
+        tasks: &crate::TaskSet,
+        owners: &crate::TaskSet,
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+    ) -> Self {
+        Self::with_observation(tasks, owners, attached, turn_id, control, None)
+    }
+
+    fn with_observation(
+        tasks: &crate::TaskSet,
+        owners: &crate::TaskSet,
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+        observation: Option<crate::runtime::child_projection::ChildTurnProjection>,
+    ) -> Self {
+        let shared = Arc::new(ChildShared {
+            agent: attached.agent().cloned(),
+            probe: attached.reachability_probe.clone(),
+            sessions: Arc::clone(&attached.sessions),
+            locator: attached.locator(),
+            turn: std::sync::Mutex::new(LiveTurn {
+                turn_id,
+                control,
+                observation,
+            }),
+            follow_ups: Arc::default(),
+            tasks: tasks.clone(),
+            delivery: Arc::default(),
+            reserve: std::sync::Mutex::new(()),
+        });
+        let (mailbox, inbox) = tokio::sync::mpsc::unbounded_channel();
+        let actor = ChildActor {
+            attached,
+            shared: Arc::clone(&shared),
+        };
+        drop(owners.spawn(actor.run(inbox)));
+        Self { mailbox, shared }
+    }
+
+    /// The live child's session, for the feed reads around it.
+    #[cfg(test)]
+    pub(crate) fn locator(&self) -> plakous::sessions::SessionLocator {
+        self.shared.locator
+    }
+
+    /// The live child's session store, for the feed reads around it.
+    #[cfg(test)]
+    pub(crate) fn sessions(&self) -> Arc<plakous::sessions::AgentSessions> {
+        Arc::clone(&self.shared.sessions)
+    }
+
+    /// The follow-up turns admitted behind the running turn.
+    #[cfg(test)]
+    pub(super) fn follow_ups(&self) -> Arc<FollowUpQueue> {
+        Arc::clone(&self.shared.follow_ups)
+    }
+
+    /// Stops the actor and hands its attached session back.
+    #[cfg(test)]
+    pub(crate) async fn into_attached(self) -> AttachedCodingSession {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        assert!(self.mailbox.send(ChildMessage::Detach { reply }).is_ok());
+        answer.await.expect("the actor hands its session back")
+    }
+
+    pub(super) fn follow_up_with_ack(
+        &self,
+        command_id: CommandId,
+        body: String,
+        acknowledged: impl Future<Output = ()> + Send + 'static,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+        // Reserve synchronously under the map guard: terminal handoff must
+        // wait even if this owned operation has not been polled yet.
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        let sent = {
+            let _order = self
+                .shared
+                .reserve
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Arc::clone(&self.shared.delivery)
+                .try_read_owned()
+                .map_err(|_| TURN_ENDED.to_owned())
+                .and_then(|delivery| {
+                    self.mailbox
+                        .send(ChildMessage::FollowUp {
+                            command_id,
+                            body,
+                            acknowledged: Box::pin(acknowledged),
+                            delivery,
+                            reply,
+                        })
+                        .map_err(|_| ACTOR_GONE.to_owned())
+                })
+        };
+        Box::pin(async move {
+            sent?;
+            answer.await.unwrap_or_else(|_| Err(ACTOR_GONE.to_owned()))
+        })
+    }
+
+    pub(super) async fn restart_with_ack(
+        &mut self,
+        driver: &crate::agent_tree_tools::TreeDriver,
+        command_id: CommandId,
+        prompt: String,
+        acknowledged: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<TurnResultHandle, ChildRestartError> {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        self.mailbox
+            .send(ChildMessage::Restart {
+                driver: driver.clone(),
+                command_id,
+                prompt,
+                acknowledged: Box::pin(acknowledged),
+                reply,
+            })
+            .map_err(|_| ChildRestartError::Runtime(ACTOR_GONE.to_owned()))?;
+        answer
+            .await
+            .unwrap_or_else(|_| Err(ChildRestartError::Runtime(ACTOR_GONE.to_owned())))
+    }
+
+    fn release_with(
+        self,
+        message: impl FnOnce(tokio::sync::oneshot::Sender<LiveRelease>) -> ChildMessage,
+    ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        let sent = {
+            let _order = self
+                .shared
+                .reserve
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.mailbox.send(message(reply)).is_ok()
+        };
+        Box::pin(async move {
+            let gone = || LiveRelease {
+                feed: None,
+                locator: None,
+                failure: Some(ACTOR_GONE.to_owned()),
+            };
+            if !sent {
+                return gone();
+            }
+            answer.await.unwrap_or_else(|_| gone())
+        })
     }
 }
 
@@ -377,24 +730,24 @@ pub(crate) async fn released_with_feed(
     }
 }
 
-impl LiveChildHandle for ProductLiveChild {
+impl LiveChildHandle for ChildActorHandle {
     fn host_observation(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        Some(self.observation.as_ref()?.observation.clone())
+        Some(self.shared.turn().observation.as_ref()?.observation.clone())
     }
 
     fn reachability_probe(&self) -> Option<plakous::model::ReachabilityProbe> {
-        self.attached.reachability_probe.clone()
+        self.shared.probe.clone()
     }
 
     fn agent(&self) -> Option<plakous::agent::Agent> {
-        self.attached.agent().cloned()
+        self.shared.agent.clone()
     }
     fn turn_id(&self) -> TurnId {
-        self.turn_id
+        self.shared.turn().turn_id
     }
 
     fn turn_control(&self) -> TurnControl {
-        self.control.clone()
+        self.shared.turn().control.clone()
     }
 
     fn feed(
@@ -402,8 +755,8 @@ impl LiveChildHandle for ProductLiveChild {
         cursor: u64,
     ) -> Pin<Box<dyn Future<Output = Result<Option<crate::agent_tree::TreeFeed>, String>> + Send>>
     {
-        let sessions = Arc::clone(&self.attached.sessions);
-        let session = self.attached.locator().session_id();
+        let sessions = Arc::clone(&self.shared.sessions);
+        let session = self.shared.locator.session_id();
         Box::pin(async move {
             super::read_tree_feed(&sessions, session, cursor)
                 .await
@@ -421,18 +774,20 @@ impl LiveChildHandle for ProductLiveChild {
     }
 
     fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
-        Some(Arc::clone(&self.delivery))
+        Some(Arc::clone(&self.shared.delivery))
     }
 
     fn take_follow_up(&mut self) -> Option<TurnResultHandle> {
         let (control, result, observation) = self
+            .shared
             .follow_ups
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pop_front()?;
-        self.observation = Some(observation);
-        self.turn_id = result.turn_id();
-        self.control = control;
+        let mut turn = self.shared.turn();
+        turn.observation = Some(observation);
+        turn.turn_id = result.turn_id();
+        turn.control = control;
         Some(result)
     }
 
@@ -456,24 +811,7 @@ impl LiveChildHandle for ProductLiveChild {
         self: Box<Self>,
         driver: crate::agent_tree_tools::TreeDriver,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
-        Box::pin(async move {
-            let _delivery = Arc::clone(&self.delivery).write_owned().await;
-            let sessions = Arc::clone(&self.attached.sessions);
-            match self.attached.release_opened_for_transfer().await {
-                Ok(locator) => {
-                    let (cursor, recorded) = release_observation(&driver, locator);
-                    released_with_feed(&sessions, locator, None, cursor, recorded).await
-                }
-                Err(error) => LiveRelease {
-                    feed: None,
-                    locator: None,
-                    failure: Some(format!(
-                        "child session could not be released ({:?}): {error}",
-                        error.kind()
-                    )),
-                },
-            }
-        })
+        (*self).release_with(|reply| ChildMessage::Release { driver, reply })
     }
 
     fn cancel_and_release(
@@ -481,42 +819,10 @@ impl LiveChildHandle for ProductLiveChild {
         driver: crate::agent_tree_tools::TreeDriver,
         dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
-        Box::pin(async move {
-            let _delivery = Arc::clone(&self.delivery).write_owned().await;
-            let cancel = match crate::interrupt::settle_cancel(
-                async {
-                    let cancellation = self.control.request_cancel().await;
-                    if let Some(dispatched) = dispatched {
-                        let _ = dispatched.send(());
-                    }
-                    let status = cancellation?;
-                    self.control.wait_until_settled().await;
-                    Ok::<_, plakous::agent::ControlError>(status)
-                },
-                plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
-            )
-            .await
-            {
-                crate::interrupt::CancelSettlement::Settled => None,
-                crate::interrupt::CancelSettlement::Unsettled(detail) => Some(detail.to_string()),
-            };
-            let sessions = Arc::clone(&self.attached.sessions);
-            match self.attached.release_opened_for_transfer().await {
-                Ok(locator) => {
-                    let (cursor, recorded) = release_observation(&driver, locator);
-                    released_with_feed(&sessions, locator, cancel, cursor, recorded).await
-                }
-                Err(error) => LiveRelease {
-                    feed: None,
-                    locator: None,
-                    failure: cancel.or_else(|| {
-                        Some(format!(
-                            "child session could not be released after cancel ({:?}): {error}",
-                            error.kind()
-                        ))
-                    }),
-                },
-            }
+        (*self).release_with(|reply| ChildMessage::CancelAndRelease {
+            driver,
+            dispatched,
+            reply,
         })
     }
 }

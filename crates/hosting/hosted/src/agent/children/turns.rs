@@ -624,8 +624,9 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         )
     });
     let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
-        Box::new(crate::agent::live::ProductLiveChild::admitted(
+        Box::new(crate::agent::live::ChildActorHandle::admitted(
             &runtime.driver().tasks(),
+            &runtime.driver().release_owners(),
             attached,
             turn_id,
             control,

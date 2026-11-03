@@ -406,7 +406,8 @@ impl Fixture {
         };
         let released = Arc::new(tokio::sync::Notify::new());
         let live: Box<dyn crate::topology_runtime::LiveChildHandle> =
-            Box::new(crate::agent::live::ProductLiveChild::new(
+            Box::new(crate::agent::live::ChildActorHandle::new(
+                &crate::TaskSet::new(),
                 &crate::TaskSet::new(),
                 attached,
                 turn,

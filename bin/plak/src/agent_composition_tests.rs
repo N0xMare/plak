@@ -254,7 +254,8 @@ async fn retiring_a_live_child_advances_its_session_locator() {
     ));
     live.lock().await.insert_for_test(
         "c1".to_owned(),
-        Box::new(live::ProductLiveChild::new(
+        Box::new(live::ChildActorHandle::new(
+            &plakous_recursive_subagents::task_set::TaskSet::default(),
             &plakous_recursive_subagents::task_set::TaskSet::default(),
             created,
             turn_id,

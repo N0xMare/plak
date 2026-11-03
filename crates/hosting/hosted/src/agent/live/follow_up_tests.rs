@@ -302,7 +302,7 @@ impl Fixture {
         fixture
     }
 
-    async fn unoccupied() -> (Self, ProductLiveChild) {
+    async fn unoccupied() -> (Self, ChildActorHandle) {
         let root = tempfile::tempdir().unwrap();
         let tree_id = uuid::Uuid::new_v4().to_string();
         let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
@@ -401,7 +401,8 @@ impl Fixture {
             })
             .await
             .unwrap();
-        let live = ProductLiveChild::new(
+        let live = ChildActorHandle::new(
+            &crate::TaskSet::new(),
             &crate::TaskSet::new(),
             AttachedCodingSession {
                 output_bound_rederived: None,
@@ -415,7 +416,7 @@ impl Fixture {
             first.turn_id(),
             submission.turn().unwrap().control(),
         );
-        let queued = Arc::clone(&live.follow_ups);
+        let queued = live.follow_ups();
         gate.entered().await;
         (
             Self {
@@ -729,4 +730,39 @@ async fn mail_entry_detaches_registration_from_cancelled_send_and_allows_close()
     })
     .await
     .unwrap();
+}
+
+/// A follow-up reserved before a release is served before it: the release
+/// waits until that follow-up's admission has ended.
+#[tokio::test]
+async fn a_follow_up_reserved_before_a_release_is_served_first() {
+    let (fixture, live) = Fixture::unoccupied().await;
+    let (entered, entering) = tokio::sync::oneshot::channel();
+    let (finish, finishing) = tokio::sync::oneshot::channel::<()>();
+    let delivery = tokio::spawn(live.follow_up_with_ack(
+        CommandId::new("fixture:ahead").unwrap(),
+        "ahead".into(),
+        async move {
+            let _ = entered.send(());
+            let _ = finishing.await;
+        },
+    ));
+    entering.await.unwrap();
+    let release =
+        tokio::spawn(Box::new(live).cancel_and_release(fixture.runtime.driver().clone(), None));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        !release.is_finished(),
+        "the release waits for the follow-up reserved before it"
+    );
+    finish.send(()).unwrap();
+    delivery.await.unwrap().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), release)
+        .await
+        .expect("the release proceeds once the follow-up is served")
+        .unwrap();
+    crate::topology_runtime::force_release(
+        &fixture.runtime.read(|tree| tree.tree_id.clone()).unwrap(),
+    )
+    .await;
 }

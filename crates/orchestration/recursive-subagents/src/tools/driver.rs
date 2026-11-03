@@ -452,7 +452,8 @@ impl TreeDriver {
         self.release_owners.spawn(future)
     }
 
-    pub(crate) fn release_owners(&self) -> crate::task_set::TaskSet {
+    /// The set [`Self::spawn_release_owner`] spawns on.
+    pub fn release_owners(&self) -> crate::task_set::TaskSet {
         self.release_owners.clone()
     }
 

@@ -153,8 +153,9 @@ impl ProductMailDeliverer {
                 }
             };
             if let Some(recovered) = recovered {
-                let child = crate::agent::live::ProductLiveChild::without_observation(
+                let child = crate::agent::live::ChildActorHandle::without_observation(
                     &self.runtime.driver().tasks(),
+                    &self.runtime.driver().release_owners(),
                     attached,
                     recovered.turn_id(),
                     recovered.control(),

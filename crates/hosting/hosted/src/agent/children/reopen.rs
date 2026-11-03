@@ -44,8 +44,9 @@ pub(in crate::agent) async fn rejoin_recovered_start(
     {
         Ok(admitted) => admitted,
         Err(error) => {
-            let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
+            let _ = Box::new(crate::agent::live::ChildActorHandle::without_observation(
                 &runtime.driver().tasks(),
+                &runtime.driver().release_owners(),
                 attached,
                 turn,
                 control,
@@ -84,8 +85,9 @@ pub(in crate::agent) async fn rejoin_recovered_start(
     let mut registration = match bound {
         Ok(registration) => registration,
         Err(error) => {
-            let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
+            let _ = Box::new(crate::agent::live::ChildActorHandle::without_observation(
                 &runtime.driver().tasks(),
+                &runtime.driver().release_owners(),
                 attached,
                 turn,
                 control,
@@ -152,8 +154,9 @@ async fn occupy_recovered_turn(
 ) -> Result<TurnId, String> {
     let feed = ChildFeedSource::of(&attached);
     let child: Box<dyn crate::topology_runtime::LiveChildHandle> =
-        Box::new(crate::agent::live::ProductLiveChild::new(
+        Box::new(crate::agent::live::ChildActorHandle::new(
             &runtime.driver().tasks(),
+            &runtime.driver().release_owners(),
             attached,
             turn,
             control,
@@ -1090,8 +1093,9 @@ pub(super) async fn reconcile_reopened_child_results(
         let sessions = Arc::clone(&session.sessions);
         let session_id = session.locator().session_id();
         let release = if let Some(recovered) = recovered {
-            Box::new(crate::agent::live::ProductLiveChild::new(
+            Box::new(crate::agent::live::ChildActorHandle::new(
                 &runtime.driver().tasks(),
+                &runtime.driver().release_owners(),
                 *session,
                 recovered.turn_id(),
                 recovered.control(),
