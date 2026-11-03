@@ -18,7 +18,7 @@ use crate::commands::host_config::{
 use crate::commands::session::seed_new_session_binding;
 use crate::commands::support::{
     HOST_WORKER_JOIN_TIMEOUT, edit_config_file, exit_restored_tui, join_host_worker_bounded,
-    join_tui_host_worker,
+    join_tui_host_worker, resolved_workspace_path,
 };
 use crate::shell::services::Services;
 use crate::{
@@ -603,9 +603,8 @@ fn prepare_tui_launch(
     }
 
     if resume {
-        let requested = std::fs::canonicalize(&cwd).unwrap_or_else(|_| cwd.clone());
-        let recorded = std::fs::canonicalize(&record.workspace_root)
-            .unwrap_or_else(|_| record.workspace_root.clone());
+        let requested = resolved_workspace_path(&cwd)?;
+        let recorded = resolved_workspace_path(&record.workspace_root)?;
         if requested != recorded {
             return Err(CliFailure::new(format!(
                 "session {} belongs to {}; exact resume from {} was refused",
@@ -1406,10 +1405,8 @@ pub(crate) fn handle_tui_handoff(
         }
         tui::TuiHandoff::ResumeSession { id } => {
             let next = store.load(&id).map_err(CliFailure::from)?;
-            let requested = std::fs::canonicalize(&record.workspace_root)
-                .unwrap_or_else(|_| record.workspace_root.clone());
-            let recorded = std::fs::canonicalize(&next.workspace_root)
-                .unwrap_or_else(|_| next.workspace_root.clone());
+            let requested = resolved_workspace_path(&record.workspace_root)?;
+            let recorded = resolved_workspace_path(&next.workspace_root)?;
             if requested != recorded {
                 return Err(CliFailure::new(
                     "selected session belongs to a different workspace",

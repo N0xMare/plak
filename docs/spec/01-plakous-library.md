@@ -5650,10 +5650,12 @@ filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
 escaping or replaced required directories fail closed rather than omit the prefix.
 This is path-policy validation, not an atomic exec or hostile-shim-content fence.
 
-Tool operations reach the workspace through the sealed backend, with two
+Tool operations reach the workspace through the sealed backend, with three
 exceptions: the files pack's skill-root read exception, which opens files under
-the enrolled skill roots directly, and the hosted `Skill` load, which reads
-through an `InstructionSourceReader`. The few
+the enrolled skill roots directly; the hosted `Skill` load, which reads
+through an `InstructionSourceReader`; and the orchestration topology tools,
+whose mints, seals, adoptions, removals, refreshes and occupancy probes reach
+copies and checkouts through the orchestration VCS port (chapter 03 §16). The few
 workspace-path questions a host asks outside tool operations, before and around
 construction, go through `plakous::tools::WorkspaceProbe`: the physical path of a
 recorded root or cwd (`canonicalize`, which is also the existence check), whether
@@ -5668,11 +5670,21 @@ Every probe and reader answer is fallible with a distinct `Unavailable` error
 "absent" answer: session construction, spawn, exact resume, instruction and
 skill discovery and the copy-size pass fail closed on it, so nothing is skipped
 and then frozen into a session. Falling back to the recorded path applies only
-where a path does not resolve, as before. Callers resolve paths before taking
+where a path does not resolve, as before; the product's exact-resume workspace
+checks resolve both paths the same way. Callers resolve paths before taking
 a tree lock: the Read/Grep stamp and copy-base lookups read the recorded rows,
-resolve them outside the lock and then match. Both ports are synchronous in
-this step; they become async in the next part of the runner split, together
-with an async version-control port, once session construction is async.
+resolve them outside the lock and then match.
+Both ports are synchronous batch ports: each call is one bounded answer, made
+outside every lock and never inside a tree writer. Session construction makes
+its calls in its construction batch, off any turn; a call on a tool's or the
+tree's path runs on a blocking worker, never on an async worker: the `Skill`
+load and the copy-size pass. A remote implementation answers each call as one
+request from that worker. They become async only with an async session
+construction, which a WebAssembly core requires. `JoinedSessionsPort` stays
+synchronous over the in-process service, and every caller runs its stops on a
+thread of its own or a blocking worker. The orchestration VCS port is async:
+every answer is awaited outside the tree's lock and its writers (chapter 03
+§16).
 The run-stable workspace facts that plan compilation and the runtime
 environment component bind (`plakous-agent/workspace-environment-v1`) name the
 operating system of the execution backend's descriptor
@@ -9659,7 +9671,9 @@ and flags, the terminal generation and its change watch, `terminal_jobs_since`,
 current by the runner's job events, which also feed `observe_jobs`; the
 effects (`stop_with_grace`, `stop_jobs`, `stop_foreground`,
 `disown_leftovers`) are forwarded and become async, and the capacity and
-output-root bindings are forwarded once at attach.
+output-root bindings are forwarded once at attach. Until then the in-process
+port's stops block, and every caller runs them on a thread of its own or a
+blocking worker (§8.5).
 After committing a terminal notice's consumption and immediately before
 removing its process snapshot, the driver calls `JobHost::observe_terminal`
 with the exact owner and terminal `JobView` rows. The default is a no-op.

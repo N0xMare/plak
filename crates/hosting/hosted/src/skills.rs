@@ -322,12 +322,19 @@ impl ToolExecutor for SkillTool {
             let name = name.strip_prefix('/').unwrap_or(name);
             let subject: String = name.chars().take(100).collect();
             context.progress().report(&subject, None, None)?;
-            match skill_result(
-                &self.skills,
-                self.reader.as_ref(),
-                name,
-                args.args.as_deref(),
-            ) {
+            // The reader is synchronous: its answers are read on a blocking
+            // worker, never on the turn's async worker (spec 01 section 8.5).
+            let (skills, reader, name) = (
+                Arc::clone(&self.skills),
+                Arc::clone(&self.reader),
+                name.to_owned(),
+            );
+            let loaded = tokio::task::spawn_blocking(move || {
+                skill_result(&skills, reader.as_ref(), &name, args.args.as_deref())
+            })
+            .await
+            .unwrap_or_else(|_| Err("the skill could not be read: its reader failed".to_owned()));
+            match loaded {
                 Ok(text) => ToolOutcome::success_text(text),
                 Err(message) => ToolOutcome::failure_text(message),
             }
