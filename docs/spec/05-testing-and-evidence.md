@@ -4223,6 +4223,17 @@ refusal stays typed through the tree rows a hub-less session writes: the root
 batch written ahead of admission and the projector's tree save both end with
 exit code 7 and the JSONL code and write nothing
 (`another_hosts_custody_stays_typed_through_the_ledger_and_the_projector`).
+A clean quit releases the custody it held on every face: after `plak run`,
+`plak agent` and the TUI each quit, every custody record in the store reads
+released (`a_clean_run_releases_its_tree_custody`,
+`a_clean_agent_quit_releases_its_tree_custody`,
+`a_clean_tui_quit_releases_its_tree_custody`). A fork request withdrawn at
+reopen takes its seeded genesis tree, or a seed's row-less custody record,
+with it and leaves any other tree under that id alone
+(`a_withdrawn_fork_leaves_no_seeded_tree_or_custody_record`); a fork that
+published keeps its tree and custody record across the source's reopen and
+opens on them
+(`reopening_a_source_after_its_fork_published_keeps_the_forks_tree`).
 
 History retention evidence (Plakous sections 4 and 5.1) runs one prune
 conformance suite against both backends (`memory_prune_conformance`,

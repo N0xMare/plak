@@ -206,8 +206,13 @@ runtime fork definitely did not commit (its runtime build failed, it was
 interrupted before dispatch, or the runtime refused it outright), the host
 deletes the seeded tree again, compare-and-swapped on the revision the seed
 published and under a custody claim like every tree write (the seed's save
-and this delete each take one for the write, §14); an interrupted process
-can leave one behind, an unreferenced tree nothing opens. Tree resolution follows a session's lineage only while its
+and this delete each take one for the write, §14). A process that dies
+before the runtime fork commits leaves the seed behind; the source's next
+open withdraws the unsettled fork request (chapter 02 §2.6) and then deletes
+the tree under the fork's id the same way, provided no product record exists
+under that id (a fork that published owns its tree) and the tree is a fork
+genesis whose root is its only node, or only the custody record when the seed
+died before its rows. Tree resolution follows a session's lineage only while its
 product node is its source's (a rebind that stayed on its source's tree); a
 record whose node is the root of a tree named after it (a new session,
 `/new`, a fork, an import or carry, a rebind onto a tree of its own) resolves

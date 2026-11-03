@@ -222,6 +222,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
                     followed,
                 )
                 .await?;
+                let withdrawn_forks = super::super::fork::withdrawable_fork_targets(
+                    &*config.store,
+                    &config.session.id,
+                )?;
                 let withdrawn = config
                     .store
                     .withdraw_unadmitted_workflows(&mut config.session)?;
@@ -229,6 +233,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> NodeActor<'a, P> {
                     let _ = events.send(ContentEvent::Row(row));
                 }
                 let rows = config.topology_rows();
+                for target in &withdrawn_forks {
+                    super::super::fork::discard_withdrawn_fork_tree(&rows, &*config.store, target);
+                }
                 super::super::projection::root_tree_pass(
                     opened.sessions(),
                     &rows,

@@ -614,3 +614,219 @@ fn an_unadmitted_fork_is_withdrawn_at_open_and_the_source_answers() {
         Some(source.session_id())
     );
 }
+
+/// What a fork seeded before its runtime fork committed goes with the fork
+/// request reopen withdraws: the genesis tree under the fork's id, and the
+/// custody record of a seed that died before writing its rows. A tree under
+/// such an id that is not a fork genesis is left alone.
+#[test]
+fn a_withdrawn_fork_leaves_no_seeded_tree_or_custody_record() {
+    use crate::agent_tree::{NodeLineId, ProductAgentTree};
+    use crate::agent_tree_protocol::WriterMode;
+    use crate::runtime::TreeRows as _;
+    let root = tempfile::tempdir().unwrap();
+    let answers = || {
+        script(serde_json::json!([
+            {"output": {"text": "one"}},
+            {"output": {"text": "two"}}
+        ]))
+    };
+    let (config, _) = scripted_host_with(root.path(), answers());
+    let store = Arc::clone(&config.store);
+    let state_roots = config.state_roots.clone();
+    let id = config.session.id.clone();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("first".into()));
+    wait_for(&events, &mut seen, "the first turn", turn_completed);
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+
+    let mut session = store.load(&id).unwrap();
+    let source = session.plakous_locator.unwrap();
+    let request = |operation: &str| crate::sessions::projector::WorkflowRequest {
+        operation_id: operation.into(),
+        source_locator: source,
+        kind: crate::sessions::SessionWorkflowKind::Fork,
+    };
+    let (seeded, unwritten, foreign) = (
+        request("plak:fork:seeded"),
+        request("plak:fork:unwritten"),
+        request("plak:fork:foreign"),
+    );
+    for request in [&seeded, &unwritten, &foreign] {
+        store
+            .submit_workflow_request(&mut session, request)
+            .unwrap();
+    }
+    let rows = crate::runtime::HostRows::new(&state_roots, store.as_ref());
+    let source_tree = ProductAgentTree::bootstrap_root_for_test(
+        id.clone(),
+        "root",
+        "owner",
+        session.workspace_root.clone(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let seeded_id = seeded.successor_product_id();
+    let mut genesis = crate::agent_tree::block_on_for_test(ProductAgentTree::fork_genesis(
+        &source_tree,
+        &seeded_id,
+        session.workspace_root.clone(),
+        NodeLineId::parse("0190c3a1-5b7e-7c2d-9f00-0123456789ab").unwrap(),
+        source.branch_id().to_string(),
+    ))
+    .unwrap();
+    rows.save_tree(&mut genesis).unwrap();
+    // A seed that died after taking custody and before its rows.
+    let trees = state_roots.tree_store().unwrap();
+    let unwritten_id = unwritten.successor_product_id();
+    std::mem::forget(
+        crate::agent_tree::acquire_custody(trees.custody_port(), &unwritten_id).unwrap(),
+    );
+    // A tree under a withdrawn fork's id that is not a fork genesis.
+    let foreign_id = foreign.successor_product_id();
+    let mut unrelated = ProductAgentTree::bootstrap_root_for_test(
+        foreign_id.clone(),
+        "root",
+        "owner",
+        session.workspace_root.clone(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    rows.save_tree(&mut unrelated).unwrap();
+    assert!(
+        trees
+            .custody_port()
+            .custody(&unwritten_id)
+            .unwrap()
+            .is_some()
+    );
+
+    let (mut config, _) = scripted_host_with(root.path(), answers());
+    config.store = Arc::clone(&store);
+    config.state_roots = state_roots.clone();
+    config.session = store.load(&id).unwrap();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("second".into()));
+    wait_for(&events, &mut seen, "the next turn", turn_completed);
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+
+    assert_eq!(
+        store.load_intents(&id).unwrap().workflow_requests,
+        [] as [crate::sessions::projector::WorkflowRequest; 0]
+    );
+    assert!(
+        rows.tree(&seeded_id).unwrap().is_none(),
+        "the seeded tree stayed"
+    );
+    assert!(trees.custody_port().custody(&seeded_id).unwrap().is_none());
+    assert!(
+        trees
+            .custody_port()
+            .custody(&unwritten_id)
+            .unwrap()
+            .is_none(),
+        "the unwritten seed's custody record stayed"
+    );
+    assert!(rows.tree(&foreign_id).unwrap().is_some());
+}
+
+/// A fork that published keeps its tree: the source's next open withdraws
+/// nothing of it, its genesis tree and custody record stay, and the fork
+/// opens on them.
+#[test]
+fn reopening_a_source_after_its_fork_published_keeps_the_forks_tree() {
+    use crate::agent_tree::ProductAgentTree;
+    use crate::agent_tree_protocol::WriterMode;
+    use crate::runtime::TreeRows as _;
+    let root = tempfile::tempdir().unwrap();
+    let answers = || {
+        script(serde_json::json!([
+            {"output": {"text": "one"}},
+            {"output": {"text": "two"}},
+            {"output": {"text": "three"}}
+        ]))
+    };
+    let (config, _) = scripted_host_with(root.path(), answers());
+    let store = Arc::clone(&config.store);
+    let state_roots = config.state_roots.clone();
+    let id = config.session.id.clone();
+    let rows = crate::runtime::HostRows::new(&state_roots, store.as_ref());
+    let mut source_tree = ProductAgentTree::bootstrap_root_for_test(
+        id.clone(),
+        "root",
+        "owner",
+        config.session.workspace_root.clone(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    rows.save_tree(&mut source_tree).unwrap();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("first".into()));
+    wait_for(&events, &mut seen, "the first turn", turn_completed);
+    send_attached_action(
+        &actions,
+        UserAction::ForkSession {
+            account: None,
+            compact: false,
+        },
+    );
+    wait_for(&events, &mut seen, "the published fork", |event| {
+        matches!(event, HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text, .. }))
+            if text.contains("forked session"))
+    });
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+
+    let request = store.load_intents(&id).unwrap().workflow_requests[0].clone();
+    assert_eq!(request.kind, crate::sessions::SessionWorkflowKind::Fork);
+    let fork_id = request.successor_product_id();
+    store.load(&fork_id).expect("the fork published its record");
+    let trees = state_roots.tree_store().unwrap();
+    let seeded = rows
+        .tree(&fork_id)
+        .unwrap()
+        .expect("the fork's seeded tree");
+    assert!(seeded.forked_from().is_some());
+    assert!(trees.custody_port().custody(&fork_id).unwrap().is_some());
+
+    // The source reopens and answers.
+    let (mut config, _) = scripted_host_with(root.path(), answers());
+    config.store = Arc::clone(&store);
+    config.state_roots = state_roots.clone();
+    config.session = store.load(&id).unwrap();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("on the source".into()));
+    wait_for(&events, &mut seen, "the source's turn", turn_completed);
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let kept = rows
+        .tree(&fork_id)
+        .unwrap()
+        .expect("the source's reopen kept the fork's tree");
+    assert_eq!(kept.stored_revision, seeded.stored_revision);
+    assert!(trees.custody_port().custody(&fork_id).unwrap().is_some());
+
+    // The fork opens on its own tree.
+    let (mut config, _) = scripted_host_with(root.path(), answers());
+    config.store = Arc::clone(&store);
+    config.state_roots = state_roots.clone();
+    config.session = store.load(&fork_id).unwrap();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("on the fork".into()));
+    wait_for(&events, &mut seen, "the fork's turn", turn_completed);
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let opened = rows.tree(&fork_id).unwrap().expect("the fork's tree");
+    assert!(opened.forked_from().is_some());
+    assert!(trees.custody_port().custody(&fork_id).unwrap().is_some());
+}

@@ -422,6 +422,57 @@ pub(super) fn discard_seeded_tree<P: plakous_host_protocol::ProtocolExtension>(
     }
 }
 
+/// The fork successors whose unsettled requests reopen is about to withdraw:
+/// their runtime fork never committed, so a tree seeded for one is
+/// referenced by nothing.
+///
+/// # Errors
+///
+/// The views or intents could not be read.
+pub(super) fn withdrawable_fork_targets(
+    store: &dyn crate::session_store::SessionRecordStore,
+    session_id: &str,
+) -> Result<Vec<String>, String> {
+    let Some(views) = store.load_views(session_id)? else {
+        return Ok(Vec::new());
+    };
+    let intents = store.load_intents(session_id)?;
+    Ok(sessions::projector::workflow_withdrawals(&views, &intents)
+        .into_iter()
+        .filter_map(|(id, _)| intents.workflow_request(&id))
+        .filter(|request| request.kind == sessions::SessionWorkflowKind::Fork)
+        .map(sessions::projector::WorkflowRequest::successor_product_id)
+        .collect())
+}
+
+/// Removes what a withdrawn fork seeded under `target_id`: its genesis tree,
+/// or, when the seed died before its rows, the custody record it took. The
+/// delete is compare-and-swapped on the revision read here, under a custody
+/// claim, so a tree written since is kept.
+///
+/// Only an unpublished seed goes. A product record under `target_id` means
+/// the fork published and the tree is that session's own, so nothing is
+/// deleted; nor is a tree that is not a fork genesis with its root as its
+/// only node, which no seed can be. Best effort, like
+/// [`discard_seeded_tree`].
+pub(super) fn discard_withdrawn_fork_tree(
+    rows: &dyn super::TreeRows,
+    store: &dyn crate::session_store::SessionRecordStore,
+    target_id: &str,
+) {
+    if !matches!(store.load(target_id), Err(error) if error == "session not found") {
+        return;
+    }
+    let revision = match rows.tree(target_id) {
+        Ok(Some(tree)) if tree.forked_from().is_some() && tree.nodes().len() == 1 => {
+            tree.stored_revision
+        }
+        Ok(None) => 0,
+        Ok(Some(_)) | Err(_) => return,
+    };
+    let _ = rows.delete_tree(target_id, revision);
+}
+
 /// The runtime a fork recompiles from: this session's own binding, built
 /// from the files as they are now, over the fork's own tree `tree_id`. It
 /// compiles over a detached copy of that tree and takes no topology lease;
