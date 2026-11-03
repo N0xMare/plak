@@ -3410,7 +3410,7 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 | `interrupt` | — |
 | `background` | — (promotes in-flight top-level foreground commands; no-op otherwise) |
 | `compact` | — |
-| `recover` | — (idle only; recovers a fenced session now, or answers with a `nothing to recover` note) |
+| `recover` | — (idle only; recovers a fenced session now, or answers with a `nothing to recover` note before the next command is handled, also when a child recovery pass with nothing pending runs in the background) |
 | `resolve_approval` | `approval_id` (the non-empty opaque handle offered by `approval`), `choice` (`"allow"` or `"deny"`) |
 | `resume_queue` | — |
 | `clear` | — |

@@ -1166,3 +1166,49 @@ async fn a_session_switch_re_resolves_the_tree_and_pushes_keep_arriving() {
     crate::topology_runtime::force_release(&first_tree).await;
     crate::topology_runtime::force_release(&second_tree).await;
 }
+
+/// An explicit recovery with nothing pending answers before it returns, not
+/// from its background pass: a quit right after the request would stop the
+/// pass before it reported, and the request would go unanswered. The pass
+/// runs on this thread and has not run yet when the answer is read.
+#[tokio::test(flavor = "current_thread")]
+async fn an_explicit_recovery_with_nothing_pending_answers_before_it_returns() {
+    let root = tempfile::tempdir().unwrap();
+    let session = SessionRecord::new(root.path().to_path_buf());
+    let _runtime = test_kit::install_idle_topology_hub(&session.id, root.path());
+    let (wire, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(wire);
+    let answers = |events: &[HostEvent]| {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(event, HostEvent::Row(TranscriptRow::Notice(notice))
+                    if notice.text.starts_with("nothing to recover"))
+            })
+            .count()
+    };
+
+    let started = start_child_recovery(
+        &events,
+        &session.id,
+        session.id.clone(),
+        true,
+        Some("nothing to recover: no turn in this session was interrupted".to_owned()),
+    );
+
+    assert_eq!(
+        started,
+        crate::agent::RecoveryPassStart::Started { pending: 0 }
+    );
+    let mut seen: Vec<HostEvent> = received.try_iter().collect();
+    assert_eq!(answers(&seen), 1, "answered before the pass ran: {seen:#?}");
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    seen.extend(received.try_iter());
+    assert_eq!(
+        answers(&seen),
+        1,
+        "the pass did not answer again: {seen:#?}"
+    );
+}

@@ -3774,7 +3774,10 @@ Settlement has three triggers:
   recoverable meanwhile is tried, and its one report lists every child either
   run recovered and what the last run refused or did not reach. Release-triggered
   passes publish the recovered tree view and log their report. An explicit
-  `/recover` says so, and one that starts a pass with children to try says so. The pass takes the
+  `/recover` says so, and one that starts a pass with children to try says so;
+  one that starts a pass with no child to try answers `nothing to recover`
+  itself, before the next intent, rather than from the pass, which a quit
+  right after it would abort before it reported. The pass takes the
   tree's reattach lock, tries each child with an unresolved session failure
   once, never waits on a lease (a held lease is `recovery_lease_held` at
   once), and has 60 seconds from when it was started, waiting for the lock

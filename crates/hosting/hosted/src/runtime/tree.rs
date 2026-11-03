@@ -711,6 +711,10 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
             finished.send(ContentEvent::Row(row))
         }
     };
+    // The pass's nothing-to-recover answer, taken by whichever of the pass
+    // and an explicit request with nothing pending reports first.
+    let nothing = std::sync::Arc::new(std::sync::Mutex::new(nothing));
+    let nothing_for_pass = std::sync::Arc::clone(&nothing);
     let started = crate::agent::start_tree_recovery_pass(tree_id, move |report| {
         match report.and_then(|report| {
             report.note().map(|note| {
@@ -731,7 +735,7 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
                 });
             }
             None => {
-                if let Some(nothing) = nothing {
+                if let Some(nothing) = take_nothing(&nothing_for_pass) {
                     let _ = report_row(TranscriptRow::info(NoticeScope::Tree, nothing));
                 }
             }
@@ -739,7 +743,11 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
     });
     if explicit {
         let note = match started {
-            crate::agent::RecoveryPassStart::Started { pending } if pending > 0 => Some(format!(
+            // Nothing is pending, so the pass has nothing to report: answer
+            // now, before the next intent, rather than from the pass, whose
+            // note a quit right after this request would never let through.
+            crate::agent::RecoveryPassStart::Started { pending: 0 } => take_nothing(&nothing),
+            crate::agent::RecoveryPassStart::Started { pending } => Some(format!(
                 "plak: recovering {pending} child agent(s) in the background; a note follows \
                  when the pass finishes"
             )),
@@ -752,7 +760,7 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
                 "this agent tree is paused; explicitly resuming it recovers its children"
                     .to_owned(),
             ),
-            _ => None,
+            crate::agent::RecoveryPassStart::NoTree => None,
         };
         if let Some(note) = note {
             let row = TranscriptRow::info(NoticeScope::Tree, note);
@@ -768,6 +776,13 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
         }
     }
     started
+}
+
+fn take_nothing(nothing: &std::sync::Mutex<Option<String>>) -> Option<String> {
+    nothing
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
 }
 
 pub(super) async fn dispatch_topology_navigator<P: plakous_host_protocol::ProtocolExtension>(
