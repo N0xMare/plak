@@ -280,6 +280,89 @@ async fn durable_genesis_is_exact_reconstructive_and_revalidates_all_live_facts(
     Ok(())
 }
 
+/// A link that sends nothing: building a runner environment asks it nothing.
+struct SilentLink;
+
+impl plakous_tools::internal::runner::RunnerLink for SilentLink {
+    fn call(
+        &self,
+        _call: plakous_tools::internal::runner::RunnerCall,
+    ) -> plakous_tools::internal::runner::RunnerCallFuture {
+        Box::pin(std::future::ready(Err(
+            plakous_tools::internal::runner::RunnerFailure::Unavailable("silent".to_owned()),
+        )))
+    }
+}
+
+/// A checkpoint rehydrates only on the runner it was taken on (spec 01
+/// §8.5): the environment digest names the runner, so a change between the
+/// local runner and a remote one, or between two remote ones, is semantics
+/// drift.
+#[tokio::test]
+async fn a_checkpoint_rehydrates_only_on_the_runner_it_was_taken_on() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let on = |runner: Option<&str>| -> TestResult<AgentBuilder> {
+        let builder = durable_test_builder(
+            Arc::clone(&workspace),
+            ToolRegistryBuilder::default().freeze(),
+            "test.route",
+            b"alpha",
+            false,
+        )?;
+        let Some(runner) = runner else {
+            return Ok(builder);
+        };
+        let mut descriptor =
+            serde_json::to_value(plakous_tools::ExecutionBackendDescriptor::local_runner())?;
+        descriptor["runner_id"] = runner.into();
+        let backend =
+            plakous_tools::internal::runner::RunnerBackend::new(descriptor, Arc::new(SilentLink))?;
+        Ok(builder.with_runner_backend(Arc::new(backend)))
+    };
+    let identities = DurableGenesisIdentities::new("create:runner-1")?;
+    for (taken, reopened, rehydrates) in [
+        (None, None, true),
+        (Some("remote-a"), Some("remote-a"), true),
+        (None, Some("remote-a"), false),
+        (Some("remote-a"), Some("remote-b"), false),
+        (Some("remote-a"), None, false),
+    ] {
+        let source = on(taken)?;
+        let admission = sealed_runtime_admission(&source).await?;
+        let checkpoint = prepare_durable_genesis(
+            &source,
+            identities,
+            admission,
+            RuntimeDurability::Required,
+            CanonicalHistory::default(),
+        )?;
+        let target = on(reopened)?;
+        let current = sealed_runtime_admission(&target).await?;
+        let witness = revalidation_witness_for(&target, identities.run_id, current)?;
+        let rehydrated = checkpoint.rehydrate(&witness);
+        if rehydrates {
+            assert!(
+                matches!(rehydrated, Ok(RuntimeRehydration::Quiescent { .. })),
+                "{taken:?} to {reopened:?}: {rehydrated:?}"
+            );
+        } else {
+            assert!(
+                matches!(
+                    rehydrated,
+                    Err(
+                        crate::recovery_scope::RuntimeRehydrationError::Revalidation(
+                            crate::recovery_scope::RevalidationError::SemanticsDrift
+                        )
+                    )
+                ),
+                "{taken:?} to {reopened:?}: {rehydrated:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn durable_create_recovers_lost_ack_repeats_opens_and_releases_on_drift() -> TestResult {
     let directory = tempfile::tempdir()?;
