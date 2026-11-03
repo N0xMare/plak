@@ -1,6 +1,7 @@
 //! The runner's owner table and op table (spec 01 §8.4): which owner of each
-//! line it accepts, and what each effect-call key has done. Pure state; the
-//! service drives it.
+//! line it accepts, and what each effect-call and owner-control key has done.
+//! Observations are fenced but never recorded. Pure state; the service drives
+//! it.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -10,13 +11,21 @@ use plakous_runner_protocol::{LineOwner, Refusal, Request, RequestClass, RunnerF
 /// How long an answered or tombstoned key is kept without an acknowledgement.
 pub(crate) const RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// One effect-call key: the line, its generation, the call and its attempt.
+/// One recorded key.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct OpKey {
-    line: String,
-    generation: u64,
-    call_id: String,
-    attempt_id: String,
+pub(crate) enum OpKey {
+    /// An effect call: the line, its generation, the call, its attempt and
+    /// the verb, since one call may run several operations (a start, then
+    /// writes to what it started).
+    Effect {
+        line: String,
+        generation: u64,
+        call_id: String,
+        attempt_id: String,
+        verb: String,
+    },
+    /// An owner control of the line's processes.
+    Control { line: String, control_id: String },
 }
 
 #[derive(Debug)]
@@ -95,17 +104,27 @@ impl Tables {
                     attempt_id,
                 },
                 Some(owner),
-            ) => Some(OpKey {
+            ) => Some(OpKey::Effect {
                 line: owner.line.clone(),
                 generation: owner.generation,
                 call_id: call_id.clone(),
                 attempt_id: attempt_id.clone(),
+                verb: request.operation.verb.clone(),
             }),
-            (RequestClass::EffectCall { .. }, None) => {
+            (RequestClass::OwnerControl { control_id }, Some(owner)) => Some(OpKey::Control {
+                line: owner.line.clone(),
+                control_id: control_id.clone(),
+            }),
+            (
+                RequestClass::EffectCall { .. }
+                | RequestClass::OwnerControl { .. }
+                | RequestClass::ProcessObservation { .. },
+                None,
+            ) => {
                 return Admission::Answer(RunnerFrame::Refused {
                     request_id: Some(id),
                     refusal: Refusal::Malformed {
-                        detail: "an effect call names its owner".into(),
+                        detail: "an effect call, observation or control names its owner".into(),
                     },
                 });
             }

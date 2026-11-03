@@ -182,6 +182,15 @@ impl ServiceProcessRequest {
         self.environment.iter().map(|(name, _)| name)
     }
 
+    /// The declared environment with its values, for a runner request.
+    pub(super) fn environment_entries(
+        &self,
+    ) -> impl Iterator<Item = (&EnvironmentVariableName, &str)> {
+        self.environment
+            .iter()
+            .map(|(name, value)| (name, &*value.0))
+    }
+
     /// Returns secret environment names without values.
     pub fn secret_environment_names(&self) -> impl Iterator<Item = &EnvironmentVariableName> {
         self.secret_environment.iter().map(|(name, _)| name)
@@ -337,6 +346,8 @@ pub struct ServiceHandle {
 
 pub(super) enum ServiceOwner {
     Host(HostService),
+    /// A service on a runner, terminated through its link.
+    Runner(super::runner::RunnerServiceOwner),
     /// A deterministic fake's live-resource guard; dropping it releases it.
     Fake(FakeProcessGuard),
 }
@@ -369,6 +380,7 @@ impl ServiceHandle {
     pub async fn terminate(self, grace: Duration) -> Result<(), ExecutionBackendError> {
         match self.owner {
             ServiceOwner::Host(host) => host.terminate(grace).await,
+            ServiceOwner::Runner(runner) => runner.terminate(grace, &self.stderr_tail).await,
             ServiceOwner::Fake(guard) => {
                 drop(guard);
                 Ok(())
@@ -381,6 +393,7 @@ impl fmt::Debug for ServiceHandle {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let owner = match &self.owner {
             ServiceOwner::Host(_) => "host",
+            ServiceOwner::Runner(_) => "runner",
             ServiceOwner::Fake(_) => "deterministic",
         };
         formatter

@@ -182,7 +182,7 @@ async fn the_seam_runs_processes_and_mutations_as_the_direct_backend_does() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn services_are_not_carried_yet() {
+async fn a_link_without_streams_carries_no_services() {
     let workspace = tempfile::tempdir().unwrap();
     let (_, remote) = pair(workspace.path());
     let request = crate::ServiceProcessRequest::new(
@@ -251,7 +251,14 @@ fn every_verb_has_one_wire_name() {
     for verb in RunnerVerb::ALL {
         assert_eq!(RunnerVerb::parse(verb.as_str()), Some(verb));
     }
-    assert_eq!(RunnerVerb::parse("process.start"), None);
+    assert_eq!(RunnerVerb::parse("process.spawn"), None);
+    assert_eq!(
+        RunnerVerb::ALL
+            .iter()
+            .filter(|verb| verb.family() == RunnerVerbFamily::Environment)
+            .count(),
+        4
+    );
 }
 
 #[test]

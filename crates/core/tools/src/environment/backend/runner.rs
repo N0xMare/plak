@@ -1,11 +1,15 @@
 //! The runner seam (unsupported, spec 01 §8.5): an execution backend whose
-//! operations run on a runner reached through a [`RunnerLink`], and the
-//! runner side that answers them from a local [`ExecutionEnvironment`].
+//! operations run on a runner reached through a [`RunnerLink`], a host handle
+//! on one line's process sessions there ([`RunnerSessions`]), and the runner
+//! side that answers both from a local [`ExecutionEnvironment`].
 //!
 //! Requests and results cross the link as JSON values in a schema this module
 //! owns ([`wire`]); the link frames, keys and fences them. Nothing here
 //! selects a runner for a session.
 
+mod service;
+mod sessions;
+mod sessions_wire;
 mod wire;
 
 use std::future::Future;
@@ -13,8 +17,15 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use plakous_model::{CancellationToken, Timestamp};
+use plakous_model::{AttemptId, CallId, CancellationToken, Timestamp};
 use serde_json::Value;
+pub(super) use service::RunnerServiceOwner;
+pub use service::{
+    ServeServiceFuture, serve_service_spawn, serve_service_terminate, service_spawned,
+    terminated_service,
+};
+pub use sessions::{RunnerSessions, job_capacity, line_sessions, serve_sessions};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::{
     EnvironmentDelegation, EnvironmentVariableValue, ExecutionBackend, ExecutionBackendError,
@@ -28,7 +39,7 @@ use super::{
 use crate::{
     ExecutionBackendDescriptor, ExecutionBackendKind, ExecutionEnvironment,
     ExecutionEnvironmentConfig, ExecutionEnvironmentError, ExecutionEnvironmentErrorKind,
-    ExecutionEnvironmentScope, RunnerId,
+    ExecutionEnvironmentScope, RunnerId, ToolPreempt,
 };
 
 /// The operations a runner answers through this seam.
@@ -42,15 +53,56 @@ pub enum RunnerVerb {
     MutateWorkspace,
     /// [`ExecutionEnvironment::execute_literal_process`].
     ExecuteLiteralProcess,
+    /// [`crate::JoinedProcessSessions::start`] on the owner's line.
+    ProcessStart,
+    /// [`crate::JoinedProcessSessions::write_stdin`].
+    ProcessWrite,
+    /// [`crate::JoinedProcessSessions::poll_from`], waiting for output.
+    ProcessPoll,
+    /// [`crate::JoinedProcessSessions::stop_with_grace`].
+    ProcessStop,
+    /// Promotes a foreground process to a job.
+    ProcessPromote,
+    /// [`crate::JoinedProcessSessions::jobs`], with the runner instance.
+    JobsSnapshot,
+    /// [`crate::JoinedProcessSessions::stop_jobs`].
+    JobsStop,
+    /// [`crate::JoinedProcessSessions::disown_leftovers`].
+    JobsDisown,
+    /// [`ExecutionEnvironment::spawn_service`], with its stdio as a stream.
+    ServiceSpawn,
+    /// [`crate::ServiceHandle::terminate`] of a spawned service.
+    ServiceTerminate,
+}
+
+/// Which runner part answers a verb.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RunnerVerbFamily {
+    /// The execution environment ([`serve`]).
+    Environment,
+    /// The owner line's process sessions ([`serve_sessions`]).
+    Sessions,
+    /// Services and their streams.
+    Service,
 }
 
 impl RunnerVerb {
     /// Every verb.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 14] = [
         Self::ReadWorkspace,
         Self::QueryRepository,
         Self::MutateWorkspace,
         Self::ExecuteLiteralProcess,
+        Self::ProcessStart,
+        Self::ProcessWrite,
+        Self::ProcessPoll,
+        Self::ProcessStop,
+        Self::ProcessPromote,
+        Self::JobsSnapshot,
+        Self::JobsStop,
+        Self::JobsDisown,
+        Self::ServiceSpawn,
+        Self::ServiceTerminate,
     ];
 
     /// The verb's wire name.
@@ -61,6 +113,16 @@ impl RunnerVerb {
             Self::QueryRepository => "repository.query",
             Self::MutateWorkspace => "workspace.mutate",
             Self::ExecuteLiteralProcess => "process.execute",
+            Self::ProcessStart => "process.start",
+            Self::ProcessWrite => "process.write",
+            Self::ProcessPoll => "process.poll",
+            Self::ProcessStop => "process.stop",
+            Self::ProcessPromote => "process.promote",
+            Self::JobsSnapshot => "jobs.snapshot",
+            Self::JobsStop => "jobs.stop",
+            Self::JobsDisown => "jobs.disown",
+            Self::ServiceSpawn => "service.spawn",
+            Self::ServiceTerminate => "service.terminate",
         }
     }
 
@@ -69,20 +131,106 @@ impl RunnerVerb {
     pub fn parse(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|verb| verb.as_str() == name)
     }
+
+    /// Which runner part answers it.
+    #[must_use]
+    pub const fn family(self) -> RunnerVerbFamily {
+        match self {
+            Self::ReadWorkspace
+            | Self::QueryRepository
+            | Self::MutateWorkspace
+            | Self::ExecuteLiteralProcess => RunnerVerbFamily::Environment,
+            Self::ServiceSpawn | Self::ServiceTerminate => RunnerVerbFamily::Service,
+            Self::ProcessStart
+            | Self::ProcessWrite
+            | Self::ProcessPoll
+            | Self::ProcessStop
+            | Self::ProcessPromote
+            | Self::JobsSnapshot
+            | Self::JobsStop
+            | Self::JobsDisown => RunnerVerbFamily::Sessions,
+        }
+    }
+
+    /// Whether sending it again cannot repeat an effect.
+    #[must_use]
+    pub const fn is_read(self) -> bool {
+        matches!(
+            self,
+            Self::ReadWorkspace | Self::QueryRepository | Self::ProcessPoll | Self::JobsSnapshot
+        )
+    }
 }
 
-/// One operation a [`RunnerBackend`] hands its link.
+/// How a link keys one call (spec 01 §8.4).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RunnerClass {
+    /// One tool call's effect: at most once per key.
+    Effect {
+        /// The tool call.
+        call_id: CallId,
+        /// The call's attempt.
+        attempt_id: AttemptId,
+    },
+    /// Work no tool call keys: never recorded.
+    Unkeyed,
+    /// An observation of one job from a cursor: idempotent, never recorded.
+    Observation {
+        /// The job's number.
+        job: u32,
+        /// The output position.
+        cursor: u64,
+    },
+    /// A control of the owner line's processes: the link mints its control
+    /// id, and it runs at most once per id.
+    Control,
+}
+
+impl From<OperationClass> for RunnerClass {
+    fn from(class: OperationClass) -> Self {
+        match class {
+            OperationClass::EffectCall {
+                call_id,
+                attempt_id,
+            } => Self::Effect {
+                call_id,
+                attempt_id,
+            },
+            OperationClass::Unkeyed => Self::Unkeyed,
+        }
+    }
+}
+
+/// One operation a [`RunnerBackend`] or [`RunnerSessions`] hands its link.
 #[derive(Debug)]
 pub struct RunnerCall {
     verb: RunnerVerb,
     payload: Value,
     owner: Option<LineOwner>,
-    class: OperationClass,
+    class: RunnerClass,
     budget: Option<Timestamp>,
     cancellation: CancellationToken,
+    preempt: tokio::sync::watch::Receiver<ToolPreempt>,
 }
 
 impl RunnerCall {
+    fn new(verb: RunnerVerb, payload: Value, control: &OperationContext) -> Self {
+        Self {
+            verb,
+            payload,
+            owner: control.owner().copied(),
+            class: control.class().into(),
+            budget: control.budget(),
+            cancellation: control.cancellation().clone(),
+            preempt: control.preempt().clone(),
+        }
+    }
+
+    const fn with_class(mut self, class: RunnerClass) -> Self {
+        self.class = class;
+        self
+    }
+
     /// The operation.
     #[must_use]
     pub const fn verb(&self) -> RunnerVerb {
@@ -103,7 +251,7 @@ impl RunnerCall {
 
     /// The request class and key.
     #[must_use]
-    pub const fn class(&self) -> OperationClass {
+    pub const fn class(&self) -> RunnerClass {
         self.class
     }
 
@@ -118,6 +266,40 @@ impl RunnerCall {
     #[must_use]
     pub const fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
+    }
+
+    /// The caller's yield signal: the link forwards each change to the
+    /// runner while the call runs.
+    #[must_use]
+    pub const fn preempt(&self) -> &tokio::sync::watch::Receiver<ToolPreempt> {
+        &self.preempt
+    }
+}
+
+/// A yield in this seam's schema.
+#[must_use]
+pub fn encode_preempt(preempt: ToolPreempt) -> Value {
+    Value::String(
+        match preempt {
+            ToolPreempt::None => "none",
+            ToolPreempt::Steer => "steer",
+            ToolPreempt::Notice(false) => "notice",
+            ToolPreempt::Notice(true) => "notice_mail",
+            ToolPreempt::Background => "background",
+        }
+        .to_owned(),
+    )
+}
+
+/// The yield a value names; anything else is no yield.
+#[must_use]
+pub fn decode_preempt(value: &Value) -> ToolPreempt {
+    match value.as_str() {
+        Some("steer") => ToolPreempt::Steer,
+        Some("notice") => ToolPreempt::Notice(false),
+        Some("notice_mail") => ToolPreempt::Notice(true),
+        Some("background") => ToolPreempt::Background,
+        _ => ToolPreempt::None,
     }
 }
 
@@ -145,11 +327,39 @@ pub enum RunnerFailure {
 /// An owned future answering one [`RunnerCall`].
 pub type RunnerCallFuture = Pin<Box<dyn Future<Output = Result<Value, RunnerFailure>> + Send>>;
 
+/// The two directions of one runner stream: bytes written to `input` reach
+/// the runner, and bytes the runner sends arrive on `output`.
+pub struct RunnerStreams {
+    /// Toward the runner.
+    pub input: Pin<Box<dyn AsyncWrite + Send>>,
+    /// From the runner.
+    pub output: Pin<Box<dyn AsyncRead + Send>>,
+}
+
+impl std::fmt::Debug for RunnerStreams {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunnerStreams")
+            .finish_non_exhaustive()
+    }
+}
+
+/// An owned future answering one [`RunnerCall`] whose result opens a stream.
+pub type RunnerOpenFuture =
+    Pin<Box<dyn Future<Output = Result<(Value, RunnerStreams), RunnerFailure>> + Send>>;
+
 /// How a [`RunnerBackend`] reaches its runner. The implementation frames,
 /// keys and fences each call; it never interprets the payload.
 pub trait RunnerLink: Send + Sync + 'static {
     /// Sends one call and answers its result.
     fn call(&self, call: RunnerCall) -> RunnerCallFuture;
+
+    /// Sends one call whose result opens a stream. A link without streams
+    /// answers [`RunnerFailure::Unsupported`].
+    fn open(&self, call: RunnerCall) -> RunnerOpenFuture {
+        drop(call);
+        Box::pin(std::future::ready(Err(RunnerFailure::Unsupported)))
+    }
 }
 
 /// An execution backend whose operations run on a runner. Its identity is
@@ -191,6 +401,12 @@ impl RunnerBackend {
         })
     }
 
+    /// The link this backend sends through.
+    #[must_use]
+    pub fn link(&self) -> Arc<dyn RunnerLink> {
+        Arc::clone(&self.link)
+    }
+
     fn call<T: Send + 'static>(
         &self,
         verb: RunnerVerb,
@@ -203,15 +419,7 @@ impl RunnerBackend {
             Ok(payload) => payload,
             Err(error) => return ready_error(error),
         };
-        let call = RunnerCall {
-            verb,
-            payload,
-            owner: control.owner().copied(),
-            class: control.class(),
-            budget: control.budget(),
-            cancellation: control.cancellation().clone(),
-        };
-        let answer = self.link.call(call);
+        let answer = self.link.call(RunnerCall::new(verb, payload, control));
         Box::pin(async move {
             match answer.await {
                 Ok(value) => decode(value),
@@ -224,7 +432,10 @@ impl RunnerBackend {
 fn failure_error(failure: RunnerFailure) -> ExecutionBackendError {
     match failure {
         RunnerFailure::Backend(error) => wire::decode_error(error),
-        RunnerFailure::StaleOwner => ExecutionBackendError::stale_job_owner(),
+        RunnerFailure::StaleOwner => ExecutionBackendError::new(
+            ExecutionBackendErrorKind::IdentityMismatch,
+            "a newer owner of this agent line holds it on the runner",
+        ),
         RunnerFailure::Unsupported => backend_error(
             ExecutionBackendErrorKind::Unsupported,
             "the runner does not implement this operation",
@@ -323,17 +534,16 @@ impl ExecutionBackend for RunnerBackend {
         )
     }
 
-    /// Services and their streams are not carried by this seam yet.
+    /// The service runs on the runner with the runner's own delegations, and
+    /// its stdio is carried as one stream. Secret environment values do not
+    /// cross the link.
     fn spawn_service(
         &self,
-        _workspace: ExecutionWorkspace,
-        _request: PreparedServiceProcess,
-        _control: OperationContext,
+        workspace: ExecutionWorkspace,
+        request: PreparedServiceProcess,
+        control: OperationContext,
     ) -> ExecutionBackendFuture<ServiceProcess> {
-        ready_error(backend_error(
-            ExecutionBackendErrorKind::Unsupported,
-            "the runner does not carry services yet",
-        ))
+        service::spawn(&self.link, &workspace, &request.request, &control)
     }
 }
 
@@ -383,7 +593,7 @@ pub fn runner_descriptor(
 /// Why the runner side answered no result.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServeFailure {
-    /// The verb is not one this seam answers; nothing ran.
+    /// The verb is not one this part answers; nothing ran.
     Unsupported,
     /// The operation ran, or was refused, with this error in this seam's
     /// schema.
@@ -398,15 +608,18 @@ pub enum ServeFailure {
 /// An owned future answering one served operation.
 pub type ServeFuture = Pin<Box<dyn Future<Output = Result<Value, ServeFailure>> + Send>>;
 
-/// Answers one operation from `environment`, as the runner side of a link.
-/// The request must name `environment`'s own workspace.
+/// Answers one environment operation from `environment`, as the runner side
+/// of a link. The request must name `environment`'s own workspace; a verb of
+/// another family is [`ServeFailure::Unsupported`].
 pub fn serve(
     environment: &ExecutionEnvironment,
     verb: &str,
     payload: Value,
     control: OperationContext,
 ) -> ServeFuture {
-    let Some(verb) = RunnerVerb::parse(verb) else {
+    let Some(verb) =
+        RunnerVerb::parse(verb).filter(|verb| verb.family() == RunnerVerbFamily::Environment)
+    else {
         return Box::pin(std::future::ready(Err(ServeFailure::Unsupported)));
     };
     let request = match wire::open_envelope(environment, payload) {
@@ -437,7 +650,7 @@ pub fn serve(
                     .and_then(|result| wire::encode_transaction_result(&result)),
                 Err(error) => Err(error),
             },
-            RunnerVerb::ExecuteLiteralProcess => match wire::decode_process_request(request) {
+            _ => match wire::decode_process_request(request) {
                 Ok(request) => environment
                     .execute_literal_process(request, control)
                     .await
@@ -460,6 +673,12 @@ pub fn answer_too_large() -> Value {
         )
         .with_proven_no_effect(false),
     )
+}
+
+/// A runner-side error as the answer it becomes.
+#[must_use]
+pub fn serve_failure(error: &ExecutionBackendError) -> ServeFailure {
+    backend_failure(error)
 }
 
 fn backend_failure(error: &ExecutionBackendError) -> ServeFailure {

@@ -20,25 +20,25 @@ use super::super::{
 };
 use crate::ExecutionEnvironment;
 
-fn malformed() -> ExecutionBackendError {
+pub(super) fn malformed() -> ExecutionBackendError {
     invalid_request("runner wire value is malformed")
 }
 
-fn to_value(value: &impl Serialize) -> Result<Value, ExecutionBackendError> {
+pub(super) fn to_value(value: &impl Serialize) -> Result<Value, ExecutionBackendError> {
     serde_json::to_value(value).map_err(|_| malformed())
 }
 
-fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, ExecutionBackendError> {
+pub(super) fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, ExecutionBackendError> {
     serde_json::from_value(value).map_err(|_| malformed())
 }
 
-fn path_text(path: &Path) -> Result<String, ExecutionBackendError> {
+pub(super) fn path_text(path: &Path) -> Result<String, ExecutionBackendError> {
     path.to_str()
         .map(str::to_owned)
         .ok_or_else(|| invalid_request("runner wire path is not UTF-8"))
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut text = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -47,7 +47,7 @@ fn hex(bytes: &[u8]) -> String {
     text
 }
 
-fn unhex(text: &str) -> Result<Vec<u8>, ExecutionBackendError> {
+pub(super) fn unhex(text: &str) -> Result<Vec<u8>, ExecutionBackendError> {
     if !text.len().is_multiple_of(2) {
         return Err(malformed());
     }

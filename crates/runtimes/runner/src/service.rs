@@ -1,29 +1,40 @@
-//! The runner end: answers one host connection at a time from a local
-//! execution environment, with the owner and op tables of this instance.
+//! The runner end: answers host connections from a local execution
+//! environment, with the owner and op tables, the per-line process sessions
+//! and the services of this instance.
 
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use plakous_model::{AttemptId, BranchId, CallId, CancellationToken, LineId, Timestamp};
 use plakous_runner_protocol::frame::FrameError;
 use plakous_runner_protocol::{
-    Hello, HostFrame, LineOwner, Refusal, Request, RequestClass, RunnerFrame, VersionTriple,
-    WireError, capabilities,
+    Hello, HostFrame, LineOwner, Refusal, Request, RequestClass, RunnerFrame, StreamFrame,
+    VersionTriple, WireError, capabilities,
 };
-use plakous_tools::internal::runner::{RunnerVerb, ServeFailure, runner_descriptor, serve};
+use plakous_tools::internal::runner::{
+    RunnerVerb, RunnerVerbFamily, ServeFailure, ServeFuture, decode_preempt, job_capacity,
+    line_sessions, runner_descriptor, serve, serve_failure, serve_service_spawn,
+    serve_service_terminate, serve_sessions, service_spawned, terminated_service,
+};
 use plakous_tools::{
-    ExecutionEnvironment, ExecutionEnvironmentError, OperationClass, OperationContext, RunnerId,
+    ExecutionEnvironment, ExecutionEnvironmentError, JoinedProcessHostCapacity,
+    JoinedProcessSessions, OperationClass, OperationContext, RunnerId, ServiceHandle,
+    ServiceProcess, ToolPreempt,
 };
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::connection::{FrameStream, fits, write_frames};
 use crate::state::{Admission, OpKey, Tables};
+use crate::streams::{
+    Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
+};
 
-/// One runner process: its identity, its environment and the tables every
+/// One runner process: its identity, its environment and the state every
 /// connection to it shares. A new service is a new instance.
 #[derive(Clone)]
 pub struct RunnerService {
@@ -33,13 +44,42 @@ pub struct RunnerService {
 struct Inner {
     environment: ExecutionEnvironment,
     hello: Hello,
+    dead: Duration,
+    capacity: JoinedProcessHostCapacity,
     tables: Mutex<Tables>,
     /// Each host's current connection: answers go there, so an answer that
     /// outlives its connection reaches the host's reconnection.
-    hosts: Mutex<HashMap<String, mpsc::UnboundedSender<RunnerFrame>>>,
-    /// Cancellation of each running request, by its op key when it is
-    /// keyed, so a replay that moved the key's request id still reaches it.
-    running: Mutex<HashMap<(String, RunKey), CancellationToken>>,
+    hosts: Mutex<HashMap<String, Connection>>,
+    next_connection: AtomicU64,
+    next_stream: AtomicU64,
+    /// Each running request's cancellation and yield, by its op key when it
+    /// is keyed, so a replay that moved the key's request id still reaches
+    /// it.
+    running: Mutex<HashMap<(String, RunKey), Running>>,
+    /// Each line's process sessions, per host. They outlive connections and
+    /// owner changes: a newer owner of the line finds its jobs here.
+    lines: Mutex<HashMap<(String, String), JoinedProcessSessions>>,
+    /// Each service, per host and stream. A service lives as long as the
+    /// connection that spawned it.
+    services: Mutex<HashMap<(String, u64), Hosted>>,
+}
+
+struct Connection {
+    sender: mpsc::UnboundedSender<RunnerFrame>,
+    host_instance: String,
+    closer: CancellationToken,
+    id: u64,
+}
+
+struct Running {
+    cancellation: CancellationToken,
+    preempt: watch::Sender<ToolPreempt>,
+}
+
+struct Hosted {
+    ends: StreamEnds,
+    handle: Option<ServiceHandle>,
+    connection: u64,
 }
 
 /// What a runner says about itself in its hello.
@@ -55,8 +95,28 @@ pub struct RunnerIdentity {
     pub binary_id: Option<String>,
 }
 
+/// A runner's bounds.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RunnerLimits {
+    /// How many processes run at once across every line and host (128).
+    pub job_bound: u32,
+    /// How long a connection may stay silent before the runner ends it
+    /// (15 s; the host pings every 5 s).
+    pub dead: Duration,
+}
+
+impl Default for RunnerLimits {
+    fn default() -> Self {
+        Self {
+            job_bound: 128,
+            dead: Duration::from_secs(15),
+        }
+    }
+}
+
 impl RunnerService {
-    /// A new runner instance answering from `environment`.
+    /// A new runner instance answering from `environment`, with the default
+    /// limits.
     ///
     /// # Errors
     ///
@@ -64,6 +124,19 @@ impl RunnerService {
     pub fn new(
         environment: ExecutionEnvironment,
         identity: RunnerIdentity,
+    ) -> Result<Self, ExecutionEnvironmentError> {
+        Self::with_limits(environment, identity, RunnerLimits::default())
+    }
+
+    /// A new runner instance answering from `environment` within `limits`.
+    ///
+    /// # Errors
+    ///
+    /// Refuses the reserved `local` runner id.
+    pub fn with_limits(
+        environment: ExecutionEnvironment,
+        identity: RunnerIdentity,
+        limits: RunnerLimits,
     ) -> Result<Self, ExecutionEnvironmentError> {
         let descriptor = runner_descriptor(&environment, identity.runner_id.clone())?;
         let hello = Hello {
@@ -73,18 +146,27 @@ impl RunnerService {
             instance: uuid::Uuid::new_v4().to_string(),
             boot_id: identity.boot_id,
             descriptor,
-            capabilities: vec![capabilities::WORKSPACE_VERBS.to_owned()],
+            capabilities: vec![
+                capabilities::WORKSPACE_VERBS.to_owned(),
+                capabilities::STREAMS.to_owned(),
+            ],
             path: None,
             home: None,
-            job_bound: 0,
+            job_bound: limits.job_bound,
         };
         Ok(Self {
             inner: Arc::new(Inner {
                 environment,
                 hello,
+                dead: limits.dead,
+                capacity: job_capacity(usize::try_from(limits.job_bound).unwrap_or(usize::MAX)),
                 tables: Mutex::default(),
                 hosts: Mutex::default(),
+                next_connection: AtomicU64::new(0),
+                next_stream: AtomicU64::new(0),
                 running: Mutex::default(),
+                lines: Mutex::default(),
+                services: Mutex::default(),
             }),
         })
     }
@@ -95,18 +177,22 @@ impl RunnerService {
         &self.inner.hello
     }
 
-    /// Answers one connection until it ends. Requests it admitted keep
-    /// running after that, and answer on the host's next connection.
+    /// Answers one connection until it ends, it stays silent for the dead
+    /// window, or a newer connection of the same host instance binds.
+    /// Requests it admitted keep running after that and answer on the
+    /// host's next connection; jobs keep running; its services end.
     pub async fn serve_connection<S>(&self, stream: S)
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
         let (reader, writer) = tokio::io::split(stream);
         let (sender, frames) = mpsc::unbounded_channel();
-        tokio::spawn(write_frames(writer, frames));
+        let closer = CancellationToken::new();
+        tokio::spawn(write_frames(writer, frames, closer.clone()));
         let mut reader = FrameStream::new(reader);
         let _ = sender.send(RunnerFrame::Hello(self.inner.hello.clone()));
-        let Some(Ok(HostFrame::Bind(bind))) = reader.next::<HostFrame>().await else {
+        let bind = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()).await;
+        let Ok(Some(Ok(HostFrame::Bind(bind)))) = bind else {
             let _ = sender.send(refused(None, Refusal::Unbound));
             return;
         };
@@ -120,11 +206,32 @@ impl RunnerService {
             return;
         }
         let host = bind.host_id;
-        lock(&self.inner.hosts).insert(host.clone(), sender.clone());
-        while let Some(frame) = reader.next::<HostFrame>().await {
+        let connection = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
+        let previous = lock(&self.inner.hosts).insert(
+            host.clone(),
+            Connection {
+                sender: sender.clone(),
+                host_instance: bind.host_instance.clone(),
+                closer: closer.clone(),
+                id: connection,
+            },
+        );
+        // A host instance binds again only once its older connection is
+        // dead to it: that connection is drained, and its answers come here.
+        if let Some(previous) = previous
+            && previous.host_instance == bind.host_instance
+        {
+            previous.closer.cancel();
+        }
+        loop {
+            let frame = tokio::select! {
+                frame = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()) => frame,
+                () = closer.cancelled() => break,
+            };
             let frame = match frame {
-                Ok(frame) => frame,
-                Err(error) => {
+                Err(_) | Ok(None) => break,
+                Ok(Some(Ok(frame))) => frame,
+                Ok(Some(Err(error))) => {
                     let _ = sender.send(refused(
                         None,
                         Refusal::Malformed {
@@ -139,62 +246,76 @@ impl RunnerService {
                     continue;
                 }
             };
-            match frame {
-                HostFrame::Request(request) => self.admit(&host, request, &sender),
-                HostFrame::Cancel { request_id } => {
-                    let run = self.run_key(&host, request_id);
-                    if let Some(token) = lock(&self.inner.running).get(&(host.clone(), run)) {
-                        token.cancel();
-                    }
-                }
-                // No operation of this version reads a yield.
-                HostFrame::Preempt { .. } => {}
-                HostFrame::Ack { request_id } => {
-                    lock(&self.inner.tables).acknowledge(&host, &request_id);
-                }
-                HostFrame::TransferOwner(transfer) => {
-                    let answer =
-                        lock(&self.inner.tables).transfer(&host, transfer.control_id, transfer.to);
-                    let _ = sender.send(answer);
-                }
-                HostFrame::Ping { nonce } => {
-                    let _ = sender.send(RunnerFrame::Pong { nonce });
-                }
-                HostFrame::Bind(_) => {
-                    let _ = sender.send(refused(
-                        None,
-                        Refusal::Malformed {
-                            detail: "the connection is already bound".into(),
-                        },
-                    ));
-                }
-                HostFrame::Stream(_) => {
-                    let _ = sender.send(refused(
-                        None,
-                        Refusal::Unsupported {
-                            what: "stream".into(),
-                        },
-                    ));
+            self.receive(&host, connection, frame, &sender);
+        }
+        // The connection is over: answers no longer go to it, its services
+        // end, and its write half closes once what is queued is written.
+        {
+            let mut hosts = lock(&self.inner.hosts);
+            if hosts
+                .get(&host)
+                .is_some_and(|current| current.id == connection)
+            {
+                hosts.remove(&host);
+            }
+        }
+        self.end_services(&host, connection);
+        closer.cancel();
+    }
+
+    fn receive(
+        &self,
+        host: &str,
+        connection: u64,
+        frame: HostFrame,
+        sender: &mpsc::UnboundedSender<RunnerFrame>,
+    ) {
+        match frame {
+            HostFrame::Request(request) => self.admit(host, connection, request, sender),
+            HostFrame::Cancel { request_id } => {
+                let run = self.run_key(host, request_id);
+                if let Some(running) = lock(&self.inner.running).get(&(host.to_owned(), run)) {
+                    running.cancellation.cancel();
                 }
             }
+            HostFrame::Preempt { request_id, value } => {
+                let run = self.run_key(host, request_id);
+                if let Some(running) = lock(&self.inner.running).get(&(host.to_owned(), run)) {
+                    let _ = running.preempt.send(decode_preempt(&value));
+                }
+            }
+            HostFrame::Ack { request_id } => {
+                lock(&self.inner.tables).acknowledge(host, &request_id);
+            }
+            HostFrame::TransferOwner(transfer) => {
+                let answer =
+                    lock(&self.inner.tables).transfer(host, transfer.control_id, transfer.to);
+                let _ = sender.send(answer);
+            }
+            HostFrame::Ping { nonce } => {
+                let _ = sender.send(RunnerFrame::Pong { nonce });
+            }
+            HostFrame::Bind(_) => {
+                let _ = sender.send(refused(
+                    None,
+                    Refusal::Malformed {
+                        detail: "the connection is already bound".into(),
+                    },
+                ));
+            }
+            HostFrame::Stream(frame) => self.stream(host, frame),
         }
     }
 
-    fn admit(&self, host: &str, request: Request, sender: &mpsc::UnboundedSender<RunnerFrame>) {
+    fn admit(
+        &self,
+        host: &str,
+        connection: u64,
+        request: Request,
+        sender: &mpsc::UnboundedSender<RunnerFrame>,
+    ) {
         let id = request.request_id.clone();
-        if !matches!(
-            request.class,
-            RequestClass::EffectCall { .. } | RequestClass::BuildRead
-        ) {
-            let _ = sender.send(refused(
-                Some(id),
-                Refusal::Unsupported {
-                    what: "request class".into(),
-                },
-            ));
-            return;
-        }
-        if RunnerVerb::parse(&request.operation.verb).is_none() {
+        let Some(verb) = RunnerVerb::parse(&request.operation.verb) else {
             let _ = sender.send(refused(
                 Some(id),
                 Refusal::Unsupported {
@@ -202,9 +323,19 @@ impl RunnerService {
                 },
             ));
             return;
+        };
+        if verb.family() == RunnerVerbFamily::Sessions && request.owner.is_none() {
+            let _ = sender.send(refused(
+                Some(id),
+                Refusal::Malformed {
+                    detail: "a process-session request names its owner".into(),
+                },
+            ));
+            return;
         }
-        let token = CancellationToken::new();
-        let control = match context(&request, token.clone()) {
+        let cancellation = CancellationToken::new();
+        let (preempt, yields) = watch::channel(ToolPreempt::None);
+        let control = match context(&request, cancellation.clone(), yields) {
             Ok(control) => control,
             Err(detail) => {
                 let _ = sender.send(refused(Some(id), Refusal::Malformed { detail }));
@@ -221,15 +352,29 @@ impl RunnerService {
         let run = key
             .clone()
             .map_or_else(|| RunKey::Request(id.clone()), RunKey::Op);
-        lock(&self.inner.running).insert((host.to_owned(), run), token);
+        lock(&self.inner.running).insert(
+            (host.to_owned(), run),
+            Running {
+                cancellation,
+                preempt,
+            },
+        );
         let service = self.clone();
         let host = host.to_owned();
-        let served = serve(
-            &self.inner.environment,
-            &request.operation.verb,
-            request.operation.payload,
-            control,
-        );
+        let payload = request.operation.payload;
+        let served = match verb.family() {
+            RunnerVerbFamily::Environment => {
+                serve(&self.inner.environment, verb.as_str(), payload, control)
+            }
+            RunnerVerbFamily::Sessions => {
+                let line = request.owner.map(|owner| owner.line).unwrap_or_default();
+                self.sessions(&host, &line, verb, payload, control)
+            }
+            RunnerVerbFamily::Service if verb == RunnerVerb::ServiceSpawn => {
+                self.spawn_service(&host, connection, payload, control)
+            }
+            RunnerVerbFamily::Service => self.terminate_service(&host, payload),
+        };
         tokio::spawn(async move {
             let answer = answer_frame(id.clone(), served.await);
             service.finish(&host, &id, key.as_ref(), answer);
@@ -245,25 +390,178 @@ impl RunnerService {
             Some(key) => lock(&self.inner.tables).answer(host, key, answer, Instant::now()),
             None => answer,
         };
-        if let Some(sender) = lock(&self.inner.hosts).get(host) {
-            let _ = sender.send(answer);
+        if let Some(connection) = lock(&self.inner.hosts).get(host) {
+            let _ = connection.sender.send(answer);
         }
     }
-}
 
-/// How a running request is found again for cancellation.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-enum RunKey {
-    Op(OpKey),
-    Request(String),
-}
-
-impl RunnerService {
     fn run_key(&self, host: &str, request_id: String) -> RunKey {
         lock(&self.inner.tables)
             .key_for(host, &request_id)
             .map_or(RunKey::Request(request_id), RunKey::Op)
     }
+
+    /// Answers a session verb from the line's sessions, made on first use.
+    fn sessions(
+        &self,
+        host: &str,
+        line: &str,
+        verb: RunnerVerb,
+        payload: Value,
+        control: OperationContext,
+    ) -> ServeFuture {
+        let sessions = {
+            let mut lines = lock(&self.inner.lines);
+            match lines.get(&(host.to_owned(), line.to_owned())) {
+                Some(sessions) => Ok(sessions.clone()),
+                None => line_sessions(&self.inner.environment, &self.inner.capacity).inspect(
+                    |sessions| {
+                        lines.insert((host.to_owned(), line.to_owned()), sessions.clone());
+                    },
+                ),
+            }
+        };
+        match sessions {
+            Ok(sessions) => serve_sessions(
+                &self.inner.environment,
+                &sessions,
+                &self.inner.hello.instance,
+                verb.as_str(),
+                payload,
+                control,
+            ),
+            Err(error) => Box::pin(std::future::ready(Err(serve_failure(&error)))),
+        }
+    }
+
+    /// Spawns a service and carries its stdio as a new stream of this
+    /// connection. Nothing is sent on it until the host grants credit.
+    fn spawn_service(
+        &self,
+        host: &str,
+        connection: u64,
+        payload: Value,
+        control: OperationContext,
+    ) -> ServeFuture {
+        let spawned = serve_service_spawn(&self.inner.environment, payload, control);
+        let service = self.clone();
+        let host = host.to_owned();
+        Box::pin(async move {
+            let process = spawned.await?;
+            let stream = service.inner.next_stream.fetch_add(1, Ordering::Relaxed);
+            service.carry(&host, connection, stream, process);
+            Ok(service_spawned(stream))
+        })
+    }
+
+    fn carry(&self, host: &str, connection: u64, stream: u64, process: ServiceProcess) {
+        let ServiceProcess {
+            stdin,
+            stdout,
+            handle,
+            ..
+        } = process;
+        let sender = lock(&self.inner.hosts)
+            .get(host)
+            .filter(|current| current.id == connection)
+            .map(|current| current.sender.clone());
+        // The spawning connection ended while the service started: nothing
+        // could carry its stdio, so it ends now.
+        let Some(sender) = sender else {
+            terminate_later(Some(handle));
+            return;
+        };
+        let out = Outbound::new(stream, move |frame: StreamFrame| {
+            sender.send(RunnerFrame::Stream(frame)).is_ok()
+        });
+        let (chunks, received) = mpsc::unbounded_channel();
+        let credit = Credit::new(0);
+        let window = Window::new(INITIAL_CREDIT);
+        {
+            let mut services = lock(&self.inner.services);
+            // Checked again under the services lock, which `end_services`
+            // takes too, so a service is either ended with its connection or
+            // never carried.
+            let current = lock(&self.inner.hosts)
+                .get(host)
+                .is_some_and(|current| current.id == connection);
+            if !current {
+                drop(services);
+                terminate_later(Some(handle));
+                return;
+            }
+            services.insert(
+                (host.to_owned(), stream),
+                Hosted {
+                    ends: StreamEnds::new(
+                        chunks,
+                        Arc::clone(&credit),
+                        Arc::clone(&window),
+                        Arc::clone(&out),
+                    ),
+                    handle: Some(handle),
+                    connection,
+                },
+            );
+        }
+        tokio::spawn(receive_stream(stdin, received, window, Arc::clone(&out)));
+        tokio::spawn(send_stream(stdout, credit, out));
+    }
+
+    fn terminate_service(&self, host: &str, payload: Value) -> ServeFuture {
+        let handle = terminated_service(&payload).and_then(|stream| {
+            let mut services = lock(&self.inner.services);
+            let mut hosted = services.remove(&(host.to_owned(), stream))?;
+            hosted.ends.close();
+            hosted.handle.take()
+        });
+        serve_service_terminate(handle, payload)
+    }
+
+    fn stream(&self, host: &str, frame: StreamFrame) {
+        let mut services = lock(&self.inner.services);
+        let key = (host.to_owned(), frame.stream);
+        let Some(hosted) = services.get_mut(&key) else {
+            return;
+        };
+        if !hosted.ends.receive(frame) {
+            // A broken stream ends its service.
+            if let Some(mut hosted) = services.remove(&key) {
+                terminate_later(hosted.handle.take());
+            }
+        }
+    }
+
+    /// Ends the services `connection` spawned: their streams died with it.
+    fn end_services(&self, host: &str, connection: u64) {
+        let mut services = lock(&self.inner.services);
+        let ended: Vec<(String, u64)> = services
+            .iter()
+            .filter(|((owner, _), hosted)| owner == host && hosted.connection == connection)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in ended {
+            if let Some(mut hosted) = services.remove(&key) {
+                hosted.ends.close();
+                terminate_later(hosted.handle.take());
+            }
+        }
+    }
+}
+
+fn terminate_later(handle: Option<ServiceHandle>) {
+    if let Some(handle) = handle {
+        tokio::spawn(async move {
+            let _ = handle.terminate(Duration::from_secs(1)).await;
+        });
+    }
+}
+
+/// How a running request is found again for cancellation and yields.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum RunKey {
+    Op(OpKey),
+    Request(String),
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -312,10 +610,14 @@ fn answer_frame(request_id: String, served: Result<Value, ServeFailure>) -> Runn
     }
 }
 
-/// The operation context the request names, as the runner's own clock and
-/// cancellation carry it.
-fn context(request: &Request, token: CancellationToken) -> Result<OperationContext, String> {
-    let mut control = OperationContext::new(token);
+/// The operation context the request names, as the runner's own clock,
+/// cancellation and yield signal carry it.
+fn context(
+    request: &Request,
+    cancellation: CancellationToken,
+    yields: watch::Receiver<ToolPreempt>,
+) -> Result<OperationContext, String> {
+    let mut control = OperationContext::new(cancellation).with_preempt(yields);
     if let Some(owner) = &request.owner {
         control = control.with_owner(line_owner(owner)?);
     }

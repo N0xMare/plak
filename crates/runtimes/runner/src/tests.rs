@@ -228,3 +228,65 @@ fn an_effect_call_names_its_owner_and_a_build_read_is_never_recorded() {
     assert_eq!(tables.admit(HOST, &read, now), Admission::Run(None));
     assert_eq!(tables.admit(HOST, &read, now), Admission::Run(None));
 }
+
+#[test]
+fn an_owner_control_runs_once_and_an_observation_is_fenced_but_never_recorded() {
+    let mut tables = Tables::default();
+    let now = Instant::now();
+    let head = owner(1, 1);
+    let mut observation = effect("r1", &head, "d", false);
+    observation.class = RequestClass::ProcessObservation { job: 1, cursor: 0 };
+    assert_eq!(
+        tables.admit(HOST, &observation, now),
+        Admission::Answer(RunnerFrame::Refused {
+            request_id: Some("r1".into()),
+            refusal: Refusal::OwnerNotTransferred,
+        })
+    );
+    transferred(&mut tables, &head);
+    assert_eq!(tables.admit(HOST, &observation, now), Admission::Run(None));
+    assert_eq!(tables.admit(HOST, &observation, now), Admission::Run(None));
+
+    let mut control = effect("r2", &head, "d", false);
+    control.class = RequestClass::OwnerControl {
+        control_id: "c1".into(),
+    };
+    assert!(matches!(
+        tables.admit(HOST, &control, now),
+        Admission::Run(Some(_))
+    ));
+    control.request_id = "r3".into();
+    control.replay = true;
+    assert_eq!(
+        tables.admit(HOST, &control, now),
+        Admission::Answer(RunnerFrame::InProgress {
+            request_id: "r3".into()
+        })
+    );
+}
+
+#[test]
+fn one_call_may_run_several_verbs_each_once() {
+    let mut tables = Tables::default();
+    let now = Instant::now();
+    let head = owner(1, 1);
+    transferred(&mut tables, &head);
+    let start = effect("r1", &head, "d1", false);
+    assert!(matches!(
+        tables.admit(HOST, &start, now),
+        Admission::Run(Some(_))
+    ));
+    let mut write = effect("r2", &head, "d2", false);
+    write.operation.verb = verbs::PROCESS_WRITE.into();
+    assert!(matches!(
+        tables.admit(HOST, &write, now),
+        Admission::Run(Some(_))
+    ));
+    write.request_id = "r3".into();
+    assert_eq!(
+        tables.admit(HOST, &write, now),
+        Admission::Answer(RunnerFrame::InProgress {
+            request_id: "r3".into()
+        })
+    );
+}

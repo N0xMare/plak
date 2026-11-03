@@ -1,21 +1,35 @@
 //! Frames over a byte stream: one task writes queued frames, the other end of
 //! the connection reads them one at a time.
 
+use plakous_model::CancellationToken;
 use plakous_runner_protocol::frame::{FrameError, FrameReader, decode, encode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-/// Writes each queued frame until the queue closes or the stream fails. A
+/// Writes each queued frame until the queue closes, the stream fails or
+/// `closer` fires, then shuts the write half down so the peer sees the end. A
 /// frame that cannot be encoded is skipped; senders check their frames first
 /// with [`fits`].
-pub(crate) async fn write_frames<W, T>(mut writer: W, mut frames: mpsc::UnboundedReceiver<T>)
-where
+pub(crate) async fn write_frames<W, T>(
+    mut writer: W,
+    mut frames: mpsc::UnboundedReceiver<T>,
+    closer: CancellationToken,
+) where
     W: AsyncWrite + Unpin,
     T: Serialize,
 {
-    while let Some(frame) = frames.recv().await {
+    loop {
+        // Frames already queued are written before a close takes effect.
+        let frame = tokio::select! {
+            biased;
+            frame = frames.recv() => frame,
+            () = closer.cancelled() => None,
+        };
+        let Some(frame) = frame else {
+            break;
+        };
         let Ok(bytes) = encode(&frame) else {
             continue;
         };

@@ -468,6 +468,8 @@ pub struct JoinedProcessSessions {
     pub(super) inner: Arc<JoinedProcessServiceInner>,
 }
 
+const HOST_RUNNING_LIMIT: usize = 128;
+
 /// Shared host-wide admission bound for process services (128 running starts).
 #[derive(Clone, Default)]
 pub struct JoinedProcessHostCapacity {
@@ -478,6 +480,8 @@ pub struct JoinedProcessHostCapacity {
 pub(super) struct JoinedProcessHostCapacityState {
     pub(super) starting: usize,
     pub(super) services: Vec<Weak<JoinedProcessServiceInner>>,
+    /// The bound when it is not the host default.
+    pub(super) limit: Option<usize>,
 }
 
 impl fmt::Debug for JoinedProcessHostCapacity {
@@ -497,8 +501,16 @@ impl Drop for HostStartReservation {
 }
 
 impl JoinedProcessHostCapacity {
+    /// A shared bound of `limit` running starts, as a runner's job bound.
+    pub(crate) fn with_limit(limit: usize) -> Self {
+        let capacity = Self::default();
+        lock(&capacity.state).limit = Some(limit);
+        capacity
+    }
+
     pub(super) fn reserve(&self) -> Result<HostStartReservation, ExecutionBackendError> {
         let mut state = lock(&self.state);
+        let limit = state.limit.unwrap_or(HOST_RUNNING_LIMIT);
         state.services.retain(|service| service.strong_count() != 0);
         let running = state
             .services
@@ -506,9 +518,10 @@ impl JoinedProcessHostCapacity {
             .filter_map(Weak::upgrade)
             .map(|service| JoinedProcessSessions::running_sessions(&lock(&service.state)))
             .sum::<usize>();
-        if running.saturating_add(state.starting) >= 128 {
-            return Err(resource_error(
-                "host running process limit (128) was reached",
+        if running.saturating_add(state.starting) >= limit {
+            return Err(ExecutionBackendError::new(
+                ExecutionBackendErrorKind::ResourceLimit,
+                format!("host running process limit ({limit}) was reached"),
             ));
         }
         state.starting += 1;
@@ -540,7 +553,7 @@ impl JoinedProcessSessions {
         *lock(&self.inner.host_capacity) = Some(capacity);
     }
 
-    pub(super) fn new(environment: &ExecutionEnvironment) -> Result<Self, ExecutionBackendError> {
+    pub(crate) fn new(environment: &ExecutionEnvironment) -> Result<Self, ExecutionBackendError> {
         if environment.backend().kind() != ExecutionBackendKind::Runner
             || !environment
                 .backend()

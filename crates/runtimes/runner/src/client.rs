@@ -1,20 +1,23 @@
 //! The host end: a [`RunnerLink`] that frames, keys and fences each call over
-//! one runner connection, and survives a reconnection.
+//! one runner connection, carries streams, watches the link's liveness, and
+//! survives a reconnection.
 
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use plakous_model::CancellationToken;
 use plakous_runner_protocol::frame::FrameError;
 use plakous_runner_protocol::{
     Bind, Hello, HostFrame, LineOwner, Operation, Refusal, Request, RequestClass, RunnerFrame,
-    TransferOwner, VersionTriple,
+    StreamEvent, StreamFrame, TransferOwner, VersionTriple,
 };
-use plakous_tools::OperationClass;
+use plakous_tools::ToolPreempt;
 use plakous_tools::internal::runner::{
-    RunnerCall, RunnerCallFuture, RunnerFailure, RunnerLink, RunnerVerb,
+    RunnerCall, RunnerCallFuture, RunnerClass, RunnerFailure, RunnerLink, RunnerOpenFuture,
+    RunnerStreams, RunnerVerb, encode_preempt,
 };
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -22,15 +25,23 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::connection::{FrameStream, fits, write_frames};
+use crate::streams::{
+    Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
+};
 
-/// How long a call waits for its answer, from when it was sent, before its
-/// outcome is unknown: across a lost link, until a reconnection answers it.
+/// How long the host waits on its runner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientWindows {
-    /// A request that is not an effect call (spec 01 §8.4: 30 s).
+    /// How long a call that is not an effect call waits for its answer from
+    /// when it was sent, across a lost link, before its outcome is unknown
+    /// (spec 01 §8.4: 30 s).
     pub read: Duration,
-    /// An effect call (120 s).
+    /// The same for an effect call (120 s).
     pub effect: Duration,
+    /// How often the host pings the runner (5 s).
+    pub ping: Duration,
+    /// How long the link may stay silent before it is lost (15 s).
+    pub dead: Duration,
 }
 
 impl Default for ClientWindows {
@@ -38,6 +49,8 @@ impl Default for ClientWindows {
         Self {
             read: Duration::from_secs(30),
             effect: Duration::from_secs(120),
+            ping: Duration::from_secs(5),
+            dead: Duration::from_secs(15),
         }
     }
 }
@@ -94,6 +107,23 @@ struct Inner {
     transferred: Mutex<Transferred>,
 }
 
+struct State {
+    sender: Option<mpsc::UnboundedSender<HostFrame>>,
+    connection: u64,
+    /// Ends the current connection: a newer one, or a silent link.
+    closer: CancellationToken,
+    last_heard: Instant,
+    instance: String,
+    pending: HashMap<String, Pending>,
+    transfers: HashMap<String, oneshot::Sender<RunnerFrame>>,
+    streams: HashMap<u64, StreamEnds>,
+}
+
+struct Pending {
+    request: Request,
+    answer: oneshot::Sender<Result<Value, RunnerFailure>>,
+}
+
 /// The owner last transferred to the current runner instance, per line. Each
 /// line's lock is held across its transfer so two calls of one new owner
 /// transfer once, without making other lines wait. A new instance has
@@ -102,19 +132,6 @@ struct Inner {
 struct Transferred {
     instance: String,
     lines: HashMap<String, Arc<tokio::sync::Mutex<Option<LineOwner>>>>,
-}
-
-struct State {
-    sender: Option<mpsc::UnboundedSender<HostFrame>>,
-    connection: u64,
-    instance: String,
-    pending: HashMap<String, Pending>,
-    transfers: HashMap<String, oneshot::Sender<RunnerFrame>>,
-}
-
-struct Pending {
-    request: Request,
-    answer: oneshot::Sender<Result<Value, RunnerFailure>>,
 }
 
 impl RunnerClient {
@@ -141,9 +158,12 @@ impl RunnerClient {
                 state: Mutex::new(State {
                     sender: None,
                     connection: 0,
+                    closer: CancellationToken::new(),
+                    last_heard: Instant::now(),
                     instance: String::new(),
                     pending: HashMap::new(),
                     transfers: HashMap::new(),
+                    streams: HashMap::new(),
                 }),
                 transferred: Mutex::default(),
             }),
@@ -155,7 +175,7 @@ impl RunnerClient {
     /// Binds a new connection to the same runner. Calls still waiting are
     /// replayed by key and digest when the runner is the same instance; when
     /// it restarted, their outcome is unknown and every line is transferred
-    /// again before its next call.
+    /// again before its next call. Streams do not survive a lost link.
     ///
     /// # Errors
     ///
@@ -185,31 +205,18 @@ impl RunnerClient {
             });
         }
         let (sender, frames) = mpsc::unbounded_channel();
-        tokio::spawn(write_frames(writer, frames));
+        let closer = CancellationToken::new();
+        tokio::spawn(write_frames(writer, frames, closer.clone()));
         let _ = sender.send(HostFrame::Bind(self.inner.bind.clone()));
-        let restarted = again && lock(&self.inner.state).instance != hello.instance;
         let connection = {
             let mut state = lock(&self.inner.state);
-            let lost: Vec<String> = state
-                .pending
-                .iter()
-                .filter(|(_, pending)| restarted || !replayable(&pending.request))
-                .map(|(id, _)| id.clone())
-                .collect();
-            for id in lost {
-                if let Some(pending) = state.pending.remove(&id) {
-                    let _ = pending
-                        .answer
-                        .send(Err(RunnerFailure::OutcomeUnknown(if restarted {
-                            "the runner restarted with the call outstanding".into()
-                        } else {
-                            "the link was lost with the call outstanding".into()
-                        })));
-                }
-            }
-            state.transfers.clear();
+            let restarted = again && state.instance != hello.instance;
+            state.closer.cancel();
+            state.lose(|request| restarted || !replayable(request), restarted);
             state.instance.clone_from(&hello.instance);
             state.connection += 1;
+            state.closer = closer.clone();
+            state.last_heard = Instant::now();
             for pending in state.pending.values() {
                 let mut request = pending.request.clone();
                 request.replay = true;
@@ -219,42 +226,95 @@ impl RunnerClient {
             state.connection
         };
         let inner = Arc::clone(&self.inner);
-        tokio::spawn(async move { inner.read(reader, connection).await });
+        tokio::spawn(async move { inner.read(reader, connection, closer).await });
+        let inner = Arc::clone(&self.inner);
+        tokio::spawn(async move { inner.ping(connection).await });
         Ok(hello)
     }
 }
 
-impl Inner {
-    async fn read<R: AsyncRead + Unpin>(&self, mut reader: FrameStream<R>, connection: u64) {
-        while let Some(frame) = reader.next::<RunnerFrame>().await {
-            match frame {
-                Ok(frame) => self.receive(frame),
-                // An oversized prefix leaves the stream unframed: the link is
-                // lost.
-                Err(FrameError::TooLarge) => break,
-                Err(_) => {}
+impl State {
+    /// Ends the current connection's transfers and streams, and fails each
+    /// pending call `lost` selects as of unknown outcome.
+    fn lose(&mut self, lost: impl Fn(&Request) -> bool, restarted: bool) {
+        self.transfers.clear();
+        for (_, mut stream) in self.streams.drain() {
+            stream.close();
+        }
+        let ids: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(_, pending)| lost(&pending.request))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            if let Some(pending) = self.pending.remove(&id) {
+                let _ = pending
+                    .answer
+                    .send(Err(RunnerFailure::OutcomeUnknown(if restarted {
+                        "the runner restarted with the call outstanding".into()
+                    } else {
+                        "the link was lost with the call outstanding".into()
+                    })));
             }
         }
+    }
+}
+
+impl Inner {
+    async fn read<R: AsyncRead + Unpin>(
+        &self,
+        mut reader: FrameStream<R>,
+        connection: u64,
+        closer: CancellationToken,
+    ) {
+        loop {
+            let frame = tokio::select! {
+                frame = reader.next::<RunnerFrame>() => frame,
+                () = closer.cancelled() => break,
+            };
+            match frame {
+                // An oversized prefix leaves the stream unframed: the link is
+                // lost.
+                None | Some(Err(FrameError::TooLarge)) => break,
+                Some(Ok(frame)) => {
+                    lock(&self.state).last_heard = Instant::now();
+                    self.receive(frame);
+                }
+                Some(Err(_)) => {}
+            }
+        }
+        closer.cancel();
         let mut state = lock(&self.state);
         if state.connection != connection {
             return;
         }
         state.sender = None;
-        state.transfers.clear();
-        // Only keyed calls and reads are replayed on a reconnection: an
-        // unkeyed mutation or process may have run, and has no key to ask by.
-        let lost: Vec<String> = state
-            .pending
-            .iter()
-            .filter(|(_, pending)| !replayable(&pending.request))
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in lost {
-            if let Some(pending) = state.pending.remove(&id) {
-                let _ = pending.answer.send(Err(RunnerFailure::OutcomeUnknown(
-                    "the link was lost with the call outstanding".into(),
-                )));
+        // Only keyed calls, observations and reads are replayed on a
+        // reconnection: an unkeyed mutation or process may have run, and has
+        // no key to ask by.
+        state.lose(|request| !replayable(request), false);
+    }
+
+    /// Pings the runner while `connection` is current, and loses the link
+    /// once it was silent for the dead window.
+    async fn ping(&self, connection: u64) {
+        let mut nonce = 0_u64;
+        loop {
+            tokio::time::sleep(self.windows.ping).await;
+            let (silent, closer) = {
+                let state = lock(&self.state);
+                if state.connection != connection || state.sender.is_none() {
+                    return;
+                }
+                (state.last_heard.elapsed(), state.closer.clone())
+            };
+            if silent >= self.windows.dead {
+                closer.cancel();
+                return;
             }
+            nonce += 1;
+            self.send(HostFrame::Ping { nonce });
         }
     }
 
@@ -274,6 +334,23 @@ impl Inner {
             return;
         }
         let (request_id, answer) = match frame {
+            RunnerFrame::Stream(frame) => {
+                // Taken out of the state while it runs: an abort sends a
+                // close, and sending takes the state's lock.
+                let stream = frame.stream;
+                let Some(mut ends) = lock(&self.state).streams.remove(&stream) else {
+                    return;
+                };
+                if ends.receive(frame) {
+                    let mut state = lock(&self.state);
+                    if state.sender.is_some() {
+                        state.streams.insert(stream, ends);
+                    } else {
+                        ends.close();
+                    }
+                }
+                return;
+            }
             RunnerFrame::Result {
                 request_id,
                 payload,
@@ -321,8 +398,9 @@ impl Inner {
                     other => RunnerFailure::Refused(format!("{other:?}")),
                 }),
             ),
-            // `InProgress`: the answer still comes. Frames without a request
-            // id refuse the connection, which then ends.
+            // `InProgress`: the answer still comes. `Pong` only proves the
+            // link is alive. Frames without a request id refuse the
+            // connection, which then ends.
             _ => return,
         };
         if let Some(pending) = lock(&self.state).pending.remove(&request_id) {
@@ -394,27 +472,28 @@ impl Inner {
         }
     }
 
-    async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
-        let owner = call.owner().map(wire_owner);
-        if let Some(owner) = &owner {
-            self.transfer(owner).await?;
-        }
-        let effect = matches!(call.class(), OperationClass::EffectCall { .. });
+    fn request(&self, call: &RunnerCall, owner: Option<LineOwner>) -> Request {
         let operation = Operation {
             verb: call.verb().as_str().to_owned(),
             payload: call.payload().clone(),
         };
-        let request = Request {
+        Request {
             request_id: self.next_id("r"),
             class: match call.class() {
-                OperationClass::EffectCall {
+                RunnerClass::Effect {
                     call_id,
                     attempt_id,
                 } => RequestClass::EffectCall {
                     call_id: call_id.to_string(),
                     attempt_id: attempt_id.to_string(),
                 },
-                _ => RequestClass::BuildRead,
+                RunnerClass::Observation { job, cursor } => {
+                    RequestClass::ProcessObservation { job, cursor }
+                }
+                RunnerClass::Control => RequestClass::OwnerControl {
+                    control_id: self.next_id("c"),
+                },
+                RunnerClass::Unkeyed => RequestClass::BuildRead,
             },
             owner,
             deadline_ms: call.budget().map(|deadline| {
@@ -427,6 +506,19 @@ impl Inner {
             digest: digest(&operation),
             replay: false,
             operation,
+        }
+    }
+
+    async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
+        let owner = call.owner().map(wire_owner);
+        if let Some(owner) = &owner {
+            self.transfer(owner).await?;
+        }
+        let request = self.request(&call, owner);
+        let window = if matches!(request.class, RequestClass::EffectCall { .. }) {
+            self.windows.effect
+        } else {
+            self.windows.read
         };
         let frame = HostFrame::Request(request.clone());
         if !fits(&frame) {
@@ -453,15 +545,16 @@ impl Inner {
                 ));
             }
         }
-        let window = if effect {
-            self.windows.effect
-        } else {
-            self.windows.read
-        };
         let expiry = tokio::time::sleep(window);
         tokio::pin!(expiry);
         let cancellation = call.cancellation().clone();
         let mut cancel_sent = false;
+        let mut preempt = call.preempt().clone();
+        let mut yields = true;
+        let initial = *preempt.borrow_and_update();
+        if initial != ToolPreempt::None {
+            self.send_preempt(&request_id, initial);
+        }
         loop {
             tokio::select! {
                 answer = &mut answered => {
@@ -478,6 +571,13 @@ impl Inner {
                         ));
                     }
                 }
+                changed = preempt.changed(), if yields => {
+                    yields = changed.is_ok();
+                    if yields {
+                        let value = *preempt.borrow_and_update();
+                        self.send_preempt(&request_id, value);
+                    }
+                }
                 () = &mut expiry => {
                     lock(&self.state).pending.remove(&request_id);
                     return Err(RunnerFailure::OutcomeUnknown(
@@ -487,6 +587,66 @@ impl Inner {
             }
         }
     }
+
+    fn send_preempt(&self, request_id: &str, value: ToolPreempt) {
+        self.send(HostFrame::Preempt {
+            request_id: request_id.to_owned(),
+            value: encode_preempt(value),
+        });
+    }
+
+    /// Makes the call, then joins the stream its result names: the host
+    /// grants the runner its first credit only once it holds the stream.
+    async fn open(
+        self: Arc<Self>,
+        call: RunnerCall,
+    ) -> Result<(Value, RunnerStreams), RunnerFailure> {
+        let value = self.call(call).await?;
+        let Some(stream) = value.get("stream").and_then(Value::as_u64) else {
+            return Err(RunnerFailure::Refused(
+                "the runner's answer names no stream".into(),
+            ));
+        };
+        let (input, input_pump) = tokio::io::duplex(64 * 1024);
+        let (output_pump, output) = tokio::io::duplex(64 * 1024);
+        let (chunks, received) = mpsc::unbounded_channel();
+        let credit = Credit::new(INITIAL_CREDIT);
+        let window = Window::new(INITIAL_CREDIT);
+        let weak = Arc::downgrade(&self);
+        let out = Outbound::new(stream, move |frame: StreamFrame| {
+            weak.upgrade()
+                .is_some_and(|inner| inner.send(HostFrame::Stream(frame)))
+        });
+        {
+            let mut state = lock(&self.state);
+            if state.sender.is_none() {
+                return Err(RunnerFailure::OutcomeUnknown(
+                    "the link was lost as the stream opened".into(),
+                ));
+            }
+            state.streams.insert(
+                stream,
+                StreamEnds::new(
+                    chunks,
+                    Arc::clone(&credit),
+                    Arc::clone(&window),
+                    Arc::clone(&out),
+                ),
+            );
+        }
+        tokio::spawn(send_stream(input_pump, credit, Arc::clone(&out)));
+        out.send(StreamEvent::Credit {
+            bytes: INITIAL_CREDIT,
+        });
+        tokio::spawn(receive_stream(output_pump, received, window, out));
+        Ok((
+            value,
+            RunnerStreams {
+                input: Box::pin(input),
+                output: Box::pin(output),
+            },
+        ))
+    }
 }
 
 impl RunnerLink for RunnerClient {
@@ -494,18 +654,26 @@ impl RunnerLink for RunnerClient {
         let inner = Arc::clone(&self.inner);
         Box::pin(async move { inner.call(call).await })
     }
+
+    fn open(&self, call: RunnerCall) -> RunnerOpenFuture {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(inner.open(call))
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Whether a request outstanding at a lost link may be sent again: a keyed
+/// call or control, an observation, or a read.
 fn replayable(request: &Request) -> bool {
-    matches!(request.class, RequestClass::EffectCall { .. })
-        || matches!(
-            RunnerVerb::parse(&request.operation.verb),
-            Some(RunnerVerb::ReadWorkspace | RunnerVerb::QueryRepository)
-        )
+    matches!(
+        request.class,
+        RequestClass::EffectCall { .. }
+            | RequestClass::OwnerControl { .. }
+            | RequestClass::ProcessObservation { .. }
+    ) || RunnerVerb::parse(&request.operation.verb).is_some_and(RunnerVerb::is_read)
 }
 
 fn wire_owner(owner: &plakous_tools::LineOwner) -> LineOwner {

@@ -23,9 +23,8 @@ use plakous_tools::{
     ExecutionBackendErrorKind, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentLimits, ExecutionEnvironmentScope, LineOwner, LiteralProcessIntent,
     LiteralProcessRequest, OperationClass, OperationContext, RepositoryMatchCase, RepositoryQuery,
-    RepositoryQueryLimits, RunnerId, ServiceProcessRequest, WorkspaceExpectedFileState,
-    WorkspaceMutation, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
-    WorkspaceReplacement,
+    RepositoryQueryLimits, RunnerId, WorkspaceExpectedFileState, WorkspaceMutation,
+    WorkspaceMutationTransaction, WorkspaceReadSliceRequest, WorkspaceReplacement,
 };
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf};
@@ -74,6 +73,7 @@ fn windows() -> ClientWindows {
     ClientWindows {
         read: Duration::from_secs(10),
         effect: Duration::from_secs(10),
+        ..ClientWindows::default()
     }
 }
 
@@ -314,26 +314,6 @@ async fn the_suite_observes_the_same_through_the_loopback_as_direct() {
     );
     assert_eq!(suite(&environment, runner_root.path()).await, direct);
     drop(loopback);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn services_are_unsupported_through_the_loopback() {
-    let root = tempfile::tempdir().unwrap();
-    let (_loopback, environment) = loopback(root.path()).await;
-    let request = ServiceProcessRequest::new(
-        "/bin/cat",
-        Vec::<String>::new(),
-        Vec::new(),
-        Vec::new(),
-        1024,
-    )
-    .unwrap();
-    let error = environment
-        .spawn_service(request, unkeyed())
-        .await
-        .unwrap_err();
-    assert_eq!(error.kind(), ExecutionBackendErrorKind::Unsupported);
-    assert!(error.proven_no_effect());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -669,16 +649,17 @@ async fn a_restarted_host_replays_by_key_and_never_runs_twice() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jobs_and_streams_are_refused_until_the_runner_carries_them() {
+async fn observations_need_an_owner_and_stray_stream_frames_change_nothing() {
     let root = tempfile::tempdir().unwrap();
     let service = service(root.path());
     assert!(
-        !service
+        service
             .hello()
             .capabilities
             .iter()
             .any(|capability| capability == plakous_runner_protocol::capabilities::STREAMS)
     );
+    assert_eq!(service.hello().job_bound, 128);
     let read = operation(&service, root.path(), shell("true")).await;
     let mut raw = Raw::bound(&service, "instance-1").await;
     let HostFrame::Request(mut observation) =
@@ -687,29 +668,20 @@ async fn jobs_and_streams_are_refused_until_the_runner_carries_them() {
         unreachable!()
     };
     observation.class = RequestClass::ProcessObservation { job: 1, cursor: 0 };
-    assert_eq!(
+    observation.owner = None;
+    assert!(matches!(
         raw.ask(HostFrame::Request(observation)).await,
         RunnerFrame::Refused {
-            request_id: Some("r1".into()),
-            refusal: Refusal::Unsupported {
-                what: "request class".into()
-            },
+            refusal: Refusal::Malformed { .. },
+            ..
         }
-    );
-    let stream = HostFrame::Stream(StreamFrame {
-        stream: 1,
+    ));
+    raw.send(&HostFrame::Stream(StreamFrame {
+        stream: 99,
         seq: 0,
         event: StreamEvent::Credit { bytes: 1024 },
-    });
-    assert_eq!(
-        raw.ask(stream).await,
-        RunnerFrame::Refused {
-            request_id: None,
-            refusal: Refusal::Unsupported {
-                what: "stream".into()
-            },
-        }
-    );
+    }))
+    .await;
     raw.send(&HostFrame::Preempt {
         request_id: "r1".into(),
         value: Value::Null,
@@ -842,6 +814,7 @@ async fn an_oversized_frame_from_the_runner_loses_the_link() {
     let short = ClientWindows {
         read: Duration::from_secs(2),
         effect: Duration::from_secs(2),
+        ..ClientWindows::default()
     };
     let (client, hello) = plakous_runner::RunnerClient::connect(host, bind("instance-1"), short)
         .await

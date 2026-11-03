@@ -15,6 +15,27 @@ pub mod verbs {
     pub const MUTATE_WORKSPACE: &str = "workspace.mutate";
     /// Run one literal process to completion.
     pub const EXECUTE_LITERAL_PROCESS: &str = "process.execute";
+    /// Start one process session on the owner's line.
+    pub const PROCESS_START: &str = "process.start";
+    /// Write to a session's stdin.
+    pub const PROCESS_WRITE: &str = "process.write";
+    /// Read a session's output from a cursor, waiting for some.
+    pub const PROCESS_POLL: &str = "process.poll";
+    /// Stop one session.
+    pub const PROCESS_STOP: &str = "process.stop";
+    /// Promote a foreground session to a job of the line.
+    pub const PROCESS_PROMOTE: &str = "process.promote";
+    /// The line's jobs.
+    pub const JOBS_SNAPSHOT: &str = "jobs.snapshot";
+    /// Stop every job of the line.
+    pub const JOBS_STOP: &str = "jobs.stop";
+    /// Disown the line's leftover processes.
+    pub const JOBS_DISOWN: &str = "jobs.disown";
+    /// Spawn a service whose stdio is a stream; the result names the stream
+    /// in its `stream` field.
+    pub const SERVICE_SPAWN: &str = "service.spawn";
+    /// Terminate a spawned service.
+    pub const SERVICE_TERMINATE: &str = "service.terminate";
 }
 
 /// Capabilities a [`Hello`] may advertise. A host sends a verb or a frame
@@ -23,7 +44,8 @@ pub mod verbs {
 pub mod capabilities {
     /// The four request/response workspace and process verbs.
     pub const WORKSPACE_VERBS: &str = "workspace-verbs";
-    /// Long-lived processes, their output streams and job control.
+    /// Process sessions and job control on the owner's line, and services
+    /// whose stdio is a credit-paced stream.
     pub const STREAMS: &str = "streams";
 }
 
