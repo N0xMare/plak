@@ -2,9 +2,9 @@
 
 use super::atomic::{AtomicStage, atomic_file, sync_parent_directory};
 use super::keys::{
-    CONFIG_KEYS, CONFIG_SECTION_DOCS, ConfigField, ConfigKey, FieldValue,
-    check_client_id_metadata_url, config_key, parse_bound, parse_max_model_rounds, parse_positive,
-    parse_scroll_lines, saturating_toml_integer,
+    CONFIG_KEYS, CONFIG_SECTION_DOCS, ConfigField, ConfigKey, FORWARD_ONLY_SECTIONS, FieldValue,
+    ResumeAfterLoss, check_client_id_metadata_url, config_key, parse_bound, parse_max_model_rounds,
+    parse_positive, parse_scroll_lines, saturating_toml_integer,
 };
 use super::policy::{
     AgentTemplate, CEILING_MAX_ATTEMPTS, CEILING_MAX_CHILDREN, CEILING_MAX_DEPTH,
@@ -228,6 +228,11 @@ pub struct ProductConfig {
     /// `[tools.<name>]` and `[mcp_servers.<id>]`: options for the optional
     /// tools templates list. A trusted project replaces entries by name.
     pub tool_sections: ToolSections,
+    /// `[host] resume_after_loss`, only when the file sets it (unset holds).
+    pub resume_after_loss: Option<ResumeAfterLoss>,
+    /// `[runners.<name>]`, home-scoped; parsed and validated only.
+    pub runners: BTreeMap<String, super::RunnerConfig>,
+    pub(super) forward: super::forward::ForwardPresence,
 }
 
 impl PartialEq for ProductConfig {
@@ -268,6 +273,8 @@ impl PartialEq for ProductConfig {
             && self.telemetry_max_age_days == other.telemetry_max_age_days
             && self.mcp_client_id_metadata_url == other.mcp_client_id_metadata_url
             && self.tool_sections == other.tool_sections
+            && self.resume_after_loss == other.resume_after_loss
+            && self.runners == other.runners
     }
 }
 
@@ -463,11 +470,13 @@ impl ProductConfig {
         if has_config {
             let overlay = Self::load_config_file(&config_path)
                 .map_err(|error| format!("{error}; edit this file to fix it"))?;
-            if overlay
-                .present
-                .iter()
-                .any(|field| field.is_home_only() && *field != ConfigField::McpClientIdMetadataUrl)
-            {
+            if overlay.present.iter().any(|field| {
+                field.is_home_only()
+                    && !matches!(
+                        field,
+                        ConfigField::McpClientIdMetadataUrl | ConfigField::ResumeAfterLoss
+                    )
+            }) {
                 self.warnings.push(format!(
                     "{}: [orchestration] is home-scoped and ignored here; set it in {}",
                     config_path.display(),
@@ -484,6 +493,7 @@ impl ProductConfig {
                     paths.config_file().display(),
                 ));
             }
+            self.warn_forward_home_scoped(&overlay, &config_path, paths);
             for field in overlay.present.clone() {
                 if field.is_home_only() {
                     continue;
@@ -579,6 +589,7 @@ impl ProductConfig {
             ConfigField::McpClientIdMetadataUrl => {
                 self.mcp_client_id_metadata_url = source.mcp_client_id_metadata_url.clone();
             }
+            ConfigField::ResumeAfterLoss => self.resume_after_loss = source.resume_after_loss,
         }
     }
 
@@ -683,6 +694,9 @@ impl ProductConfig {
             telemetry_max_age_days: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_AGE_DAYS,
             mcp_client_id_metadata_url: None,
             tool_sections: ToolSections::default(),
+            resume_after_loss: None,
+            runners: BTreeMap::new(),
+            forward: super::forward::ForwardPresence::default(),
         }
     }
 
@@ -873,11 +887,25 @@ impl ProductConfig {
             );
         }
         for (section, purpose) in CONFIG_SECTION_DOCS {
+            // An earlier build refuses these sections, so one none of whose
+            // keys is set is never written live.
+            let dormant = FORWARD_ONLY_SECTIONS.contains(section)
+                && CONFIG_KEYS
+                    .iter()
+                    .filter(|row| row.section() == *section)
+                    .all(|row| self.field_value(row.field).is_none());
+            if dormant && !annotated {
+                continue;
+            }
             out.push('\n');
             if annotated {
                 out.push_str(&format!("# {purpose}\n"));
             }
-            out.push_str(&format!("[{section}]\n"));
+            if dormant {
+                out.push_str(&format!("# [{section}]\n"));
+            } else {
+                out.push_str(&format!("[{section}]\n"));
+            }
             for row in CONFIG_KEYS.iter().filter(|row| row.section() == *section) {
                 if annotated {
                     out.push_str(&row.comment_block());
@@ -966,6 +994,7 @@ impl ProductConfig {
             ConfigField::McpClientIdMetadataUrl => {
                 Value::from(self.mcp_client_id_metadata_url.as_deref()?)
             }
+            ConfigField::ResumeAfterLoss => Value::from(self.resume_after_loss?.as_str()),
         })
     }
 
@@ -1475,6 +1504,9 @@ impl ProductConfig {
                     check_client_id_metadata_url(url)?;
                     self.mcp_client_id_metadata_url = Some(url.to_owned());
                 }
+            }
+            ConfigField::ResumeAfterLoss => {
+                self.resume_after_loss = ResumeAfterLoss::assigned(key, value)?;
             }
         }
         Ok(())

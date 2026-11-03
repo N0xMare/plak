@@ -827,6 +827,9 @@ fn server_table(server: &McpServerConfig) -> Table {
     if server.resources {
         table.insert("resources", toml_edit::value(true));
     }
+    if let Some(placement) = server.placement {
+        table.insert("placement", toml_edit::value(placement.as_str()));
+    }
     if server.startup_seconds != DEFAULT_MCP_STARTUP_SECONDS {
         table.insert(
             "startup_seconds",

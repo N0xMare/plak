@@ -130,7 +130,7 @@ pub(super) fn removed_or_unknown_section(section: &str) -> String {
     format!("unknown config section [{section}]")
 }
 
-/// The seven sections `config.toml` accepts, in render order, each with the one
+/// The key sections `config.toml` accepts, in render order, each with the one
 /// sentence the reference file prints above it.
 pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
     ("root", "The template new sessions bind at genesis."),
@@ -165,7 +165,16 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
         "mcp",
         "The MCP client; servers are [mcp_servers.<id>] tables.",
     ),
+    (
+        "host",
+        "The per-user host. Accepted and inert until node recovery lands.",
+    ),
 ];
+
+/// Sections an earlier build refuses as unknown. A render writes one live
+/// only when one of its keys is set, so a file `plak` writes stays loadable
+/// by those builds until the operator opts in.
+pub(crate) const FORWARD_ONLY_SECTIONS: &[&str] = &["host"];
 
 /// One documented `config.toml` key.
 ///
@@ -273,6 +282,8 @@ pub enum ConfigField {
     TelemetryMaxAgeDays,
     /// `[mcp] client_id_metadata_url`.
     McpClientIdMetadataUrl,
+    /// `[host] resume_after_loss`.
+    ResumeAfterLoss,
 }
 
 impl ConfigField {
@@ -291,6 +302,7 @@ impl ConfigField {
                 | Self::RequireReviewEvidence
                 | Self::McpClientIdMetadataUrl
                 | Self::ReloadRequests
+                | Self::ResumeAfterLoss
         )
     }
 }
@@ -632,7 +644,44 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         example: "\"https://plak.example/oauth/client.json\"",
         scope: ConfigScope::Immediate,
     },
+    ConfigKey {
+        path: "host.resume_after_loss",
+        field: ConfigField::ResumeAfterLoss,
+        kind: "enum",
+        constraint: "hold|continue; unset holds; home-scoped",
+        doc: "Whether a root whose owner was lost (a crash, a lease loss) continues by itself or holds for the operator's Resume. Accepted and inert until node recovery lands; a 0.0.3 build refuses a config.toml that sets it.",
+        example: "\"continue\"",
+        scope: ConfigScope::Immediate,
+    },
 ];
+
+/// `[host] resume_after_loss`: what a root whose owner was lost does.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResumeAfterLoss {
+    /// Hold for the operator's Resume; the default when unset.
+    Hold,
+    /// Continue by itself.
+    Continue,
+}
+
+impl ResumeAfterLoss {
+    /// The spelling `config.toml` carries.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Hold => "hold",
+            Self::Continue => "continue",
+        }
+    }
+
+    pub(super) fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "hold" => Ok(Self::Hold),
+            "continue" => Ok(Self::Continue),
+            _ => Err("[host] resume_after_loss must be hold or continue".to_owned()),
+        }
+    }
+}
 
 /// A Client ID Metadata Document URL: `https://` with a path beyond `/`,
 /// no query, fragment or credentials.

@@ -299,6 +299,7 @@ impl McpAction {
                             .unwrap_or(crate::product_config::DEFAULT_MCP_STARTUP_SECONDS),
                         call_seconds: call_seconds
                             .unwrap_or(crate::product_config::DEFAULT_MCP_CALL_SECONDS),
+                        placement: None,
                     },
                     replace,
                 }

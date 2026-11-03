@@ -575,6 +575,10 @@ struct RenderedServer {
     tools: Option<Vec<String>>,
     #[serde(default)]
     resources: bool,
+    /// Decoded so a set placement is admitted and checked; inert until
+    /// runner placement lands, so every server runs on the host.
+    #[serde(rename = "placement")]
+    _placement: Option<crate::frozen_tools::McpPlacement>,
     startup_seconds: u64,
     call_seconds: u64,
 }

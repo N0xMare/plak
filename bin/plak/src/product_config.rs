@@ -1,6 +1,7 @@
 //! Product `config.toml` (non-secret preferences).
 
 mod atomic;
+mod forward;
 mod keys;
 mod load;
 #[cfg(feature = "mcp")]
@@ -13,6 +14,7 @@ mod templates;
 mod toml_file;
 mod tool_sections;
 
+pub use tool_sections::runners::{LOCAL_RUNNER_NAME, RunnerConfig};
 pub use tool_sections::{
     DEFAULT_FETCH_URL_MAX_BYTES, DEFAULT_FETCH_URL_TIMEOUT_SECONDS, DEFAULT_MCP_CALL_SECONDS,
     DEFAULT_MCP_STARTUP_SECONDS, DEFAULT_WEB_SEARCH_MAX_USES, FetchUrlOptions, McpOAuthClient,
@@ -39,7 +41,10 @@ pub use load::{
     ProjectConfigSource, no_native_protocol_accounts, template_accounts,
 };
 
-pub use keys::{CONFIG_KEYS, CONFIG_SECTION_DOCS, ConfigField, ConfigKey, ConfigScope, config_key};
+pub use keys::{
+    CONFIG_KEYS, CONFIG_SECTION_DOCS, ConfigField, ConfigKey, ConfigScope, ResumeAfterLoss,
+    config_key,
+};
 pub use policy::{
     AgentTemplate, CEILING_MAX_ATTEMPTS, CEILING_MAX_CHILDREN, CEILING_MAX_DEPTH,
     CEILING_MAX_MODEL_ROUNDS, CEILING_MAX_NODES, CEILING_REQUESTS_PER_ACCOUNT,

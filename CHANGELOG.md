@@ -9,6 +9,12 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plak
 
+- Configuration compatibility: `config.toml` accepts `[host]
+  resume_after_loss`, `[mcp_servers.<id>] placement` and `[runners.<name>]`,
+  validated and inert until node recovery and runner placement land. A 0.0.3
+  build refuses a `config.toml` that sets any of them, so `plak` writes them
+  only when you set them and `plak doctor` warns `config uses 0.0.4-only keys`
+  while one is set.
 - Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
   accepts image input. Codex Direct adds `view_image` for one workspace image.
   Other packs stay text. A model that cannot accept the image is refused with

@@ -11,11 +11,14 @@
 
 use super::templates::{toml_key, toml_text};
 use super::toml_file::{Entry, located, table_header};
+use plakous_hosted::frozen_tools::McpPlacement;
 use plakous_hosted::tool_plan::{OptionalTool, SelectedTool, TemplateToolSelection};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Range, RangeInclusive};
 use toml::Spanned;
+
+pub mod runners;
 
 /// `[tools.fetch_url]` default response-body cap, in bytes.
 pub const DEFAULT_FETCH_URL_MAX_BYTES: u32 = 2_097_152;
@@ -153,6 +156,10 @@ pub struct McpServerConfig {
     pub startup_seconds: u16,
     /// Hard per-call ceiling, in seconds.
     pub call_seconds: u16,
+    /// `placement`, when the table sets it: where the server's process is to
+    /// run. Accepted and inert until runner placement lands; every server
+    /// runs on the host and its records freeze `host`.
+    pub placement: Option<McpPlacement>,
 }
 
 /// Every `[tools.*]` and `[mcp_servers.*]` table one config resolved.
@@ -342,6 +349,10 @@ fn render_mcp_server(id: &str, server: &McpServerConfig) -> String {
     if server.resources {
         out.push_str("resources = true\n");
     }
+    // Spelled only when set, like the OAuth keys.
+    if let Some(placement) = server.placement {
+        out.push_str(&format!("placement = \"{}\"\n", placement.as_str()));
+    }
     out.push_str(&format!("startup_seconds = {}\n", server.startup_seconds));
     out.push_str(&format!("call_seconds = {}\n", server.call_seconds));
     out
@@ -413,6 +424,7 @@ pub(super) struct McpServerSection {
     oauth_callback_port: Entry,
     tools: Entry,
     resources: Entry,
+    placement: Entry,
     startup_seconds: Entry,
     call_seconds: Entry,
 }
@@ -709,12 +721,24 @@ fn parse_mcp_server(
         .integer("call_seconds", &section.call_seconds, MCP_CALL_SECONDS)?
         .map_or(Ok(DEFAULT_MCP_CALL_SECONDS), u16::try_from)
         .map_err(|_| reader.message("call_seconds is out of range"))?;
+    let placement = reader
+        .string("placement", &section.placement)?
+        .map(|value| {
+            McpPlacement::parse(&value).ok_or_else(|| {
+                reader.at_entry(
+                    &section.placement,
+                    "placement must be \"host\" or \"runner\"",
+                )
+            })
+        })
+        .transpose()?;
     Ok(McpServerConfig {
         transport,
         tools,
         resources,
         startup_seconds,
         call_seconds,
+        placement,
     })
 }
 

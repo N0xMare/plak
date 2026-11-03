@@ -165,12 +165,26 @@ remain unchanged. Only explicit configuration actions (including Settings and
 profile application) publish configuration changes; an incomplete bind cannot
 silently clear `[root] agent`.
 
-Eleven key sections, in render order: `[root] [roster] [orchestration] [turn]
-[jobs] [api] [tui] [compaction] [skills] [telemetry] [mcp]`, plus two families
-of named tables, `[tools.<name>]` (§3.4) and `[mcp_servers.<id>]` (§3.5),
-thirteen in all. Any other section is an error. The two families are not `plak config set`
-keys: they are authored in the file, a save leaves them exactly as written, and
-`plak config show` prints their canonical rendering after the keys.
+Twelve key sections, in render order: `[root] [roster] [orchestration] [turn]
+[jobs] [api] [tui] [compaction] [skills] [telemetry] [mcp] [host]`, plus three
+families of named tables, `[tools.<name>]` (§3.4), `[mcp_servers.<id>]` (§3.5)
+and `[runners.<name>]` (§3.6), fifteen in all. Any other section is an error.
+The families are not `plak config set` keys: they are authored in the file, a
+save leaves them exactly as written, and `plak config show` prints the
+canonical rendering of the tool and server tables after the keys.
+
+`[host] resume_after_loss`, `[mcp_servers.<id>] placement` and
+`[runners.<name>]` are accepted, validated and inert until their steps (node
+recovery for the first, runner placement for the other two). A 0.0.3 build
+refuses a `config.toml` that sets any of them (unknown section or key), so
+`plak` writes them only when the operator sets them: `plak config init` and a
+fresh save write the `[host]` header commented out, a save of another key
+never adds one, and a save that clears the last key of `[host]` removes the
+empty table. `plak doctor` names each one the home file or a trusted project
+file carries, and a `[host]` or `[runners]` table present even empty
+(chapter 02 §7.3). `[host] resume_after_loss` and `[runners.<name>]` are
+home-scoped: a project file that sets them is loaded with a warning and its
+values are ignored.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
@@ -206,6 +220,7 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
+| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether a root whose owner was lost (a crash, a lease loss) continues by itself or holds for the operator's Resume. Accepted and inert until node recovery lands; a 0.0.3 build refuses a config.toml that sets it. |
 
 OpenRouter input admission uses the discovered context window minus the reserved
 output bound, lowered by eligible endpoint limits. It has no fixed 65,536-token
@@ -366,6 +381,7 @@ reach the server; it starts nothing until a template that lists it binds.
 | `oauth_callback_port` | integer | `(ephemeral)` | 1024..=65535; requires `auth = "oauth"` | Fixed loopback port of the login callback `http://127.0.0.1:<port>/callback`, for a client registered with that exact redirect. |
 | `tools` | array of string | `(every listed tool)` | MCP tool names, 1 to 128 bytes without whitespace, none twice | Server-level allowlist; `mcp:<id>` means exactly these. |
 | `resources` | bool | `false` | either transport | Give templates that list the server its `mcp__<id>__read_resource` tool (spec 01 §8.5); the server must advertise resources. Without it a server's resources never reach a model. |
+| `placement` | string | `(unset)` | host\|runner; either transport; unset is host | Where the server's process runs: on the host beside the agent, or on the node's runner with runner-local secrets. Accepted and inert until runner placement lands: every server runs on the host, and a session freezes `host` in its MCP tool records. |
 | `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
 | `call_seconds` | integer | `120` | 1..=3600 | Hard per-call ceiling; progress does not extend it. |
 
@@ -378,7 +394,8 @@ A key of the other transport is a load error, and so is an `oauth_*` key
 without `auth = "oauth"` or `auth` beside `bearer_secret`. The canonical
 rendering a session freezes spells out `auth`, the `oauth_*` keys and
 `resources` only when they are set, so a table without them renders, freezes
-and digests exactly as before they existed. Secrets are never values in
+and digests exactly as before they existed; `placement` is spelled the same
+way. Secrets are never values in
 TOML: a secret name matches `[a-z][a-z0-9-]{0,31}` and resolves from the home
 (spec 04 §3.1) when the server is started; whether it exists is a bind check,
 not a load check. `plak mcp add` writes a table into the home or (with
@@ -400,6 +417,21 @@ and a symlinked `config.toml` is written at its target. A trusted project may ad
 `[tools.<name>]` table or replace one of the home's by name, whole (a stdio
 server is a host-authority command, like `on_mint`); its secrets still resolve
 only from the home.
+
+### 3.6 `[runners.<name>]`
+
+One machine a host may run a node's tools on, reached over ssh as
+`ssh <strict options> <ssh> plak runner connect --stdio`. `<name>` matches
+`[a-z][a-z0-9-]{0,31}` and is never `local`, the name of the host's own runner,
+which needs no table. Home-scoped. Parsed and validated only: no runner is
+dialed, listed or chosen until the runner steps land.
+
+| key | type | default | constraint | meaning |
+| --- | --- | --- | --- | --- |
+| `ssh` | string | `(required)` | 1 to 255 visible ASCII bytes, no whitespace, not starting with `-` | The ssh destination: a `~/.ssh/config` alias or `[user@]host`. |
+
+Any other key is a load error. The runner's own roots, copies directory, PATH
+and HOME live in its `runner.toml` on that machine, not here.
 
 ## 4. `agents/<name>.toml`
 

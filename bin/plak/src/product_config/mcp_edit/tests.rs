@@ -23,6 +23,7 @@ fn stdio(command: &str, args: &[&str]) -> McpServerConfig {
         resources: false,
         startup_seconds: DEFAULT_MCP_STARTUP_SECONDS,
         call_seconds: DEFAULT_MCP_CALL_SECONDS,
+        placement: None,
     }
 }
 
@@ -96,6 +97,7 @@ fn add_refuses_what_the_load_parser_refuses_and_writes_nothing() {
         resources: false,
         startup_seconds: DEFAULT_MCP_STARTUP_SECONDS,
         call_seconds: DEFAULT_MCP_CALL_SECONDS,
+        placement: None,
     };
     let refused = add_server(&paths, ConfigWriteScope::User, "web", &server, false).unwrap_err();
     assert!(refused.contains("url must be https://"), "{refused}");

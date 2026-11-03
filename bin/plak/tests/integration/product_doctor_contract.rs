@@ -54,6 +54,7 @@ fn input(temp: &TempDir) -> DoctorInputs {
         version: "0.1.0-test".to_owned(),
         paths: DoctorPaths::under(home),
         config: ConfigStatus::Parsed,
+        forward_config_keys: Vec::new(),
         product_database: DatabaseStatus::Available,
 
         subagents_database: DatabaseStatus::Available,
@@ -154,6 +155,35 @@ fn report_is_table_ready_and_summarizes_warnings() {
     assert_eq!(report.summary.errors, 1);
     assert!(report.summary.ok >= 2);
     assert_eq!(CheckKind::ProductDatabase.key(), "product_db");
+}
+
+/// A config that sets a key a 0.0.3 build refuses is named, and one that
+/// sets none adds no row.
+#[test]
+fn a_config_with_0_0_4_only_keys_is_a_named_warning() {
+    let quiet = TempDir::new().unwrap();
+    let report = diagnose(input(&quiet));
+    assert!(
+        report
+            .checks
+            .iter()
+            .all(|check| check.kind != CheckKind::ConfigCompatibility)
+    );
+    let temp = TempDir::new().unwrap();
+    let mut values = input(&temp);
+    values.forward_config_keys = vec![
+        "[host] resume_after_loss".to_owned(),
+        "[runners.buildbox]".to_owned(),
+    ];
+    let report = diagnose(values);
+    let compat = check(&report, CheckKind::ConfigCompatibility);
+    assert_eq!(compat.severity, Severity::Warning);
+    assert_eq!(compat.result, "config uses 0.0.4-only keys");
+    assert_eq!(
+        compat.detail,
+        "[host] resume_after_loss, [runners.buildbox]; a 0.0.3 build sharing this home refuses this config.toml"
+    );
+    assert_eq!(CheckKind::ConfigCompatibility.key(), "config_compat");
 }
 
 /// A spawnable template whose account is not ready loads; doctor names it

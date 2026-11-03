@@ -19,9 +19,14 @@
 //! changed, so comments, key order and spacing on every other line survive a
 //! `plak config set` byte for byte.
 
-use super::keys::{CONFIG_KEYS, ConfigKey, FieldValue, removed_or_unknown_section, unknown_key};
+use super::forward::ForwardPresence;
+use super::keys::{
+    CONFIG_KEYS, ConfigKey, FORWARD_ONLY_SECTIONS, FieldValue, removed_or_unknown_section,
+    unknown_key,
+};
 use super::load::ProductConfig;
 use super::policy::AgentTemplate;
+use super::tool_sections::runners::{self, RunnerSection};
 use super::tool_sections::{self, McpServerSection, ToolsSection};
 use super::{ProductCompositionSelection, ProductProtocolSelection};
 use plakous_hosted::agent_tree_protocol::{Delegation, TemplateName, Tier};
@@ -32,8 +37,8 @@ use std::ops::Range;
 use toml::Spanned;
 use toml_edit::{DocumentMut, Item, Table, TableLike, Value};
 
-/// `config.toml`: thirteen sections, each optional, nothing else. `[tools]` and
-/// `[mcp_servers]` hold one named table per entry.
+/// `config.toml`: fifteen sections, each optional, nothing else. `[tools]`,
+/// `[mcp_servers]` and `[runners]` hold one named table per entry.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
@@ -50,6 +55,14 @@ struct ConfigFile {
     mcp: Option<McpSection>,
     tools: Option<ToolsSection>,
     mcp_servers: Option<BTreeMap<String, McpServerSection>>,
+    host: Option<HostSection>,
+    runners: Option<BTreeMap<String, RunnerSection>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostSection {
+    resume_after_loss: Entry,
 }
 
 /// Every key is read as a spanned TOML value rather than a Rust type so the
@@ -261,8 +274,13 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
             &section.client_id_metadata_url,
         )?;
     }
+    if let Some(section) = &file.host {
+        assign("host.resume_after_loss", &section.resume_after_loss)?;
+    }
+    config.forward = ForwardPresence::of(file.host.is_some(), file.runners.is_some());
     config.tool_sections =
         tool_sections::parse(text, file.tools.as_ref(), file.mcp_servers.as_ref())?;
+    config.runners = runners::parse(text, file.runners.as_ref())?;
     Ok(config)
 }
 
@@ -488,7 +506,22 @@ pub(super) fn edit_document(
             (None, None) => {}
         }
     }
+    drop_empty_forward_sections(&mut document);
     Ok(document.to_string())
+}
+
+/// A forward-only table an edit left empty is removed, so a cleared key does
+/// not leave a header an earlier build refuses.
+fn drop_empty_forward_sections(document: &mut DocumentMut) {
+    for section in FORWARD_ONLY_SECTIONS {
+        if document
+            .get(section)
+            .and_then(Item::as_table_like)
+            .is_some_and(TableLike::is_empty)
+        {
+            document.remove(section);
+        }
+    }
 }
 
 /// The project override document: a key is written only where the effective
@@ -527,6 +560,7 @@ pub(super) fn edit_project_document(
         };
         section_table(&mut document, row.section())?.insert(row.key(), Item::Value(desired));
     }
+    drop_empty_forward_sections(&mut document);
     let rendered = document.to_string();
     if existing.is_none() {
         return Ok(format!(

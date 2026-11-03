@@ -33,6 +33,7 @@ pub enum CheckKind {
     Home,
     HomeFreeSpace,
     Config,
+    ConfigCompatibility,
     ProductDatabase,
     RuntimeDatabase,
     RuntimeStore,
@@ -62,6 +63,7 @@ impl CheckKind {
             Self::Home => "home",
             Self::HomeFreeSpace => "home_free_space",
             Self::Config => "config",
+            Self::ConfigCompatibility => "config_compat",
             Self::ProductDatabase => "product_db",
             Self::SubagentsDatabase => "subagents_db",
             Self::RuntimeDatabase => "runtime_db",
@@ -265,6 +267,8 @@ pub struct DoctorInputs {
     /// Product-volume capacity observed by the read-only input collector.
     pub storage_admission: plakous_hosted::session_store::StorageAdmission,
     pub config: ConfigStatus,
+    /// The keys the loaded config sets that a 0.0.3 build refuses.
+    pub forward_config_keys: Vec<String>,
     pub product_database: DatabaseStatus,
     pub runtime_database: DatabaseStatus,
     pub runtime_store: RuntimeStoreStatus,
@@ -833,6 +837,19 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     ));
     checks.push(storage_space::check(input.storage_admission));
     checks.push(config_check(&input.paths.config, input.config));
+    if !input.forward_config_keys.is_empty() {
+        checks.push(DoctorCheck::new(
+            CheckKind::ConfigCompatibility,
+            "config",
+            Severity::Warning,
+            "config uses 0.0.4-only keys",
+            format!(
+                "{}; a 0.0.3 build sharing this home refuses this config.toml",
+                input.forward_config_keys.join(", ")
+            ),
+            Some("remove them before running a 0.0.3 build on this home"),
+        ));
+    }
     checks.push(database_check(
         CheckKind::ProductDatabase,
         &input.paths.product_database,

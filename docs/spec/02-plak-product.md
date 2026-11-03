@@ -7810,7 +7810,14 @@ OpenRouter catalog; the root template; the spawnable templates
 (`spawn_templates`: a warning naming each template the working set reaches,
 directly or through `spawns`, whose account or model is not ready, with the
 remedy `plak login <account>`; the config still loads and only that role's
-spawn is refused); and the three OAuth verticals.
+spawn is refused); and the three OAuth verticals. One more row,
+`config_compat`, follows the config file only when the home file or a trusted
+project file carries something a 0.0.3 build refuses as unknown (`[host]
+resume_after_loss`, `[mcp_servers.<id>] placement`, `[runners.<name>]`, or a
+`[host]` or `[runners]` table present even empty, chapter 07 §3): a warning
+`config uses 0.0.4-only keys` naming each (a project file's with its path),
+with the remedy to remove them before running a 0.0.3 build on the home. `plak` itself writes those keys only
+when the operator sets them.
 
 Each row prints a check name, a severity of `OK`, `WARNING`, or `ERROR`, a
 detail that leads with a closed result token — `available`, `missing`,
