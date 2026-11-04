@@ -3,7 +3,7 @@ use super::{
     EnvironmentVariableValue, ExecutionBackendError, ExecutionEnvironmentLimits,
     HostProcessContext, Instant, JoinedProcessOutputStream, JoinedProcessStartRequest,
     JoinedProcessStatus, JoinedProcessTerminalMode, JoinedSessionInput, JoinedSessionShared, Mutex,
-    Ordering, Path, PtyInputCommand, Stdio, SyncSender, cleanup_setup_error,
+    Path, PtyInputCommand, ReaderStop, Stdio, SyncSender, cleanup_setup_error,
     cleanup_unresolved_error, clone_linux_pty_master, host_process_home, host_process_path,
     invalid_request, io_error, join_thread_until, joined_pty_command, native_pty_system,
     reap_when_group_empty, set_nonblocking, sleep_until_next_poll, spawn_joined_output_reader,
@@ -58,7 +58,7 @@ pub(in crate::environment::backend::process) struct JoinedProcessResources {
     readers: Vec<std::thread::JoinHandle<()>>,
     input_thread: Option<std::thread::JoinHandle<()>>,
     input_owner: Option<SyncSender<PtyInputCommand>>,
-    io_stop: Arc<AtomicBool>,
+    io_stop: Arc<ReaderStop>,
     cleanup_duration: Duration,
     armed: bool,
     #[cfg(test)]
@@ -75,6 +75,9 @@ impl JoinedSpawn<'_> {
             JoinedProcessTerminalMode::Pipes => self.spawn_pipes()?,
             JoinedProcessTerminalMode::UnixPty => self.spawn_pty()?,
         };
+        // After the child, so its pipes are counted first: a wake never
+        // takes the room a spawn needs.
+        let io_stop = Arc::new(ReaderStop::new());
         Ok((
             JoinedProcessResources {
                 child,
@@ -82,7 +85,7 @@ impl JoinedSpawn<'_> {
                 readers: Vec::new(),
                 input_thread: None,
                 input_owner: None,
-                io_stop: Arc::new(AtomicBool::new(false)),
+                io_stop,
                 cleanup_duration: self.limits.cleanup_duration(),
                 armed: true,
                 #[cfg(test)]
@@ -430,7 +433,7 @@ impl JoinedProcessResources {
     }
 
     pub(in crate::environment::backend::process) fn stop_io(&self) {
-        self.io_stop.store(true, Ordering::Release);
+        self.io_stop.stop();
         if let Some(owner) = &self.input_owner {
             let _ = owner.try_send(PtyInputCommand::Stop);
         }
@@ -451,7 +454,7 @@ impl JoinedProcessResources {
     }
 
     fn rollback(&mut self, error: ExecutionBackendError) -> ExecutionBackendError {
-        self.io_stop.store(true, Ordering::Release);
+        self.io_stop.stop();
         #[cfg(test)]
         if let Some(probe) = self.before_rollback.take() {
             probe();

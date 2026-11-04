@@ -3,6 +3,8 @@
 use std::io::Write;
 use std::os::unix::process::CommandExt;
 
+use rustix::event::{PollFd, PollFlags};
+
 use super::{
     Arc, AsFd, AtomicBool, Command, Duration, Errno, ExecutionBackendError,
     ExecutionEnvironmentLimits, HostProcessOutput, HostProcessStream, Instant,
@@ -10,12 +12,102 @@ use super::{
     Ordering, Read, Stdio, fs, io_error, lock, supervision_poll_interval,
 };
 
+#[cfg(test)]
+mod tests;
+
+/// Descriptors a session leaves free under the soft open-file limit before
+/// its readers take a wake pipe; with less room they poll instead, so the
+/// wakes never starve a later spawn of its pipes.
+const WAKE_HEADROOM: u64 = 64;
+
+/// Stops a joined session's output readers. Stopping also wakes every reader
+/// blocked waiting for output, so an idle job's readers never poll.
+pub(super) struct ReaderStop {
+    stopped: AtomicBool,
+    // A single byte is written on the first stop and never read, so the wake
+    // stays readable for every reader that waits after it. `None` when the
+    // process had no room for it: the readers poll every 2 ms instead.
+    wake: Option<(std::io::PipeReader, std::io::PipeWriter)>,
+}
+
+impl ReaderStop {
+    /// A stop with a wake pipe (two descriptors) when the soft open-file
+    /// limit leaves room for one, and without one otherwise.
+    pub(super) fn new() -> Self {
+        Self {
+            stopped: AtomicBool::new(false),
+            wake: room_for_wake().then(std::io::pipe).and_then(Result::ok),
+        }
+    }
+
+    pub(super) fn stop(&self) {
+        if !self.stopped.swap(true, Ordering::AcqRel)
+            && let Some((_, waker)) = &self.wake
+        {
+            // `write_all` retries an interrupted write. A one-byte write to
+            // a pipe whose read end this holds cannot otherwise fail.
+            let _ = (&*waker).write_all(&[0]);
+        }
+    }
+
+    pub(super) fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    /// Blocks until `reader` is readable or hung up, or the readers stop.
+    fn wait_for_output(&self, reader: &impl AsFd, pollable: &mut bool) {
+        self.wait_with(reader, pollable, |fds| rustix::event::poll(fds, None));
+    }
+
+    /// [`Self::wait_for_output`] through `poll`. Without a wake, or for a
+    /// descriptor `poll` reports `NVAL` for or fails on, `pollable` turns
+    /// false and each pass sleeps 2 ms instead.
+    fn wait_with(
+        &self,
+        reader: &impl AsFd,
+        pollable: &mut bool,
+        poll: impl FnOnce(&mut [PollFd<'_>]) -> rustix::io::Result<usize>,
+    ) {
+        if *pollable && let Some((wake, _)) = &self.wake {
+            let mut fds = [
+                PollFd::new(reader, PollFlags::IN),
+                PollFd::new(wake, PollFlags::IN),
+            ];
+            match poll(&mut fds) {
+                Ok(_) if !fds[0].revents().contains(PollFlags::NVAL) => return,
+                Err(Errno::INTR) => return,
+                _ => *pollable = false,
+            }
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// Whether a wake pipe leaves [`WAKE_HEADROOM`] descriptors free under the
+/// soft open-file limit. An open-descriptor count that cannot be taken
+/// answers no.
+fn room_for_wake() -> bool {
+    use rustix::process::{Resource, getrlimit};
+    let Some(soft) = getrlimit(Resource::Nofile).current else {
+        return true;
+    };
+    let directory = if cfg!(target_os = "linux") {
+        "/proc/self/fd"
+    } else {
+        "/dev/fd"
+    };
+    fs::read_dir(directory).is_ok_and(|entries| {
+        let open = u64::try_from(entries.count()).unwrap_or(u64::MAX);
+        open.saturating_add(2 + WAKE_HEADROOM) <= soft
+    })
+}
+
 pub(super) fn spawn_joined_output_reader<R>(
     reader: R,
     stream: JoinedProcessOutputStream,
     shared: Arc<Mutex<JoinedSessionShared>>,
     io_failed: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
+    stop: Arc<ReaderStop>,
     limits: ExecutionEnvironmentLimits,
 ) -> Result<std::thread::JoinHandle<()>, ExecutionBackendError>
 where
@@ -27,21 +119,24 @@ where
         .spawn(move || {
             let mut reader = reader;
             let mut chunk = [0_u8; 16 * 1024];
+            let mut pollable = true;
             loop {
+                // A release is followed by the supervisor's stop, which wakes
+                // a reader waiting here; the release is checked first.
                 if lock(&shared).disowned {
                     if detach_output_reader(&reader, stream, &shared).is_err() {
                         io_failed.store(true, Ordering::Release);
                     }
                     return;
                 }
-                if stop.load(Ordering::Acquire) {
+                if stop.is_stopped() {
                     return;
                 }
                 let read = match reader.read(&mut chunk) {
                     Ok(0) => return,
                     Ok(read) => read,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(2));
+                        stop.wait_for_output(&reader, &mut pollable);
                         continue;
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -56,7 +151,7 @@ where
                         return;
                     }
                 };
-                if stop.load(Ordering::Acquire) && !lock(&shared).disowned {
+                if stop.is_stopped() && !lock(&shared).disowned {
                     return;
                 }
                 let mut state = lock(&shared);

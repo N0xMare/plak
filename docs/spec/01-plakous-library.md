@@ -6733,7 +6733,14 @@ distinct from natural exit. Release stops run concurrently. Process cleanup
 keeps bounded output readers alive during TERM/KILL and
 group reaping, then signals I/O shutdown and joins readers under the cleanup
 bound; cancelling output consumption must not close the child's output pipes
-before the termination attempt.
+before the termination attempt. A joined session's output readers wait in
+`poll` on their pipe or terminal and on a session wake pipe that I/O shutdown
+makes readable, so an idle job's readers do not wake at all. The wake costs
+two descriptors per session and is taken after the child's pipes, only while
+it leaves 64 descriptors free under the soft open-file limit; a session
+without one, and a descriptor `poll` reports `NVAL` for or fails on, use a 2 ms
+read poll instead, so the limit never refuses a start. A release is observed
+when that shutdown wakes them.
 
 Every error carries the disposition of the work it interrupted. **A refusal
 raised before a tool has had an effect is a definite, model-visible tool

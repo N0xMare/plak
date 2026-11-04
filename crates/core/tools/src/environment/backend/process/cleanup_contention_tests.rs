@@ -501,3 +501,35 @@ fn join_all_handles_free_children_and_retains_contended_child_for_retry() -> Res
     assert!(sessions.is_drained());
     Ok(())
 }
+
+/// The session limit fits macOS's default soft open-file limit of 256: a
+/// session whose wake pipe would leave too little room polls instead, so no
+/// start is refused for want of descriptors. It lowers this process's limit,
+/// so it runs in the serial lane, one test per process.
+#[test]
+fn the_session_limit_fits_a_256_descriptor_soft_limit() -> Result<(), TestError> {
+    use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+
+    struct Restore(Rlimit);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = setrlimit(Resource::Nofile, self.0);
+        }
+    }
+
+    let original = getrlimit(Resource::Nofile);
+    let _restore = Restore(original);
+    setrlimit(
+        Resource::Nofile,
+        Rlimit {
+            current: Some(256),
+            maximum: original.maximum,
+        },
+    )?;
+    let (_workspace, sessions) = sessions(120)?;
+    for _ in 0..MAX_JOINED_PROCESS_SESSIONS {
+        sleeping_child(&sessions)?;
+    }
+    join_all_with_bounded_retries(&sessions)?;
+    Ok(())
+}

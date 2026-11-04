@@ -38,7 +38,7 @@ fn pipes_initial_stdin_rollback_terminates_group_before_join() -> TestResult {
         readers: Vec::new(),
         input_thread: None,
         input_owner: None,
-        io_stop: Arc::new(AtomicBool::new(false)),
+        io_stop: Arc::new(ReaderStop::new()),
         cleanup_duration: Duration::from_secs(4),
         armed: true,
         before_rollback: Some(Box::new(move || assert_stdin_still_open(input_reader))),
@@ -174,7 +174,7 @@ fn delayed_pty() -> Result<(JoinedProcessResources, DelayedPtyReader), Box<dyn s
             readers: Vec::new(),
             input_thread: None,
             input_owner: None,
-            io_stop: Arc::new(AtomicBool::new(false)),
+            io_stop: Arc::new(ReaderStop::new()),
             cleanup_duration: Duration::from_secs(4),
             armed: true,
             before_rollback: None,
@@ -244,5 +244,75 @@ fn pty_reader_drains_after_leader_exit_before_io_stop() -> TestResult {
     assert_eq!(bytes, b"x");
     assert!(shared.status.is_terminal());
     assert!(resources.readers.is_empty());
+    Ok(())
+}
+
+/// A terminal reader waiting in `poll` takes a burst in order and returns at
+/// the hang-up once the last slave closes, with nothing left unread. Linux
+/// only: there the master keeps buffered output past the hang-up, and its
+/// reader takes the `poll` path rather than the macOS fallback.
+#[cfg(target_os = "linux")]
+#[test]
+fn pty_reader_drains_a_burst_and_returns_at_hang_up() -> TestResult {
+    let pair = native_pty_system().openpty(PtySize::default())?;
+    let file = clone_linux_pty_master(pair.master.as_ref())?;
+    let mut command = portable_pty::CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        "i=0; while [ $i -lt 2000 ]; do echo line-$i; i=$((i + 1)); done",
+    ]);
+    let mut child = pair.slave.spawn_command(command)?;
+    drop(pair);
+    let shared = Arc::new(Mutex::new(JoinedSessionShared {
+        output: JoinedSessionOutput::default(),
+        status: JoinedProcessStatus::Running,
+        elapsed: None,
+        terminal_changes: None,
+        changes: tokio::sync::watch::channel(0).0,
+        terminal: Arc::new(std::sync::Condvar::new()),
+        released: false,
+        spool: None,
+        pending_spool: None,
+        leftover: None,
+        disowned: false,
+    }));
+    let failed = Arc::new(AtomicBool::new(false));
+    let limits = ExecutionEnvironmentLimits::new(
+        65536,
+        65536,
+        65536,
+        65536,
+        Duration::from_secs(20),
+        Duration::from_secs(4),
+    )?;
+    let reader = spawn_joined_output_reader(
+        file,
+        JoinedProcessOutputStream::Terminal,
+        Arc::clone(&shared),
+        Arc::clone(&failed),
+        Arc::new(ReaderStop::new()),
+        limits,
+    )?;
+    // Liveness only: the reader ends at the hang-up, never by a stop.
+    assert!(join_thread_until(
+        reader,
+        Instant::now() + Duration::from_secs(30)
+    ));
+    assert!(child.wait()?.success());
+    assert!(!failed.load(std::sync::atomic::Ordering::Acquire));
+    let shared = shared.lock().map_err(|_| "poisoned output")?;
+    let bytes: Vec<_> = shared
+        .output
+        .records
+        .iter()
+        .flat_map(|record| record.bytes.iter().copied())
+        .collect();
+    let mut expected = String::new();
+    for i in 0..2000 {
+        expected.push_str("line-");
+        expected.push_str(&i.to_string());
+        expected.push_str("\r\n");
+    }
+    assert_eq!(String::from_utf8_lossy(&bytes), expected);
     Ok(())
 }

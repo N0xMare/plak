@@ -84,6 +84,7 @@ pub mod home {
 pub mod oauth_ui;
 #[cfg(test)]
 mod observation_parity_tests;
+mod open_file_limit;
 #[doc(hidden)]
 pub mod openrouter_product;
 #[doc(hidden)]
@@ -247,6 +248,7 @@ use crate::tui_launch::launch_tui;
 #[must_use]
 pub fn main_from_env() -> ExitCode {
     tui_timing::process_started();
+    open_file_limit::raise();
     // Read the system zone once, before anything spawns a thread. Resume
     // dates and prompt send times resolve each instant's own offset in it.
     let _ = local_time_zone();

@@ -14,13 +14,13 @@ use super::{
     JOINED_PROCESS_PTY_INITIAL_ROWS, JoinedProcessCommand, JoinedProcessOutputCursor,
     JoinedProcessOutputStream, JoinedProcessStartRequest, JoinedProcessStatus,
     JoinedProcessTerminalMode, JoinedSession, JoinedSessionOutput, JoinedSessionShared, MasterPty,
-    Mutex, OperationContext, Ordering, Path, PendingJobOutput, PtySize, RawFd, Receiver, Stdio,
-    SyncSender, TrySendError, Write, backend_error, cleanup_setup_error, cleanup_unresolved_error,
-    conflict_error, displayed_command, fs, host_process_home, host_process_path, invalid_request,
-    io_error, join_thread_until, native_pty_system, reap_when_group_empty,
-    resolve_existing_no_symlink, resource_error, restore_path_after_login, set_nonblocking,
-    sleep_until_next_poll, spawn_joined_output_reader, supervise_joined_process, sync_channel,
-    terminate_direct_child, terminate_direct_pty_child, workspace_error,
+    Mutex, OperationContext, Ordering, Path, PendingJobOutput, PtySize, RawFd, ReaderStop,
+    Receiver, Stdio, SyncSender, TrySendError, Write, backend_error, cleanup_setup_error,
+    cleanup_unresolved_error, conflict_error, displayed_command, fs, host_process_home,
+    host_process_path, invalid_request, io_error, join_thread_until, native_pty_system,
+    reap_when_group_empty, resolve_existing_no_symlink, resource_error, restore_path_after_login,
+    set_nonblocking, sleep_until_next_poll, spawn_joined_output_reader, supervise_joined_process,
+    sync_channel, terminate_direct_child, terminate_direct_pty_child, workspace_error,
 };
 
 pub(super) enum JoinedSessionInput {

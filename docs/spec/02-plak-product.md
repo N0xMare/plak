@@ -2692,6 +2692,14 @@ Installing the log creates the private home and `logs/` only. It does not create
 
 Workspace maintenance follows chapter 03 §6.6.
 
+Before anything else, every `plak` process raises its soft open-file limit
+(`RLIMIT_NOFILE`) toward its hard limit, capped at 10 240 (macOS's `OPEN_MAX`,
+which `setrlimit` accepts there even with an unlimited hard limit). It never
+lowers it, a refused raise leaves it unchanged, and the processes it starts
+inherit it. macOS's default soft limit of 256 is too low for the joined-session
+limit with its wake pipes; library embedders keep their own limit, under which
+readers fall back to polling (chapter 01 §8.5).
+
 After diagnostics initialize, startup emits one `INFO` event at `plak.start`
 with only `binary` (the same 12-hex build id as `plak version`), `state_key`
 and `command` (the normalized top-level verb), skipped if the build id is unavailable;

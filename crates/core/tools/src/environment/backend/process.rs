@@ -35,7 +35,8 @@ pub(super) use host_context::{
 };
 #[cfg(unix)]
 use output_reader::{
-    set_nonblocking, spawn_joined_output_reader, spawn_output_reader, write_process_input,
+    ReaderStop, set_nonblocking, spawn_joined_output_reader, spawn_output_reader,
+    write_process_input,
 };
 pub(in crate::environment) use sessions::JoinedProcessServiceCache;
 #[cfg(unix)]
