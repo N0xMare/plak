@@ -986,6 +986,12 @@ impl App {
             HostEvent::Extension(SurfaceObservation::ProfileRefused { name, reason }) => {
                 self.apply_profile_refused(&name, &reason);
             }
+            HostEvent::Extension(SurfaceObservation::BuildStatus { newer_installed }) => {
+                self.apply_build_status(newer_installed);
+            }
+            HostEvent::Extension(SurfaceObservation::ReloadRequested(request)) => {
+                self.apply_reload_request(request);
+            }
             HostEvent::Extension(SurfaceObservation::OpenUsageOverlay) => {
                 if self.pending_open_usage {
                     self.pending_open_usage = false;

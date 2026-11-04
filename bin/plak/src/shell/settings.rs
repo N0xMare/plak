@@ -958,6 +958,7 @@ pub struct ProductSurface {
     /// True only while the TUI's Usage tab is the open control tab.
     usage_watch: std::sync::atomic::AtomicBool,
     state_home: Result<std::path::PathBuf, String>,
+    reload: crate::shell::reload_surface::ReloadChannel,
 }
 
 /// How long a Usage refresh-account read waits for the host's usage read to
@@ -989,11 +990,12 @@ impl ProductSurface {
         Self {
             state_home: crate::home::paths::application_state_home(),
             usage_refreshing: std::sync::Arc::new(std::sync::Mutex::new(false)),
-            paths,
             chrome_refresh: crate::shell::chrome_refresh::ChromeRefresh::default(),
             chrome_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
             usage_accounts_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
             usage_watch: std::sync::atomic::AtomicBool::new(false),
+            reload: crate::shell::reload_surface::ReloadChannel::new(paths.clone()),
+            paths,
         }
     }
 
@@ -1234,6 +1236,16 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             ),
             SurfaceIntent::ListAgentAcknowledgements { tree_id } => {
                 send_agent_acknowledgements(&self.paths, &tree_id, events);
+            }
+            SurfaceIntent::CheckBuild => {
+                let session = facts.session.as_ref().map(|session| session.id.as_str());
+                self.reload.check(session, events);
+            }
+            SurfaceIntent::AcceptReloadRequest { request_id } => {
+                self.reload.accept(&request_id);
+            }
+            SurfaceIntent::RefuseReloadRequest { request_id, reason } => {
+                self.reload.refuse(&request_id, reason);
             }
             SurfaceIntent::ApplyProfile { name, apply } => {
                 return SurfaceEffect {

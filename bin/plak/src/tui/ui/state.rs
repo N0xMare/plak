@@ -3,10 +3,11 @@
 #[cfg(test)]
 use super::Rect;
 use super::{
-    App, BUILD_CHECK_INTERVAL, Instant, MAX_LIVE_TRANSCRIPT_BLOCKS, MAX_LIVE_TRANSCRIPT_BYTES,
-    RedrawDemand, ScrollBlock, SlashContext, TRANSCRIPT_TRUNCATION_MARKER, TranscriptChange,
-    UserAction, WHEEL_FAST_BONUS, WHEEL_FAST_WINDOW, WHEEL_NOTCH_DEFAULT, WHEEL_QUEUE_CAP,
-    fuzzy_list, render_prefs_for, user_phase,
+    App, BUILD_CHECK_INTERVAL, BUILD_CHECK_STALE, Instant, MAX_LIVE_TRANSCRIPT_BLOCKS,
+    MAX_LIVE_TRANSCRIPT_BYTES, RedrawDemand, ScrollBlock, SlashContext,
+    TRANSCRIPT_TRUNCATION_MARKER, TranscriptChange, UserAction, WHEEL_FAST_BONUS,
+    WHEEL_FAST_WINDOW, WHEEL_NOTCH_DEFAULT, WHEEL_QUEUE_CAP, fuzzy_list, render_prefs_for,
+    user_phase,
 };
 use std::time::Duration;
 
@@ -26,17 +27,42 @@ impl App {
         self.mark_dirty();
     }
 
-    /// Poll whether a newer `plak` was installed; true when the hint changed.
-    pub(super) fn recheck_installed_build(&mut self, now: Instant) -> bool {
+    /// On the build check's cadence, asks the host whether a newer `plak`
+    /// is installed and for this session's reload request; the answers
+    /// arrive as observations. One check is outstanding at a time, so a host
+    /// busy in a long workflow never finds its mailbox filled with them; one
+    /// unanswered for [`BUILD_CHECK_STALE`] is asked again.
+    pub(super) fn recheck_installed_build(
+        &mut self,
+        now: Instant,
+        actions: Option<&crate::tui::FaceActionSender>,
+    ) {
         if now < self.next_build_check {
-            return false;
+            return;
         }
         self.next_build_check = now + BUILD_CHECK_INTERVAL;
-        self.poll_reload_requests();
-        let newer = crate::build_identity::newer_build_installed();
-        let changed = newer != self.newer_build_installed;
-        self.newer_build_installed = newer;
-        changed
+        if self
+            .build_check_sent
+            .is_some_and(|sent| now.saturating_duration_since(sent) < BUILD_CHECK_STALE)
+        {
+            return;
+        }
+        if let Some(actions) = actions
+            && actions
+                .send(UserAction::Extension(crate::tui::SurfaceIntent::CheckBuild))
+                .is_ok()
+        {
+            self.build_check_sent = Some(now);
+        }
+    }
+
+    /// The host's answer to the build check.
+    pub(super) fn apply_build_status(&mut self, newer_installed: bool) {
+        self.build_check_sent = None;
+        if newer_installed != self.newer_build_installed {
+            self.newer_build_installed = newer_installed;
+            self.mark_dirty();
+        }
     }
 
     /// How long a parked loop may sleep before a deadline this state armed

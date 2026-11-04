@@ -7,6 +7,7 @@ pub mod catalog_refresh;
 mod chrome_refresh;
 pub mod home;
 pub mod host;
+mod reload_surface;
 pub mod services;
 pub mod settings;
 pub(crate) mod workspace;

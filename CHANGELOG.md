@@ -308,6 +308,16 @@ an export.
   intent the service refused for the attachment's role; `plak agent` JSONL
   v1 answers it as that command's `error` record), `HostService` is
   `Clone` (its clones are the same service), and the new types.
+- The TUI's installed-build check and its reload-request channel move to
+  the session's host: every five seconds the TUI sends the product
+  surface's `check_build`, and the host answers whether a newer build is
+  installed (`build_status`), announces the session it serves on the
+  reload-request channel and offers a waiting request (`reload_requested`)
+  until the TUI acknowledges it (`accept_reload_request`); the TUI hands
+  refusals back (`refuse_reload_request`) for the host to record, and the
+  host refuses `not taken` a request no face took. One check is outstanding
+  at a time. Only a session's UUID names a file in the channel. The
+  announcement now lives with the session's host.
 - Wire v2 handshake: `welcome` names the session id, tree id and root node,
   and the session opens before it is sent, so a failure before dispatch
   (`plak agent --wire v2` included) is a `refused` frame with the new

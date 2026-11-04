@@ -111,6 +111,8 @@ pub type ReadinessRead =
 
 /// Frozen session facts for product-owned identity and workspace presentation.
 pub struct SurfaceSession {
+    /// The product session this host serves.
+    pub id: String,
     /// Exact root account.
     pub account: Option<String>,
     /// Exact root model.
@@ -212,6 +214,7 @@ pub(super) fn session_facts(
         }
     });
     SurfaceSession {
+        id: session.id.clone(),
         account: session.account.clone(),
         model: session.model.clone(),
         effort: session.effort.clone(),

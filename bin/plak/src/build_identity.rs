@@ -6,12 +6,12 @@ use std::sync::OnceLock;
 
 use sha2::{Digest as _, Sha256};
 
-#[cfg(any(test, feature = "tui"))]
 mod interactive;
+#[cfg(any(test, feature = "tui"))]
+pub(crate) use interactive::installed_executable;
 #[cfg(feature = "tui")]
 pub(crate) use interactive::invocation_argv0;
-#[cfg(any(test, feature = "tui"))]
-pub(crate) use interactive::{installed_executable, newer_build_installed};
+pub(crate) use interactive::newer_build_installed;
 
 pub(crate) const JJ_ENABLED: bool = cfg!(feature = "jj");
 
@@ -35,12 +35,10 @@ pub(crate) const SOURCE_REVISION: &str = match option_env!("PLAK_SOURCE_REVISION
 struct Launch {
     /// `argv[0]` as a command name searched on `PATH`, or as a path made
     /// absolute against the launch directory.
-    #[cfg(any(test, feature = "tui"))]
     invocation: Invocation,
     executable: Option<FileIdentity>,
 }
 
-#[cfg(any(test, feature = "tui"))]
 enum Invocation {
     Name(std::ffi::OsString),
     Path(PathBuf),
@@ -108,10 +106,7 @@ pub(crate) fn ready_binary_id() -> Option<&'static str> {
 
 /// Record the invocation and the running executable. Call once, first thing.
 pub(crate) fn record_launch(argv0: Option<&std::ffi::OsStr>) {
-    #[cfg(not(any(test, feature = "tui")))]
-    let _ = argv0;
     LAUNCH.get_or_init(|| {
-        #[cfg(any(test, feature = "tui"))]
         let invocation = match argv0 {
             Some(arg) if Path::new(arg).components().count() > 1 => Invocation::Path(
                 std::env::current_dir()
@@ -125,7 +120,6 @@ pub(crate) fn record_launch(argv0: Option<&std::ffi::OsStr>) {
             .ok()
             .and_then(|path| FileIdentity::of(&path));
         Launch {
-            #[cfg(any(test, feature = "tui"))]
             invocation,
             executable,
         }
@@ -140,7 +134,6 @@ fn launch() -> &'static Launch {
         let current = std::env::current_exe().ok();
         Launch {
             executable: current.as_deref().and_then(FileIdentity::of),
-            #[cfg(any(test, feature = "tui"))]
             invocation: Invocation::Path(current.unwrap_or_else(|| PathBuf::from("plak"))),
         }
     })

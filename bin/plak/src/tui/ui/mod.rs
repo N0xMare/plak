@@ -110,6 +110,8 @@ use crate::tui::{
 
 /// How often the TUI rechecks whether `plak` on `PATH` was replaced.
 const BUILD_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+/// How long a build check may go unanswered before the next one is sent.
+const BUILD_CHECK_STALE: Duration = Duration::from_secs(60);
 
 /// Terminal events consumed before one frame is composed. Bounded so a paste
 /// or key-repeat burst cannot postpone the frame indefinitely; anything left
@@ -538,6 +540,8 @@ pub(crate) struct App {
     /// offers `/reload`. Rechecked every [`BUILD_CHECK_INTERVAL`].
     newer_build_installed: bool,
     next_build_check: Instant,
+    /// When the outstanding build check was sent, if one is.
+    build_check_sent: Option<Instant>,
     /// `/reload` was accepted; the loop starts the installed-build probe.
     pending_reload: bool,
     /// The running installed-build probe; the loop hands off when it answers.
@@ -913,6 +917,7 @@ impl App {
             pending_rebind: None,
             newer_build_installed: false,
             next_build_check: Instant::now(),
+            build_check_sent: None,
             pending_reload: false,
             reload_probe: None,
             reload_confirmed_target: None,

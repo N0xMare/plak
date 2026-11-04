@@ -1494,7 +1494,11 @@ running interactive session to reload onto the installed build (chapter 02
   check; a host never removes an announcement that is no longer its own. A
   well-formed request of another version is refused with an outcome saying
   so. Every file is opened without following links and validated on the
-  opened descriptor. A
+  opened descriptor. Only a session's UUID ever names a file in the
+  channel, and a session's host announces and takes requests only for the
+  session it serves, never for a session a face names; a face can only
+  acknowledge a request the host offered it and refuse one the host handed
+  over to it. A
   request that replaces one the host has not yet taken gives the replaced one
   a `superseded` outcome. Outcomes nobody collected are pruned after seven
   days.

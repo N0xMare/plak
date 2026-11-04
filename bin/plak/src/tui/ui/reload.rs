@@ -10,16 +10,22 @@ use super::{App, ScrollBlock};
 
 pub(super) const RELOAD_CHECKING: &str = "checking installed build…";
 
-/// The session's own reload requests: its announcement, a request waiting
-/// for the next idle boundary, and the one a running probe performs.
+/// The session's own reload requests, as the host hands them over: a
+/// request waiting for the next idle boundary, the one a running probe
+/// performs, and the answers the host still has to take.
 #[derive(Default)]
 pub(super) struct ReloadRequests {
-    /// The product home the composition root named; the channel is closed
-    /// without one.
+    /// The product home, for a refusal no host is left to record.
     home: Option<crate::home::paths::PlakPaths>,
-    listener: Option<(String, crate::reload_request::Listener)>,
     pending: Option<crate::reload_request::ReloadRequest>,
     active: Option<crate::reload_request::ReloadRequest>,
+    /// Requests taken from the host's offer and not yet acknowledged to it.
+    accepts: Vec<String>,
+    /// Requests whose acknowledgement this face's host took: only these
+    /// are its to record.
+    handed_over: std::collections::BTreeSet<String>,
+    /// `(request id, reason)` per refusal not yet sent to the host.
+    refusals: Vec<(String, String)>,
 }
 
 impl ReloadRequests {
@@ -132,13 +138,9 @@ impl App {
                     Some(ScrollBlock::System(text)) => text.clone(),
                     _ => "the reload was refused".to_owned(),
                 };
-                if let Some(paths) = self.reload_requests.home.as_ref() {
-                    crate::reload_request::record(
-                        paths,
-                        &request.request_id,
-                        &crate::reload_request::ReloadOutcome::Refused { reason },
-                    );
-                }
+                self.reload_requests
+                    .refusals
+                    .push((request.request_id, reason));
                 Some(ReloadOutcome::Refused)
             }
             None if self.reload_probe.is_none() && self.destructive_confirm.is_some() => {
@@ -156,38 +158,93 @@ impl App {
         }
     }
 
-    /// Announces this session as accepting reload requests (again, when its
-    /// announcement vanished or another instance replaced it) and takes one,
-    /// on the installed-build check's cadence.
-    pub(super) fn poll_reload_requests(&mut self) {
-        let Some(session) = self.session_id.clone() else {
+    /// The reload request the host offers this session: taken (and
+    /// acknowledged) once, it runs at the next idle boundary. The host
+    /// offers it again until it hears the acknowledgement.
+    pub(super) fn apply_reload_request(&mut self, request: crate::reload_request::ReloadRequest) {
+        let known = [&self.reload_requests.pending, &self.reload_requests.active]
+            .into_iter()
+            .flatten()
+            .any(|held| held.request_id == request.request_id);
+        if known {
+            self.reload_requests.accepts.push(request.request_id);
             return;
-        };
-        let Some(paths) = self.reload_requests.home.clone() else {
-            return;
-        };
-        if self
-            .reload_requests
-            .listener
-            .as_ref()
-            .is_none_or(|(id, listener)| id != &session || !listener.is_current())
-        {
-            // A missing or replaced announcement is re-published, so a pruned
-            // or overwritten file never leaves the channel silently dead.
-            self.reload_requests.listener =
-                crate::reload_request::Listener::announce(&paths, &session)
-                    .map(|listener| (session.clone(), listener));
         }
-        let Some((_, listener)) = self.reload_requests.listener.as_ref() else {
+        if self.session_id.as_deref() != Some(request.session_id.as_str()) {
             return;
-        };
-        if let Some(request) = listener.take(&paths, &session) {
-            self.push_block(ScrollBlock::System(format!(
-                "reload requested onto build {}; it runs when this session is idle",
-                request.expect_binary
-            )));
-            self.mark_dirty();
-            self.reload_requests.pending = Some(request);
+        }
+        self.push_block(ScrollBlock::System(format!(
+            "reload requested onto build {}; it runs when this session is idle",
+            request.expect_binary
+        )));
+        self.mark_dirty();
+        self.reload_requests
+            .accepts
+            .push(request.request_id.clone());
+        self.reload_requests.pending = Some(request);
+    }
+
+    /// Hands the host the acknowledgements and refusals it records for
+    /// their requesters. A full mailbox keeps them for the next frame; with
+    /// no host left, a refusal is recorded here.
+    pub(super) fn send_reload_answers(&mut self, actions: Option<&crate::tui::FaceActionSender>) {
+        use crate::tui::{SurfaceIntent, UserAction, UserActionSendError};
+        let mut accepts = std::mem::take(&mut self.reload_requests.accepts).into_iter();
+        while let Some(request_id) = accepts.next() {
+            let Some(actions) = actions else {
+                continue;
+            };
+            let accept = SurfaceIntent::AcceptReloadRequest {
+                request_id: request_id.clone(),
+            };
+            match actions.send(UserAction::Extension(accept)) {
+                Ok(()) => {
+                    self.reload_requests.handed_over.insert(request_id);
+                }
+                Err(UserActionSendError::Saturated(_)) => {
+                    self.reload_requests.accepts.push(request_id);
+                    self.reload_requests.accepts.extend(accepts);
+                    break;
+                }
+                Err(_) => {}
+            }
+        }
+        // A refusal never overtakes its own acceptance: the host records only
+        // a request it handed over.
+        if !self.reload_requests.accepts.is_empty() {
+            return;
+        }
+        let mut refusals = std::mem::take(&mut self.reload_requests.refusals).into_iter();
+        while let Some((request_id, reason)) = refusals.next() {
+            let sent = match actions {
+                Some(actions) if self.reload_requests.handed_over.contains(&request_id) => {
+                    let refuse = SurfaceIntent::RefuseReloadRequest {
+                        request_id: request_id.clone(),
+                        reason: reason.clone(),
+                    };
+                    match actions.send(UserAction::Extension(refuse)) {
+                        Ok(()) => true,
+                        Err(
+                            UserActionSendError::Saturated(_) | UserActionSendError::Duplicate(_),
+                        ) => {
+                            self.reload_requests.refusals.push((request_id, reason));
+                            self.reload_requests.refusals.extend(refusals);
+                            return;
+                        }
+                        Err(_) => false,
+                    }
+                }
+                _ => false,
+            };
+            self.reload_requests.handed_over.remove(&request_id);
+            // No host that handed this request over is left to record it.
+            if !sent && let Some(paths) = self.reload_requests.home.as_ref() {
+                crate::reload_request::record(
+                    paths,
+                    &request_id,
+                    &crate::reload_request::ReloadOutcome::Refused { reason },
+                );
+            }
         }
     }
 
@@ -223,15 +280,9 @@ impl App {
             "requested reload refused: {reason}"
         )));
         self.mark_dirty();
-        if let Some(paths) = self.reload_requests.home.as_ref() {
-            crate::reload_request::record(
-                paths,
-                &request.request_id,
-                &crate::reload_request::ReloadOutcome::Refused {
-                    reason: reason.to_owned(),
-                },
-            );
-        }
+        self.reload_requests
+            .refusals
+            .push((request.request_id.clone(), reason.to_owned()));
     }
 
     fn poll_reload_probe_once(&mut self) -> Option<ReloadOutcome> {
@@ -293,3 +344,7 @@ impl App {
         Some(ReloadOutcome::HandOff(target))
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+mod tests;

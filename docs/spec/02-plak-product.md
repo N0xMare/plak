@@ -4097,10 +4097,11 @@ restored — and the process replaces itself (`exec`) with the executable its ow
 `argv[0]` now resolves to on `PATH`, invoked as `plak --resume <id>` with the
 same `argv[0]`, so the successor keeps detecting newer installs; a shell that
 never committed a session starts fresh instead. If `exec` itself fails, the
-process prints the ordinary resume line and exits. Every five seconds the TUI compares
-that resolved file (path, inode, modification time) with the one it is
-running, and while they differ the composer's hint-line guidance reads
-`new build installed · /reload`. A process started by absolute path resolves to
+process prints the ordinary resume line and exits. Every five seconds the TUI asks
+its session's host (the product surface's `check_build` intent, answered by
+`build_status`), which compares that resolved file (path, inode,
+modification time) with the one it is running; while they differ the
+composer's hint-line guidance reads `new build installed · /reload`. A process started by absolute path resolves to
 that path, so a rebuild in place is still detected.
 The background-process refusal is `reload refused: background processes are
 running; stop them first (/ps)`. A process-local shared count reaches the shell
@@ -4132,14 +4133,19 @@ replaced by a newer one and its outcome reads `{"outcome":"superseded",
 restarted since the request was written) is refused with an outcome saying so,
 and a host discards any request it finds when it announces itself. A host
 whose announcement file vanished, or now carries another instance's nonce,
-re-announces on its next installed-build check. A request of another version
+re-announces on its next installed-build check. The announcement belongs to
+the session's host (its product surface), made on the TUI's build check and
+withdrawn when that host ends. A request of another version
 is refused with `unsupported request version`. Because `run/` is not state, no
 legacy-state notice, `plak doctor` report or `plak state prune-legacy` lists
 or removes it. The
 channel, its permission model and its targeting rules are chapter 04 §4.6. The
-TUI takes a queued request on its installed-build check (every five seconds),
-notes `reload requested onto build <binary-id>; it runs when this session is
-idle`, and performs it at the next idle boundary: never during a turn, so a
+session's host takes a queued request for the session it serves on the
+TUI's installed-build check (every five seconds, one check outstanding at a
+time) and offers it to the TUI (`reload_requested`) on every check until
+the TUI acknowledges it (`accept_reload_request`); a request no face took
+before the host ended is refused `not taken`. The TUI notes `reload
+requested onto build <binary-id>; it runs when this session is idle`, and performs it at the next idle boundary: never during a turn, so a
 request from the agent's own turn runs after that turn ends. If sub-agents or
 background processes are live at that boundary it refuses instead of waiting
 (`requested reload refused: <reason>`). Otherwise it runs exactly `/reload`:
@@ -4148,7 +4154,11 @@ not hand off, when the installed build now reports another binary id, when the
 probe or verdict refuses, or when a carry would need the capacity confirmation
 an operator gives (`/reload` by hand confirms it). Every refusal is noted in
 the transcript and written to the outcome file as
-`{"outcome":"refused","reason":...}`; every outcome file carries a `version`.
+`{"outcome":"refused","reason":...}` by the session's host, which the TUI
+hands the refusal (`refuse_reload_request`, after the request's own
+acknowledgement and retried while the host's mailbox is full; the TUI
+records it itself when no host that handed the request over is left);
+every outcome file carries a `version`.
 A handoff passes the request to the new build in the reload handoff sidecar
 (§2.5.1), never the environment, whether the reload resumes (`--resume <id>
 --reload-handoff <file>`) or carries; the new build honors it only with a

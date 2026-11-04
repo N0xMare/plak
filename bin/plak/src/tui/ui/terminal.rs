@@ -737,6 +737,7 @@ pub(super) fn run_app(
             }
             Some(super::reload::ReloadOutcome::Refused) | None => {}
         }
+        app.send_reload_answers(actions);
 
         #[cfg(feature = "test-hooks")]
         if let Some(pilot) = pilot.as_mut()
@@ -765,7 +766,8 @@ pub(super) fn run_app(
         let spinner_advanced = app.advance_status_spinner(now);
         let drag_advanced =
             app.advance_transcript_drag_autoscroll() | app.advance_composer_drag_autoscroll();
-        let mut timer_expired = app.recheck_installed_build(now);
+        app.recheck_installed_build(now, actions);
+        let mut timer_expired = false;
         if let Some(arm) = &app.quit_arm
             && arm.expired(now)
         {

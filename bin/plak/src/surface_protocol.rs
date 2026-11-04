@@ -318,6 +318,25 @@ pub enum SurfaceIntent {
         /// Tree id from the latest snapshot.
         tree_id: String,
     },
+    /// Ask the host whether a newer `plak` is installed, and for the reload
+    /// request waiting for the session it serves, which it announces as
+    /// accepting them; answered by [`SurfaceObservation::BuildStatus`] and,
+    /// while one is offered, [`SurfaceObservation::ReloadRequested`].
+    CheckBuild,
+    /// The face took the offered reload request; it is the face's to run or
+    /// refuse from now on.
+    AcceptReloadRequest {
+        /// The request taken.
+        request_id: String,
+    },
+    /// Record a requested reload's refusal for its requester; only a request
+    /// the host handed over.
+    RefuseReloadRequest {
+        /// The request refused.
+        request_id: String,
+        /// Why, as the operator reads it.
+        reason: String,
+    },
 }
 
 impl fmt::Debug for SurfaceIntent {
@@ -336,6 +355,9 @@ impl fmt::Debug for SurfaceIntent {
             Self::ApplyProfile { .. } => "ApplyProfile{..}",
             Self::AcknowledgeAgent { .. } => "AcknowledgeAgent{..}",
             Self::ListAgentAcknowledgements { .. } => "ListAgentAcknowledgements{..}",
+            Self::CheckBuild => "CheckBuild",
+            Self::AcceptReloadRequest { .. } => "AcceptReloadRequest{..}",
+            Self::RefuseReloadRequest { .. } => "RefuseReloadRequest{..}",
         })
     }
 }
@@ -401,6 +423,16 @@ pub enum SurfaceObservation {
         /// Tree the failed read was for.
         tree_id: String,
     },
+    /// Whether a newer `plak` than the running one is installed on the host.
+    BuildStatus {
+        /// A newer build is installed; `/reload` would start it.
+        newer_installed: bool,
+    },
+    /// A same-user request that this session reload onto the installed
+    /// build (spec 02 §5.1), offered until the face accepts it
+    /// ([`SurfaceIntent::AcceptReloadRequest`]); the face runs it at its next
+    /// idle boundary or refuses it ([`SurfaceIntent::RefuseReloadRequest`]).
+    ReloadRequested(crate::reload_request::ReloadRequest),
 }
 
 impl ObservationExtension for SurfaceObservation {
@@ -431,7 +463,9 @@ impl ObservationExtension for SurfaceObservation {
             | Self::ProfileApplied { .. }
             | Self::ProfileRefused { .. }
             | Self::AgentAcknowledgements { .. }
-            | Self::AgentAcknowledgementsUnavailable { .. } => ObservationClass::Addressed,
+            | Self::AgentAcknowledgementsUnavailable { .. }
+            | Self::BuildStatus { .. }
+            | Self::ReloadRequested(_) => ObservationClass::Addressed,
         }
     }
 
@@ -452,6 +486,8 @@ impl ObservationExtension for SurfaceObservation {
             Self::ProfileRefused { .. } => "profile_refused",
             Self::AgentAcknowledgements { .. } => "agent_acknowledgements",
             Self::AgentAcknowledgementsUnavailable { .. } => "agent_acknowledgements_unavailable",
+            Self::BuildStatus { .. } => "build_status",
+            Self::ReloadRequested(_) => "reload_requested",
         }
     }
 }

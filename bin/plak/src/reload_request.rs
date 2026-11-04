@@ -214,8 +214,9 @@ impl Listener {
     /// Announces `session` as accepting requests, when the home opted in. A
     /// request left from before this instance is discarded, and outcomes past
     /// their retention are pruned.
+    /// Only a session's UUID ever names a file in the channel.
     pub fn announce(paths: &PlakPaths, session: &str) -> Option<Self> {
-        if !enabled(paths) {
+        if !enabled(paths) || uuid::Uuid::parse_str(session).is_err() {
             return None;
         }
         let dir = private_directory(paths).ok()?;
@@ -249,6 +250,7 @@ impl Listener {
     /// another session or another instance of this host is discarded; a
     /// well-formed one for another instance is told so.
     pub fn take(&self, paths: &PlakPaths, session: &str) -> Option<ReloadRequest> {
+        uuid::Uuid::parse_str(session).ok()?;
         let path = request_path(paths, session);
         let bytes = read_private(&path);
         let _ = fs::remove_file(&path);

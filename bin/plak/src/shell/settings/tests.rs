@@ -77,6 +77,7 @@ fn nearest_profile_ties_keep_the_first_profile_list_row() {
         .unwrap_or_else(|| panic!("{list:#?}"));
     assert!(a < b);
     let session = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         account: Some("claude".into()),
         model: Some("claude-other".into()),
         effort: Some("high".into()),
@@ -106,6 +107,7 @@ fn nearest_profile_ties_keep_the_first_profile_list_row() {
 fn stale_composer_refresh_cannot_publish_profile_or_workspace() {
     let config = ProductConfig::default_product();
     let session = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         account: None,
         model: None,
         effort: None,
@@ -163,6 +165,7 @@ fn composer_refresh_uses_the_launch_workspace() {
     let expected = crate::shell::workspace::read(&workspace);
     let (events, rx) = host_event_sink();
     let session = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         account: None,
         model: None,
         effort: None,
@@ -206,6 +209,7 @@ fn session_identity_uses_frozen_cards_not_current_config() {
         root.effort.clone(),
     );
     let mut session = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         account: Some(root.account.clone()),
         model: Some(root.model.clone()),
         effort: root.effort.clone(),
@@ -296,6 +300,7 @@ fn session_profile_keeps_config_order_and_sibling_references() {
     let prepared = crate::profiles::prepare(&config, paths.home(), "nest").unwrap();
     let root = &prepared.root;
     let session = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         account: Some(root.account.clone()),
         model: Some(root.model.clone()),
         effort: root.effort.clone(),
@@ -348,6 +353,7 @@ fn default_effort_identity_survives_none_and_explicit_default() {
         .effort = None;
     let root = prepared.config.root_template().unwrap();
     let session = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         account: Some(root.account.clone()),
         model: Some(root.model.clone()),
         effort: None,
@@ -366,6 +372,7 @@ fn default_effort_identity_survives_none_and_explicit_default() {
         "claude-default"
     );
     let explicit = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         effort: Some("default".into()),
         ..session
     };
@@ -577,8 +584,11 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
                 | SurfaceIntent::ApplyProfile { .. }
                 | SurfaceIntent::AcknowledgeAgent { .. }
                 | SurfaceIntent::ListAgentAcknowledgements { .. }
+                | SurfaceIntent::CheckBuild
+                | SurfaceIntent::AcceptReloadRequest { .. }
+                | SurfaceIntent::RefuseReloadRequest { .. }
                 | SurfaceIntent::WatchUsage(_) => {
-                    unreachable!("profile and acknowledgement intents have their own tests")
+                    unreachable!("profile, acknowledgement and build intents have their own tests")
                 }
             }
         }
@@ -1780,6 +1790,7 @@ fn a_failed_config_loads_no_profile_templates_and_does_not_say_custom() {
     )
     .unwrap();
     let session = plakous_hosted::runtime::SurfaceSession {
+        id: String::new(),
         account: Some("claude".into()),
         model: Some("claude-opus".into()),
         effort: Some("xhigh".into()),
