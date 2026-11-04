@@ -3672,8 +3672,16 @@ latency, and nothing else. Prompt text never reaches a span.
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
 removed. Its types live in `plakous-host-protocol` (`wire`, the observation
-classes, and serde on every intent and observation). No frontend speaks it
-yet: the host side (attachments, node attach) follows.
+classes, and serde on every intent and observation). No supported frontend
+speaks it yet: the host side (attachments, node attach) follows. The hidden,
+unsupported `plak agent --wire v2` speaks it on stdio as an adapter over the
+session's own mailbox: one attachment at a time, on the session's root node
+only (another node is `unknown_node`), every observation sent to it with
+its class, the attach's baseline asked for as a root resync. Plak's
+extension traffic travels as the `extension` kind; the settings view never
+carries the terminal preferences, which stay client-local, and the views a
+surface opens (settings, usage, profiles, MCP, acknowledgements, profile
+verdicts) are addressed, the session profile and workspace chrome states.
 
 - **Framing.** One JSON object per line in both directions, each carrying
   `frame`, at most 16 MiB including the newline. A longer line is refused

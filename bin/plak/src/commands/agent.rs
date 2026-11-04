@@ -45,6 +45,7 @@ pub(crate) fn run_agent(
     effort_explicit: bool,
     composition: Option<product_config::ProductCompositionSelection>,
     resume_tree: bool,
+    wire_v2: bool,
 ) -> CliResult<ProcessOutcome> {
     // Installed before admission, and before the session opens: a session open
     // reaches the provider for discovery and can take seconds, and a signal
@@ -57,7 +58,12 @@ pub(crate) fn run_agent(
     // that turn, so a stop that sent interrupt and quit together waited out the
     // provider it was trying to escape. Until the drive exists, the watcher's
     // own deadline is the whole answer.
-    crate::signals::install(crate::signals::jsonl_announcement(), || {});
+    if wire_v2 {
+        // Wire v2 frames own stdout: a signal is announced on stderr.
+        crate::signals::install(crate::signals::cli_announcement(), || {});
+    } else {
+        crate::signals::install(crate::signals::jsonl_announcement(), || {});
+    }
     // Ctrl-C (`SIGINT`) interrupts a running turn and ends the stream the way
     // end of input does; the drive polls the count.
     crate::signals::count_interrupts();
@@ -84,6 +90,9 @@ pub(crate) fn run_agent(
     };
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
+    if wire_v2 {
+        return crate::agent_wire::run_agent_wire(admitted.config, io::stdin(), &mut stdout);
+    }
     crate::agent_stdio::run_agent_stdio(
         admitted.config,
         admitted.resume_tree,

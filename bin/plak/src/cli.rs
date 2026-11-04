@@ -440,6 +440,10 @@ enum TopCommand {
         session: Option<String>,
         #[arg(long = "resume-tree", action = ArgAction::SetTrue)]
         resume_tree: bool,
+        /// The stdio protocol: `v1` (JSONL, the default) or `v2` (the
+        /// framed wire, not yet supported).
+        #[arg(long = "wire", hide = true, value_parser = ["v1", "v2"])]
+        stdio_wire: Option<String>,
     },
     Resume {
         session: Option<String>,

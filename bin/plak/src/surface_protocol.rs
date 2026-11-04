@@ -8,6 +8,7 @@
 
 use std::fmt;
 
+use plakous_host_protocol::observation::ObservationClass;
 use plakous_host_protocol::{
     CompositionSelection, IntentReceiver, IntentSendError, IntentSender, ObservationExtension,
     ObservationReceiver, ObservationSender, ProtocolExtension, ProtocolSelection, SessionIntent,
@@ -18,7 +19,8 @@ use plakous_host_protocol::{
 pub(crate) mod mcp_lines;
 
 /// Checkout facts, not a preformatted border label or session authority.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceChrome {
     pub path: std::path::PathBuf,
     pub home: Option<std::path::PathBuf>,
@@ -26,7 +28,8 @@ pub struct WorkspaceChrome {
 }
 
 /// Read-only MCP configuration and the session's frozen binding.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct McpOverview {
     pub config_readable: bool,
     pub unavailable: Option<String>,
@@ -35,14 +38,16 @@ pub struct McpOverview {
     pub omitted: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct McpServerView {
     pub id: String,
     pub configuration: Result<Option<McpServerConfiguration>, String>,
     pub binding: McpSessionBinding,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct McpServerConfiguration {
     pub transport: String,
     pub target: String,
@@ -55,7 +60,8 @@ pub struct McpServerConfiguration {
     pub login: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum McpSessionBinding {
     NotBound,
     Bound {
@@ -65,7 +71,8 @@ pub enum McpSessionBinding {
 }
 
 /// Product-authoritative editable settings.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SettingsSnapshot {
     /// Default account for new sessions.
     pub default_account: Option<String>,
@@ -87,9 +94,13 @@ pub struct SettingsSnapshot {
 }
 
 /// Product settings and the independently owned terminal preferences edited together.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SettingsView {
     pub product: SettingsSnapshot,
+    /// Client-local on wire v2: it never travels, and a received view
+    /// holds the defaults.
+    #[serde(skip)]
     pub tui: crate::tui_preferences::TuiPreferences,
 }
 
@@ -106,7 +117,8 @@ impl Default for SettingsView {
 }
 
 /// Product-resolved availability for one exact composition choice and default binding.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SettingsCompositionOption {
     /// Closed selection represented by this option.
     pub composition: CompositionSelection,
@@ -119,7 +131,8 @@ pub struct SettingsCompositionOption {
 pub use crate::tui_preferences::SettingsTheme;
 
 /// One role line in the Agents detail box.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProfileRole {
     /// Role (`root`, `worker`, …) or, for a user profile, the template name.
     pub label: String,
@@ -137,7 +150,8 @@ pub struct ProfileRole {
 }
 
 /// One selectable profile.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProfileRow {
     /// Built-in id or `~/.plak/profiles` file stem; for a session's own row,
     /// the nearest profile.
@@ -155,7 +169,8 @@ pub struct ProfileRow {
 /// How a session differs from its nearest profile: the root's own values
 /// beside the profile's, and card or roster names. Never card bodies or
 /// credentials.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ProfileDifference {
     RootAccount { session: String, profile: String },
     RootModel { session: String, profile: String },
@@ -167,7 +182,8 @@ pub enum ProfileDifference {
 }
 
 /// The product's profile list, as the Agents tab shows it.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProfilesView {
     /// Built-ins first, then user profiles by name.
     pub rows: Vec<ProfileRow>,
@@ -178,7 +194,8 @@ pub struct ProfilesView {
 }
 
 /// Where an applied profile takes effect.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ProfileApply {
     /// Saved as the default profile brand-new sessions bind.
     Default,
@@ -191,7 +208,8 @@ pub enum ProfileApply {
 }
 
 /// How an applied profile landed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ProfileOutcome {
     /// Saved as the default profile brand-new sessions bind.
     Saved,
@@ -224,7 +242,8 @@ impl ProtocolExtension for PlakExtension {
 ///
 /// An acknowledgement covers this attempt's attention label and end stamp,
 /// not every later time the same attempt needs the operator.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(deny_unknown_fields)]
 pub struct AgentAcknowledgement {
     /// Exact agent id.
     pub agent_id: String,
@@ -237,7 +256,8 @@ pub struct AgentAcknowledgement {
 }
 
 /// Product-owned intents the protocol carries for Plak's own surfaces.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum SurfaceIntent {
     /// Open raw `config.toml` in `$EDITOR`.
     OpenConfigFile,
@@ -315,7 +335,8 @@ impl fmt::Debug for SurfaceIntent {
 }
 
 /// Product-owned observations the protocol carries for Plak's own surfaces.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum SurfaceObservation {
     /// Replace and open the typed product settings pane.
     SettingsView(SettingsView),
@@ -385,6 +406,27 @@ impl ObservationExtension for SurfaceObservation {
 
     fn same_kind(&self, other: &Self) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+
+    /// The views a surface opens answer the attachment that asked; the
+    /// session's profile and workspace chrome are the session's state.
+    fn wire_class(&self) -> ObservationClass {
+        match self {
+            Self::SessionProfile(_) | Self::WorkspaceChrome(_) => ObservationClass::State,
+            Self::SettingsView(_)
+            | Self::SettingsViewApplied(_)
+            | Self::SettingsLoadFailed(_)
+            | Self::SettingsSaveFailed(_)
+            | Self::OpenUsageOverlay
+            | Self::UsageRefreshAccounts(_)
+            | Self::UsageCredentialRefreshed { .. }
+            | Self::Profiles(_)
+            | Self::McpOverview(_)
+            | Self::ProfileApplied { .. }
+            | Self::ProfileRefused { .. }
+            | Self::AgentAcknowledgements { .. }
+            | Self::AgentAcknowledgementsUnavailable { .. } => ObservationClass::Addressed,
+        }
     }
 
     fn kind_label(&self) -> &'static str {

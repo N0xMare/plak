@@ -243,7 +243,9 @@ an export.
   the `wire` module holds the NDJSON frames (16 MiB lines), the
   exact-version handshake, requests with one typed response each, blob
   chunks for images and paged snapshots, with bounded blob and snapshot
-  assembly and the event class derived at the receiver. Embedder break:
+  assembly and the event class derived at the receiver. The hidden
+  `plak agent --wire v2` speaks it on stdio over the session's mailbox (root
+  only, unsupported). Embedder break:
   `ObservationExtension` gains `wire_class` (with a default) and the
   protocol's view types serialize.
 - A Messages `model_context_window_exceeded` stop fails the stream and takes

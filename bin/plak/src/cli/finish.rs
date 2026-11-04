@@ -206,6 +206,7 @@ pub(super) fn finish_agent(
             effort_explicit: false,
             composition: None,
             resume_tree,
+            wire_v2: false,
         });
     }
     if resume_tree {
@@ -250,6 +251,7 @@ pub(super) fn finish_agent(
         effort_explicit,
         composition,
         resume_tree: false,
+        wire_v2: false,
     })
 }
 
@@ -290,6 +292,7 @@ fn finish_openrouter_agent(
         effort_explicit,
         composition: Some(composition),
         resume_tree: false,
+        wire_v2: false,
     })
 }
 
@@ -339,5 +342,6 @@ fn finish_platform_agent(
         effort_explicit: effort.is_some(),
         composition,
         resume_tree: false,
+        wire_v2: false,
     })
 }

@@ -40,6 +40,7 @@ mod agent_composition_tests;
 pub mod agent_jsonl;
 #[doc(hidden)]
 pub mod agent_stdio;
+mod agent_wire;
 #[doc(hidden)]
 pub mod agents_projection;
 mod build_features;
@@ -1233,6 +1234,7 @@ fn run_agent_command(services: &Services, command: Command) -> CliResult<Process
         effort_explicit,
         composition,
         resume_tree,
+        wire_v2,
     } = command
     else {
         return Err(CliFailure::new("internal command dispatch error"));
@@ -1248,6 +1250,7 @@ fn run_agent_command(services: &Services, command: Command) -> CliResult<Process
         effort_explicit,
         composition,
         resume_tree,
+        wire_v2,
     )
 }
 

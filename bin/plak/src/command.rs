@@ -234,6 +234,9 @@ pub(crate) enum Command {
         effort_explicit: bool,
         composition: Option<product_config::ProductCompositionSelection>,
         resume_tree: bool,
+        /// Speak wire v2 on stdio instead of JSONL v1 (hidden, not yet
+        /// supported).
+        wire_v2: bool,
     },
 }
 
@@ -294,6 +297,38 @@ impl RunEffort {
 }
 
 impl Command {
+    /// This command with `plak agent` speaking wire v2 when `v2` holds;
+    /// any other command unchanged.
+    #[must_use]
+    pub(crate) fn speaking_wire(self, v2: bool) -> Self {
+        match self {
+            Self::Agent {
+                session_id,
+                provider,
+                platform,
+                wire,
+                model,
+                effort,
+                effort_explicit,
+                composition,
+                resume_tree,
+                ..
+            } => Self::Agent {
+                session_id,
+                provider,
+                platform,
+                wire,
+                model,
+                effort,
+                effort_explicit,
+                composition,
+                resume_tree,
+                wire_v2: v2,
+            },
+            other => other,
+        }
+    }
+
     pub(crate) const fn diagnostic_verb(&self) -> &'static str {
         match self {
             Self::Help | Self::CommandHelp { .. } => "help",

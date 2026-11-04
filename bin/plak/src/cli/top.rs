@@ -199,6 +199,7 @@ impl TopCommand {
                 protocol,
                 session,
                 resume_tree,
+                stdio_wire,
             } => finish_agent(
                 account.or(provider),
                 model,
@@ -207,7 +208,8 @@ impl TopCommand {
                 protocol,
                 session,
                 resume_tree,
-            ),
+            )
+            .map(|command| command.speaking_wire(stdio_wire.as_deref() == Some("v2"))),
             Self::Resume { session } => Ok(Command::Resume {
                 session_id: session,
                 handoff: None,
