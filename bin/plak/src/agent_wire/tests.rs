@@ -183,7 +183,10 @@ fn the_handshake_refuses_another_version() {
             ))))
             .unwrap();
         let mut output = Vec::new();
-        assert_eq!(handshake(&lines, welcome(), &mut output).unwrap(), admitted);
+        assert_eq!(
+            handshake::<PlakExtension>(&lines, welcome(), &mut output).unwrap(),
+            admitted
+        );
         let frame: Host =
             plakous_host_protocol::wire::decode_host_line(std::str::from_utf8(&output).unwrap())
                 .unwrap();
@@ -252,9 +255,10 @@ fn the_hidden_wire_flag_selects_v2() {
 /// first.
 #[test]
 fn a_childs_mail_request_is_answered_once_the_mail_is_written() {
-    let (actions, _intents) = user_action_channel();
+    let (actions, _intents) =
+        plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
     let mut stdout = Vec::new();
-    let mut adapter = Adapter::new(root(), &mut stdout, actions);
+    let mut adapter = WireConnection::new(root(), &mut stdout, actions);
     adapter.mails.insert("mail-1".into(), 7);
     adapter.mails.insert("mail-2".into(), 8);
     adapter.mails.insert("mail-3".into(), 9);

@@ -9,6 +9,9 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::thread;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::time::{Duration, Instant};
 
 use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow};
@@ -17,19 +20,16 @@ use plakous_host_protocol::wire::{
     NodeAddress, Op, Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WireError,
     admit_hello, decode_line, encode_line, page_snapshot, take_observation_images,
 };
+use plakous_host_protocol::{IntentSender, ProtocolExtension};
 use plakous_host_protocol::{ObservationReceiver, SessionIntent, SessionObservation};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use plakous_hosted::host_service::{HostService, Outbound, TreeNodes};
 use plakous_hosted::runtime::{HostConfig, spawn_host_worker};
 
-use crate::surface_protocol::{PlakExtension, UserActionSender};
-
-type Client = ClientFrame<PlakExtension>;
-type Host = HostFrame<PlakExtension>;
+use crate::surface_protocol::PlakExtension;
 
 const POLL: Duration = Duration::from_millis(20);
 const JOIN_TIMEOUT: Duration = Duration::from_secs(30);
-/// The only attachment this adapter makes.
 /// How far an attachment may fall behind before it is dropped.
 const ATTACHMENT_CAPACITY: usize = 4096;
 
@@ -50,7 +50,7 @@ pub(crate) fn run_agent_wire(
         host_generation: host_generation(),
         caps: Vec::new(),
     };
-    if !handshake(&lines, welcome, stdout)? {
+    if !handshake::<PlakExtension>(&lines, welcome, stdout)? {
         return Ok(ProcessOutcome::Success);
     }
     let tree_id =
@@ -90,7 +90,9 @@ fn host_generation() -> u64 {
 
 /// Lines from `input`, read on a thread of their own; the channel closes at
 /// the end of input.
-fn read_lines(mut input: impl Read + Send + 'static) -> mpsc::Receiver<Result<String, WireError>> {
+pub(crate) fn read_lines(
+    mut input: impl Read + Send + 'static,
+) -> mpsc::Receiver<Result<String, WireError>> {
     let (sender, lines) = mpsc::sync_channel(64);
     thread::spawn(move || {
         let mut reader = LineReader::default();
@@ -110,7 +112,18 @@ fn read_lines(mut input: impl Read + Send + 'static) -> mpsc::Receiver<Result<St
     lines
 }
 
-fn write_frame(stdout: &mut dyn Write, frame: &Host) -> CliResult<()> {
+/// Writes `frame` as one line and flushes it.
+///
+/// # Errors
+///
+/// A frame over the line cap, or a lost output.
+pub(crate) fn write_frame<P: ProtocolExtension>(
+    stdout: &mut dyn Write,
+    frame: &HostFrame<P>,
+) -> CliResult<()>
+where
+    HostFrame<P>: Serialize,
+{
     let line = encode_line(frame).map_err(|error| CliFailure::new(error.to_string()))?;
     stdout
         .write_all(line.as_bytes())
@@ -120,18 +133,26 @@ fn write_frame(stdout: &mut dyn Write, frame: &Host) -> CliResult<()> {
 
 /// Reads the client's hello and answers it; `false` when it was refused
 /// or never came.
-pub(crate) fn handshake(
+///
+/// # Errors
+///
+/// A lost output.
+pub(crate) fn handshake<P: ProtocolExtension>(
     lines: &mpsc::Receiver<Result<String, WireError>>,
     welcome: Welcome,
     stdout: &mut dyn Write,
-) -> CliResult<bool> {
+) -> CliResult<bool>
+where
+    HostFrame<P>: Serialize,
+    ClientFrame<P>: DeserializeOwned,
+{
     let Ok(first) = lines.recv() else {
         return Ok(false);
     };
-    let refusal = match first.and_then(|line| decode_line::<Client>(&line)) {
-        Ok(Client::Hello(hello)) => match admit_hello(&hello, welcome) {
+    let refusal = match first.and_then(|line| decode_line::<ClientFrame<P>>(&line)) {
+        Ok(ClientFrame::Hello(hello)) => match admit_hello(&hello, welcome) {
             Ok(welcome) => {
-                write_frame(stdout, &Host::Welcome(welcome))?;
+                write_frame(stdout, &HostFrame::<P>::Welcome(welcome))?;
                 return Ok(true);
             }
             Err(refusal) => refusal,
@@ -143,16 +164,16 @@ pub(crate) fn handshake(
             detail: error.to_string(),
         },
     };
-    write_frame(stdout, &Host::Refused(refusal))?;
+    write_frame(stdout, &HostFrame::<P>::Refused(refusal))?;
     Ok(false)
 }
 
 /// The connection's state after the handshake: one attachment at a time
 /// on the session's host service.
-pub(crate) struct Adapter<'a> {
-    stdout: &'a mut dyn Write,
-    actions: UserActionSender,
-    service: HostService<PlakExtension>,
+pub(crate) struct WireConnection<P: ProtocolExtension, W: Write> {
+    stdout: W,
+    actions: IntentSender<P>,
+    service: HostService<P>,
     attachment: Option<AttachmentId>,
     blobs: BlobAssembler,
     quit_sent: bool,
@@ -167,19 +188,21 @@ pub(crate) struct Adapter<'a> {
 }
 
 /// Whether `intent` is tree mail on a child's attachment.
-const fn is_mail(intent: &SessionIntent<PlakExtension>) -> bool {
+const fn is_mail<P: ProtocolExtension>(intent: &SessionIntent<P>) -> bool {
     matches!(
         intent,
         SessionIntent::Prompt(_) | SessionIntent::FollowUp(_) | SessionIntent::Steer(_)
     )
 }
 
-impl<'a> Adapter<'a> {
-    pub(crate) fn new(
-        root: NodeAddress,
-        stdout: &'a mut dyn Write,
-        actions: UserActionSender,
-    ) -> Self {
+impl<P: ProtocolExtension, W: Write> WireConnection<P, W>
+where
+    HostFrame<P>: Serialize,
+    ClientFrame<P>: DeserializeOwned,
+{
+    /// A connection over a fresh host service for the session `actions`
+    /// sends to, whose root is `root`.
+    pub(crate) fn new(root: NodeAddress, stdout: W, actions: IntentSender<P>) -> Self {
         Self {
             stdout,
             service: HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
@@ -197,10 +220,14 @@ impl<'a> Adapter<'a> {
 
     /// Serves frames and observations until the session ends. A client that
     /// leaves (bye or end of input) quits the session first.
+    ///
+    /// # Errors
+    ///
+    /// A lost output.
     pub(crate) fn serve(
         mut self,
         lines: &mpsc::Receiver<Result<String, WireError>>,
-        events: &ObservationReceiver<PlakExtension>,
+        events: &ObservationReceiver<P>,
     ) -> CliResult<()> {
         let mut reading = true;
         loop {
@@ -225,7 +252,7 @@ impl<'a> Adapter<'a> {
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     self.flush()?;
-                    return write_frame(self.stdout, &Host::Bye);
+                    return write_frame(&mut self.stdout, &HostFrame::<P>::Bye);
                 }
             }
         }
@@ -240,30 +267,30 @@ impl<'a> Adapter<'a> {
 
     /// Answers one client line; `false` once the client has left.
     fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
-        let frame = match line.and_then(|line| decode_line::<Client>(&line)) {
+        let frame = match line.and_then(|line| decode_line::<ClientFrame<P>>(&line)) {
             // A second hello, or a line that is not a frame, names no
             // request to refuse: the connection ends, as a client that
             // broke the protocol.
-            Ok(Client::Hello(_)) | Err(_) => {
+            Ok(ClientFrame::Hello(_)) | Err(_) => {
                 self.quit();
                 return Ok(false);
             }
             Ok(frame) => frame,
         };
         match frame {
-            Client::Hello(_) => Ok(false),
-            Client::Bye => {
+            ClientFrame::Hello(_) => Ok(false),
+            ClientFrame::Bye => {
                 self.quit();
                 Ok(false)
             }
-            Client::Blob(chunk) => {
+            ClientFrame::Blob(chunk) => {
                 if self.blobs.push(chunk).is_err() {
                     self.quit();
                     return Ok(false);
                 }
                 Ok(true)
             }
-            Client::Request { id, op } => {
+            ClientFrame::Request { id, op } => {
                 let named = matches!(op, Op::Intent { .. });
                 let outcome = self.request(id, op);
                 // Blobs precede the request that names them: any left are
@@ -272,7 +299,7 @@ impl<'a> Adapter<'a> {
                     self.blobs.discard();
                 }
                 if let Some(outcome) = outcome {
-                    write_frame(self.stdout, &Host::Response { id, outcome })?;
+                    write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
                 }
                 Ok(true)
             }
@@ -281,7 +308,7 @@ impl<'a> Adapter<'a> {
 
     /// The request's outcome, or `None` for a child's mail, answered once
     /// the mail is written.
-    fn request(&mut self, id: RequestId, op: Op<PlakExtension>) -> Option<Outcome> {
+    fn request(&mut self, id: RequestId, op: Op<P>) -> Option<Outcome> {
         let refused = |refusal| Some(Outcome::Refused(refusal));
         match op {
             Op::Ping => Some(Outcome::Ok(Answer::Pong)),
@@ -359,7 +386,7 @@ impl<'a> Adapter<'a> {
 
     /// The response a child's mail request gets from `observation`, the
     /// answer in its window: accepted once written, or the tree's refusal.
-    fn mail_answer(&mut self, observation: &SessionObservation<PlakExtension>) {
+    fn mail_answer(&mut self, observation: &SessionObservation<P>) {
         let outcome = match observation {
             SessionObservation::IntentStarted(correlation) => {
                 self.window.clone_from(correlation);
@@ -395,7 +422,7 @@ impl<'a> Adapter<'a> {
     /// answered before the event that settles it.
     fn flush(&mut self) -> CliResult<()> {
         for (id, outcome) in std::mem::take(&mut self.settled) {
-            write_frame(self.stdout, &Host::Response { id, outcome })?;
+            write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
         }
         let Some(attachment) = self.attachment else {
             return Ok(());
@@ -405,16 +432,19 @@ impl<'a> Adapter<'a> {
                 self.mail_answer(observation);
             }
             for (id, outcome) in std::mem::take(&mut self.settled) {
-                write_frame(self.stdout, &Host::Response { id, outcome })?;
+                write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
             }
             match item {
                 Outbound::ResyncRequired => {
                     self.attachment = None;
                     self.unanswered();
                     for (id, outcome) in std::mem::take(&mut self.settled) {
-                        write_frame(self.stdout, &Host::Response { id, outcome })?;
+                        write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
                     }
-                    write_frame(self.stdout, &Host::ResyncRequired { attachment })?;
+                    write_frame(
+                        &mut self.stdout,
+                        &HostFrame::<P>::ResyncRequired { attachment },
+                    )?;
                 }
                 Outbound::Event {
                     observation: SessionObservation::PresentationSnapshot(snapshot),
@@ -423,7 +453,7 @@ impl<'a> Adapter<'a> {
                     let pages = page_snapshot(snapshot, attachment)
                         .map_err(|error| CliFailure::new(error.to_string()))?;
                     for page in pages {
-                        write_frame(self.stdout, &Host::Snapshot(page))?;
+                        write_frame(&mut self.stdout, &HostFrame::<P>::Snapshot(page))?;
                     }
                 }
                 Outbound::Event {
@@ -433,11 +463,11 @@ impl<'a> Adapter<'a> {
                 } => {
                     let taken = take_observation_images(&mut observation, &format!("e{seq}"));
                     for chunk in taken.chunks {
-                        write_frame(self.stdout, &Host::Blob(chunk))?;
+                        write_frame(&mut self.stdout, &HostFrame::<P>::Blob(chunk))?;
                     }
                     write_frame(
-                        self.stdout,
-                        &Host::Event {
+                        &mut self.stdout,
+                        &HostFrame::<P>::Event {
                             attachment,
                             seq,
                             class,
@@ -451,6 +481,15 @@ impl<'a> Adapter<'a> {
         Ok(())
     }
 }
+
+/// The stdio connection: the one client's state on the session's host
+/// service.
+pub(crate) type Adapter<W> = WireConnection<PlakExtension, W>;
+
+#[cfg(test)]
+type Client = ClientFrame<PlakExtension>;
+#[cfg(test)]
+type Host = HostFrame<PlakExtension>;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
