@@ -7,6 +7,7 @@ use plakous_recursive_subagents::protocol::CandidateId;
 use serde_json::{Value, json};
 pub(super) mod c1;
 mod residency;
+pub(super) mod runner;
 mod sw3a;
 
 #[test]
@@ -262,6 +263,26 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: prompt_then_quit,
         assert_live: sw3a::assert_process,
+    },
+    Shape {
+        name: "runner_job_survives_host_loss",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: runner::job_script,
+        configure: runner::configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: runner::assert_job,
+    },
+    Shape {
+        name: "runner_restart_unknown",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: runner::job_script,
+        configure: runner::configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: runner::assert_job,
     },
     Shape {
         name: "sealed_family_artifacts",

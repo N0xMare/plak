@@ -69,6 +69,7 @@ impl Fixture {
         fixture.workspace_override = Some(self.workspace());
         std::fs::remove_dir_all(fixture.home()).expect("empty fork home");
         copy_directory(&self.home(), &fixture.home());
+        ChildRunner::at(self).fork_into(&fixture);
         fixture
     }
 
@@ -151,6 +152,24 @@ pub(super) fn write_private(path: &Path, body: &str) {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        // A child runner's daemons and the jobs they started outlive every
+        // host process; they end with the fixture, preserved or not.
+        let runner = ChildRunner::at(self);
+        if runner.home.exists() {
+            for entry in std::fs::read_dir(&self.root)
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if entry.path().extension().is_some_and(|ext| ext == "marker") {
+                    kill_marked_jobs(&entry.path());
+                }
+            }
+            runner.kill();
+            if !std::thread::panicking() && !self.preserve.load(Ordering::Relaxed) {
+                let _ = std::fs::remove_dir_all(&runner.home);
+            }
+        }
         if std::thread::panicking() || self.preserve.load(Ordering::Relaxed) {
             return;
         }
@@ -501,5 +520,275 @@ pub(super) fn copy_directory(source: &Path, target: &Path) {
         } else {
             std::fs::copy(entry.path(), destination).expect("copy fixture file");
         }
+    }
+}
+
+/// The processes that have `path` open, from their descriptor tables.
+#[cfg(target_os = "linux")]
+fn opened_by(path: &Path) -> Vec<i32> {
+    std::fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_str()?.parse::<i32>().ok()?;
+            std::fs::read_dir(entry.path().join("fd"))
+                .ok()?
+                .flatten()
+                .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|target| target == path))
+                .then_some(pid)
+        })
+        .collect()
+}
+
+/// The processes that have `path` open, as `lsof` lists them.
+#[cfg(target_os = "macos")]
+fn opened_by(path: &Path) -> Vec<i32> {
+    Command::new("lsof")
+        .args(["-t", "--"])
+        .arg(path)
+        .output()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| line.trim().parse().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Kills each job a marker file names that is still that job: a process
+/// whose command line names the marker, so a pid reused on a busy machine
+/// is never signalled.
+fn kill_marked_jobs(marker: &Path) {
+    let marker_name = marker.display().to_string();
+    for line in std::fs::read_to_string(marker).unwrap_or_default().lines() {
+        let Some(pid) = line
+            .split_whitespace()
+            .next()
+            .and_then(|pid| pid.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        let command = Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+            .unwrap_or_default();
+        if pid > 1 && command.contains(&marker_name) {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+}
+
+/// A child runner for one fixture (spec 01 §8.5): a runner daemon's own
+/// product home beside the fixture, which pairs the fixture's host, serves
+/// the fixture's workspace, and records the daemon this harness started.
+/// The host reaches it through `plak runner connect --stdio`.
+pub(super) struct ChildRunner {
+    /// The daemon's product home. Socket paths are short, so it lives
+    /// directly under the temporary directory rather than in the fixture.
+    pub(super) home: PathBuf,
+    /// Where the daemon's pid is recorded, beside the fixture.
+    pid_file: PathBuf,
+}
+
+/// The host identity every child-runner fixture binds as.
+pub(super) const CHILD_RUNNER_HOST: &str = "00000000-0000-4000-8000-0000000000c7";
+
+/// The fixture file naming the child runner's daemon. Not a `.pid` file: a
+/// cut's lifecycle kills those when the host dies, and the daemon outlives
+/// the host.
+const CHILD_RUNNER_DAEMON: &str = "child-runner.daemon";
+
+impl ChildRunner {
+    /// The child runner of `fixture`: where its home and daemon record are.
+    pub(super) fn at(fixture: &Fixture) -> Self {
+        let name = fixture
+            .root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap()
+            .to_owned();
+        Self {
+            home: std::env::temp_dir().join(format!("rh-{name}")),
+            pid_file: fixture.root.join(CHILD_RUNNER_DAEMON),
+        }
+    }
+
+    /// The child runner of `fixture`, configured to serve its workspace and
+    /// selected by its script. Nothing runs until [`Self::start`] or the
+    /// host's bridge starts the daemon.
+    pub(super) fn of(fixture: &Fixture) -> Self {
+        let runner = Self::at(fixture);
+        let directory = runner.home.join("runner");
+        std::fs::create_dir_all(&directory).unwrap();
+        for path in [&runner.home, &directory] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        write_private(
+            &directory.join("runner.toml"),
+            &format!(
+                "roots = [{:?}]\nhosts = [{CHILD_RUNNER_HOST:?}]\npath = {:?}\nidle_exit_seconds = 20\n",
+                fixture
+                    .workspace()
+                    .canonicalize()
+                    .unwrap()
+                    .display()
+                    .to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+        );
+        let mut script: Value = serde_json::from_slice(&std::fs::read(fixture.script()).unwrap())
+            .expect("fixture script");
+        script["child_runner"] = json!({"home": runner.home, "host_id": CHILD_RUNNER_HOST});
+        fixture.write_script(&script);
+        runner
+    }
+
+    /// Gives `fork` this runner's identity and owner floors, as the same
+    /// runner machine: a session bound to a runner reopens only on it. The
+    /// fork's daemon is its own.
+    fn fork_into(&self, fork: &Fixture) {
+        let from = self.home.join("runner");
+        if !from.is_dir() {
+            return;
+        }
+        let to = Self::at(fork).home.join("runner");
+        std::fs::create_dir_all(&to).unwrap();
+        for path in [to.parent().unwrap(), to.as_path()] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        for name in ["runner-id", "owners.json"] {
+            if from.join(name).is_file() {
+                std::fs::copy(from.join(name), to.join(name)).unwrap();
+            }
+        }
+    }
+
+    /// Starts the daemon, in its own process group as `connect` would, and
+    /// waits until it listens.
+    pub(super) fn start(&self) -> i32 {
+        let log = std::fs::File::create(self.home.join("serve-harness.log")).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_plak"));
+        command
+            .args(["runner", "serve"])
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("HOME", &self.home)
+            .env("PLAK_HOME", &self.home)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(log);
+        forward_coverage_environment(&mut command);
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        let mut child = command.spawn().expect("runner daemon");
+        let pid = i32::try_from(child.id()).unwrap();
+        std::fs::write(&self.pid_file, pid.to_string()).unwrap();
+        let run = self.home.join("runner").join("run");
+        let deadline = Instant::now() + WAIT;
+        let log =
+            || std::fs::read_to_string(self.home.join("serve-harness.log")).unwrap_or_default();
+        while !std::fs::read_dir(&run).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "sock"))
+        }) {
+            // A daemon that cannot serve, such as one whose socket path is
+            // too long for the platform, says why and exits.
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!(
+                    "the runner daemon exited ({status}) before it listened: {}",
+                    log()
+                );
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the runner daemon never listened: {}",
+                log()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // From here the harness only signals the daemon and reaps it once.
+        std::mem::forget(child);
+        pid
+    }
+
+    /// The daemon this harness started last, while it lives. It is this
+    /// harness's child, so an exit is reaped here rather than mistaken for
+    /// a live zombie.
+    pub(super) fn pid(&self) -> Option<i32> {
+        let pid = std::fs::read_to_string(&self.pid_file)
+            .ok()?
+            .trim()
+            .parse::<i32>()
+            .ok()?;
+        let child = rustix::process::Pid::from_raw(pid)?;
+        // Exited, or no longer this harness's child to wait for: every
+        // recorded daemon is its child, so either way it is gone and its pid
+        // may already be another's.
+        if let Ok(None) =
+            rustix::process::waitpid(Some(child), rustix::process::WaitOptions::NOHANG)
+        {
+            return Some(pid);
+        }
+        let _ = std::fs::remove_file(&self.pid_file);
+        None
+    }
+
+    /// Every daemon serving from this runner home: each process that has a
+    /// socket's lock file open, which only a daemon of this home keeps open
+    /// for its life. A daemon the host's bridge started is found here as
+    /// well as one this harness started. Asking takes no lock, so it never
+    /// turns away a daemon that is starting.
+    fn holders(&self) -> Vec<i32> {
+        let run = self.home.join("runner").join("run");
+        std::fs::read_dir(run)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "lock"))
+            .filter_map(|entry| entry.path().canonicalize().ok())
+            .flat_map(|lock| opened_by(&lock))
+            .collect()
+    }
+
+    /// Kills every daemon of this runner home, each with its whole process
+    /// group (the daemon, not its jobs, which run in groups of their own),
+    /// and waits until none has its lock file open.
+    pub(super) fn kill(&self) {
+        let mut daemons = self.holders();
+        daemons.extend(self.pid());
+        for pid in daemons {
+            let Some(pid) = rustix::process::Pid::from_raw(pid) else {
+                continue;
+            };
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            // Reaps a daemon this harness started; any other is not its child.
+            let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
+        }
+        let _ = std::fs::remove_file(&self.pid_file);
+        let deadline = Instant::now() + WAIT;
+        while !self.holders().is_empty() {
+            if Instant::now() >= deadline {
+                // A fixture dropped by a failing test reports that failure.
+                assert!(
+                    std::thread::panicking(),
+                    "a runner daemon of {} outlived SIGKILL",
+                    self.home.display()
+                );
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Kills the daemon and removes its home.
+    pub(super) fn remove(&self) {
+        self.kill();
+        let _ = std::fs::remove_dir_all(&self.home);
     }
 }

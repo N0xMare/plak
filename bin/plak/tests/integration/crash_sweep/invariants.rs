@@ -98,7 +98,15 @@ fn capacity_publication_fences_queued_dispatch_and_duplicates() {
     assert!(std::panic::catch_unwind(|| capacity_publication(&state, 2)).is_err());
 }
 
-pub(super) fn job_notices_once(before: &Summary, first: &AgentOutcome, second: &AgentOutcome) {
+/// Each durable job's terminal is reported once. A job still running at the
+/// cut died with the host, so its outcome is unknown, unless `survives`: a
+/// runner's job outlives the host, and the successor reports its real end.
+pub(super) fn job_notices_once(
+    before: &Summary,
+    first: &AgentOutcome,
+    second: &AgentOutcome,
+    survives: bool,
+) {
     let notices = first
         .records()
         .into_iter()
@@ -108,7 +116,11 @@ pub(super) fn job_notices_once(before: &Summary, first: &AgentOutcome, second: &
         .iter()
         .map(|row| row["job_id"].as_str().unwrap())
         .collect::<BTreeSet<_>>();
-    assert_eq!(ids.len(), notices.len(), "duplicate job terminal notice");
+    assert_eq!(
+        ids.len(),
+        notices.len(),
+        "duplicate job terminal notice: {notices:?}"
+    );
     let second_notices = second
         .records()
         .into_iter()
@@ -121,7 +133,7 @@ pub(super) fn job_notices_once(before: &Summary, first: &AgentOutcome, second: &
     assert_eq!(
         second_ids.len(),
         second_notices.len(),
-        "duplicate job snapshot within one attachment"
+        "duplicate job snapshot within one attachment: {second_notices:?}"
     );
     for job in &before.jobs {
         let id = format!("p{}", job["number"].as_u64().unwrap());
@@ -130,7 +142,12 @@ pub(super) fn job_notices_once(before: &Summary, first: &AgentOutcome, second: &
             .filter(|row| row["job_id"] == id)
             .collect::<Vec<_>>();
         assert_eq!(matches.len(), 1, "durable job notice lost: {id}");
-        if job["terminal"] == false {
+        if job["terminal"] == false && survives {
+            assert_ne!(
+                matches[0]["status"], "outcome_unknown",
+                "a job that outlived the host lost its outcome"
+            );
+        } else if job["terminal"] == false {
             assert_eq!(
                 matches[0]["status"], "outcome_unknown",
                 "invented lost-process outcome"

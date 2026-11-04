@@ -826,6 +826,50 @@ fn failing_command_script(answer: &str) -> Value {
     })
 }
 
+/// A session on a child runner (spec 01 §8.5): a real runner daemon reached
+/// through `plak runner connect --stdio`, as a host's ssh reaches one. Its
+/// shell runs there, under the daemon, and the line is the daemon's.
+#[test]
+fn a_session_on_a_child_runner_runs_its_shell_in_the_daemon() {
+    let mut script = failing_command_script("the shell ran in the daemon");
+    script["steps"][0]["output"]["tool"]["arguments"]["command"] =
+        json!("printf '%s' \"$PPID\" > ran.txt; exit 3");
+    let fixture = Fixture::new(&script);
+    let runner = ChildRunner::of(&fixture);
+    let daemon = runner.start();
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    agent.wait_for("ready", |record| record["kind"] == "ready");
+    agent.send(&prompt_frame("run it"));
+    agent.wait_for("assistant_done", |record| {
+        record["kind"] == "assistant_done"
+    });
+    agent.send(&quit_frame());
+    let outcome = agent.finish();
+    runner.remove();
+    assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
+    assert_eq!(
+        outcome.assistant_text(),
+        vec!["the shell ran in the daemon".to_owned()]
+    );
+    let terminal = outcome
+        .records()
+        .into_iter()
+        .rfind(|record| record["kind"] == "tool" && record["name"] == "process_session_start")
+        .expect("the command's tool record");
+    assert_eq!(
+        terminal["state"],
+        "failed:exit 3",
+        "stream:\n{}",
+        outcome.lines.join("\n")
+    );
+    // The daemon spawned the shell, never the host.
+    let parent: i32 = std::fs::read_to_string(fixture.workspace().join("ran.txt"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(parent, daemon, "the shell's parent is not the daemon");
+}
+
 /// A session on the test-only loopback runner (spec 01 §8.5): its shell
 /// runs on the runner, and the tool record reads as it would locally.
 #[test]

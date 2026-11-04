@@ -6271,10 +6271,14 @@ not depend on the protocol crate.
 
 Runner selection (unsupported). A process selects at most one runner, once,
 before its first session (`select_process_runner`); without one, every
-session runs on the local runner as before. Only the test-only loopback route
-selects one (an offline script's `loopback_runner` in a `test-hooks` build): a
+session runs on the local runner as before. Only two test-only routes select
+one, from an offline script in a `test-hooks` build: `loopback_runner`, a
 runner in the same process that registers every workspace a request names,
-reached only through the seam. `SessionRuntimeBinding::new` then hands the builder the
+reached only through the seam; and `child_runner`, a real runner daemon
+(`plak runner serve` over the script's runner home) reached through
+`plak runner connect --stdio` run from the product's own executable, as a
+host's ssh reaches one, bound under the script's host identity with its
+keyed calls journaled. `SessionRuntimeBinding::new` then hands the builder the
 runner's backend (`plakous::agent::select_runner_backend`), so the run's
 environment is a runner environment: its reads, queries, mutations, literal
 processes and services go to the runner, and its descriptor names the runner,

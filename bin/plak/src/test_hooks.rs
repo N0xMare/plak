@@ -73,18 +73,103 @@ fn install_identity_hash_delay() {
 }
 
 /// Installs the process-wide test hooks: the identity hash delay, and the
-/// loopback runner when the offline script asks for it (spec 01 §8.5).
-/// Nothing else selects a runner.
+/// loopback or child runner when the offline script asks for one (spec 01
+/// §8.5). Nothing else selects a runner.
 pub(crate) fn install() -> Result<(), String> {
     install_identity_hash_delay();
-    if let Some(Ok(selection)) = selected()
-        && selection.plan.loopback_runner
-    {
-        plakous_offline_crash_harness::loopback::select(
-            plakous_hosted::runner_reader::test_runner_extension(),
-        )?;
+    if let Some(Ok(selection)) = selected() {
+        if selection.plan.loopback_runner {
+            plakous_offline_crash_harness::loopback::select(
+                plakous_hosted::runner_reader::test_runner_extension(),
+            )?;
+        } else if let Some(child) = &selection.plan.child_runner {
+            child_runner::select(child)?;
+        }
     }
     Ok(())
+}
+
+/// The offline script's child runner: a real runner daemon, reached as a
+/// host's ssh reaches one, through `plak runner connect --stdio` run from this
+/// executable over the runner's own product home.
+mod child_runner {
+    use std::sync::{Arc, OnceLock};
+
+    use plakous::runner::protocol::Bind;
+    use plakous::runner::{CallJournal, ClientWindows, FileCallJournal, RunnerClient};
+    use plakous::tools::runner::{RunnerBackend, select_process_runner};
+    use plakous_offline_crash_harness::script::ChildRunnerPlan;
+
+    /// The link and the runtime it runs on, kept for the process.
+    struct Route {
+        _runtime: tokio::runtime::Runtime,
+        _bridge: tokio::process::Child,
+    }
+
+    static ROUTE: OnceLock<Route> = OnceLock::new();
+
+    pub(super) fn select(plan: &ChildRunnerPlan) -> Result<(), String> {
+        if ROUTE.get().is_some() {
+            return Ok(());
+        }
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("plak-child-runner")
+            .enable_all()
+            .build()
+            .map_err(|error| format!("the child runner's runtime did not start: {error}"))?;
+        // A cleared environment: the bridge must not read this process's
+        // offline script and select a runner of its own.
+        let mut bridge = tokio::process::Command::new(
+            std::env::current_exe().map_err(|error| error.to_string())?,
+        );
+        bridge
+            .args(["runner", "connect", "--stdio"])
+            .env_clear()
+            .env(
+                "PATH",
+                crate::environment::inherited_path().unwrap_or_default(),
+            )
+            .env("HOME", &plan.home)
+            .env("PLAK_HOME", &plan.home)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        let guard = runtime.enter();
+        let mut bridge = bridge
+            .spawn()
+            .map_err(|error| format!("the child runner's bridge did not start: {error}"))?;
+        let (Some(stdin), Some(stdout)) = (bridge.stdin.take(), bridge.stdout.take()) else {
+            return Err("the child runner's bridge gave no link".to_owned());
+        };
+        let journal: Arc<dyn CallJournal> = Arc::new(
+            FileCallJournal::open(plan.home.join("host-calls"))
+                .map_err(|error| format!("the child runner's call journal failed: {error}"))?,
+        );
+        let bind = Bind {
+            host_id: plan.host_id.clone(),
+            host_instance: uuid::Uuid::new_v4().hyphenated().to_string(),
+            version: crate::commands::runner::version(),
+            inspect: false,
+        };
+        let (client, hello) = runtime
+            .block_on(RunnerClient::connect_journaled(
+                tokio::io::join(stdout, stdin),
+                bind,
+                ClientWindows::default(),
+                Some(journal),
+            ))
+            .map_err(|error| format!("the child runner did not bind: {error}"))?;
+        let backend = RunnerBackend::new(hello.descriptor, Arc::new(client))
+            .map_err(|error| format!("the child runner's descriptor: {error}"))?;
+        select_process_runner(Arc::new(backend), runtime.handle().clone());
+        drop(guard);
+        let _ = ROUTE.set(Route {
+            _runtime: runtime,
+            _bridge: bridge,
+        });
+        Ok(())
+    }
 }
 
 pub(crate) fn assistant_done_release() -> Option<PathBuf> {

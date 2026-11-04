@@ -1888,6 +1888,24 @@ ordinal, so `sweep.jsonl` and `table.md` do not depend on which work finished
 first; while the sweep runs they are refreshed at most every 30 seconds, and the
 final pair is written once every task is done. `timings.jsonl` beside them
 records each setup-and-pilot and each cut with its start and duration.
+The child-runner shapes `runner_job_survives_host_loss` and
+`runner_restart_unknown` run a session on a real runner daemon (`plak runner
+serve`, started by the harness in its own process group over a runner home of its
+own) that the product reaches through `plak runner connect
+--stdio`, the offline script's `child_runner` route (spec 01 §8.5). A fork
+keeps the seed's runner identity and owner floors, so its session reopens on
+the same runner, under a daemon of its own. The session promotes one job,
+which the pilot's quit stops on the runner; the pilot checks the daemon
+started it. Every cut kills the host at one of its commits. In
+`runner_job_survives_host_loss` the daemon survives, and so does a job it
+started while the host had not yet published the answer; in
+`runner_restart_unknown` the harness kills the daemon at the cut as well and
+starts a replacement, so the successor's bridge meets a new runner instance,
+and a job the cut left running is reported only as of unknown outcome. The
+job appends one line per start to its marker, and no cut or successor may
+start it twice. A fixture reaps every daemon of its runner home (each
+process that has a socket's lock file open, found without taking the lock), checks that a marked job is still that job
+before it kills it, and fails if any daemon survives.
 The residency corpus includes `image_residency_admission`,
 `image_residency_tool_batch` and `image_residency_continue`. Each seeds protected
 image history, crosses a mandatory aggregate-image fence with optional scheduled

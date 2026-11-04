@@ -1570,6 +1570,19 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "VersionTriple",
         },
     },
+    # `test-hooks` only: the offline script's child runner, bound and journaled
+    # as a host's dial is, then selected for the process (spec 01 §8.5).
+    ("plak", "src/test_hooks.rs"): {
+        "runner": {
+            "CallJournal",
+            "ClientWindows",
+            "FileCallJournal",
+            "RunnerClient",
+            "protocol",
+            "Bind",
+        },
+        "tools": {"runner::RunnerBackend", "runner::select_process_runner"},
+    },
     # Re-adoption of a runner's lines through a lease-only head (spec 01 §8.4).
     ("plakous-hosted", "src/runner_adoption.rs"): {
         "runner": {"RunnerClient"},

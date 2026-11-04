@@ -161,6 +161,11 @@ pub struct ScriptPlan {
     /// the local runner (spec 01 §8.5), through the runner seam alone.
     #[serde(default)]
     pub loopback_runner: bool,
+    /// Run the process's sessions on a child runner instead: a real runner
+    /// daemon reached through its `connect --stdio` bridge, as a host's ssh
+    /// would reach it.
+    #[serde(default)]
+    pub child_runner: Option<ChildRunnerPlan>,
     /// Seal the final provider response with managed family replay artifacts.
     #[serde(default)]
     pub seal_family_artifacts: bool,
@@ -273,6 +278,17 @@ pub enum ScriptToolPolicy {
     /// Every mutating call pauses in an effect-decision frame until the
     /// control plane answers, so a process can be cut inside that frame.
     DecisionRequired,
+}
+
+/// A child runner: the product home its daemon runs from, and the host
+/// identity this process binds as, which the daemon's allowlist pairs.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChildRunnerPlan {
+    /// The daemon's product home (`PLAK_HOME`), holding its `runner/`.
+    pub home: std::path::PathBuf,
+    /// The host identity to bind as.
+    pub host_id: String,
 }
 
 /// One scripted assistant round.

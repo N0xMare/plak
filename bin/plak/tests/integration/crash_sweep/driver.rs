@@ -330,8 +330,11 @@ pub(super) fn cut(
     let (fixture, commits) = kill_fixture(seed, session, shape, pilot, target);
     let _orphans = Orphans(&fixture);
     let before = summary::read(&fixture);
+    shapes::runner::after_kill(shape, &fixture, &before);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        cut_after_kill(&fixture, session, shape, &commits, &before, baseline)
+        let row = cut_after_kill(&fixture, session, shape, &commits, &before, baseline);
+        shapes::runner::after_recovery(shape, &fixture);
+        row
     }));
     match result {
         Ok(row) => row,
@@ -678,7 +681,12 @@ fn cut_after_kill(
     second.send(&quit_frame());
     let second_outcome = second.finish();
     assert!(second_outcome.status.success());
-    invariants::job_notices_once(before, &first, &second_outcome);
+    invariants::job_notices_once(
+        before,
+        &first,
+        &second_outcome,
+        shape == "runner_job_survives_host_loss",
+    );
     let mut converged = summary::read_converged(fixture);
     let second_revision = converged.revision;
     // Idle attach/quit advances the CAS revision without changing turn authority.
