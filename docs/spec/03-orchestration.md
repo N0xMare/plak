@@ -4754,7 +4754,17 @@ shutdown of the host that attached the tree last. These are latched signals,
 selected on directly; each writer takes the host signal current when it asks
 for its turn. A queued writer gives up only while the tree cannot publish and
 its agent or the tree or host is stopping. Dropping a mutation's future stops
-its park, but the closure itself runs to its end.
+its park, but the closure itself runs to its end. An abandonable mutation's
+result that its dropped caller never reads is undone exactly once: the drop
+first closes the result's channel, then undoes a result already sent as the
+tree's next writer, and a writer whose result the closed channel refuses
+undoes it in place. A caller whose writer has run reads its result at once,
+without awaiting it, so no budget-deferred read can leave it unread. The
+dropped caller's undo runs on a thread of its own, so it needs no runtime and
+a runtime shutting down does not skip it; when no thread can be started it is
+logged as an error and the claim holds until the tree is next opened. A wait
+dropped while its admission runs therefore never leaves its parked claim
+holding a send to the waiter's recipient.
 
 Owed work never gives up its turn: releasing a process-local claim (mail
 consumers, turn waiter registrations) and admitting and completing effects

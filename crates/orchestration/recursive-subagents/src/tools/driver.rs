@@ -675,12 +675,14 @@ impl TreeDriver {
         let (deliver, delivered) = tokio::sync::oneshot::channel();
         let mut delivered = Unread {
             result: Some(delivered),
-            on_unread: Some({
+            undo: Some({
                 let (driver, undo) = (self.clone(), Arc::clone(&undo));
                 Box::new(move |result: R| {
                     driver.undo_as_next_writer(Box::new(move |tree| (*undo)(tree, result)));
                 })
             }),
+            #[cfg(test)]
+            after_read: None,
         };
         let work: ErasedWork = Box::new(move |tree| {
             let result = work(tree);
@@ -689,22 +691,31 @@ impl TreeDriver {
             }
         });
         self.write_erased(work, turn).await?;
-        delivered.take().await.map_err(|_| Self::lock_poisoned())
+        // `work` has run and sent its result to this live receiver, so it is
+        // read at once: an awaited receive can be put off by the task's
+        // budget, and a caller dropped then would leave the result unread
+        // outside `Unread`, undone by no one.
+        delivered.read().ok_or_else(Self::lock_poisoned)
     }
 
-    /// Runs `undo` as the tree's next writer, on a blocking worker: an undo
-    /// never saves, so it needs no park.
+    /// Runs `undo` as the tree's next writer, on a thread of its own: it
+    /// needs no runtime, so neither a caller dropped outside one nor a
+    /// runtime shutting down skips it, and an undo never saves, so it needs
+    /// no park.
     fn undo_as_next_writer(&self, undo: ErasedWork) {
-        if tokio::runtime::Handle::try_current().is_err() {
-            return;
-        }
         let driver = self.clone();
-        drop(tokio::task::spawn_blocking(move || {
-            let _permit = driver.writer.order().blocking_lock_owned();
-            if let Ok(mut tree) = storage::TreeMutationGuard::lock(&driver.tree) {
-                undo(&mut tree);
-            }
-        }));
+        let spawned = std::thread::Builder::new()
+            .name("tree-undo".to_owned())
+            .spawn(move || {
+                let _permit = driver.writer.order().blocking_lock_owned();
+                if let Ok(mut tree) = storage::TreeMutationGuard::lock(&driver.tree) {
+                    undo(&mut tree);
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::error!(target: "plak.topology", %error,
+                "a dropped tree mutation could not be undone: no thread for its undo");
+        }
     }
 
     /// Waits for the writer's turn as `turn` says, then runs `work` on a
@@ -1539,24 +1550,134 @@ impl std::fmt::Debug for HeldEffects {
 /// result to the writer's undo as the tree's next writer.
 struct Unread<R> {
     result: Option<tokio::sync::oneshot::Receiver<R>>,
-    on_unread: Option<Box<dyn FnOnce(R) + Send>>,
+    undo: Option<Box<dyn FnOnce(R) + Send>>,
+    /// Runs inside the drop after the read, so a test can land a writer's
+    /// send exactly where a receiver read before it was closed lost it.
+    #[cfg(test)]
+    after_read: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl<R> Unread<R> {
-    fn take(&mut self) -> tokio::sync::oneshot::Receiver<R> {
-        self.result
-            .take()
-            .unwrap_or_else(|| tokio::sync::oneshot::channel().1)
+    /// Takes a result already sent, with no await: once it is taken, the
+    /// drop has nothing left to undo.
+    fn read(&mut self) -> Option<R> {
+        self.result.take()?.try_recv().ok()
     }
 }
 
 impl<R> Drop for Unread<R> {
     fn drop(&mut self) {
-        if let (Some(mut result), Some(on_unread)) = (self.result.take(), self.on_unread.take())
-            && let Ok(result) = result.try_recv()
-        {
-            on_unread(result);
+        let (Some(mut result), Some(undo)) = (self.result.take(), self.undo.take()) else {
+            return;
+        };
+        // Closed before it is read: a result sent from here on is refused,
+        // so its writer undoes it in place; one sent before is read below and
+        // undone here. Reading first would lose a result sent between the
+        // read and the receiver's drop, and nothing would undo it.
+        result.close();
+        if let Ok(result) = result.try_recv() {
+            undo(result);
         }
+        #[cfg(test)]
+        if let Some(hook) = self.after_read.take() {
+            hook();
+        }
+    }
+}
+
+#[cfg(test)]
+mod unread_tests {
+    use super::Unread;
+    use std::future::Future as _;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A dropped caller's result is undone exactly once, whichever side of
+    /// the drop the writer's send lands on: the caller undoes what it can
+    /// read, and the writer undoes what it can no longer send.
+    fn undone_once(send_inside_drop: bool) -> usize {
+        let undone = Arc::new(AtomicUsize::new(0));
+        let (sender, receiver) = tokio::sync::oneshot::channel::<u8>();
+        let mut sender = Some(sender);
+        let writer = {
+            let undone = Arc::clone(&undone);
+            move |sender: tokio::sync::oneshot::Sender<u8>| {
+                if sender.send(1).is_err() {
+                    undone.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        };
+        if !send_inside_drop {
+            writer(sender.take().unwrap());
+        }
+        let hook_sender = sender.take();
+        let hook_writer = writer.clone();
+        drop(Unread {
+            result: Some(receiver),
+            undo: Some({
+                let undone = Arc::clone(&undone);
+                Box::new(move |_| {
+                    undone.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            after_read: Some(Box::new(move || {
+                if let Some(sender) = hook_sender {
+                    hook_writer(sender);
+                }
+            })),
+        });
+        undone.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn a_result_sent_before_the_drop_is_undone_by_the_caller() {
+        assert_eq!(undone_once(false), 1);
+    }
+
+    /// The interleaving that lost a parked wait: the writer's send lands
+    /// after the dropped caller's read and before its receiver goes. Closed
+    /// first, the receiver refuses it and the writer undoes it in place; a
+    /// receiver read before it is closed would take it and drop it.
+    #[test]
+    fn a_result_sent_after_the_drop_read_is_undone_by_the_writer() {
+        assert_eq!(undone_once(true), 1);
+    }
+
+    /// A result already sent is taken whatever the task's budget: reading it
+    /// never yields, so no dropped caller can leave it outside `Unread`.
+    #[tokio::test]
+    async fn a_sent_result_is_read_under_a_spent_budget() {
+        let undone = Arc::new(AtomicUsize::new(0));
+        let (sender, receiver) = tokio::sync::oneshot::channel::<u8>();
+        sender.send(7).unwrap();
+        let mut unread = Unread {
+            result: Some(receiver),
+            undo: Some({
+                let undone = Arc::clone(&undone);
+                Box::new(move |_| {
+                    undone.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            after_read: None,
+        };
+        let read = std::future::poll_fn(|cx| {
+            // Spend the task's budget on ready receivers first, as a busy
+            // writer's own awaits can.
+            for _ in 0..300 {
+                let (ready, mut waiting) = tokio::sync::oneshot::channel::<()>();
+                ready.send(()).unwrap();
+                let _ = std::pin::Pin::new(&mut waiting).poll(cx);
+            }
+            std::task::Poll::Ready(unread.read())
+        })
+        .await;
+        assert_eq!(read, Some(7));
+        drop(unread);
+        assert_eq!(
+            undone.load(Ordering::SeqCst),
+            0,
+            "a read result is not undone"
+        );
     }
 }
 
