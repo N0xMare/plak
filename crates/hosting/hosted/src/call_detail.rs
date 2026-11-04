@@ -168,6 +168,9 @@ impl CallDetailRequest {
             call_id: self.call_id.clone(),
             agent_id: self.agent_id.clone(),
         };
+        // The answer is its request's, and the read answers after the host
+        // may have started another intent.
+        let events = events.answering();
         match gate.admit(&key) {
             Admit::Duplicate => {}
             Admit::Busy => {
@@ -181,9 +184,6 @@ impl CallDetailRequest {
                 }));
             }
             Admit::Ready(generation) => {
-                // The read answers after the host may have started another
-                // intent.
-                let events = events.answering();
                 tasks.spawn(async move {
                     let _guard = Inflight {
                         gate: Arc::clone(&gate),

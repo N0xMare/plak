@@ -237,6 +237,24 @@ an export.
   intent a command reply. In `plak agent` JSONL v1, a late answer (a
   profile apply's finish, a usage refresh) now carries the command id of
   the command it answers rather than the one running when it arrived.
+- Wire v2 node attach: a host service attachment may target a child node of
+  the session's tree (`HostService::with_nodes`, `ChildNodes`, `TreeNodes`).
+  It holds that node's transcript only, and its intents are the node's
+  controls: tree mail from the operator for prompts, follow-ups and steers
+  (the new `SessionIntent::MailTopologyNode`), the tree's interrupt with
+  the operator as its cause, its close and call detail as the node; a quit
+  detaches it. It gets back only the answers its
+  control's publisher marks (`Sender::answering` marks its windows
+  `answer:`); the session serves one agent view, so a second agent's is
+  refused while one is held. Approvals and tool calls are refused there for
+  now. Operator mail is the root's send, reaching the root's message peers;
+  its request is answered once the mail is written (`draft_accepted`, or
+  `mail_refused`). A closed, retiring, out-of-reach or unknown node is
+  refused with `node_closed`, `node_retiring`, `out_of_reach` or
+  `unknown_node` (`RequestRefusal` gains all but the last, and
+  `mail_refused`). The navigator's interrupt now records the operator as
+  its cause (`interrupt_agent_for`). Embedder break: the new intent and
+  refusals, and an answering sender's marked windows.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.

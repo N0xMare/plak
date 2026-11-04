@@ -25,6 +25,8 @@ use plakous_offline_crash_harness::{
 use serde_json::json;
 
 use super::*;
+
+mod face;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};
 use crate::agent_tree::{
     CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TURN_ABANDONED,

@@ -86,8 +86,8 @@ pub(crate) enum Row {
     /// `Recover`.
     Recover,
     /// `OpenTopologyNavigator`, `RefreshTopologyTree`,
-    /// `InterruptTopologyNode`, `CloseTopologyNode`, `StopAllTopology`,
-    /// `RecoverTopologyNode`.
+    /// `InterruptTopologyNode`, `CloseTopologyNode`, `MailTopologyNode`,
+    /// `StopAllTopology`, `RecoverTopologyNode`.
     Navigator,
     /// `OpenAgentTranscript`, `CloseAgentTranscript`, `ResyncTranscript`.
     Transcript,
@@ -250,6 +250,7 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         | UserAction::RefreshTopologyTree
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
+        | UserAction::MailTopologyNode { .. }
         | UserAction::StopAllTopology
         | UserAction::RecoverTopologyNode { .. } => Row::Navigator,
         UserAction::OpenAgentTranscript { .. }
@@ -269,6 +270,7 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
         UserAction::OpenAgentTranscript { agent_id }
         | UserAction::InterruptTopologyNode { agent_id }
         | UserAction::CloseTopologyNode { agent_id }
+        | UserAction::MailTopologyNode { agent_id, .. }
         | UserAction::RecoverTopologyNode { agent_id, .. } => Some(agent_id),
         UserAction::InvokeTool { agent_id, .. }
         | UserAction::RequestCallDetail { agent_id, .. } => agent_id.as_deref(),
@@ -280,7 +282,7 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
 }
 
 /// The number of intent variants [`row_of`] places.
-const INTENT_VARIANTS: usize = 35;
+const INTENT_VARIANTS: usize = 36;
 
 /// One intent of every variant, child-addressed wherever the intent can be.
 pub(crate) fn every_intent() -> Vec<UserAction> {
@@ -340,6 +342,11 @@ pub(crate) fn every_intent() -> Vec<UserAction> {
         UserAction::RefreshTopologyTree,
         UserAction::InterruptTopologyNode { agent_id: id() },
         UserAction::CloseTopologyNode { agent_id: id() },
+        UserAction::MailTopologyNode {
+            agent_id: id(),
+            message: id(),
+            urgent: true,
+        },
         UserAction::StopAllTopology,
         UserAction::RecoverTopologyNode {
             tree_id: id(),

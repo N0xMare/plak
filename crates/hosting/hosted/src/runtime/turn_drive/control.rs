@@ -630,6 +630,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     | UserAction::OpenAgentTranscript { .. }
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }
+                    | UserAction::MailTopologyNode { .. }
                     | UserAction::StopAllTopology
                     | UserAction::RecoverTopologyNode { .. }),
                 ) => {

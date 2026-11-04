@@ -31,7 +31,7 @@ pub(super) enum Decision {
     Interrupt {
         effective: bool,
         /// Why the turn was interrupted; `None` where the writer recorded no
-        /// cause, which is every interrupt today.
+        /// cause.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cause: Option<InterruptCause>,
     },

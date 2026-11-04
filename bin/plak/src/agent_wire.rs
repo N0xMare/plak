@@ -1,23 +1,25 @@
 //! `plak agent --wire v2` (hidden): wire v2 on stdio (spec 02 §4.4) over
 //! the session this process opens, through its host service
 //! ([`HostService`]): one connection, one attachment at a time, on the
-//! session's root node. Every observation reaches the attachment as the
+//! session's root node or a child of its tree. Every observation reaches the attachment as the
 //! service routes it, with its class; a presentation snapshot goes as pages
 //! and image bytes as blobs.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow};
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, HostFrame, LineReader,
-    NodeAddress, Op, Outcome, RequestRefusal, WIRE_VERSION, Welcome, WireError, admit_hello,
-    decode_line, encode_line, page_snapshot, take_observation_images,
+    NodeAddress, Op, Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WireError,
+    admit_hello, decode_line, encode_line, page_snapshot, take_observation_images,
 };
 use plakous_host_protocol::{ObservationReceiver, SessionIntent, SessionObservation};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
-use plakous_hosted::host_service::{HostService, Outbound};
+use plakous_hosted::host_service::{HostService, Outbound, TreeNodes};
 use plakous_hosted::runtime::{HostConfig, spawn_host_worker};
 
 use crate::surface_protocol::{PlakExtension, UserActionSender};
@@ -154,6 +156,22 @@ pub(crate) struct Adapter<'a> {
     attachment: Option<AttachmentId>,
     blobs: BlobAssembler,
     quit_sent: bool,
+    /// A child's mail requests, by the correlation their intents carry,
+    /// answered once the mail is written.
+    mails: BTreeMap<String, RequestId>,
+    /// The client correlation of the attachment's current answer window.
+    window: Option<String>,
+    /// Responses decided outside their request's frame.
+    settled: Vec<(RequestId, Outcome)>,
+    next_mail: u64,
+}
+
+/// Whether `intent` is tree mail on a child's attachment.
+const fn is_mail(intent: &SessionIntent<PlakExtension>) -> bool {
+    matches!(
+        intent,
+        SessionIntent::Prompt(_) | SessionIntent::FollowUp(_) | SessionIntent::Steer(_)
+    )
 }
 
 impl<'a> Adapter<'a> {
@@ -164,11 +182,16 @@ impl<'a> Adapter<'a> {
     ) -> Self {
         Self {
             stdout,
-            service: HostService::new(actions.clone(), root, ATTACHMENT_CAPACITY),
+            service: HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
+                .with_nodes(std::sync::Arc::new(TreeNodes::new(root.tree_id))),
             actions,
             attachment: None,
             blobs: BlobAssembler::default(),
             quit_sent: false,
+            mails: BTreeMap::new(),
+            window: None,
+            settled: Vec::new(),
+            next_mail: 0,
         }
     }
 
@@ -242,30 +265,35 @@ impl<'a> Adapter<'a> {
             }
             Client::Request { id, op } => {
                 let named = matches!(op, Op::Intent { .. });
-                let outcome = self.request(op);
+                let outcome = self.request(id, op);
                 // Blobs precede the request that names them: any left are
                 // no one's.
                 if !named {
                     self.blobs.discard();
                 }
-                write_frame(self.stdout, &Host::Response { id, outcome })?;
+                if let Some(outcome) = outcome {
+                    write_frame(self.stdout, &Host::Response { id, outcome })?;
+                }
                 Ok(true)
             }
         }
     }
 
-    fn request(&mut self, op: Op<PlakExtension>) -> Outcome {
-        let refused = Outcome::Refused;
+    /// The request's outcome, or `None` for a child's mail, answered once
+    /// the mail is written.
+    fn request(&mut self, id: RequestId, op: Op<PlakExtension>) -> Option<Outcome> {
+        let refused = |refusal| Some(Outcome::Refused(refusal));
         match op {
-            Op::Ping => Outcome::Ok(Answer::Pong),
+            Op::Ping => Some(Outcome::Ok(Answer::Pong)),
             Op::Attach { node } => {
                 if let Some(held) = self.attachment.take() {
                     let _ = self.service.detach(held);
+                    self.unanswered();
                 }
                 match self.service.attach(&node) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
-                        Outcome::Ok(Answer::Attached { attachment })
+                        Some(Outcome::Ok(Answer::Attached { attachment }))
                     }
                     Err(refusal) => refused(refusal),
                 }
@@ -275,8 +303,9 @@ impl<'a> Adapter<'a> {
                     return refused(RequestRefusal::NotAttached);
                 }
                 self.attachment = None;
+                self.unanswered();
                 match self.service.detach(attachment) {
-                    Ok(()) => Outcome::Ok(Answer::Detached),
+                    Ok(()) => Some(Outcome::Ok(Answer::Detached)),
                     Err(refusal) => refused(refusal),
                 }
             }
@@ -293,25 +322,98 @@ impl<'a> Adapter<'a> {
                         detail: error.to_string(),
                     });
                 }
-                match self.service.intent(attachment, intent) {
-                    Ok(()) => Outcome::Ok(Answer::Accepted),
+                let mail = (is_mail(&intent) && self.service.is_child(attachment)).then(|| {
+                    self.next_mail += 1;
+                    format!("mail-{}", self.next_mail)
+                });
+                match self
+                    .service
+                    .intent_correlated(attachment, intent, mail.as_deref())
+                {
+                    Ok(()) => {
+                        if let Some(mail) = mail {
+                            self.mails.insert(mail, id);
+                            return None;
+                        }
+                        // A child attachment's quit is its detach.
+                        if !self.service.attached(attachment) {
+                            self.attachment = None;
+                            self.unanswered();
+                        }
+                        Some(Outcome::Ok(Answer::Accepted))
+                    }
                     Err(refusal) => refused(refusal),
                 }
             }
         }
     }
 
+    /// The mail requests of an attachment that ended are not attached.
+    fn unanswered(&mut self) {
+        self.window = None;
+        for (_, id) in std::mem::take(&mut self.mails) {
+            self.settled
+                .push((id, Outcome::Refused(RequestRefusal::NotAttached)));
+        }
+    }
+
+    /// The response a child's mail request gets from `observation`, the
+    /// answer in its window: accepted once written, or the tree's refusal.
+    fn mail_answer(&mut self, observation: &SessionObservation<PlakExtension>) {
+        let outcome = match observation {
+            SessionObservation::IntentStarted(correlation) => {
+                self.window.clone_from(correlation);
+                return;
+            }
+            SessionObservation::DraftAccepted(_) => Outcome::Ok(Answer::Accepted),
+            SessionObservation::Row(TranscriptRow::Notice(notice))
+                if notice.tone == NoticeTone::Error =>
+            {
+                Outcome::Refused(RequestRefusal::MailRefused {
+                    detail: notice.text.clone(),
+                })
+            }
+            SessionObservation::TopologyNavigatorUnavailable { reason } => {
+                Outcome::Refused(RequestRefusal::MailRefused {
+                    detail: reason.clone(),
+                })
+            }
+            _ => return,
+        };
+        if let Some(id) = self
+            .window
+            .as_ref()
+            .and_then(|window| self.mails.remove(window))
+        {
+            self.settled.push((id, outcome));
+        }
+    }
+
     /// Writes what the service queued for the attachment: a snapshot as
     /// pages, anything else as an event after its image blobs, and a
-    /// resync-required that ends the attachment.
+    /// resync-required that ends the attachment. A child's mail request is
+    /// answered before the event that settles it.
     fn flush(&mut self) -> CliResult<()> {
+        for (id, outcome) in std::mem::take(&mut self.settled) {
+            write_frame(self.stdout, &Host::Response { id, outcome })?;
+        }
         let Some(attachment) = self.attachment else {
             return Ok(());
         };
         for item in self.service.take(attachment) {
+            if let Outbound::Event { observation, .. } = &item {
+                self.mail_answer(observation);
+            }
+            for (id, outcome) in std::mem::take(&mut self.settled) {
+                write_frame(self.stdout, &Host::Response { id, outcome })?;
+            }
             match item {
                 Outbound::ResyncRequired => {
                     self.attachment = None;
+                    self.unanswered();
+                    for (id, outcome) in std::mem::take(&mut self.settled) {
+                        write_frame(self.stdout, &Host::Response { id, outcome })?;
+                    }
                     write_frame(self.stdout, &Host::ResyncRequired { attachment })?;
                 }
                 Outbound::Event {

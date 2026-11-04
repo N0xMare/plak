@@ -298,11 +298,14 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         | UserAction::RefreshTopologyTree
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
+        | UserAction::MailTopologyNode { .. }
         | UserAction::StopAllTopology
         | UserAction::RecoverTopologyNode { .. } => {
+            // The intent's own answer, which a node's face waits for.
+            let answers = events.answering();
             crate::topology_navigator::emit_navigator_unavailable(
                 |event| {
-                    let _ = events.send(event);
+                    let _ = answers.send(event);
                 },
                 "agent tree navigator requires an attached canonical session",
             );

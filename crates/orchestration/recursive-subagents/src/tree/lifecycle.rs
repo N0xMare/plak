@@ -33,6 +33,23 @@ impl ProductAgentTree {
         request: &AttemptScopedRequest,
         operation_id: Option<&str>,
     ) -> Result<NodeStatus, TopologyError> {
+        self.interrupt_agent_for(caller_id, request, operation_id, None)
+    }
+
+    /// [`Self::interrupt_agent`], recording why: an operator's interrupt
+    /// from a face attached to the node records
+    /// [`super::InterruptCause::Operator`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::interrupt_agent`].
+    pub fn interrupt_agent_for(
+        &mut self,
+        caller_id: &str,
+        request: &AttemptScopedRequest,
+        operation_id: Option<&str>,
+        cause: Option<super::InterruptCause>,
+    ) -> Result<NodeStatus, TopologyError> {
         if let Some(prior) = self.replay_typed(operation_id, "interrupt_agent", request)? {
             return Ok(prior);
         }
@@ -70,7 +87,7 @@ impl ProductAgentTree {
             attempt_id,
             super::operator_intents::Decision::Interrupt {
                 effective: owned || parked || awaiting_recovery,
-                cause: None,
+                cause,
             },
         )?;
         let status = self.node(&request.agent_id)?.status;

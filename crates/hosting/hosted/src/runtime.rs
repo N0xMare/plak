@@ -381,27 +381,34 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             }
             _ => {}
         }
-        let late = self.answers.as_ref().filter(|answers| {
-            value.class() == plakous_host_protocol::observation::ObservationClass::Addressed
-                && window.as_ref() != Some(*answers)
-        });
-        let Some(answers) = late else {
+        let addressed = value.class()
+            == plakous_host_protocol::observation::ObservationClass::Addressed
+            || matches!(&value, HostEvent::Row(row) if row.is_error());
+        let Some(answers) = self.answers.as_ref().filter(|_| addressed) else {
             return self.publish(value);
         };
-        // A late answer: the requester's window reopens around it, and then
-        // the window it interrupted, or none when that was closed.
-        let _ = self.publish(HostEvent::IntentStarted(answers.0.clone()));
+        // An answer to a named intent goes out marked as that intent's
+        // answer, in a window of its own, so it reaches its requester and
+        // nothing else does; then the window it interrupted reopens, or none
+        // when a reset closed it. An answer to an unnamed window reopens it
+        // only when another opened since.
+        let reopen = match &answers.0 {
+            Some(correlation) => Some(format!("{}{correlation}", crate::host_service::ANSWER)),
+            None if window.as_ref() != Some(answers) => None,
+            None => return self.publish(value),
+        };
+        let _ = self.publish(HostEvent::IntentStarted(reopen));
         let sent = self.publish(value);
         let open = window.as_ref().and_then(|open| open.0.clone());
         let _ = self.publish(HostEvent::IntentStarted(open));
         sent
     }
 
-    /// A clone that answers the intent the session is answering now. An
-    /// addressed observation it sends after the session started another
-    /// intent goes out inside the requester's `IntentStarted` window,
-    /// reopened for it, followed by the window it interrupted: for a
-    /// publisher that answers after the host moved on.
+    /// A clone that answers the intent the session is answering now: every
+    /// addressed observation or error row it sends goes out in a window of
+    /// its own, marked as that intent's answer, followed by the window it
+    /// interrupted. For any publisher of an intent's answer, and one that
+    /// answers after the host moved on in particular.
     #[must_use]
     pub fn answering(&self) -> Self {
         let answers = self

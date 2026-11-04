@@ -121,7 +121,7 @@ async fn navigator_close_of_starting_child_emits_closed_detach() {
             if stop {
                 stop_all::<TestExtension>(&session, &runtime, |_| {}).await;
             } else {
-                close_node::<TestExtension>(&session, &runtime, |_| {}, &id).await;
+                close_node::<TestExtension>(&session, &runtime, |_| {}, |_| {}, &id).await;
             }
         })
         .await
@@ -234,7 +234,7 @@ async fn assert_idle_detach(stop: bool) {
                 if stop {
                     stop_all::<TestExtension>(&session, &runtime, |_| {}).await;
                 } else {
-                    close_node::<TestExtension>(&session, &runtime, |_| {}, &idle).await;
+                    close_node::<TestExtension>(&session, &runtime, |_| {}, |_| {}, &idle).await;
                 }
             })
             .await
@@ -957,13 +957,8 @@ async fn navigator_background_join_does_not_refault_a_settled_release() {
     let id = child.clone();
     let notes = events.clone();
     let closing = tokio::spawn(async move {
-        close_node(
-            &session,
-            &owner,
-            |event| notes.lock().unwrap().push(event),
-            &id,
-        )
-        .await;
+        let send = |event| notes.lock().unwrap().push(event);
+        close_node(&session, &owner, send, send, &id).await;
     });
     // The first request after the release owner freed its slot decides;
     // the test waits for that decision, not for a number of polls.
@@ -1112,11 +1107,11 @@ async fn interrupt_then_overlapping_close_and_stop_all_return_before_retirement_
     // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        close_node(&session, &runtime, send, &child),
+        close_node(&session, &runtime, send, send, &child),
     )
     .await
     .unwrap();
-    close_node(&session, &runtime, send, &child).await;
+    close_node(&session, &runtime, send, send, &child).await;
     stop_all(&session, &runtime, send).await;
     assert!(
         !cancel.is_finished(),

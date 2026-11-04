@@ -4,6 +4,8 @@ use plakous_host_protocol::{Core, Draft, IntentReceiver, intent_channel};
 
 use super::*;
 
+mod child;
+
 type Observation = SessionObservation<Core>;
 
 fn root() -> NodeAddress {

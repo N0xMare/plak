@@ -214,6 +214,16 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
         /// Exact agent id.
         agent_id: String,
     },
+    /// Tree mail from the operator to one exact node: a steer into its
+    /// running turn (`urgent`) or a deferred follow-up.
+    MailTopologyNode {
+        /// Exact agent id.
+        agent_id: String,
+        /// The message.
+        message: String,
+        /// Whether it steers the node's running turn.
+        urgent: bool,
+    },
     /// Host stop-all: postorder-close every non-root non-terminal node.
     StopAllTopology,
     /// Settle one child's recorded session recovery. Not the root `Recover`
@@ -302,6 +312,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::RefreshTopologyTree => "RefreshTopologyTree",
             Self::InterruptTopologyNode { .. } => "InterruptTopologyNode(..)",
             Self::CloseTopologyNode { .. } => "CloseTopologyNode(..)",
+            Self::MailTopologyNode { .. } => "MailTopologyNode(..)",
             Self::StopAllTopology => "StopAllTopology",
             Self::RecoverTopologyNode { .. } => "RecoverTopologyNode(..)",
             Self::RefreshTemplates => "RefreshTemplates",

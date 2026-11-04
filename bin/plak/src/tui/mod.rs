@@ -384,6 +384,7 @@ pub mod control {
             | UserAction::RefreshTopologyTree
             | UserAction::InterruptTopologyNode { .. }
             | UserAction::CloseTopologyNode { .. }
+            | UserAction::MailTopologyNode { .. }
             | UserAction::StopAllTopology
             | UserAction::RecoverTopologyNode { .. }
             | UserAction::RefreshTemplates

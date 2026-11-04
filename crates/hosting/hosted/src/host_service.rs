@@ -7,18 +7,24 @@
 //! intents ([`HostService::intent`]). Every observation takes its class
 //! ([`SessionObservation::class`]):
 //!
-//! * a **state** is broadcast and kept as the latest of its kind;
-//! * an **event** is broadcast; a required one is never dropped;
+//! * a **state** is broadcast to the root's attachments and kept as the
+//!   latest of its kind;
+//! * an **event** is broadcast to the root's attachments; a required one is
+//!   never dropped;
 //! * an **addressed** observation goes to the attachment whose intent the
 //!   session is answering: the one the last `IntentStarted` names, which
 //!   gets back its own correlation in it. An answer to no attachment's
-//!   intent goes to every attachment.
+//!   intent goes to every root attachment.
 //!
 //! A transcript observation (snapshot, keyed patch, stream) goes, whatever
-//! its class, to every attachment holding its scope: the root's to all, an
-//! agent's to those that opened it.
+//! its class, to every attachment holding its scope: the root's to the
+//! root's attachments, an agent's to those that opened it and to those
+//! attached to that agent's node.
 //!
-//! An attachment starts with the attach snapshot: every state, the root
+//! An attachment to a child node (`child`) holds that node's transcript and
+//! nothing else, and its intents are that node's controls.
+//!
+//! A root attachment starts with the attach snapshot: every state, the root
 //! baseline, every approval still pending and the credential wait that
 //! holds, each re-emitted as itself. Its queue holds at most its capacity:
 //! a droppable event makes room by dropping the oldest droppable one, or is
@@ -35,10 +41,12 @@
 //! mailbox sender tagged with its attachment, and takes its observations
 //! through [`FaceReceiver`].
 
+mod child;
 mod face;
+mod tree_nodes;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use plakous_host_protocol::observation::{Delivery, ObservationClass};
 use plakous_host_protocol::views::transcript::TranscriptScope;
@@ -48,7 +56,13 @@ use plakous_host_protocol::{
     SessionObservation,
 };
 
+pub use child::{ChildNodes, NodeState};
 pub use face::{FaceReceiver, face};
+pub use tree_nodes::TreeNodes;
+
+/// The prefix marking an `IntentStarted` whose window holds only that
+/// intent's answer ([`crate::runtime::Sender::answering`]).
+pub(crate) const ANSWER: &str = "answer:";
 
 /// The most root patches the service keeps after the root snapshot for an
 /// attach; past it, a new attachment asks the session for a fresh one.
@@ -81,6 +95,8 @@ struct Attachment<P: ProtocolExtension> {
     /// The session's mailbox sender tagged with this attachment, or `None`
     /// for a face that sends its intents itself.
     sender: Option<IntentSender<P>>,
+    /// The child node this attachment targets, or `None` for the root.
+    node: Option<String>,
     queue: VecDeque<Outbound<P>>,
     seq: u64,
     /// The transcripts this attachment holds; a face holds every one, since
@@ -151,7 +167,9 @@ pub struct HostService<P: ProtocolExtension> {
     actions: Option<IntentSender<P>>,
     root: NodeAddress,
     capacity: usize,
-    state: Mutex<State<P>>,
+    /// The session tree's children, or `None` when only the root attaches.
+    nodes: Option<Arc<dyn ChildNodes>>,
+    state: Arc<Mutex<State<P>>>,
 }
 
 /// The origin tag an attachment's intents carry, so the session's
@@ -205,7 +223,8 @@ impl<P: ProtocolExtension> HostService<P> {
             actions,
             root,
             capacity: capacity.max(1),
-            state: Mutex::new(State {
+            nodes: None,
+            state: Arc::new(Mutex::new(State {
                 attachments: BTreeMap::new(),
                 next_attachment: 1,
                 snapshot: Snapshot {
@@ -216,22 +235,38 @@ impl<P: ProtocolExtension> HostService<P> {
                 },
                 requester: None,
                 agent_holders: BTreeMap::new(),
-            }),
+            })),
         }
+    }
+
+    /// This service, with the session tree's children attachable through
+    /// `nodes`.
+    #[must_use]
+    pub fn with_nodes(mut self, nodes: Arc<dyn ChildNodes>) -> Self {
+        self.nodes = Some(nodes);
+        self
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State<P>> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Attaches to `node`, queueing the attach snapshot first.
+    /// Attaches to `node`, queueing the attach snapshot first. A child
+    /// node's attachment holds that node's transcript only, and its attach
+    /// snapshot is that transcript's baseline ([`ChildNodes`]).
     ///
     /// # Errors
     ///
-    /// [`RequestRefusal::UnknownNode`] for any node but the session's root.
+    /// [`RequestRefusal::UnknownNode`] for a node that is neither the
+    /// session's root nor one of its tree's children;
+    /// [`RequestRefusal::NodeClosed`] and [`RequestRefusal::NodeRetiring`]
+    /// for a child that is closed or retiring.
     pub fn attach(&self, node: &NodeAddress) -> Result<AttachmentId, RequestRefusal> {
-        if *node != self.root {
+        if node.tree_id != self.root.tree_id {
             return Err(RequestRefusal::UnknownNode);
+        }
+        if node.agent_id != self.root.agent_id {
+            return self.attach_child(&node.agent_id);
         }
         let (id, ask) = self.admit();
         if let Some(sender) = ask {
@@ -274,6 +309,7 @@ impl<P: ProtocolExtension> HostService<P> {
         let ask = sender.clone().filter(|_| needs_baseline);
         let mut attachment = Attachment {
             sender,
+            node: None,
             queue: VecDeque::new(),
             seq: 0,
             scopes,
@@ -293,23 +329,31 @@ impl<P: ProtocolExtension> HostService<P> {
         (id, ask)
     }
 
+    /// Whether `attachment` is attached to a child node.
+    #[must_use]
+    pub fn is_child(&self, attachment: AttachmentId) -> bool {
+        self.lock()
+            .attachments
+            .get(&attachment)
+            .is_some_and(|held| held.node.is_some())
+    }
+
+    /// Whether `attachment` is attached and not dropped.
+    #[must_use]
+    pub fn attached(&self, attachment: AttachmentId) -> bool {
+        self.lock()
+            .attachments
+            .get(&attachment)
+            .is_some_and(|held| !held.dropped)
+    }
+
     /// Detaches `attachment`; the session runs on.
     ///
     /// # Errors
     ///
     /// [`RequestRefusal::NotAttached`] when it is not attached.
     pub fn detach(&self, attachment: AttachmentId) -> Result<(), RequestRefusal> {
-        let mut state = self.lock();
-        let agents: Vec<String> = state
-            .attachments
-            .get(&attachment)
-            .into_iter()
-            .flat_map(|held| held.scopes.agents().cloned())
-            .collect();
-        for agent in &agents {
-            state.release_agent(attachment, agent);
-        }
-        match state.attachments.remove(&attachment) {
+        match self.lock().remove(attachment, self.actions.as_ref()) {
             Some(held) if !held.dropped => Ok(()),
             _ => Err(RequestRefusal::NotAttached),
         }
@@ -354,7 +398,20 @@ impl<P: ProtocolExtension> HostService<P> {
         let Some(sender) = held.sender.clone() else {
             return Err(RequestRefusal::Disconnected);
         };
+        if let Some(agent) = held.node.clone() {
+            drop(state);
+            return self.child_intent(attachment, &agent, &sender, intent, client);
+        }
         let held_agent = held.scopes.agents().next().cloned();
+        // The session serves one agent transcript: another is refused while
+        // any other attachment holds one.
+        if let SessionIntent::OpenAgentTranscript { agent_id } = &intent
+            && state.holds_another(agent_id, held_agent.as_deref())
+        {
+            return Err(RequestRefusal::RefusedForRole {
+                row: "transcript".to_owned(),
+            });
+        }
         // An agent transcript is opened in the session by its first holder
         // and closed by its last; the others only hold or release it.
         let forwarded = match &intent {
@@ -415,7 +472,7 @@ impl<P: ProtocolExtension> HostService<P> {
         let taken: Vec<_> = held.queue.drain(..).collect();
         held.snapshot_held = 0;
         if held.dropped {
-            state.attachments.remove(&attachment);
+            state.remove(attachment, self.actions.as_ref());
         }
         taken
     }
@@ -440,29 +497,59 @@ impl<P: ProtocolExtension> HostService<P> {
                     .collect(),
                 (ObservationClass::Addressed, None) => {
                     if let SessionObservation::IntentStarted(started) = &observation {
+                        let (answer, named) = match started.as_deref() {
+                            Some(started) => match started.strip_prefix(ANSWER) {
+                                Some(named) => (true, Some(named.to_owned())),
+                                None => (false, Some(started.to_owned())),
+                            },
+                            None => (false, None),
+                        };
                         // A face's mailbox may carry another sender's
                         // correlation that only looks like an attachment's:
                         // it is passed through as no attachment's.
-                        let owner = started
-                            .as_deref()
-                            .and_then(attachment_of)
-                            .filter(|(id, _)| {
-                                self.actions.is_some() || state.attachments.contains_key(id)
-                            });
-                        state.requester = owner.as_ref().map(|(id, _)| *id);
-                        if let Some((_, client)) = owner {
+                        let owner = named.as_deref().and_then(attachment_of).filter(|(id, _)| {
+                            self.actions.is_some() || state.attachments.contains_key(id)
+                        });
+                        if let Some((owner, client)) = owner {
                             // The attachment sees its own correlation.
                             observation = SessionObservation::IntentStarted(client);
+                            let child = state
+                                .attachments
+                                .get(&owner)
+                                .is_some_and(|held| held.node.is_some());
+                            // A child attachment's window holds only its own
+                            // control's answers, which come marked; the rest
+                            // of an unmarked window is the session's.
+                            state.requester = (answer || !child).then_some(owner);
+                            vec![owner]
+                        } else {
+                            state.requester = None;
+                            observation = SessionObservation::IntentStarted(named);
+                            state.root_attachments()
+                        }
+                    } else {
+                        // An answer to no attachment's intent belongs to
+                        // none: every root attachment gets it.
+                        match state.requester {
+                            Some(owner) => vec![owner],
+                            None => state.root_attachments(),
                         }
                     }
-                    // An answer to no attachment's intent belongs to none:
-                    // every attachment gets it.
-                    match state.requester {
-                        Some(owner) => vec![owner],
-                        None => state.attachments.keys().copied().collect(),
-                    }
                 }
-                _ => state.attachments.keys().copied().collect(),
+                // An error row in a child's answer window refuses that
+                // child's control and is the child's alone.
+                _ => match state.requester {
+                    Some(owner)
+                        if matches!(&observation, SessionObservation::Row(row) if row.is_error())
+                            && state
+                                .attachments
+                                .get(&owner)
+                                .is_some_and(|held| held.node.is_some()) =>
+                    {
+                        vec![owner]
+                    }
+                    _ => state.root_attachments(),
+                },
             };
             if let Some((last, others)) = targets.split_last() {
                 for id in others {
@@ -522,6 +609,45 @@ fn refusal_of<P: ProtocolExtension>(error: &IntentSendError<P>) -> RequestRefusa
 }
 
 impl<P: ProtocolExtension> State<P> {
+    /// Removes `attachment`, releasing its agent transcript: the last
+    /// holder's release closes the session's agent view, asked as no
+    /// attachment's intent since the attachment is gone.
+    fn remove(
+        &mut self,
+        attachment: AttachmentId,
+        actions: Option<&IntentSender<P>>,
+    ) -> Option<Attachment<P>> {
+        let held = self.attachments.get(&attachment)?;
+        let agents: Vec<String> = held.scopes.agents().cloned().collect();
+        for agent in &agents {
+            self.release_agent(attachment, agent);
+            if !self.agent_holders.contains_key(agent)
+                && let Some(actions) = actions
+            {
+                let _ = actions.send(SessionIntent::CloseAgentTranscript);
+            }
+        }
+        self.attachments.remove(&attachment)
+    }
+
+    /// Whether an attachment other than one holding `own` holds an agent
+    /// transcript other than `agent`.
+    fn holds_another(&self, agent: &str, own: Option<&str>) -> bool {
+        self.agent_holders
+            .iter()
+            .any(|(held, count)| held != agent && *count > usize::from(own == Some(held.as_str())))
+    }
+
+    /// The attachments on the session's root: a child's attachment takes
+    /// only its node's transcript and the answers to its own intents.
+    fn root_attachments(&self) -> Vec<AttachmentId> {
+        self.attachments
+            .iter()
+            .filter(|(_, held)| held.node.is_none())
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// `attachment` stops holding `agent`'s transcript.
     fn release_agent(&mut self, attachment: AttachmentId, agent: &str) {
         if let Some(held) = self.attachments.get_mut(&attachment)

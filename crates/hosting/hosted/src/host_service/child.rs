@@ -1,0 +1,241 @@
+//! Attachments to a child node of the session's tree (spec 02 §4.4).
+//!
+//! A child's attachment holds that node's transcript scope and nothing else:
+//! its attach snapshot is that transcript's baseline, which the session
+//! opens for the scope's first holder and resnapshots for a later one, and
+//! it takes no root state, event, approval, wait or answer. The session
+//! serves one agent transcript, so another agent's is refused while one is
+//! held. Its intents are the node's controls, sent through the session's
+//! mailbox tagged with the attachment; it gets back the start of each and
+//! only the answers its control's publisher marks as that control's
+//! (`Sender::answering`). Mail is tree mail from the operator, which reaches
+//! the nodes the tree's root may write to; an interrupt is the tree's
+//! interrupt with the operator as its cause, and a close of the attached
+//! node is the tree's close. A `Quit` is the attachment's detach; the node
+//! runs on. Approvals and tool calls are refused until their answers are
+//! routed to the node's attachment. Every control is refused, with its own
+//! refusal, when the node is closed, retiring, out of reach or unknown.
+
+use std::collections::{BTreeSet, VecDeque};
+
+use plakous_host_protocol::views::transcript::TranscriptScope;
+use plakous_host_protocol::wire::{AttachmentId, RequestRefusal};
+use plakous_host_protocol::{IntentSender, ProtocolExtension, SessionIntent};
+
+use super::{Attachment, HostService, Scopes, origin, refusal_of};
+
+/// Where a child node of the session's tree stands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NodeState {
+    /// It takes attachments and controls.
+    Open,
+    /// Its host is releasing it.
+    Retiring,
+    /// It never runs again.
+    Closed,
+    /// The operator does not reach it: the tree's root may not write to it.
+    OutOfReach,
+    /// The session's tree has no such child.
+    Unknown,
+}
+
+/// The session tree's children, as its host service looks them up.
+pub trait ChildNodes: Send + Sync {
+    /// Where the child `agent_id` stands; the tree's root is no child.
+    fn state(&self, agent_id: &str) -> NodeState;
+}
+
+/// The refusal for a node that does not take an attachment or control.
+fn admitted(state: NodeState) -> Result<(), RequestRefusal> {
+    match state {
+        NodeState::Open => Ok(()),
+        NodeState::Retiring => Err(RequestRefusal::NodeRetiring),
+        NodeState::Closed => Err(RequestRefusal::NodeClosed),
+        NodeState::OutOfReach => Err(RequestRefusal::OutOfReach),
+        NodeState::Unknown => Err(RequestRefusal::UnknownNode),
+    }
+}
+
+/// The role-table row an intent belongs to, as a refusal names it.
+const fn row<P: ProtocolExtension>(intent: &SessionIntent<P>) -> &'static str {
+    match intent {
+        SessionIntent::Prompt(_) | SessionIntent::FollowUp(_) => "prompt",
+        SessionIntent::Steer(_) => "steer",
+        SessionIntent::Interrupt => "interrupt",
+        SessionIntent::StopProcesses { .. } | SessionIntent::Background => "processes",
+        SessionIntent::DropQueued
+        | SessionIntent::SendQueuedNow { .. }
+        | SessionIntent::DeleteQueued { .. }
+        | SessionIntent::EditQueued { .. }
+        | SessionIntent::MoveQueued { .. }
+        | SessionIntent::ResumeQueueDrain => "queue",
+        SessionIntent::ResolveApproval { .. } => "approval",
+        SessionIntent::Quit => "quit",
+        SessionIntent::NewSession
+        | SessionIntent::Compact
+        | SessionIntent::ForkSession { .. }
+        | SessionIntent::ResumeSession { .. }
+        | SessionIntent::ResumeSessionHandoff { .. } => "workflow",
+        SessionIntent::RefreshReadiness | SessionIntent::RetryAttach => "readiness",
+        SessionIntent::Recover => "recover",
+        SessionIntent::OpenTopologyNavigator
+        | SessionIntent::RefreshTopologyTree
+        | SessionIntent::InterruptTopologyNode { .. }
+        | SessionIntent::CloseTopologyNode { .. }
+        | SessionIntent::MailTopologyNode { .. }
+        | SessionIntent::StopAllTopology
+        | SessionIntent::RecoverTopologyNode { .. } => "navigator",
+        SessionIntent::OpenAgentTranscript { .. }
+        | SessionIntent::CloseAgentTranscript
+        | SessionIntent::ResyncTranscript { .. } => "transcript",
+        SessionIntent::InvokeTool { .. } => "invoke_tool",
+        SessionIntent::RequestCallDetail { .. } => "call_detail",
+        SessionIntent::RefreshTemplates | SessionIntent::Extension(_) => "templates",
+    }
+}
+
+/// What a child attachment's intent does: the session intent it sends, or
+/// nothing more to send.
+enum Routed<P: ProtocolExtension> {
+    Send(SessionIntent<P>),
+    Done,
+}
+
+/// The session intent that is `intent` on the child `agent`.
+fn route<P: ProtocolExtension>(
+    agent: &str,
+    intent: SessionIntent<P>,
+) -> Result<Routed<P>, RequestRefusal> {
+    let node = || agent.to_owned();
+    let own = |agent_id: &str| agent_id == agent;
+    let routed = match intent {
+        SessionIntent::Prompt(draft) | SessionIntent::FollowUp(draft)
+            if draft.images.is_empty() =>
+        {
+            SessionIntent::MailTopologyNode {
+                agent_id: node(),
+                message: draft.text,
+                urgent: false,
+            }
+        }
+        SessionIntent::Steer(draft) if draft.images.is_empty() => SessionIntent::MailTopologyNode {
+            agent_id: node(),
+            message: draft.text,
+            urgent: true,
+        },
+        SessionIntent::Prompt(_) | SessionIntent::FollowUp(_) | SessionIntent::Steer(_) => {
+            return Err(RequestRefusal::Malformed {
+                detail: "tree mail carries text only".to_owned(),
+            });
+        }
+        SessionIntent::Interrupt => SessionIntent::InterruptTopologyNode { agent_id: node() },
+        SessionIntent::InterruptTopologyNode { agent_id } if own(&agent_id) => {
+            SessionIntent::InterruptTopologyNode { agent_id }
+        }
+        SessionIntent::CloseTopologyNode { agent_id } if own(&agent_id) => {
+            SessionIntent::CloseTopologyNode { agent_id }
+        }
+        SessionIntent::RequestCallDetail {
+            call_id,
+            session_id,
+            ..
+        } => SessionIntent::RequestCallDetail {
+            call_id,
+            agent_id: Some(node()),
+            session_id,
+        },
+        SessionIntent::OpenAgentTranscript { agent_id } if own(&agent_id) => {
+            SessionIntent::ResyncTranscript {
+                scope: TranscriptScope::Agent(agent_id),
+            }
+        }
+        SessionIntent::ResyncTranscript {
+            scope: TranscriptScope::Agent(agent_id),
+        } if own(&agent_id) => SessionIntent::ResyncTranscript {
+            scope: TranscriptScope::Agent(agent_id),
+        },
+        // The attachment holds its node's transcript for as long as it is
+        // attached.
+        SessionIntent::CloseAgentTranscript => return Ok(Routed::Done),
+        other => {
+            return Err(RequestRefusal::RefusedForRole {
+                row: row(&other).to_owned(),
+            });
+        }
+    };
+    Ok(Routed::Send(routed))
+}
+
+impl<P: ProtocolExtension> HostService<P> {
+    /// Attaches to the child `agent`: the attachment holds its transcript,
+    /// whose baseline the session is asked for.
+    pub(super) fn attach_child(&self, agent: &str) -> Result<AttachmentId, RequestRefusal> {
+        let (Some(nodes), Some(actions)) = (&self.nodes, &self.actions) else {
+            return Err(RequestRefusal::UnknownNode);
+        };
+        admitted(nodes.state(agent))?;
+        let scope = TranscriptScope::Agent(agent.to_owned());
+        // Held across the ask, so the baseline the session answers with
+        // finds the attachment holding its scope.
+        let mut state = self.lock();
+        // The session serves one agent transcript.
+        if state.holds_another(agent, None) {
+            return Err(RequestRefusal::RefusedForRole {
+                row: "transcript".to_owned(),
+            });
+        }
+        let id = state.next_attachment;
+        let sender = actions.clone().tagged(origin(id));
+        let ask = if state.agent_holders.get(agent).copied().unwrap_or(0) > 0 {
+            SessionIntent::ResyncTranscript {
+                scope: scope.clone(),
+            }
+        } else {
+            SessionIntent::OpenAgentTranscript {
+                agent_id: agent.to_owned(),
+            }
+        };
+        sender.send(ask).map_err(|error| refusal_of(&error))?;
+        state.next_attachment += 1;
+        state.attachments.insert(
+            id,
+            Attachment {
+                sender: Some(sender),
+                node: Some(agent.to_owned()),
+                queue: VecDeque::new(),
+                seq: 0,
+                scopes: Scopes::Held(BTreeSet::from([scope])),
+                gapped: BTreeSet::new(),
+                snapshot_held: 0,
+                dropped: false,
+            },
+        );
+        *state.agent_holders.entry(agent.to_owned()).or_default() += 1;
+        Ok(id)
+    }
+
+    /// `intent` from the attachment to the child `agent`, as that node's
+    /// control.
+    pub(super) fn child_intent(
+        &self,
+        attachment: AttachmentId,
+        agent: &str,
+        sender: &IntentSender<P>,
+        intent: SessionIntent<P>,
+        client: Option<&str>,
+    ) -> Result<(), RequestRefusal> {
+        if matches!(intent, SessionIntent::Quit) {
+            return self.detach(attachment);
+        }
+        let Some(nodes) = &self.nodes else {
+            return Err(RequestRefusal::UnknownNode);
+        };
+        admitted(nodes.state(agent))?;
+        match route(agent, intent)? {
+            Routed::Send(routed) => sender
+                .send_correlated(routed, client.map(str::to_owned))
+                .map_err(|error| refusal_of(&error)),
+            Routed::Done => Ok(()),
+        }
+    }
+}

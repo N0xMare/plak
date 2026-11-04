@@ -87,6 +87,11 @@ fn intents() -> Vec<Intent> {
         Intent::CloseTopologyNode {
             agent_id: "c1".into(),
         },
+        Intent::MailTopologyNode {
+            agent_id: "c1".into(),
+            message: "also check the docs".into(),
+            urgent: true,
+        },
         Intent::StopAllTopology,
         Intent::RecoverTopologyNode {
             tree_id: "t1".into(),
@@ -113,7 +118,7 @@ fn intents() -> Vec<Intent> {
 #[test]
 fn every_intent_round_trips_tagged_by_kind() {
     let intents = intents();
-    assert_eq!(intents.len(), 34, "every core intent but Extension");
+    assert_eq!(intents.len(), 35, "every core intent but Extension");
     for intent in &intents {
         let encoded = round_trips(intent);
         assert!(encoded["kind"].is_string(), "{encoded}");

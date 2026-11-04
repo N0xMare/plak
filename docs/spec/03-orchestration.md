@@ -3523,7 +3523,13 @@ root persisted `recovery_required` reopens `running`.
 An owed child takes no turn until its `recover_node` ran in this process:
 mail for it is not delivered (the send waits as for a busy slot, `SlotBusy`,
 and the mail stays durable), and an interrupt of it takes effect and ends
-what its `recover_node` would rejoin. The owed set is process-local; every
+what its `recover_node` would rejoin. The same holds for the operator's
+mail and interrupt from a face attached to the node (chapter 02 §4.4); the
+operator acts there as the tree's root, so its mail is the root's
+`send_agent_message`, recorded and read with the root as its sender, and
+reaches only the root's message peers. An operator with its own reach and
+sender identity needs a sender kind the mail record does not have, and
+waits for a format cut. The owed set is process-local; every
 custody take rebuilds it from the tree rows. The first root attach after a
 custody take runs `recover_node` for every owed child, descendants first,
 before the root actor's first open; the root actor's open then starts one more
@@ -3960,7 +3966,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Tree provenance (`forked_from`) | intent | the fork or import that created the tree: a `/fork` genesis writes `node` (source tree, root agent, line, branch, source epoch); none for an import yet |
 | Runner ancestors | external-effect record | each bundle apply that completes adds its tip to its target runner's set, at most 8, a full set giving up its first commit; a lost record only makes a later bundle carry more |
 | Custody | ownership record, never tree content | the custody steps above |
-| Interrupt cause | intent | an optional `cause` field (`operator`, `parent`, `cascade`, `owner_lost`, `handoff`, `stopped`) of the anchored `interrupt` intent, omitted when the writer records none, which every interrupt does today; such a row keeps its earlier bytes |
+| Interrupt cause | intent | an optional `cause` field (`operator`, `parent`, `cascade`, `owner_lost`, `handoff`, `stopped`) of the anchored `interrupt` intent, omitted when the writer records none: the operator's interrupt (the navigator's, and a child face's on wire v2) records `operator`, the reopen law `owner_lost`, and every other interrupt none; such a row keeps its earlier bytes |
 | Root and child continuation decisions | intent | `agent_operations` of kind `continuation`, keyed `plak:continuation:<agent>:<attempt or root>:<cause>:<host generation>:<round>:<turn or command>:<anchor id>`, so root decisions in different turns and decisions after another host loss never collide; with cause `transient`, `owner_lost` or `handoff`, a one-based 32-bit round, the anchoring stopped turn or unfacted command, the decision stamp, and a decision: `new_turn` (its command id and the unfacted commands it replaces), `resubmit` (the one unfacted command) or `withdrawn` (at least one command); none today, where child transient decisions remain `child_finalization` `Resume` intents and root decisions are process-local |
 | Terminal recovery refusals | intent | kind `terminal_refusal`, keyed `plak:terminal_refusal:<agent>:<attempt>`, with the refusal and its observation stamp; none today, where they remain process-local |
 | VCS stages | external-effect record | kind `vcs_stage`, written before the stage runs: the stage (`mint`, `seal`, `adopt`, `unmint`, `refresh`, `base_snapshot`, `bundle_create`, `relay`, `bundle_apply`), its class (`reproducible`, `verifiable`, `ambiguous`), the node it serves, and exactly the inputs its kind takes (below), plus for exactly the verifiable class the expected `refs/` reference and commit; written for each VCS effect of a port on a runner (below), none for an in-process port |

@@ -48,6 +48,11 @@ pub(crate) async fn dispatch_topology_navigator_action<
     let send = |event| {
         let _ = events.send(event);
     };
+    // A node control's refusal is its requester's answer.
+    let answers = events.answering();
+    let answer = |event| {
+        let _ = answers.send(event);
+    };
     let tree_id = tree_id_for_session(rows, session);
     let Some(runtime) = crate::topology_runtime::lookup(&tree_id) else {
         match action {
@@ -69,9 +74,10 @@ pub(crate) async fn dispatch_topology_navigator_action<
             _ => {}
         }
         // A navigator intent is explicit operator input — never part of an
-        // attach sequence — so a hub miss is reported, not swallowed.
+        // attach sequence — so a hub miss is reported, not swallowed, as
+        // the intent's own answer.
         emit_navigator_unavailable(
-            send,
+            answer,
             "agent tree navigator unavailable: no topology hub is attached",
         );
         return;
@@ -83,11 +89,16 @@ pub(crate) async fn dispatch_topology_navigator_action<
             emit_snapshot(&runtime, session, send, true);
         }
         UserAction::InterruptTopologyNode { agent_id } => {
-            interrupt_node(session, &runtime, &send, agent_id).await;
+            interrupt_node(session, &runtime, &send, &answer, agent_id).await;
         }
         UserAction::CloseTopologyNode { agent_id } => {
-            close_node(session, &runtime, &send, agent_id).await;
+            close_node(session, &runtime, &send, &answer, agent_id).await;
         }
+        UserAction::MailTopologyNode {
+            agent_id,
+            message,
+            urgent,
+        } => spawn_operator_mail(&runtime, &tree_id, events, agent_id, message, *urgent),
         UserAction::StopAllTopology => stop_all(session, &runtime, &send).await,
         UserAction::RecoverTopologyNode {
             tree_id,
@@ -114,6 +125,104 @@ pub(crate) async fn dispatch_topology_navigator_action<
         }
         _ => {}
     }
+}
+
+/// Starts one operator mail on the tree's tasks and returns. The mail is
+/// written first, as the root's send, and its intent is answered
+/// `DraftAccepted` once that write is durable, or refused with an error row.
+/// Its delivery is then the recorded send's: it may wait on its node (a turn
+/// unwinding, a recovery owed, whose mail stays durable until that settles)
+/// and is answered, in its intent's window, with a steer acknowledgement or
+/// the send's refusal.
+pub(crate) fn spawn_operator_mail<P: plakous_host_protocol::ProtocolExtension>(
+    runtime: &std::sync::Arc<ProductTopologyRuntime>,
+    tree_id: &str,
+    events: &crate::runtime::Sender<P>,
+    agent_id: &str,
+    message: &str,
+    urgent: bool,
+) {
+    let events = events.answering();
+    if runtime.is_closed() {
+        let _ = events.send(ContentEvent::Row(TranscriptRow::error(
+            NoticeScope::Tree,
+            "agent tree navigator unavailable: hub is shutting down",
+        )));
+        return;
+    }
+    let request = crate::agent_tree_protocol::SendAgentMessageRequest {
+        refresh: None,
+        agent_id: agent_id.to_owned(),
+        message: message.to_owned(),
+        purpose: None,
+        priority: Some(if urgent {
+            crate::agent_tree_protocol::MessagePriority::Urgent
+        } else {
+            crate::agent_tree_protocol::MessagePriority::Deferred
+        }),
+        in_reply_to: None,
+        output_schema_json: None,
+    };
+    let (runtime, tree_id) = (std::sync::Arc::clone(runtime), tree_id.to_owned());
+    let accepted = UserAction::MailTopologyNode {
+        agent_id: agent_id.to_owned(),
+        message: message.to_owned(),
+        urgent,
+    };
+    let tasks = runtime.driver().tasks();
+    // Detached: the hub's shutdown ends it with the tree's other tasks.
+    drop(tasks.spawn(async move {
+        let refused = |error: String| {
+            ContentEvent::Row(TranscriptRow::error(
+                NoticeScope::Tree,
+                format!("mail refused: {error}"),
+            ))
+        };
+        let Ok(arguments) = serde_json::to_value(&request) else {
+            let _ = events.send(refused("the mail could not be encoded".to_owned()));
+            return;
+        };
+        let call_id = uuid::Uuid::new_v4().to_string();
+        let written = runtime
+            .mutate_then_emit(false, {
+                let call_id = call_id.clone();
+                move |tree| {
+                    let root = tree.root_agent_id.clone();
+                    tree.send_agent_message(&root, &request, Some(&call_id))
+                        .map_err(|error| error.message)
+                }
+            })
+            .await;
+        if let Err(error) = written {
+            let _ = events.send(refused(error));
+            return;
+        }
+        let _ = events.send(ContentEvent::DraftAccepted(accepted));
+        // The recorded send replays and delivers.
+        let sent = crate::agent::invoke_topology_tool_on_hub(
+            &tree_id,
+            None,
+            "send_agent_message",
+            &arguments,
+            &call_id,
+        )
+        .await;
+        let answer = match sent {
+            Ok(receipt) if receipt.succeeded => {
+                let steered = serde_json::from_str::<serde_json::Value>(&receipt.detail)
+                    .is_ok_and(|output| output["disposition"] == "steered");
+                ContentEvent::SteerAck {
+                    state: if steered { "applied" } else { "queued" }.to_owned(),
+                    position: None,
+                }
+            }
+            Ok(receipt) => {
+                ContentEvent::Row(TranscriptRow::error(NoticeScope::Tree, receipt.detail))
+            }
+            Err(error) => ContentEvent::Row(TranscriptRow::error(NoticeScope::Tree, error)),
+        };
+        let _ = events.send(answer);
+    }));
 }
 
 /// Starts one child recover on the host executor and returns. The hub keeps
@@ -375,22 +484,13 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
     session: &SessionRecord,
     runtime: &ProductTopologyRuntime,
     send: impl Fn(ContentEvent<P>) + Copy,
+    answer: impl Fn(ContentEvent<P>) + Copy,
     agent_id: &str,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
     let agent = agent_id.to_owned();
-    if mutate_tree(runtime, send, "interrupt failed", move |tree| {
-        let root = tree.root_agent_id.clone();
-        tree.interrupt_agent(
-            &root,
-            &AttemptScopedRequest {
-                agent_id: agent,
-                expected_attempt_id: None,
-            },
-            Some(&operation_id),
-        )
-        .map(|_| ())
-        .map_err(|error| error.message)
+    if mutate_tree(runtime, answer, "interrupt failed", move |tree| {
+        operator_interrupt(tree, &agent, &operation_id).map(|_| ())
     })
     .await
     .is_none()
@@ -401,15 +501,36 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
     emit_snapshot(runtime, session, send, false);
 }
 
+/// The operator's interrupt of one node: the root's grant, the operator as
+/// its cause.
+pub(crate) fn operator_interrupt(
+    tree: &mut ProductAgentTree,
+    agent_id: &str,
+    operation_id: &str,
+) -> Result<crate::agent_tree_protocol::NodeStatus, String> {
+    let root = tree.root_agent_id.clone();
+    tree.interrupt_agent_for(
+        &root,
+        &AttemptScopedRequest {
+            agent_id: agent_id.to_owned(),
+            expected_attempt_id: None,
+        },
+        Some(operation_id),
+        Some(crate::agent_tree::InterruptCause::Operator),
+    )
+    .map_err(|error| error.message)
+}
+
 async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
     session: &SessionRecord,
     runtime: &ProductTopologyRuntime,
     send: impl Fn(ContentEvent<P>) + Copy,
+    answer: impl Fn(ContentEvent<P>) + Copy,
     agent_id: &str,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
     let agent = agent_id.to_owned();
-    let Some(closed) = mutate_tree(runtime, send, "close failed", move |tree| {
+    let Some(closed) = mutate_tree(runtime, answer, "close failed", move |tree| {
         let root = tree.root_agent_id.clone();
         let closed = tree
             .close_agent(

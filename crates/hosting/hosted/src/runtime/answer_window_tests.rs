@@ -15,6 +15,14 @@ fn started(correlation: &str) -> ContentObservation<Core> {
     ContentObservation::IntentStarted(Some(correlation.into()))
 }
 
+/// The marked start of the window holding only `correlation`'s answer.
+fn answers(correlation: &str) -> ContentObservation<Core> {
+    ContentObservation::IntentStarted(Some(format!(
+        "{}{correlation}",
+        crate::host_service::ANSWER
+    )))
+}
+
 fn restored(text: &str) -> ContentObservation<Core> {
     ContentObservation::DraftRestored(Draft::from(text))
 }
@@ -34,7 +42,7 @@ fn a_late_answer_reopens_its_requesters_window_then_the_open_one() {
         [
             started("a"),
             started("b"),
-            started("a"),
+            answers("a"),
             restored("late"),
             started("b"),
             restored("now"),
@@ -43,10 +51,12 @@ fn a_late_answer_reopens_its_requesters_window_then_the_open_one() {
     );
 }
 
-/// An answer inside its own window, and anything not addressed, go out as
-/// they are; a sender bound before any window answers as an unbound one.
+/// An answer inside its own window is marked as that intent's too, so no
+/// other observation in the window is taken for it; anything not addressed
+/// goes as it is, and a sender bound before any window answers as an
+/// unbound one.
 #[test]
-fn an_answer_in_its_own_window_or_not_addressed_goes_as_it_is() {
+fn an_answer_in_its_own_window_is_marked_and_the_rest_goes_as_it_is() {
     let (channel, received) = observation_channel::<Core>();
     let events = Sender::over(channel);
     let early = events.answering();
@@ -61,7 +71,9 @@ fn an_answer_in_its_own_window_or_not_addressed_goes_as_it_is() {
         seen,
         [
             started("a"),
+            answers("a"),
             restored("in time"),
+            started("a"),
             started("b"),
             ContentObservation::AssistantDone,
             restored("unbound"),
@@ -148,7 +160,7 @@ fn a_late_answer_after_a_reset_restores_no_window() {
             started("a"),
             started("b"),
             ContentObservation::PromptCorrelationReset,
-            started("a"),
+            answers("a"),
             restored("late"),
             ContentObservation::IntentStarted(None),
         ]

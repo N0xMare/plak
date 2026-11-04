@@ -3660,11 +3660,10 @@ Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
 removed. Its types live in `plakous-host-protocol` (`wire`, the observation
 classes, and serde on every intent and observation). No supported frontend
-speaks it yet: the host side (attachments, node attach) follows. The hidden,
-unsupported `plak agent --wire v2` speaks it on stdio as an adapter over the
-session's own mailbox: one attachment at a time, on the session's root node
-only (another node is `unknown_node`), every observation sent to it with
-its class, the attach's baseline asked for as a root resync. Plak's
+speaks it yet. The hidden, unsupported `plak agent --wire v2` speaks it on
+stdio through the session's host service: one attachment at a time, on the
+session's root node or a child of its tree, every observation sent to it
+with its class, the attach's baseline asked for as a resync of its scope. Plak's
 extension traffic travels as the `extension` kind; the settings view never
 carries the terminal preferences, which stay client-local, and the views a
 surface opens (settings, usage, profiles, MCP, acknowledgements, profile
@@ -3690,7 +3689,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   entered the node's mailbox; what it does arrives as observations) or
   `pong`, or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
   `refused_for_role` (with its role-table row), `unknown_node`,
-  `not_attached` or `malformed`. A refused request did nothing.
+  `node_closed`, `node_retiring`, `out_of_reach`, `mail_refused` (with the
+  tree's reason), `not_attached` or `malformed`. A refused request did
+  nothing.
 - **Observation classes.** Every observation is one class. A **state** is
   broadcast as the latest value of its kind and is part of the attach
   snapshot. An **event** is broadcast as it happens; a *required* event is
@@ -3720,8 +3721,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   session's side of the wire, the only consumer of its observations and the
   only sender of its attachments' intents; `plak agent --wire v2` speaks
   through it, and the TUI and JSONL v1 are its faces (below). An attachment
-  targets the session's root (any other node is `unknown_node` until node
-  attach).
+  targets the session's root or a child of its tree (node attach, below);
+  any other node is `unknown_node`.
   Every intent carries its attachment as its origin beside the client's own
   correlation, and the `IntentStarted` that opens the session's answer
   window names both (`attachment:<id>` or `attachment:<id>:<client>`); the
@@ -3762,6 +3763,53 @@ verdicts) are addressed, the session profile and workspace chrome states.
   baselines and revisions are one set its publisher keeps for every
   attachment, which is sound because each attachment's gaps and their
   repair are its own. The session never waits on an attachment.
+- **Node attach.** An attachment to a child node of the session's tree
+  holds that node's transcript scope and nothing else. Its attach snapshot
+  is that transcript's baseline: the session opens it for the scope's first
+  holder and resnapshots it for a later one. The session serves one agent
+  transcript, so while any attachment holds one, another agent's is refused
+  (`refused_for_role`, `transcript`) to a child's attach and to a root
+  attachment's open alike, and the last holder's detach (a child's `quit`
+  included) closes it. The attachment takes no root state, root
+  transcript, pending approval, credential wait, root event or root answer.
+  It is an attachment to the node, not to one actor: when `recover_node`
+  (chapter 03 §14) rebinds the node after a reopen, the attachment stays and
+  its controls reach the rebound child. Its intents are the node's
+  controls, sent through the session's mailbox tagged with the attachment.
+  It gets back the `IntentStarted` of each, and of what the session sends
+  in that window only the answers the control's publisher marks as that
+  control's: such an answer goes out in a window of its own, opened by an
+  `IntentStarted` whose correlation is the requester's prefixed `answer:`
+  and closed by the window it interrupted. Everything else in a child's
+  window, addressed answers and error rows included, is the root
+  attachments'. `prompt` and `follow_up` are deferred tree mail from the
+  operator to the node and `steer` urgent tree mail (the
+  `mail_topology_node` intent; text only, images are `malformed`). The
+  operator writes as the tree's root, so its mail reads as the root's and
+  reaches the nodes the root may write to: an attach to, or a control of,
+  any other node is `out_of_reach`. The mail is written before it is
+  answered: its request's response is `accepted` once the mail is durable
+  (the addressed `draft_accepted` in its window), or `mail_refused` with
+  the tree's reason, and the send's delivery is answered later with a steer
+  acknowledgement (`applied` when the node's running turn took it,
+  `queued` otherwise) or the send's refusal as an error row. Mail to a
+  child owed its `recover_node` is refused by the child's slot and stays
+  durable; its delivery settles, and is answered, once that recovery has
+  run. `interrupt` is the tree's interrupt of the node with the operator as
+  its cause, which takes effect on an owed child too. A face's stop is that
+  interrupt or the node's close (`close_topology_node` naming the attached
+  node); a `quit` detaches the attachment and the node runs on. Call detail
+  names the node; opening or resyncing the node's own transcript resyncs it
+  and closing it does nothing. Every other intent is `refused_for_role`
+  with its row (`queue`, `workflow`, `readiness`, `recover`, `navigator`,
+  `transcript`, `processes`, `templates`), approvals (`approval`) and tool
+  calls (`invoke_tool`) included until their answers are routed to the
+  node's attachment. An attach to, or a control of, a closed node is
+  `node_closed`, of a node whose hub is shutting down `node_retiring`, of a
+  node outside the operator's reach `out_of_reach`, and of a node the tree
+  does not hold `unknown_node`; a `quit` still detaches. Mail and the stop
+  controls go through the root session's mailbox, so they are taken while
+  the root runs a turn and wait while it runs a workflow.
 - **Faces.** The TUI, `plak agent` JSONL v1, an attached session command
   and the shell host are in-process attachments of their session's service
   (`plakous_hosted::host_service::face`). A face sends its intents itself,

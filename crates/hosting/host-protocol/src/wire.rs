@@ -229,6 +229,18 @@ pub enum RequestRefusal {
     },
     /// No such node.
     UnknownNode,
+    /// The node is closed: it never runs again.
+    NodeClosed,
+    /// The node is retiring: its host is releasing it.
+    NodeRetiring,
+    /// The node is outside the operator's reach: the operator reaches the
+    /// nodes the tree's root may write to.
+    OutOfReach,
+    /// The tree refused the operator's mail; nothing was written.
+    MailRefused {
+        /// The tree's reason.
+        detail: String,
+    },
     /// No such attachment on this connection.
     NotAttached,
     /// The request could not be read.
