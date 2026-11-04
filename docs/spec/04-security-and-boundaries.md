@@ -430,12 +430,25 @@ not merely that the shell exited; zombies are not running work. On Linux,
 member scans read process names as bytes, so a non-UTF-8 name does not hide a
 live member. An incomplete directory scan or malformed status leaves group
 membership unknown and is treated as live, not as proof of completion.
-macOS probes share bounded process-group snapshots across concurrent owners;
-only a complete successful scan can prove absence, and a new owner or
-termination phase cannot reuse a snapshot from its preceding phase.
+Concurrent owners share process-group snapshots (Linux `/proc`, bounded macOS
+`ps`); only a complete successful scan can prove absence, on Linux only two
+consecutive ones begun at different times (a readdir is not point-in-time),
+and a new owner or termination phase cannot reuse a snapshot from its
+preceding phase.
 A snapshot missing the scanner's own process group remains unknown, even
 after a successful scanner exit; scanner reaping never blocks shared probes
-indefinitely.
+indefinitely. On Linux a group whose killpg(0) returns EPERM holds only another
+user's members and is unknown, not empty; macOS returns EPERM for a group
+holding only the unreaped leader, and its `ps` snapshot covers every user. A
+hardened `/proc` (`hidepid`,
+`subset=pid`) hides another user's processes from the scan; while the
+unreaped leader keeps killpg(0) succeeding, such a member (a setuid helper in
+the job's group) is not seen and the group can read as empty. That is outside
+this boundary, like `setsid`. A joined, literal or service leader is reaped
+only once its group reads empty, and a reaped leader's PGID is never
+signalled; a leader whose group outlives cleanup, a released one, or a service
+dropped before it joined is handed, with its handle, to a background reaper
+that waits for the group to read empty.
 Explicit stop, session release, attempt end and the hard cap terminate the
 group. Escaping the group with `setsid` or double-forking remains outside this
 ownership boundary.

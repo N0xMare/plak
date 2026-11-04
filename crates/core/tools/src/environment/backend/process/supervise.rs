@@ -10,9 +10,9 @@ use super::{
     JoinedProcessStatus, JoinedSessionShared, LiteralProcessResult, Mutex, OperationContext,
     Ordering, Path, PathBuf, PreparedLiteralProcess, Stdio, backend_error, cancel_foreground,
     cleanup_setup_error, host_process_home, host_process_path, io_error, lock,
-    observe_leftover_group, peek_leader_exit, resource_error, set_nonblocking, spawn_output_reader,
-    terminate_direct_child, terminate_owned_process_group, terminate_owned_process_group_until,
-    wait_for_output_readers_until, write_process_input,
+    observe_leftover_group, peek_leader_exit, reap_when_group_empty, resource_error,
+    set_nonblocking, spawn_output_reader, terminate_direct_child, terminate_owned_process_group,
+    terminate_owned_process_group_until, wait_for_output_readers_until, write_process_input,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,11 +143,18 @@ pub(super) fn supervise_joined_process(
             break JoinedProcessStatus::TimedOut;
         }
         match peek_leader_exit(resources.process_group()) {
+            Ok(Some(exit)) if !shell_command => {
+                // Termination reaps the leader once the group is empty, so
+                // the zombie pins the PGID through its TERM and KILL.
+                break JoinedProcessStatus::Exited(exit.code);
+            }
             Ok(Some(exit)) => {
-                if shell_command && observe_leftover_group(&mut group, exit.code, shared) {
+                if observe_leftover_group(&mut group, exit.code, shared) {
                     std::thread::sleep(supervision_poll_interval(started.elapsed()));
                     continue;
                 }
+                // The group is proven empty, so reaping releases nothing
+                // that termination would still have to signal.
                 match resources.try_wait() {
                     Ok(JoinedProcessStatus::Exited(code)) => {
                         break JoinedProcessStatus::Exited(code);
@@ -285,7 +292,7 @@ pub(super) fn supervise_host_process(
     };
     let Some(stdin) = child.stdin.take() else {
         return Err(cleanup_setup_error(
-            &mut child,
+            child,
             raw_pid,
             limits.cleanup_duration(),
             io_error("host literal process stdin was unavailable"),
@@ -293,7 +300,7 @@ pub(super) fn supervise_host_process(
     };
     let Some(stdout) = child.stdout.take() else {
         return Err(cleanup_setup_error(
-            &mut child,
+            child,
             raw_pid,
             limits.cleanup_duration(),
             io_error("host literal process stdout was unavailable"),
@@ -301,7 +308,7 @@ pub(super) fn supervise_host_process(
     };
     let Some(stderr) = child.stderr.take() else {
         return Err(cleanup_setup_error(
-            &mut child,
+            child,
             raw_pid,
             limits.cleanup_duration(),
             io_error("host literal process stderr was unavailable"),
@@ -309,7 +316,7 @@ pub(super) fn supervise_host_process(
     };
     if let Err(error) = set_nonblocking(&stdin) {
         return Err(cleanup_setup_error(
-            &mut child,
+            child,
             raw_pid,
             limits.cleanup_duration(),
             error,
@@ -333,7 +340,7 @@ pub(super) fn supervise_host_process(
         Ok(thread) => thread,
         Err(error) => {
             return Err(cleanup_setup_error(
-                &mut child,
+                child,
                 raw_pid,
                 limits.cleanup_duration(),
                 error,
@@ -354,7 +361,10 @@ pub(super) fn supervise_host_process(
         Err(error) => {
             io_stop.store(true, Ordering::Release);
             let cleanup =
-                terminate_owned_process_group(&mut child, raw_pid, None, limits.cleanup_duration());
+                terminate_owned_process_group(&mut child, raw_pid, limits.cleanup_duration());
+            if cleanup.is_err() {
+                reap_when_group_empty(raw_pid, Box::new(child));
+            }
             let joined = stdout_thread.join();
             return Err(match (cleanup, joined) {
                 (Err(cleanup), _) => cleanup,
@@ -376,7 +386,10 @@ pub(super) fn supervise_host_process(
         Err(error) => {
             io_stop.store(true, Ordering::Release);
             let cleanup =
-                terminate_owned_process_group(&mut child, raw_pid, None, limits.cleanup_duration());
+                terminate_owned_process_group(&mut child, raw_pid, limits.cleanup_duration());
+            if cleanup.is_err() {
+                reap_when_group_empty(raw_pid, Box::new(child));
+            }
             let stdout_joined = stdout_thread.join();
             let stderr_joined = stderr_thread.join();
             return Err(if let Err(cleanup) = cleanup {
@@ -389,7 +402,6 @@ pub(super) fn supervise_host_process(
         }
     };
 
-    let mut terminal_status = None;
     let stop_reason = loop {
         if dropped.load(Ordering::Acquire) || control.cancellation().is_cancelled() {
             break HostProcessStop::Cancelled;
@@ -403,19 +415,20 @@ pub(super) fn supervise_host_process(
         if started.elapsed() >= limits.execution_duration() {
             break HostProcessStop::TimedOut;
         }
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                terminal_status = Some(status);
-                break HostProcessStop::Completed;
-            }
+        // The leader stays unreaped, pinning the PGID, until cleanup has
+        // signalled the group and seen it empty.
+        match peek_leader_exit(raw_pid) {
+            Ok(Some(_)) => break HostProcessStop::Completed,
             Ok(None) => std::thread::sleep(supervision_poll_interval(started.elapsed())),
             Err(_) => break HostProcessStop::Io,
         }
     };
 
     let cleanup_deadline = Instant::now() + limits.cleanup_duration();
-    let cleanup_result =
-        terminate_owned_process_group_until(&mut child, raw_pid, terminal_status, cleanup_deadline);
+    let cleanup_result = terminate_owned_process_group_until(&mut child, raw_pid, cleanup_deadline);
+    if cleanup_result.is_err() {
+        reap_when_group_empty(raw_pid, Box::new(child));
+    }
     if stop_reason == HostProcessStop::Completed && cleanup_result.is_ok() {
         // Preserve all bounded output from a normally completed owned group.
         // An escaped descendant may keep the pipes so this EOF drain
@@ -426,7 +439,7 @@ pub(super) fn supervise_host_process(
     let stdin_joined = stdin_thread.join();
     let stdout_joined = stdout_thread.join();
     let stderr_joined = stderr_thread.join();
-    terminal_status = Some(cleanup_result?);
+    let status = cleanup_result?;
     if stdin_joined.is_err() || stdout_joined.is_err() || stderr_joined.is_err() {
         return Err(io_error("host process I/O worker failed"));
     }
@@ -461,8 +474,6 @@ pub(super) fn supervise_host_process(
         }
     }
 
-    let status =
-        terminal_status.ok_or_else(|| io_error("host process had no terminal exit status"))?;
     let collected = lock(&output);
     LiteralProcessResult::new(
         status.code(),

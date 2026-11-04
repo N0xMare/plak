@@ -6690,10 +6690,30 @@ Released rows reopen as Released; a missing terminal record remains
 OutcomeUnknown. No stored PID is later signalled in either case.
 Leader exit is observed with waitid WNOWAIT; the unreaped leader pins the PGID
 until no live group members remain, or ownership is explicitly relinquished.
-Ordinary polls use killpg(0), treating EPERM as present; per-owner live-member
+The leader is reaped only after its group is proven empty, and a reaped
+leader's PGID is never signalled: a joined shell reaps after its leftover check
+reads empty, and every other exit leaves the leader to termination, which
+signals while it is pinned and reaps last. Host services follow the same
+rule. A leader whose group outlives its cleanup, or whose owner drops it
+unreaped, stays unreaped and its handle passes to a background reaper, which
+reaps it once its group reads empty and signals nothing; as the handle's only
+owner it cannot reap a reused pid. A released (disowned) job's running leader
+is handed over the same way: the reaper polls it about once a second while it
+runs and reaps it once its group reads empty. A failed exit probe is retried
+on the next pass, never taken as proof.
+Ordinary polls use killpg(0); ESRCH is absent. On Linux, where a group holding
+only the unreaped leader answers success, EPERM means only another user's
+members remain and leaves membership unknown, counted live; macOS answers
+EPERM for that zombie-only group, so there the `ps` scan, which lists every
+user's processes, decides. Per-owner live-member
 scans for classification/zombies are limited to one per 250 ms except a new
-termination phase. On macOS, concurrent probes share one bounded, complete
-`ps` snapshot across groups instead of spawning one scanner per group. A probe
+termination phase. Concurrent probes share one complete host snapshot across
+groups (a `/proc` scan on Linux, a bounded `ps` run on macOS) instead of
+scanning once per group, so stopping N jobs costs a few scans of the host's
+processes rather than N concurrent ones. A Linux `/proc` readdir is not a
+point-in-time snapshot, so an empty count holds only when two consecutive
+shared scans, both begun after the probe's fence, agree; the previous scan is
+kept so concurrent probes share that confirmation. A probe
 requires a snapshot begun after its first membership query (following leader
 exit observation) or previous polling phase;
 starting a new termination phase invalidates its previous observation. Failed,

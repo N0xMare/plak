@@ -16,14 +16,13 @@ mod unsupported;
 mod validate;
 
 #[cfg(unix)]
-pub(super) use cleanup::process_group_exists;
+pub(super) use cleanup::{GroupProbe, leader_exited, reap_when_group_empty};
 #[cfg(unix)]
 use cleanup::{
-    GroupProbe, cleanup_pty_setup_error, cleanup_setup_error, join_thread_until,
-    observe_leftover_group, peek_leader_exit, terminate_direct_child, terminate_direct_pty_child,
-    terminate_owned_process_group, terminate_owned_process_group_until,
-    terminate_owned_process_group_with_grace, terminate_owned_pty_group_with_grace,
-    wait_for_output_readers_until,
+    cleanup_setup_error, join_thread_until, observe_leftover_group, peek_leader_exit,
+    terminate_direct_child, terminate_direct_pty_child, terminate_owned_process_group,
+    terminate_owned_process_group_until, terminate_owned_process_group_with_grace,
+    terminate_owned_pty_group_with_grace, wait_for_output_readers_until,
 };
 #[cfg(unix)]
 pub(in crate::environment) use host_context::HostProcessContext;

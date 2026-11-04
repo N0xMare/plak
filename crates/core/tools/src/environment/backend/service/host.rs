@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt as _;
 
 use super::super::process::{
-    HostProcessContext, host_process_home, host_process_path, process_group_exists,
-    resolve_host_process_program,
+    GroupProbe, HostProcessContext, host_process_home, host_process_path, leader_exited,
+    reap_when_group_empty, resolve_host_process_program,
 };
 use super::super::workspace::verified_workspace_root;
 use super::super::{
@@ -25,7 +25,8 @@ const SERVICE_PROCESS_JOIN_BOUND: Duration = Duration::from_secs(2);
 const SERVICE_PROCESS_JOIN_POLL: Duration = Duration::from_millis(5);
 
 pub(in crate::environment::backend) struct HostService {
-    child: tokio::process::Child,
+    /// Taken only by `Drop`, which hands an unjoined leader to the reaper.
+    child: Option<tokio::process::Child>,
     process_group: rustix::process::Pid,
     stderr_reader: Option<tokio::task::JoinHandle<()>>,
     joined: bool,
@@ -63,14 +64,20 @@ impl HostService {
         Ok(())
     }
 
+    /// Reaps the leader once its group is empty. Until then the unreaped
+    /// leader pins the PGID, so the TERM and KILL that precede and follow this
+    /// wait, and `Drop`'s KILL, never reach a reused group.
     async fn join_until(&mut self, deadline: Instant) -> Result<bool, ExecutionBackendError> {
+        let mut group = GroupProbe::new(self.process_group);
         loop {
-            let exited = self
-                .child
-                .try_wait()
-                .map_err(|_| io_error("service process wait failed"))?
-                .is_some();
-            if exited && !process_group_exists(self.process_group) {
+            if leader_exited(self.process_group)
+                && group.members() == 0
+                && let Some(child) = self.child.as_mut()
+                && child
+                    .try_wait()
+                    .map_err(|_| io_error("service process wait failed"))?
+                    .is_some()
+            {
                 return Ok(true);
             }
             if Instant::now() >= deadline {
@@ -88,6 +95,10 @@ impl Drop for HostService {
                 self.process_group,
                 rustix::process::Signal::KILL,
             );
+            // Still unreaped, so the PGID stays pinned until the group empties.
+            if let Some(child) = self.child.take() {
+                reap_when_group_empty(self.process_group, Box::new(child));
+            }
         }
         if let Some(reader) = self.stderr_reader.take() {
             reader.abort();
@@ -159,7 +170,7 @@ pub(in crate::environment::backend) fn spawn_host_service(
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let mut host = HostService {
-            child,
+            child: Some(child),
             process_group,
             stderr_reader: None,
             joined: false,

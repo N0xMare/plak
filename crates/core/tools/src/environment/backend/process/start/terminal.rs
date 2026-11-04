@@ -3,10 +3,10 @@ use super::{
     EnvironmentVariableValue, ExecutionBackendError, ExecutionEnvironmentLimits,
     HostProcessContext, Instant, JoinedProcessOutputStream, JoinedProcessStartRequest,
     JoinedProcessStatus, JoinedProcessTerminalMode, JoinedSessionInput, JoinedSessionShared, Mutex,
-    Ordering, Path, PtyInputCommand, Stdio, SyncSender, cleanup_pty_setup_error,
-    cleanup_setup_error, cleanup_unresolved_error, clone_linux_pty_master, host_process_home,
-    host_process_path, invalid_request, io_error, join_thread_until, joined_pty_command,
-    native_pty_system, set_nonblocking, sleep_until_next_poll, spawn_joined_output_reader,
+    Ordering, Path, PtyInputCommand, Stdio, SyncSender, cleanup_setup_error,
+    cleanup_unresolved_error, clone_linux_pty_master, host_process_home, host_process_path,
+    invalid_request, io_error, join_thread_until, joined_pty_command, native_pty_system,
+    reap_when_group_empty, set_nonblocking, sleep_until_next_poll, spawn_joined_output_reader,
     spawn_pty_input_writer, terminate_direct_child, terminate_direct_pty_child,
     write_joined_initial_input,
 };
@@ -18,12 +18,15 @@ use crate::environment::backend::process::{
     terminate_owned_process_group_with_grace, terminate_owned_pty_group_with_grace,
 };
 
+/// The leader and, once reaped, its status.
 enum JoinedChild {
     Pipes(std::process::Child, Option<std::process::ExitStatus>),
     Pty(
         Box<dyn portable_pty::Child + Send + Sync>,
         Option<portable_pty::ExitStatus>,
     ),
+    /// An unreaped leader was handed to the reaper as its owner dropped.
+    HandedOff,
 }
 
 pub(super) enum JoinedIo {
@@ -140,15 +143,15 @@ impl JoinedSpawn<'_> {
                 );
             }
         };
-        let io = self.prepare_pipes_io(&mut child, process_group)?;
+        let (child, io) = self.prepare_pipes_io(child, process_group)?;
         Ok((JoinedChild::Pipes(child, None), process_group, io))
     }
 
     fn prepare_pipes_io(
         &self,
-        child: &mut std::process::Child,
+        mut child: std::process::Child,
         process_group: rustix::process::Pid,
-    ) -> Result<JoinedIo, ExecutionBackendError> {
+    ) -> Result<(std::process::Child, JoinedIo), ExecutionBackendError> {
         let stdin = child.stdin.take();
         if (self.request.keep_stdin_open || !self.request.stdin.is_empty()) && stdin.is_none() {
             return Err(cleanup_setup_error(
@@ -184,11 +187,14 @@ impl JoinedSpawn<'_> {
                 error,
             ));
         }
-        Ok(JoinedIo::Pipes {
-            stdin,
-            stdout,
-            stderr,
-        })
+        Ok((
+            child,
+            JoinedIo::Pipes {
+                stdin,
+                stdout,
+                stderr,
+            },
+        ))
     }
 
     fn spawn_pty(
@@ -376,6 +382,7 @@ impl JoinedProcessResources {
                     })
                 })
                 .map_err(|_| ()),
+            JoinedChild::HandedOff => Err(()),
         }
     }
 
@@ -384,24 +391,31 @@ impl JoinedProcessResources {
         deadline: Instant,
         grace: Duration,
     ) -> Result<(), ExecutionBackendError> {
+        // The reaped status is kept, so a later call signals nothing.
         match &mut self.child {
-            JoinedChild::Pipes(child, status) => terminate_owned_process_group_with_grace(
-                child,
-                self.process_group,
-                status.take(),
-                deadline,
-                grace,
-            )
-            .map(|_| ()),
-            JoinedChild::Pty(child, status) => terminate_owned_pty_group_with_grace(
-                child.as_mut(),
-                self.process_group,
-                status.take(),
-                deadline,
-                grace,
-            )
-            .map(|_| ()),
+            JoinedChild::Pipes(child, status) => {
+                let exit = terminate_owned_process_group_with_grace(
+                    child,
+                    self.process_group,
+                    status.take(),
+                    deadline,
+                    grace,
+                )?;
+                *status = Some(exit);
+            }
+            JoinedChild::Pty(child, status) => {
+                let exit = terminate_owned_pty_group_with_grace(
+                    child.as_mut(),
+                    self.process_group,
+                    status.take(),
+                    deadline,
+                    grace,
+                )?;
+                *status = Some(exit);
+            }
+            JoinedChild::HandedOff => {}
         }
+        Ok(())
     }
 
     pub(in crate::environment::backend::process) fn drain_readers_until(&self, deadline: Instant) {
@@ -443,18 +457,11 @@ impl JoinedProcessResources {
             probe();
         }
         let deadline = Instant::now() + self.cleanup_duration;
-        let (cleanup, error) = if let JoinedChild::Pty(child, _) = &mut self.child {
-            (
-                Ok(()),
-                cleanup_pty_setup_error(
-                    child.as_mut(),
-                    self.process_group,
-                    self.cleanup_duration,
-                    error,
-                ),
-            )
-        } else {
-            (self.terminate(deadline, Duration::from_secs(2)), error)
+        let pty = matches!(self.child, JoinedChild::Pty(..));
+        let (cleanup, error) = match self.terminate(deadline, Duration::from_secs(2)) {
+            // A PTY setup failure reports its cleanup failure in its place.
+            Err(cleanup) if pty => (Ok(()), cleanup),
+            cleanup => (cleanup, error),
         };
         if let Some(owner) = &self.input_owner {
             let _ = owner.try_send(PtyInputCommand::Stop);
@@ -477,12 +484,24 @@ impl JoinedProcessResources {
 
 impl Drop for JoinedProcessResources {
     fn drop(&mut self) {
-        if !self.armed {
-            return;
+        if self.armed {
+            let deadline = Instant::now() + self.cleanup_duration;
+            let _ = self.terminate(deadline, Duration::from_secs(2));
+            self.stop_io();
+            let _ = self.join_workers_until(deadline);
         }
-        let deadline = Instant::now() + self.cleanup_duration;
-        let _ = self.terminate(deadline, Duration::from_secs(2));
-        self.stop_io();
-        let _ = self.join_workers_until(deadline);
+        // A leader without a status was never reaped: its group outlived
+        // cleanup, or it was released. The reaper takes it over.
+        match std::mem::replace(&mut self.child, JoinedChild::HandedOff) {
+            JoinedChild::Pipes(child, None) => {
+                reap_when_group_empty(self.process_group, Box::new(child));
+            }
+            JoinedChild::Pty(child, None) => {
+                reap_when_group_empty(self.process_group, Box::new(child));
+            }
+            JoinedChild::Pipes(_, Some(_))
+            | JoinedChild::Pty(_, Some(_))
+            | JoinedChild::HandedOff => {}
+        }
     }
 }

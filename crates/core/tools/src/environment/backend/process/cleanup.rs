@@ -1,59 +1,64 @@
 //! Process-group termination and setup-failure cleanup.
 
-#[cfg(target_os = "macos")]
-mod macos_group_snapshot;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod group_snapshot;
+mod reaper;
 use super::{
     Duration, Errno, ExecutionBackendError, Instant, JoinedSessionShared, LeftoverJob, Mutex,
     io_error, lock, sleep_until_next_poll,
 };
+pub(in crate::environment::backend) use reaper::reap_when_group_empty;
 
 pub(super) fn terminate_owned_process_group(
     child: &mut std::process::Child,
     process_group: rustix::process::Pid,
-    mut status: Option<std::process::ExitStatus>,
     grace: Duration,
 ) -> Result<std::process::ExitStatus, ExecutionBackendError> {
     let cleanup_deadline = Instant::now() + grace;
-    terminate_owned_process_group_until(child, process_group, status.take(), cleanup_deadline)
+    terminate_owned_process_group_until(child, process_group, cleanup_deadline)
 }
 
 pub(super) fn terminate_owned_process_group_until(
     child: &mut std::process::Child,
     process_group: rustix::process::Pid,
-    status: Option<std::process::ExitStatus>,
     cleanup_deadline: Instant,
 ) -> Result<std::process::ExitStatus, ExecutionBackendError> {
     terminate_owned_process_group_with_grace(
         child,
         process_group,
-        status,
+        None,
         cleanup_deadline,
         Duration::from_secs(2),
     )
 }
 
+/// TERM, then KILL, the owned group, reaping its leader only once no live
+/// member remains, so the unreaped leader pins the PGID through every signal.
+///
+/// A `status` means the caller already reaped the leader, which it does only
+/// after proving the group empty: nothing is signalled to the unpinned PGID.
 pub(super) fn terminate_owned_process_group_with_grace(
     child: &mut std::process::Child,
     process_group: rustix::process::Pid,
-    mut status: Option<std::process::ExitStatus>,
+    status: Option<std::process::ExitStatus>,
     cleanup_deadline: Instant,
     grace: Duration,
 ) -> Result<std::process::ExitStatus, ExecutionBackendError> {
+    if let Some(status) = status {
+        return Ok(status);
+    }
     let mut group = GroupProbe::new(process_group);
     let now = Instant::now();
     let term_deadline = now + grace.min(cleanup_deadline.saturating_duration_since(now) / 2);
     let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::TERM);
     while Instant::now() < term_deadline {
-        if status.is_none()
-            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+        if peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
             && group.members() == 0
-        {
-            status = child
+            && let Some(status) = child
                 .try_wait()
-                .map_err(|_| io_error("host process cleanup wait failed"))?;
-        }
-        if status.is_some() && group.members() == 0 {
-            return status.ok_or_else(|| io_error("host process cleanup produced no status"));
+                .map_err(|_| io_error("host process cleanup wait failed"))?
+        {
+            return Ok(status);
         }
         sleep_until_next_poll(now, cleanup_deadline);
     }
@@ -63,16 +68,13 @@ pub(super) fn terminate_owned_process_group_with_grace(
         group.checked = None;
     }
     while Instant::now() < cleanup_deadline {
-        if status.is_none()
-            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+        if peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
             && group.members() == 0
-        {
-            status = child
+            && let Some(status) = child
                 .try_wait()
-                .map_err(|_| io_error("host process final join failed"))?;
-        }
-        if status.is_some() && group.members() == 0 {
-            return status.ok_or_else(|| io_error("host process cleanup produced no status"));
+                .map_err(|_| io_error("host process final join failed"))?
+        {
+            return Ok(status);
         }
         sleep_until_next_poll(now, cleanup_deadline);
     }
@@ -81,52 +83,30 @@ pub(super) fn terminate_owned_process_group_with_grace(
     ))
 }
 
-fn terminate_owned_pty_group(
-    child: &mut dyn portable_pty::Child,
-    process_group: rustix::process::Pid,
-    status: Option<portable_pty::ExitStatus>,
-    grace: Duration,
-) -> Result<portable_pty::ExitStatus, ExecutionBackendError> {
-    terminate_owned_pty_group_until(child, process_group, status, Instant::now() + grace)
-}
-
-pub(super) fn terminate_owned_pty_group_until(
-    child: &mut dyn portable_pty::Child,
-    process_group: rustix::process::Pid,
-    status: Option<portable_pty::ExitStatus>,
-    cleanup_deadline: Instant,
-) -> Result<portable_pty::ExitStatus, ExecutionBackendError> {
-    terminate_owned_pty_group_with_grace(
-        child,
-        process_group,
-        status,
-        cleanup_deadline,
-        Duration::from_secs(2),
-    )
-}
-
+/// The PTY counterpart of [`terminate_owned_process_group_with_grace`], with
+/// the same PGID pinning and the same meaning of `status`.
 pub(super) fn terminate_owned_pty_group_with_grace(
     child: &mut dyn portable_pty::Child,
     process_group: rustix::process::Pid,
-    mut status: Option<portable_pty::ExitStatus>,
+    status: Option<portable_pty::ExitStatus>,
     cleanup_deadline: Instant,
     grace: Duration,
 ) -> Result<portable_pty::ExitStatus, ExecutionBackendError> {
+    if let Some(status) = status {
+        return Ok(status);
+    }
     let mut group = GroupProbe::new(process_group);
     let now = Instant::now();
     let term_deadline = now + grace.min(cleanup_deadline.saturating_duration_since(now) / 2);
     let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::TERM);
     while Instant::now() < term_deadline {
-        if status.is_none()
-            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+        if peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
             && group.members() == 0
-        {
-            status = child
+            && let Some(status) = child
                 .try_wait()
-                .map_err(|_| io_error("joined process PTY cleanup wait failed"))?;
-        }
-        if status.is_some() && group.members() == 0 {
-            return status.ok_or_else(|| io_error("joined process PTY cleanup produced no status"));
+                .map_err(|_| io_error("joined process PTY cleanup wait failed"))?
+        {
+            return Ok(status);
         }
         sleep_until_next_poll(now, cleanup_deadline);
     }
@@ -135,33 +115,19 @@ pub(super) fn terminate_owned_pty_group_with_grace(
         group.checked = None;
     }
     while Instant::now() < cleanup_deadline {
-        if status.is_none()
-            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+        if peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
             && group.members() == 0
-        {
-            status = child
+            && let Some(status) = child
                 .try_wait()
-                .map_err(|_| io_error("joined process PTY final join failed"))?;
-        }
-        if status.is_some() && group.members() == 0 {
-            return status.ok_or_else(|| io_error("joined process PTY cleanup produced no status"));
+                .map_err(|_| io_error("joined process PTY final join failed"))?
+        {
+            return Ok(status);
         }
         sleep_until_next_poll(now, cleanup_deadline);
     }
     Err(io_error(
         "joined process PTY group cleanup exceeded its configured bound",
     ))
-}
-
-pub(super) fn cleanup_pty_setup_error(
-    child: &mut dyn portable_pty::Child,
-    process_group: rustix::process::Pid,
-    grace: Duration,
-    setup_error: ExecutionBackendError,
-) -> ExecutionBackendError {
-    terminate_owned_pty_group(child, process_group, None, grace)
-        .err()
-        .unwrap_or(setup_error)
 }
 
 pub(super) fn wait_for_output_readers_until(
@@ -183,15 +149,21 @@ pub(super) fn join_thread_until(thread: std::thread::JoinHandle<()>, deadline: I
     thread.is_finished() && thread.join().is_ok()
 }
 
+/// Terminates a child whose setup failed; one whose group outlives the
+/// cleanup goes to the reaper.
 pub(super) fn cleanup_setup_error(
-    child: &mut std::process::Child,
+    mut child: std::process::Child,
     process_group: rustix::process::Pid,
     grace: Duration,
     setup_error: ExecutionBackendError,
 ) -> ExecutionBackendError {
-    terminate_owned_process_group(child, process_group, None, grace)
-        .err()
-        .unwrap_or(setup_error)
+    match terminate_owned_process_group(&mut child, process_group, grace) {
+        Ok(_) => setup_error,
+        Err(error) => {
+            reap_when_group_empty(process_group, Box::new(child));
+            error
+        }
+    }
 }
 
 pub(super) fn terminate_direct_child(
@@ -240,6 +212,11 @@ pub(super) struct LeaderExit {
     pub(super) code: Option<i32>,
 }
 
+/// Whether the unreaped `leader` has exited; an error reads as not yet.
+pub(in crate::environment::backend) fn leader_exited(leader: rustix::process::Pid) -> bool {
+    peek_leader_exit(leader).is_ok_and(|exit| exit.is_some())
+}
+
 pub(super) fn peek_leader_exit(
     pid: rustix::process::Pid,
 ) -> rustix::io::Result<Option<LeaderExit>> {
@@ -255,14 +232,14 @@ pub(super) fn peek_leader_exit(
     })
 }
 
-pub(super) struct GroupProbe {
+pub(in crate::environment::backend) struct GroupProbe {
     pub(super) group: rustix::process::Pid,
     pub(super) checked: Option<Instant>,
     pub(super) count: usize,
 }
 
 impl GroupProbe {
-    pub(super) fn new(group: rustix::process::Pid) -> Self {
+    pub(in crate::environment::backend) fn new(group: rustix::process::Pid) -> Self {
         Self {
             group,
             checked: None,
@@ -270,27 +247,28 @@ impl GroupProbe {
         }
     }
 
-    pub(super) fn members(&mut self) -> usize {
-        if !process_group_exists(self.group) {
-            return 0;
+    pub(in crate::environment::backend) fn members(&mut self) -> usize {
+        match rustix::process::test_kill_process_group(self.group) {
+            // Linux answers Ok for a group that holds only our unreaped
+            // leader, so EPERM means only another user's members remain, and
+            // a hardened `/proc` (`hidepid`, `subset=pid`) may hide them from
+            // the scan: the count is unknown, which counts as live. macOS
+            // answers EPERM for that zombie-only group, and its `ps` scan
+            // lists every user's processes, so the scan decides.
+            Err(Errno::PERM) if cfg!(target_os = "linux") => return self.count.max(1),
+            Ok(()) | Err(Errno::PERM) => {}
+            Err(_) => return 0,
         }
         if self
             .checked
             .is_none_or(|at| at.elapsed() >= Duration::from_millis(250))
         {
-            #[cfg(target_os = "linux")]
-            {
-                self.count = live_group_members(self.group);
-            }
-            #[cfg(target_os = "macos")]
-            {
-                // The first query follows leader-exit observation. A snapshot
-                // from before that query could still count the live leader,
-                // delaying a short command by an entire polling interval.
-                // Resetting `checked` for KILL also fences the new phase.
-                let fresh_since = self.checked.unwrap_or_else(Instant::now);
-                self.count = macos_group_snapshot::members(self.group, fresh_since).unwrap_or(1);
-            }
+            // The first query follows leader-exit observation. A snapshot
+            // from before that query could still count the live leader,
+            // delaying a short command by an entire polling interval.
+            // Resetting `checked` for KILL also fences the new phase.
+            let fresh_since = self.checked.unwrap_or_else(Instant::now);
+            self.count = group_snapshot::members(self.group, fresh_since).unwrap_or(1);
             self.checked = Some(Instant::now());
         }
         self.count
@@ -326,54 +304,10 @@ pub(super) fn observe_leftover_group(
     true
 }
 
-// Zombies cannot run or receive signals. In particular, an orphaned zombie
-// waiting for the host's init must not keep a server job alive forever.
-#[cfg(target_os = "linux")]
-fn live_group_members(group: rustix::process::Pid) -> usize {
-    if !process_group_exists(group) {
-        return 0;
-    }
-    live_group_members_impl(group).unwrap_or(1)
-}
-
-#[cfg(target_os = "linux")]
-fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
-    let mut count = 0;
-    // `/proc/<pid>/stat` is a single_open record: a successful read is the
-    // whole line, never a truncated prefix. A directory-entry error ends
-    // `ReadDir`, so the scan is unknown rather than a short count callers
-    // would trust as empty. An unreadable field is the same. A missing stat
-    // is a pid reaped between readdir and the read; that member is gone.
-    for entry in std::fs::read_dir("/proc").ok()? {
-        let entry = entry.ok()?;
-        if !entry
-            .file_name()
-            .as_encoded_bytes()
-            .iter()
-            .all(u8::is_ascii_digit)
-        {
-            continue;
-        }
-        let Ok(stat) = std::fs::read(entry.path().join("stat")) else {
-            continue;
-        };
-        let split = stat.iter().rposition(|byte| *byte == b')')?;
-        let fields = std::str::from_utf8(&stat[split + 1..]).ok()?;
-        let mut fields = fields.split_whitespace();
-        let state = fields.next()?;
-        let _parent = fields.next()?;
-        let pgid = fields.next()?.parse::<i32>().ok()?;
-        if pgid == group.as_raw_pid() && state != "Z" && state != "X" {
-            count += 1;
-        }
-    }
-    Some(count)
-}
-
 #[cfg(all(test, target_os = "linux"))]
 #[allow(
     clippy::expect_used,
-    reason = "the non-UTF-8 comm fixture fails the test rather than the scan"
+    reason = "a fixture that cannot be set up fails the test rather than the probe"
 )]
 mod tests {
     use std::os::unix::process::CommandExt;
@@ -388,6 +322,56 @@ mod tests {
                 let _ = child.wait();
             }
         }
+    }
+
+    /// Kills a background member that outlives its reaped leader.
+    struct KillMember(rustix::process::Pid);
+
+    impl Drop for KillMember {
+        fn drop(&mut self) {
+            let _ = rustix::process::kill_process(self.0, rustix::process::Signal::KILL);
+        }
+    }
+
+    /// Once the leader is reaped its PGID is no longer pinned and could name
+    /// another user's group, so termination given the reaped status signals
+    /// nothing, even to a member that is still running.
+    #[test]
+    fn a_reaped_leader_status_signals_nothing() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let mut child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 30 & echo $! > member.pid")
+            .current_dir(directory.path())
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+        let group = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .expect("pid");
+        let status = child.wait().expect("leader exit");
+        let member = std::fs::read_to_string(directory.path().join("member.pid"))
+            .ok()
+            .and_then(|pid| pid.trim().parse::<i32>().ok())
+            .and_then(rustix::process::Pid::from_raw)
+            .expect("member pid");
+        let _member = KillMember(member);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let returned = super::terminate_owned_process_group_with_grace(
+            &mut child,
+            group,
+            Some(status),
+            deadline,
+            std::time::Duration::from_millis(200),
+        )
+        .expect("reaped status");
+        assert_eq!(returned, status);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(live_group_members(group), 1);
     }
 
     const HELPER_ENV: &str = "PLAKOUS_NON_UTF8_COMM_HELPER";
@@ -444,7 +428,7 @@ mod tests {
                 read_text(&stdout_path),
                 read_text(&stderr_path),
             );
-            if non_utf8_comm(id) && super::live_group_members(pid) == 1 {
+            if non_utf8_comm(id) && live_group_members(pid) == 1 {
                 observed = true;
                 break;
             }
@@ -463,10 +447,10 @@ mod tests {
             .expect("comm closer");
         let comm_at = stat.iter().position(|byte| *byte == b'(').expect("comm");
         assert!(std::str::from_utf8(&stat[comm_at + 1..split]).is_err());
-        assert_eq!(super::live_group_members(pid), 1);
+        assert_eq!(live_group_members(pid), 1);
         let _ = child.kill();
         let _ = child.wait();
-        assert_eq!(super::live_group_members(pid), 0);
+        assert_eq!(live_group_members(pid), 0);
     }
 
     /// Libtest's `--exact` filter is the test path without the crate name.
@@ -494,14 +478,20 @@ mod tests {
         comm_at < split && std::str::from_utf8(&stat[comm_at + 1..split]).is_err()
     }
 
+    fn live_group_members(group: rustix::process::Pid) -> usize {
+        super::group_snapshot::live_groups()
+            .expect("complete /proc scan")
+            .get(&group.as_raw_pid())
+            .copied()
+            .unwrap_or(0)
+    }
+
     fn read_text(path: &std::path::Path) -> String {
         String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned()
     }
 }
 
-pub(in crate::environment::backend) fn process_group_exists(
-    process_group: rustix::process::Pid,
-) -> bool {
+pub(super) fn process_group_exists(process_group: rustix::process::Pid) -> bool {
     match rustix::process::test_kill_process_group(process_group) {
         Ok(()) | Err(Errno::PERM) => true,
         Err(_) => false,

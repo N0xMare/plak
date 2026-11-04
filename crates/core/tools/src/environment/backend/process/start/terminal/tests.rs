@@ -1,7 +1,8 @@
 use std::io::Read;
 
 use super::*;
-use crate::environment::backend::process::{JoinedSessionOutput, process_group_exists};
+use crate::environment::backend::process::JoinedSessionOutput;
+use crate::environment::backend::process::cleanup::process_group_exists;
 use crate::{JoinedProcessCommand, OperationContext};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
