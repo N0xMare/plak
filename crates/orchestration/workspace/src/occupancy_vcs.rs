@@ -31,6 +31,7 @@ mod namespace;
 mod ops;
 mod pins;
 mod refresh;
+pub mod stage;
 
 pub(crate) use git::git_query;
 #[cfg(test)]
@@ -54,7 +55,8 @@ use mint::run_mint_hook_bounded;
 use mint::{mint_git_worktree, mint_jj_workspace};
 pub use names::{CopyNames, branch_of_copy_dir, copy_names};
 pub use ops::{
-    AdoptRequest, MintRequest, RevertRange, SystemVcs, UnavailableVcs, VcsFuture, VcsOps,
+    AdoptRequest, MintRequest, OwnedAdopt, OwnedMint, RevertRange, SystemVcs, UnavailableVcs,
+    VcsFuture, VcsOps,
 };
 pub use refresh::{RefreshApplied, RefreshPlan, RefreshPreparation, RefreshRequest};
 
@@ -68,7 +70,7 @@ const GIT_CLI_ENABLED: bool = false;
 /// One `snapshot(path)` result. For git `content` is the written
 /// tree id and `commit` is the `commit-tree` commit; for JJ `content` hashes
 /// the native merged tree IDs and conflict labels with explicit framing.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VcsSnapshot {
     /// Seal observation: the recorded mint base is no longer an ancestor.
     pub history_left_base: bool,
@@ -98,7 +100,7 @@ impl VcsSnapshot {
 
 /// One freshly minted copy: where it is, what it is on, and
 /// the base a later seal and adopt three-way against.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MintedCopy {
     /// The copy's own directory.
     pub path: PathBuf,
@@ -111,7 +113,7 @@ pub struct MintedCopy {
 pub use plakous_host_protocol::topology::ConflictPath;
 
 /// A pinned textual merge which has not changed the target checkout.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConflictCandidate {
     /// Conflicted merge result, including text markers.
     pub snapshot: VcsSnapshot,
@@ -120,7 +122,7 @@ pub struct ConflictCandidate {
 }
 
 /// Identity reserved by the tree for a conflict result.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ConflictPin {
     /// Candidate id, including its reserved conflict ordinal.
     pub id: String,
@@ -139,7 +141,7 @@ pub struct ResolvedSource<'a> {
 }
 
 /// Why an adopt did not land. Never a success status.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AdoptFailure {
     /// The backend cannot apply this adoption mode; nothing was applied.
     NotApplicable(String),
@@ -160,7 +162,7 @@ pub enum AdoptFailure {
 }
 
 /// What a landed adopt changed in the caller's own copy.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AdoptLanding {
     /// The target's token before the landing.
     pub target_before: String,
@@ -182,7 +184,7 @@ pub struct AdoptLanding {
 pub const ADOPT_RECEIPT_FILE_LIMIT: usize = 64;
 
 /// Added, modified, deleted, renamed, or a type change.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ChangeKind {
     /// The path was added.
     Added,
@@ -197,7 +199,7 @@ pub enum ChangeKind {
 }
 
 /// One path a landing changed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ChangedPath {
     /// What happened to the path.
     pub status: ChangeKind,
@@ -249,7 +251,7 @@ impl AdoptLanding {
 /// Why a VCS operation did not run. Deliberately not a
 /// topology error: this module knows nothing about the tree, and the tree
 /// maps each kind onto its own wire code.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum VcsErrorKind {
     /// Work is preserved but repository or checkout state needs explicit recovery.
     RecoveryRequired,
@@ -264,7 +266,7 @@ pub enum VcsErrorKind {
 }
 
 /// Coverage evidence governing whether disposable cache trimming is safe.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ReclamationRefusal {
     /// Static content cannot be covered by normal sealing.
     StaticCoverage,
@@ -274,7 +276,7 @@ pub enum ReclamationRefusal {
 
 /// A refusal from the VCS, typed so the caller can name it on its own wire
 /// without this crate knowing that wire.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VcsError {
     /// What kind of refusal it is.
     pub kind: VcsErrorKind,

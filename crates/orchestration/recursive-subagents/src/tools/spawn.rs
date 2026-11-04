@@ -74,7 +74,12 @@ impl From<&str> for SpawnBindError {
 /// reservation waiting on the mint that runs with the mutex released.
 enum SpawnPhase {
     Done(SpawnAgentOutput, bool),
-    Minting(Box<SpawnReservation>, MintTicket),
+    /// The mint still owed, and the stage it runs as on a runner.
+    Minting(
+        Box<SpawnReservation>,
+        MintTicket,
+        Option<Arc<plakous_workspace::occupancy_vcs::stage::VcsStage>>,
+    ),
 }
 
 impl TopologyTool {
@@ -352,11 +357,11 @@ impl TopologyTool {
             .map_err(|error| {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
-        let (reservation, ticket) = match phase {
+        let (reservation, ticket, stage) = match phase {
             Ok(SpawnPhase::Done(output, replayed)) => {
                 return Ok((Ok((output, replayed)), effects));
             }
-            Ok(SpawnPhase::Minting(reservation, ticket)) => (reservation, ticket),
+            Ok(SpawnPhase::Minting(reservation, ticket, stage)) => (reservation, ticket, stage),
             Err(error) => return Ok((Err(error), effects)),
         };
         // One release owner runs the mint and the writer that commits or
@@ -368,36 +373,47 @@ impl TopologyTool {
             .driver
             .owned(async move {
                 let port = driver.vcs();
-                let minted = tokio::spawn(async move { ticket.mint(port.as_ref()).await })
-                    .await
-                    .unwrap_or_else(|error| {
-                        Err(VcsError::mint_failed(format!("mint task failed: {error}")))
-                    });
+                let staged = stage.clone();
+                let minted = tokio::spawn(async move {
+                    plakous_workspace::occupancy_vcs::stage::run(staged, ticket.mint(port.as_ref()))
+                        .await
+                })
+                .await
+                .unwrap_or_else(|error| {
+                    Err(VcsError::mint_failed(format!("mint task failed: {error}")))
+                });
                 let writer = driver.clone();
                 driver
-                    .mutate_owed(move |tree| match minted {
-                        Ok(minted) => match tree.spawn_commit(*reservation, Some(minted)) {
-                            Ok(output) => {
-                                writer.save(tree)?;
-                                Ok((output, false))
-                            }
+                    .mutate_owed(move |tree| {
+                        // The mint's answer is recorded in this revision with
+                        // its stage settled.
+                        if let Some(stage) = &stage {
+                            tree.settle_vcs_stage(stage);
+                        }
+                        match minted {
+                            Ok(minted) => match tree.spawn_commit(*reservation, Some(minted)) {
+                                Ok(output) => {
+                                    writer.save(tree)?;
+                                    Ok((output, false))
+                                }
+                                Err(error) => {
+                                    tree.remember_failure(
+                                        &operation_id,
+                                        &caller,
+                                        "spawn_agent",
+                                        &request,
+                                        error.code,
+                                    )?;
+                                    writer.save(tree)?;
+                                    Err(error)
+                                }
+                            },
                             Err(error) => {
-                                tree.remember_failure(
-                                    &operation_id,
-                                    &caller,
-                                    "spawn_agent",
-                                    &request,
-                                    error.code,
-                                )?;
+                                let error =
+                                    tree.spawn_abort(*reservation, topology_error_from_vcs(error));
                                 writer.save(tree)?;
                                 Err(error)
                             }
-                        },
-                        Err(error) => {
-                            let error =
-                                tree.spawn_abort(*reservation, topology_error_from_vcs(error));
-                            writer.save(tree)?;
-                            Err(error)
                         }
                     })
                     .await
@@ -462,7 +478,17 @@ impl TopologyTool {
             }
             Ok(SpawnAdmission::Reserved(mut reservation, Some(ticket))) => {
                 reservation.set_parent_composition(parent_composition);
-                Ok(SpawnPhase::Minting(reservation, ticket))
+                // On a runner the mint is a recorded stage, published before
+                // it runs (spec 03 §14).
+                let stage = match self.driver.vcs().stage_runner() {
+                    Some(runner) => {
+                        let stage = tree.record_mint_stage(&ticket, None, runner)?;
+                        self.driver.save(tree)?;
+                        Some(stage)
+                    }
+                    None => None,
+                };
+                Ok(SpawnPhase::Minting(reservation, ticket, stage))
             }
             Err(error) => {
                 // Prepare already persisted a non-terminal receipt. Failures

@@ -285,6 +285,8 @@ fn every_error_code_has_a_distinct_snake_case_wire_form() {
         TopologyErrorCode::RecoveryEffectEvidenceRefused,
         TopologyErrorCode::RecoveryVcsAmbiguous,
         TopologyErrorCode::RecoverySessionUnavailable,
+        TopologyErrorCode::RunnerMismatch,
+        TopologyErrorCode::CrossRunnerCopyUnavailable,
     ];
     let mut seen = std::collections::BTreeSet::new();
     for code in codes {

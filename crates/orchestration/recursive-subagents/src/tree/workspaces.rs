@@ -380,6 +380,38 @@ impl ProductAgentTree {
         self.bump();
     }
 
+    /// Faults `agent_id` for stage `stage_id`, whose effect may have half
+    /// run on its runner.
+    pub(super) fn fault_vcs_stage(
+        &mut self,
+        agent_id: &str,
+        stage_id: &str,
+        attempt_id: Option<super::AttemptId>,
+    ) {
+        if !self.nodes.contains_key(agent_id) {
+            return;
+        }
+        // The root is recorded like a root adopt in flight at reopen: its
+        // checkout is named, since nothing recovers the root itself.
+        let reason = if agent_id == self.root_agent_id {
+            "a VCS step into this checkout on its runner may have half run; inspect it before relying on its contents"
+        } else {
+            "a VCS step on the node's runner may have half run; inspect its copy"
+        };
+        let anchor = self.vcs_fault_anchor(agent_id);
+        self.record_vcs_fault(
+            agent_id,
+            VcsFault {
+                refresh_prior_status: None,
+                source_id: stage_id.to_owned(),
+                workspace_id: None,
+                attempt_id,
+                reason: reason.to_owned(),
+            },
+            anchor,
+        );
+    }
+
     pub(super) fn join_vcs_fault(&mut self, agent_id: &str, id: &str) -> Result<(), TopologyError> {
         let fault: VcsFault = serde_json::from_str(&self.operations[id].canonical_request)
             .map_err(|_| {
@@ -558,6 +590,9 @@ impl ProductAgentTree {
     /// Refuses a tree that is closed or terminal — those never resume.
     pub fn resume_tree(&mut self) -> Result<(), TopologyError> {
         self.fault_in_flight_vcs();
+        // A stage left recorded is kept across reopen for node recovery,
+        // and settles by its class when the tree resumes.
+        self.settle_unfinished_vcs_stages();
         let agents: std::collections::BTreeSet<_> = self
             .operations
             .values()

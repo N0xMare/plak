@@ -81,6 +81,7 @@ pub mod call_facts;
 pub mod cell_budget;
 pub mod epoch;
 pub mod hub;
+pub mod remote_vcs;
 pub mod task_set;
 pub mod tools;
 pub mod tree;

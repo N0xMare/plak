@@ -1,7 +1,7 @@
 //! Read-only rescue snapshots, separate from adoptable candidate authority.
 
 use crate::agent_tree_protocol::{WorkspaceMode, WorkspaceStatus};
-use plakous_workspace::occupancy_vcs::{candidate_ref, digest_text};
+use plakous_workspace::occupancy_vcs::{candidate_ref, digest_text, stage};
 
 use super::{ChildTurnIdentity, TreeDriver};
 
@@ -55,7 +55,11 @@ pub(super) async fn snapshot_failure(
     let reference = candidate_ref(&namespace, &id);
     // The seal primitive leaves HEAD, the branch and the real index untouched,
     // and excludes secrets. Its durable rescue owner is not adoptable authority.
-    let result = tokio::spawn(async move { vcs.seal(&path, &namespace, &id, &base).await }).await;
+    let result = tokio::spawn(stage::unstaged(
+        "rescue seal of a failed worktree, owned by its rescue pin",
+        async move { vcs.seal(&path, &namespace, &id, &base).await },
+    ))
+    .await;
     Some(match result {
         Ok(Ok(snapshot)) => format!(
             "; failed worktree snapshot: {reference} (commit {})",

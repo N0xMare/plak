@@ -55,9 +55,11 @@ impl ProductAgentTree {
             adopts,
             hooks,
             unmints,
+            stages,
         } = completed;
         // An absent copy's base pin was never reconciliation work.
-        let recorded_anything = !refreshes.is_empty()
+        let recorded_anything = !stages.is_empty()
+            || !refreshes.is_empty()
             || base_pins
                 .iter()
                 .any(|(_, result)| !matches!(result, Ok(false)))
@@ -123,6 +125,11 @@ impl ProductAgentTree {
             if let Err(error) = self.finish_unmint(ticket, removed) {
                 settled.cleanup_failures.push(error);
             }
+        }
+        // Each effect's answer is recorded above, in this revision: its stage
+        // is done, or settles by its class when a step's outcome was lost.
+        for stage in &stages {
+            self.settle_vcs_stage(stage);
         }
         // A seal or adopt that just finished may be what a closed copy was
         // waiting on.
@@ -351,6 +358,19 @@ impl Effects {
     /// with the tree mutex held by construction of its arguments; a `FakeVcs`
     /// in tests records whether it was anyway.
     pub async fn run(self, vcs: &dyn VcsOps) -> Completed {
+        self.run_staged(vcs, super::stages::EffectStages::default())
+            .await
+    }
+
+    /// [`Self::run`], each ticket as its recorded stage in `stages`, which
+    /// the completion settles.
+    pub(crate) async fn run_staged(
+        self,
+        vcs: &dyn VcsOps,
+        plan: super::stages::EffectStages,
+    ) -> Completed {
+        use super::stages::EffectStages;
+        use plakous_workspace::occupancy_vcs::stage;
         let Self {
             refreshes,
             base_pins,
@@ -362,45 +382,70 @@ impl Effects {
             launch_checkout,
         } = self;
         let mut completed = Completed::default();
-        for ticket in base_pins {
-            let result = ticket.run(vcs).await;
+        for (index, ticket) in base_pins.into_iter().enumerate() {
+            let staged = EffectStages::at(&plan.base_pins, index);
+            let result = stage::run(staged, ticket.run(vcs)).await;
             completed.base_pins.push((ticket, result));
         }
-        for ticket in refreshes {
-            let answer = ticket.run(vcs).await;
+        for (index, ticket) in refreshes.into_iter().enumerate() {
+            let staged = EffectStages::at(&plan.refreshes, index);
+            let answer = stage::run(staged, ticket.run(vcs)).await;
             completed.refreshes.push((ticket, answer));
         }
-        for ticket in seals {
-            let sealed = ticket.seal(vcs).await;
+        for (index, ticket) in seals.into_iter().enumerate() {
+            let staged = EffectStages::at(&plan.seals, index);
+            let sealed = stage::run(staged, ticket.seal(vcs)).await;
             completed.seals.push((ticket, sealed));
         }
-        for ticket in adopts {
-            let landed = ticket.land(vcs).await;
+        for (index, ticket) in adopts.into_iter().enumerate() {
+            let staged = EffectStages::at(&plan.adopts, index);
+            let landed = stage::run(staged, ticket.land(vcs)).await;
             completed.adopts.push((ticket, landed));
         }
-        for hook in hooks {
-            let ran = vcs.run_mint_hook(&hook.cwd, &hook.command, &hook.env).await;
+        for (index, hook) in hooks.into_iter().enumerate() {
+            let staged = EffectStages::at(&plan.hooks, index);
+            let ran = stage::run(
+                staged,
+                vcs.run_mint_hook(&hook.cwd, &hook.command, &hook.env),
+            )
+            .await;
             completed.hooks.push((hook, ran));
         }
-        for ticket in unmints {
-            let removed = vcs
-                .unmint(&launch_checkout, &ticket.path, &ticket.namespace)
-                .await;
-            if removed.is_ok() {
-                for candidate_id in &ticket.candidate_ids {
-                    // A surviving pin keeps explicitly relinquished
-                    // content reachable; the copy is gone.
-                    let _ = vcs
-                        .unpin(&launch_checkout, &ticket.namespace, candidate_id)
-                        .await;
+        for (index, ticket) in unmints.into_iter().enumerate() {
+            let staged = EffectStages::at(&plan.unmints, index);
+            let removed = stage::run(staged, async {
+                let removed = vcs
+                    .unmint(&launch_checkout, &ticket.path, &ticket.namespace)
+                    .await;
+                if removed.is_ok() {
+                    for candidate_id in &ticket.candidate_ids {
+                        // A surviving pin keeps explicitly relinquished
+                        // content reachable; the copy is gone.
+                        let _ = vcs
+                            .unpin(&launch_checkout, &ticket.namespace, candidate_id)
+                            .await;
+                    }
                 }
-            }
+                removed
+            })
+            .await;
             completed.unmints.push((ticket, removed));
         }
-        for mut ticket in dormancy {
-            let answer = ticket.run(vcs, &launch_checkout).await;
+        for (index, mut ticket) in dormancy.into_iter().enumerate() {
+            let staged = EffectStages::at(&plan.dormancy, index);
+            let answer = stage::run(staged, ticket.run(vcs, &launch_checkout)).await;
             completed.dormancy.push((ticket, answer));
         }
+        completed.stages = [
+            plan.base_pins,
+            plan.refreshes,
+            plan.seals,
+            plan.adopts,
+            plan.hooks,
+            plan.unmints,
+            plan.dormancy,
+        ]
+        .concat();
         completed
     }
 }

@@ -199,7 +199,7 @@ const CLOSED_VOCABULARY_PINS: &[(&str, &str)] = &[
     ("message_priority", "deferred,urgent"),
     (
         "topology_error_codes",
-        "unknown_field,schema_mismatch,bound_exceeded,grant_denied,self_send,recipient_closed,recipient_attempt_terminal,recipient_recovery_required,reply_invalid,mailbox_full,spawn_budget,capacity,storage_low,request_key_conflict,depth_exhausted,template_not_spawnable,template_unknown,mint_unavailable,mint_hook_failed,input_not_sealed,workspace_identity_mismatch,workspace_recovery_required,workspace_not_owned,workspace_referenced,model_not_admitted,submit_root_forbidden,submit_stale_token,submit_duplicate_conflict,live_work,tree_restored_paused,operation_recovery_required,candidate_unknown,not_sealed,not_authorized,evidence_mismatch,target_changed,merge_conflict,adopt_not_applicable,discard_not_applicable,followup_not_idle,followup_closed,followup_recovery_required,followup_workspace_gone,quota_blocked,attempt_mismatch,no_pending_children,wait_caller_settled,recovery_lease_held,recovery_owner_live,recovery_storage_unavailable,recovery_effect_evidence_refused,recovery_vcs_ambiguous,recovery_session_unavailable",
+        "unknown_field,schema_mismatch,bound_exceeded,grant_denied,self_send,recipient_closed,recipient_attempt_terminal,recipient_recovery_required,reply_invalid,mailbox_full,spawn_budget,capacity,storage_low,request_key_conflict,depth_exhausted,template_not_spawnable,template_unknown,mint_unavailable,mint_hook_failed,input_not_sealed,workspace_identity_mismatch,workspace_recovery_required,workspace_not_owned,workspace_referenced,model_not_admitted,submit_root_forbidden,submit_stale_token,submit_duplicate_conflict,live_work,tree_restored_paused,operation_recovery_required,candidate_unknown,not_sealed,not_authorized,evidence_mismatch,target_changed,merge_conflict,adopt_not_applicable,discard_not_applicable,followup_not_idle,followup_closed,followup_recovery_required,followup_workspace_gone,quota_blocked,attempt_mismatch,no_pending_children,wait_caller_settled,recovery_lease_held,recovery_owner_live,recovery_storage_unavailable,recovery_effect_evidence_refused,recovery_vcs_ambiguous,recovery_session_unavailable,runner_mismatch,cross_runner_copy_unavailable",
     ),
 ];
 
@@ -727,6 +727,8 @@ fn wire_identity_closed_vocabularies_are_pinned() {
             TopologyErrorCode::RecoveryEffectEvidenceRefused,
             TopologyErrorCode::RecoveryVcsAmbiguous,
             TopologyErrorCode::RecoverySessionUnavailable,
+            TopologyErrorCode::RunnerMismatch,
+            TopologyErrorCode::CrossRunnerCopyUnavailable,
         ]),
     );
 

@@ -139,6 +139,23 @@ pub(crate) enum RefreshAnswer {
 }
 
 impl RefreshTicket {
+    /// The stage this ticket runs as on `runner`: the copy moving onto its
+    /// new base, re-run from its refresh intent.
+    pub(crate) fn stage(&self, runner: &str) -> super::VcsStageIntent {
+        let (agent, base) = match &self.step {
+            Step::Prepare(request) => (&request.agent, &request.base),
+            Step::Apply(plan) => (&plan.request.agent, &plan.parent),
+        };
+        let mut intent = super::stages::local_stage(
+            super::VcsStageKind::Refresh,
+            super::VcsStageClass::Reproducible,
+            agent,
+            runner,
+        );
+        intent.base_commit = Some(base.clone());
+        intent
+    }
+
     pub(crate) async fn run(&self, vcs: &dyn VcsOps) -> Result<RefreshAnswer, VcsError> {
         match &self.step {
             Step::Prepare(request) => vcs

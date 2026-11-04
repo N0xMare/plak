@@ -202,6 +202,20 @@ an export.
 
 ### Plakous
 
+- Version control on a runner (unsupported; only the test route selects a
+  runner): an orchestration tree on a selected runner drives its copies
+  through `RemoteVcs` over the runner link instead of refusing every effect.
+  Questions are `vcs.read` calls; every effect is a `vcs.effect` step of a
+  tree operation (protocol class `TreeOperation`, keyed by tree and
+  operation), recorded first as a `vcs_stage` tree intent and run at most
+  once per key. The root and its children record the runner they run on; an
+  `inherit` child on another runner is `runner_mismatch` and a copy on another
+  runner `cross_runner_copy_unavailable`. Embedder break: `RunnerClass` is no
+  longer `Copy` (`RunnerCall::class` returns a reference), and the VCS port's
+  value types serialize. A stage left unfinished by a lost process reruns
+  under its first keys, so a rerun never runs beside the step it repeats;
+  the extension refuses a relative path or one with `..` before admission;
+  a root stage of unknown outcome records a `vcs_fault`.
 - A Messages `model_context_window_exceeded` stop fails the stream and takes
   the context-limit overflow fold when nothing hosted ran, on Anthropic and
   OpenRouter.

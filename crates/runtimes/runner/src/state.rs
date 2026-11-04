@@ -34,6 +34,12 @@ pub(crate) enum OpKey {
     },
     /// An owner control of the line's processes.
     Control { line: String, control_id: String },
+    /// A tree operation's step, by the tree, the operation and the verb.
+    Tree {
+        tree_id: String,
+        operation_id: String,
+        verb: String,
+    },
 }
 
 #[derive(Debug)]
@@ -386,6 +392,18 @@ fn op_key(request: &Request) -> Keyed {
         (RequestClass::OwnerControl { control_id }, Some(owner)) => Keyed::Key(OpKey::Control {
             line: owner.line.clone(),
             control_id: control_id.clone(),
+        }),
+        // A tree operation is the tree's, not a line's: no owner fences it.
+        (
+            RequestClass::TreeOperation {
+                tree_id,
+                operation_id,
+            },
+            _,
+        ) => Keyed::Key(OpKey::Tree {
+            tree_id: tree_id.clone(),
+            operation_id: operation_id.clone(),
+            verb: request.operation.verb.clone(),
         }),
         (
             RequestClass::EffectCall { .. }

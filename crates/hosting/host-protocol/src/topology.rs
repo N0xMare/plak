@@ -513,6 +513,12 @@ pub enum TopologyErrorCode {
     /// `recover_agent`: the child session could not be reopened or recreated
     /// for another reason the message names. Never settles.
     RecoverySessionUnavailable,
+    /// An `inherit` child shares its parent's checkout, so it runs on the
+    /// parent's runner; the spawn named another.
+    RunnerMismatch,
+    /// A `fork` or `snapshot` copy on another runner than the parent's is
+    /// not carried yet; nothing was minted.
+    CrossRunnerCopyUnavailable,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

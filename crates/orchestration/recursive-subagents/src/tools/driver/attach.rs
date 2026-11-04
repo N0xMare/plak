@@ -37,7 +37,13 @@ impl TreeDriver {
             return Ok(());
         };
         let completed = match published {
-            Ok(()) => attach.run(self.vcs.as_ref()).await,
+            Ok(()) => {
+                plakous_workspace::occupancy_vcs::stage::unstaged(
+                    "attach refresh and base pin, re-derived at the next attach",
+                    attach.run(self.vcs.as_ref()),
+                )
+                .await
+            }
             Err(error) => attach.refuse_attach(format!(
                 "attachment publication failed: {error}; no base pin was changed"
             )),

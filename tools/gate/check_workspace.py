@@ -616,6 +616,8 @@ ALLOWED_CLI_MACROS = {
 }
 # Per-source additions to ALLOWED_CLI_MACROS.
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
+    # The tree stage a VCS effect runs as, read by a runner-backed port.
+    ("plakous-workspace", "src/occupancy_vcs/stage.rs"): {"task_local"},
     ("plakous-host-protocol", "src/observation.rs"): {"define_observations"},
     ("plakous-host-protocol", "src/observation/vocabulary.rs"): {"define_observations"},
     # Disposable transcript projection invariants, with release-mode resync.
@@ -1465,13 +1467,26 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents": {
         **_SHARED_PLAKOUS_SYMBOLS,
         # Hidden, unsupported runner seam: the selected runner's probe and
-        # whether the tree's VCS port refuses (spec 01 §8.5).
+        # the runner the tree's VCS port runs on (spec 01 §8.5).
         "tools": _SHARED_PLAKOUS_SYMBOLS["tools"]
         | {"runner::process_runner", "runner::workspace_probe"},
     },
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # The tree's VCS port over the runner link, and the runner extension
+    # that answers it (spec 01 §8.5).
+    ("plakous-recursive-subagents", "src/remote_vcs.rs"): {
+        "tools": {
+            "runner::RunnerCall",
+            "runner::RunnerExtension",
+            "runner::RunnerFailure",
+            "runner::RunnerLink",
+            "runner::RunnerVerb",
+            "runner::ServeFailure",
+            "runner::ServeFuture",
+        },
+    },
     ("plakous-hosted", "src/runtime/child_live.rs"): {
         "agent": {"TurnViewState"},
     },

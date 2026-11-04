@@ -334,6 +334,14 @@ The enforcement of "this node may change files" on `execute` is the
 `workspace=fork` snapshot is thrown away unless something seals a candidate
 and a parent adopts it.
 
+A child runs on its parent's runner, and the root on the runner the tree's
+VCS port runs on (the local runner, recorded as none, unless a runner is
+selected). The tree admits a spawn placed elsewhere only by the rules of the
+runner split: an `inherit` child shares its parent's checkout, so another
+runner is `runner_mismatch`; a `fork` or `snapshot` copy on another runner is
+`cross_runner_copy_unavailable` until copies cross runners as bundles. Both
+refusals reserve nothing. No spawn names another runner yet.
+
 Workspace process-shim requirements follow the actual workspace identity, not
 the tool tier. An inherited ordinary checkout needs no copy shim; an inherited
 minted copy retains its required shim, including when the child is read-only.
@@ -1347,7 +1355,8 @@ The complete `TopologyErrorCode` set, in wire spelling:
 `followup_workspace_gone`, `quota_blocked`, `attempt_mismatch`,
 `no_pending_children`, `wait_caller_settled`, `recovery_lease_held`, `recovery_owner_live`,
 `recovery_storage_unavailable`, `recovery_effect_evidence_refused`,
-`recovery_vcs_ambiguous`, `recovery_session_unavailable`.
+`recovery_vcs_ambiguous`, `recovery_session_unavailable`, `runner_mismatch`,
+`cross_runner_copy_unavailable`.
 
 `lease_saturated`, `class_not_pinned`, and `merge_not_owner` are not codes and
 MUST NOT deserialize.
@@ -3915,7 +3924,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Orphaned VCS operation and its settlement | intent, joined into views | anchored `agent_operations` of kinds `vcs_fault` and `vcs_fault_settled`, per affected agent and attempt; reopen records seal, adopt and removal ambiguity, and acknowledged workspace completion records settlement |
 | Spawn refusal, adoption acceptance and failed workspace removal | intent, joined into views | anchored `agent_operations` of kinds `spawn_refused`, `attempt_adopted` for the producer's attempt, and `workspace_cleanup` per occupant; captured failure, diagnostic and spawn end stamp derive agent-local consequences |
 | Feed cursors (`agent_feed_cursors`), node fold order | view metadata | cursor per runtime session and last applied intent order at the agent cursor; NULL node order restarts the fold |
-| Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn: the caller's epoch and composition; written today as no line and the local runner |
+| Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn: the caller's epoch, composition and runner; the root's runner is the one the tree's VCS port runs on (none for the local runner); written today as no line and no workspace override |
 | Successor epochs, current epoch | intent | an epoch append: a profile switch's settlement of its pending epoch, or a roster apply (§1.2) |
 | Tree provenance (`forked_from`) | intent | the fork or import that created the tree: a `/fork` genesis writes `node` (source tree, root agent, line, branch, source epoch); none for an import yet |
 | Runner ancestors | external-effect record | completed bundle stages; none today |
@@ -3923,7 +3932,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Interrupt cause | intent | an optional `cause` field (`operator`, `parent`, `cascade`, `owner_lost`, `handoff`, `stopped`) of the anchored `interrupt` intent, omitted when the writer records none, which every interrupt does today; such a row keeps its earlier bytes |
 | Root and child continuation decisions | intent | `agent_operations` of kind `continuation`, keyed `plak:continuation:<agent>:<attempt or root>:<cause>:<host generation>:<round>:<turn or command>:<anchor id>`, so root decisions in different turns and decisions after another host loss never collide; with cause `transient`, `owner_lost` or `handoff`, a one-based 32-bit round, the anchoring stopped turn or unfacted command, the decision stamp, and a decision: `new_turn` (its command id and the unfacted commands it replaces), `resubmit` (the one unfacted command) or `withdrawn` (at least one command); none today, where child transient decisions remain `child_finalization` `Resume` intents and root decisions are process-local |
 | Terminal recovery refusals | intent | kind `terminal_refusal`, keyed `plak:terminal_refusal:<agent>:<attempt>`, with the refusal and its observation stamp; none today, where they remain process-local |
-| VCS stages | external-effect record | kind `vcs_stage`, written before the stage runs: the stage (`mint`, `seal`, `adopt`, `unmint`, `refresh`, `base_snapshot`, `bundle_create`, `relay`, `bundle_apply`), its class (`reproducible`, `verifiable`, `ambiguous`), the node it serves, and exactly the inputs its kind takes (below), plus for exactly the verifiable class the expected `refs/` reference and commit; none today |
+| VCS stages | external-effect record | kind `vcs_stage`, written before the stage runs: the stage (`mint`, `seal`, `adopt`, `unmint`, `refresh`, `base_snapshot`, `bundle_create`, `relay`, `bundle_apply`), its class (`reproducible`, `verifiable`, `ambiguous`), the node it serves, and exactly the inputs its kind takes (below), plus for exactly the verifiable class the expected `refs/` reference and commit; written for each VCS effect of a port on a runner (below), none for an in-process port |
 | Pending epoch | intent | kind `epoch_pending`, with the epoch number it installs as (from 1), the workflow whose published settlement validates it, and the successor snapshot's exact JSON bytes and digest; the bytes must decode to a snapshot whose digest matches. Keyed `plak:epoch_pending:<workflow>`, at most one per tree, written by a profile switch after its product `Switch` intent and before its runtime publication (chapter 02 §5.5). Publish or validate: once the publication lands, the append from these bytes and the row's removal are one tree revision, taken in process right after the product projection and, after a crash, by the successor's open before its tools compile; a request withdrawn without its fact withdraws the row, and the line head's open withdraws any row left pending by a switch that never published onto it |
 
 Each of the last five payloads is decoded only through its own codec, which
@@ -4757,6 +4766,34 @@ aborted owner but not the Tokio runtime. When that runtime shuts down, a task
 is dropped between two port calls; a port call already running on a blocking
 worker is not interrupted, but nothing after it is recorded, so the next
 open's recovery settles that batch as it settles a crash.
+On a runner (chapter 01 §8.5) every VCS effect is a stage. Before a settle
+dispatches a batch, or a spawn its mint, the tree records one `vcs_stage`
+intent per effect, with the runner as its target, and publishes it; the
+port then sends the effect's steps as tree operations keyed by that intent's
+id, so the runner runs each step at most once and a host that lost the link
+replays it by key. The revision that records an effect's answer removes its
+stage. Seals, mints, removals, reclamations, base pins and refresh
+applications are reproducible; adopts and `on_mint` hooks are ambiguous; no
+single-runner stage is verifiable. A stage whose step lost its outcome (the
+link was lost past its window, or the runner restarted under it), and a stage
+a crashed process left recorded, settle by their class when the tree resumes:
+a reproducible stage stays recorded while its node is open (it is removed once
+the node is closed or gone) and its effect's own failure stands; its workflow
+runs the effect again, and a stage recorded with exactly the inputs of an
+unfinished one takes that one's id again, so each step reaches the runner
+under the key it was first sent with. The runner answers a step the lost run
+still runs once that step ends, and a step it finished with its stored
+answer, so a rerun never runs beside the step it repeats; a step whose
+answer was already taken ran to its end and runs again under a key of its
+own. An ambiguous stage records a `vcs_fault` for its node, as an in-flight
+effect at reopen does; one of the root records it for the root, naming its
+checkout, since nothing recovers the root itself. A verifiable stage settles
+as ambiguous until node recovery checks its expected outcome. That reading is
+one function, which node recovery replaces. Effects run outside a settle or a
+spawn (attachment refreshes and base pins, a candidate's unpin, a failed
+worktree's rescue seal) each declare an unstaged scope and go under a key of
+their own: each is re-derived by its next attach or settle. A runner port
+treats an effect in neither a stage nor an unstaged scope as a defect.
 A mutation retains the store-acknowledged revision from its explicit publish;
 settling an empty effect batch does not itself publish a mutation. Every queued
 effect is drained after the tree mutex is released, including when the initial

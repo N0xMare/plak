@@ -88,7 +88,10 @@ pub fn block_on_for_test<F: Future>(future: F) -> F::Output {
     }
     let waker = std::task::Waker::from(Arc::new(Unpark(std::thread::current())));
     let mut context = std::task::Context::from_waker(&waker);
-    let mut future = Box::pin(future);
+    let mut future = Box::pin(plakous_workspace::occupancy_vcs::stage::unstaged(
+        "a synchronous test convenience",
+        future,
+    ));
     loop {
         if let std::task::Poll::Ready(output) = future.as_mut().poll(&mut context) {
             return output;
@@ -529,6 +532,34 @@ pub(crate) struct BasePinTicket {
     base: String,
 }
 
+impl BasePinTicket {
+    pub(crate) fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
+    pub(crate) fn base(&self) -> &str {
+        &self.base
+    }
+}
+
+impl AdoptTicket {
+    /// The adopter and the candidate it lands, as a stage records them.
+    pub(crate) fn stage_identity(&self) -> (&str, &CandidateId) {
+        (&self.caller_id, &self.candidate.candidate_id)
+    }
+}
+
+impl MintTicket {
+    pub(crate) fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
+    /// The commit the copy is minted over, when an input names one.
+    pub(crate) fn input_commit(&self) -> Option<&str> {
+        self.input_base.as_ref().map(|base| base.commit.as_str())
+    }
+}
+
 /// What one tree mutation owes the VCS once the mutex is released.
 /// The tree never runs a subprocess: every mutating
 /// entry queues its seals, adopts, hooks, and unmints here, the runtime takes
@@ -575,6 +606,8 @@ pub struct Completed {
     adopts: Vec<(AdoptTicket, Result<AdoptLanding, AdoptFailure>)>,
     hooks: Vec<(MintHook, Result<(), VcsError>)>,
     unmints: Vec<(UnmintTicket, Result<(), VcsError>)>,
+    /// The stages the batch ran as on a runner, settled with its answers.
+    stages: Vec<Arc<plakous_workspace::occupancy_vcs::stage::VcsStage>>,
 }
 
 /// What the workspace plan hands the spawn: the row it bound or minted.
@@ -836,8 +869,10 @@ mod recovery;
 mod refresh;
 mod retention;
 mod revert;
+mod stages;
 mod succession;
 pub use refresh::{RefreshReport, RefreshStatus};
+pub(crate) use stages::EffectStages;
 mod runtime_error;
 pub mod text;
 mod tree_store;

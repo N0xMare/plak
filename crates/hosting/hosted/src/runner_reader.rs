@@ -274,12 +274,28 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
     }
 }
 
-/// The runner extension that answers instruction-source reads from the
-/// runner's own filesystem. Unsupported: the test route registers it.
+/// The runner extension the test route registers (spec 01 §8.5): it
+/// answers instruction-source reads and the tree's version control from the
+/// runner's own filesystem, for every workspace. Unsupported.
 #[doc(hidden)]
 #[must_use]
-pub fn instruction_reader_extension() -> Arc<dyn RunnerExtension> {
-    Arc::new(InstructionReaderExtension)
+pub fn test_runner_extension() -> Arc<dyn RunnerExtension> {
+    Arc::new(TestRunnerExtension {
+        vcs: plakous_recursive_subagents::remote_vcs::vcs_runner_extension(Arc::new(|_| true)),
+    })
+}
+
+struct TestRunnerExtension {
+    vcs: Arc<dyn RunnerExtension>,
+}
+
+impl RunnerExtension for TestRunnerExtension {
+    fn serve(&self, verb: RunnerVerb, payload: Value) -> ServeFuture {
+        match verb {
+            RunnerVerb::VcsRead | RunnerVerb::VcsEffect => self.vcs.serve(verb, payload),
+            _ => InstructionReaderExtension.serve(verb, payload),
+        }
+    }
 }
 
 struct InstructionReaderExtension;

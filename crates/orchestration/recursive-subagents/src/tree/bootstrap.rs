@@ -8,20 +8,25 @@ use super::{
 };
 use super::{NodePlacement, TreeLineage};
 
-/// The VCS port of this process's sessions: the system `git`/`jj` port on
-/// the local runner, and on another runner a port that refuses every effect,
-/// since version control there is not carried yet.
-fn session_vcs() -> Arc<dyn VcsOps> {
-    if plakous::tools::runner::process_runner().is_some() {
-        Arc::new(plakous_workspace::occupancy_vcs::UnavailableVcs)
-    } else {
-        Arc::new(SystemVcs)
+/// The VCS port of tree `tree_id`'s workspaces: the system `git`/`jj` port
+/// on the local runner, and the selected runner's port over its link.
+fn session_vcs(tree_id: &str) -> Arc<dyn VcsOps> {
+    match plakous::tools::runner::process_runner() {
+        Some(runner) => {
+            let backend = runner.backend();
+            Arc::new(crate::remote_vcs::RemoteVcs::new(
+                backend.link(),
+                backend.runner_id().as_str().to_owned(),
+                tree_id.to_owned(),
+            ))
+        }
+        None => Arc::new(SystemVcs),
     }
 }
 
 impl ProductAgentTree {
     /// Bootstraps a root over the system `git`/`jj` port, or the selected
-    /// runner's refusing port.
+    /// runner's port.
     ///
     /// # Errors
     ///
@@ -34,8 +39,9 @@ impl ProductAgentTree {
         selected_tuple: impl Into<String>,
         writer_mode: WriterMode,
     ) -> Result<Self, TopologyError> {
+        let tree_id = tree_id.into();
         Self::bootstrap_root_with(
-            session_vcs(),
+            session_vcs(&tree_id),
             tree_id,
             root_agent_id,
             root_role,
@@ -102,7 +108,11 @@ impl ProductAgentTree {
             active_turn: false,
             line_id: None,
             epoch_no: 0,
-            placement: NodePlacement::default(),
+            // The root runs where the tree's port runs its effects.
+            placement: NodePlacement {
+                runner_id: vcs.stage_runner().map(str::to_owned),
+                workspace: None,
+            },
             parent_composition: None,
         };
         let grant = TopologyGrant {
@@ -271,6 +281,7 @@ impl ProductAgentTree {
         messages: BTreeMap<String, MailRecord>,
         operations: BTreeMap<String, OperationRecord>,
     ) -> Self {
+        let vcs = TreeVcs(session_vcs(&tree_id));
         let mut allowed_tuples = BTreeSet::new();
         allowed_tuples.insert(selected_tuple.clone());
         for node in nodes.values() {
@@ -365,7 +376,7 @@ impl ProductAgentTree {
             max_attempts: MAX_TREE_ATTEMPTS,
             prompt_attempt_base: 0,
             notify: Arc::new(tokio::sync::Notify::new()),
-            vcs: TreeVcs(session_vcs()),
+            vcs,
             cell_budgets,
         }
     }

@@ -384,12 +384,15 @@ impl TreeDriver {
                     namespace.clone(),
                     ticket.candidates.clone(),
                 );
-                async move {
-                    for candidate in &candidates {
-                        vcs.unpin(&launch, &namespace, candidate.as_str()).await?;
-                    }
-                    Ok::<(), VcsError>(())
-                }
+                plakous_workspace::occupancy_vcs::stage::unstaged(
+                    "candidate unpin, retained as an intent until acknowledged",
+                    async move {
+                        for candidate in &candidates {
+                            vcs.unpin(&launch, &namespace, candidate.as_str()).await?;
+                        }
+                        Ok::<(), VcsError>(())
+                    },
+                )
                 .await
             };
             if unpinned.is_err() {
@@ -1059,10 +1062,22 @@ impl TreeDriver {
         let mut settled = Settled::default();
         let mut first_save_error = None;
         while !effects.is_empty() {
-            let (admitted, refused) = self
+            let runner = self.vcs.stage_runner().map(str::to_owned);
+            let driver = self.clone();
+            let (admitted, refused, stages) = self
                 .write_owed(move |tree| {
                     let refused = Self::admit_settled_effects(tree, &mut effects)?;
-                    Ok::<_, TopologyError>((effects, refused))
+                    // On a runner each effect is a recorded stage, published
+                    // before it runs (spec 03 §14).
+                    let stages = match &runner {
+                        Some(runner) if !effects.is_empty() => {
+                            let stages = tree.record_effect_stages(&effects, runner)?;
+                            driver.save_guarded(tree)?;
+                            stages
+                        }
+                        _ => crate::tree::EffectStages::default(),
+                    };
+                    Ok::<_, TopologyError>((effects, refused, stages))
                 })
                 .await??;
             let vcs = Arc::clone(&self.vcs);
@@ -1070,14 +1085,15 @@ impl TreeDriver {
             // dispatched it runs every port call to its end even if this
             // release owner is aborted. It ends with the Tokio runtime
             // (spec 03 §16), between two port calls.
-            let mut completed = tokio::spawn(async move { admitted.run(vcs.as_ref()).await })
-                .await
-                .map_err(|_| {
-                    TopologyError::new(
-                        TopologyErrorCode::OperationRecoveryRequired,
-                        "effects task failed",
-                    )
-                })?;
+            let mut completed =
+                tokio::spawn(async move { admitted.run_staged(vcs.as_ref(), stages).await })
+                    .await
+                    .map_err(|_| {
+                        TopologyError::new(
+                            TopologyErrorCode::OperationRecoveryRequired,
+                            "effects task failed",
+                        )
+                    })?;
             completed.refuse_unpublished_unmints(refused);
             let driver = self.clone();
             // Recorded whenever the turn comes: only the publication below

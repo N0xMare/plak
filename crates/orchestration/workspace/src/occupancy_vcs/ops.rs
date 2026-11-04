@@ -71,7 +71,7 @@ pub struct AdoptRequest<'a> {
 }
 
 /// Immutable adoption provenance and conditional copy-base restorations.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RevertRange {
     /// Pinned target snapshot before adoption.
     pub before: String,
@@ -91,6 +91,14 @@ pub struct RevertRange {
 /// fallible, and an `Err` is never an "absent" answer: a port that cannot
 /// reach the workspace answers `Err`, and the caller fails closed.
 pub trait VcsOps: Send + Sync {
+    /// The runner this port's effects run on when it is not this process:
+    /// its effects are then recorded as tree stages before they run, and
+    /// each runs under its stage's key (see [`super::stage`]). `None`, the
+    /// default, is a port that works in this process.
+    fn stage_runner(&self) -> Option<&str> {
+        None
+    }
+
     /// Computes a clean live-fork catch-up using object writes only.
     fn prepare_refresh<'a>(
         &'a self,
@@ -282,8 +290,10 @@ fn lost_worker() -> VcsError {
     VcsError::mint_unavailable("the VCS worker was cancelled with its runtime")
 }
 
-/// [`MintRequest`] owned, so its work can move to a blocking worker.
-struct OwnedMint {
+/// [`MintRequest`] owned, so its work can move to a blocking worker or
+/// across a runner link.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OwnedMint {
     launch: PathBuf,
     agent_id: String,
     namespace: String,
@@ -293,7 +303,9 @@ struct OwnedMint {
 }
 
 impl OwnedMint {
-    fn of(request: &MintRequest<'_>) -> Self {
+    /// `request`, owned.
+    #[must_use]
+    pub fn of(request: &MintRequest<'_>) -> Self {
         Self {
             launch: request.launch.to_owned(),
             agent_id: request.agent_id.to_owned(),
@@ -304,7 +316,9 @@ impl OwnedMint {
         }
     }
 
-    fn request(&self) -> MintRequest<'_> {
+    /// The request again, borrowed.
+    #[must_use]
+    pub fn request(&self) -> MintRequest<'_> {
         MintRequest {
             launch: &self.launch,
             agent_id: &self.agent_id,
@@ -316,8 +330,10 @@ impl OwnedMint {
     }
 }
 
-/// [`AdoptRequest`] owned, so its work can move to a blocking worker.
-struct OwnedAdopt {
+/// [`AdoptRequest`] owned, so its work can move to a blocking worker or
+/// across a runner link.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OwnedAdopt {
     resolution_refusal: Option<String>,
     revert: Option<RevertRange>,
     accept_conflicts: bool,
@@ -336,7 +352,9 @@ struct OwnedAdopt {
 }
 
 impl OwnedAdopt {
-    fn of(request: &AdoptRequest<'_>) -> Self {
+    /// `request`, owned.
+    #[must_use]
+    pub fn of(request: &AdoptRequest<'_>) -> Self {
         Self {
             resolution_refusal: request.resolution_refusal.map(str::to_owned),
             revert: request.revert.cloned(),
@@ -362,7 +380,9 @@ impl OwnedAdopt {
         }
     }
 
-    fn request(&self) -> AdoptRequest<'_> {
+    /// The request again, borrowed.
+    #[must_use]
+    pub fn request(&self) -> AdoptRequest<'_> {
         AdoptRequest {
             resolution_refusal: self.resolution_refusal.as_deref(),
             revert: self.revert.as_ref(),

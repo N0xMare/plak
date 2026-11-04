@@ -124,6 +124,16 @@ pub enum RequestClass {
         /// Unique per line.
         control_id: String,
     },
+    /// One step of a tree operation (a mint, seal, adopt, unmint, refresh
+    /// or pin): keyed by the tree and the operation id the host recorded
+    /// for it, run at most once per key, and fenced by the tree's custody on
+    /// the host rather than by a line owner.
+    TreeOperation {
+        /// The tree the operation belongs to.
+        tree_id: String,
+        /// The operation's id, unique per tree.
+        operation_id: String,
+    },
 }
 
 /// One operation: a verb and its payload.

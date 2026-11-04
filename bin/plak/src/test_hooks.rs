@@ -81,7 +81,7 @@ pub(crate) fn install() -> Result<(), String> {
         && selection.plan.loopback_runner
     {
         plakous_offline_crash_harness::loopback::select(
-            plakous_hosted::runner_reader::instruction_reader_extension(),
+            plakous_hosted::runner_reader::test_runner_extension(),
         )?;
     }
     Ok(())

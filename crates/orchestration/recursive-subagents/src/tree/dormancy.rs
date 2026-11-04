@@ -84,6 +84,12 @@ pub(crate) struct DormancyTicket {
     trim_outcome: Option<TrimOutcome>,
 }
 
+impl DormancyTicket {
+    pub(crate) fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum DormancyAnswer {
     Sealed(VcsSnapshot),

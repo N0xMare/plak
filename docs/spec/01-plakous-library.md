@@ -5575,13 +5575,18 @@ runner for a session yet.
   line's processes) is keyed by host, line and control id, and must name its
   owner. A `ProcessObservation { job, cursor }` (a poll) must name its owner,
   is fenced like any other request, and is never recorded, since repeating it
-  changes nothing. A `BuildRead` (from `Unkeyed`) is keyed by its request id
-  alone and is never recorded. The operations are `workspace.read`,
+  changes nothing. A `TreeOperation { tree_id, operation_id }` (one step of an
+  orchestration tree's VCS stage) is keyed by host, tree, operation and verb,
+  names no owner and is fenced by the tree's custody on the host, not by a
+  line; it runs at most once per key, is journaled and replayed like an effect
+  call, and waits the effect window. A `BuildRead` (from `Unkeyed`) is keyed by
+  its request id alone and is never recorded. The operations are `workspace.read`,
   `repository.query`, `workspace.mutate` and `process.execute`; the
   process-session verbs `process.start`, `process.write`, `process.poll`,
   `process.stop`, `process.promote`, `jobs.snapshot`, `jobs.watch`,
-  `jobs.stop` and `jobs.disown`, which act on the owner's line; and
-  `service.spawn` and `service.terminate`. `jobs.watch` is an unkeyed read
+  `jobs.stop` and `jobs.disown`, which act on the owner's line;
+  `service.spawn` and `service.terminate`; and the embedder's extension verbs
+  `instructions.read`, `vcs.read` and `vcs.effect` (§8.5). `jobs.watch` is an unkeyed read
   whose result opens a stream of the line's job events: a JSON line with the
   runner instance and the line's jobs at once, and another whenever they
   change. Their payloads and errors are the execution
@@ -5645,8 +5650,9 @@ runner for a session yet.
   key answers `StaleRequest`, with no effect. A replay (`replay = true`) of a
   key the runner never saw answers `NotSeen` and leaves a tombstone, so the
   original arriving late never runs. The host's `Ack` spends a key, and a
-  later resend answers `Spent`: the call ran, and the host treats its outcome
-  as unknown. Request ids are unique per host process, and a key's answer,
+  later resend answers `Spent` (`RunnerFailure::Spent`): the call ran to its
+  end and its answer is gone, so its outcome is unknown, but nothing of it
+  still runs. Request ids are unique per host process, and a key's answer,
   its `Ack`, `Cancel` and `Preempt` belong to the host instance that last sent
   it: the answer goes to that instance's connection, and another instance of
   the same host cannot acknowledge, cancel or yield it. Answers and
@@ -6137,10 +6143,23 @@ is `Unavailable`. They become async only with an async session construction,
 which a WebAssembly core requires. `JoinedSessionsPort` stays synchronous, and
 every caller runs its stops on a thread of its own or a blocking worker. The
 orchestration VCS port is async: every answer is awaited outside the tree's
-lock and its writers (chapter 03 §16). On a selected runner it is
-`UnavailableVcs`, which refuses every mint, seal, adopt, unmint and copy
-question as unavailable, never as absent, and reads no presentation facts,
-until version control on a runner is carried.
+lock and its writers (chapter 03 §16). On a selected runner it is the
+orchestration crate's `RemoteVcs` over the runner link: questions go as
+unkeyed `vcs.read` calls, and effects (a mint, seal, adopt, unmint, `on_mint`
+hook, refresh application, pin or cache trim) as `vcs.effect` steps of a tree
+operation (`RunnerCall::tree`, protocol class `TreeOperation`), keyed by the
+tree and the stage the tree recorded before the effect ran (chapter 03 §14).
+The runner answers both through its registered extension
+(`remote_vcs::vcs_runner_extension`), which runs the system port over the
+runner's filesystem for the paths its embedder admits and answers any other
+path unavailable, with no effect; a relative path, or one with a `..`
+component, is unavailable before the embedder's admission sees it. A step the
+link refused is unavailable, with no effect; one whose outcome it lost, or
+whose key the runner reports spent (it ran and its answer was already taken,
+`RunnerFailure::Spent`), marks its stage unknown and is `RecoveryRequired`. A presentation read the runner cannot answer reads nothing.
+The port reports its runner (`VcsOps::stage_runner`); an in-process port
+reports none and records no stages. `UnavailableVcs` remains the port that
+refuses every effect.
 The run-stable workspace facts that plan compilation and the runtime
 environment component bind (`plakous-agent/workspace-environment-v2`) name the
 operating system and the runner of the execution backend's descriptor

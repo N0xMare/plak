@@ -112,6 +112,13 @@ pub enum RunnerVerb {
     /// One instruction-source read, answered by the runner's registered
     /// extension.
     ReadInstructions,
+    /// One version-control question about a workspace on the runner,
+    /// answered by the runner's registered extension.
+    VcsRead,
+    /// One version-control effect on a workspace on the runner (a mint,
+    /// seal, adopt, unmint, refresh or pin), answered by the runner's
+    /// registered extension; sent as a tree operation.
+    VcsEffect,
 }
 
 /// Which runner part answers a verb.
@@ -131,7 +138,7 @@ pub enum RunnerVerbFamily {
 
 impl RunnerVerb {
     /// Every verb.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 19] = [
         Self::ReadWorkspace,
         Self::QueryRepository,
         Self::MutateWorkspace,
@@ -149,6 +156,8 @@ impl RunnerVerb {
         Self::ServiceTerminate,
         Self::ProbeWorkspace,
         Self::ReadInstructions,
+        Self::VcsRead,
+        Self::VcsEffect,
     ];
 
     /// The verb's wire name.
@@ -172,6 +181,8 @@ impl RunnerVerb {
             Self::ServiceTerminate => "service.terminate",
             Self::ProbeWorkspace => "probe.workspace",
             Self::ReadInstructions => "instructions.read",
+            Self::VcsRead => "vcs.read",
+            Self::VcsEffect => "vcs.effect",
         }
     }
 
@@ -191,7 +202,7 @@ impl RunnerVerb {
             | Self::ExecuteLiteralProcess => RunnerVerbFamily::Environment,
             Self::ServiceSpawn | Self::ServiceTerminate => RunnerVerbFamily::Service,
             Self::ProbeWorkspace => RunnerVerbFamily::Probe,
-            Self::ReadInstructions => RunnerVerbFamily::Extension,
+            Self::ReadInstructions | Self::VcsRead | Self::VcsEffect => RunnerVerbFamily::Extension,
             Self::ProcessStart
             | Self::ProcessWrite
             | Self::ProcessPoll
@@ -215,12 +226,13 @@ impl RunnerVerb {
                 | Self::JobsSnapshot
                 | Self::ProbeWorkspace
                 | Self::ReadInstructions
+                | Self::VcsRead
         )
     }
 }
 
 /// How a link keys one call (spec 01 §8.4).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RunnerClass {
     /// One tool call's effect: at most once per key.
     Effect {
@@ -241,6 +253,14 @@ pub enum RunnerClass {
     /// A control of the owner line's processes: the link mints its control
     /// id, and it runs at most once per id.
     Control,
+    /// One step of a tree operation: at most once per tree and operation
+    /// id, fenced by the tree's custody rather than a line owner.
+    Tree {
+        /// The tree.
+        tree_id: String,
+        /// The operation the tree recorded for the step.
+        operation_id: String,
+    },
 }
 
 impl From<OperationClass> for RunnerClass {
@@ -293,7 +313,22 @@ impl RunnerCall {
         )
     }
 
-    const fn with_class(mut self, class: RunnerClass) -> Self {
+    /// A call no line owns that runs one step of `tree_id`'s operation
+    /// `operation_id`: at most once per key, and replayed by it.
+    #[must_use]
+    pub fn tree(
+        verb: RunnerVerb,
+        payload: Value,
+        tree_id: impl Into<String>,
+        operation_id: impl Into<String>,
+    ) -> Self {
+        Self::unkeyed(verb, payload).with_class(RunnerClass::Tree {
+            tree_id: tree_id.into(),
+            operation_id: operation_id.into(),
+        })
+    }
+
+    fn with_class(mut self, class: RunnerClass) -> Self {
         self.class = class;
         self
     }
@@ -318,8 +353,8 @@ impl RunnerCall {
 
     /// The request class and key.
     #[must_use]
-    pub const fn class(&self) -> RunnerClass {
-        self.class
+    pub const fn class(&self) -> &RunnerClass {
+        &self.class
     }
 
     /// The caller's absolute deadline, when it set one.
@@ -386,6 +421,9 @@ pub enum RunnerFailure {
     /// The call may have run: the link was lost after it was sent, or the
     /// runner restarted under it.
     OutcomeUnknown(String),
+    /// The runner ran this key to its end, and its answer was taken before:
+    /// what it returned is unknown, but nothing of it still runs.
+    Spent,
     /// The runner refused the call as malformed or out of protocol; nothing
     /// ran.
     Refused(String),
@@ -464,6 +502,7 @@ pub fn call_blocking(
 /// selected for a session by this crate.
 pub struct RunnerBackend {
     identity: ExecutionBackendIdentity,
+    runner_id: RunnerId,
     link: Arc<dyn RunnerLink>,
 }
 
@@ -487,15 +526,25 @@ impl RunnerBackend {
         };
         let descriptor: ExecutionBackendDescriptor =
             serde_json::from_value(descriptor).map_err(|_| invalid())?;
-        if descriptor.kind() != ExecutionBackendKind::Runner
-            || descriptor.runner_id().is_none_or(RunnerId::is_local)
-        {
-            return Err(invalid());
-        }
+        let runner_id = match descriptor.runner_id() {
+            Some(runner)
+                if descriptor.kind() == ExecutionBackendKind::Runner && !runner.is_local() =>
+            {
+                runner.clone()
+            }
+            _ => return Err(invalid()),
+        };
         Ok(Self {
             identity: ExecutionBackendIdentity::runner(descriptor)?,
+            runner_id,
             link,
         })
+    }
+
+    /// The runner this backend's operations run on.
+    #[must_use]
+    pub const fn runner_id(&self) -> &RunnerId {
+        &self.runner_id
     }
 
     /// The link this backend sends through.
@@ -545,6 +594,10 @@ fn failure_error(failure: RunnerFailure) -> ExecutionBackendError {
         RunnerFailure::OutcomeUnknown(detail) => ExecutionBackendError::new(
             ExecutionBackendErrorKind::RecoveryRequired,
             format!("the runner operation's outcome is unknown: {detail}"),
+        ),
+        RunnerFailure::Spent => ExecutionBackendError::new(
+            ExecutionBackendErrorKind::RecoveryRequired,
+            "the runner ran this call and its answer was already taken, so its outcome is unknown",
         ),
         RunnerFailure::Refused(detail) => ExecutionBackendError::new(
             ExecutionBackendErrorKind::InvalidRequest,

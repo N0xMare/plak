@@ -33,7 +33,7 @@ rustix = { workspace = true, features = ["system"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tempfile = { workspace = true, optional = true }
-uuid = { workspace = true, features = ["v4"], optional = true }
+uuid = { workspace = true, features = ["v4"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
@@ -45,7 +45,6 @@ plakous-workspace = { workspace = true, features = ["test-support"] }
 proptest = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-uuid = { workspace = true, features = ["v4"] }
 
 [features]
 default = ["git-cli", "jj-lib"]
@@ -54,7 +53,6 @@ jj-lib = ["plakous-workspace/jj-lib"]
 # `MemoryTreeStore`, `FakeVcs`, and the fixtures the crates above this one drive.
 test-support = [
     "dep:tempfile",
-    "dep:uuid",
     "plakous-host-protocol/test-support",
     "plakous-workspace/test-support",
 ]

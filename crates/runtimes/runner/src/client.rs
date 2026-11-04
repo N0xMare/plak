@@ -672,7 +672,10 @@ impl Inner {
         request.request_id = self.next_id("r");
         request.replay = true;
         request.age_ms = Some(plakous_model::now_unix_millis().saturating_sub(entry.claimed_at_ms));
-        let window = if matches!(request.class, RequestClass::EffectCall { .. }) {
+        let window = if matches!(
+            request.class,
+            RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
+        ) {
             self.windows.effect
         } else {
             self.windows.read
@@ -720,11 +723,19 @@ impl Inner {
                     call_id: call_id.to_string(),
                     attempt_id: attempt_id.to_string(),
                 },
-                RunnerClass::Observation { job, cursor } => {
-                    RequestClass::ProcessObservation { job, cursor }
-                }
+                RunnerClass::Observation { job, cursor } => RequestClass::ProcessObservation {
+                    job: *job,
+                    cursor: *cursor,
+                },
                 RunnerClass::Control => RequestClass::OwnerControl {
                     control_id: self.next_id("c"),
+                },
+                RunnerClass::Tree {
+                    tree_id,
+                    operation_id,
+                } => RequestClass::TreeOperation {
+                    tree_id: tree_id.clone(),
+                    operation_id: operation_id.clone(),
                 },
                 RunnerClass::Unkeyed => RequestClass::BuildRead,
             },
@@ -749,7 +760,10 @@ impl Inner {
             self.transfer(owner).await?;
         }
         let request = self.request(&call, owner);
-        let window = if matches!(request.class, RequestClass::EffectCall { .. }) {
+        let window = if matches!(
+            request.class,
+            RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
+        ) {
             self.windows.effect
         } else {
             self.windows.read
@@ -969,13 +983,7 @@ fn request_answer(frame: RunnerFrame) -> Option<(String, Result<Value, RunnerFai
             )),
             false,
         ),
-        RunnerFrame::Spent { request_id } => (
-            request_id,
-            Err(RunnerFailure::OutcomeUnknown(
-                "the runner ran this call and its answer was already acknowledged".into(),
-            )),
-            false,
-        ),
+        RunnerFrame::Spent { request_id } => (request_id, Err(RunnerFailure::Spent), false),
         RunnerFrame::Expired { request_id } => (
             request_id,
             Err(RunnerFailure::OutcomeUnknown(
@@ -1030,7 +1038,9 @@ const LINK_LOST: &str = "the link was lost before the replay was answered";
 const fn keyed(request: &Request) -> bool {
     matches!(
         request.class,
-        RequestClass::EffectCall { .. } | RequestClass::OwnerControl { .. }
+        RequestClass::EffectCall { .. }
+            | RequestClass::OwnerControl { .. }
+            | RequestClass::TreeOperation { .. }
     )
 }
 
@@ -1041,6 +1051,7 @@ fn replayable(request: &Request) -> bool {
         request.class,
         RequestClass::EffectCall { .. }
             | RequestClass::OwnerControl { .. }
+            | RequestClass::TreeOperation { .. }
             | RequestClass::ProcessObservation { .. }
     ) || RunnerVerb::parse(&request.operation.verb).is_some_and(RunnerVerb::is_read)
 }

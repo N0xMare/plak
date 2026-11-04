@@ -22,7 +22,7 @@ pub struct RefreshRequest {
 }
 
 /// Object-only preparation; only `Ready` requires a durable apply intent.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum RefreshPreparation {
     /// Parent has no new tree content at this base.
     Unchanged,
@@ -56,7 +56,7 @@ pub struct RefreshPlan {
 }
 
 /// Settled application, including a proven no-write abandonment.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum RefreshApplied {
     /// Branch, index and base pin now agree with the plan.
     Refreshed,

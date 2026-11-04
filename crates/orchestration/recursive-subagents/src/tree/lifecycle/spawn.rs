@@ -20,16 +20,36 @@ impl ProductAgentTree {
     /// the lock: a child id whose copy directory exists without a row (a
     /// crashed mint) is skipped. A port that could not list it refuses the
     /// spawn after the replay checks.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "spawn admission validates grants, roster, schema and capacity before reserving a single workspace identity"
-    )]
     pub fn spawn_reserve(
         &mut self,
         caller_id: &str,
         request: &SpawnAgentRequest,
         operation_id: Option<&str>,
         jj_copy_dirs: &Result<BTreeSet<String>, VcsError>,
+    ) -> Result<SpawnAdmission, TopologyError> {
+        self.spawn_reserve_on(caller_id, request, operation_id, jj_copy_dirs, None)
+    }
+
+    /// [`Self::spawn_reserve`] of a child placed on `runner` (`None` is the
+    /// parent's own; the local runner has no id). An `inherit` child shares
+    /// its parent's checkout, so another runner is `runner_mismatch`; a copy
+    /// on another runner is `cross_runner_copy_unavailable` until copies
+    /// cross runners.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::spawn_reserve`], and the two placement refusals.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "spawn admission validates grants, roster, schema and capacity before reserving a single workspace identity"
+    )]
+    pub fn spawn_reserve_on(
+        &mut self,
+        caller_id: &str,
+        request: &SpawnAgentRequest,
+        operation_id: Option<&str>,
+        jj_copy_dirs: &Result<BTreeSet<String>, VcsError>,
+        runner: Option<&str>,
     ) -> Result<SpawnAdmission, TopologyError> {
         if let Some(prior) = self.replay_typed(operation_id, "spawn_agent", request)? {
             return Ok(SpawnAdmission::Replayed(prior));
@@ -47,6 +67,21 @@ impl ProductAgentTree {
                  inputs holds at most 8 non-empty ids, and inherit takes no inputs",
             )
         })?;
+        if let Some(runner) = runner
+            && self.node(caller_id)?.placement.runner_id.as_deref() != Some(runner)
+        {
+            return Err(if request.workspace.is_inherit() {
+                TopologyError::new(
+                    TopologyErrorCode::RunnerMismatch,
+                    "an inherit child works in its parent's checkout, so it runs on its parent's runner",
+                )
+            } else {
+                TopologyError::new(
+                    TopologyErrorCode::CrossRunnerCopyUnavailable,
+                    "a fork or snapshot copy on another runner than its parent's is not carried yet",
+                )
+            });
+        }
         self.bound_text(&request.description)?;
         self.bound_text(&request.prompt)?;
         self.bound_text(&request.output_schema_json)?;
@@ -353,7 +388,14 @@ impl ProductAgentTree {
             active_turn: false,
             line_id: None,
             epoch_no,
-            placement: NodePlacement::default(),
+            // A child runs on its parent's runner (spec 03 §2).
+            placement: NodePlacement {
+                runner_id: self
+                    .nodes
+                    .get(&caller_id)
+                    .and_then(|parent| parent.placement.runner_id.clone()),
+                workspace: None,
+            },
             parent_composition,
         };
         self.nodes.insert(agent_id.clone(), child);
