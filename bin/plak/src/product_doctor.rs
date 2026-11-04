@@ -7,6 +7,7 @@
 mod composition;
 pub mod jj_cli;
 mod refresh;
+pub mod runner_ssh;
 mod storage_space;
 use composition::composition_checks;
 pub(crate) use refresh::last_failed_refresh;
@@ -49,6 +50,7 @@ pub enum CheckKind {
     OpenRouterCatalog,
     RootTemplate,
     SpawnTemplates,
+    RunnerSsh,
     OauthCodex,
     OauthXai,
     OauthClaude,
@@ -79,6 +81,7 @@ impl CheckKind {
             Self::OpenRouterCatalog => "openrouter_catalog",
             Self::RootTemplate => "root_template",
             Self::SpawnTemplates => "spawn_templates",
+            Self::RunnerSsh => "runner_ssh",
             Self::OauthCodex => "oauth_codex",
             Self::OauthXai => "oauth_xai",
             Self::OauthClaude => "oauth_claude",
@@ -286,6 +289,8 @@ pub struct DoctorInputs {
     pub openrouter_catalog: OpenRouterCatalogStatus,
     pub root_template: RootTemplateStatus,
     pub spawn_templates: SpawnTemplatesStatus,
+    /// One `ssh -G` row per `[runners.<name>]`, collected by the caller.
+    pub runner_ssh: Vec<DoctorCheck>,
     pub oauth: OauthCredentialProbes,
 }
 
@@ -923,6 +928,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     }
     checks.push(root_template_check(input.root_template));
     checks.push(spawn_templates_check(input.spawn_templates));
+    checks.extend(input.runner_ssh);
     for doctor in crate::capabilities::ROUTES
         .iter()
         .filter(|capability| capability.route.compiled)

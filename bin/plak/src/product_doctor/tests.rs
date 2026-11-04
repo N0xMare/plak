@@ -308,3 +308,43 @@ fn last_failed_refresh_fixture_unreadable_schema_is_not_rebuilt()
     );
     Ok(())
 }
+
+#[test]
+fn runner_ssh_rows_name_the_resolved_destination_or_why_there_is_none() {
+    let resolved = "user me\nhostname build.example\nport 2222\nbatchmode yes\n\
+                    stricthostkeychecking true\nforwardagent no\n";
+    let check = runner_ssh::check("build", Ok(resolved.to_owned()));
+    assert_eq!(check.kind.key(), "runner_ssh");
+    assert_eq!(check.severity, Severity::Ok);
+    assert_eq!(check.detail, "runner build: me@build.example:2222");
+
+    let weakened = resolved.replace("stricthostkeychecking true", "stricthostkeychecking ask");
+    let check = runner_ssh::check("build", Ok(weakened));
+    assert_eq!(check.severity, Severity::Warning);
+    assert!(
+        check.detail.contains("stricthostkeychecking"),
+        "{}",
+        check.detail
+    );
+
+    let check = runner_ssh::check("build", Ok("hostname only\n".to_owned()));
+    assert_eq!(
+        (check.severity, check.result.as_str()),
+        (Severity::Warning, "unavailable")
+    );
+
+    // No ssh on the path: the row says so instead of failing doctor.
+    let empty = tempfile::tempdir().unwrap();
+    let rows = runner_ssh::probe(
+        &[("build".to_owned(), "me@build.example".to_owned())],
+        &crate::commands::runner::STRICT_SSH_OPTIONS,
+        Some(empty.path().as_os_str()),
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].result, "unavailable");
+    assert!(
+        rows[0].detail.starts_with("runner build: ssh -G "),
+        "{}",
+        rows[0].detail
+    );
+}

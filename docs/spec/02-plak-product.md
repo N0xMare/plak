@@ -7877,8 +7877,8 @@ allocation failures can refuse a write even when the volume reports free
 blocks. Doctor does not clear a parked writer or authorize paid dispatch;
 the affected store must acknowledge its retained authoritative write.
 
-One check runs a bounded local subprocess: `jj --version`, discovered on PATH
-with `.plak/bin` skipped. It gets a cleared environment with only PATH, null
+Two checks run bounded local subprocesses. The first is `jj --version`,
+discovered on PATH with `.plak/bin` skipped. It gets a cleared environment with only PATH, null
 stdin, no pager, bounded output, its own process group, and a five-second
 ceiling; the whole group is retired and the child reaped. `jj_cli` is never an
 error: detail says `library not built` when the JJ feature is disabled;
@@ -7887,7 +7887,17 @@ minors 0.44-0.46 are `OK available`, older/newer are `WARNING untested` with an
 upgrade/pin-or-update remedy, and failed/timeout/unparseable probes are
 `WARNING unavailable`. Detail names library 0.46.0, the supported range, and,
 inside a JJ repository, colocated/secondary/non-colocated repository kind.
-The analyzer consumes this captured probe; other checks spawn no processes.
+The second, one `runner_ssh` row per `[runners.<name>]`, runs `ssh -G` with
+the dial's strict options and the configured destination, under the same
+bounds (PATH only, null stdin, own group, five seconds): it resolves the
+destination through the user's ssh config and never connects, though
+evaluating that config runs any `Match exec` command it holds, under the same
+bounds. The row is `OK
+resolved` naming `user@hostname:port`, `WARNING unsafe` when the resolved
+config dropped a strict option (`batchmode`, `stricthostkeychecking`,
+`forwardagent`), and `WARNING unavailable` with ssh's first error line when
+ssh is missing, fails, times out or resolves no user, host and port. The
+analyzer consumes these captured probes; other checks spawn no processes.
 
 The product and subagents database rows run read-only `PRAGMA integrity_check(1)`
 and `PRAGMA foreign_key_check`. A failed check is `ERROR corrupt`, with a remedy
@@ -7928,7 +7938,8 @@ resume_after_loss`, `[mcp_servers.<id>] placement`, `[runners.<name>]`, or a
 `[host]` or `[runners]` table present even empty, chapter 07 §3): a warning
 `config uses 0.0.4-only keys` naming each (a project file's with its path),
 with the remedy to remove them before running a 0.0.3 build on the home. `plak` itself writes those keys only
-when the operator sets them.
+when the operator sets them. The `runner_ssh` rows follow the spawnable
+templates, one per configured runner, in name order.
 
 Each row prints a check name, a severity of `OK`, `WARNING`, or `ERROR`, a
 detail that leads with a closed result token — `available`, `missing`,

@@ -76,6 +76,7 @@ fn input(temp: &TempDir) -> DoctorInputs {
         openrouter_catalog: OpenRouterCatalogStatus::NotConfigured,
         root_template: RootTemplateStatus::Unset,
         spawn_templates: SpawnTemplatesStatus::None,
+        runner_ssh: Vec::new(),
         oauth: OauthCredentialProbes {
             codex: OauthCredentialProbe {
                 provider: "codex",

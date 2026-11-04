@@ -515,6 +515,11 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ("plak", "src/product_doctor/jj_cli.rs"): [
         ("Command", (("identifier", "executable"),)),
     ],
+    # Doctor's `ssh -G` resolution of each runner, bounded the same way; it
+    # never connects (spec 02 §7.3).
+    ("plak", "src/product_doctor/runner_ssh.rs"): [
+        ("Command", (("string", "ssh"),)),
+    ],
     ("plak", "src/terminal_application.rs"): [
         ("std::process::Command", (("string", "open"),)),
         ("std::process::Command", (("string", "xdg-open"),)),
@@ -589,6 +594,7 @@ EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
     ("plak", "src/commands/runner/dial.rs"): {"Stdio"},
     ("plak", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},
+    ("plak", "src/product_doctor/runner_ssh.rs"): {"Command", "Stdio"},
     ("plak", "src/main.rs"): {"ExitCode"},
     ("plak", "src/lib.rs"): {"ExitCode"},
     ("plak", "src/oauth_ui.rs"): {"Command", "Stdio"},

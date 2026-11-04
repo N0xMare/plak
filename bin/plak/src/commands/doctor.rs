@@ -159,11 +159,12 @@ pub(crate) fn run_doctor(
         Ok(accounts) => accounts.offline_status_row(provider),
         Err(failure) => Err(failure.message().to_owned()),
     };
+    let path = env::var_os("PATH");
     let report = product_doctor::diagnose(product_doctor::DoctorInputs {
         storage_admission: crate::storage_space::admission(paths.home()),
         version: plakous::VERSION.to_owned(),
         jj_cli: product_doctor::jj_cli::probe(
-            env::var_os("PATH").as_deref(),
+            path.as_deref(),
             &env::current_dir().unwrap_or_default(),
         ),
         paths: doctor_paths,
@@ -192,6 +193,15 @@ pub(crate) fn run_doctor(
         openrouter_catalog,
         root_template,
         spawn_templates,
+        runner_ssh: product_doctor::runner_ssh::probe(
+            &selected
+                .runners
+                .iter()
+                .map(|(name, runner)| (name.clone(), runner.ssh.clone()))
+                .collect::<Vec<_>>(),
+            &crate::commands::runner::STRICT_SSH_OPTIONS,
+            path.as_deref(),
+        ),
         oauth: product_doctor::OauthCredentialProbes {
             codex: product_doctor::probe_oauth_credential(
                 "codex",

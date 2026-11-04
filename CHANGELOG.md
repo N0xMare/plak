@@ -132,6 +132,7 @@ an export.
   secrets (`plak runner secret set|rm|list`); host secret values never cross
   to a runner. Without a remote runner the server runs here and reads this
   home's runner secrets. Sessions freeze the placement each server ran under.
+  `plak doctor` adds a `runner_ssh` row per `[runners.<name>]` from `ssh -G`.
 - Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
   accepts image input. Codex Direct adds `view_image` for one workspace image.
   Other packs stay text. A model that cannot accept the image is refused with

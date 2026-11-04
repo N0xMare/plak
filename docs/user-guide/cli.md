@@ -331,6 +331,8 @@ running, `plak runner serve` runs it in the foreground, `plak runner allow
 300) with nothing to keep. `plak runner secret set|rm <name>` and `plak runner
 secret list` manage the runner machine's own secrets, which an MCP server with
 `placement = "runner"` reads; they work like `plak secret`, on a separate store.
+`plak doctor` resolves each `[runners.<name>]` with `ssh -G` (no connection)
+and shows the user, host and port it would dial.
 
 ---
 

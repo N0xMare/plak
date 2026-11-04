@@ -27,6 +27,7 @@ use plakous::tools::{
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
 use crate::home::paths::{PlakPaths, SecretShelf};
+pub(crate) use dial::STRICT_SSH_OPTIONS;
 use dial::{ssh_command, version};
 use home::RunnerHome;
 
